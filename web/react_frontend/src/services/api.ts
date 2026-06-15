@@ -97,6 +97,170 @@ export interface SkillItem {
   catalog_indexed?: boolean
 }
 
+export interface ParserTemplateItem {
+  id: string
+  vendor: string
+  model?: string
+  family?: string
+  profile: string
+  canonical_command: string
+  category: string
+  version: string
+  status: string
+  validation_json?: Record<string, unknown>
+  created_at: string
+}
+
+export interface ParserTemplatePreview {
+  id: string
+  vendor: string
+  profile: string
+  canonical_command: string
+  category: string
+  version: string
+  status: string
+  sha256: string
+  hash_valid: boolean
+  content: string
+  validation: Record<string, unknown>
+}
+
+export interface ParserTemplateComparison {
+  template_id: string
+  active_template_id?: string
+  sample_count: number
+  passed_samples: number
+  candidate_contract_sha256?: string
+  active_contract_sha256?: string
+  contract_changed: boolean
+  candidate_contract: Record<string, unknown>
+  active_contract: Record<string, unknown>
+  rows: Array<{
+    snapshot_id: string
+    dataset_id: string
+    device_id: string
+    changed: boolean
+    current?: { status: string; failure_code?: string; records?: unknown }
+    proposed: { status: string; failure_code?: string; records?: unknown }
+  }>
+}
+
+export interface ParserDatasetCoverage {
+  dataset_id: string
+  snapshot_count: number
+  device_count: number
+  command_count: number
+  eligible_count: number
+  parsed: number
+  empty: number
+  ignored: number
+  missing: number
+  failed: number
+  identity_unknown: number
+  structured_coverage_rate: number
+  parse_success_rate: number
+  legal_empty_rate: number
+  missing_template_rate: number
+  parse_failure_rate: number
+  primary_key_stability_rate: number
+  first_imported_at?: string
+  last_imported_at?: string
+}
+
+export interface ParserImportPreview {
+  success: boolean
+  preview: boolean
+  dataset_id: string
+  source_path: string
+  file_count: number
+  device_count: number
+  command_count: number
+  unique_commands: number
+  ready: number
+  template_missing: number
+  parse_failed: number
+  ignored: number
+  identity_unknown: number
+  duplicate_snapshots: number
+  new_snapshots: number
+}
+
+export interface ParserJobItem {
+  id: string
+  job_type: string
+  vendor: string
+  model?: string
+  profile: string
+  canonical_command: string
+  status: string
+  sample_count: number
+  attempts: number
+  failure_code?: string
+  last_error?: string
+  celery_task_id?: string
+  dispatched_at?: string
+  started_at?: string
+  completed_at?: string
+  created_at: string
+  updated_at: string
+  samples?: ParserJobSample[]
+}
+
+export interface ParserJobSample {
+  id: string
+  snapshot_id: string
+  snapshot_source: 'postgresql'
+  dataset_id?: string
+  device_id: string
+  output_signature: string
+  created_at: string
+}
+
+export interface ParserCoverage {
+  templates_total: number
+  templates_active: number
+  jobs_total: number
+  jobs_pending: number
+  missing_candidates: number
+  repair_candidates: number
+  command_aliases: number
+  device_profiles: number
+  identity_signatures: number
+  auto_dispatch_enabled: boolean
+}
+
+export interface ParserDispatchControl {
+  auto_dispatch_enabled: boolean
+}
+
+export interface ParserCommandAlias {
+  id: string
+  alias: string
+  canonical_command: string
+  confidence: number
+  status: string
+}
+
+export interface ParserDeviceProfile {
+  id: string
+  vendor: string
+  model: string
+  family?: string
+  confidence: number
+  status: string
+}
+
+export interface ParserIdentitySignature {
+  id: string
+  vendor: string
+  model: string
+  family?: string
+  evidence_command: string
+  pattern: string
+  confidence: number
+  status: string
+}
+
 export type SkillRolloutStatus = 'draft' | 'canary' | 'stable' | 'deprecated'
 
 export interface SkillCatalogStats {
@@ -372,6 +536,70 @@ export const skillApi = {
     const response = await api.get<import('../types/workflowDsl').SkillSchema>(`/skills/${name}/schema/`)
     return response.data
   },
+}
+
+export const parserApi = {
+  templates: async () => {
+    const response = await api.get<{ items: ParserTemplateItem[] }>('/parser/templates/')
+    return response.data.items
+  },
+  jobs: async () => {
+    const response = await api.get<{ items: ParserJobItem[] }>('/parser/jobs/')
+    return response.data.items
+  },
+  job: async (id: string) => {
+    const response = await api.get<ParserJobItem>(`/parser/jobs/${id}/`)
+    return response.data
+  },
+  aliases: async () => {
+    const response = await api.get<{ items: ParserCommandAlias[] }>('/parser/aliases/')
+    return response.data.items
+  },
+  deviceProfiles: async () => {
+    const response = await api.get<{ items: ParserDeviceProfile[] }>('/parser/device-profiles/')
+    return response.data.items
+  },
+  identitySignatures: async () => {
+    const response = await api.get<{ items: ParserIdentitySignature[] }>('/parser/identity-signatures/')
+    return response.data.items
+  },
+  coverage: async () => {
+    const response = await api.get<ParserCoverage>('/parser/coverage/')
+    return response.data
+  },
+  preview: async (id: string) => {
+    const response = await api.get<ParserTemplatePreview>(`/parser/templates/${id}/preview/`)
+    return response.data
+  },
+  comparison: async (id: string) => {
+    const response = await api.get<ParserTemplateComparison>(`/parser/templates/${id}/comparison/`)
+    return response.data
+  },
+  datasets: async () => {
+    const response = await api.get<{ items: ParserDatasetCoverage[] }>('/parser/datasets/')
+    return response.data.items
+  },
+  previewImport: async (data: { source_path: string; dataset_id?: string }) => (
+    await api.post<ParserImportPreview>('/parser/import-preview/', data)
+  ).data,
+  executeImport: async (data: { source_path: string; dataset_id?: string }) => (
+    await api.post('/parser/import-execute/', data)
+  ).data,
+  activate: async (id: string) => (await api.post(`/parser/templates/${id}/activate/`)).data,
+  reject: async (id: string) => (await api.post(`/parser/templates/${id}/reject/`)).data,
+  deprecate: async (id: string) => (await api.post(`/parser/templates/${id}/deprecate/`)).data,
+  retryJob: async (id: string) => (await api.post(`/parser/jobs/${id}/retry/`)).data,
+  cancelJob: async (id: string) => (await api.post(`/parser/jobs/${id}/cancel/`)).data,
+  dispatchJob: async (id: string) => (await api.post(`/parser/jobs/${id}/dispatch/`)).data,
+  dispatch: async () => (await api.post('/parser/dispatch/')).data,
+  dispatchControl: async () => {
+    const response = await api.get<ParserDispatchControl>('/parser/dispatch-control/')
+    return response.data
+  },
+  setDispatchControl: async (enabled: boolean) => (
+    await api.post<ParserDispatchControl>('/parser/dispatch-control/', { enabled })
+  ).data,
+  bootstrap: async () => (await api.post('/parser/bootstrap/')).data,
 }
 
 export const skillCatalogApi = {
@@ -666,6 +894,8 @@ export interface WorkflowTemplateSummary {
   plugin_dir: string
   has_chat_intent: boolean
   has_webhook: boolean
+  test_context?: Record<string, unknown>
+  test_required_context?: string[]
 }
 
 export type WorkflowPluginStatus = 'draft' | 'review' | 'published' | 'archived'

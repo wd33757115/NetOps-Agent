@@ -14,6 +14,14 @@ CISCO_PROMPT_RE = re.compile(r"^(?P<device>[A-Za-z0-9_.:/-]+)#\s*(?P<command>.*)
 BEGIN_RE = re.compile(r"^\[BEGIN\]\s*(?P<ts>.+)$", re.IGNORECASE)
 REPORT_COMMAND_RE = re.compile(r"^\s*命令\s*[:：]\s*(?P<command>.+?)\s*$", re.IGNORECASE)
 REPORT_OUTPUT_RE = re.compile(r"^\s*输出\s*[:：]\s*$", re.IGNORECASE)
+REPORT_COMMAND_RE = re.compile(
+    r"^\s*(?:命令|鍛戒护|Command)\s*[:：]\s*(?P<command>.+?)\s*$",
+    re.IGNORECASE,
+)
+REPORT_OUTPUT_RE = re.compile(
+    r"^\s*(?:输出|杈撳嚭|Output)\s*[:：]\s*$",
+    re.IGNORECASE,
+)
 SEPARATOR_RE = re.compile(r"^\s*-{10,}\s*$")
 
 

@@ -26,7 +26,13 @@ from src.core.workflows.manager import (
 from src.core.workflows.generator import generate_and_persist, preview_workflow
 from src.core.workflows.mapping import build_mapping_suggestions
 from src.core.workflows.dsl import GenerateOptions, WorkflowDSL
-from src.core.workflows.registry import WORKFLOWS_ROOT, get_template, list_templates, load_workflows
+from src.core.workflows.registry import (
+    WORKFLOWS_ROOT,
+    get_template,
+    list_templates,
+    load_workflows,
+    missing_test_context,
+)
 from src.core.workflows.repository import get_workflow_run, list_child_runs, list_workflow_runs, list_workflow_steps
 from src.core.workflows.events import get_workflow_timeline
 from src.core.workflows.stream import stream_workflow_events
@@ -576,8 +582,15 @@ async def test_run_workflow(
     if not tpl:
         raise HTTPException(status_code=404, detail=f"未知 Workflow: {request.template_name}")
     ctx = dict(request.context)
-    if not ctx.get("ticket_id"):
-        raise HTTPException(status_code=400, detail="context.ticket_id 必填")
+    missing = missing_test_context(tpl, ctx)
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Workflow 试跑上下文缺少必填字段",
+                "missing_context": missing,
+            },
+        )
     user_id = request.user_id or (user.user_id if user else None)
     try:
         run_id = WorkflowEngine.start(

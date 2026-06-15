@@ -122,7 +122,7 @@ fallback_to_rag: true
 
 此 Skill 需要调用后端 Celery 任务 `execute_config_backup_task` 执行实际的备份操作。
 
-**脚本位置**：`src/skills/device-backup/scripts/`（`netops_agent_tools.py`、`init_test_db.py`）
+**运行时位置**：`src/core/device_ops/tools.py`；`init_test_db.py` 仅向 PostgreSQL 写入非生产示例资产。
 
 执行步骤：
 1. 接收用户参数
@@ -132,7 +132,7 @@ fallback_to_rag: true
 
 ## 安全规范
 
-1. **凭证安全**：设备登录凭证通过环境变量 `DEVICE_USERNAME` / `DEVICE_PASSWORD` 获取，不得在 SKILL.md 或代码中硬编码
+1. **凭证安全**：设备资产仅保存 `credential_ref=env:VARIABLE`，实际密码从对应环境变量读取，不得写入数据库或代码
 2. **操作审计**：每次备份记录审计日志（备份设备列表、用户、时间、成功率）
 3. **权限控制**：只有 POWER_USER 及以上级别可执行设备备份操作
 4. **敏感信息过滤**：备份报告中自动过滤密码、密钥等敏感配置行

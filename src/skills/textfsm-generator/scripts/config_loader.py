@@ -9,13 +9,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import yaml
+from src.core.parser.policy import SHARED_PARSER_CONFIG_ROOT, ParserPolicy, load_yaml
 
-SKILL_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CATEGORIES = SKILL_ROOT / "config" / "command_categories.yaml"
-DEFAULT_MAPPING = SKILL_ROOT / "config" / "command_mapping.yaml"
-DEFAULT_SIGNATURES = SKILL_ROOT / "config" / "device_signatures.yaml"
-DEFAULT_ALIASES = SKILL_ROOT / "config" / "command_aliases.yaml"
+DEFAULT_MAPPING = SHARED_PARSER_CONFIG_ROOT / "command_policy.yaml"
 
 
 @dataclass(frozen=True)
@@ -44,36 +40,6 @@ class CommandMapping:
     family: str | None = None
 
 
-def load_yaml(path: Path) -> dict[str, Any]:
-    if not path.is_file():
-        raise FileNotFoundError(f"configuration file does not exist: {path}")
-    with path.open(encoding="utf-8") as handle:
-        data = yaml.safe_load(handle) or {}
-    if not isinstance(data, dict):
-        raise ValueError(f"configuration root must be an object: {path}")
-    return data
-
-
-def load_categories(path: Path | None = None) -> dict[str, CategorySpec]:
-    raw = load_yaml(path or DEFAULT_CATEGORIES)
-    output: dict[str, CategorySpec] = {}
-    for name, spec in raw.items():
-        if not isinstance(spec, dict):
-            continue
-        output[str(name)] = CategorySpec(
-            name=str(name),
-            required_fields=list(spec.get("required_fields") or spec.get("fields") or []),
-            optional_fields=list(spec.get("optional_fields") or []),
-            entity_type=str(spec.get("entity_type") or name),
-            primary_keys=list(spec.get("primary_keys") or []),
-            validators=dict(spec.get("validators") or {}),
-            allow_empty=bool(spec.get("allow_empty", False)),
-            empty_patterns=list(spec.get("empty_patterns") or []),
-            ignore_fields=list(spec.get("ignore_fields") or []),
-        )
-    return output
-
-
 def load_command_mapping(path: Path | None = None) -> list[CommandMapping]:
     raw = load_yaml(path or DEFAULT_MAPPING)
     mappings: list[CommandMapping] = []
@@ -98,29 +64,35 @@ def load_command_mapping(path: Path | None = None) -> list[CommandMapping]:
                         family=str(meta.get("family") or "").strip() or None,
                     )
                 )
+    if mappings:
+        return mappings
+    from src.core.parser.repository import ParserRepository
+
+    seen: set[tuple[str, str, str]] = set()
+    for template in ParserRepository().list_templates(status="active"):
+        key = (
+            str(template["vendor"]),
+            str(template["profile"]),
+            str(template["canonical_command"]),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        mappings.append(
+            CommandMapping(
+                vendor=key[0],
+                model=key[1],
+                command=key[2],
+                category=str(template.get("category") or "record"),
+                family=template.get("family"),
+            )
+        )
     return mappings
 
 
-def load_command_aliases(path: Path | None = None) -> dict[str, str]:
-    raw = load_yaml(path or DEFAULT_ALIASES)
-    aliases = raw.get("aliases", raw)
-    if not isinstance(aliases, dict):
-        return {}
-    return {
-        normalize_command(str(alias)): normalize_command(str(canonical))
-        for alias, canonical in aliases.items()
-        if str(alias).strip() and str(canonical).strip()
-    }
-
-
-def load_device_signatures(path: Path | None = None) -> dict[str, Any]:
-    return load_yaml(path or DEFAULT_SIGNATURES)
-
-
 def normalize_command(command: str, aliases: dict[str, str] | None = None) -> str:
-    normalized = " ".join(str(command or "").strip().lower().split())
-    if normalized.startswith("dis "):
-        normalized = f"display {normalized[4:]}"
+    policy = ParserPolicy()
+    normalized = policy.normalize_command(command)
     return (aliases or {}).get(normalized, normalized)
 
 

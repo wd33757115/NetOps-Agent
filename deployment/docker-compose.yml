@@ -131,6 +131,45 @@ services:
     networks:
       - netops-network
 
+  migrate:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.fastapi
+    container_name: netops-migrate
+    env_file:
+      - ../.env
+    environment:
+      - POSTGRES_HOST=postgres
+      - TZ=Asia/Shanghai
+    command: python scripts/migrate_db.py
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - netops-network
+
+  django-migrate:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.django
+    container_name: netops-django-migrate
+    env_file:
+      - ../.env
+    environment:
+      - POSTGRES_HOST=postgres
+      - DJANGO_DATABASE_ENGINE=postgresql
+      - TZ=Asia/Shanghai
+    command: python manage.py migrate --noinput
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+    networks:
+      - netops-network
+
   fastapi:
     build:
       context: ..
@@ -155,6 +194,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       rabbitmq:
@@ -183,6 +224,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       rabbitmq:
@@ -211,7 +254,12 @@ services:
       - django-static:/app/web/django_backend/staticfiles
       - ..:/app
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      django-migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
     networks:
       - netops-network

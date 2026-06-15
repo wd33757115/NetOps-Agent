@@ -1,7 +1,7 @@
 ---
 name: textfsm-generator
 version: 1.2.0
-description: 从聊天 CLI、SQLite 或离线巡检文件目录生成并跨样本验证 TextFSM 模板，识别设备厂商和精确型号，发布共享 Parser 资产
+description: 从聊天 CLI、PostgreSQL 验证数据集或离线巡检文件目录生成并跨样本验证 TextFSM 模板，识别设备厂商和精确型号，发布共享 Parser 资产
 category: network
 tags: [textfsm, parser, template, patrol, offline]
 author: wangdong
@@ -19,6 +19,10 @@ triggers:
   - 解析模板生成
   - textfsm generator
 inputs:
+  - name: job_id
+    type: string
+    required: false
+    description: Parser Control Plane任务ID；提供后进入job模式
   - name: source_path
     type: string
     required: false
@@ -51,14 +55,6 @@ inputs:
     type: string
     required: false
     description: 单条输入模式的显式字段类别
-  - name: patrol_db
-    type: string
-    required: false
-    description: SQLite 扫描模式的巡检数据库
-  - name: devices_db
-    type: string
-    required: false
-    description: SQLite 扫描模式的设备数据库
   - name: templates_dir
     type: string
     required: false
@@ -140,10 +136,10 @@ fallback_to_rag: false
 
 ## 工作流程
 
-1. 读取聊天 CLI、SQLite 或离线 `.txt/.log` 文件。
+1. 读取聊天 CLI、PostgreSQL `parser_validation` 数据集或离线 `.txt/.log` 文件。
 2. 复用巡检命令切分器，规范化命令别名。
 3. 优先从版本和库存命令识别厂商、精确型号及设备族。
-4. 只处理 `config/command_mapping.yaml` 白名单中的命令。
+4. 只处理 Skill 共享配置 `src/skills/shared/parser-config/command_policy.yaml` 中启用的命令。
 5. 按 `vendor + model + command` 聚合全部样本。
 6. 使用代表样本生成模板，并对该组全部样本验证。
 7. 通过配置的发布门槛后，原子写入共享目录并更新 manifest。
@@ -156,7 +152,7 @@ fallback_to_rag: false
 
 ## 输入参数说明
 
-- `source_path` 优先级最高，启用离线目录模式。
+- `job_id` 优先级最高；`source_path` 启用离线发现和验证模式。
 - `vendor/model` 必须同时提供才覆盖自动识别。
 - `publish=false` 或 `dry_run=true` 不写共享资产。
 - `minimum_sample_pass_rate` 默认 `1.0`。
@@ -184,7 +180,7 @@ fallback_to_rag: false
 {
   "source_path": "C:\\patrol-data",
   "recursive": true,
-  "publish": true,
+  "publish": false,
   "minimum_sample_pass_rate": 1.0
 }
 ```
@@ -194,10 +190,12 @@ fallback_to_rag: false
 - 不连接或执行任何网络设备命令。
 - 不根据 `display/show` 猜测离线文件的厂商。
 - 未识别设备和未配置命令必须明确报告并跳过。
-- LLM 不得自行扩展字段；字段由 `command_categories.yaml` 控制。
+- LLM 只能在验证模式提出数据契约候选；字段、主键和校验器经过多样本确定性验证及人工审批后，固化到模板版本的 `validation_json`。
+- 正式巡检只读取 PostgreSQL 中 active 模板及其已审批契约，不实时调用 LLM。
+- 唯一持续人工维护的配置是 `src/skills/shared/parser-config/command_policy.yaml` 命令白名单。
 - 默认要求全部样本通过后才发布。
 - 共享模板位于 `src/skills/shared/textfsm-templates/`。
-- 根目录 `templates/` 仅作为旧资产只读回退。
+- 目录和直接输入不能发布生产模板；发布必须来自 PostgreSQL `parser_validation` 快照创建的 Job。
 
 ## 实际执行说明
 

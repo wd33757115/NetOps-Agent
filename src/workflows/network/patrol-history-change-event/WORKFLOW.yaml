@@ -5,28 +5,38 @@ name: patrol-history-change-event
 description: 导入两个历史巡检目录，对比变化并构建运维事件
 version: "1.0"
 
+test:
+  context:
+    baseline_path: ""
+    baseline_run_id: history-baseline-test
+    current_path: ""
+    current_run_id: history-current-test
+    publish_events: false
+  required_context:
+    - baseline_path
+    - current_path
+
 steps:
   - name: baseline_ingest
     label: 导入上一季度巡检
     skill: patrol-raw-ingestor
     inputs:
       file_path: ${context.baseline_path}
-      db_path: ${context.db_path}
       run_id: ${context.baseline_run_id}
+      mode: production
 
   - name: current_ingest
     label: 导入本季度巡检
     skill: patrol-raw-ingestor
     inputs:
       file_path: ${context.current_path}
-      db_path: ${context.db_path}
       run_id: ${context.current_run_id}
+      mode: production
 
   - name: change_detection
     label: 对比季度巡检变化
     skill: change-detector
     inputs:
-      db_path: ${context.db_path}
       previous_run_id: ${steps.baseline_ingest.result.run_id}
       current_run_id: ${steps.current_ingest.result.run_id}
       persist: true
@@ -35,7 +45,6 @@ steps:
     label: 构建运维事件
     skill: event-builder
     inputs:
-      db_path: ${context.db_path}
       run_id: ${steps.current_ingest.result.run_id}
       persist: true
       publish: ${context.publish_events}

@@ -5,11 +5,11 @@
 
 from __future__ import annotations
 
-import sqlite3
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -18,15 +18,18 @@ sys.path.insert(0, str(SCRIPTS))
 
 from config_loader import (  # noqa: E402
     find_category,
-    load_categories,
     load_command_mapping,
-    required_fields_for_category,
     resolve_device_mapping,
 )
-from db_reader import discover_missing_template_candidates  # noqa: E402
+from db_reader import (  # noqa: E402
+    TemplateCandidate,
+    discover_missing_template_candidates,
+)
 from device_detector import detect_device_identity  # noqa: E402
 from directory_reader import discover_directory_candidates  # noqa: E402
+from llm_generator import build_generation_prompt  # noqa: E402
 from generate_templates import (  # noqa: E402
+    _job_candidate,
     cmd_to_template_filename,
     resolve_template_path,
 )
@@ -39,11 +42,10 @@ from template_validator import (  # noqa: E402
 
 from src.core.patrol.command_splitter import split_cli_capture  # noqa: E402
 from src.core.patrol.raw_importer import _read_text_best_effort  # noqa: E402
-from src.core.patrol.textfsm_assets import (  # noqa: E402
-    command_template_name,
-    discover_textfsm_templates,
-    resolve_textfsm_template,
-    safe_slug,
+from src.core.parser.assets import TemplateAssetStore, safe_slug  # noqa: E402
+from src.core.parser.policy import (  # noqa: E402
+    SHARED_PARSER_CONFIG_ROOT,
+    ParserPolicy,
 )
 
 try:
@@ -70,92 +72,71 @@ SAMPLE_CLI = """Slot  CPU 5s 1m 5m
 
 
 class TestConfigLoader(unittest.TestCase):
-    def test_load_mapping_and_category(self):
-        skill_root = PROJECT_ROOT / "src" / "skills" / "textfsm-generator"
-        mappings = load_command_mapping(skill_root / "config" / "command_mapping.yaml")
-        categories = load_categories(skill_root / "config" / "command_categories.yaml")
+    def test_load_mapping_from_active_template_assets(self):
+        mappings = load_command_mapping(
+            SHARED_PARSER_CONFIG_ROOT / "command_policy.yaml"
+        )
         self.assertTrue(mappings)
-        cat = find_category("Huawei", "CE12800", "display cpu-usage", mappings)
+        cat = find_category("H3C", "S5130S-54S-HI-G", "display cpu", mappings)
         self.assertEqual(cat, "cpu")
-        fields = required_fields_for_category(cat, categories)
-        self.assertIn("cpu_5s", fields)
 
-    def test_resolve_category_fan_generic(self):
-        from config_loader import resolve_category
-
-        skill_root = PROJECT_ROOT / "src" / "skills" / "textfsm-generator"
-        mappings = load_command_mapping(skill_root / "config" / "command_mapping.yaml")
-        cat = resolve_category("Huawei", "Generic", "display fan", mappings)
-        self.assertEqual(cat, "fan")
+    def test_policy_is_vendor_neutral(self):
+        decision = ParserPolicy().decide(
+            vendor="NewVendor",
+            model="NewModel",
+            family=None,
+            command="show version",
+        )
+        self.assertTrue(decision.enabled)
 
     def test_resolve_device_model(self):
-        skill_root = PROJECT_ROOT / "src" / "skills" / "textfsm-generator"
-        mappings = load_command_mapping(skill_root / "config" / "command_mapping.yaml")
-        self.assertEqual(resolve_device_mapping("CE12800", mappings), ("Huawei", "CE12800"))
-
-    def test_command_aliases(self):
-        from config_loader import load_command_aliases, normalize_command
-
-        skill_root = PROJECT_ROOT / "src" / "skills" / "textfsm-generator"
-        aliases = load_command_aliases(skill_root / "config" / "command_aliases.yaml")
-        self.assertEqual(normalize_command("display cpu-us", aliases), "display cpu")
+        mappings = load_command_mapping(
+            SHARED_PARSER_CONFIG_ROOT / "command_policy.yaml"
+        )
         self.assertEqual(
-            normalize_command("show env power", aliases),
+            resolve_device_mapping("S5130S-54S-HI-G", mappings),
+            ("H3C", "S5130S-54S-HI-G"),
+        )
+
+    def test_command_aliases_are_database_assets(self):
+        from config_loader import normalize_command
+
+        self.assertEqual(normalize_command("display cpu-us"), "display cpu")
+        self.assertEqual(
+            normalize_command("show env power"),
             "show environment power",
         )
 
 
 class TestDbReader(unittest.TestCase):
-    def _setup_dbs(self, tmp: Path):
-        devices = tmp / "devices.db"
-        patrol = tmp / "patrol.db"
-        conn = sqlite3.connect(devices)
-        try:
-            conn.execute(
-                "CREATE TABLE devices ("
-                "device_id INTEGER PRIMARY KEY, device_name TEXT, ip TEXT, model TEXT)"
-            )
-            conn.execute(
-                "INSERT INTO devices (device_name, ip, model) VALUES (?,?,?)",
-                ("sw1", "10.0.0.1", "CE12800"),
-            )
-            conn.commit()
-        finally:
-            conn.close()
-
-        conn = sqlite3.connect(patrol)
-        try:
-            conn.executescript(
-                """
-                CREATE TABLE patrol_data (
-                    run_id TEXT, device_id TEXT, command TEXT,
-                    structured TEXT, text_output TEXT, timestamp TEXT,
-                    PRIMARY KEY (run_id, device_id, command)
-                );
-                """
-            )
-            conn.execute(
-                "INSERT INTO patrol_data VALUES (?,?,?,?,?,?)",
-                ("r1", "sw1-10.0.0.1", "display cpu-usage", None, SAMPLE_CLI, "2026-01-01"),
-            )
-            conn.execute(
-                "INSERT INTO patrol_data VALUES (?,?,?,?,?,?)",
-                ("r2", "sw1-10.0.0.1", "display cpu-usage", None, SAMPLE_CLI, "2026-01-02"),
-            )
-            conn.commit()
-        finally:
-            conn.close()
-        return patrol, devices
-
     def test_dedupe_by_vendor_model_command(self):
-        skill_root = PROJECT_ROOT / "src" / "skills" / "textfsm-generator"
-        mappings = load_command_mapping(skill_root / "config" / "command_mapping.yaml")
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
-            patrol, devices = self._setup_dbs(Path(tmpdir))
-            items = discover_missing_template_candidates(patrol, devices, mappings)
+        mappings = load_command_mapping(
+            SHARED_PARSER_CONFIG_ROOT / "command_policy.yaml"
+        )
+        snapshots = [
+            SimpleNamespace(
+                parse_status="template_missing",
+                vendor="H3C",
+                model="S5130S-54S-HI-G",
+                command_canonical="display cpu",
+                raw_text=SAMPLE_CLI,
+                device_id="sw1-10.0.0.1",
+            ),
+            SimpleNamespace(
+                parse_status="template_missing",
+                vendor="H3C",
+                model="S5130S-54S-HI-G",
+                command_canonical="display cpu",
+                raw_text=SAMPLE_CLI,
+                device_id="sw2-10.0.0.2",
+            ),
+        ]
+        with patch("db_reader.PatrolRepository") as repository:
+            repository.return_value.list_dataset_snapshots.return_value = snapshots
+            items = discover_missing_template_candidates(None, None, mappings)
             self.assertEqual(len(items), 1)
-            self.assertEqual(items[0].vendor, "Huawei")
-            self.assertEqual(items[0].model, "CE12800")
+            self.assertEqual(items[0].vendor, "H3C")
+            self.assertEqual(items[0].model, "S5130S-54S-HI-G")
 
 
 class TestTemplateValidator(unittest.TestCase):
@@ -183,11 +164,52 @@ Start
         self.assertGreater(result.record_count, 0)
         self.assertEqual(result.missing_fields, [])
 
+    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
+    def test_duplicate_primary_key_fails_template_validation(self):
+        template = """Value interface (\\S+)
+Value status (\\S+)
+
+Start
+  ^${interface}\\s+${status} -> Record
+"""
+        result = validate_template(
+            template,
+            "Gi1/0/1 up\nGi1/0/1 down\n",
+            ["interface", "status"],
+            primary_keys=["interface"],
+        )
+
+        self.assertFalse(result.is_valid)
+        self.assertTrue(result.key_errors)
+
     def test_strip_llm_fence(self):
         raw = "```textfsm\nValue X (\\d+)\n\nStart\n  ^${X}\n```"
         cleaned = strip_llm_template(raw)
         self.assertIn("Value X", cleaned)
         self.assertNotIn("```", cleaned)
+
+    def test_strip_llm_repairs_invalid_state_record_action(self):
+        raw = """Value Filldown SLOT (\\d+)
+Value FAN (\\d+)
+Value STATE (\\S+)
+
+Start
+  ^Slot ${SLOT}: -> Slot.Record
+
+Slot
+  ^\\s+Fan ${FAN}: ${STATE} -> Record
+"""
+        cleaned = strip_llm_template(raw)
+        self.assertIn("-> Slot", cleaned)
+        self.assertNotIn("Slot.Record", cleaned)
+        result = validate_template(
+            cleaned,
+            "Slot 1:\n Fan 1: Normal\n Fan 2: Normal\n",
+            ["SLOT", "FAN", "STATE"],
+            primary_keys=["SLOT", "FAN"],
+        )
+        self.assertTrue(result.is_valid)
+        self.assertEqual(result.record_count, 2)
 
     def test_field_value_percent(self):
         errors = validate_field_values(
@@ -339,66 +361,45 @@ Start
   ^Slot\\s+CPU
   ^${slot}\\s+${cpu_5s}\\s+${cpu_1m}\\s+${cpu_5m}
 """
-        skill_root = PROJECT_ROOT / "src" / "skills" / "textfsm-generator"
+        skill_root = SHARED_PARSER_CONFIG_ROOT
 
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             tmp = Path(tmpdir)
-            patrol = tmp / "patrol.db"
-            devices = tmp / "devices.db"
             templates = tmp / "templates"
             reports = tmp / "reports"
 
-            conn = sqlite3.connect(devices)
-            try:
-                conn.execute(
-                    "CREATE TABLE devices ("
-                    "device_id INTEGER PRIMARY KEY, device_name TEXT, ip TEXT, model TEXT)"
-                )
-                conn.execute(
-                    "INSERT INTO devices (device_name, ip, model) VALUES (?,?,?)",
-                    ("sw1", "10.0.0.1", "CE12800"),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-
-            conn = sqlite3.connect(patrol)
-            try:
-                conn.executescript(
-                    """
-                    CREATE TABLE patrol_data (
-                        run_id TEXT, device_id TEXT, command TEXT,
-                        structured TEXT, text_output TEXT, timestamp TEXT,
-                        PRIMARY KEY (run_id, device_id, command)
-                    );
-                    """
-                )
-                cli = "Slot CPU\n0 10 12 15\n"
-                conn.execute(
-                    "INSERT INTO patrol_data VALUES (?,?,?,?,?,?)",
-                    ("r1", "sw1-10.0.0.1", "display cpu-usage", None, cli, "2026-01-01"),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-
             from generate_templates import generate_templates
 
-            result = generate_templates(
-                {
-                    "patrol_db": str(patrol),
-                    "devices_db": str(devices),
-                    "templates_dir": str(templates),
-                    "reports_dir": str(reports),
-                    "mapping_config": str(skill_root / "config" / "command_mapping.yaml"),
-                    "categories_config": str(skill_root / "config" / "command_categories.yaml"),
-                    "max_retries": 1,
-                }
+            cli = "Slot CPU\n0 10 12 15\n"
+            candidate = TemplateCandidate(
+                vendor="H3C",
+                model="S5130S-54S-HI-G",
+                command="display cpu",
+                sample_output=cli,
+                source_table="netops_command_snapshots",
+                device_id="sw1-10.0.0.1",
             )
+            with patch(
+                "generate_templates.discover_missing_template_candidates",
+                return_value=[candidate],
+            ):
+                result = generate_templates(
+                    {
+                        "templates_dir": str(templates),
+                        "reports_dir": str(reports),
+                        "mapping_config": str(skill_root / "command_policy.yaml"),
+                        "max_retries": 1,
+                        "publish": False,
+                    }
+                )
             self.assertTrue(result["success"])
-            self.assertEqual(result["success_count"], 1)
-            out_file = templates / "CE12800" / cmd_to_template_filename("display cpu-usage")
-            self.assertTrue(out_file.is_file())
+            self.assertEqual(result["validation_pass_rate"], 1.0)
+            out_file = (
+                templates
+                / "S5130S-54S-HI-G"
+                / cmd_to_template_filename("display cpu")
+            )
+            self.assertFalse(out_file.is_file())
             report_files = list(reports.glob("*.json"))
             self.assertTrue(report_files)
 
@@ -413,7 +414,7 @@ Start
   ^Fan\\s+${fan}:
   ^State\\s+:\\s+${state}
 """
-        skill_root = PROJECT_ROOT / "src" / "skills" / "textfsm-generator"
+        skill_root = SHARED_PARSER_CONFIG_ROOT
         cli = """Slot 1:
 Fan 1:
 State    : Normal
@@ -432,9 +433,9 @@ State    : Normal"""
                     "model": "Generic",
                     "templates_dir": str(tmp / "templates"),
                     "reports_dir": str(tmp / "reports"),
-                    "mapping_config": str(skill_root / "config" / "command_mapping.yaml"),
-                    "categories_config": str(skill_root / "config" / "command_categories.yaml"),
+                    "mapping_config": str(skill_root / "command_policy.yaml"),
                     "max_retries": 1,
+                    "publish": False,
                 }
             )
             self.assertEqual(result["mode"], "direct")
@@ -467,20 +468,14 @@ Start
                     "templates_dir": str(tmp / "shared"),
                     "reports_dir": str(tmp / "reports"),
                     "max_retries": 0,
+                    "publish": False,
                 }
             )
             self.assertEqual(result["mode"], "directory")
             self.assertEqual(result["files_scanned"], 1)
             self.assertEqual(result["devices_detected"], 1)
-            self.assertEqual(result["success_count"], 1)
-            self.assertTrue(
-                (
-                    tmp
-                    / "shared"
-                    / "S5130S-54S-HI-G"
-                    / "display_version.textfsm"
-                ).is_file()
-            )
+            self.assertEqual(result["validation_pass_rate"], 1.0)
+            self.assertFalse((tmp / "shared").exists())
 
     @patch("generate_templates.generate_template_text")
     def test_unconfigured_directory_command_does_not_call_llm(self, mock_llm):
@@ -511,20 +506,13 @@ Start
 
 class TestOfflineDirectoryDiscovery(unittest.TestCase):
     def _discover(self, directory: Path):
-        from config_loader import (
-            load_command_aliases,
-            load_command_mapping,
-            load_device_signatures,
-        )
+        from config_loader import load_command_mapping
 
-        skill_root = PROJECT_ROOT / "src" / "skills" / "textfsm-generator"
         return discover_directory_candidates(
             directory,
-            mappings=load_command_mapping(skill_root / "config" / "command_mapping.yaml"),
-            signatures=load_device_signatures(
-                skill_root / "config" / "device_signatures.yaml"
+            mappings=load_command_mapping(
+                SHARED_PARSER_CONFIG_ROOT / "command_policy.yaml"
             ),
-            aliases=load_command_aliases(skill_root / "config" / "command_aliases.yaml"),
         )
 
     def test_multiple_same_model_files_are_grouped_once(self):
@@ -566,9 +554,6 @@ class TestOfflineDirectoryDiscovery(unittest.TestCase):
         )
 
     def test_version_evidence_has_high_confidence(self):
-        from config_loader import load_device_signatures
-
-        skill_root = PROJECT_ROOT / "src" / "skills" / "textfsm-generator"
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             path = Path(tmpdir) / "CORE1-10.0.0.1.txt"
             path.write_text(
@@ -581,9 +566,7 @@ class TestOfflineDirectoryDiscovery(unittest.TestCase):
             identity = detect_device_identity(
                 path=path,
                 blocks=blocks,
-                config=load_device_signatures(
-                    skill_root / "config" / "device_signatures.yaml"
-                ),
+                config={},
             )
         self.assertEqual((identity.vendor, identity.model), ("Cisco", "N9K-C9364C"))
         self.assertGreaterEqual(identity.confidence, 0.99)
@@ -593,64 +576,114 @@ class TestOfflineDirectoryDiscovery(unittest.TestCase):
 class TestSharedTextfsmAssets(unittest.TestCase):
     def test_safe_model_and_command_paths(self):
         self.assertEqual(safe_slug("ISR4451-X/K9"), "ISR4451-X_K9")
-        self.assertEqual(
-            command_template_name("show ip interface brief"),
-            "show_ip_interface_brief.textfsm",
+        self.assertEqual(safe_slug("show ip interface brief"), "show_ip_interface_brief")
+
+    def test_immutable_asset_and_hash_verification(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            store = TemplateAssetStore(Path(tmpdir))
+            path, digest = store.write_immutable(
+                vendor="Cisco",
+                profile="N9K-C9364C",
+                command="show version",
+                version="1",
+                content="template",
+            )
+            self.assertTrue(store.verify(path, digest))
+            self.assertEqual(path.parent.name, "N9K-C9364C")
+            self.assertEqual(path.name, "show_version__1.textfsm")
+            with self.assertRaises(FileExistsError):
+                store.write_immutable(
+                    vendor="Cisco",
+                    profile="N9K-C9364C",
+                    command="show version",
+                    version="1",
+                    content="different",
+                )
+
+    def test_global_raw_hash_policy(self):
+        decision = ParserPolicy().decide(
+            vendor="Cisco",
+            model="N9K-C9364C",
+            family="NXOS9K",
+            command="show running-config",
         )
+        self.assertFalse(decision.enabled)
+        self.assertEqual(decision.handling, "raw_hash_diff")
 
-    def test_shared_exact_then_legacy_fallback(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
-            root = Path(tmpdir)
-            shared = root / "shared"
-            legacy = root / "legacy"
-            legacy_file = legacy / "M1" / "show_version.textfsm"
-            legacy_file.parent.mkdir(parents=True)
-            legacy_file.write_text("legacy", encoding="utf-8")
-            self.assertEqual(
-                resolve_textfsm_template(
-                    model="M1",
-                    command="show version",
-                    shared_root=shared,
-                    legacy_root=legacy,
-                ),
-                legacy_file,
-            )
-            shared_file = shared / "M1" / "show_version.textfsm"
-            shared_file.parent.mkdir(parents=True)
-            shared_file.write_text("shared", encoding="utf-8")
-            self.assertEqual(
-                resolve_textfsm_template(
-                    model="M1",
-                    command="show version",
-                    shared_root=shared,
-                    legacy_root=legacy,
-                ),
-                shared_file,
-            )
-            mapping = discover_textfsm_templates(
-                model="M1",
-                shared_root=shared,
-                legacy_root=legacy,
-            )
-            self.assertEqual(mapping["show_version.textfsm"], shared_file)
 
-    def test_shared_family_fallback(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
-            root = Path(tmpdir)
-            shared = root / "shared"
-            family_file = shared / "NXOS9K" / "show_version.textfsm"
-            family_file.parent.mkdir(parents=True)
-            family_file.write_text("family", encoding="utf-8")
-            self.assertEqual(
-                resolve_textfsm_template(
-                    model="N9K-C9364C",
-                    family="NXOS9K",
-                    command="show version",
-                    shared_root=shared,
-                    legacy_root=root / "legacy",
+class TestParserJobSamples(unittest.TestCase):
+    def test_generation_prompt_allows_filldown_for_parent_primary_keys(self):
+        prompt = build_generation_prompt(
+            vendor="H3C",
+            model="S6860-54HF",
+            command="display fan",
+            cli_output="Slot 1\n Fan 1 Normal",
+            required_fields=["slot", "fan", "state"],
+            primary_keys=["slot", "fan"],
+        )
+        self.assertIn("Value Filldown", prompt)
+        self.assertIn("slot, fan", prompt)
+
+    def test_job_candidate_accepts_postgresql_validation_samples(self):
+        job = {
+            "vendor": "H3C",
+            "model": "S6860-54HF",
+            "profile": "S6860-54HF",
+            "family": "Comware7",
+            "canonical_command": "display fan",
+            "samples": [
+                {"snapshot_id": "sample-a", "snapshot_source": "postgresql"},
+                {"snapshot_id": "sample-b", "snapshot_source": "postgresql"},
+            ],
+        }
+        contexts = {
+            sample_id: {
+                "mode": "parser_validation",
+                "snapshot": SimpleNamespace(
+                    snapshot_id=sample_id,
+                    device_id=f"device-{sample_id}",
+                    command_canonical="display fan",
+                    raw_text="Slot 1 Fan 1 Normal",
                 ),
-                family_file,
-            )
+            }
+            for sample_id in ("sample-a", "sample-b")
+        }
+        with patch("generate_templates.ParserRepository") as parser_repository:
+            parser_repository.return_value.get_job.return_value = job
+            with patch("generate_templates.PatrolRepository") as patrol_repository:
+                patrol_repository.return_value.get_snapshot_context.side_effect = (
+                    lambda snapshot_id: contexts[snapshot_id]
+                )
+                candidate = _job_candidate({"job_id": "job-1"})
+        self.assertIsNotNone(candidate)
+        self.assertEqual(len(candidate.samples), 2)
+
+    def test_job_candidate_rejects_production_mode_sample(self):
+        job = {
+            "vendor": "H3C",
+            "model": "S6860-54HF",
+            "profile": "S6860-54HF",
+            "family": "Comware7",
+            "canonical_command": "display fan",
+            "samples": [
+                {"snapshot_id": "sample-production", "snapshot_source": "postgresql"}
+            ],
+        }
+        context = {
+            "mode": "production",
+            "snapshot": SimpleNamespace(
+                snapshot_id="sample-production",
+                device_id="device-1",
+                command_canonical="display fan",
+                raw_text="Slot 1 Fan 1 Normal",
+            ),
+        }
+        with patch("generate_templates.ParserRepository") as repository:
+            repository.return_value.get_job.return_value = job
+            with patch("generate_templates.PatrolRepository") as patrol_repository:
+                patrol_repository.return_value.get_snapshot_context.return_value = context
+                with self.assertRaisesRegex(ValueError, "outside parser_validation mode"):
+                    _job_candidate({"job_id": "job-1"})
 
 
 if __name__ == "__main__":

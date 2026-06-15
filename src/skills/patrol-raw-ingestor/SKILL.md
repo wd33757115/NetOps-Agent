@@ -18,14 +18,22 @@ triggers:
   - patrol raw ingest
   - 巡检文件入库
 inputs:
+  - name: preview
+    type: boolean
+    required: false
+    description: 仅分析预计新增、重复、缺模板和解析失败数量，不写入数据库
+  - name: dataset_id
+    type: string
+    required: false
+    description: 测试巡检数据集标识，例如 2025Q3、2025Q4
+  - name: mode
+    type: string
+    required: false
+    description: production 或 parser_validation，默认 production
   - name: file_path
     type: string
     required: true
     description: 巡检原始 txt/log 文件或包含这些文件的目录路径
-  - name: db_path
-    type: string
-    required: false
-    description: snapshot SQLite 路径，默认 .runtime/patrol/patrol.db
   - name: run_id
     type: string
     required: false
@@ -60,6 +68,8 @@ fallback_to_rag: false
 3. 命令名称必须规范化，缩写和大小写不应破坏跨次匹配。
 4. 无法结构化的命令仍应以 `raw_only` 状态入库。
 5. 文件编码异常时应尝试 UTF-8、UTF-16 和 GB18030。
+6. 同一文件、设备、规范命令和输出内容只保存一份 Snapshot。
+7. 测试数据应先使用 `preview=true` 预览，再确认写入。
 
 ## 核心能力
 
@@ -80,7 +90,8 @@ fallback_to_rag: false
 ## 输入参数说明
 
 - `file_path`：必须提供的原始巡检文件或目录；目录将递归导入 `.txt` 和 `.log`。
-- `db_path`：SQLite 路径，默认 `.runtime/patrol/patrol.db`。
+- `mode`：`production` 或 `parser_validation`，默认 `production`。
+- Snapshot、Run 和 Dataset 统一写入 PostgreSQL，调用方不提供数据库文件路径。
 - `run_id`：可由外部巡检任务指定，以合并多台设备。
 - `device_name/ip`：可覆盖自动推断结果。
 - `vendor/model`：设备档案元数据。
@@ -107,7 +118,7 @@ fallback_to_rag: false
 - 不执行文件中的任何命令。
 - 不主动连接网络设备。
 - 仅将文件内容作为文本解析。
-- Snapshot Store 路径必须由平台配置或可信调用者提供。
+- PostgreSQL 不可用时导入直接失败，不降级到本地文件数据库。
 
 ## 实际执行说明
 

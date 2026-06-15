@@ -25,7 +25,6 @@ context_from_query:
   current_path: path_1
 
 context_defaults:
-  db_path: .runtime/patrol/patrol.db
   baseline_run_id: patrol-baseline
   current_run_id: patrol-current
   publish_events: false

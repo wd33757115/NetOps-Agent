@@ -5,15 +5,12 @@
 
 from __future__ import annotations
 
-import json
-import sqlite3
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
-from src.core.patrol.change_detector import ensure_change_table
+from src.core.patrol.change_event_repository import ChangeEventRepository
 
 
 @dataclass(frozen=True)
@@ -131,62 +128,8 @@ def build_events_from_changes(changes: list[dict[str, Any]]) -> list[NetworkEven
     return events
 
 
-def ensure_event_table(db_path: str | Path) -> None:
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS netops_network_events (
-                event_id TEXT PRIMARY KEY,
-                event_type TEXT NOT NULL,
-                severity TEXT NOT NULL,
-                device_id TEXT,
-                entity_type TEXT NOT NULL,
-                entity_key TEXT NOT NULL,
-                source_change_id TEXT,
-                run_id TEXT,
-                occurred_at TEXT NOT NULL,
-                status TEXT NOT NULL,
-                payload_json TEXT
-            );
-            CREATE INDEX IF NOT EXISTS idx_network_events_run
-                ON netops_network_events(run_id);
-            CREATE INDEX IF NOT EXISTS idx_network_events_device
-                ON netops_network_events(device_id);
-            CREATE INDEX IF NOT EXISTS idx_network_events_type
-                ON netops_network_events(event_type);
-            """
-        )
-
-
-def save_events(db_path: str | Path, events: list[NetworkEvent]) -> None:
-    ensure_event_table(db_path)
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.executemany(
-            """
-            INSERT OR REPLACE INTO netops_network_events
-            (
-                event_id, event_type, severity, device_id, entity_type, entity_key,
-                source_change_id, run_id, occurred_at, status, payload_json
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                (
-                    e.event_id,
-                    e.event_type,
-                    e.severity,
-                    e.device_id,
-                    e.entity_type,
-                    e.entity_key,
-                    e.source_change_id,
-                    e.run_id,
-                    e.occurred_at,
-                    e.status,
-                    json.dumps(e.payload, ensure_ascii=False, default=str),
-                )
-                for e in events
-            ],
-        )
+def save_events(events: list[NetworkEvent]) -> int:
+    return ChangeEventRepository().save_events(events)
 
 
 def publish_events(events: list[NetworkEvent]) -> list[str]:
@@ -210,53 +153,38 @@ def publish_events(events: list[NetworkEvent]) -> list[str]:
     return message_ids
 
 
-def load_changes_from_db(
-    db_path: str | Path,
+def load_changes(
     *,
     run_id: str | None = None,
     device_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    ensure_change_table(db_path)
-    sql = "SELECT * FROM netops_network_changes WHERE 1=1"
-    params: list[Any] = []
-    if run_id:
-        sql += " AND run_id=?"
-        params.append(run_id)
-    if device_id:
-        sql += " AND device_id=?"
-        params.append(device_id)
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(sql, params).fetchall()
-    changes = []
-    for row in rows:
-        item = dict(row)
-        item["old"] = item.pop("old_value")
-        item["new"] = item.pop("new_value")
-        changes.append(item)
-    return changes
+    return ChangeEventRepository().list_changes(
+        run_id=run_id,
+        device_id=device_id,
+    )
 
 
 def build_events_from_params(params: dict[str, Any]) -> dict[str, Any]:
-    db_path = params.get("db_path") or params.get("patrol_db")
     changes = params.get("changes")
     if changes is None:
-        if not db_path:
-            raise ValueError("changes or db_path is required")
-        changes = load_changes_from_db(
-            db_path,
+        if not params.get("run_id") and not params.get("device_id"):
+            raise ValueError("changes, run_id, or device_id is required")
+        changes = load_changes(
             run_id=params.get("run_id"),
             device_id=params.get("device_id"),
         )
     events = build_events_from_changes(list(changes or []))
-    if db_path and params.get("persist", True):
-        save_events(db_path, events)
+    persisted_event_count = (
+        save_events(events) if params.get("persist", True) else 0
+    )
     message_ids: list[str] = []
     if params.get("publish", False):
         message_ids = publish_events(events)
     return {
         "success": True,
         "event_count": len(events),
+        "persisted_event_count": persisted_event_count,
+        "storage": "postgresql",
         "events": [event.to_dict() for event in events],
         "published_message_ids": message_ids,
     }

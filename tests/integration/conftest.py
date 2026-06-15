@@ -13,9 +13,9 @@ from src.infrastructure.db.models import (
     WorkflowMarketTemplate,
     WorkflowPluginMetadata,
     WorkflowPluginVersion,
-    init_db_models,
 )
-from src.infrastructure.db.postgres import engine, get_db_session, verify_postgres_connection
+from src.infrastructure.db.migrations import upgrade_database
+from src.infrastructure.db.postgres import get_db_session, verify_postgres_connection
 
 TEST_PLUGIN_PREFIX = "gov-pg-test-"
 
@@ -25,7 +25,7 @@ def postgres_available():
     """会话级：无 PostgreSQL 时跳过整个集成模块。"""
     if not verify_postgres_connection():
         pytest.skip("PostgreSQL 不可用，跳过治理集成测试")
-    init_db_models(engine)
+    upgrade_database()
     return True
 
 

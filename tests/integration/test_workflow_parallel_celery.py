@@ -17,15 +17,15 @@ from src.core.workflows.manager import save_plugin
 from src.core.workflows.registry import WORKFLOWS_ROOT, get_template, load_workflows
 from src.core.workflows.repository import get_workflow_run, list_workflow_steps
 from src.core.workflows.dsl import WorkflowDSL, WorkflowMetaDSL, WorkflowStepDSL
-from src.infrastructure.db.models import init_db_models
-from src.infrastructure.db.postgres import engine, verify_postgres_connection
+from src.infrastructure.db.migrations import upgrade_database
+from src.infrastructure.db.postgres import verify_postgres_connection
 
 
 @pytest.fixture(scope="module")
 def postgres_available():
     if not verify_postgres_connection():
         pytest.skip("PostgreSQL 不可用")
-    init_db_models(engine)
+    upgrade_database()
     return True
 
 

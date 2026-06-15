@@ -10,9 +10,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from config_loader import CommandMapping, find_category, normalize_command
-from device_detector import DeviceIdentity, detect_device_identity
+from config_loader import CommandMapping, normalize_command
+from device_detector import DeviceIdentity
 
+from src.core.parser.identity import DeviceIdentityResolver
+from src.core.parser.policy import ParserPolicy
 from src.core.patrol.command_splitter import infer_device_from_filename, split_cli_capture
 from src.core.patrol.raw_importer import _read_text_best_effort
 
@@ -31,7 +33,7 @@ class DirectoryCandidate:
     model: str
     family: str | None
     command: str
-    category: str
+    category: str | None
     samples: tuple[TemplateSample, ...]
     confidence: float
     evidence_command: str | None
@@ -62,9 +64,9 @@ def _discover_files(path: Path, recursive: bool) -> list[Path]:
 def discover_directory_candidates(
     source_path: str | Path,
     *,
-    mappings: list[CommandMapping],
-    signatures: dict[str, Any],
-    aliases: dict[str, str],
+    mappings: list[CommandMapping] | None = None,
+    signatures: dict[str, Any] | None = None,
+    aliases: dict[str, str] | None = None,
     recursive: bool = True,
     vendor: str | None = None,
     model: str | None = None,
@@ -77,14 +79,15 @@ def discover_directory_candidates(
     unresolved: list[str] = []
     seen_samples: set[tuple[str, str, str]] = set()
     normalized_filter = normalize_command(command_filter or "", aliases) or None
+    policy = ParserPolicy()
+    identity_resolver = DeviceIdentityResolver(policy=policy)
 
     for path in paths:
         device_name, ip = infer_device_from_filename(path)
         blocks = split_cli_capture(_read_text_best_effort(path), device_name=device_name)
-        identity = detect_device_identity(
+        identity = identity_resolver.resolve(
             path=path,
             blocks=blocks,
-            config=signatures,
             vendor=vendor,
             model=model,
         )
@@ -98,10 +101,13 @@ def discover_directory_candidates(
             command = normalize_command(block.command_canonical, aliases)
             if normalized_filter and command != normalized_filter:
                 continue
-            category = find_category(identity.vendor or "", identity.model or "", command, mappings)
-            if not category and identity.family:
-                category = find_category(identity.vendor or "", identity.family, command, mappings)
-            if not category:
+            decision = policy.decide(
+                vendor=identity.vendor,
+                model=identity.model,
+                family=identity.family,
+                command=command,
+            )
+            if not decision.enabled:
                 skipped.append(
                     {
                         "file_path": str(path),
@@ -129,23 +135,19 @@ def discover_directory_candidates(
     candidates: list[DirectoryCandidate] = []
     for (candidate_vendor, candidate_model, command), samples in sorted(grouped.items()):
         identity = identities[(candidate_vendor, candidate_model)]
-        category = find_category(candidate_vendor, candidate_model, command, mappings)
-        if not category and identity.family:
-            category = find_category(candidate_vendor, identity.family, command, mappings)
-        if category:
-            candidates.append(
-                DirectoryCandidate(
-                    vendor=candidate_vendor,
-                    model=candidate_model,
-                    family=identity.family,
-                    command=command,
-                    category=category,
-                    samples=tuple(samples),
-                    confidence=identity.confidence,
-                    evidence_command=identity.evidence_command,
-                    evidence_text=identity.evidence_text,
-                )
+        candidates.append(
+            DirectoryCandidate(
+                vendor=candidate_vendor,
+                model=candidate_model,
+                family=identity.family,
+                command=command,
+                category=None,
+                samples=tuple(samples),
+                confidence=identity.confidence,
+                evidence_command=identity.evidence_command,
+                evidence_text=identity.evidence_text,
             )
+        )
 
     profiles = tuple(
         {

@@ -56,6 +56,8 @@ def template_to_summary(tpl: WorkflowTemplate) -> dict[str, Any]:
         else str(tpl.plugin_dir),
         "has_chat_intent": (tpl.plugin_dir / "CHAT.intent.yaml").is_file(),
         "has_webhook": (tpl.plugin_dir / "ITSM.webhook.yaml").is_file(),
+        "test_context": tpl.test_context,
+        "test_required_context": tpl.test_required_context,
     }
 
 

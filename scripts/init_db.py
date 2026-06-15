@@ -8,12 +8,8 @@ from pathlib import Path
 BASE_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
-from src.infrastructure.db.postgres import (
-    init_postgres_schema,
-    verify_postgres_connection,
-    engine
-)
-from src.infrastructure.db.models import init_db_models
+from src.infrastructure.db.migrations import upgrade_database
+from src.infrastructure.db.postgres import init_postgres_schema, verify_postgres_connection
 
 if __name__ == "__main__":
     print("=" * 60)
@@ -31,7 +27,7 @@ if __name__ == "__main__":
     init_postgres_schema()
 
     print("\n📊 创建业务状态表...")
-    init_db_models(engine)
+    upgrade_database()
 
     print("\n" + "=" * 60)
     print("✅ 数据库初始化全部完成!")

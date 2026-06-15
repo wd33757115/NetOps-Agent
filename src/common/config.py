@@ -52,8 +52,6 @@ class Settings(BaseSettings):
     STORAGE_MAX_USER_BYTES: int = 20 * 1024 * 1024 * 1024  # 个人空间 20GB
 
     # 巡检 Snapshot / Change / Event MVP 存储
-    PATROL_SNAPSHOT_DB: str = ".runtime/patrol/patrol.db"
-
     @field_validator("STORAGE_MAX_FILE_BYTES", "STORAGE_MAX_USER_BYTES", mode="before")
     @classmethod
     def parse_storage_byte_limit(cls, value):

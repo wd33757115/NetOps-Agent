@@ -24,8 +24,10 @@ def build_generation_prompt(
     cli_output: str,
     required_fields: list[str],
     optional_fields: list[str] | None = None,
+    primary_keys: list[str] | None = None,
 ) -> str:
     optional = ", ".join(optional_fields or []) or "(none)"
+    keys = ", ".join(primary_keys or []) or "(none)"
     return f"""You are a network CLI TextFSM parser expert.
 Create one Python textfsm-compatible template for the samples below.
 
@@ -39,13 +41,20 @@ Required Value names (all must be defined and populated for non-empty output):
 Optional Value names (define and populate when the output contains them):
 {optional}
 
+Entity primary keys (every emitted record must contain these fields):
+{keys}
+
 CLI samples:
 {cli_output}
 
 Rules:
 1. Output only the TextFSM template, without Markdown or explanation.
 2. Use only the listed required and optional Value names.
-3. Declare values exactly as `Value model (\\S+)`; do not add data types or Value options.
+3. Declare values as `Value NAME (regex)`. Use `Value Filldown NAME (regex)` when
+   a parent or section field, especially a primary key, must be carried into child records.
+   Do not use Fillup, List, or Key options.
+   TextFSM actions must use valid forms such as `-> Record`, `-> StateName`, or
+   `-> Record StateName`; never emit `-> StateName.Record`.
 4. Every emitted record must contain every required field; accumulate fields before `-> Record`.
 5. Produce stable records suitable for comparing separate patrol runs.
 6. Ignore headings, legends, prompts, totals, and process-detail rows unless the requested
@@ -62,6 +71,7 @@ def build_repair_prompt(
     cli_output: str,
     required_fields: list[str],
     optional_fields: list[str] | None,
+    primary_keys: list[str] | None,
     current_template: str,
     validation_errors: list[str],
     missing_fields: list[str],
@@ -82,6 +92,7 @@ def build_repair_prompt(
             cli_output=cli_output,
             required_fields=required_fields,
             optional_fields=optional_fields,
+            primary_keys=primary_keys,
         )
         + f"""
 
@@ -119,6 +130,7 @@ def generate_template_text(
     cli_output: str,
     required_fields: list[str],
     optional_fields: list[str] | None = None,
+    primary_keys: list[str] | None = None,
     previous_template: str | None = None,
     validation_errors: list[str] | None = None,
     missing_fields: list[str] | None = None,
@@ -132,6 +144,7 @@ def generate_template_text(
             cli_output=cli_output,
             required_fields=required_fields,
             optional_fields=optional_fields,
+            primary_keys=primary_keys,
             current_template=previous_template,
             validation_errors=validation_errors or [],
             missing_fields=missing_fields or [],
@@ -145,6 +158,7 @@ def generate_template_text(
             cli_output=cli_output,
             required_fields=required_fields,
             optional_fields=optional_fields,
+            primary_keys=primary_keys,
         )
     return _strip_fences(call_llm(prompt))
 

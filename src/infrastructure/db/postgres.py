@@ -87,6 +87,14 @@ def verify_postgres_connection() -> bool:
         return False
 
 
+def require_postgres_connection() -> None:
+    """Raise when PostgreSQL cannot serve an authoritative operation."""
+    with engine.connect() as conn:
+        result = conn.execute(text("SELECT 1"))
+        if result.scalar() != 1:
+            raise RuntimeError("PostgreSQL health check returned an unexpected result")
+
+
 def get_postgres_saver():
     import psycopg
     from langgraph.checkpoint.postgres import PostgresSaver

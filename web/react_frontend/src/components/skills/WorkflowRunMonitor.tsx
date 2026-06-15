@@ -23,6 +23,10 @@ const STATUS_COLOR: Record<string, string> = {
   failed: 'error',
 }
 
+function hasArtifacts(value?: Record<string, unknown> | null) {
+  return !!value && Object.keys(value).length > 0
+}
+
 function formatTime(ts?: string) {
   if (!ts) return ''
   try {
@@ -34,6 +38,10 @@ function formatTime(ts?: string) {
 
 const WorkflowRunMonitor: React.FC<WorkflowRunMonitorProps> = ({ runId, onClose, embedded }) => {
   const [liveEvents, setLiveEvents] = useState<WorkflowTimelineEvent[]>([])
+
+  useEffect(() => {
+    setLiveEvents([])
+  }, [runId])
 
   const { data: run, isLoading, refetch } = useQuery(
     ['workflow-run', runId],
@@ -146,7 +154,7 @@ const WorkflowRunMonitor: React.FC<WorkflowRunMonitorProps> = ({ runId, onClose,
                     : s.status === 'running'
                       ? 'process'
                       : 'wait',
-              description: s.error_message || (s.output_artifacts ? '已有产物' : undefined),
+              description: s.error_message || (hasArtifacts(s.output_artifacts) ? '已有产物' : undefined),
             }))}
           />
 
@@ -178,7 +186,7 @@ const WorkflowRunMonitor: React.FC<WorkflowRunMonitorProps> = ({ runId, onClose,
             </Card>
           )}
 
-          {run.steps.some((s) => s.skill_name === 'llm-result-analyzer' && s.output_artifacts) && (
+          {run.steps.some((s) => s.skill_name === 'llm-result-analyzer' && hasArtifacts(s.output_artifacts)) && (
             <Alert
               type="success"
               style={{ marginTop: 12 }}

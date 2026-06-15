@@ -5,6 +5,26 @@ name: itsm-firewall-llm-analysis
 description: ITSM 防火墙变更 + LLM 结果分析（模式 A）
 version: "1.0"
 
+test:
+  context:
+    ticket_id: REQ-TEST-001
+    ticket_title: Workflow UI test
+    policy_file_url: ""
+    topology_file_url:
+    requester: tester
+    assignee:
+    priority: normal
+    parameters: {}
+    change_background: Workflow UI test
+    change_purpose: Validate workflow execution
+    requester_dept: NetOps
+    due_date:
+    analysis_prompt: Summarize change risk
+    analysis_focus: summary
+  required_context:
+    - ticket_id
+    - policy_file_url
+
 steps:
   - name: policy_generation
     label: 生成配置 ZIP

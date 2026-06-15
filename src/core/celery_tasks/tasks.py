@@ -27,8 +27,9 @@ def _persist_patrol_snapshots(
     *,
     details: list[dict[str, Any]],
     snapshot_run_id: str,
-    db_path: str,
+    db_path: str | None = None,
     ticket_id: str | None = None,
+    mode: str = "production",
 ) -> dict[str, Any]:
     """Import completed patrol reports into the snapshot store."""
     from src.core.patrol.raw_importer import import_raw_capture
@@ -43,7 +44,7 @@ def _persist_patrol_snapshots(
         try:
             imported = import_raw_capture(
                 file_path=str(output_file),
-                db_path=db_path,
+                mode=mode,
                 run_id=snapshot_run_id,
                 device_name=detail.get("device_name"),
                 ip=detail.get("ip"),
@@ -58,7 +59,8 @@ def _persist_patrol_snapshots(
 
     return {
         "snapshot_run_id": snapshot_run_id,
-        "snapshot_db": db_path,
+        "snapshot_storage": "postgresql",
+        "legacy_db_path_ignored": db_path,
         "snapshot_devices": imported_devices,
         "snapshot_commands": imported_commands,
         "snapshot_errors": import_errors,
@@ -191,6 +193,7 @@ def execute_device_patrol_task(
     filter_params: dict[str, Any],
     ticket_id: str | None = None,
     save_baseline: bool = False,
+    mode: str = "production",
     **kwargs
 ):
     """执行设备巡检任务"""
@@ -205,7 +208,9 @@ def execute_device_patrol_task(
 
     try:
         from src.core.device_ops.loader import import_netops_agent_tools
+        from src.core.patrol.modes import normalize_patrol_mode
 
+        mode = normalize_patrol_mode(mode)
         netops = import_netops_agent_tools()
         DBManager = netops.DBManager
         DeviceFilter = netops.DeviceFilter
@@ -217,15 +222,21 @@ def execute_device_patrol_task(
         device_filter = DeviceFilter(**filter_params) if filter_params else DeviceFilter()
 
         import asyncio
-        result = asyncio.run(patrol_tool.patrol_by_filter(device_filter, save_baseline))
+        result = asyncio.run(
+            patrol_tool.patrol_by_filter(device_filter, save_baseline, mode=mode)
+        )
+        if not result.success:
+            raise RuntimeError(result.message or "device patrol failed")
 
         snapshot_run_id = f"patrol-{getattr(self.request, 'id', None) or uuid.uuid4()}"
         snapshot_result = _persist_patrol_snapshots(
             details=result.details or [],
             snapshot_run_id=snapshot_run_id,
-            db_path=settings.PATROL_SNAPSHOT_DB,
             ticket_id=ticket_id,
+            mode=mode,
         )
+        if snapshot_result["snapshot_errors"]:
+            raise RuntimeError("; ".join(snapshot_result["snapshot_errors"]))
 
         minio_client = get_minio_storage()
         download_url = None
@@ -270,6 +281,7 @@ def execute_device_patrol_task(
             "action": "patrol",
             "ticket_id": ticket_id,
             "save_baseline": save_baseline,
+            "mode": mode,
             "download_url": download_url,
             "total_devices": result.total_devices,
             "success_devices": result.success_devices,

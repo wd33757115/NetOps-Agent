@@ -58,7 +58,7 @@ CLI 原始输出
 ```json
 {
   "file_path": "E:/patrol/SW1-10.0.0.1_2025-12-24_10-00-00.log",
-  "db_path": ".runtime/patrol/patrol.db",
+  "db_path": "src/skills/shared/databases/patrol.db",
   "vendor": "Cisco",
   "model": "C2960X"
 }

@@ -11,6 +11,7 @@ import TemplateMarketTab from '../components/skills/TemplateMarketTab'
 import DevGuideTab from '../components/skills/DevGuideTab'
 import WorkflowWizard, { WorkflowWizardInitial } from '../components/skills/WorkflowWizard'
 import WorkflowWizardShell from '../components/skills/WorkflowWizardShell'
+import ParserControlTab from '../components/skills/ParserControlTab'
 
 const SkillsPage: React.FC = () => {
   const isMobile = useIsMobile()
@@ -67,6 +68,11 @@ const SkillsPage: React.FC = () => {
       key: 'market',
       label: '模板市场',
       children: <TemplateMarketTab />,
+    },
+    {
+      key: 'parser',
+      label: 'Parser 控制面',
+      children: <ParserControlTab />,
     },
     {
       key: 'guide',

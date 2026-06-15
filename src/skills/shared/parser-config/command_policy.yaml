@@ -1,0 +1,36 @@
+commands:
+  display version: {enabled: true}
+  show version: {enabled: true}
+  display device manuinfo: {enabled: true}
+  show inventory: {enabled: true}
+  display cpu: {enabled: true}
+  display cpu-usage: {enabled: true}
+  show processes cpu: {enabled: true}
+  show system resources: {enabled: true}
+  display memory: {enabled: true}
+  show processes memory: {enabled: true}
+  display interface brief: {enabled: true}
+  display ip interface brief: {enabled: true}
+  show ip interface brief: {enabled: true}
+  show interface status: {enabled: true}
+  display fan: {enabled: true}
+  show environment fan: {enabled: true}
+  display power: {enabled: true}
+  show environment power: {enabled: true}
+  display environment: {enabled: true}
+  show environment temperature: {enabled: true}
+  show env all: {enabled: true}
+  display vrrp statistics: {enabled: true}
+  show vrrp brief: {enabled: true}
+  display irf: {enabled: true}
+  display m-lag system: {enabled: true}
+  show vpc: {enabled: true}
+
+  display current-configuration: {enabled: false, handling: raw_hash_diff}
+  display saved-configuration: {enabled: false, handling: raw_hash_diff}
+  show running-config: {enabled: false, handling: raw_hash_diff}
+  show startup-config: {enabled: false, handling: raw_hash_diff}
+  display logbuffer: {enabled: false, handling: raw_only}
+  show logging: {enabled: false, handling: raw_only}
+  display clock: {enabled: false, handling: raw_only}
+  show clock: {enabled: false, handling: raw_only}

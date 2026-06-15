@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +14,35 @@ from src.core.patrol.command_splitter import (
     inspect_raw_capture,
     split_cli_capture,
 )
-from src.core.patrol.snapshot_store import PatrolSnapshotStore
+from src.core.patrol.modes import (
+    PARSER_VALIDATION_MODE,
+    PRODUCTION_MODE,
+    normalize_patrol_mode,
+)
+from src.core.patrol.repository import PatrolRepository
+from src.core.parser.identity import DeviceIdentityResolver
+from src.core.parser.runtime import ParserRuntime
+from src.infrastructure.db.postgres import require_postgres_connection
+
+
+class ParserCoverageError(RuntimeError):
+    def __init__(self, message: str, violations: list[dict[str, Any]]):
+        super().__init__(message)
+        self.violations = violations
+
+
+def _non_repairable_output(raw_text: str) -> bool:
+    text = (raw_text or "").lower()
+    return len(text.strip()) < 20 or any(
+        marker in text
+        for marker in (
+            "connection timed out",
+            "connection reset",
+            "command execution failed",
+            "ssh connection failed",
+            "output truncated",
+        )
+    )
 
 
 def _read_text_best_effort(path: Path) -> str:
@@ -26,10 +55,160 @@ def _read_text_best_effort(path: Path) -> str:
     return data.decode("utf-8", errors="replace")
 
 
+def _dataset_id(path: Path, metadata: dict[str, Any] | None) -> str:
+    explicit = str((metadata or {}).get("dataset_id") or "").strip()
+    if explicit:
+        return explicit
+    source = path if path.is_dir() else path.parent
+    label = source.name or "parser-validation"
+    digest = hashlib.sha256(str(source.resolve()).encode("utf-8")).hexdigest()[:10]
+    return f"{label}-{digest}"
+
+
+def _import_fingerprint(
+    *,
+    mode: str,
+    dataset_id: str,
+    source_file_hash: str,
+    device_id: str,
+    canonical_command: str,
+    raw_text: str,
+) -> str:
+    raw_hash = hashlib.sha256((raw_text or "").encode("utf-8")).hexdigest()
+    value = "|".join(
+        [
+            "v2",
+            mode,
+            dataset_id,
+            source_file_hash,
+            device_id,
+            canonical_command.strip().lower(),
+            raw_hash,
+        ]
+    )
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def preview_raw_path(
+    *,
+    file_path: str | Path,
+    mode: str = PARSER_VALIDATION_MODE,
+    vendor: str | None = None,
+    model: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Analyze an import without writing snapshots or parser jobs."""
+    require_postgres_connection()
+    mode = normalize_patrol_mode(mode)
+    path = Path(file_path)
+    if path.is_file():
+        files = [path]
+    elif path.is_dir():
+        files = sorted(
+            item
+            for item in path.rglob("*")
+            if item.is_file() and item.suffix.lower() in {".txt", ".log"}
+        )
+    else:
+        raise FileNotFoundError(f"patrol source path does not exist: {path}")
+    if not files:
+        raise ValueError(f"no txt/log patrol files found under: {path}")
+
+    runtime = ParserRuntime()
+    repository = PatrolRepository()
+    dataset_id = _dataset_id(path, metadata)
+    totals = {
+        "ready": 0,
+        "template_missing": 0,
+        "parse_failed": 0,
+        "ignored": 0,
+        "identity_unknown": 0,
+        "duplicate_snapshots": 0,
+        "new_snapshots": 0,
+    }
+    devices: set[str] = set()
+    commands: set[str] = set()
+    file_results: list[dict[str, Any]] = []
+    existing_fingerprints = repository.list_import_fingerprints(mode=mode)
+    for candidate in files:
+        text = _read_text_best_effort(candidate)
+        file_hash = hashlib.sha256(candidate.read_bytes()).hexdigest()
+        inferred_name, inferred_ip = infer_device_from_filename(candidate)
+        inspected = inspect_raw_capture(text)
+        resolved_name = inspected.device_name or inferred_name or candidate.stem
+        device_id = f"{resolved_name}-{inferred_ip}" if inferred_ip else resolved_name
+        blocks = split_cli_capture(text, device_name=resolved_name)
+        identity = DeviceIdentityResolver().resolve(
+            blocks=blocks,
+            path=candidate,
+            vendor=vendor,
+            model=model,
+        )
+        devices.add(device_id)
+        statuses: dict[str, int] = {}
+        for block in blocks:
+            commands.add(block.command_canonical)
+            fingerprint = _import_fingerprint(
+                mode=mode,
+                dataset_id=dataset_id,
+                source_file_hash=file_hash,
+                device_id=device_id,
+                canonical_command=block.command_canonical,
+                raw_text=block.raw_output,
+            )
+            if fingerprint in existing_fingerprints:
+                totals["duplicate_snapshots"] += 1
+                statuses["duplicate"] = statuses.get("duplicate", 0) + 1
+                continue
+            totals["new_snapshots"] += 1
+            parsed = runtime.parse(
+                identity=identity,
+                command=block.command_canonical,
+                raw_text=block.raw_output,
+            )
+            if parsed.policy_status == "ignored":
+                status = "ignored"
+            elif parsed.identity_status != "known":
+                status = "identity_unknown"
+            elif parsed.parser_status in {"success", "empty"}:
+                status = "ready"
+            elif parsed.failure_code == "template_missing":
+                status = "template_missing"
+            else:
+                status = "parse_failed"
+            totals[status] += 1
+            statuses[status] = statuses.get(status, 0) + 1
+        file_results.append(
+            {
+                "file_path": str(candidate),
+                "device_id": device_id,
+                "vendor": identity.vendor,
+                "model": identity.model,
+                "identity_status": identity.status,
+                "command_count": len(blocks),
+                "statuses": statuses,
+            }
+        )
+    return {
+        "success": True,
+        "preview": True,
+        "mode": mode,
+        "dataset_id": dataset_id,
+        "source_path": str(path),
+        "file_count": len(files),
+        "device_count": len(devices),
+        "command_count": sum(item["command_count"] for item in file_results),
+        "unique_commands": len(commands),
+        **totals,
+        "files": file_results,
+    }
+
+
 def import_raw_capture(
     *,
     file_path: str | Path,
-    db_path: str | Path,
+    db_path: str | Path | None = None,
+    mode: str = PRODUCTION_MODE,
     run_id: str | None = None,
     device_name: str | None = None,
     ip: str | None = None,
@@ -38,47 +217,244 @@ def import_raw_capture(
     observed_at: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    require_postgres_connection()
+    mode = normalize_patrol_mode(mode)
     path = Path(file_path)
     text = _read_text_best_effort(path)
+    source_file_hash = hashlib.sha256(path.read_bytes()).hexdigest()
     inferred_name, inferred_ip = infer_device_from_filename(path)
     inspected = inspect_raw_capture(text)
     device_name = device_name or inspected.device_name or inferred_name or path.stem
     ip = ip or inferred_ip
     device_id = f"{device_name}-{ip}" if ip else device_name
     blocks = split_cli_capture(text, device_name=device_name)
+    identity = DeviceIdentityResolver().resolve(
+        blocks=blocks,
+        path=path,
+        vendor=vendor,
+        model=model,
+    )
+    vendor = identity.vendor
+    model = identity.model
 
-    store = PatrolSnapshotStore(db_path)
-    rid = store.create_run(
+    runtime = ParserRuntime()
+    coverage = [
+        runtime.check_coverage(
+            identity=identity,
+            command=block.command_canonical,
+        )
+        for block in blocks
+    ]
+    blocking = [
+        item
+        for item in coverage
+        if item["policy_status"] == "eligible"
+        and item["coverage_status"] != "ready"
+    ]
+    if mode == PRODUCTION_MODE and blocking:
+        raise ParserCoverageError(
+            f"production patrol blocked by {len(blocking)} parser coverage issue(s)",
+            blocking,
+        )
+
+    parsed_blocks = [
+        (
+            block,
+            runtime.parse(
+                identity=identity,
+                command=block.command_canonical,
+                raw_text=block.raw_output,
+            ),
+        )
+        for block in blocks
+    ]
+    if mode == PRODUCTION_MODE:
+        parse_violations = [
+            {
+                "canonical_command": parsed.canonical_command,
+                "parser_status": parsed.parser_status,
+                "failure_code": parsed.failure_code,
+                "template_id": parsed.template_id,
+                "template_version": parsed.template_version,
+            }
+            for _, parsed in parsed_blocks
+            if parsed.policy_status == "eligible"
+            and parsed.parser_status not in {"success", "empty"}
+        ]
+        if parse_violations:
+            raise ParserCoverageError(
+                "production patrol blocked by parser validation failure",
+                parse_violations,
+            )
+
+    repository = PatrolRepository()
+    dataset_id = _dataset_id(path, metadata)
+    fingerprints = [
+        _import_fingerprint(
+            mode=mode,
+            dataset_id=dataset_id,
+            source_file_hash=source_file_hash,
+            device_id=device_id,
+            canonical_command=block.command_canonical,
+            raw_text=block.raw_output,
+        )
+        for block, _ in parsed_blocks
+    ]
+    existing = repository.find_snapshots_by_import_fingerprints(set(fingerprints))
+    if fingerprints and all(fingerprint in existing for fingerprint in fingerprints):
+        existing_snapshots = [existing[fingerprint] for fingerprint in fingerprints]
+        return {
+            "success": True,
+            "run_id": existing_snapshots[0].run_id,
+            "device_id": device_id,
+            "device_name": device_name,
+            "ip": ip,
+            "command_count": len(blocks),
+            "snapshot_ids": [
+                snapshot.snapshot_id for snapshot in existing_snapshots
+            ],
+            "new_snapshot_count": 0,
+            "duplicate_snapshot_count": len(existing_snapshots),
+            "duplicate_snapshot_ids": [
+                snapshot.snapshot_id for snapshot in existing_snapshots
+            ],
+            "commands": [block.command_canonical for block in blocks],
+            "vendor": vendor,
+            "model": model,
+            "family": identity.family,
+            "identity_status": identity.status,
+            "mode": mode,
+            "dataset_id": dataset_id,
+            "storage": "postgresql",
+            "legacy_db_path_ignored": str(db_path) if db_path else None,
+            "coverage": coverage,
+            "parser_results": [
+                {
+                    "snapshot_id": snapshot.snapshot_id,
+                    "command": snapshot.command_canonical,
+                    "parse_status": snapshot.parse_status,
+                    "candidate_job_id": None,
+                }
+                for snapshot in existing_snapshots
+            ],
+        }
+    repository.ensure_dataset(
+        dataset_id=dataset_id,
+        name=str((metadata or {}).get("dataset_name") or dataset_id),
+        mode=mode,
+        source="imported_file",
+        metadata={
+            "source_path": str(path.parent),
+            **(metadata or {}),
+        },
+    )
+    rid = repository.create_run(
         run_id=run_id,
         source="imported_file",
+        mode=mode,
+        dataset_id=dataset_id,
         metadata={
             "file_path": str(path),
             "prompt_style": inspected.prompt_style,
+            "patrol_mode": mode,
+            "dataset_id": dataset_id,
             **(metadata or {}),
         },
         started_at=observed_at,
     )
 
     snapshot_ids: list[str] = []
-    for block in blocks:
-        snapshot_ids.append(
-            store.save_snapshot(
-                run_id=rid,
-                device_id=device_id,
-                device_name=device_name,
-                ip=ip,
-                vendor=vendor,
-                model=model,
-                command=block.command,
-                command_canonical=block.command_canonical,
-                raw_text=block.raw_output,
-                observed_at=observed_at or inspected.observed_at_text,
-                parse_status="raw_only",
-                start_line=block.start_line,
-                end_line=block.end_line,
-            )
+    duplicate_snapshot_ids: list[str] = []
+    parser_results: list[dict[str, Any]] = []
+    for (block, parsed), fingerprint in zip(
+        parsed_blocks, fingerprints, strict=True
+    ):
+        parse_status = "raw_only"
+        structured = None
+        parser_name = None
+        parser_version = None
+        if parsed.policy_status == "ignored":
+            parse_status = "ignored"
+        elif parsed.identity_status != "known":
+            parse_status = "identity_unknown"
+        elif parsed.parser_status == "unavailable":
+            parse_status = "template_missing"
+        elif parsed.parser_status == "empty":
+            parse_status = "parse_empty"
+            structured = []
+        elif parsed.parser_status == "success":
+            parse_status = "parsed"
+            structured = parsed.structured_data
+        else:
+            parse_status = "parse_failed"
+        parser_name = parsed.template_id
+        parser_version = parsed.template_version
+        snapshot_id, snapshot_created = repository.save_snapshot_idempotent(
+            run_id=rid,
+            device_id=device_id,
+            device_name=device_name,
+            ip=ip,
+            vendor=vendor,
+            model=model,
+            command=block.command,
+            command_canonical=block.command_canonical,
+            raw_text=block.raw_output,
+            observed_at=observed_at or inspected.observed_at_text,
+            structured_json=structured,
+            parser_name=parser_name,
+            parser_version=parser_version,
+            parse_status=parse_status,
+            dataset_id=dataset_id,
+            source_file_hash=source_file_hash,
+            import_fingerprint=fingerprint,
+            start_line=block.start_line,
+            end_line=block.end_line,
+            metadata={
+                "patrol_mode": mode,
+                "source_path": str(path),
+            },
         )
-    store.finish_run(rid)
+        snapshot_ids.append(snapshot_id)
+        if not snapshot_created:
+            duplicate_snapshot_ids.append(snapshot_id)
+        candidate_job_id = None
+        if snapshot_created and mode == PARSER_VALIDATION_MODE and parsed.failure_code in {
+            "template_missing",
+            "template_parse_error",
+            "unexpected_empty",
+            "required_fields_missing",
+            "field_validation_failed",
+            "primary_key_invalid",
+            "primary_key_duplicate",
+            "asset_hash_mismatch",
+        } and not _non_repairable_output(block.raw_output):
+            from src.core.parser.repository import ParserRepository
+
+            candidate_job_id = ParserRepository().create_candidate(
+                job_type=(
+                    "CREATE_TEMPLATE"
+                    if parsed.failure_code == "template_missing"
+                    else "REPAIR_TEMPLATE"
+                ),
+                vendor=identity.vendor or "",
+                model=identity.model or "",
+                family=identity.family,
+                command=parsed.canonical_command,
+                snapshot_id=snapshot_id,
+                device_id=device_id,
+                raw_text=block.raw_output,
+                failure_code=parsed.failure_code,
+                dataset_id=dataset_id,
+            )
+        parser_results.append(
+            {
+                "snapshot_id": snapshot_id,
+                "command": block.command_canonical,
+                "parse_status": parse_status,
+                "candidate_job_id": candidate_job_id,
+            }
+        )
+    repository.finish_run(rid)
     return {
         "success": True,
         "run_id": rid,
@@ -87,14 +463,28 @@ def import_raw_capture(
         "ip": ip,
         "command_count": len(blocks),
         "snapshot_ids": snapshot_ids,
+        "new_snapshot_count": len(snapshot_ids) - len(duplicate_snapshot_ids),
+        "duplicate_snapshot_count": len(duplicate_snapshot_ids),
+        "duplicate_snapshot_ids": duplicate_snapshot_ids,
         "commands": [b.command_canonical for b in blocks],
+        "vendor": vendor,
+        "model": model,
+        "family": identity.family,
+        "identity_status": identity.status,
+        "mode": mode,
+        "dataset_id": dataset_id,
+        "storage": "postgresql",
+        "legacy_db_path_ignored": str(db_path) if db_path else None,
+        "coverage": coverage,
+        "parser_results": parser_results,
     }
 
 
 def import_raw_path(
     *,
     file_path: str | Path,
-    db_path: str | Path,
+    db_path: str | Path | None = None,
+    mode: str = PRODUCTION_MODE,
     run_id: str | None = None,
     vendor: str | None = None,
     model: str | None = None,
@@ -107,6 +497,7 @@ def import_raw_path(
         return import_raw_capture(
             file_path=path,
             db_path=db_path,
+            mode=mode,
             run_id=run_id,
             vendor=vendor,
             model=model,
@@ -125,17 +516,20 @@ def import_raw_path(
         raise ValueError(f"目录中未发现 txt/log 巡检文件: {path}")
 
     rid = run_id
+    dataset_id = _dataset_id(path, metadata)
     imported: list[dict[str, Any]] = []
     for candidate in files:
         result = import_raw_capture(
             file_path=candidate,
             db_path=db_path,
+            mode=mode,
             run_id=rid,
             vendor=vendor,
             model=model,
             observed_at=observed_at,
             metadata={
                 "source_directory": str(path),
+                "dataset_id": dataset_id,
                 **(metadata or {}),
             },
         )
@@ -144,8 +538,11 @@ def import_raw_path(
 
     return {
         "success": True,
+        "mode": normalize_patrol_mode(mode),
         "run_id": rid,
-        "db_path": str(db_path),
+        "dataset_id": dataset_id,
+        "storage": "postgresql",
+        "legacy_db_path_ignored": str(db_path) if db_path else None,
         "source_path": str(path),
         "file_count": len(imported),
         "device_count": len({item["device_id"] for item in imported}),
@@ -155,6 +552,10 @@ def import_raw_path(
             for item in imported
             for snapshot_id in item["snapshot_ids"]
         ],
+        "new_snapshot_count": sum(item["new_snapshot_count"] for item in imported),
+        "duplicate_snapshot_count": sum(
+            item["duplicate_snapshot_count"] for item in imported
+        ),
         "files": [
             {
                 "file_path": str(candidate),

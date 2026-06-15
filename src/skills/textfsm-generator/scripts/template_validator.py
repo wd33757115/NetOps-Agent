@@ -6,9 +6,12 @@
 from __future__ import annotations
 
 import io
+import ipaddress
 import re
 from dataclasses import dataclass, field
 from typing import Any
+
+from src.core.parser.key_contract import validate_entity_keys
 
 try:
     import textfsm
@@ -28,6 +31,7 @@ class ValidationResult:
     errors: list[str] = field(default_factory=list)
     records: list[dict[str, Any]] = field(default_factory=list)
     empty_accepted: bool = False
+    key_errors: list[str] = field(default_factory=list)
 
     @property
     def is_valid(self) -> bool:
@@ -37,6 +41,7 @@ class ValidationResult:
             and (self.record_count > 0 or self.empty_accepted)
             and not self.missing_fields
             and not self.value_errors
+            and not self.key_errors
         )
 
 
@@ -69,6 +74,20 @@ def validate_field_values(
                 if allowed and str(raw).strip().lower() not in allowed:
                     errors.append(
                         f"record[{index}].{field_name}={raw!r} is not in {sorted(allowed)}"
+                    )
+            elif rule_type in {"ip", "ip_or_unassigned"}:
+                text = str(raw).strip()
+                if rule_type == "ip_or_unassigned" and text.lower() in {
+                    "unassigned",
+                    "--",
+                    "none",
+                }:
+                    continue
+                try:
+                    ipaddress.ip_interface(text)
+                except ValueError:
+                    errors.append(
+                        f"record[{index}].{field_name}={raw!r} is not an IP address"
                     )
     return errors
 
@@ -122,6 +141,7 @@ def validate_template(
     *,
     allow_empty: bool = False,
     empty_patterns: list[str] | None = None,
+    primary_keys: list[str] | tuple[str, ...] | None = None,
 ) -> ValidationResult:
     result = ValidationResult()
     validators = validators or {}
@@ -158,8 +178,12 @@ def validate_template(
     )
     result.value_errors = validate_field_values(records, validators)
     result.errors.extend(result.value_errors)
+    key_result = validate_entity_keys(records, primary_keys or ())
+    result.key_errors = list(key_result.errors)
+    result.errors.extend(result.key_errors)
     score = 50 + round(25 * result.field_coverage / 100)
-    score += 25 if not result.value_errors else max(0, 25 - len(result.value_errors) * 5)
+    contract_errors = result.value_errors + result.key_errors
+    score += 25 if not contract_errors else max(0, 25 - len(contract_errors) * 5)
     result.validation_score = min(100, int(score))
     return result
 
@@ -177,6 +201,18 @@ def strip_llm_template(raw: str) -> str:
         ):
             started = True
         if started:
+            # LLMs sometimes emit the invalid `-> State.Record` form for a
+            # parent line. The parent should only enter the child state;
+            # child rows are responsible for emitting records.
+            line = re.sub(
+                r"(\s+)->\s*([A-Za-z][A-Za-z0-9_]*)\.Record\s*$",
+                r"\1-> \2",
+                line,
+            )
             output.append(line)
     cleaned = "\n".join(output).strip() if output else text.strip()
+    if re.search(r"(?m)^Value\s+Filldown\s+", cleaned) and not re.search(
+        r"(?m)^EOF\s*$", cleaned
+    ):
+        cleaned = f"{cleaned}\n\nEOF"
     return f"{cleaned}\n"

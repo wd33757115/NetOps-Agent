@@ -20,7 +20,7 @@ src/skills/shared/textfsm-templates/
 该目录不属于某个具体 Skill，可以由 `textfsm-generator`、`device-patrol`、
 `patrol-raw-ingestor` 等组件共同使用。
 
-旧目录 `templates/` 只作为兼容性回退路径。
+旧目录 `templates/` 已停用并删除，不再作为运行时回退路径。
 
 ## 2. 整体工作流程
 
@@ -40,7 +40,7 @@ flowchart TD
     L -- "否" --> M["反馈错误并尝试修复"]
     M --> I
     L -- "是" --> N["原子写入共享模板目录"]
-    N --> O["更新 manifest.json"]
+    N --> O["注册不可变模板版本"]
     O --> P["输出生成和验证报告"]
 ```
 
@@ -72,7 +72,7 @@ CISCO-SW#show version
 以及带有“命令/输出”标签的报告式文件。
 
 命令会先转为小写、压缩空格，再通过
-`config/command_aliases.yaml` 进行别名归一化。例如：
+`src/skills/shared/parser-config/command_aliases.yaml` 进行别名归一化。例如：
 
 ```text
 display cpu-us       -> display cpu
@@ -156,7 +156,7 @@ Cisco / ISR4451-X/K9 / IOS-XE-ISR
 识别规则位于：
 
 ```text
-src/skills/textfsm-generator/config/device_signatures.yaml
+src/skills/shared/parser-config/device_signatures.yaml
 ```
 
 配置包含：
@@ -172,7 +172,7 @@ src/skills/textfsm-generator/config/device_signatures.yaml
 
 Generator 不会为扫描到的全部命令调用 LLM。
 
-只有 `config/command_mapping.yaml` 中配置的命令才会进入模板生成流程。未配置命令会以
+只有 Skill 共享配置 `src/skills/shared/parser-config/command_policy.yaml` 中启用的命令才会进入模板生成流程。未配置命令会以
 `command_not_configured` 原因写入 `skipped_commands`。
 
 首批支持的主要类别包括：
@@ -194,7 +194,7 @@ Generator 不会为扫描到的全部命令调用 LLM。
 字段契约位于：
 
 ```text
-src/skills/textfsm-generator/config/command_categories.yaml
+src/skills/shared/parser-config/command_categories.yaml
 ```
 
 每个类别可以配置：
@@ -266,7 +266,7 @@ Cisco WS-C2960XR-24TS-I / show version
 模板路径格式：
 
 ```text
-src/skills/shared/textfsm-templates/{model_slug}/{command_slug}.textfsm
+src/skills/shared/textfsm-templates/{vendor}/{profile}/{version}/{command_slug}.textfsm
 ```
 
 例如：
@@ -287,7 +287,7 @@ ISR4451-X/K9 -> ISR4451-X_K9
 
 发布使用原子文件替换，避免其他 Skill 读取到只写了一部分的模板。
 
-`manifest.json` 保存：
+PostgreSQL `parser_templates` 保存：
 
 - 厂商、原始型号和设备族。
 - 命令和字段类别。
@@ -302,8 +302,7 @@ ISR4451-X/K9 -> ISR4451-X_K9
 
 1. 共享目录中的精确型号模板。
 2. 共享目录中的设备族模板。
-3. 旧 `templates/` 中的精确型号模板。
-4. 旧 `templates/` 中的设备族模板。
+只有注册表中状态为 `active` 且SHA-256校验通过的精确型号或设备族模板可用。
 
 ## 6. 使用方法
 
@@ -346,7 +345,7 @@ Slot 1 CPU 0 CPU usage:
 {
   "source_path": "C:\\patrol-data",
   "recursive": true,
-  "publish": true,
+  "publish": false,
   "minimum_sample_pass_rate": 1.0,
   "max_samples_per_prompt": 3,
   "max_retries": 3
@@ -359,7 +358,7 @@ Slot 1 CPU 0 CPU usage:
 {
   "source_path": "C:\\patrol-data",
   "command": "display cpu",
-  "publish": true
+  "publish": false
 }
 ```
 
@@ -476,7 +475,7 @@ Slot 1 CPU 0 CPU usage:
 command_not_configured
 ```
 
-检查 `command_mapping.yaml` 是否为对应厂商和型号配置了该命令。
+检查 `src/skills/shared/parser-config/command_policy.yaml` 是否为对应厂商和型号启用了该命令。
 
 不要仅为了消除跳过记录而加入命令。应先确定它是否能形成稳定实体和有价值的变化。
 
@@ -489,7 +488,8 @@ command_not_configured
 - `display device manuinfo`
 - `show inventory`
 
-如果输出格式是新的设备类型，应在 `device_signatures.yaml` 中增加规则。
+如果输出格式是新的设备类型，应在
+`src/skills/shared/parser-config/device_signatures.yaml` 中增加规则。
 
 ### 8.3 模板生成但没有发布
 
@@ -531,10 +531,10 @@ VRRP4 is not configured.
 
 新增支持时按以下顺序修改：
 
-1. 在 `device_signatures.yaml` 增加设备识别及设备族规则。
-2. 在 `command_aliases.yaml` 增加现场缩写或命令变体。
-3. 在 `command_categories.yaml` 定义字段、实体类型和稳定主键。
-4. 在 `command_mapping.yaml` 将命令加入对应精确型号或设备族白名单。
+1. 在 `src/skills/shared/parser-config/device_signatures.yaml` 增加设备识别及设备族规则。
+2. 在 `src/skills/shared/parser-config/command_aliases.yaml` 增加现场缩写或命令变体。
+3. 在 `src/skills/shared/parser-config/command_categories.yaml` 定义字段、实体类型和稳定主键。
+4. 在 `src/skills/shared/parser-config/command_policy.yaml` 将命令加入对应精确型号或设备族策略。
 5. 使用至少两个巡检周期的样本运行目录模式。
 6. 确认全部样本通过后再发布模板。
 7. 使用 change-detector 验证实体键和字段变化是否符合运维语义。

@@ -1,0 +1,396 @@
+"""Parser control-plane management API."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+
+from src.auth.dependencies import require_role
+from src.core.parser.assets import TemplateAssetStore
+from src.core.parser.bootstrap import bootstrap_shared_templates
+from src.core.parser.discovery_assets import bootstrap_discovery_assets
+from src.core.parser.repository import (
+    OPEN_JOB_STATUSES,
+    ParserJobStateError,
+    ParserRepository,
+)
+from src.core.parser.identity import DeviceIdentity
+from src.core.parser.runtime import ParserRuntime
+from src.core.patrol.raw_importer import import_raw_path, preview_raw_path
+from src.core.patrol.repository import PatrolRepository
+from src.core.parser.tasks import dispatch_ready_parser_jobs
+from src.core.celery_tasks.celery_app import celery
+
+router = APIRouter(
+    prefix="/api/v1/parser",
+    tags=["Parser Control Plane"],
+    dependencies=[Depends(require_role(["admin"]))],
+)
+
+
+class ParserDispatchControlRequest(BaseModel):
+    enabled: bool
+
+
+class ParserImportRequest(BaseModel):
+    source_path: str
+    dataset_id: str | None = None
+    vendor: str | None = None
+    model: str | None = None
+
+
+@router.get("/templates")
+def list_templates(status: str | None = None):
+    return {"items": ParserRepository().list_templates(status=status)}
+
+
+@router.get("/templates/{template_id}/preview")
+def preview_template(template_id: str):
+    template = ParserRepository().get_template(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="parser template not found")
+
+    asset_store = TemplateAssetStore()
+    asset_root = asset_store.root.resolve()
+    target = Path(template.asset_path).resolve()
+    if not target.is_relative_to(asset_root):
+        raise HTTPException(
+            status_code=400,
+            detail="template asset path is outside the shared asset store",
+        )
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="template asset file not found")
+
+    return {
+        "id": template.id,
+        "vendor": template.vendor,
+        "profile": template.profile,
+        "canonical_command": template.canonical_command,
+        "category": template.category,
+        "version": template.version,
+        "status": template.status,
+        "sha256": template.sha256,
+        "hash_valid": asset_store.verify(target, template.sha256),
+        "content": target.read_text(encoding="utf-8"),
+        "validation": template.validation_json or {},
+    }
+
+
+class _TemplateRegistry:
+    def __init__(self, template):
+        self.template = template
+
+    def resolve_active(self, **_: Any):
+        return self.template
+
+
+def _parse_snapshot_with_template(template, snapshot):
+    identity = DeviceIdentity(
+        vendor=template.vendor,
+        model=template.model or template.profile,
+        family=template.family,
+        confidence=1.0,
+        source="template_comparison",
+    )
+    result = ParserRuntime(registry=_TemplateRegistry(template)).parse(
+        identity=identity,
+        command=template.canonical_command,
+        raw_text=snapshot.raw_text,
+    )
+    return {
+        "status": result.parser_status,
+        "failure_code": result.failure_code,
+        "records": result.structured_data,
+    }
+
+
+@router.get("/templates/{template_id}/comparison")
+def compare_template(template_id: str, limit: int = 20):
+    repository = ParserRepository()
+    candidate = repository.get_template(template_id)
+    if not candidate:
+        raise HTTPException(status_code=404, detail="parser template not found")
+    active = repository.resolve_active(
+        vendor=candidate.vendor,
+        model=candidate.model or candidate.profile,
+        family=candidate.family,
+        command=candidate.canonical_command,
+    )
+    snapshots = [
+        item
+        for item in PatrolRepository().list_dataset_snapshots(
+            mode="parser_validation"
+        )
+        if (item.vendor or "").lower() == candidate.vendor.lower()
+        and (item.model or "").lower()
+        == (candidate.model or candidate.profile).lower()
+        and item.command_canonical == candidate.canonical_command
+    ][: max(1, min(limit, 100))]
+    rows = []
+    for snapshot in snapshots:
+        proposed = _parse_snapshot_with_template(candidate, snapshot)
+        current = (
+            _parse_snapshot_with_template(active, snapshot) if active else None
+        )
+        rows.append(
+            {
+                "snapshot_id": snapshot.snapshot_id,
+                "dataset_id": snapshot.dataset_id or "legacy",
+                "device_id": snapshot.device_id,
+                "current": current,
+                "proposed": proposed,
+                "changed": current != proposed,
+            }
+        )
+    passed_samples = sum(
+        row["proposed"]["status"] in {"success", "empty"} for row in rows
+    )
+    repository.record_regression_validation(
+        candidate.id,
+        passed=bool(rows) and passed_samples == len(rows),
+        sample_count=len(rows),
+        passed_samples=passed_samples,
+    )
+    candidate_contract = dict(candidate.validation_json or {})
+    active_contract = dict(active.validation_json or {}) if active else {}
+    return {
+        "template_id": candidate.id,
+        "active_template_id": active.id if active else None,
+        "sample_count": len(rows),
+        "passed_samples": passed_samples,
+        "candidate_contract_sha256": candidate.contract_sha256,
+        "active_contract_sha256": active.contract_sha256 if active else None,
+        "contract_changed": candidate.contract_sha256
+        != (active.contract_sha256 if active else None),
+        "candidate_contract": candidate_contract,
+        "active_contract": active_contract,
+        "rows": rows,
+    }
+
+
+@router.get("/jobs")
+def list_jobs(status: str | None = None):
+    return {"items": ParserRepository().list_jobs(status=status)}
+
+
+@router.get("/jobs/{job_id}")
+def get_job(job_id: str):
+    item = ParserRepository().get_job(job_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="parser job not found")
+    return item
+
+
+@router.post("/jobs/{job_id}/retry")
+def retry_job(job_id: str):
+    try:
+        ParserRepository().retry_job(job_id)
+    except ParserJobStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"success": True, "job_id": job_id, "status": "pending"}
+
+
+@router.post("/jobs/{job_id}/cancel")
+def cancel_job(job_id: str):
+    try:
+        item = ParserRepository().cancel_job(job_id)
+    except ParserJobStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if item.get("celery_task_id"):
+        celery.control.revoke(item["celery_task_id"], terminate=False)
+    return {"success": True, "job_id": job_id, "status": "cancelled"}
+
+
+@router.post("/jobs/{job_id}/dispatch")
+def dispatch_job(job_id: str):
+    if not ParserRepository().get_job(job_id):
+        raise HTTPException(status_code=404, detail="parser job not found")
+    result = dispatch_ready_parser_jobs(job_id=job_id, limit=1)
+    if not result["dispatched"]:
+        raise HTTPException(
+            status_code=409,
+            detail=result["failed"][0]["error"]
+            if result["failed"]
+            else "parser job is not ready for dispatch",
+        )
+    return {"success": True, **result}
+
+
+@router.post("/dispatch")
+def dispatch_jobs():
+    return {"success": True, **dispatch_ready_parser_jobs(limit=1)}
+
+
+@router.get("/dispatch-control")
+def get_dispatch_control():
+    return {
+        "auto_dispatch_enabled": ParserRepository().get_auto_dispatch_enabled()
+    }
+
+
+@router.post("/dispatch-control")
+def set_dispatch_control(payload: ParserDispatchControlRequest):
+    enabled = ParserRepository().set_auto_dispatch_enabled(payload.enabled)
+    return {"success": True, "auto_dispatch_enabled": enabled}
+
+
+@router.post("/templates/{template_id}/activate")
+def activate_template(template_id: str):
+    try:
+        item = ParserRepository().activate_template(template_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return item.to_dict()
+
+
+@router.post("/templates/{template_id}/reject")
+def reject_template(template_id: str):
+    ParserRepository().set_template_status(template_id, "rejected")
+    return {"success": True, "template_id": template_id, "status": "rejected"}
+
+
+@router.post("/templates/{template_id}/deprecate")
+def deprecate_template(template_id: str):
+    ParserRepository().set_template_status(template_id, "deprecated")
+    return {"success": True, "template_id": template_id, "status": "deprecated"}
+
+
+@router.post("/bootstrap")
+def bootstrap_templates():
+    return {
+        "templates": bootstrap_shared_templates(),
+        "discovery_assets": bootstrap_discovery_assets(),
+    }
+
+
+@router.post("/import-preview")
+def preview_validation_import(payload: ParserImportRequest):
+    try:
+        return preview_raw_path(
+            file_path=payload.source_path,
+            metadata={"dataset_id": payload.dataset_id} if payload.dataset_id else None,
+            vendor=payload.vendor,
+            model=payload.model,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/import-execute")
+def execute_validation_import(payload: ParserImportRequest):
+    try:
+        retired = ParserRepository().supersede_legacy_jobs()
+        result = import_raw_path(
+            file_path=payload.source_path,
+            mode="parser_validation",
+            metadata={"dataset_id": payload.dataset_id} if payload.dataset_id else None,
+            vendor=payload.vendor,
+            model=payload.model,
+        )
+        result["superseded_legacy_jobs"] = retired
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/datasets")
+def dataset_coverage():
+    patrol_repository = PatrolRepository()
+    output = []
+    for dataset in patrol_repository.list_datasets(mode="parser_validation"):
+        snapshots = patrol_repository.list_dataset_snapshots(
+            dataset["id"],
+            mode="parser_validation",
+        )
+        counts = {
+            "parsed": 0,
+            "empty": 0,
+            "ignored": 0,
+            "missing": 0,
+            "failed": 0,
+            "identity_unknown": 0,
+        }
+        for item in snapshots:
+            if item.parse_status == "parsed":
+                counts["parsed"] += 1
+            elif item.parse_status == "parse_empty":
+                counts["empty"] += 1
+            elif item.parse_status == "ignored":
+                counts["ignored"] += 1
+            elif item.parse_status == "template_missing":
+                counts["missing"] += 1
+            elif item.parse_status == "identity_unknown":
+                counts["identity_unknown"] += 1
+            elif item.parse_status == "parse_failed":
+                counts["failed"] += 1
+        eligible = len(snapshots) - counts["ignored"]
+        successful = counts["parsed"] + counts["empty"]
+        output.append(
+            {
+                **dataset,
+                "dataset_id": dataset["id"],
+                **counts,
+                "eligible_count": eligible,
+                "structured_coverage_rate": (
+                    successful / eligible if eligible else 1.0
+                ),
+                "parse_success_rate": (
+                    counts["parsed"] / eligible if eligible else 1.0
+                ),
+                "legal_empty_rate": counts["empty"] / eligible if eligible else 0.0,
+                "missing_template_rate": (
+                    counts["missing"] / eligible if eligible else 0.0
+                ),
+                "parse_failure_rate": (
+                    counts["failed"] / eligible if eligible else 0.0
+                ),
+                "primary_key_stability_rate": (
+                    successful / eligible if eligible else 1.0
+                ),
+            }
+        )
+    return {"items": output}
+
+
+@router.get("/aliases")
+def list_aliases():
+    return {"items": ParserRepository().list_command_aliases()}
+
+
+@router.get("/device-profiles")
+def list_device_profiles():
+    return {"items": ParserRepository().list_device_profiles()}
+
+
+@router.get("/identity-signatures")
+def list_identity_signatures():
+    return {"items": ParserRepository().list_identity_signatures()}
+
+
+@router.get("/coverage")
+def parser_coverage():
+    repository = ParserRepository()
+    repository.backfill_contract_metadata()
+    templates = repository.list_templates()
+    jobs = repository.list_jobs()
+    active = sum(item["status"] == "active" for item in templates)
+    open_jobs = [item for item in jobs if item["status"] in OPEN_JOB_STATUSES]
+    return {
+        "templates_total": len(templates),
+        "templates_active": active,
+        "jobs_total": len(jobs),
+        "jobs_pending": len(open_jobs),
+        "missing_candidates": sum(
+            item["job_type"] == "CREATE_TEMPLATE" for item in open_jobs
+        ),
+        "repair_candidates": sum(
+            item["job_type"] == "REPAIR_TEMPLATE" for item in open_jobs
+        ),
+        "command_aliases": len(repository.list_command_aliases()),
+        "device_profiles": len(repository.list_device_profiles()),
+        "identity_signatures": len(repository.list_identity_signatures()),
+        "auto_dispatch_enabled": repository.get_auto_dispatch_enabled(),
+    }

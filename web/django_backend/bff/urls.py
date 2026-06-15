@@ -4,7 +4,7 @@
 from django.urls import path
 
 from . import auth, user_admin
-from .views import chat, conversations, health, itsm, knowledge, notifications, rag, skills, storage, system, tasks, upload, workflows, artifacts
+from .views import chat, conversations, health, itsm, knowledge, notifications, parser, rag, skills, storage, system, tasks, upload, workflows, artifacts
 
 urlpatterns = [
     path("auth/login/", auth.bff_login, name="bff_login"),
@@ -109,6 +109,13 @@ urlpatterns = [
     path("skills/<str:skill_name>/test-run/", skills.proxy_skill_test_run, name="bff_skill_test_run"),
     path("skills/<str:skill_name>/schema/", skills.proxy_skill_schema, name="bff_skill_schema"),
     path("skills/<str:skill_name>/", skills.proxy_skill_detail, name="bff_skill_detail"),
+    path("parser/<str:resource>/", parser.proxy_parser_collection, name="bff_parser_collection"),
+    path("parser/jobs/<str:job_id>/", parser.proxy_parser_job_detail, name="bff_parser_job_detail"),
+    path(
+        "parser/<str:resource>/<str:item_id>/<str:action>/",
+        parser.proxy_parser_action,
+        name="bff_parser_action",
+    ),
     path("knowledge/documents/", knowledge.proxy_knowledge_documents, name="bff_knowledge_documents"),
     path(
         "knowledge/documents/<path:doc_path>/content/",

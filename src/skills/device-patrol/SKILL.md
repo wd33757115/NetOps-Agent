@@ -17,6 +17,10 @@ triggers:
   - "检查设备"
   - "device patrol"
 inputs:
+  - name: mode
+    type: string
+    required: false
+    description: production 或 parser_validation，默认 production
   - name: device_name
     type: string
     required: false
@@ -51,9 +55,9 @@ outputs:
   - name: snapshot_run_id
     type: string
     description: 本次巡检 Snapshot Run ID，供 Workflow 下游 change-detector 使用
-  - name: snapshot_db
+  - name: snapshot_storage
     type: string
-    description: Snapshot Store 路径
+    description: Snapshot 权威存储，固定为 postgresql
   - name: snapshot_commands
     type: integer
     description: 本次写入的命令快照数量
@@ -144,7 +148,7 @@ fallback_to_rag: true
 
 此 Skill 需要调用后端 Celery 任务 `execute_device_patrol_task` 执行实际的巡检操作。
 
-**脚本位置**：运行时逻辑在 `src/skills/device-backup/scripts/netops_agent_tools.py`（PatrolTool）；CLI 参考脚本 `src/skills/device-patrol/scripts/net_device_inspect.py`
+**运行时位置**：`src/core/device_ops/tools.py`（`PatrolTool`），设备资产来自 PostgreSQL。
 
 执行步骤：
 1. 接收用户参数

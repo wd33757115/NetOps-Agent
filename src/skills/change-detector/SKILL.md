@@ -42,10 +42,6 @@ inputs:
     type: string
     required: false
     description: 当前巡检 run_id；未提供 previous_run_id 时自动对比每条命令的最近历史快照
-  - name: db_path
-    type: string
-    required: false
-    description: snapshot SQLite 路径
   - name: entity_type
     type: string
     required: false
@@ -84,7 +80,7 @@ fallback_to_rag: false
 
 ## 工作流程
 
-1. 校验输入模式和 SQLite 路径。
+1. 校验输入模式和 PostgreSQL 快照引用。
 2. 读取当前快照以及指定或最近的历史快照。
 3. 结构化记录按 `primary_keys` 构造实体键。
 4. 输出 added、deleted、modified 字段级变化。
@@ -121,7 +117,7 @@ fallback_to_rag: false
 ## 示例
 
 用户要求“比较本轮巡检和上轮巡检”，Workflow 应传入
-`current_run_id` 和 `db_path`。Skill 自动查找最近历史快照并返回变化。
+只需传入 `current_run_id`。Skill 自动从 PostgreSQL 查找最近历史快照并返回变化。
 
 ## 安全规范
 

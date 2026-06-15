@@ -53,6 +53,8 @@ class WorkflowTemplate:
     steps: list[WorkflowStepTemplate]
     plugin_dir: Path
     on_complete: WorkflowCompletionConfig = field(default_factory=WorkflowCompletionConfig)
+    test_context: dict[str, Any] = field(default_factory=dict)
+    test_required_context: list[str] = field(default_factory=list)
 
 
 _TEMPLATES: dict[str, WorkflowTemplate] = {}
@@ -91,6 +93,7 @@ def _parse_workflow_file(path: Path) -> WorkflowTemplate | None:
         )
 
     oc = raw.get("on_complete") or {}
+    test_config = raw.get("test") or {}
     notif = oc.get("notification") or {}
     on_complete = WorkflowCompletionConfig(
         message=str(oc.get("message") or "Workflow 已完成"),
@@ -108,6 +111,10 @@ def _parse_workflow_file(path: Path) -> WorkflowTemplate | None:
         steps=steps,
         plugin_dir=path.parent,
         on_complete=on_complete,
+        test_context=dict(test_config.get("context") or {}),
+        test_required_context=[
+            str(item) for item in (test_config.get("required_context") or [])
+        ],
     )
 
 
@@ -154,6 +161,19 @@ def find_step_template(template: WorkflowTemplate, step_name: str) -> WorkflowSt
         if step.name == step_name:
             return step
     return None
+
+
+def missing_test_context(
+    template: WorkflowTemplate,
+    context: dict[str, Any],
+) -> list[str]:
+    """Return workflow-owned required test fields that have no usable value."""
+    missing: list[str] = []
+    for field_name in template.test_required_context:
+        value = context.get(field_name)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            missing.append(field_name)
+    return missing
 
 
 def resolve_active_steps(

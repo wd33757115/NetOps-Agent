@@ -26,13 +26,24 @@ export function GrokChip({
 interface GrokToolBtnProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   icon?: React.ReactNode
   primary?: boolean
+  loading?: boolean
 }
 
-export function GrokToolBtn({ icon, children, primary, className = '', ...rest }: GrokToolBtnProps) {
+export function GrokToolBtn({
+  icon,
+  children,
+  primary,
+  loading = false,
+  className = '',
+  disabled,
+  ...rest
+}: GrokToolBtnProps) {
   return (
     <button
       type="button"
       className={`grok-tool-btn${primary ? ' is-primary' : ''}${className ? ` ${className}` : ''}`}
+      disabled={disabled || loading}
+      aria-busy={loading}
       {...rest}
     >
       {icon ? <span className="grok-tool-btn-icon">{icon}</span> : null}

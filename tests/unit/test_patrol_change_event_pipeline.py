@@ -4,6 +4,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import uuid
+
+import pytest
 
 from src.core.celery_tasks.tasks import _persist_patrol_snapshots
 from src.core.patrol.change_detector import (
@@ -13,8 +16,74 @@ from src.core.patrol.change_detector import (
 from src.core.patrol.command_splitter import split_cli_capture
 from src.core.patrol.event_builder import build_events_from_changes
 from src.core.patrol.raw_importer import import_raw_capture, import_raw_path
+from src.infrastructure.db.models import (
+    CommandSnapshot,
+    NetworkChangeRecord,
+    NetworkEventRecord,
+    ParserJobSample,
+    ParserOutboxEvent,
+    ParserTemplateJob,
+    PatrolDataset,
+    PatrolRun,
+)
+from src.infrastructure.db.postgres import get_db_session
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _cleanup_runs(*run_ids: str) -> None:
+    with get_db_session() as db:
+        snapshots = (
+            db.query(CommandSnapshot)
+            .filter(CommandSnapshot.run_id.in_(run_ids))
+            .all()
+        )
+        snapshot_ids = [row.id for row in snapshots]
+        dataset_ids = {row.dataset_id for row in snapshots if row.dataset_id}
+        job_ids = {
+            row[0]
+            for row in db.query(ParserJobSample.job_id)
+            .filter(ParserJobSample.snapshot_id.in_(snapshot_ids))
+            .all()
+        }
+        if snapshot_ids:
+            db.query(ParserJobSample).filter(
+                ParserJobSample.snapshot_id.in_(snapshot_ids)
+            ).delete(synchronize_session=False)
+        for job_id in job_ids:
+            job = db.get(ParserTemplateJob, job_id)
+            if job is None:
+                continue
+            remaining = (
+                db.query(ParserJobSample)
+                .filter(ParserJobSample.job_id == job_id)
+                .count()
+            )
+            job.sample_count = remaining
+            if remaining == 0:
+                db.query(ParserOutboxEvent).filter(
+                    ParserOutboxEvent.aggregate_id == job_id
+                ).delete(synchronize_session=False)
+                db.delete(job)
+        db.query(NetworkEventRecord).filter(
+            NetworkEventRecord.run_id.in_(run_ids)
+        ).delete(synchronize_session=False)
+        db.query(NetworkChangeRecord).filter(
+            NetworkChangeRecord.run_id.in_(run_ids)
+        ).delete(synchronize_session=False)
+        db.query(CommandSnapshot).filter(
+            CommandSnapshot.run_id.in_(run_ids)
+        ).delete(synchronize_session=False)
+        db.query(PatrolRun).filter(PatrolRun.id.in_(run_ids)).delete(
+            synchronize_session=False
+        )
+        for dataset_id in dataset_ids:
+            if not db.query(CommandSnapshot.id).filter(
+                CommandSnapshot.dataset_id == dataset_id
+            ).first():
+                db.query(PatrolDataset).filter(
+                    PatrolDataset.id == dataset_id
+                ).delete(synchronize_session=False)
 
 H3C_SAMPLE = """[BEGIN] 2025/12/24 14:46:42
 <SW1>
@@ -84,6 +153,17 @@ def test_split_command_report_format():
     assert blocks[0].prompt_style == "command_report"
 
 
+def test_split_ascii_command_report_format():
+    blocks = split_cli_capture(
+        "Command: show version\nOutput:\nCisco IOS Software\n"
+        "--------------------------------------------------\n"
+    )
+
+    assert len(blocks) == 1
+    assert blocks[0].command_canonical == "show version"
+    assert blocks[0].raw_output == "Cisco IOS Software"
+
+
 def test_change_detector_field_changes():
     changes = detect_changes_between_values(
         [{"interface": "Gi1/0/1", "status": "up", "protocol": "up"}],
@@ -137,24 +217,39 @@ def test_import_and_raw_hash_change_roundtrip(tmp_path: Path):
     file2 = tmp_path / "SW2-10.0.0.2_2025-12-24_16-29-15.log"
     file1.write_text(CISCO_SAMPLE, encoding="utf-8")
     file2.write_text(CISCO_SAMPLE.replace("24%/0%", "95%/0%"), encoding="utf-8")
-    db = tmp_path / "patrol.db"
+    run1 = f"test-{uuid.uuid4()}"
+    run2 = f"test-{uuid.uuid4()}"
+    dataset_id = f"test-{uuid.uuid4()}"
+    try:
+        r1 = import_raw_capture(
+            file_path=file1,
+            mode="parser_validation",
+            run_id=run1,
+            vendor="Cisco",
+            metadata={"dataset_id": dataset_id},
+        )
+        r2 = import_raw_capture(
+            file_path=file2,
+            mode="parser_validation",
+            run_id=run2,
+            vendor="Cisco",
+            metadata={"dataset_id": dataset_id},
+        )
+        assert r1["command_count"] == 3
+        assert r2["command_count"] == 3
 
-    r1 = import_raw_capture(file_path=file1, db_path=db, run_id="r1", vendor="Cisco")
-    r2 = import_raw_capture(file_path=file2, db_path=db, run_id="r2", vendor="Cisco")
-    assert r1["command_count"] == 3
-    assert r2["command_count"] == 3
+        result = detect_changes_from_params(
+            {
+                "previous_run_id": run1,
+                "current_run_id": run2,
+                "device_id": "SW2-10.0.0.2",
+            }
+        )
 
-    result = detect_changes_from_params(
-        {
-            "db_path": str(db),
-            "previous_run_id": "r1",
-            "current_run_id": "r2",
-            "device_id": "SW2-10.0.0.2",
-        }
-    )
-
-    assert result["change_count"] == 1
-    assert result["changes"][0]["field"] == "raw_text_hash"
+        assert result["change_count"] == 1
+        assert result["changes"][0]["field"] == "raw_text_hash"
+    finally:
+        _cleanup_runs(run1, run2)
 
 
 def test_import_raw_path_batches_directory_into_one_run(tmp_path: Path):
@@ -162,18 +257,42 @@ def test_import_raw_path_batches_directory_into_one_run(tmp_path: Path):
     source.mkdir()
     (source / "SW1-10.0.0.1.log").write_text(CISCO_SAMPLE, encoding="utf-8")
     (source / "SW2-10.0.0.2.log").write_text(CISCO_SAMPLE, encoding="utf-8")
+    run_id = f"test-{uuid.uuid4()}"
+    try:
+        result = import_raw_path(
+            file_path=source,
+            mode="parser_validation",
+            run_id=run_id,
+            metadata={"dataset_id": f"test-{uuid.uuid4()}"},
+        )
+
+        assert result["run_id"] == run_id
+        assert result["file_count"] == 2
+        assert result["device_count"] == 2
+        assert result["command_count"] == 6
+    finally:
+        _cleanup_runs(run_id)
+
+
+def test_raw_import_fails_before_writing_when_postgres_is_unavailable(
+    tmp_path: Path, monkeypatch
+):
+    source = tmp_path / "SW1-10.0.0.1.log"
+    source.write_text(CISCO_SAMPLE, encoding="utf-8")
     db = tmp_path / "patrol.db"
 
-    result = import_raw_path(
-        file_path=source,
-        db_path=db,
-        run_id="quarter-1",
+    def unavailable():
+        raise ConnectionError("PostgreSQL unavailable")
+
+    monkeypatch.setattr(
+        "src.core.patrol.raw_importer.require_postgres_connection",
+        unavailable,
     )
 
-    assert result["run_id"] == "quarter-1"
-    assert result["file_count"] == 2
-    assert result["device_count"] == 2
-    assert result["command_count"] == 6
+    with pytest.raises(ConnectionError, match="PostgreSQL unavailable"):
+        import_raw_capture(file_path=source, db_path=db)
+
+    assert not db.exists()
 
 
 def test_completed_patrol_run_only_persists_snapshots(tmp_path: Path):
@@ -206,35 +325,40 @@ interface Gi1/0/1
         encoding="utf-8",
     )
     db = tmp_path / "pipeline.db"
+    run1 = f"test-{uuid.uuid4()}"
+    run2 = f"test-{uuid.uuid4()}"
     detail1 = [{"device_name": "SW1", "ip": "10.0.0.1", "output_file": str(first_report)}]
     detail2 = [{"device_name": "SW1", "ip": "10.0.0.1", "output_file": str(second_report)}]
 
-    baseline = _persist_patrol_snapshots(
-        details=detail1,
-        snapshot_run_id="run-1",
-        db_path=str(db),
-    )
-    current = _persist_patrol_snapshots(
-        details=detail2,
-        snapshot_run_id="run-2",
-        db_path=str(db),
-    )
+    try:
+        baseline = _persist_patrol_snapshots(
+            details=detail1,
+            snapshot_run_id=run1,
+            db_path=str(db),
+            mode="parser_validation",
+        )
+        current = _persist_patrol_snapshots(
+            details=detail2,
+            snapshot_run_id=run2,
+            db_path=str(db),
+            mode="parser_validation",
+        )
 
-    assert baseline["snapshot_commands"] == 2
-    assert current["snapshot_commands"] == 2
-    assert "change_count" not in current
-    assert "event_count" not in current
+        assert baseline["snapshot_commands"] == 2
+        assert current["snapshot_commands"] == 2
+        assert "change_count" not in current
+        assert "event_count" not in current
 
-    change_result = detect_changes_from_params(
-        {
-            "db_path": str(db),
-            "current_run_id": "run-2",
-            "persist": True,
-        }
-    )
-    event_result = build_events_from_changes(change_result["changes"])
+        change_result = detect_changes_from_params(
+            {
+                "current_run_id": run2,
+                "persist": True,
+            }
+        )
+        event_result = build_events_from_changes(change_result["changes"])
 
-    assert change_result["compared_snapshots"] == 2
-    assert change_result["change_count"] == 2
-    assert [event.event_type for event in event_result] == ["ConfigChanged"]
-
+        assert change_result["compared_snapshots"] == 2
+        assert change_result["change_count"] == 2
+        assert [event.event_type for event in event_result] == ["ConfigChanged"]
+    finally:
+        _cleanup_runs(run1, run2)

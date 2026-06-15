@@ -45,7 +45,11 @@ celery = Celery(
     "netops_worker",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
-    include=["src.core.celery_tasks.tasks", "src.core.workflows.tasks"]
+    include=[
+        "src.core.celery_tasks.tasks",
+        "src.core.workflows.tasks",
+        "src.core.parser.tasks",
+    ]
 )
 
 _celery_conf: dict = {
@@ -84,6 +88,21 @@ celery.conf.beat_schedule = {
     "archive-skill-executions-monthly": {
         "task": "src.core.celery_tasks.tasks.archive_skill_executions_task",
         "schedule": 30 * 24 * 3600.0,
+        "options": {"queue": "netops.default"},
+    },
+    "dispatch-parser-jobs": {
+        "task": "dispatch_parser_jobs",
+        "schedule": 30.0,
+        "options": {"queue": "netops.default"},
+    },
+    "publish-parser-outbox": {
+        "task": "publish_parser_outbox",
+        "schedule": 10.0,
+        "options": {"queue": "netops.default"},
+    },
+    "reconcile-parser-jobs": {
+        "task": "reconcile_parser_jobs",
+        "schedule": 60.0,
         "options": {"queue": "netops.default"},
     },
 }

@@ -193,7 +193,13 @@ if ($dockerOk) {
     Write-ColorOutput '  [SKIP] Docker not available (middleware + Langfuse)' "Gray"
 }
 
-Write-ColorOutput "[Step 3/7] Django migrate..." "Yellow"
+Write-ColorOutput "[Step 3/7] PostgreSQL + Django migrations..." "Yellow"
+& $venvPython scripts/migrate_db.py *>&1 | Out-File (Join-Path $logDir "postgres-migrate.log") -Encoding utf8
+if ($LASTEXITCODE -ne 0) {
+    Write-ColorOutput "  [ERROR] PostgreSQL migration failed (log: postgres-migrate.log)" "Red"
+    exit 1
+}
+Write-ColorOutput '  [OK] PostgreSQL migration done' "Green"
 Push-Location (Join-Path $ProjectRoot "web\django_backend")
 $env:DJANGO_SETTINGS_MODULE = "django_backend.settings"
 $migrateLog = Join-Path $logDir "django-migrate.log"
@@ -226,7 +232,7 @@ foreach ($k in @("LANGFUSE_HOST", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"))
 if ($dotEnv.ContainsKey("JWT_ALGORITHM")) { $fastapiEnv["JWT_ALGORITHM"] = $dotEnv["JWT_ALGORITHM"] }
 if ($dotEnv.ContainsKey("BFF_REQUIRE_AUTH")) { $fastapiEnv["BFF_REQUIRE_AUTH"] = $dotEnv["BFF_REQUIRE_AUTH"] }
 
-Write-ColorOutput '[Step 4/7] Start Celery Worker (solo, Windows) ...' "Yellow"
+Write-ColorOutput '[Step 4/7] Start Celery Worker + Beat (Windows) ...' "Yellow"
 $celeryLog = Join-Path $logDir "celery.log"
 $celeryLauncher = Join-Path $logDir "celery-launcher.ps1"
 $celeryEnv = @{
@@ -256,6 +262,16 @@ $pids.celery = (Start-LauncherProcess -LauncherPath $celeryLauncher).Id
 Write-ColorOutput ("  [OK] Celery PID={0} (log: celery.log)" -f $pids.celery) "Green"
 Write-ColorOutput "  [TIP] Celery worker running; do not start a second worker (pidbox conflict)" "Gray"
 Write-ColorOutput "        Debug: scripts\test\celery_worker.ps1" "Gray"
+$celeryBeatLog = Join-Path $logDir "celery-beat.log"
+$celeryBeatLauncher = Join-Path $logDir "celery-beat-launcher.ps1"
+$celeryBeatPid = Join-Path $runtimeDir "celery-beat.pid"
+$celeryBeatSchedule = Join-Path $runtimeDir "celery-beat-schedule"
+$celeryBeatCmd = "& '$py' -m celery -A src.core.celery_tasks.celery_app beat --loglevel=info --pidfile='$celeryBeatPid' --schedule='$celeryBeatSchedule'"
+New-LauncherScript -Path $celeryBeatLauncher -WorkingDirectory $ProjectRoot -EnvVars $celeryEnv -CommandLine $celeryBeatCmd -LogFile $celeryBeatLog -PreCommands @(
+    'Remove-Item Env:DJANGO_SETTINGS_MODULE -ErrorAction SilentlyContinue'
+)
+$pids.celeryBeat = (Start-LauncherProcess -LauncherPath $celeryBeatLauncher).Id
+Write-ColorOutput ("  [OK] Celery Beat PID={0} (log: celery-beat.log)" -f $pids.celeryBeat) "Green"
 if ($dockerOk -and -not $SkipMiddleware) {
     Start-Sleep -Seconds 8
 }

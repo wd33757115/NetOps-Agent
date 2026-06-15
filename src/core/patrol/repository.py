@@ -1,0 +1,462 @@
+"""PostgreSQL repository for patrol datasets, runs, and command snapshots."""
+
+from __future__ import annotations
+
+import hashlib
+import uuid
+from datetime import datetime, timezone
+from typing import Any
+
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
+
+from src.core.patrol.domain import SnapshotRecord
+from src.infrastructure.db.models import (
+    CommandSnapshot,
+    NetworkDevice,
+    ParserTemplate,
+    PatrolDataset,
+    PatrolRun,
+)
+from src.infrastructure.db.postgres import get_db_session
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _as_datetime(value: str | datetime | None) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if value:
+        text = str(value).strip().replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(text)
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    return _utcnow()
+
+
+def _iso(value: datetime | None) -> str:
+    if value is None:
+        return ""
+    return value.isoformat()
+
+
+class PatrolRepository:
+    """Authoritative PostgreSQL patrol data-plane repository."""
+
+    def ensure_dataset(
+        self,
+        *,
+        dataset_id: str,
+        mode: str,
+        source: str,
+        name: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        with get_db_session() as db:
+            row = db.get(PatrolDataset, dataset_id)
+            if row is None:
+                row = PatrolDataset(
+                    id=dataset_id,
+                    name=name or dataset_id,
+                    mode=mode,
+                    source=source,
+                    status="active",
+                    metadata_json=metadata or {},
+                    created_at=_utcnow(),
+                    updated_at=_utcnow(),
+                )
+                db.add(row)
+            else:
+                row.name = name or row.name
+                row.mode = mode
+                row.source = source
+                row.metadata_json = {**(row.metadata_json or {}), **(metadata or {})}
+                row.updated_at = _utcnow()
+        return dataset_id
+
+    def create_run(
+        self,
+        *,
+        run_id: str | None = None,
+        source: str = "imported_file",
+        mode: str = "production",
+        dataset_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        started_at: str | datetime | None = None,
+    ) -> str:
+        run_id = run_id or str(uuid.uuid4())
+        with get_db_session() as db:
+            row = db.get(PatrolRun, run_id)
+            if row is None:
+                row = PatrolRun(
+                    id=run_id,
+                    source=source,
+                    mode=mode,
+                    dataset_id=dataset_id,
+                    status="running",
+                    started_at=_as_datetime(started_at),
+                    metadata_json=metadata or {},
+                    created_at=_utcnow(),
+                    updated_at=_utcnow(),
+                )
+                db.add(row)
+            else:
+                row.source = source
+                row.mode = mode
+                row.dataset_id = dataset_id or row.dataset_id
+                row.status = "running"
+                row.completed_at = None
+                row.metadata_json = {**(row.metadata_json or {}), **(metadata or {})}
+                row.updated_at = _utcnow()
+        return run_id
+
+    def finish_run(self, run_id: str) -> None:
+        with get_db_session() as db:
+            row = db.get(PatrolRun, run_id)
+            if row is None:
+                raise ValueError(f"patrol run not found: {run_id}")
+            counts = (
+                db.query(
+                    func.count(CommandSnapshot.id),
+                    func.count(func.distinct(CommandSnapshot.device_id)),
+                )
+                .filter(CommandSnapshot.run_id == run_id)
+                .one()
+            )
+            row.command_count = int(counts[0] or 0)
+            row.device_count = int(counts[1] or 0)
+            row.status = "completed"
+            row.completed_at = _utcnow()
+            row.updated_at = _utcnow()
+            if row.dataset_id:
+                dataset = db.get(PatrolDataset, row.dataset_id)
+                if dataset is not None:
+                    dataset.imported_at = _utcnow()
+                    dataset.updated_at = _utcnow()
+
+    def save_snapshot(
+        self,
+        **values: Any,
+    ) -> str:
+        snapshot_id, _ = self.save_snapshot_idempotent(**values)
+        return snapshot_id
+
+    def save_snapshot_idempotent(
+        self,
+        *,
+        run_id: str,
+        device_id: str,
+        device_name: str,
+        command: str,
+        command_canonical: str,
+        raw_text: str,
+        ip: str | None = None,
+        vendor: str | None = None,
+        model: str | None = None,
+        observed_at: str | datetime | None = None,
+        structured_json: Any = None,
+        parser_name: str | None = None,
+        parser_version: str | None = None,
+        parse_status: str | None = None,
+        start_line: int | None = None,
+        end_line: int | None = None,
+        dataset_id: str | None = None,
+        source_file_hash: str | None = None,
+        import_fingerprint: str | None = None,
+        snapshot_id: str | None = None,
+        snapshot_kind: str = "full",
+        metadata: dict[str, Any] | None = None,
+    ) -> tuple[str, bool]:
+        raw_hash = hashlib.sha256((raw_text or "").encode("utf-8")).hexdigest()
+        status = parse_status or ("parsed" if structured_json is not None else "raw_only")
+        snapshot_id = snapshot_id or str(uuid.uuid4())
+        try:
+            with get_db_session() as db:
+                existing_by_id = db.get(CommandSnapshot, snapshot_id)
+                if existing_by_id is not None:
+                    return existing_by_id.id, False
+                if import_fingerprint:
+                    existing = (
+                        db.query(CommandSnapshot)
+                        .filter(CommandSnapshot.import_fingerprint == import_fingerprint)
+                        .first()
+                    )
+                    if existing is not None:
+                        return existing.id, False
+                inventory = (
+                    db.query(NetworkDevice)
+                    .filter(
+                        NetworkDevice.device_name == device_name,
+                        NetworkDevice.management_ip == (ip or ""),
+                    )
+                    .first()
+                    if ip
+                    else None
+                )
+                contract_version = None
+                if parser_name:
+                    template = db.get(ParserTemplate, parser_name)
+                    contract_version = template.contract_version if template else None
+                db.add(
+                    CommandSnapshot(
+                        id=snapshot_id,
+                        run_id=run_id,
+                        dataset_id=dataset_id,
+                        inventory_device_id=inventory.id if inventory else None,
+                        device_id=device_id,
+                        device_name=device_name,
+                        management_ip=ip,
+                        vendor=vendor,
+                        model=model,
+                        command=command,
+                        canonical_command=command_canonical,
+                        parser_template_id=parser_name,
+                        parser_version=parser_version,
+                        contract_version=contract_version,
+                        observed_at=_as_datetime(observed_at),
+                        structured_json=structured_json,
+                        raw_text=raw_text or "",
+                        raw_text_hash=raw_hash,
+                        parse_status=status,
+                        snapshot_kind=snapshot_kind,
+                        source_file_hash=source_file_hash,
+                        import_fingerprint=import_fingerprint,
+                        start_line=start_line,
+                        end_line=end_line,
+                        metadata_json=metadata or {},
+                        created_at=_utcnow(),
+                    )
+                )
+            return snapshot_id, True
+        except IntegrityError:
+            if not import_fingerprint:
+                raise
+            with get_db_session() as db:
+                existing = (
+                    db.query(CommandSnapshot)
+                    .filter(CommandSnapshot.import_fingerprint == import_fingerprint)
+                    .one()
+                )
+                return existing.id, False
+
+    def list_dataset_snapshots(
+        self,
+        dataset_id: str | None = None,
+        *,
+        mode: str | None = None,
+    ) -> list[SnapshotRecord]:
+        with get_db_session() as db:
+            query = db.query(CommandSnapshot)
+            if dataset_id:
+                query = query.filter(CommandSnapshot.dataset_id == dataset_id)
+            if mode:
+                query = query.join(PatrolRun, PatrolRun.id == CommandSnapshot.run_id).filter(
+                    PatrolRun.mode == mode
+                )
+            rows = query.order_by(
+                CommandSnapshot.dataset_id,
+                CommandSnapshot.device_id,
+                CommandSnapshot.canonical_command,
+                CommandSnapshot.observed_at,
+            ).all()
+            return [self._to_snapshot(row) for row in rows]
+
+    def list_datasets(self, *, mode: str | None = None) -> list[dict[str, Any]]:
+        with get_db_session() as db:
+            query = db.query(
+                PatrolDataset,
+                func.count(CommandSnapshot.id).label("snapshot_count"),
+                func.count(func.distinct(CommandSnapshot.device_id)).label("device_count"),
+                func.count(func.distinct(CommandSnapshot.canonical_command)).label(
+                    "command_count"
+                ),
+                func.min(CommandSnapshot.created_at).label("first_imported_at"),
+                func.max(CommandSnapshot.created_at).label("last_imported_at"),
+            ).outerjoin(CommandSnapshot, CommandSnapshot.dataset_id == PatrolDataset.id)
+            if mode:
+                query = query.filter(PatrolDataset.mode == mode)
+            rows = (
+                query
+                .group_by(PatrolDataset.id)
+                .order_by(func.max(CommandSnapshot.created_at).desc().nullslast())
+                .all()
+            )
+            return [
+                {
+                    **dataset.to_dict(),
+                    "snapshot_count": int(snapshot_count or 0),
+                    "device_count": int(device_count or 0),
+                    "command_count": int(command_count or 0),
+                    "first_imported_at": _iso(first_imported_at),
+                    "last_imported_at": _iso(last_imported_at),
+                }
+                for (
+                    dataset,
+                    snapshot_count,
+                    device_count,
+                    command_count,
+                    first_imported_at,
+                    last_imported_at,
+                ) in rows
+            ]
+
+    def list_import_fingerprints(
+        self,
+        *,
+        mode: str | None = None,
+        dataset_id: str | None = None,
+    ) -> set[str]:
+        with get_db_session() as db:
+            query = db.query(CommandSnapshot.import_fingerprint).filter(
+                CommandSnapshot.import_fingerprint.is_not(None)
+            )
+            if dataset_id:
+                query = query.filter(CommandSnapshot.dataset_id == dataset_id)
+            if mode:
+                query = query.join(
+                    PatrolRun, PatrolRun.id == CommandSnapshot.run_id
+                ).filter(PatrolRun.mode == mode)
+            return {str(row[0]) for row in query.all() if row[0]}
+
+    def find_snapshots_by_import_fingerprints(
+        self,
+        fingerprints: set[str],
+    ) -> dict[str, SnapshotRecord]:
+        if not fingerprints:
+            return {}
+        with get_db_session() as db:
+            rows = (
+                db.query(CommandSnapshot)
+                .filter(CommandSnapshot.import_fingerprint.in_(fingerprints))
+                .all()
+            )
+            return {
+                str(row.import_fingerprint): self._to_snapshot(row)
+                for row in rows
+                if row.import_fingerprint
+            }
+
+    def get_snapshot(self, snapshot_id: str) -> SnapshotRecord | None:
+        with get_db_session() as db:
+            row = db.get(CommandSnapshot, snapshot_id)
+            return self._to_snapshot(row) if row else None
+
+    def get_snapshot_context(self, snapshot_id: str) -> dict[str, Any] | None:
+        with get_db_session() as db:
+            row = (
+                db.query(CommandSnapshot, PatrolRun)
+                .join(PatrolRun, PatrolRun.id == CommandSnapshot.run_id)
+                .filter(CommandSnapshot.id == snapshot_id)
+                .first()
+            )
+            if not row:
+                return None
+            snapshot, run = row
+            return {
+                "snapshot": self._to_snapshot(snapshot),
+                "mode": run.mode,
+                "source": run.source,
+                "dataset_id": snapshot.dataset_id or run.dataset_id,
+                "run_metadata": dict(run.metadata_json or {}),
+            }
+
+    def get_run_metadata_for_snapshot(self, snapshot_id: str) -> dict[str, Any]:
+        with get_db_session() as db:
+            row = (
+                db.query(PatrolRun.metadata_json)
+                .join(CommandSnapshot, CommandSnapshot.run_id == PatrolRun.id)
+                .filter(CommandSnapshot.id == snapshot_id)
+                .first()
+            )
+            return dict(row[0] or {}) if row else {}
+
+    def find_snapshot(
+        self,
+        *,
+        run_id: str,
+        device_id: str,
+        command_canonical: str,
+    ) -> SnapshotRecord | None:
+        with get_db_session() as db:
+            row = (
+                db.query(CommandSnapshot)
+                .filter(
+                    CommandSnapshot.run_id == run_id,
+                    CommandSnapshot.device_id == device_id,
+                    CommandSnapshot.canonical_command == command_canonical,
+                )
+                .order_by(CommandSnapshot.observed_at.desc())
+                .first()
+            )
+            return self._to_snapshot(row) if row else None
+
+    def find_previous_snapshot(
+        self,
+        *,
+        current_run_id: str,
+        device_id: str,
+        command_canonical: str,
+    ) -> SnapshotRecord | None:
+        with get_db_session() as db:
+            current_run = db.get(PatrolRun, current_run_id)
+            if current_run is None:
+                return None
+            row = (
+                db.query(CommandSnapshot)
+                .join(PatrolRun, PatrolRun.id == CommandSnapshot.run_id)
+                .filter(
+                    CommandSnapshot.run_id != current_run_id,
+                    CommandSnapshot.device_id == device_id,
+                    CommandSnapshot.canonical_command == command_canonical,
+                    PatrolRun.mode == current_run.mode,
+                    PatrolRun.started_at <= current_run.started_at,
+                )
+                .order_by(CommandSnapshot.observed_at.desc())
+                .first()
+            )
+            return self._to_snapshot(row) if row else None
+
+    def list_run_snapshots(
+        self,
+        run_id: str,
+        device_id: str | None = None,
+    ) -> list[SnapshotRecord]:
+        with get_db_session() as db:
+            query = db.query(CommandSnapshot).filter(CommandSnapshot.run_id == run_id)
+            if device_id:
+                query = query.filter(CommandSnapshot.device_id == device_id)
+            return [
+                self._to_snapshot(row)
+                for row in query.order_by(
+                    CommandSnapshot.device_id,
+                    CommandSnapshot.canonical_command,
+                ).all()
+            ]
+
+    @staticmethod
+    def _to_snapshot(row: CommandSnapshot) -> SnapshotRecord:
+        return SnapshotRecord(
+            snapshot_id=row.id,
+            run_id=row.run_id,
+            device_id=row.device_id,
+            device_name=row.device_name,
+            ip=row.management_ip,
+            vendor=row.vendor,
+            model=row.model,
+            command=row.command,
+            command_canonical=row.canonical_command,
+            parser_name=row.parser_template_id,
+            parser_version=row.parser_version,
+            observed_at=_iso(row.observed_at),
+            structured_json=row.structured_json,
+            raw_text=row.raw_text or "",
+            raw_text_hash=row.raw_text_hash,
+            parse_status=row.parse_status,
+            dataset_id=row.dataset_id,
+            source_file_hash=row.source_file_hash,
+            import_fingerprint=row.import_fingerprint,
+        )

@@ -22,10 +22,6 @@ inputs:
     type: object
     required: false
     description: change-detector 输出的 changes 列表
-  - name: db_path
-    type: string
-    required: false
-    description: 包含 netops_network_changes 的 SQLite 路径
   - name: run_id
     type: string
     required: false
@@ -52,7 +48,7 @@ fallback_to_rag: false
 2. 普通数值波动是 Change，不一定是 Event。
 3. 每个事件必须保留 `source_change_id`。
 4. 相同 Change 重放时应保持相同事件语义。
-5. Redis 不可用时不得影响 SQLite 事件持久化。
+5. Redis 不可用时不得影响 PostgreSQL 事件持久化。
 
 ## 核心能力
 
@@ -65,7 +61,7 @@ fallback_to_rag: false
 
 ## 工作流程
 
-1. 接收 Changes，或按 run ID 从 SQLite 读取。
+1. 接收 Changes，或按 run ID 从 PostgreSQL 读取。
 2. 逐条匹配事件规则。
 3. 忽略没有运维意义的普通变化。
 4. 生成事件类型、严重级别和关联实体。
@@ -74,7 +70,7 @@ fallback_to_rag: false
 ## 输入参数说明
 
 - `changes`：change-detector 输出的变化列表。
-- `db_path`：Snapshot/Change/Event SQLite 路径。
+- `run_id`：从 PostgreSQL 读取指定巡检运行产生的 Change。
 - `run_id`：读取指定巡检批次产生的 Changes。
 - `device_id`：可选设备过滤条件。
 - `persist`：是否写入事件表，默认 true。
@@ -119,4 +115,3 @@ CPU 从 15 变为 18 时不生成事件；CPU 从 15 变为 95 时生成
 - 当前规则为 MVP，后续应迁移到版本化 YAML 规则文件。
 - 原始文本只有配置类变化会升级为事件。
 - Event 不是 RCA 结论，不应包含未经验证的根因。
-

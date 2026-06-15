@@ -36,8 +36,6 @@ def main() -> int:
     )
     parser.add_argument("--params", help="platform params JSON path")
     parser.add_argument("--source-path", help="offline txt/log file or directory")
-    parser.add_argument("--patrol-db")
-    parser.add_argument("--devices-db")
     parser.add_argument("--templates-dir")
     parser.add_argument("--vendor")
     parser.add_argument("--model")
@@ -57,8 +55,6 @@ def main() -> int:
             params = json.load(handle)
     for key in (
         "source_path",
-        "patrol_db",
-        "devices_db",
         "templates_dir",
         "vendor",
         "model",

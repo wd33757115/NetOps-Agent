@@ -12,31 +12,29 @@ from pathlib import Path
 from typing import Any
 
 from config_loader import (
+    DEFAULT_MAPPING,
     CategorySpec,
     list_device_profiles,
-    load_categories,
-    load_command_aliases,
     load_command_mapping,
-    load_device_signatures,
     normalize_command,
-    resolve_category,
 )
 from db_reader import TemplateCandidate, discover_missing_template_candidates
 from directory_reader import DirectoryCandidate, TemplateSample, discover_directory_candidates
 from input_parser import extract_direct_input, infer_vendor_model
-from llm_generator import generate_template_text
+from llm_generator import call_llm, generate_template_text
 from report_generator import GenerationReport, save_report, save_summary
 from template_validator import ValidationResult, strip_llm_template, validate_template
 
-from src.core.patrol.textfsm_assets import (
-    SHARED_TEXTFSM_ROOT,
-    atomic_write_text,
-    command_template_name,
-    remove_manifest_entry,
-    safe_slug,
-    template_path,
-    upsert_manifest_entry,
+from src.core.parser.assets import (
+    DEFAULT_ASSET_ROOT as SHARED_TEXTFSM_ROOT,
 )
+from src.core.parser.assets import (
+    TemplateAssetStore,
+    safe_slug,
+)
+from src.core.parser.contract_inference import infer_contract
+from src.core.parser.repository import ParserRepository
+from src.core.patrol.repository import PatrolRepository
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REPORTS = SKILL_ROOT / "reports"
@@ -56,12 +54,8 @@ class Candidate:
     evidence_text: str | None = None
 
 
-def project_root() -> Path:
-    return Path(__file__).resolve().parents[4]
-
-
 def cmd_to_template_filename(command: str) -> str:
-    return command_template_name(command)
+    return f"{safe_slug(command.strip().lower())}.textfsm"
 
 
 def model_to_dirname(model: str) -> str:
@@ -69,7 +63,54 @@ def model_to_dirname(model: str) -> str:
 
 
 def resolve_template_path(templates_dir: Path, model: str, command: str) -> Path:
-    return template_path(templates_dir, model, command)
+    return templates_dir / safe_slug(model) / cmd_to_template_filename(command)
+
+
+def _job_candidate(params: dict[str, Any]) -> Candidate | None:
+    job_id = str(params.get("job_id") or "").strip()
+    if not job_id:
+        return None
+    job = ParserRepository().get_job(job_id)
+    if not job:
+        raise ValueError(f"parser template job does not exist: {job_id}")
+    samples: list[TemplateSample] = []
+    patrol_repository = PatrolRepository()
+    for item in job.get("samples") or []:
+        if item.get("snapshot_source") != "postgresql":
+            raise ValueError(
+                "parser job contains a legacy SQLite sample; re-import the dataset"
+            )
+        context = patrol_repository.get_snapshot_context(item["snapshot_id"])
+        if not context:
+            raise ValueError(
+                f"parser job sample is unavailable in PostgreSQL: {item['snapshot_id']}"
+            )
+        if context["mode"] != "parser_validation":
+            raise ValueError(
+                "parser job contains a sample outside parser_validation mode"
+            )
+        snapshot = context["snapshot"]
+        if snapshot:
+            samples.append(
+                TemplateSample(
+                    file_path=f"snapshot:{snapshot.snapshot_id}",
+                    device_id=snapshot.device_id,
+                    command=snapshot.command_canonical,
+                    output=snapshot.raw_text,
+                )
+            )
+    if not samples:
+        raise ValueError(f"parser template job has no readable samples: {job_id}")
+    return Candidate(
+        vendor=job["vendor"],
+        model=job["model"] or job["profile"],
+        family=job.get("family"),
+        command=job["canonical_command"],
+        category=None,
+        samples=tuple(samples),
+        confidence=1.0,
+        evidence_text=f"parser job {job_id}",
+    )
 
 
 def _direct_candidate(params: dict[str, Any], mappings: list[Any]) -> Candidate | None:
@@ -163,6 +204,7 @@ def _validate_samples(
             spec.validators,
             allow_empty=spec.allow_empty,
             empty_patterns=spec.empty_patterns,
+            primary_keys=spec.primary_keys,
         )
         validations.append(result)
         details.append(
@@ -175,38 +217,40 @@ def _validate_samples(
                 "field_coverage": result.field_coverage,
                 "validation_score": result.validation_score,
                 "errors": result.errors,
+                "key_errors": result.key_errors,
             }
         )
     return validations, details
 
 
-def _manifest_entry(
-    *,
-    candidate: Candidate,
-    category: str,
-    spec: CategorySpec,
-    target: Path,
-    templates_dir: Path,
-    template_text: str,
-    pass_rate: float,
-) -> dict[str, Any]:
-    return {
-        "vendor": candidate.vendor,
-        "model": candidate.model,
-        "family": candidate.family,
-        "command": candidate.command,
-        "category": category,
-        "entity_type": spec.entity_type,
-        "primary_keys": spec.primary_keys,
-        "required_fields": spec.required_fields,
-        "optional_fields": spec.optional_fields,
-        "parser_version": PARSER_VERSION,
-        "template_path": str(target.relative_to(templates_dir)),
-        "sha256": hashlib.sha256(template_text.encode("utf-8")).hexdigest(),
-        "sample_count": len(candidate.samples),
-        "validation_pass_rate": pass_rate,
-        "published_at": datetime.now(timezone.utc).isoformat(),
+def _regression_samples(candidate: Candidate) -> tuple[TemplateSample, ...]:
+    existing_hashes = {
+        hashlib.sha256(sample.output.encode("utf-8")).hexdigest()
+        for sample in candidate.samples
     }
+    output: list[TemplateSample] = []
+    for snapshot in PatrolRepository().list_dataset_snapshots(
+        mode="parser_validation"
+    ):
+        if (
+            (snapshot.vendor or "").lower() != candidate.vendor.lower()
+            or (snapshot.model or "").lower() != candidate.model.lower()
+            or snapshot.command_canonical != candidate.command
+        ):
+            continue
+        digest = hashlib.sha256(snapshot.raw_text.encode("utf-8")).hexdigest()
+        if digest in existing_hashes:
+            continue
+        existing_hashes.add(digest)
+        output.append(
+            TemplateSample(
+                file_path=f"regression:{snapshot.snapshot_id}",
+                device_id=snapshot.device_id,
+                command=snapshot.command_canonical,
+                output=snapshot.raw_text,
+            )
+        )
+    return tuple(output)
 
 
 def _report_failure(
@@ -242,8 +286,6 @@ def _report_failure(
 def _process_candidate(
     candidate: Candidate,
     *,
-    categories: dict[str, CategorySpec],
-    mappings: list[Any],
     templates_dir: Path,
     reports_dir: Path,
     max_retries: int,
@@ -252,137 +294,160 @@ def _process_candidate(
     force_overwrite: bool,
     minimum_pass_rate: float,
     max_samples_per_prompt: int,
-    explicit_category: str | None,
     mode: str,
+    source_job_id: str | None = None,
 ) -> GenerationReport:
-    category = candidate.category or resolve_category(
-        candidate.vendor,
-        candidate.model,
-        candidate.command,
-        mappings,
-        explicit_category=explicit_category,
+    trigger_sample_count = len(candidate.samples)
+    regression_samples = _regression_samples(candidate) if source_job_id else ()
+    validation_candidate = Candidate(
+        vendor=candidate.vendor,
+        model=candidate.model,
+        family=candidate.family,
+        command=candidate.command,
+        category=candidate.category,
+        samples=tuple([*candidate.samples, *regression_samples]),
+        confidence=candidate.confidence,
+        evidence_command=candidate.evidence_command,
+        evidence_text=candidate.evidence_text,
     )
-    if not category:
-        return _report_failure(
-            candidate,
-            mode=mode,
-            reason="command_not_configured",
-            reports_dir=reports_dir,
-        )
-    spec = categories.get(category)
-    if not spec or not spec.required_fields:
-        return _report_failure(
-            candidate,
-            mode=mode,
-            reason=f"category_not_configured:{category}",
-            reports_dir=reports_dir,
-        )
+    proposal = infer_contract(
+        command=candidate.command,
+        samples_text=_prompt_samples(candidate.samples, max_samples_per_prompt),
+        llm_call=call_llm,
+    )
+    category = proposal.category
+    core_spec = proposal.to_category_spec()
+    spec = CategorySpec(
+        name=core_spec.name,
+        required_fields=list(core_spec.required_fields),
+        optional_fields=list(core_spec.optional_fields),
+        entity_type=core_spec.entity_type,
+        primary_keys=list(core_spec.primary_keys),
+        validators=core_spec.validators,
+        allow_empty=core_spec.allow_empty,
+        empty_patterns=list(core_spec.empty_patterns),
+        ignore_fields=list(core_spec.ignore_fields),
+    )
 
     target = resolve_template_path(templates_dir, candidate.model, candidate.command)
     template_text = ""
     retry_count = 0
     validations: list[ValidationResult] = []
     sample_results: list[dict[str, Any]] = []
-    target_existed = target.is_file()
-    previous_asset_valid = False
-
-    if target_existed:
-        template_text = target.read_text(encoding="utf-8")
-        validations, sample_results = _validate_samples(template_text, candidate.samples, spec)
-        existing_passed = sum(result.is_valid for result in validations)
-        existing_rate = existing_passed / len(validations) if validations else 0.0
-        previous_asset_valid = bool(validations) and existing_rate >= minimum_pass_rate
-    if target_existed and previous_asset_valid and not force_overwrite:
-        skipped_reason = "template_exists"
-    else:
-        skipped_reason = None
-        previous_errors: list[str] = []
-        missing_fields: list[str] = []
-        value_errors: list[str] = []
-        for attempt in range(max_retries + 1):
-            retry_count = attempt
-            raw = generate_template_text(
-                vendor=candidate.vendor,
-                model=candidate.model,
-                command=candidate.command,
-                cli_output=_prompt_samples(candidate.samples, max_samples_per_prompt),
-                required_fields=spec.required_fields,
-                optional_fields=spec.optional_fields,
-                previous_template=template_text or None,
-                validation_errors=previous_errors,
-                missing_fields=missing_fields,
-                value_errors=value_errors,
-            )
-            template_text = strip_llm_template(raw)
-            validations, sample_results = _validate_samples(
-                template_text, candidate.samples, spec
-            )
-            passed = sum(result.is_valid for result in validations)
-            pass_rate = passed / len(validations) if validations else 0.0
-            if pass_rate >= minimum_pass_rate:
-                break
-            failed = [result for result in validations if not result.is_valid]
-            previous_errors = [
-                error for result in failed for error in result.errors
-            ][:30]
-            missing_fields = sorted(
-                {field for result in failed for field in result.missing_fields}
-            )
-            value_errors = [
-                error for result in failed for error in result.value_errors
-            ][:30]
+    skipped_reason = None
+    previous_errors: list[str] = []
+    missing_fields: list[str] = []
+    value_errors: list[str] = []
+    for attempt in range(max_retries + 1):
+        retry_count = attempt
+        raw = generate_template_text(
+            vendor=candidate.vendor,
+            model=candidate.model,
+            command=candidate.command,
+            cli_output=_prompt_samples(candidate.samples, max_samples_per_prompt),
+            required_fields=spec.required_fields,
+            optional_fields=spec.optional_fields,
+            primary_keys=spec.primary_keys,
+            previous_template=template_text or None,
+            validation_errors=previous_errors,
+            missing_fields=missing_fields,
+            value_errors=value_errors,
+        )
+        template_text = strip_llm_template(raw)
+        validations, sample_results = _validate_samples(
+            template_text, validation_candidate.samples, spec
+        )
+        passed = sum(result.is_valid for result in validations)
+        pass_rate = passed / len(validations) if validations else 0.0
+        if pass_rate >= minimum_pass_rate:
+            break
+        failed = [result for result in validations if not result.is_valid]
+        previous_errors = [error for result in failed for error in result.errors][:30]
+        missing_fields = sorted(
+            {field for result in failed for field in result.missing_fields}
+        )
+        value_errors = [error for result in failed for error in result.value_errors][:30]
 
     passed_samples = sum(result.is_valid for result in validations)
     pass_rate = passed_samples / len(validations) if validations else 0.0
     accepted = bool(validations) and pass_rate >= minimum_pass_rate
     generated = False
-    if (
-        accepted
-        and publish
-        and not dry_run
-        and (force_overwrite or not target.is_file() or not previous_asset_valid)
-    ):
-        atomic_write_text(target, template_text)
-        generated = True
-        upsert_manifest_entry(
-            _manifest_entry(
-                candidate=candidate,
-                category=category,
-                spec=spec,
-                target=target,
-                templates_dir=templates_dir,
-                template_text=template_text,
-                pass_rate=pass_rate,
-            ),
-            root=templates_dir,
+    template_id = None
+    if accepted and publish and not dry_run:
+        version = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+        target, digest = TemplateAssetStore(templates_dir).write_immutable(
+            vendor=candidate.vendor,
+            profile=candidate.model,
+            command=candidate.command,
+            version=version,
+            content=template_text,
         )
-    elif accepted and publish and not dry_run and target.is_file():
-        upsert_manifest_entry(
-            _manifest_entry(
-                candidate=candidate,
-                category=category,
-                spec=spec,
-                target=target,
-                templates_dir=templates_dir,
-                template_text=template_text,
-                pass_rate=pass_rate,
-            ),
-            root=templates_dir,
-        )
-    elif target_existed and not previous_asset_valid and target.is_file():
-        rejected_dir = reports_dir / "rejected"
-        rejected_dir.mkdir(parents=True, exist_ok=True)
-        rejected = rejected_dir / (
-            f"{safe_slug(candidate.vendor)}_{safe_slug(candidate.model)}_"
-            f"{command_template_name(candidate.command)}"
-        )
-        target.replace(rejected)
-        remove_manifest_entry(
+        validation_payload = {
+            "key_contract_version": 1,
+            "sample_count": len(validation_candidate.samples),
+            "trigger_sample_count": trigger_sample_count,
+            "regression_sample_count": len(regression_samples),
+            "passed_samples": passed_samples,
+            "validation_pass_rate": pass_rate,
+            "samples": sample_results,
+            "entity_type": spec.entity_type,
+            "primary_keys": spec.primary_keys,
+            "required_fields": spec.required_fields,
+            "optional_fields": spec.optional_fields,
+            "validators": spec.validators,
+            "allow_empty": spec.allow_empty,
+            "empty_patterns": spec.empty_patterns or [],
+            "ignore_fields": spec.ignore_fields or [],
+            "contract_source": proposal.source,
+            "contract_confidence": proposal.confidence,
+            "contract_approval_status": "pending",
+            "regression_validation": {
+                "passed": pass_rate >= minimum_pass_rate,
+                "sample_count": len(regression_samples),
+                "passed_samples": sum(
+                    result.is_valid
+                    for result, detail in zip(
+                        validations, sample_results, strict=True
+                    )
+                    if str(detail["file_path"]).startswith("regression:")
+                ),
+                "minimum_pass_rate": minimum_pass_rate,
+            },
+            "identity_evidence": {
+                "command": candidate.evidence_command,
+                "text": candidate.evidence_text,
+                "confidence": candidate.confidence,
+            },
+        }
+        repository = ParserRepository()
+        template_id = repository.register_template(
             vendor=candidate.vendor,
             model=candidate.model,
+            family=candidate.family,
+            profile=candidate.model,
             command=candidate.command,
-            root=templates_dir,
+            category=category,
+            version=version,
+            asset_path=str(target),
+            sha256=digest,
+            validation=validation_payload,
+            source_job_id=source_job_id,
+            status="pending_approval",
         )
+        source_job = repository.get_job(source_job_id) if source_job_id else None
+        if (
+            source_job
+            and source_job.get("job_type") == "CREATE_TEMPLATE"
+            and candidate.family
+            and len(validation_candidate.samples) >= 2
+            and pass_rate >= 1.0
+            and repository.has_trusted_family(
+                vendor=candidate.vendor,
+                family=candidate.family,
+            )
+        ):
+            repository.activate_template(template_id)
+        generated = True
 
     all_records = [
         record for result in validations if result.is_valid for record in result.records
@@ -434,33 +499,23 @@ def _process_candidate(
 
 
 def generate_templates(params: dict[str, Any]) -> dict[str, Any]:
-    root = project_root()
     templates_dir = Path(params.get("templates_dir") or SHARED_TEXTFSM_ROOT)
     reports_dir = Path(params.get("reports_dir") or DEFAULT_REPORTS)
-    categories = load_categories(
-        Path(params.get("categories_config") or SKILL_ROOT / "config" / "command_categories.yaml")
-    )
     mappings = load_command_mapping(
-        Path(params.get("mapping_config") or SKILL_ROOT / "config" / "command_mapping.yaml")
-    )
-    aliases = load_command_aliases(
-        Path(params.get("command_aliases_config") or SKILL_ROOT / "config" / "command_aliases.yaml")
+        Path(params.get("mapping_config") or DEFAULT_MAPPING)
     )
     reports: list[GenerationReport] = []
     discovery_metadata: dict[str, Any] = {}
 
+    job_candidate = _job_candidate(params)
     direct = _direct_candidate(params, mappings)
-    if params.get("source_path"):
+    if job_candidate:
+        candidates = [job_candidate]
+        mode = "job"
+    elif params.get("source_path"):
         discovery = discover_directory_candidates(
             params["source_path"],
             mappings=mappings,
-            signatures=load_device_signatures(
-                Path(
-                    params.get("device_signatures_config")
-                    or SKILL_ROOT / "config" / "device_signatures.yaml"
-                )
-            ),
-            aliases=aliases,
             recursive=bool(params.get("recursive", True)),
             vendor=params.get("vendor"),
             model=params.get("model"),
@@ -480,8 +535,8 @@ def generate_templates(params: dict[str, Any]) -> dict[str, Any]:
         mode = "direct"
     else:
         database_items = discover_missing_template_candidates(
-            Path(params.get("patrol_db") or root / "db" / "patrol.db"),
-            Path(params.get("devices_db") or root / "db" / "devices.db"),
+            None,
+            None,
             mappings,
             vendor_filter=params.get("vendor"),
             model_filter=params.get("model"),
@@ -490,24 +545,29 @@ def generate_templates(params: dict[str, Any]) -> dict[str, Any]:
         candidates = _database_candidates(database_items)
         mode = "database"
 
+    publish = bool(params.get("publish", True))
+    if mode in {"direct", "directory"} and publish and candidates:
+        raise ValueError(
+            "direct and directory modes are discovery-only; publish from a "
+            "parser-validation database job"
+        )
+
     for candidate in candidates:
         reports.append(
             _process_candidate(
                 candidate,
-                categories=categories,
-                mappings=mappings,
                 templates_dir=templates_dir,
                 reports_dir=reports_dir,
                 max_retries=int(params.get("max_retries", 3)),
                 dry_run=bool(params.get("dry_run", False)),
-                publish=bool(params.get("publish", True)),
+                publish=publish,
                 force_overwrite=bool(
                     params.get("force_generate", mode == "direct")
                 ),
                 minimum_pass_rate=float(params.get("minimum_sample_pass_rate", 1.0)),
                 max_samples_per_prompt=int(params.get("max_samples_per_prompt", 3)),
-                explicit_category=str(params.get("category") or "").strip() or None,
                 mode=mode,
+                source_job_id=str(params.get("job_id") or "").strip() or None,
             )
         )
 
@@ -520,7 +580,14 @@ def generate_templates(params: dict[str, Any]) -> dict[str, Any]:
     passed = sum(report.passed_samples for report in reports)
     samples = sum(report.sample_count for report in reports)
     return {
-        "success": not discovery_metadata.get("unresolved_files"),
+        "success": (
+            not discovery_metadata.get("unresolved_files")
+            and all(
+                report.validation_pass_rate
+                >= float(params.get("minimum_sample_pass_rate", 1.0))
+                for report in reports
+            )
+        ),
         "message": (
             f"{mode} mode processed {len(reports)} candidate groups; "
             f"published {len(generated)} templates"

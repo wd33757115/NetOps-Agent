@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React, { useMemo, useState } from 'react'
-import { Card, Empty, Input, Modal, Select, Spin, Tag, Typography, message } from 'antd'
+import { Alert, Card, Empty, Input, Modal, Select, Spin, Tag, Typography, message } from 'antd'
 import {
   EyeOutlined,
   EditOutlined,
@@ -45,6 +45,9 @@ const WorkflowPluginList: React.FC<WorkflowPluginListProps> = ({ onCreateWizard,
   const [yamlContent, setYamlContent] = useState<string | null>(null)
   const [monitorRunId, setMonitorRunId] = useState<string | null>(null)
   const [governancePlugin, setGovernancePlugin] = useState<WorkflowPluginSummary | null>(null)
+  const [testPlugin, setTestPlugin] = useState<WorkflowPluginSummary | null>(null)
+  const [testContextText, setTestContextText] = useState('{}')
+  const [testContextError, setTestContextError] = useState<string | null>(null)
   const [testRunLoading, setTestRunLoading] = useState<string | null>(null)
   const [historyLoading, setHistoryLoading] = useState<string | null>(null)
 
@@ -105,21 +108,46 @@ const WorkflowPluginList: React.FC<WorkflowPluginListProps> = ({ onCreateWizard,
     }
   }
 
-  const handleTestRun = async (name: string) => {
-    setTestRunLoading(name)
+  const openTestRun = (plugin: WorkflowPluginSummary) => {
+    setTestPlugin(plugin)
+    setTestContextText(JSON.stringify(plugin.test_context || {}, null, 2))
+    setTestContextError(null)
+  }
+
+  const handleTestRun = async () => {
+    if (!testPlugin) return
+    let context: Record<string, unknown>
+    try {
+      const parsed = JSON.parse(testContextText)
+      if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+        throw new Error('试跑上下文必须是 JSON 对象')
+      }
+      context = parsed as Record<string, unknown>
+    } catch (err) {
+      setTestContextError(err instanceof Error ? err.message : 'JSON 格式错误')
+      return
+    }
+    const missing = (testPlugin.test_required_context || []).filter((field) => {
+      const value = context[field]
+      return value === null || value === undefined || (typeof value === 'string' && !value.trim())
+    })
+    if (missing.length > 0) {
+      setTestContextError(`请填写必填参数：${missing.join(', ')}`)
+      return
+    }
+
+    setTestRunLoading(testPlugin.name)
+    setTestContextError(null)
     try {
       const res = await workflowApi.testRun({
-        template_name: name,
-        context: {
-          ticket_id: 'REQ2025001',
-          analysis_prompt: '请总结变更风险',
-          analysis_focus: 'summary',
-        },
+        template_name: testPlugin.name,
+        context,
       })
       setMonitorRunId(res.run_id)
+      setTestPlugin(null)
       message.success('试跑已启动')
     } catch (err) {
-      message.error(err instanceof Error ? err.message : '试跑失败（需 admin 权限且 Celery 运行中）')
+      setTestContextError(err instanceof Error ? err.message : '试跑失败')
     } finally {
       setTestRunLoading(null)
     }
@@ -226,7 +254,7 @@ const WorkflowPluginList: React.FC<WorkflowPluginListProps> = ({ onCreateWizard,
                       <GrokToolBtn
                         icon={<PlayCircleOutlined />}
                         loading={testRunLoading === tpl.name}
-                        onClick={() => handleTestRun(tpl.name)}
+                        onClick={() => openTestRun(tpl)}
                       >
                         试跑
                       </GrokToolBtn>
@@ -267,6 +295,44 @@ const WorkflowPluginList: React.FC<WorkflowPluginListProps> = ({ onCreateWizard,
         open={!!governancePlugin}
         onClose={() => setGovernancePlugin(null)}
       />
+
+      <Modal
+        title={testPlugin ? `试跑 Workflow - ${testPlugin.name}` : '试跑 Workflow'}
+        open={!!testPlugin}
+        onCancel={() => {
+          if (!testRunLoading) {
+            setTestPlugin(null)
+            setTestContextError(null)
+          }
+        }}
+        onOk={handleTestRun}
+        okText="启动试跑"
+        cancelText="取消"
+        confirmLoading={!!testRunLoading}
+        width={720}
+      >
+        <Paragraph type="secondary">
+          参数由当前 Workflow 声明。平台只负责校验并传递上下文，不附加工单或其他业务字段。
+        </Paragraph>
+        {(testPlugin?.test_required_context || []).length > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <Text type="secondary">必填：</Text>
+            {testPlugin?.test_required_context?.map((field) => (
+              <Tag key={field} color="processing">{field}</Tag>
+            ))}
+          </div>
+        )}
+        {testContextError && (
+          <Alert type="error" showIcon message={testContextError} style={{ marginBottom: 12 }} />
+        )}
+        <Input.TextArea
+          value={testContextText}
+          onChange={(event) => setTestContextText(event.target.value)}
+          rows={16}
+          spellCheck={false}
+          style={{ fontFamily: 'monospace', fontSize: 12 }}
+        />
+      </Modal>
 
       <WorkflowRunMonitor runId={monitorRunId} onClose={() => setMonitorRunId(null)} />
     </>

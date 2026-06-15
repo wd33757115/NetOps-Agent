@@ -83,6 +83,7 @@ from src.gateway.artifacts_api import router as artifacts_router
 from src.gateway.workflow_api import router as workflow_router
 from src.gateway.notification_api import router as notification_router
 from src.gateway.events_api import router as events_router
+from src.gateway.parser_api import router as parser_router
 from src.gateway.schemas import (
     AddMessageRequest,
     ChatFileUploadRequest,
@@ -101,8 +102,11 @@ from src.gateway.schemas import (
     TaskResponse,
     UpdateConversationRequest,
 )
-from src.infrastructure.db.models import init_db_models
-from src.infrastructure.db.postgres import engine, verify_postgres_connection
+from src.infrastructure.db.migrations import require_database_schema_current
+from src.infrastructure.db.postgres import (
+    require_postgres_connection,
+    verify_postgres_connection,
+)
 
 CELERY_AVAILABLE = False
 EXECUTE_FIREWALL_POLICY_TASK = None
@@ -110,10 +114,12 @@ EXECUTE_FIREWALL_POLICY_TASK = None
 # =============================================================================
 # 数据库初始化（非阻塞，失败不阻止启动）
 # =============================================================================
-try:
-    init_db_models(engine)
-except Exception as e:
-    log.warning("db_auto_create_skipped", error=str(e))
+require_postgres_connection()
+require_database_schema_current()
+from src.core.parser.bootstrap import bootstrap_shared_templates
+
+parser_bootstrap = bootstrap_shared_templates()
+log.info("parser_assets_bootstrapped", **parser_bootstrap)
 
 
 # =============================================================================
@@ -158,14 +164,8 @@ async def lifespan(app: FastAPI):
         log.warning("redis_unavailable", error=str(e))
 
     # --- 启动：验证 PostgreSQL ---
-    try:
-        pg_ok = verify_postgres_connection()
-        if pg_ok:
-            log.info("postgres_connected", host=settings.POSTGRES_HOST, port=settings.POSTGRES_PORT)
-        else:
-            log.warning("postgres_connection_failed")
-    except Exception as e:
-        log.warning("postgres_unavailable", error=str(e))
+    require_postgres_connection()
+    log.info("postgres_connected", host=settings.POSTGRES_HOST, port=settings.POSTGRES_PORT)
 
     # --- 启动：预加载 RAG 服务 ---
     try:
@@ -274,6 +274,7 @@ app.include_router(artifacts_router)
 app.include_router(workflow_router)
 app.include_router(notification_router)
 app.include_router(events_router)
+app.include_router(parser_router)
 register_exception_handlers(app)
 
 # =============================================================================

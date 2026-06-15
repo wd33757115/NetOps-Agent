@@ -33,6 +33,22 @@ def test_load_patrol_change_event_workflow():
     assert tpl.steps[2].inputs["run_id"] == "${steps.patrol.result.snapshot_run_id}"
 
 
+def test_workflow_owns_test_context_contract():
+    from src.core.workflows.registry import missing_test_context
+
+    load_workflows(force=True)
+    tpl = get_template("parser-validation-ingest")
+
+    assert tpl is not None
+    assert tpl.test_context["dataset_id"] == "dev-test-previous-quarter"
+    assert tpl.test_required_context == ["file_path"]
+    assert missing_test_context(tpl, tpl.test_context) == ["file_path"]
+    assert missing_test_context(
+        tpl,
+        {**tpl.test_context, "file_path": "C:/captures"},
+    ) == []
+
+
 def test_patrol_chat_intent_has_no_ticket_requirement():
     from src.core.plugins.chat_intent import get_chat_intent_registry
 

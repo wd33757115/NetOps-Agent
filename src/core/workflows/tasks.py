@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 
+from billiard.exceptions import SoftTimeLimitExceeded
 from celery import chord
 
 from src.core.celery_tasks.celery_app import celery
@@ -20,12 +21,56 @@ logger = logging.getLogger(__name__)
 @celery.task(bind=True, name="execute_skill_task")
 def execute_skill_task(self, skill_name: str, **params):
     """通用 Skill 执行 Celery 任务。"""
+    from src.core.parser.repository import ParserJobStateError, ParserRepository
     from src.core.skills.executor import SkillExecutionError, execute_skill
 
+    job_id = str(params.get("job_id") or "") if skill_name == "textfsm-generator" else ""
+    repository = ParserRepository() if job_id else None
+    if repository:
+        try:
+            repository.transition_job_status(job_id, "running")
+        except ParserJobStateError as exc:
+            return {"success": False, "message": str(exc), "error": str(exc)}
+
     try:
-        return execute_skill(skill_name, params)
+        result = execute_skill(skill_name, params)
     except SkillExecutionError as exc:
+        if repository:
+            repository.transition_job_status(
+                job_id, "failed", str(exc), failure_code="skill_execution_failed"
+            )
         return {"success": False, "message": str(exc), "error": str(exc)}
+    except SoftTimeLimitExceeded:
+        if repository:
+            repository.transition_job_status(
+                job_id,
+                "failed",
+                "textfsm-generator exceeded the Celery soft time limit",
+                failure_code="worker_timeout",
+            )
+        raise
+    except Exception as exc:
+        if repository:
+            repository.transition_job_status(
+                job_id, "failed", str(exc), failure_code="worker_exception"
+            )
+        logger.exception("Skill execution failed skill=%s job=%s", skill_name, job_id or None)
+        raise
+
+    if repository:
+        current = repository.get_job(job_id)
+        if current and current["status"] == "cancelled":
+            return {"success": False, "message": "parser job cancelled", "error": "cancelled"}
+        success = bool((result or {}).get("success"))
+        repository.transition_job_status(
+            job_id,
+            "succeeded" if success else "failed",
+            None
+            if success
+            else str((result or {}).get("error") or (result or {}).get("message")),
+            failure_code=None if success else "generator_failed",
+        )
+    return result
 
 
 def _run_subworkflow_step(run_id: str, step_index: int, step_tpl) -> dict:

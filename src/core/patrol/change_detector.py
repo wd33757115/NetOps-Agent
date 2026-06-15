@@ -6,15 +6,16 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
+from src.core.parser.key_contract import EntityKeyError, index_records
 from src.core.patrol.command_splitter import canonicalize_command
-from src.core.patrol.snapshot_store import PatrolSnapshotStore, SnapshotRecord
+from src.core.patrol.change_event_repository import ChangeEventRepository
+from src.core.patrol.domain import SnapshotRecord
+from src.core.patrol.repository import PatrolRepository
 
 
 @dataclass(frozen=True)
@@ -63,20 +64,6 @@ def _normalize_records(value: Any) -> list[dict[str, Any]]:
     return [{"value": value}]
 
 
-def _entity_key(row: dict[str, Any], primary_keys: list[str]) -> str:
-    keys = primary_keys or ["id", "name", "interface", "port", "peer", "neighbor", "slot"]
-    lowered = {str(k).lower(): k for k in row}
-    parts: list[str] = []
-    for key in keys:
-        actual = key if key in row else lowered.get(key.lower())
-        if actual is not None:
-            parts.append(str(row.get(actual, "")))
-    if parts and any(parts):
-        return "|".join(parts)
-    stable = json.dumps(row, ensure_ascii=False, sort_keys=True)
-    return stable[:128]
-
-
 def detect_changes_between_values(
     previous: Any,
     current: Any,
@@ -93,8 +80,8 @@ def detect_changes_between_values(
     prev_rows = _normalize_records(previous)
     curr_rows = _normalize_records(current)
     primary_keys = primary_keys or []
-    prev_map = {_entity_key(row, primary_keys): row for row in prev_rows}
-    curr_map = {_entity_key(row, primary_keys): row for row in curr_rows}
+    prev_map = index_records(prev_rows, primary_keys)
+    curr_map = index_records(curr_rows, primary_keys)
     changes: list[NetworkChange] = []
 
     for key in sorted(set(prev_map) - set(curr_map)):
@@ -193,11 +180,17 @@ def detect_changes_between_snapshots(
                 confidence=0.5,
             )
         ]
+    resolved_entity_type = entity_type
+    resolved_primary_keys = primary_keys
+    if primary_keys is None:
+        resolved_entity_type, resolved_primary_keys = _snapshot_key_contract(
+            previous, current
+        )
     return detect_changes_between_values(
         previous.structured_json,
         current.structured_json,
-        entity_type=entity_type,
-        primary_keys=primary_keys,
+        entity_type=resolved_entity_type,
+        primary_keys=resolved_primary_keys,
         run_id=current.run_id,
         device_id=current.device_id,
         command=current.command_canonical,
@@ -206,74 +199,90 @@ def detect_changes_between_snapshots(
     )
 
 
-def ensure_change_table(db_path: str | Path) -> None:
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS netops_network_changes (
-                change_id TEXT PRIMARY KEY,
-                run_id TEXT,
-                device_id TEXT,
-                command TEXT,
-                entity_type TEXT NOT NULL,
-                entity_key TEXT NOT NULL,
-                field TEXT NOT NULL,
-                old_value TEXT,
-                new_value TEXT,
-                change_type TEXT NOT NULL,
-                previous_snapshot_id TEXT,
-                current_snapshot_id TEXT,
-                detected_at TEXT NOT NULL,
-                confidence REAL DEFAULT 1.0
-            );
-            CREATE INDEX IF NOT EXISTS idx_network_changes_run
-                ON netops_network_changes(run_id);
-            CREATE INDEX IF NOT EXISTS idx_network_changes_device
-                ON netops_network_changes(device_id);
-            """
+def _snapshot_key_contract(
+    previous: SnapshotRecord,
+    current: SnapshotRecord,
+) -> tuple[str, list[str]]:
+    """Resolve and compare the immutable entity identity contract."""
+    if not previous.parser_name or not current.parser_name:
+        raise EntityKeyError(
+            "structured snapshots require parser template metadata or explicit primary_keys"
         )
+    try:
+        from src.core.parser.repository import ParserRepository
+
+        repository = ParserRepository()
+        previous_template = repository.get_template(previous.parser_name)
+        current_template = repository.get_template(current.parser_name)
+    except Exception as exc:
+        raise EntityKeyError(f"unable to resolve parser key contract: {exc}") from exc
+    if not previous_template or not current_template:
+        raise EntityKeyError("parser template metadata was not found")
+
+    previous_validation = dict(previous_template.validation_json or {})
+    current_validation = dict(current_template.validation_json or {})
+    previous_contract = (
+        str(previous_validation.get("entity_type") or "record"),
+        tuple(previous_validation.get("primary_keys") or ()),
+    )
+    current_contract = (
+        str(current_validation.get("entity_type") or "record"),
+        tuple(current_validation.get("primary_keys") or ()),
+    )
+    if previous_contract != current_contract:
+        raise EntityKeyError(
+            "snapshot parser key contracts are incompatible: "
+            f"{previous_contract!r} != {current_contract!r}"
+        )
+    return current_contract[0], list(current_contract[1])
 
 
-def save_changes(db_path: str | Path, changes: list[NetworkChange]) -> None:
-    ensure_change_table(db_path)
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.executemany(
-            """
-            INSERT OR REPLACE INTO netops_network_changes
-            (
-                change_id, run_id, device_id, command, entity_type, entity_key,
-                field, old_value, new_value, change_type,
-                previous_snapshot_id, current_snapshot_id, detected_at, confidence
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                (
-                    c.change_id,
-                    c.run_id,
-                    c.device_id,
-                    c.command,
-                    c.entity_type,
-                    c.entity_key,
-                    c.field,
-                    _stringify(c.old_value),
-                    _stringify(c.new_value),
-                    c.change_type,
-                    c.previous_snapshot_id,
-                    c.current_snapshot_id,
-                    c.detected_at,
-                    c.confidence,
-                )
-                for c in changes
-            ],
-        )
+def detect_versioned_changes(
+    previous: SnapshotRecord,
+    current: SnapshotRecord,
+) -> list[NetworkChange] | None:
+    """Compare append-only parse revisions only when both use one parser version."""
+    try:
+        from src.core.parser.repository import ParserRepository
+
+        repository = ParserRepository()
+        previous_result = repository.get_latest_parse_result(previous.snapshot_id)
+        current_result = repository.get_latest_parse_result(current.snapshot_id)
+    except Exception:
+        return None
+    if not previous_result or not current_result:
+        return []
+    if (
+        previous_result["template_id"] != current_result["template_id"]
+        or previous_result["template_version"] != current_result["template_version"]
+    ):
+        return []
+    return detect_changes_between_values(
+        previous_result["structured_json"],
+        current_result["structured_json"],
+        entity_type=current_result["entity_type"],
+        primary_keys=current_result["primary_keys"],
+        run_id=current.run_id,
+        device_id=current.device_id,
+        command=current.command_canonical,
+        previous_snapshot_id=previous.snapshot_id,
+        current_snapshot_id=current.snapshot_id,
+    )
+
+
+def save_changes(changes: list[NetworkChange]) -> int:
+    return ChangeEventRepository().save_changes(changes)
 
 
 def detect_changes_from_params(params: dict[str, Any]) -> dict[str, Any]:
-    db_path = params.get("db_path") or params.get("patrol_db")
     entity_type = params.get("entity_type") or "record"
-    primary_keys = list(params.get("primary_keys") or [])
+    primary_keys = (
+        list(params.get("primary_keys") or [])
+        if "primary_keys" in params
+        else None
+    )
     persist = bool(params.get("persist", True))
+    use_versioned = bool(params.get("use_versioned_parser_results", False))
 
     if "previous_snapshot" in params or "current_snapshot" in params:
         changes = detect_changes_between_values(
@@ -285,11 +294,9 @@ def detect_changes_from_params(params: dict[str, Any]) -> dict[str, Any]:
             command=params.get("command"),
         )
     elif params.get("previous_snapshot_id") and params.get("current_snapshot_id"):
-        if not db_path:
-            raise ValueError("db_path is required when comparing snapshot IDs")
-        store = PatrolSnapshotStore(db_path)
-        previous = store.get_snapshot(str(params["previous_snapshot_id"]))
-        current = store.get_snapshot(str(params["current_snapshot_id"]))
+        repository = PatrolRepository()
+        previous = repository.get_snapshot(str(params["previous_snapshot_id"]))
+        current = repository.get_snapshot(str(params["current_snapshot_id"]))
         if not previous or not current:
             raise ValueError("snapshot not found")
         changes = detect_changes_between_snapshots(
@@ -299,23 +306,28 @@ def detect_changes_from_params(params: dict[str, Any]) -> dict[str, Any]:
             primary_keys=primary_keys,
         )
     elif params.get("previous_run_id") and params.get("current_run_id"):
-        if not db_path:
-            raise ValueError("db_path is required when comparing run IDs")
-        store = PatrolSnapshotStore(db_path)
-        current_snapshots = store.list_run_snapshots(
+        repository = PatrolRepository()
+        current_snapshots = repository.list_run_snapshots(
             str(params["current_run_id"]),
             device_id=params.get("device_id"),
         )
         changes = []
         for current in current_snapshots:
-            previous = store.find_snapshot(
+            previous = repository.find_snapshot(
                 run_id=str(params["previous_run_id"]),
                 device_id=current.device_id,
                 command_canonical=canonicalize_command(current.command_canonical),
             )
             if previous:
+                versioned = (
+                    detect_versioned_changes(previous, current)
+                    if use_versioned
+                    else None
+                )
                 changes.extend(
-                    detect_changes_between_snapshots(
+                    versioned
+                    if versioned is not None
+                    else detect_changes_between_snapshots(
                         previous,
                         current,
                         entity_type=entity_type,
@@ -323,13 +335,11 @@ def detect_changes_from_params(params: dict[str, Any]) -> dict[str, Any]:
                     )
                 )
     elif params.get("current_run_id"):
-        if not db_path:
-            raise ValueError("db_path is required when comparing current run with history")
         return detect_changes_against_history(
-            db_path,
             current_run_id=str(params["current_run_id"]),
             device_id=params.get("device_id"),
             persist=persist,
+            use_versioned_parser_results=use_versioned,
         )
     else:
         raise ValueError(
@@ -337,29 +347,32 @@ def detect_changes_from_params(params: dict[str, Any]) -> dict[str, Any]:
             "previous_run_id/current_run_id, or current_run_id"
         )
 
-    if db_path and persist:
-        save_changes(db_path, changes)
+    persisted_change_count = save_changes(changes) if persist else 0
     return {
         "success": True,
         "change_count": len(changes),
+        "persisted_change_count": persisted_change_count,
+        "storage": "postgresql",
         "changes": [c.to_dict() for c in changes],
     }
 
 
 def detect_changes_against_history(
-    db_path: str | Path,
+    storage_reference: str | None = None,
     *,
     current_run_id: str,
     device_id: str | None = None,
     persist: bool = True,
+    use_versioned_parser_results: bool = False,
 ) -> dict[str, Any]:
     """Compare every current snapshot with its latest prior snapshot."""
-    store = PatrolSnapshotStore(db_path)
+    del storage_reference
+    repository = PatrolRepository()
     changes: list[NetworkChange] = []
     compared_snapshots = 0
     baseline_snapshots = 0
-    for current in store.list_run_snapshots(current_run_id, device_id=device_id):
-        previous = store.find_previous_snapshot(
+    for current in repository.list_run_snapshots(current_run_id, device_id=device_id):
+        previous = repository.find_previous_snapshot(
             current_run_id=current_run_id,
             device_id=current.device_id,
             command_canonical=current.command_canonical,
@@ -368,15 +381,25 @@ def detect_changes_against_history(
             baseline_snapshots += 1
             continue
         compared_snapshots += 1
-        changes.extend(detect_changes_between_snapshots(previous, current))
+        versioned = (
+            detect_versioned_changes(previous, current)
+            if use_versioned_parser_results
+            else None
+        )
+        changes.extend(
+            versioned
+            if versioned is not None
+            else detect_changes_between_snapshots(previous, current)
+        )
 
-    if persist:
-        save_changes(db_path, changes)
+    persisted_change_count = save_changes(changes) if persist else 0
     return {
         "success": True,
         "current_run_id": current_run_id,
         "compared_snapshots": compared_snapshots,
         "baseline_snapshots": baseline_snapshots,
         "change_count": len(changes),
+        "persisted_change_count": persisted_change_count,
+        "storage": "postgresql",
         "changes": [change.to_dict() for change in changes],
     }
