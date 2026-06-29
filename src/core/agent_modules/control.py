@@ -81,7 +81,7 @@ def agent_module_control_violations(module_ids: list[str]) -> list[dict[str, Any
             .filter(AgentModuleControlRecord.module_id.in_(module_ids))
             .all()
         )
-    controls = {row.module_id: module_control_dict(row, row.module_id) for row in rows}
+        controls = {row.module_id: module_control_dict(row, row.module_id) for row in rows}
     violations: list[dict[str, Any]] = []
     for module_id in module_ids:
         control = controls.get(module_id, module_control_dict(None, module_id))

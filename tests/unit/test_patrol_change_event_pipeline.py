@@ -16,7 +16,12 @@ from src.core.patrol.change_detector import (
 from src.core.patrol.command_splitter import split_cli_capture
 from src.core.patrol.event_builder import build_events_from_changes
 from src.core.patrol.event_builder import build_events_from_params
-from src.core.patrol.raw_importer import import_raw_capture, import_raw_path
+from src.core.patrol.change_event_repository import ChangeEventRepository
+from src.core.patrol.raw_importer import (
+    _resolve_capture_device,
+    import_raw_capture,
+    import_raw_path,
+)
 from src.infrastructure.db.models import (
     CommandSnapshot,
     NetworkChangeRecord,
@@ -26,6 +31,7 @@ from src.infrastructure.db.models import (
     ParserTemplateJob,
     PatrolDataset,
     PatrolRun,
+    RawEvidenceRecord,
 )
 from src.infrastructure.db.postgres import get_db_session
 
@@ -194,6 +200,54 @@ def test_change_detector_ignores_status_case_noise():
     assert changes == []
 
 
+def test_observation_change_detector_emits_initial_changes(monkeypatch):
+    current = [
+        {
+            "id": "obs-1",
+            "run_id": "run-current",
+            "snapshot_id": "snapshot-1",
+            "device_id": "SW1",
+            "canonical_command": "display cpu",
+            "entity_type": "cpu",
+            "entity_key": "slot1",
+            "field_name": "cpu_5s",
+            "value_json": 98,
+            "value_number": 98,
+            "confidence": 1.0,
+        }
+    ]
+
+    class FakeStateRepository:
+        def list_run_observations(self, run_id, *, device_ids=None):
+            return current
+
+        def list_prior_observations_for_run(self, run_id):
+            return []
+
+    monkeypatch.setattr(
+        "src.core.patrol.change_detector.StateRepository",
+        FakeStateRepository,
+    )
+    monkeypatch.setattr(
+        "src.core.patrol.change_detector.save_changes",
+        lambda changes: len(changes),
+    )
+
+    result = detect_changes_from_params(
+        {
+            "current_run_id": "run-current",
+            "use_state_observations": True,
+            "persist": True,
+        }
+    )
+
+    assert result["baseline_observations"] == 1
+    assert result["initial_observations"] == 1
+    assert result["change_count"] == 1
+    assert result["changes"][0]["change_type"] == "initial"
+    assert result["changes"][0]["new"] == 98
+
+
 def test_event_builder_distinguishes_change_from_event():
     small_cpu_change = [
         {
@@ -229,6 +283,119 @@ def test_event_builder_distinguishes_change_from_event():
     assert high_cpu_event.payload["rule"] == {"rule_id": "cpu-high", "version": 1}
     assert interface_event.event_type == "InterfaceDown"
     assert interface_event.payload["rule"]["rule_id"] == "interface-down"
+
+
+def test_event_builder_handles_initial_abnormal_state():
+    initial_cpu_normal = [
+        {
+            "change_id": "initial-cpu-normal",
+            "device_id": "SW1",
+            "entity_type": "cpu",
+            "entity_key": "slot1",
+            "field": "cpu_5s",
+            "old": None,
+            "new": 30,
+            "change_type": "initial",
+        }
+    ]
+    initial_cpu_high = [{**initial_cpu_normal[0], "change_id": "initial-cpu-high", "new": 98}]
+    initial_interface_down = [
+        {
+            "change_id": "initial-interface-down",
+            "device_id": "SW1",
+            "entity_type": "interface_l3",
+            "entity_key": "Gi1/0/1",
+            "field": "protocol",
+            "old": None,
+            "new": "down",
+            "change_type": "initial",
+        }
+    ]
+
+    assert build_events_from_changes(initial_cpu_normal) == []
+    assert build_events_from_changes(initial_cpu_high)[0].event_type == "CPUHigh"
+    assert build_events_from_changes(initial_interface_down)[0].event_type == "InterfaceDown"
+
+
+def test_event_builder_suppresses_repeated_threshold_high_change():
+    repeated_high = [
+        {
+            "change_id": "cpu-still-high",
+            "device_id": "SW1",
+            "entity_type": "cpu",
+            "entity_key": "slot1",
+            "field": "cpu_5s",
+            "old": 91,
+            "new": 92,
+            "change_type": "modified",
+        }
+    ]
+
+    assert build_events_from_changes(repeated_high) == []
+
+
+def test_event_repository_dedupes_active_event_and_resolves_recovery():
+    run_id = f"test-{uuid.uuid4()}"
+    duplicate_high_changes = [
+        {
+            "change_id": f"change-high-{idx}",
+            "run_id": run_id,
+            "device_id": "SW1",
+            "entity_type": "cpu",
+            "entity_key": "slot1",
+            "field": "cpu_5s",
+            "old": None,
+            "new": 98 + idx,
+            "change_type": "initial",
+        }
+        for idx in range(2)
+    ]
+    recovery_change = [
+        {
+            "change_id": "change-recovered",
+            "run_id": run_id,
+            "device_id": "SW1",
+            "entity_type": "cpu",
+            "entity_key": "slot1",
+            "field": "cpu_5s",
+            "old": 92,
+            "new": 85,
+            "change_type": "modified",
+        }
+    ]
+    repository = ChangeEventRepository()
+    try:
+        high_events = build_events_from_changes(duplicate_high_changes)
+        assert len(high_events) == 2
+        assert repository.save_events(high_events) == 1
+
+        recovery_events = build_events_from_changes(recovery_change)
+        assert [event.event_type for event in recovery_events] == ["CPURecovered"]
+        assert repository.save_events(recovery_events) == 1
+
+        with get_db_session() as db:
+            high = (
+                db.query(NetworkEventRecord)
+                .filter(
+                    NetworkEventRecord.run_id == run_id,
+                    NetworkEventRecord.event_type == "CPUHigh",
+                )
+                .one()
+            )
+            recovered = (
+                db.query(NetworkEventRecord)
+                .filter(
+                    NetworkEventRecord.run_id == run_id,
+                    NetworkEventRecord.event_type == "CPURecovered",
+                )
+                .one()
+            )
+            assert high.status == "resolved"
+            assert high.payload_json["latest_source_change_id"] == "change-high-1"
+            assert high.payload_json["recovered_by_event_type"] == "CPURecovered"
+            assert recovered.status == "open"
+    finally:
+        _cleanup_runs(run_id)
 
 
 def test_event_builder_detects_memory_high():
@@ -345,6 +512,19 @@ def test_import_and_raw_hash_change_roundtrip(tmp_path: Path):
         _cleanup_runs(run1, run2)
 
 
+def test_offline_import_prefers_asset_name_from_filename_over_prompt_alias(tmp_path: Path):
+    source = tmp_path / "XA-FOTIC-RT5620-1-10.34.2.219_2025-12-24_14-51-48.txt"
+    text = """<XA-FOTIC-DCHL-RT5620-1>display version
+H3C Comware Software
+"""
+
+    device_name, ip, inspected = _resolve_capture_device(path=source, text=text)
+
+    assert device_name == "XA-FOTIC-RT5620-1"
+    assert ip == "10.34.2.219"
+    assert inspected.device_name == "XA-FOTIC-DCHL-RT5620-1"
+
+
 def test_import_raw_path_batches_directory_into_one_run(tmp_path: Path):
     source = tmp_path / "captures"
     source.mkdir()
@@ -386,6 +566,71 @@ def test_raw_import_fails_before_writing_when_postgres_is_unavailable(
         import_raw_capture(file_path=source, db_path=db)
 
     assert not db.exists()
+
+
+def test_production_import_preserves_evidence_when_parser_fails(
+    tmp_path: Path, monkeypatch
+):
+    source = tmp_path / "SW1-10.0.0.1.log"
+    source.write_text(CISCO_SAMPLE, encoding="utf-8")
+    run_id = f"test-{uuid.uuid4()}"
+
+    def fake_check_coverage(self, *, identity, command):
+        return {
+            "canonical_command": command,
+            "policy_status": "eligible",
+            "identity_status": "known",
+            "coverage_status": "ready",
+            "template_id": "template-1",
+            "template_version": "v1",
+            "failure_code": None,
+        }
+
+    def fake_parse(self, *, identity, command, raw_text):
+        raise RuntimeError("broken parser")
+
+    monkeypatch.setattr(
+        "src.core.patrol.raw_importer.ParserRuntime.check_coverage",
+        fake_check_coverage,
+    )
+    monkeypatch.setattr(
+        "src.core.patrol.raw_importer.ParserRuntime.parse",
+        fake_parse,
+    )
+
+    try:
+        result = import_raw_capture(
+            file_path=source,
+            mode="production",
+            run_id=run_id,
+            vendor="Cisco",
+            model="WS-C2960XR-24TS-I",
+            metadata={"dataset_id": f"test-{uuid.uuid4()}"},
+        )
+
+        assert result["success"] is True
+        assert result["production_parser_ready"] is False
+        assert result["parse_violations"]
+        with get_db_session() as db:
+            snapshots = (
+                db.query(CommandSnapshot)
+                .filter(CommandSnapshot.run_id == run_id)
+                .all()
+            )
+            assert snapshots
+            assert {row.parse_status for row in snapshots} == {"parse_failed"}
+            evidence_count = (
+                db.query(RawEvidenceRecord)
+                .filter(
+                    RawEvidenceRecord.source_snapshot_id.in_(
+                        [row.id for row in snapshots]
+                    )
+                )
+                .count()
+            )
+            assert evidence_count == len(snapshots)
+    finally:
+        _cleanup_runs(run_id)
 
 
 def test_completed_patrol_run_only_persists_snapshots(tmp_path: Path):

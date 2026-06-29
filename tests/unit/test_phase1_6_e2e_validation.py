@@ -46,36 +46,42 @@ def test_phase1_6_validation_main_reports_real_postgres_failure(capsys, monkeypa
 def test_snapshot_summary_groups_parser_coverage_gaps():
     rows = [
         SimpleNamespace(
+            device_id="SW1",
             parse_status="parsed",
             vendor="Cisco",
             model="N9K-C9364C",
             canonical_command="show version",
         ),
         SimpleNamespace(
+            device_id="SW1",
             parse_status="parse_empty",
             vendor="Cisco",
             model="N9K-C9364C",
             canonical_command="show vrrp brief",
         ),
         SimpleNamespace(
+            device_id="SW1",
             parse_status="template_missing",
             vendor="Cisco",
             model="N9K-C9364C",
             canonical_command="show inventory",
         ),
         SimpleNamespace(
+            device_id="SW2",
             parse_status="template_missing",
             vendor="Cisco",
             model="N9K-C9364C",
             canonical_command="show inventory",
         ),
         SimpleNamespace(
+            device_id="SW3",
             parse_status="parse_failed",
             vendor="H3C",
             model="S6860-54HF",
             canonical_command="display fan",
         ),
         SimpleNamespace(
+            device_id="SW3",
             parse_status="ignored",
             vendor="H3C",
             model="S6860-54HF",
@@ -89,6 +95,15 @@ def test_snapshot_summary_groups_parser_coverage_gaps():
     assert summary["eligible_snapshot_count"] == 5
     assert summary["structured_snapshot_count"] == 2
     assert summary["coverage_rate"] == 0.4
+    assert summary["devices"] == {"SW1": 3, "SW3": 2, "SW2": 1}
     assert summary["template_missing_by_command"] == {"show inventory": 2}
     assert summary["template_missing_by_model"] == {"Cisco N9K-C9364C": 2}
     assert summary["parse_failed_by_command"] == {"display fan": 1}
+
+
+def test_parse_device_ids_accepts_repeat_and_csv_values():
+    result = phase1_6_e2e_validation._parse_device_ids(
+        ["SW1, SW2", "SW1", " ", "SW3"]
+    )
+
+    assert result == ["SW1", "SW2", "SW3"]

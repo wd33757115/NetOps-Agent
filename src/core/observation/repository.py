@@ -110,6 +110,12 @@ class ObservationContractRepository:
                 created_at=now,
             )
             db.add(row)
+        elif row.contract_sha256 != payload["contract_sha256"]:
+            raise ValueError(
+                "observation contract version is immutable; create a new version "
+                f"for {payload['source_type']}:{payload['schema_id']} "
+                f"v{payload['version']}"
+            )
         if payload["status"] == "active":
             (
                 db.query(ObservationContractRecord)
@@ -129,18 +135,21 @@ class ObservationContractRepository:
                 )
             )
             row.activated_at = row.activated_at or now
-        row.schema_ref = payload["schema_ref"]
-        row.source_template_id = payload["source_template_id"]
-        row.entity_type = payload["entity_type"]
-        row.primary_keys_json = list(payload["primary_keys"])
-        row.required_fields_json = list(payload["required_fields"])
-        row.optional_fields_json = list(payload["optional_fields"])
-        row.validators_json = payload["validators"]
-        row.ignore_fields_json = list(payload["ignore_fields"])
-        row.allow_empty = bool(payload["allow_empty"])
-        row.empty_patterns_json = list(payload["empty_patterns"])
-        row.state_semantics_json = payload["state_semantics"]
-        row.contract_sha256 = payload["contract_sha256"]
+        if row.schema_ref is None:
+            row.schema_ref = payload["schema_ref"]
+        if row.source_template_id is None:
+            row.source_template_id = payload["source_template_id"]
+        if row.entity_type is None:
+            row.entity_type = payload["entity_type"]
+            row.primary_keys_json = list(payload["primary_keys"])
+            row.required_fields_json = list(payload["required_fields"])
+            row.optional_fields_json = list(payload["optional_fields"])
+            row.validators_json = payload["validators"]
+            row.ignore_fields_json = list(payload["ignore_fields"])
+            row.allow_empty = bool(payload["allow_empty"])
+            row.empty_patterns_json = list(payload["empty_patterns"])
+            row.state_semantics_json = payload["state_semantics"]
+            row.contract_sha256 = payload["contract_sha256"]
         row.status = payload["status"]
         row.updated_at = now
         db.flush()

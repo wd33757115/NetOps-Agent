@@ -62,6 +62,19 @@ def _top(counter: Counter[str], *, limit: int = 20) -> dict[str, int]:
     return dict(counter.most_common(limit))
 
 
+def _parse_device_ids(values: list[str] | None) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values or []:
+        for item in str(value).split(","):
+            device_id = item.strip()
+            if not device_id or device_id in seen:
+                continue
+            seen.add(device_id)
+            result.append(device_id)
+    return result
+
+
 def _row_value(row: Any, name: str) -> Any:
     if isinstance(row, dict):
         return row.get(name)
@@ -74,6 +87,9 @@ def _snapshot_summary_from_rows(rows: list[Any]) -> dict[str, Any]:
     )
     command_counter = Counter(
         str(_row_value(row, "canonical_command") or "unknown") for row in rows
+    )
+    device_counter = Counter(
+        str(_row_value(row, "device_id") or "unknown") for row in rows
     )
     vendor_counter = Counter(str(_row_value(row, "vendor") or "unknown") for row in rows)
     model_counter = Counter(str(_row_value(row, "model") or "unknown") for row in rows)
@@ -103,6 +119,7 @@ def _snapshot_summary_from_rows(rows: list[Any]) -> dict[str, Any]:
     return {
         "snapshot_count": len(rows),
         "parse_status": dict(status_counter),
+        "devices": _top(device_counter),
         "vendors": dict(vendor_counter),
         "models": dict(model_counter),
         "commands": _top(command_counter),
@@ -121,19 +138,35 @@ def _snapshot_summary_from_rows(rows: list[Any]) -> dict[str, Any]:
     }
 
 
-def _snapshot_summary(run_id: str) -> dict[str, Any]:
+def _snapshot_summary(
+    run_id: str,
+    *,
+    device_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    with get_db_session() as db:
+        query = db.query(
+            CommandSnapshot.device_id,
+            CommandSnapshot.parse_status,
+            CommandSnapshot.vendor,
+            CommandSnapshot.model,
+            CommandSnapshot.canonical_command,
+        ).filter(CommandSnapshot.run_id == run_id)
+        if device_ids:
+            query = query.filter(CommandSnapshot.device_id.in_(device_ids))
+        rows = query.all()
+    return _snapshot_summary_from_rows(list(rows))
+
+
+def _run_device_ids(run_id: str) -> list[str]:
     with get_db_session() as db:
         rows = (
-            db.query(
-                CommandSnapshot.parse_status,
-                CommandSnapshot.vendor,
-                CommandSnapshot.model,
-                CommandSnapshot.canonical_command,
-            )
+            db.query(CommandSnapshot.device_id)
             .filter(CommandSnapshot.run_id == run_id)
+            .distinct()
+            .order_by(CommandSnapshot.device_id)
             .all()
         )
-    return _snapshot_summary_from_rows(list(rows))
+    return [str(row[0]) for row in rows]
 
 
 def _write_markdown(path: Path, summary: dict[str, Any]) -> None:
@@ -145,6 +178,9 @@ def _write_markdown(path: Path, summary: dict[str, Any]) -> None:
         f"- Current Source: `{summary['current_source']}`",
         f"- Previous Run: `{summary['previous_run_id']}`",
         f"- Current Run: `{summary['current_run_id']}`",
+        f"- Validation Scope: `{summary['validation_scope']}`",
+        f"- Validation Devices: `{', '.join(summary['validation_device_ids']) or 'all imported devices'}`",
+        f"- Missing Requested Devices: `{', '.join(summary.get('missing_validation_device_ids') or []) or '-'}`",
         "",
         "## Import Preview",
         "",
@@ -343,23 +379,58 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     )
     previous_run_id = previous_import["run_id"]
     current_run_id = current_import["run_id"]
+    requested_device_ids = _parse_device_ids(args.device_id)
+    if requested_device_ids:
+        previous_devices = set(_run_device_ids(previous_run_id))
+        current_devices = set(_run_device_ids(current_run_id))
+        device_ids = [
+            device_id
+            for device_id in requested_device_ids
+            if device_id in previous_devices and device_id in current_devices
+        ]
+        missing_device_ids = [
+            device_id
+            for device_id in requested_device_ids
+            if device_id not in previous_devices or device_id not in current_devices
+        ]
+        if not device_ids:
+            raise ValueError(
+                "none of the requested validation devices exists in both datasets: "
+                + ", ".join(requested_device_ids)
+            )
+    else:
+        device_ids = []
+        missing_device_ids = []
 
     previous_state = normalize_state_from_params(
-        {"run_id": previous_run_id, "update_current_state": False}
+        {
+            "run_id": previous_run_id,
+            "update_current_state": False,
+            "device_ids": device_ids or None,
+        }
     )
     current_state = normalize_state_from_params(
-        {"run_id": current_run_id, "update_current_state": False}
+        {
+            "run_id": current_run_id,
+            "update_current_state": False,
+            "device_ids": device_ids or None,
+        }
     )
     change_result = detect_changes_from_params(
         {
             "previous_run_id": previous_run_id,
             "current_run_id": current_run_id,
             "use_state_observations": True,
+            "device_ids": device_ids or None,
             "persist": True,
         }
     )
     event_result = build_events_from_params(
-        {"run_id": current_run_id, "persist": True, "publish": False}
+        {
+            "changes": change_result.get("changes") or [],
+            "persist": True,
+            "publish": False,
+        }
     )
     generated_report = render_run_report(
         run_id=current_run_id,
@@ -373,12 +444,23 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "current_source": str(current_source),
         "previous_run_id": previous_run_id,
         "current_run_id": current_run_id,
+        "validation_scope": "selected_devices" if device_ids else "all_imported_devices",
+        "validation_device_ids": device_ids,
+        "missing_validation_device_ids": missing_device_ids,
         "previous_preview": previous_preview,
         "current_preview": current_preview,
         "previous_import": previous_import,
         "current_import": current_import,
-        "previous_snapshots": _snapshot_summary(previous_run_id),
-        "current_snapshots": _snapshot_summary(current_run_id),
+        "previous_snapshots": _snapshot_summary(
+            previous_run_id,
+            device_ids=device_ids or None,
+        ),
+        "current_snapshots": _snapshot_summary(
+            current_run_id,
+            device_ids=device_ids or None,
+        ),
+        "previous_all_snapshots": _snapshot_summary(previous_run_id),
+        "current_all_snapshots": _snapshot_summary(current_run_id),
         "previous_state": {
             key: value for key, value in previous_state.items() if key != "results"
         },
@@ -422,6 +504,14 @@ def main() -> int:
     parser.add_argument("--current-run-id")
     parser.add_argument("--previous-dataset-id")
     parser.add_argument("--current-dataset-id")
+    parser.add_argument(
+        "--device-id",
+        action="append",
+        help=(
+            "limit validation to one or more device IDs; repeat the option or pass "
+            "comma-separated values. Import preview still scans the whole directory."
+        ),
+    )
     args = parser.parse_args()
     try:
         result = run(args)

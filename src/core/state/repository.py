@@ -58,49 +58,67 @@ class StateRepository:
                 "dataset_id": snapshot.dataset_id or run.dataset_id,
             }
 
-    def list_run_snapshot_ids(self, run_id: str) -> list[str]:
+    def list_run_snapshot_ids(
+        self,
+        run_id: str,
+        *,
+        device_ids: list[str] | None = None,
+    ) -> list[str]:
         with get_db_session() as db:
+            query = db.query(CommandSnapshot.id).filter(CommandSnapshot.run_id == run_id)
+            if device_ids:
+                query = query.filter(CommandSnapshot.device_id.in_(device_ids))
             return [
                 row[0]
-                for row in db.query(CommandSnapshot.id)
-                .filter(CommandSnapshot.run_id == run_id)
-                .order_by(CommandSnapshot.device_id, CommandSnapshot.canonical_command)
-                .all()
+                for row in query.order_by(
+                    CommandSnapshot.device_id,
+                    CommandSnapshot.canonical_command,
+                ).all()
             ]
 
-    def list_run_observations(self, run_id: str) -> list[dict[str, Any]]:
+    def list_run_observations(
+        self,
+        run_id: str,
+        *,
+        device_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         with get_db_session() as db:
-            rows = (
-                db.query(StateObservationRecord)
-                .filter(StateObservationRecord.run_id == run_id)
-                .order_by(
-                    StateObservationRecord.device_id,
-                    StateObservationRecord.entity_type,
-                    StateObservationRecord.entity_key,
-                    StateObservationRecord.field_name,
-                    StateObservationRecord.observed_at,
-                )
-                .all()
+            query = db.query(StateObservationRecord).filter(
+                StateObservationRecord.run_id == run_id
             )
+            if device_ids:
+                query = query.filter(StateObservationRecord.device_id.in_(device_ids))
+            rows = query.order_by(
+                StateObservationRecord.device_id,
+                StateObservationRecord.entity_type,
+                StateObservationRecord.entity_key,
+                StateObservationRecord.field_name,
+                StateObservationRecord.observed_at,
+            ).all()
             return [row.to_dict() for row in rows]
 
-    def list_observations_for_runs(self, run_ids: list[str]) -> list[dict[str, Any]]:
+    def list_observations_for_runs(
+        self,
+        run_ids: list[str],
+        *,
+        device_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         if not run_ids:
             return []
         with get_db_session() as db:
-            rows = (
-                db.query(StateObservationRecord)
-                .filter(StateObservationRecord.run_id.in_(run_ids))
-                .order_by(
-                    StateObservationRecord.run_id,
-                    StateObservationRecord.device_id,
-                    StateObservationRecord.entity_type,
-                    StateObservationRecord.entity_key,
-                    StateObservationRecord.field_name,
-                    StateObservationRecord.observed_at,
-                )
-                .all()
+            query = db.query(StateObservationRecord).filter(
+                StateObservationRecord.run_id.in_(run_ids)
             )
+            if device_ids:
+                query = query.filter(StateObservationRecord.device_id.in_(device_ids))
+            rows = query.order_by(
+                StateObservationRecord.run_id,
+                StateObservationRecord.device_id,
+                StateObservationRecord.entity_type,
+                StateObservationRecord.entity_key,
+                StateObservationRecord.field_name,
+                StateObservationRecord.observed_at,
+            ).all()
             return [row.to_dict() for row in rows]
 
     def find_previous_observation(self, observation: dict[str, Any]) -> dict[str, Any] | None:
@@ -211,6 +229,11 @@ class StateRepository:
             .first()
         )
         now = datetime.now(timezone.utc)
+        incoming_observed_at = _datetime(item.observed_at)
+        if row is not None and row.observed_at is not None:
+            current_observed_at = _datetime(row.observed_at)
+            if incoming_observed_at <= current_observed_at:
+                return 0
         if row is None:
             row = CurrentStateRecord(
                 id=item.observation_id,
@@ -235,7 +258,7 @@ class StateRepository:
         row.source_snapshot_id = item.snapshot_id
         row.source_evidence_id = item.evidence_id
         row.schema_id = item.schema_id
-        row.observed_at = _datetime(item.observed_at)
+        row.observed_at = incoming_observed_at
         row.version = int(row.version or 0) + 1
         row.confidence = item.confidence
         row.metadata_json = item.metadata or {}

@@ -61,31 +61,38 @@ def _patch_collection_db(monkeypatch, tmp_path):
     return session_factory
 
 
-def test_collection_policy_uses_configured_commands():
+def test_collection_policy_uses_active_profile_and_collector_options(monkeypatch):
+    monkeypatch.setattr(
+        CollectionPolicyResolver,
+        "_load_active_profile",
+        lambda self, profile_name, action: {
+            "profile_version_id": "profile-v2",
+            "commands": ["display version", "display interface brief"],
+        },
+    )
+
     plan = CollectionPolicyResolver().build_plan(
         device={
             "device_id": "device-1",
-            "vendor": "Cisco",
-            "command_file": "core-switch-patrol",
+            "vendor": "H3C",
+            "command_file": "h3c-general",
             "credential_ref": "env:NETOPS_PASSWORD",
             "attributes": {
-                "patrol_commands": ["show version", "show inventory"],
-                "patrol_profile_version_id": "profile-v2",
                 "collector_options": {"read_timeout": 30, "netmiko_device_type": "generic"},
-                "patrol_collector_options": {"read_timeout": 90, "netmiko_device_type": "cisco_ios"},
+                "patrol_collector_options": {"read_timeout": 90, "netmiko_device_type": "hp_comware"},
             },
         },
         action="patrol",
         mode="production",
     )
 
-    assert plan.profile_name == "core-switch-patrol"
+    assert plan.profile_name == "h3c-general"
     assert plan.profile_version_id == "profile-v2"
-    assert plan.policy_source == "device_attributes"
+    assert plan.policy_source == "device_profile"
     assert plan.credential_ref == "env:NETOPS_PASSWORD"
-    assert plan.collector_options == {"read_timeout": 90, "netmiko_device_type": "cisco_ios"}
-    assert plan.command_texts() == ["show version", "show inventory"]
-    assert plan.to_metadata()["collection_items"][0]["command"] == "show version"
+    assert plan.collector_options == {"read_timeout": 90, "netmiko_device_type": "hp_comware"}
+    assert plan.command_texts() == ["display version", "display interface brief"]
+    assert plan.to_metadata()["collection_items"][0]["command"] == "display version"
     assert plan.to_metadata()["device_id"] == "device-1"
     assert plan.to_metadata()["action"] == "patrol"
     assert plan.to_metadata()["mode"] == "production"
@@ -93,15 +100,16 @@ def test_collection_policy_uses_configured_commands():
     assert plan.to_metadata()["collector_options"]["read_timeout"] == 90
 
 
-def test_collection_policy_defaults_by_vendor():
+def test_collection_policy_does_not_create_default_commands():
     plan = CollectionPolicyResolver().build_plan(
         device={"device_id": "device-1", "vendor": "Cisco", "attributes": {}},
         action="patrol",
         mode="production",
     )
 
-    assert "show interface status" in plan.command_texts()
+    assert plan.command_texts() == []
     assert plan.policy_source == "default"
+    assert plan.profile_version_id is None
 
 
 def test_collection_policy_prefers_active_profile(monkeypatch):
@@ -228,7 +236,7 @@ def test_command_profile_rollback_reactivates_old_version(monkeypatch, tmp_path)
     assert versions[second]["version_status"] == "deprecated"
 
 
-def test_command_profile_activation_requires_clean_coverage(monkeypatch, tmp_path):
+def test_command_profile_activation_requires_saved_impact_evidence(monkeypatch, tmp_path):
     _patch_collection_db(monkeypatch, tmp_path)
     repository = CommandProfileRepository()
     version_id = repository.create_profile_version(
@@ -245,11 +253,10 @@ def test_command_profile_activation_requires_clean_coverage(monkeypatch, tmp_pat
         {
             "matched_device_count": 1,
             "blocked_device_count": 1,
-            "blocked_command_count": 0,
+            "blocked_command_count": 1,
         },
     )
-    with pytest.raises(ValueError, match="blocked devices"):
-        repository.validate_profile_activation(version_id)
+    repository.validate_profile_activation(version_id)
 
     saved = repository.record_profile_coverage(
         version_id,
@@ -263,6 +270,29 @@ def test_command_profile_activation_requires_clean_coverage(monkeypatch, tmp_pat
     repository.validate_profile_activation(version_id)
     assert saved["coverage"]["coverage_rate"] == 1.0
     assert saved["coverage"]["recorded_at"]
+
+
+def test_command_profile_delete_version_keeps_active_versions_safe(monkeypatch, tmp_path):
+    _patch_collection_db(monkeypatch, tmp_path)
+    repository = CommandProfileRepository()
+    draft_id = repository.create_profile_version(
+        name="core-patrol",
+        action="patrol",
+        commands=["show version"],
+    )
+    deleted = repository.delete_profile_version(draft_id)
+    assert deleted["success"] is True
+    assert deleted["profile_deleted"] is True
+    assert repository.get_profile_version(draft_id) is None
+
+    active_id = repository.create_profile_version(
+        name="core-patrol",
+        action="patrol",
+        commands=["show version"],
+        status="active",
+    )
+    with pytest.raises(ValueError, match="active command profile version cannot be deleted"):
+        repository.delete_profile_version(active_id)
 
 
 def test_execution_plan_from_metadata_validates_and_round_trips():

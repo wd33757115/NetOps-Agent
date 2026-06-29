@@ -36,6 +36,7 @@ def test_load_patrol_change_event_workflow():
         == "${steps.patrol.result.snapshot_run_id}"
     )
     assert tpl.steps[1].inputs["run_id"] == "${steps.patrol.result.snapshot_run_id}"
+    assert "update_current_state" not in tpl.steps[1].inputs
     assert tpl.steps[2].inputs["use_state_observations"] is True
     assert tpl.steps[3].inputs["run_id"] == "${steps.patrol.result.snapshot_run_id}"
 

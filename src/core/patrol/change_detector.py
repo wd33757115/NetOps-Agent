@@ -388,6 +388,12 @@ def detect_changes_from_params(params: dict[str, Any]) -> dict[str, Any]:
     use_state_observations = bool(params.get("use_state_observations", False))
 
     if params.get("current_run_id") and use_state_observations:
+        device_ids = params.get("device_ids")
+        if not device_ids and params.get("device_id"):
+            device_ids = [str(params["device_id"])]
+        kwargs: dict[str, Any] = {}
+        if device_ids:
+            kwargs["device_ids"] = device_ids
         return detect_observation_changes_against_history(
             current_run_id=str(params["current_run_id"]),
             previous_run_id=(
@@ -396,6 +402,7 @@ def detect_changes_from_params(params: dict[str, Any]) -> dict[str, Any]:
                 else None
             ),
             persist=persist,
+            **kwargs,
         )
     if "previous_snapshot" in params or "current_snapshot" in params:
         changes = detect_changes_between_values(
@@ -474,6 +481,7 @@ def detect_observation_changes_against_history(
     *,
     current_run_id: str,
     previous_run_id: str | None = None,
+    device_ids: list[str] | None = None,
     persist: bool = True,
 ) -> dict[str, Any]:
     repository = StateRepository()
@@ -481,15 +489,27 @@ def detect_observation_changes_against_history(
     compared_observations = 0
     baseline_observations = 0
     detected_at = _now()
-    current_observations = repository.list_run_observations(current_run_id)
+    if device_ids:
+        current_observations = repository.list_run_observations(
+            current_run_id,
+            device_ids=device_ids,
+        )
+    else:
+        current_observations = repository.list_run_observations(current_run_id)
     current_by_key = {_state_key(item): item for item in current_observations}
     current_collections = {_collection_key(item) for item in current_observations}
     prior_by_key: dict[str, dict[str, Any]] = {}
-    prior_observations = (
-        repository.list_observations_for_runs([previous_run_id])
-        if previous_run_id
-        else repository.list_prior_observations_for_run(current_run_id)
-    )
+    if previous_run_id:
+        prior_observations = (
+            repository.list_observations_for_runs(
+                [previous_run_id],
+                device_ids=device_ids,
+            )
+            if device_ids
+            else repository.list_observations_for_runs([previous_run_id])
+        )
+    else:
+        prior_observations = repository.list_prior_observations_for_run(current_run_id)
     prior_collections = {_collection_key(item) for item in prior_observations}
     for prior in prior_observations:
         prior_by_key.setdefault(_state_key(prior), prior)
@@ -508,6 +528,15 @@ def detect_observation_changes_against_history(
                 )
             else:
                 baseline_observations += 1
+                changes.append(
+                    _observation_to_change(
+                        previous=None,
+                        current=current,
+                        run_id=current_run_id,
+                        change_type="initial",
+                        detected_at=detected_at,
+                    )
+                )
             continue
         compared_observations += 1
         old = previous.get("value_json")
@@ -543,8 +572,12 @@ def detect_observation_changes_against_history(
         "success": True,
         "current_run_id": current_run_id,
         "previous_run_id": previous_run_id,
+        "device_ids": device_ids or [],
         "compared_observations": compared_observations,
         "baseline_observations": baseline_observations,
+        "initial_observations": sum(
+            1 for change in changes if change.change_type == "initial"
+        ),
         "added_observations": sum(1 for change in changes if change.change_type == "added"),
         "deleted_observations": sum(
             1 for change in changes if change.change_type == "deleted"

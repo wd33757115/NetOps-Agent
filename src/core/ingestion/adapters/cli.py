@@ -120,6 +120,28 @@ def connect_cli_device(
     )
 
 
+def connect_cli_device_with_retries(
+    device: dict[str, Any],
+    *,
+    connector: Callable[[dict[str, Any]], Any] = connect_cli_device,
+) -> Any:
+    """Connect to a CLI device with a small retry window for virtual-lab SSH flaps."""
+    attributes = dict(device.get("attributes") or {})
+    attempts = max(1, _safe_int(attributes.get("connection_attempts"), 3))
+    delay = max(0.0, _safe_float(attributes.get("connection_retry_delay"), 1.0))
+    last_exc: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return connector(device)
+        except Exception as exc:
+            last_exc = exc
+            if attempt >= attempts:
+                break
+            time.sleep(delay)
+    assert last_exc is not None
+    raise last_exc
+
+
 def test_cli_connectivity(
     device: dict[str, Any],
     *,
@@ -129,7 +151,7 @@ def test_cli_connectivity(
     started = time.perf_counter()
     connection = None
     try:
-        connection = connector(device)
+        connection = connect_cli_device_with_retries(device, connector=connector)
         prompt = ""
         find_prompt = getattr(connection, "find_prompt", None)
         if callable(find_prompt):
@@ -210,7 +232,10 @@ class CLICommandCollector(IngestionAdapter):
             dict(effective_device.get("attributes") or {}).get("read_timeout"),
             60,
         )
-        connection = self.connector(effective_device)
+        connection = connect_cli_device_with_retries(
+            effective_device,
+            connector=self.connector,
+        )
         sections: list[str] = []
         try:
             for command in execution_plan.command_texts():

@@ -205,6 +205,24 @@ def test_command_profile_rollback_endpoint(monkeypatch):
     assert result["version_status"] == "active"
 
 
+def test_command_profile_delete_endpoint(monkeypatch):
+    class FakeRepository:
+        def delete_profile_version(self, profile_version_id):
+            assert profile_version_id == "profile-version-1"
+            return {
+                "success": True,
+                "profile_version_id": profile_version_id,
+                "profile_deleted": True,
+            }
+
+    monkeypatch.setattr(parser_api, "CommandProfileRepository", FakeRepository)
+
+    result = parser_api.delete_command_profile("profile-version-1")
+
+    assert result["success"] is True
+    assert result["profile_deleted"] is True
+
+
 def test_command_profile_binding_disable_endpoint(monkeypatch):
     class FakeRepository:
         def set_binding_status(self, binding_id, status):

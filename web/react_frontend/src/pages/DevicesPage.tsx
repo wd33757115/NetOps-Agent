@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { Alert, AutoComplete, Button, Descriptions, Drawer, Form, Input, Modal, Row, Col, Select, Space, Table, Tabs, Tag, Typography, Upload, message } from 'antd'
-import { DeleteOutlined, DownloadOutlined, EditOutlined, EyeOutlined, ImportOutlined, LinkOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
+import { DeleteOutlined, DownloadOutlined, EditOutlined, EyeOutlined, ImportOutlined, LinkOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined, SafetyCertificateOutlined, SearchOutlined } from '@ant-design/icons'
 import { useMutation, useQuery } from 'react-query'
 import { useSearchParams } from 'react-router-dom'
 import GrokShellLayout from '../components/layout/GrokShellLayout'
@@ -15,6 +15,7 @@ import {
   parserApi,
   workflowApi,
   type DeviceBulkPreview,
+  type DeviceBulkDeletePreview,
   type DeviceBulkRequest,
   type DeviceBulkUpdate,
   type DeviceConnectionHealthRecord,
@@ -24,6 +25,7 @@ import {
   type DeviceEvidenceTimelineItem,
   type DeviceExecutionPlanRecord,
   type DeviceEffectivePlanPreview,
+  type DeviceIdentityDiscoveryResult,
   type DeviceImportPayload,
   type DeviceConnectivityTestResult,
   type DeviceImportPreview,
@@ -53,13 +55,11 @@ const codeStyle: React.CSSProperties = {
 
 interface DeviceFormValues extends Omit<DeviceUpsertPayload, 'groups' | 'attributes'> {
   groups?: string
-  patrol_commands_text?: string
   attributes_json?: string
 }
 
 interface BulkFormValues extends Omit<DeviceBulkUpdate, 'groups'> {
   groups?: string
-  patrol_commands_text?: string
   dynamic_group_id?: string
   credential_ref?: string
 }
@@ -71,6 +71,7 @@ interface PatrolFormValues {
   launch_mode?: string
   workflow_name?: string
   dynamic_group_id?: string
+  group?: string
 }
 
 const fileToBase64 = (file: File) =>
@@ -101,7 +102,7 @@ const extractErrorMessage = (error: any, fallback: string) => {
   if (!detail) return error?.message || fallback
   if (typeof detail === 'string') return detail
   if (Array.isArray(detail?.errors) && detail.errors.length) {
-    return `${detail.message || fallback}；${detail.errors.join('；')}`
+    return `${detail.message || fallback}锛?{detail.errors.join('锛?)}`
   }
   return detail.message || fallback
 }
@@ -128,7 +129,7 @@ const hasActivePatrolBatches = (batches: PatrolBatchSummary[] = []) =>
 const statusLabel = (status?: string) => {
   const labels: Record<string, string> = {
     active: '启用',
-    blocked: '阻塞',
+    blocked: '阻断',
     cancelled: '已取消',
     completed: '已完成',
     connected: '已连接',
@@ -160,8 +161,8 @@ const statusLabel = (status?: string) => {
 const severityLabel = (severity?: string) => {
   const labels: Record<string, string> = {
     critical: '严重',
-    warning: '警告',
-    info: '信息',
+    warning: '璀﹀憡',
+    info: '淇℃伅',
   }
   return severity ? labels[severity] || severity : '-'
 }
@@ -226,8 +227,9 @@ interface DynamicGroupRule {
 interface ProfileBindingFormValues {
   profile_version_id?: string
   priority?: number
-  target_type?: 'selected' | 'dynamic_group' | 'filters'
+  target_type?: 'selected' | 'group' | 'dynamic_group' | 'filters'
   dynamic_group_id?: string
+  group?: string
 }
 
 const dynamicGroupSelectorFields = [
@@ -256,36 +258,31 @@ const parseAttributes = (value?: string): Record<string, unknown> | undefined =>
   return JSON.parse(text) as Record<string, unknown>
 }
 
-const splitPatrolCommands = (value?: string): string[] =>
-  (value || '')
-    .split(/\r?\n|,/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-
-const patrolCommandsText = (attributes?: Record<string, unknown>): string | undefined => {
-  const commands = attributes?.patrol_commands
-  if (Array.isArray(commands)) {
-    return commands.map((item) => String(item)).filter(Boolean).join('\n')
-  }
-  if (typeof commands === 'string') {
-    return commands
-  }
-  return undefined
-}
-
 const buildDeviceAttributes = (
   attributesJson?: string,
-  patrolCommands?: string,
 ): Record<string, unknown> | undefined => {
   const attributes = { ...(parseAttributes(attributesJson) || {}) }
-  const commands = splitPatrolCommands(patrolCommands)
-  if (commands.length) {
-    attributes.patrol_commands = Array.from(new Set(commands))
-  } else {
-    delete attributes.patrol_commands
-  }
+  delete attributes.patrol_commands
   return Object.keys(attributes).length ? attributes : undefined
 }
+
+const findCommandProfile = (profiles: ParserCommandProfile[], value?: string) => {
+  const key = String(value || '').trim()
+  if (!key) return undefined
+  return (
+    profiles.find((profile) => profile.version_status === 'active' && profile.profile_name === key) ||
+    profiles.find((profile) => profile.version_status === 'active' && profile.profile_id === key) ||
+    profiles.find((profile) => profile.profile_version_id === key) ||
+    profiles.find((profile) => profile.profile_name === key) ||
+    profiles.find((profile) => profile.profile_id === key)
+  )
+}
+
+const commandProfileCommands = (profile?: ParserCommandProfile) =>
+  (profile?.items || [])
+    .filter((item) => !item.action || item.action === 'patrol')
+    .map((item) => item.command)
+    .filter(Boolean)
 
 const createRuleId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`
 
@@ -324,7 +321,7 @@ const formatDateTime = (value?: string | null) => {
 
 const importExample = [
   'device_name,management_ip,vendor,model,family,platform,device_type,os_version,serial_number,site,role,status,credential_ref,command_profile,groups,attributes_json',
-  'SW1,10.0.0.1,Cisco,WS-C2960XR-24TS-I,IOS-C2960,ios,access_switch,15.2(7)E10,FOC1234,xian,access,active,env:NETOPS_PASSWORD,browser-test-patrol,"core,xian","{""patrol_commands"": [""show version""]}"',
+  'SW1,10.0.0.1,Cisco,WS-C2960XR-24TS-I,IOS-C2960,ios,access_switch,15.2(7)E10,FOC1234,xian,access,active,env:NETOPS_PASSWORD,browser-test-patrol,"core,xian","{""collector_options"": {""read_timeout"": 60}}"',
 ].join('\n')
 
 const DevicesPage: React.FC = () => {
@@ -352,6 +349,8 @@ const DevicesPage: React.FC = () => {
   const [selected, setSelected] = useState<ManagedDevice | null>(null)
   const [plan, setPlan] = useState<DeviceEffectivePlanPreview | null>(null)
   const [connectivityResult, setConnectivityResult] = useState<DeviceConnectivityTestResult | null>(null)
+  const [identityDiscoveryResult, setIdentityDiscoveryResult] = useState<DeviceIdentityDiscoveryResult | null>(null)
+  const [identityDiscoveryTargetId, setIdentityDiscoveryTargetId] = useState<string | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<ManagedDevice | null>(null)
   const [importOpen, setImportOpen] = useState(false)
@@ -361,6 +360,8 @@ const DevicesPage: React.FC = () => {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
   const [bulkOpen, setBulkOpen] = useState(false)
   const [bulkPreview, setBulkPreview] = useState<DeviceBulkPreview | null>(null)
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+  const [bulkDeletePreview, setBulkDeletePreview] = useState<DeviceBulkDeletePreview | null>(null)
   const [patrolOpen, setPatrolOpen] = useState(false)
   const [patrolPreview, setPatrolPreview] = useState<DevicePatrolPreview | null>(null)
   const [patrolLaunch, setPatrolLaunch] = useState<DevicePatrolLaunchResult | null>(null)
@@ -460,6 +461,11 @@ const DevicesPage: React.FC = () => {
     () => deviceApi.dynamicGroups(),
     { refetchOnWindowFocus: false },
   )
+  const { data: deviceGroups = [], refetch: refetchDeviceGroups } = useQuery(
+    ['device-groups'],
+    () => deviceApi.groups(),
+    { refetchOnWindowFocus: false },
+  )
   const { data: credentialRefs = [], refetch: refetchCredentialRefs } = useQuery(
     ['device-credentials'],
     () => deviceApi.credentials(),
@@ -469,6 +475,15 @@ const DevicesPage: React.FC = () => {
     ['device-command-profiles'],
     () => parserApi.commandProfiles(),
     { refetchOnWindowFocus: false },
+  )
+  const watchedCommandProfile = Form.useWatch('command_profile', form)
+  const currentCommandProfile = useMemo(
+    () => findCommandProfile(commandProfiles, watchedCommandProfile),
+    [commandProfiles, watchedCommandProfile],
+  )
+  const currentCommandProfileCommands = useMemo(
+    () => commandProfileCommands(currentCommandProfile),
+    [currentCommandProfile],
   )
   const { data: importTemplate } = useQuery<DeviceImportTemplate>(
     ['device-import-template'],
@@ -520,10 +535,9 @@ const DevicesPage: React.FC = () => {
       const payload: DeviceUpsertPayload = {
         ...values,
         groups: splitGroups(values.groups),
-        attributes: buildDeviceAttributes(values.attributes_json, values.patrol_commands_text),
+        attributes: buildDeviceAttributes(values.attributes_json),
       }
       delete (payload as any).attributes_json
-      delete (payload as any).patrol_commands_text
       if (editing) {
         return deviceApi.update(editing.device_id, payload)
       }
@@ -536,6 +550,7 @@ const DevicesPage: React.FC = () => {
         setEditing(null)
         form.resetFields()
         await refetch()
+        await refetchDeviceGroups()
       },
       onError: (error: any) => message.error(extractErrorMessage(error, '保存设备失败')),
     },
@@ -545,7 +560,7 @@ const DevicesPage: React.FC = () => {
     (device: ManagedDevice) => deviceApi.delete(device.device_id),
     {
       onSuccess: async (_, device) => {
-        message.success(`设备 ${device.device_name || device.device_id} 已删除`)
+        message.success(`设备 ${device.device_name || device.device_id} 已从资产清单删除`)
         if (selected?.device_id === device.device_id) {
           setSelected(null)
           setPlan(null)
@@ -555,6 +570,18 @@ const DevicesPage: React.FC = () => {
         await refetch()
       },
       onError: (error: any) => message.error(extractErrorMessage(error, '删除设备失败')),
+    },
+  )
+
+  const setDeviceStatus = useMutation(
+    ({ device, status }: { device: ManagedDevice; status: 'active' | 'disabled' }) =>
+      deviceApi.setStatus(device.device_id, status),
+    {
+      onSuccess: async (result) => {
+        message.success(`设备 ${result.device?.device_name || result.device?.device_id || ''} 状态已更新`)
+        await refetch()
+      },
+      onError: (error: any) => message.error(extractErrorMessage(error, '更新设备状态失败')),
     },
   )
 
@@ -587,6 +614,28 @@ const DevicesPage: React.FC = () => {
     },
   )
 
+  const discoverIdentity = useMutation(
+    (device: ManagedDevice) => {
+      setIdentityDiscoveryTargetId(device.device_id)
+      return deviceApi.discoverIdentity(device.device_id)
+    },
+    {
+      onSuccess: async (result) => {
+        setIdentityDiscoveryResult(result)
+        setSelected(result.device)
+        await refetch()
+        refetchHealthHistory()
+        if (result.success) {
+          message.success(`设备身份已识别：${result.identity?.vendor || '-'} ${result.identity?.model || '-'}`)
+        } else {
+          message.warning(result.error || result.failure_code || '设备身份未能可靠识别')
+        }
+      },
+      onError: (error: any) => message.error(extractErrorMessage(error, '设备身份识别失败')),
+      onSettled: () => setIdentityDiscoveryTargetId(null),
+    },
+  )
+
   const importPayload = (): DeviceImportPayload => importFilePayload || {
     content: importText,
     format: 'csv',
@@ -605,9 +654,10 @@ const DevicesPage: React.FC = () => {
     () => deviceApi.applyImport(importPayload()),
     {
       onSuccess: async (result) => {
-        message.success(`已导入 ${result.applied_count} 台设备`)
+        message.success('已导入 ' + result.applied_count + ' 台设备')
         setImportPreview(result)
         await refetch()
+        await refetchDeviceGroups()
       },
       onError: (error: any) => message.error(extractErrorMessage(error, '应用导入失败')),
     },
@@ -678,7 +728,7 @@ const DevicesPage: React.FC = () => {
     .filter((profile: ParserCommandProfile) => profile.profile_version_id && profile.version_status === 'active')
     .map((profile) => ({
       value: profile.profile_version_id!,
-      label: `${profile.profile_name} v${profile.version || profile.current_version || '-'}`,
+      label: String(profile.profile_name || '-') + ' v' + String(profile.version || profile.current_version || '-'),
     }))
 
   const currentFilterSelector = (): Record<string, unknown> => {
@@ -710,6 +760,10 @@ const DevicesPage: React.FC = () => {
       if (!group) throw new Error('请选择动态分组')
       return group.selector || {}
     }
+    if (values.target_type === 'group') {
+      if (!values.group) throw new Error('请选择设备分组')
+      return { group: values.group }
+    }
     return currentFilterSelector()
   }
 
@@ -730,7 +784,7 @@ const DevicesPage: React.FC = () => {
   const previewProfileBindingImpact = useMutation(
     async () => {
       const values = await profileBindingForm.validateFields()
-      if (!values.profile_version_id) throw new Error('必须选择命令 Profile 版本')
+      if (!values.profile_version_id) throw new Error('必须选择采集命令集版本')
       return parserApi.commandProfileImpactPreview({
         profile_version_id: values.profile_version_id,
         selector: buildProfileBindingSelector(values),
@@ -740,14 +794,14 @@ const DevicesPage: React.FC = () => {
     },
     {
       onSuccess: setProfileBindingImpact,
-      onError: (error: any) => message.error(extractErrorMessage(error, '预览 Profile 影响失败')),
+      onError: (error: any) => message.error(extractErrorMessage(error, '预览采集命令集影响失败')),
     },
   )
 
   const saveProfileBinding = useMutation(
     async () => {
       const values = await profileBindingForm.validateFields()
-      if (!values.profile_version_id) throw new Error('必须选择命令 Profile 版本')
+      if (!values.profile_version_id) throw new Error('必须选择采集命令集版本')
       const selector = buildProfileBindingSelector(values)
       if (!Object.keys(selector).length) throw new Error('目标选择器不能为空')
       return parserApi.upsertCommandProfileBinding({
@@ -759,19 +813,16 @@ const DevicesPage: React.FC = () => {
     },
     {
       onSuccess: async () => {
-        message.success('Profile 绑定已保存')
+        message.success('采集命令集绑定已保存')
         await previewProfileBindingImpact.mutateAsync()
       },
-      onError: (error: any) => message.error(extractErrorMessage(error, '保存 Profile 绑定失败')),
+      onError: (error: any) => message.error(extractErrorMessage(error, '保存采集命令集绑定失败')),
     },
   )
 
   const buildBulkPayload = (values: BulkFormValues): DeviceBulkRequest => {
     const update: DeviceBulkUpdate = {
       command_profile: values.command_profile || undefined,
-      patrol_commands: values.patrol_commands_text && values.patrol_commands_text.trim()
-        ? splitPatrolCommands(values.patrol_commands_text)
-        : undefined,
       credential_ref: values.credential_ref || undefined,
       status: values.status || undefined,
       platform: values.platform || undefined,
@@ -825,14 +876,82 @@ const DevicesPage: React.FC = () => {
     },
     {
       onSuccess: async (result) => {
-        message.success(`已更新 ${result.applied_count} 台设备`)
+        message.success('已更新 ' + result.applied_count + ' 台设备')
         setBulkPreview(result)
         setSelectedRowKeys([])
         await refetch()
+        await refetchDeviceGroups()
       },
       onError: (error: any) => message.error(extractErrorMessage(error, '批量更新失败')),
     },
   )
+
+  const buildBulkSelectionPayload = () => ({
+    device_ids: selectedRowKeys.length ? selectedRowKeys.map(String) : undefined,
+    filters: selectedRowKeys.length ? undefined : {
+      device_name: queryParams.device_name,
+      vendor: queryParams.vendor,
+      model: queryParams.model,
+      family: queryParams.family,
+      platform: queryParams.platform,
+      device_type: queryParams.device_type,
+      site: queryParams.site,
+      role: queryParams.role,
+      group: queryParams.group,
+      status: queryParams.status,
+      connection_status: queryParams.connection_status,
+    },
+  })
+
+  const previewBulkDelete = useMutation(
+    () => deviceApi.previewBulkDelete(buildBulkSelectionPayload()),
+    {
+      onSuccess: setBulkDeletePreview,
+      onError: (error: any) => message.error(extractErrorMessage(error, '批量删除预览失败')),
+    },
+  )
+
+  const applyBulkDelete = useMutation(
+    () => deviceApi.bulkDelete(buildBulkSelectionPayload()),
+    {
+      onSuccess: async (result) => {
+        message.success('已删除 ' + result.deleted_count + ' 台设备资产，历史证据已保留')
+        setBulkDeletePreview(null)
+        setBulkDeleteOpen(false)
+        setSelectedRowKeys([])
+        await refetch()
+        await refetchDeviceGroups()
+      },
+      onError: (error: any) => message.error(extractErrorMessage(error, '批量删除失败')),
+    },
+  )
+
+  const applyBulkStatus = useMutation(
+    (status: 'active' | 'disabled') => deviceApi.applyBulk({
+      ...buildBulkSelectionPayload(),
+      update: { status },
+    }),
+    {
+      onSuccess: async (result) => {
+        message.success('已更新 ' + result.applied_count + ' 台设备状态')
+        setSelectedRowKeys([])
+        await refetch()
+      },
+      onError: (error: any) => message.error(extractErrorMessage(error, '批量状态更新失败')),
+    },
+  )
+
+  const confirmBulkStatus = (status: 'active' | 'disabled') => {
+    Modal.confirm({
+      title: status === 'active' ? '批量启用设备' : '批量停用设备',
+      content: selectedRowKeys.length
+        ? '将操作已勾选的 ' + selectedRowKeys.length + ' 台设备。'
+        : '未勾选设备时，将操作当前筛选结果中的设备。',
+      okText: status === 'active' ? '启用' : '停用',
+      cancelText: '取消',
+      onOk: () => applyBulkStatus.mutateAsync(status),
+    })
+  }
 
   const buildPatrolPayload = (values: PatrolFormValues) => ({
     device_ids: selectedRowKeys.length ? selectedRowKeys.map(String) : undefined,
@@ -846,7 +965,7 @@ const DevicesPage: React.FC = () => {
       device_type: queryParams.device_type,
       site: queryParams.site,
       role: queryParams.role,
-      group: queryParams.group,
+      group: values.group || queryParams.group,
       status: queryParams.status,
       connection_status: queryParams.connection_status,
     },
@@ -864,14 +983,23 @@ const DevicesPage: React.FC = () => {
     },
     {
       onSuccess: (result) => { setPatrolPreview(result); setPatrolLaunch(null) },
-      onError: (error: any) => message.error(extractErrorMessage(error, '巡检预览失败')),
+      onError: (error: any) => message.error(extractErrorMessage(error, '宸℃棰勮澶辫触')),
     },
   )
 
   const launchPatrol = useMutation(
     async () => {
       const values = await patrolForm.validateFields()
-      return deviceApi.launchPatrol(buildPatrolPayload(values))
+      const payload = buildPatrolPayload(values)
+      if (!patrolPreview) {
+        const preview = await deviceApi.previewPatrol(payload)
+        setPatrolPreview(preview)
+        setPatrolLaunch(null)
+        if (preview.ready_count === 0) {
+          throw new Error('没有可发起的巡检设备，请先处理预检错误')
+        }
+      }
+      return deviceApi.launchPatrol(payload)
     },
     {
       onSuccess: (result) => {
@@ -881,11 +1009,15 @@ const DevicesPage: React.FC = () => {
         refetchRecentPatrolRuns()
         refetchActiveBatchRuns()
         refetchPatrolBatches()
-        message.success(`已发起 ${result.launched_count} 个巡检${result.launch_mode === 'workflow' ? ' Workflow' : '任务'}`)
+          message.success(
+            '已发起 ' + result.launched_count + ' 个巡检'
+            + (result.launch_mode === 'workflow' ? ' Workflow' : '任务')
+            + ((result.skipped_count || 0) ? '，跳过 ' + result.skipped_count + ' 台未就绪设备' : ''),
+          )
       },
       onError: (error: any) => {
         const detail = error?.response?.data?.detail
-        message.error(typeof detail === 'string' ? detail : detail?.message || '巡检发起失败')
+        message.error(typeof detail === 'string' ? detail : detail?.message || error?.message || '巡检发起失败')
       },
     },
   )
@@ -909,7 +1041,7 @@ const DevicesPage: React.FC = () => {
     (batchId: string) => workflowApi.retryPatrolBatch(batchId),
     {
       onSuccess: async (result) => {
-        message.success(`已重试 ${result.retried_count} 个失败/取消的运行`)
+        message.success('已重试 ' + result.retried_count + ' 个失败/取消的运行')
         if (result.runs?.[0]?.run_id) {
           setMonitorRunId(result.runs[0].run_id)
         }
@@ -925,7 +1057,7 @@ const DevicesPage: React.FC = () => {
     (batchId: string) => workflowApi.rerunPatrolBatch(batchId),
     {
       onSuccess: async (result) => {
-        message.success(`已为 ${result.rerun_count} 台设备启动重新巡检`)
+        message.success('已为 ' + result.rerun_count + ' 台设备启动重新巡检')
         setActivePatrolBatchId(result.new_patrol_batch_id)
         await Promise.all([
           refetchPatrolBatches(),
@@ -942,7 +1074,7 @@ const DevicesPage: React.FC = () => {
     (batchId: string) => workflowApi.archivePatrolBatch(batchId, { reason: 'manual archive from Device Management' }),
     {
       onSuccess: async (result) => {
-        message.success(`已归档批次 ${result.patrol_batch_id}，影响 ${result.affected_runs} 个运行`)
+        message.success('已归档批次 ' + result.patrol_batch_id + '，影响 ' + result.affected_runs + ' 个运行')
         if (activePatrolBatchId === result.patrol_batch_id) {
           setActivePatrolBatchId(null)
         }
@@ -959,7 +1091,7 @@ const DevicesPage: React.FC = () => {
     (batchId: string) => workflowApi.restorePatrolBatch(batchId, { reason: 'manual restore from Device Management' }),
     {
       onSuccess: async (result) => {
-        message.success(`已恢复批次 ${result.patrol_batch_id}`)
+        message.success(`宸叉仮澶嶆壒娆?${result.patrol_batch_id}`)
         await refetchPatrolBatches()
       },
       onError: (error: any) => message.error(extractErrorMessage(error, '批次恢复失败')),
@@ -1004,6 +1136,7 @@ const DevicesPage: React.FC = () => {
     setSelected(device)
     setPlan(null)
     setConnectivityResult(null)
+    setIdentityDiscoveryResult(null)
     previewPlan.mutate(device)
   }
 
@@ -1037,7 +1170,6 @@ const DevicesPage: React.FC = () => {
       status: device.status || 'active',
       command_profile: device.command_file,
       groups: (device.groups || []).join(', '),
-      patrol_commands_text: patrolCommandsText(device.attributes),
       attributes_json: device.attributes ? JSON.stringify(device.attributes, null, 2) : undefined,
     })
     setModalOpen(true)
@@ -1131,7 +1263,7 @@ const DevicesPage: React.FC = () => {
 
   const credentialOptions = credentialRefs.map((item) => ({
     value: item.ref,
-    label: `${item.ref}${item.available ? '' : '（不可用）'}`,
+    label: item.ref + (item.available ? '' : '（不可用）'),
   }))
 
   const readinessColor = (status?: string) => {
@@ -1139,6 +1271,16 @@ const DevicesPage: React.FC = () => {
     if (status === 'blocked' || status === 'error') return 'red'
     if (status === 'not_required') return 'default'
     return 'blue'
+  }
+
+  const readinessSourceText = (value: ManagedDevice['patrol_readiness']) => {
+    if (!value) return '-'
+    const profile = value.profile_name || '-'
+    if (value.policy_source === 'device_profile') return `设备指定命令集：${profile}`
+    if (value.policy_source === 'profile_binding') return `绑定命令集：${profile}`
+    if (value.policy_source === 'default') return `默认命令集：${profile}`
+    if (value.policy_source) return `${value.policy_source}：${profile}`
+    return profile
   }
 
   const connectionColor = (status?: string) => {
@@ -1149,9 +1291,9 @@ const DevicesPage: React.FC = () => {
 
   const confirmDeleteDevice = (device: ManagedDevice) => {
     Modal.confirm({
-      title: '删除设备',
-      content: `设备 ${device.device_name || device.device_id} 将被标记为已删除，历史巡检和证据记录会保留。`,
-      okText: '删除',
+      title: '删除设备资产',
+      content: '设备 ' + (device.device_name || device.device_id) + ' 将从资产清单中删除，历史巡检、证据链和 Workflow 记录会保留。',
+      okText: '鍒犻櫎',
       okButtonProps: { danger: true, loading: deleteDevice.isLoading },
       cancelText: '取消',
       onOk: () => deleteDevice.mutateAsync(device),
@@ -1190,19 +1332,31 @@ const DevicesPage: React.FC = () => {
     { title: '巡检就绪', dataIndex: 'patrol_readiness', width: 170,
       render: (value: ManagedDevice['patrol_readiness']) => {
         if (!value) return '-'
-        const title = value.error
-          || `${value.ready_count}/${value.eligible_count} 个结构化命令已就绪`
+        const parserIssues = value.blocked_count || 0
         const connectionIssues = value.connection_issues?.length || 0
+        const planIssues = value.plan_violations?.length || 0
+        const blockerCount = parserIssues + connectionIssues + planIssues
+        const title = value.error
+          || [
+            readinessSourceText(value),
+            `${value.ready_count}/${value.eligible_count} 个结构化命令已就绪`,
+            `计划阻断 ${planIssues}`,
+            `Parser 阻断 ${parserIssues}`,
+            `连接阻断 ${connectionIssues}`,
+          ].join('；')
         return (
           <Space direction="vertical" size={2}>
             <Tag color={readinessColor(value.status)}>{statusLabel(value.status)}</Tag>
-            <Typography.Text type={value.blocked_count ? 'danger' : 'secondary'} title={title}>
-              {value.command_count} 命令 / {value.blocked_count + connectionIssues} 阻塞
+            <Typography.Text type={blockerCount ? 'danger' : 'secondary'} title={title}>
+              {value.command_count} 命令 / {blockerCount} 阻断
+            </Typography.Text>
+            <Typography.Text type="secondary" title={title}>
+              {readinessSourceText(value)}
             </Typography.Text>
           </Space>
         )
       } },
-    { title: '操作', width: 170,
+    { title: '操作', width: 220,
       render: (_: unknown, row: ManagedDevice) => (
         <Space>
           <Button icon={<EyeOutlined />} size="small" title="查看执行计划" onClick={() => openDetail(row)} />
@@ -1217,7 +1371,28 @@ const DevicesPage: React.FC = () => {
               testConnectivity.mutate(row)
             }}
           />
+          <Button
+            icon={<SafetyCertificateOutlined />}
+            size="small"
+            title="识别设备身份"
+            loading={discoverIdentity.isLoading && identityDiscoveryTargetId === row.device_id}
+            onClick={() => {
+              setSelected(row)
+              setIdentityDiscoveryResult(null)
+              discoverIdentity.mutate(row)
+            }}
+          />
           <Button icon={<EditOutlined />} size="small" title="编辑设备" onClick={() => openEdit(row)} />
+          <Button
+            size="small"
+            loading={setDeviceStatus.isLoading}
+            onClick={() => setDeviceStatus.mutate({
+              device: row,
+              status: row.status === 'active' ? 'disabled' : 'active',
+            })}
+          >
+            {row.status === 'active' ? '停用' : '启用'}
+          </Button>
           <Button
             danger
             icon={<DeleteOutlined />}
@@ -1252,10 +1427,8 @@ const DevicesPage: React.FC = () => {
   const bulkColumns = [
     { title: '设备', dataIndex: 'device_name', width: 220 },
     { title: 'IP', dataIndex: 'ip', width: 130 },
-    { title: '命令 Profile', dataIndex: ['update', 'command_profile'], width: 170,
+    { title: '采集命令集', dataIndex: ['update', 'command_profile'], width: 170,
       render: (value: string) => value || '-' },
-    { title: '巡检命令', dataIndex: ['update', 'patrol_commands'], width: 220,
-      render: (value: string[]) => value?.length ? <Typography.Text>{value.join(', ')}</Typography.Text> : '-' },
     { title: '凭据引用', dataIndex: ['update', 'credential_ref'], width: 180,
       render: (value: string) => value || '-' },
     { title: '状态', dataIndex: ['update', 'status'], width: 100,
@@ -1285,7 +1458,7 @@ const DevicesPage: React.FC = () => {
           <Space wrap size={4}>
             <Tag color={blocked ? 'red' : 'green'}>{blocked ? '阻断' : '就绪'}</Tag>
             {coverageCount > 0 && <Tag color="red">Parser {coverageCount}</Tag>}
-            {connectionCount > 0 && <Tag color="orange">连接 {connectionCount}</Tag>}
+            {connectionCount > 0 && <Tag color="orange">杩炴帴 {connectionCount}</Tag>}
           </Space>
         )
       } },
@@ -1345,7 +1518,7 @@ const DevicesPage: React.FC = () => {
       render: (value: string) => <Tag color={value === 'launched' ? 'green' : value === 'launch_failed' ? 'red' : 'blue'}>{statusLabel(value)}</Tag> },
     { title: '来源', dataIndex: 'launch_source', width: 120,
       render: (value: string) => value || '-' },
-    { title: 'Profile', dataIndex: 'profile_name', width: 170 },
+    { title: '采集命令集', dataIndex: 'profile_name', width: 170 },
     { title: '策略来源', dataIndex: 'policy_source', width: 150 },
     { title: '命令数', dataIndex: 'command_count', width: 90 },
     { title: 'Plan Hash', dataIndex: 'plan_sha256', width: 150,
@@ -1358,13 +1531,13 @@ const DevicesPage: React.FC = () => {
             ? <Typography.Text copyable code>{row.celery_task_id}</Typography.Text>
             : '-'
       ) },
-    { title: '创建时间', dataIndex: 'created_at', width: 190,
+    { title: '鍒涘缓鏃堕棿', dataIndex: 'created_at', width: 190,
       render: (value: string) => formatDateTime(value) },
   ]
 
   const evidenceColumns = [
     { title: 'Workflow Run', dataIndex: 'workflow_run_id', width: 240,
-      render: (value: string) => <Typography.Text copyable code>{value}</Typography.Text> },
+      render: (value: string) => value ? <Typography.Text copyable code>{value}</Typography.Text> : '-' },
     { title: '状态', dataIndex: 'workflow_status', width: 110,
       render: (value: string) => <Tag color={value === 'completed' ? 'green' : value === 'failed' ? 'red' : 'blue'}>{statusLabel(value)}</Tag> },
     { title: '执行计划', dataIndex: 'execution_plan_id', width: 220,
@@ -1459,7 +1632,7 @@ const DevicesPage: React.FC = () => {
   )
 
   const dynamicGroupColumns = [
-    { title: '分组名', dataIndex: 'name', width: 180 },
+    { title: '分组名称', dataIndex: 'name', width: 180 },
     { title: '状态', dataIndex: 'status', width: 110,
       render: (value: string) => <Tag color={value === 'active' ? 'green' : 'default'}>{statusLabel(value)}</Tag> },
     { title: '选择器', dataIndex: 'selector',
@@ -1791,17 +1964,34 @@ const DevicesPage: React.FC = () => {
   return (
     <GrokShellLayout
       title="设备管理"
-      subtitle="查看设备资产上下文，预览 device-patrol 与 device-backup 使用的执行计划。"
+      subtitle="管理设备资产、凭据引用和采集命令集，预览 device-patrol 与 device-backup 使用的执行计划。"
       toolbar={
         <Space>
           <Button icon={<PlusOutlined />} type="primary" onClick={openCreate}>新增设备</Button>
           <Button icon={<ImportOutlined />} onClick={() => setImportOpen(true)}>导入设备</Button>
           <Button icon={<SearchOutlined />} onClick={openDynamicGroupCreate}>动态分组</Button>
-          <Button icon={<LinkOutlined />} onClick={openProfileBinding}>绑定 Profile</Button>
+          <Button icon={<LinkOutlined />} onClick={openProfileBinding}>绑定采集命令集</Button>
           <Button
             onClick={() => { bulkForm.resetFields(); setBulkPreview(null); setBulkOpen(true) }}
           >
             批量更新
+          </Button>
+          <Button loading={applyBulkStatus.isLoading} onClick={() => confirmBulkStatus('disabled')}>
+            批量停用
+          </Button>
+          <Button loading={applyBulkStatus.isLoading} onClick={() => confirmBulkStatus('active')}>
+            批量启用
+          </Button>
+          <Button
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => {
+              setBulkDeletePreview(null)
+              setBulkDeleteOpen(true)
+              previewBulkDelete.mutate()
+            }}
+          >
+            批量删除
           </Button>
           <Button
             icon={<PlayCircleOutlined />}
@@ -1857,6 +2047,16 @@ const DevicesPage: React.FC = () => {
             description={extractErrorMessage(devicesError, '请检查 BFF、FastAPI 和数据库连接状态。')}
           />
         )}
+        <DeviceAssetInventoryPanel
+          columns={columns}
+          devices={devices}
+          filters={filters}
+          loading={isLoading}
+          selectedRowKeys={selectedRowKeys}
+          total={data?.total || 0}
+          onFiltersChange={(patch) => setFilters((value) => ({ ...value, ...patch }))}
+          onSelectedRowKeysChange={setSelectedRowKeys}
+        />
         <PatrolOperationsPanel
           activeBatchRuns={activeBatchRuns}
           activeBatchResultSummary={activeBatchResultSummary}
@@ -1884,16 +2084,6 @@ const DevicesPage: React.FC = () => {
           exportBatchReportLoading={exportPatrolBatchReport.isLoading}
           retryRunLoading={retryWorkflowRun.isLoading}
         />
-        <DeviceAssetInventoryPanel
-          columns={columns}
-          devices={devices}
-          filters={filters}
-          loading={isLoading}
-          selectedRowKeys={selectedRowKeys}
-          total={data?.total || 0}
-          onFiltersChange={(patch) => setFilters((value) => ({ ...value, ...patch }))}
-          onSelectedRowKeysChange={setSelectedRowKeys}
-        />
               </Space>
             ),
           },
@@ -1904,7 +2094,7 @@ const DevicesPage: React.FC = () => {
           },
           {
             key: 'modules',
-            label: 'Agent 模块',
+            label: '平台模块',
             children: <AgentModuleControlTab />,
           },
         ]}
@@ -1913,7 +2103,12 @@ const DevicesPage: React.FC = () => {
       <Drawer
         title={selected?.device_name || '设备详情'}
         open={Boolean(selected)}
-        onClose={() => { setSelected(null); setPlan(null); setConnectivityResult(null) }}
+        onClose={() => {
+          setSelected(null)
+          setPlan(null)
+          setConnectivityResult(null)
+          setIdentityDiscoveryResult(null)
+        }}
         width={isMobile ? '100vw' : 760}
         destroyOnClose
       >
@@ -1922,7 +2117,7 @@ const DevicesPage: React.FC = () => {
             <Descriptions bordered size="small" column={2}>
               <Descriptions.Item label="设备 ID" span={2}>{selected.device_id}</Descriptions.Item>
               <Descriptions.Item label="IP">{selected.ip || selected.management_ip}</Descriptions.Item>
-              <Descriptions.Item label="状态">{selected.status}</Descriptions.Item>
+              <Descriptions.Item label="状态">{statusLabel(selected.status)}</Descriptions.Item>
               <Descriptions.Item label="厂商">{selected.vendor}</Descriptions.Item>
               <Descriptions.Item label="型号">{selected.model}</Descriptions.Item>
               <Descriptions.Item label="设备族">{selected.family}</Descriptions.Item>
@@ -1959,6 +2154,16 @@ const DevicesPage: React.FC = () => {
                 onClick={() => testConnectivity.mutate(selected)}
               >
                 测试连接
+              </Button>
+              <Button
+                icon={<SafetyCertificateOutlined />}
+                loading={discoverIdentity.isLoading && identityDiscoveryTargetId === selected.device_id}
+                onClick={() => {
+                  setIdentityDiscoveryResult(null)
+                  discoverIdentity.mutate(selected)
+                }}
+              >
+                识别身份
               </Button>
               <Button
                 icon={<EyeOutlined />}
@@ -2000,12 +2205,53 @@ const DevicesPage: React.FC = () => {
                 }
               />
             )}
+            {identityDiscoveryResult && (
+              <Alert
+                type={identityDiscoveryResult.success ? 'success' : 'warning'}
+                showIcon
+                message={identityDiscoveryResult.success ? '设备身份识别成功' : '设备身份未能可靠识别'}
+                description={
+                  <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                    <Space wrap>
+                      <Tag color="blue">状态：{statusLabel(identityDiscoveryResult.identity_status)}</Tag>
+                      {identityDiscoveryResult.identity?.vendor && <Tag>厂商：{identityDiscoveryResult.identity.vendor}</Tag>}
+                      {identityDiscoveryResult.identity?.model && <Tag color="green">型号：{identityDiscoveryResult.identity.model}</Tag>}
+                      {identityDiscoveryResult.identity?.family && <Tag color="purple">设备族：{identityDiscoveryResult.identity.family}</Tag>}
+                      {identityDiscoveryResult.identity?.confidence !== undefined && (
+                        <Tag>置信度：{Math.round((identityDiscoveryResult.identity.confidence || 0) * 100)}%</Tag>
+                      )}
+                    </Space>
+                    {identityDiscoveryResult.error && (
+                      <Typography.Text type="danger">{identityDiscoveryResult.error}</Typography.Text>
+                    )}
+                    {(identityDiscoveryResult.warnings || []).map((warning) => (
+                      <Typography.Text key={`${warning.code}-${warning.message}`} type="warning">
+                        {warning.code}: {warning.message}
+                      </Typography.Text>
+                    ))}
+                    {identityDiscoveryResult.identity?.evidence_command && (
+                      <Typography.Text>证据命令：{identityDiscoveryResult.identity.evidence_command}</Typography.Text>
+                    )}
+                    {identityDiscoveryResult.identity?.evidence_text && (
+                      <Typography.Paragraph style={codeStyle}>
+                        {identityDiscoveryResult.identity.evidence_text}
+                      </Typography.Paragraph>
+                    )}
+                    {identityDiscoveryResult.commands?.length ? (
+                      <Typography.Text type="secondary">
+                        Bootstrap 命令：{identityDiscoveryResult.commands.join(' | ')}
+                      </Typography.Text>
+                    ) : null}
+                  </Space>
+                }
+              />
+            )}
             {plan && (
               <Space direction="vertical" size={12} style={{ width: '100%' }}>
                 <Alert
                   type={plan.coverage_summary?.status === 'blocked' ? 'warning' : 'success'}
                   showIcon
-                  message={`巡检计划：${plan.commands.length} 条命令`}
+                  message={'巡检计划：' + plan.commands.length + ' 条命令'}
                   description={
                     <Space direction="vertical" size={8} style={{ width: '100%' }}>
                       <Space wrap>
@@ -2019,7 +2265,7 @@ const DevicesPage: React.FC = () => {
                         )}
                       </Space>
                       <Descriptions size="small" bordered column={isMobile ? 1 : 3}>
-                        <Descriptions.Item label="Profile">{plan.plan.profile_name || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="采集命令集">{plan.plan.profile_name || '-'}</Descriptions.Item>
                         <Descriptions.Item label="模式">{plan.plan.mode || plan.coverage_summary?.mode || '-'}</Descriptions.Item>
                         <Descriptions.Item label="动作">{plan.plan.action || '-'}</Descriptions.Item>
                         <Descriptions.Item label="凭据引用">
@@ -2054,7 +2300,7 @@ const DevicesPage: React.FC = () => {
                         <Alert
                           type="error"
                           showIcon
-            message="采集器预检问题"
+                          message="采集器预检问题"
                           description={
                             <Space direction="vertical" size={2}>
                               {plan.coverage_summary?.connection_issues.map((issue, index) => (
@@ -2081,7 +2327,7 @@ const DevicesPage: React.FC = () => {
                   dataSource={plan.parser_coverage || []}
                   columns={planCoverageColumns}
                   scroll={{ x: 860 }}
-                  locale={{ emptyText: '当前模式无需 Parser 覆盖率检查，或没有需结构化命令' }}
+                  locale={{ emptyText: '当前模式无需 Parser 覆盖率检查，或没有需要结构化的命令' }}
                 />
                 <Table<{ command: string; action?: string; collection_item_id?: string }>
                   rowKey={(row, index) => `${row.command}-${index}`}
@@ -2182,15 +2428,15 @@ const DevicesPage: React.FC = () => {
               </Col>
               <Col xs={24} md={8}>
                 <Form.Item name="status" label="状态" initialValue="active">
-                  <Select options={[{ value: 'active', label: 'active' }, { value: 'disabled', label: 'disabled' }]} />
+                  <Select options={[{ value: 'active', label: '启用' }, { value: 'disabled', label: '停用' }]} />
                 </Form.Item>
               </Col>
               <Col span={24}>
                 <Space direction="vertical" size={8} style={{ width: '100%' }}>
                   <Space align="center" style={{ justifyContent: 'space-between', width: '100%' }}>
-                    <Typography.Text strong>Selector Builder</Typography.Text>
+                    <Typography.Text strong>选择器构建器</Typography.Text>
                     <Button size="small" icon={<PlusOutlined />} onClick={addDynamicGroupRule}>
-                      Add Condition
+                      添加条件
                     </Button>
                   </Space>
                   {dynamicGroupRules.length === 0 && (
@@ -2315,7 +2561,7 @@ const DevicesPage: React.FC = () => {
       </Drawer>
 
       <Drawer
-        title="绑定命令 Profile"
+        title="绑定采集命令集"
         open={profileBindingOpen}
         onClose={() => setProfileBindingOpen(false)}
         width={isMobile ? '100vw' : 1100}
@@ -2325,7 +2571,7 @@ const DevicesPage: React.FC = () => {
           <Alert
             type="info"
             showIcon
-            message="将已激活的命令 Profile 绑定到设备集合。绑定关系存储在 Parser 控制面，并由 device-patrol 通过 CollectionPolicyResolver 使用。"
+            message="将已激活的采集命令集绑定到设备集合。绑定关系存储在 Parser 控制面，并由 device-patrol 通过 CollectionPolicyResolver 使用。"
           />
           <Form<ProfileBindingFormValues>
             form={profileBindingForm}
@@ -2340,13 +2586,13 @@ const DevicesPage: React.FC = () => {
               <Col xs={24} md={9}>
                 <Form.Item
                   name="profile_version_id"
-                  label="Profile 版本"
-                  rules={[{ required: true, message: '请选择 Profile 版本' }]}
+                  label="采集命令集版本"
+                  rules={[{ required: true, message: '请选择采集命令集版本' }]}
                 >
                   <Select
                     showSearch
                     optionFilterProp="label"
-                    placeholder="选择已激活的 Profile 版本"
+                    placeholder="选择已激活的采集命令集版本"
                     options={activeProfileVersionOptions}
                   />
                 </Form.Item>
@@ -2360,13 +2606,36 @@ const DevicesPage: React.FC = () => {
                 <Form.Item name="target_type" label="目标" initialValue={selectedRowKeys.length ? 'selected' : 'filters'}>
                   <Select
                     options={[
-                      { value: 'selected', label: `已勾选设备（${selectedRowKeys.length}）`, disabled: selectedRowKeys.length === 0 },
+                      { value: 'selected', label: '已勾选设备（' + selectedRowKeys.length + '）', disabled: selectedRowKeys.length === 0 },
+                      { value: 'group', label: '设备分组' },
                       { value: 'dynamic_group', label: '动态分组' },
                       { value: 'filters', label: '当前筛选条件' },
                     ]}
                   />
                 </Form.Item>
               </Col>
+              <Form.Item shouldUpdate noStyle>
+                {({ getFieldValue }) => getFieldValue('target_type') === 'group' ? (
+                  <Col span={24}>
+                    <Form.Item
+                      name="group"
+                      label="设备分组"
+                      rules={[{ required: true, message: '请选择设备分组' }]}
+                    >
+                      <Select
+                        showSearch
+                        allowClear
+                        optionFilterProp="label"
+                        placeholder="选择导入或资产维护中的设备分组"
+                        options={deviceGroups.map((group) => ({
+                          value: group,
+                          label: group,
+                        }))}
+                      />
+                    </Form.Item>
+                  </Col>
+                ) : null}
+              </Form.Item>
               <Form.Item shouldUpdate noStyle>
                 {({ getFieldValue }) => getFieldValue('target_type') === 'dynamic_group' ? (
                   <Col span={24}>
@@ -2392,6 +2661,7 @@ const DevicesPage: React.FC = () => {
           <Descriptions size="small" bordered column={isMobile ? 1 : 3}>
             <Descriptions.Item label="已选择">{selectedRowKeys.length}</Descriptions.Item>
             <Descriptions.Item label="当前筛选">{Object.keys(currentFilterSelector()).length} 个字段</Descriptions.Item>
+            <Descriptions.Item label="设备分组">{deviceGroups.length}</Descriptions.Item>
             <Descriptions.Item label="动态分组">{dynamicGroups.length}</Descriptions.Item>
           </Descriptions>
           <Typography.Paragraph style={codeStyle}>
@@ -2423,14 +2693,14 @@ const DevicesPage: React.FC = () => {
               保存绑定
             </Button>
             <Button icon={<ReloadOutlined />} onClick={() => refetchCommandProfiles()}>
-              刷新 Profile
+              刷新命令集
             </Button>
           </Space>
           {profileBindingImpact && (
             <Alert
               type={profileBindingImpact.blocked_device_count ? 'warning' : 'success'}
               showIcon
-              message={`影响范围：${profileBindingImpact.matched_device_count} 台设备，${profileBindingImpact.blocked_device_count} 台阻塞`}
+              message={'影响范围：' + profileBindingImpact.matched_device_count + ' 台设备，' + profileBindingImpact.blocked_device_count + ' 台阻断'}
               description={`覆盖率 ${(profileBindingImpact.coverage_rate * 100).toFixed(1)}%；就绪命令 ${profileBindingImpact.ready_command_count}/${profileBindingImpact.eligible_command_count}；阻塞命令 ${profileBindingImpact.blocked_command_count}`}
             />
           )}
@@ -2484,7 +2754,7 @@ const DevicesPage: React.FC = () => {
             <Col xs={12} md={8}><Form.Item name="role" label="角色"><Input /></Form.Item></Col>
             <Col xs={12} md={8}>
               <Form.Item name="status" label="状态">
-                <Select options={[{ value: 'active', label: 'active' }, { value: 'inactive', label: 'inactive' }]} />
+                <Select options={[{ value: 'active', label: '启用' }, { value: 'disabled', label: '停用' }]} />
               </Form.Item>
             </Col>
             <Col xs={24} md={12}><Form.Item name="username" label="用户名"><Input /></Form.Item></Col>
@@ -2510,15 +2780,27 @@ const DevicesPage: React.FC = () => {
                 </Space.Compact>
               </Form.Item>
             </Col>
-            <Col xs={24} md={12}><Form.Item name="command_profile" label="命令 Profile"><Input /></Form.Item></Col>
+            <Col xs={24} md={12}><Form.Item name="command_profile" label="采集命令集"><Input /></Form.Item></Col>
             <Col xs={24} md={12}><Form.Item name="groups" label="分组"><Input placeholder="core, xian-dc" /></Form.Item></Col>
             <Col span={24}>
-              <Form.Item
-                name="patrol_commands_text"
-                label="巡检命令"
-                extra="每行一条命令；保存后写入 attributes.patrol_commands，优先于命令 Profile 的默认命令。"
-              >
-                <Input.TextArea rows={5} placeholder={'show version\nshow ip interface brief\nshow inventory'} />
+              <Form.Item label="巡检命令">
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Alert
+                    type={currentCommandProfile ? 'info' : 'warning'}
+                    showIcon
+                    message={currentCommandProfile
+                      ? `来自采集命令集：${currentCommandProfile.profile_name} v${currentCommandProfile.version || currentCommandProfile.current_version || '-'}`
+                      : '未匹配到已登记的采集命令集'}
+                    description={currentCommandProfile
+                      ? `共 ${currentCommandProfileCommands.length} 条 patrol 命令；实际巡检以执行计划预览为准。`
+                      : '请先填写或绑定采集命令集。设备级巡检命令覆盖已移除。'}
+                  />
+                  <pre style={{ ...codeStyle, maxHeight: 180 }}>
+                    {currentCommandProfileCommands.length
+                      ? currentCommandProfileCommands.join('\n')
+                      : '暂无可展示命令'}
+                  </pre>
+                </Space>
               </Form.Item>
             </Col>
             <Col span={24}>
@@ -2536,7 +2818,7 @@ const DevicesPage: React.FC = () => {
                   },
                 }]}
               >
-                <Input.TextArea rows={4} placeholder='{"patrol_commands": ["show version"]}' />
+                <Input.TextArea rows={4} placeholder='{"collector_options": {"read_timeout": 60}}' />
               </Form.Item>
             </Col>
           </Row>
@@ -2623,7 +2905,7 @@ const DevicesPage: React.FC = () => {
                 return false
               }}
             >
-              <Button icon={<ImportOutlined />}>选择 CSV/XLSX</Button>
+              <Button icon={<ImportOutlined />}>閫夋嫨 CSV/XLSX</Button>
             </Upload>
             {importFilePayload && (
               <>
@@ -2679,7 +2961,7 @@ const DevicesPage: React.FC = () => {
                 <Tag color={importPreview.invalid_count ? 'red' : 'default'}>无效 {importPreview.invalid_count}</Tag>
               </Space>
               {importPreview.invalid_count > 0 && (
-                <Alert type="warning" showIcon message="存在无效行，请根据“错误定位”修复后再应用导入。" />
+                <Alert type="warning" showIcon message="存在无效行，请根据错误定位修复后再应用导入。" />
               )}
               <Table
                 rowKey="row_number"
@@ -2699,9 +2981,9 @@ const DevicesPage: React.FC = () => {
         open={bulkOpen}
         onCancel={() => setBulkOpen(false)}
         footer={[
-          <Button key="close" onClick={() => setBulkOpen(false)}>关闭</Button>,
+          <Button key="close" onClick={() => setBulkOpen(false)}>鍏抽棴</Button>,
           <Button key="preview" icon={<SearchOutlined />} loading={previewBulk.isLoading} onClick={() => previewBulk.mutate()}>
-            预览
+            棰勮
           </Button>,
           <Button
             key="apply"
@@ -2721,7 +3003,7 @@ const DevicesPage: React.FC = () => {
             type="info"
             showIcon
             message={selectedRowKeys.length
-              ? `将操作已勾选的 ${selectedRowKeys.length} 台设备。`
+              ? '将操作已勾选的 ' + selectedRowKeys.length + ' 台设备。'
               : '未勾选设备时，将按当前筛选条件匹配目标设备。'}
           />
           <Form<BulkFormValues> form={bulkForm} layout="vertical" requiredMark={false}>
@@ -2737,7 +3019,7 @@ const DevicesPage: React.FC = () => {
                   />
                 </Form.Item>
               </Col>
-              <Col xs={24} md={8}><Form.Item name="command_profile" label="命令 Profile"><Input /></Form.Item></Col>
+              <Col xs={24} md={8}><Form.Item name="command_profile" label="采集命令集"><Input /></Form.Item></Col>
               <Col xs={24} md={8}>
                 <Form.Item name="credential_ref" label="凭据引用">
                   <AutoComplete
@@ -2755,7 +3037,7 @@ const DevicesPage: React.FC = () => {
               <Col xs={12} md={8}><Form.Item name="role" label="角色"><Input /></Form.Item></Col>
               <Col xs={12} md={8}>
                 <Form.Item name="status" label="状态">
-                  <Select allowClear options={[{ value: 'active', label: 'active' }, { value: 'inactive', label: 'inactive' }]} />
+                  <Select allowClear options={[{ value: 'active', label: '启用' }, { value: 'disabled', label: '停用' }]} />
                 </Form.Item>
               </Col>
               <Col xs={12} md={8}>
@@ -2764,15 +3046,6 @@ const DevicesPage: React.FC = () => {
                 </Form.Item>
               </Col>
               <Col xs={24} md={8}><Form.Item name="groups" label="分组"><Input placeholder="core, xian-dc" /></Form.Item></Col>
-              <Col span={24}>
-                <Form.Item
-                  name="patrol_commands_text"
-                  label="批量设置巡检命令"
-                  extra="每行一条命令；留空表示不修改现有巡检命令。"
-                >
-                  <Input.TextArea rows={4} placeholder={'show version\nshow ip interface brief\nshow inventory'} />
-                </Form.Item>
-              </Col>
             </Row>
           </Form>
           {bulkPreview && (
@@ -2795,6 +3068,68 @@ const DevicesPage: React.FC = () => {
       </Modal>
 
       <Modal
+        title="批量删除设备资产"
+        open={bulkDeleteOpen}
+        onCancel={() => setBulkDeleteOpen(false)}
+        footer={[
+          <Button key="close" onClick={() => setBulkDeleteOpen(false)}>关闭</Button>,
+          <Button
+            key="refresh"
+            icon={<SearchOutlined />}
+            loading={previewBulkDelete.isLoading}
+            onClick={() => previewBulkDelete.mutate()}
+          >
+            重新预览
+          </Button>,
+          <Button
+            key="delete"
+            danger
+            type="primary"
+            loading={applyBulkDelete.isLoading}
+            disabled={!bulkDeletePreview || bulkDeletePreview.target_count === 0}
+            onClick={() => applyBulkDelete.mutate()}
+          >
+            确认删除
+          </Button>,
+        ]}
+        width={860}
+        destroyOnClose
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Alert
+            type="warning"
+            showIcon
+            message={selectedRowKeys.length
+              ? `将删除已勾选的 ${selectedRowKeys.length} 台设备资产。`
+              : '未勾选设备时，将删除当前筛选结果中的设备资产。'}
+            description="删除只影响设备资产清单，不会删除历史巡检、证据链、Workflow 记录或事件数据。"
+          />
+          {bulkDeletePreview && (
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              <Tag color={bulkDeletePreview.target_count ? 'red' : 'default'}>
+                目标设备 {bulkDeletePreview.target_count}
+              </Tag>
+              <Table
+                rowKey="device_id"
+                size="small"
+                pagination={{ pageSize: 8 }}
+                dataSource={bulkDeletePreview.rows}
+                columns={[
+                  { title: '设备', dataIndex: 'device_name', width: 220 },
+                  { title: 'IP', dataIndex: 'ip', width: 140 },
+                  { title: '厂商', dataIndex: ['current', 'vendor'], width: 120 },
+                  { title: '型号', dataIndex: ['current', 'model'], width: 180 },
+                  { title: '状态', dataIndex: ['current', 'status'], width: 100,
+                    render: (value: string) => <Tag>{statusLabel(value)}</Tag> },
+                ]}
+                scroll={{ x: 780 }}
+              />
+            </Space>
+          )}
+        </Space>
+      </Modal>
+
+      <Modal
         title="发起设备巡检"
         open={patrolOpen}
         onCancel={() => setPatrolOpen(false)}
@@ -2808,7 +3143,7 @@ const DevicesPage: React.FC = () => {
             type="primary"
             icon={<PlayCircleOutlined />}
             loading={launchPatrol.isLoading}
-            disabled={!patrolPreview || patrolPreview.ready_count === 0 || patrolPreview.error_count > 0}
+            disabled={previewPatrol.isLoading || Boolean(patrolPreview && patrolPreview.ready_count === 0)}
             onClick={() => launchPatrol.mutate()}
           >
             发起
@@ -2822,16 +3157,37 @@ const DevicesPage: React.FC = () => {
             type="info"
             showIcon
             message={selectedRowKeys.length
-              ? `将为已勾选的 ${selectedRowKeys.length} 台设备生成巡检计划。`
+              ? '将为已勾选的 ' + selectedRowKeys.length + ' 台设备生成巡检计划。'
               : '未勾选设备时，将按当前筛选条件生成巡检计划。'}
           />
-          <Form<PatrolFormValues> form={patrolForm} layout="vertical" requiredMark={false}>
+          <Form<PatrolFormValues>
+            form={patrolForm}
+            layout="vertical"
+            requiredMark={false}
+            onValuesChange={() => {
+              setPatrolPreview(null)
+              setPatrolLaunch(null)
+            }}
+          >
             <Row gutter={12}>
+              <Col xs={24} md={6}>
+                <Form.Item name="group" label="设备分组">
+                  <Select
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    placeholder="使用当前筛选"
+                    disabled={Boolean(selectedRowKeys.length)}
+                    options={deviceGroups.map((group) => ({ value: group, label: group }))}
+                  />
+                </Form.Item>
+              </Col>
               <Col xs={24} md={6}>
                 <Form.Item name="dynamic_group_id" label="动态分组">
                   <Select
                     allowClear
                     placeholder="使用当前筛选"
+                    disabled={Boolean(selectedRowKeys.length)}
                     options={dynamicGroups
                       .filter((group) => group.status === 'active')
                       .map((group) => ({ value: group.id, label: group.name }))}
@@ -2899,8 +3255,16 @@ const DevicesPage: React.FC = () => {
               <Alert
                 type="success"
                 showIcon
-                message={`已启动 ${patrolLaunch.launched_count} 个巡检${patrolLaunch.launch_mode === 'workflow' ? ' Workflow' : '任务'}`}
+                message={`已启动 ${patrolLaunch.launched_count} 个巡检${patrolLaunch.launch_mode === 'workflow' ? ' Workflow' : '任务'}${(patrolLaunch.skipped_count || 0) ? `，跳过 ${patrolLaunch.skipped_count} 台未就绪设备` : ''}`}
               />
+              {(patrolLaunch.skipped_count || 0) > 0 && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message="部分设备未发起"
+                  description={renderPatrolPreviewErrors()}
+                />
+              )}
               {patrolLaunch.launch_mode === 'workflow' ? (
                 <>
                   <Table

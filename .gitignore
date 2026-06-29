@@ -164,6 +164,8 @@ src/skills/textfsm-generator/reports/*.json
 src/skills/textfsm-generator/reports/rejected/
 src/skills/shared/textfsm-templates/*
 !src/skills/shared/textfsm-templates/.gitkeep
+src/skills/shared/outputs/*
+!src/skills/shared/outputs/.gitkeep
 templates/**/*.textfsm
 
 # Local patrol captures and artifacts derived from private captures

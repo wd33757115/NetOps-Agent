@@ -239,7 +239,7 @@ class CollectionPolicyResolver:
 
     def build_plan(self, *, device: dict[str, Any], action: str, mode: str) -> ExecutionPlan:
         attributes = dict(device.get("attributes") or {})
-        configured = attributes.get(f"{action}_commands")
+        configured = attributes.get(f"{action}_commands") if action != "patrol" else None
         profile_name = str(device.get("command_file") or f"default-{action}")
         credential_ref = str(device.get("credential_ref") or "").strip() or None
         collector_options = self._collector_options(attributes, action)
@@ -265,11 +265,7 @@ class CollectionPolicyResolver:
             profile_version_id = profile_version_id or (
                 active_profile.get("profile_version_id") if active_profile else None
             )
-            commands = (
-                list(active_profile["commands"])
-                if active_profile
-                else self._default_commands(device, action)
-            )
+            commands = list(active_profile["commands"]) if active_profile else []
         return ExecutionPlan(
             device_id=str(device.get("device_id") or ""),
             action=action,
@@ -419,32 +415,6 @@ class CollectionPolicyResolver:
             elif str(actual or "").lower() != str(expected).lower():
                 return False
         return True
-
-    @staticmethod
-    def _default_commands(device: dict[str, Any], action: str) -> list[str]:
-        vendor = str(device.get("vendor") or "").lower()
-        if action == "backup":
-            return (
-                ["show version", "show running-config"]
-                if vendor == "cisco"
-                else ["display version", "display current-configuration"]
-            )
-        if vendor == "cisco":
-            return [
-                "show version",
-                "show inventory",
-                "show interface status",
-                "show processes cpu",
-                "show processes memory",
-            ]
-        return [
-            "display version",
-            "display device manuinfo",
-            "display interface brief",
-            "display cpu-usage",
-            "display memory",
-        ]
-
 
 class CommandProfileRepository:
     def get_profile_version(self, profile_version_id: str) -> dict[str, Any] | None:
@@ -673,10 +643,37 @@ class CommandProfileRepository:
             coverage = dict(version.coverage_json or {})
             if not coverage:
                 raise ValueError("command profile impact evidence is required before activation")
-            if coverage.get("blocked_device_count", 0):
-                raise ValueError("command profile impact evidence has blocked devices")
-            if coverage.get("blocked_command_count", 0):
-                raise ValueError("command profile impact evidence has blocked commands")
+
+    def delete_profile_version(self, profile_version_id: str) -> dict[str, Any]:
+        with get_db_session() as db:
+            version = db.get(CommandProfileVersionRecord, profile_version_id)
+            if version is None:
+                raise ValueError(f"command profile version not found: {profile_version_id}")
+            if version.status == "active":
+                raise ValueError("active command profile version cannot be deleted; deprecate it first")
+            profile = db.get(CommandProfileRecord, version.profile_id)
+            profile_id = version.profile_id
+            deleted_version = version.to_dict()
+            db.delete(version)
+            db.flush()
+            remaining_count = (
+                db.query(CommandProfileVersionRecord)
+                .filter(CommandProfileVersionRecord.profile_id == profile_id)
+                .count()
+            )
+            profile_deleted = False
+            if remaining_count == 0 and profile is not None:
+                db.delete(profile)
+                profile_deleted = True
+            elif profile is not None:
+                profile.updated_at = datetime.now(timezone.utc)
+            return {
+                "success": True,
+                "profile_id": profile_id,
+                "profile_version_id": profile_version_id,
+                "deleted_version": deleted_version,
+                "profile_deleted": profile_deleted,
+            }
 
     def record_profile_coverage(
         self,

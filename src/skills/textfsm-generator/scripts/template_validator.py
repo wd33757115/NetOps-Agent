@@ -32,6 +32,7 @@ class ValidationResult:
     records: list[dict[str, Any]] = field(default_factory=list)
     empty_accepted: bool = False
     key_errors: list[str] = field(default_factory=list)
+    completeness_errors: list[str] = field(default_factory=list)
 
     @property
     def is_valid(self) -> bool:
@@ -42,6 +43,7 @@ class ValidationResult:
             and not self.missing_fields
             and not self.value_errors
             and not self.key_errors
+            and not self.completeness_errors
         )
 
 
@@ -142,6 +144,7 @@ def validate_template(
     allow_empty: bool = False,
     empty_patterns: list[str] | None = None,
     primary_keys: list[str] | tuple[str, ...] | None = None,
+    expected_min_records: int | None = None,
 ) -> ValidationResult:
     result = ValidationResult()
     validators = validators or {}
@@ -173,6 +176,13 @@ def validate_template(
         result.validation_score = 25
         return result
 
+    if expected_min_records and len(records) < expected_min_records:
+        result.completeness_errors.append(
+            "parsed record count "
+            f"{len(records)} is below expected minimum {expected_min_records}"
+        )
+        result.errors.extend(result.completeness_errors)
+
     result.field_coverage, result.missing_fields = check_required_fields(
         records, required_fields
     )
@@ -182,7 +192,9 @@ def validate_template(
     result.key_errors = list(key_result.errors)
     result.errors.extend(result.key_errors)
     score = 50 + round(25 * result.field_coverage / 100)
-    contract_errors = result.value_errors + result.key_errors
+    contract_errors = (
+        result.value_errors + result.key_errors + result.completeness_errors
+    )
     score += 25 if not contract_errors else max(0, 25 - len(contract_errors) * 5)
     result.validation_score = min(100, int(score))
     return result

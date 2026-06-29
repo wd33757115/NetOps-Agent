@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import io
+import json
+import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +49,10 @@ router = APIRouter(
 
 class ParserDispatchControlRequest(BaseModel):
     enabled: bool
+
+
+class ParserBulkJobDeleteRequest(BaseModel):
+    job_ids: list[str]
 
 
 class ParserImportRequest(BaseModel):
@@ -102,6 +112,76 @@ class CommandProfileImpactPreviewRequest(BaseModel):
 @router.get("/templates")
 def list_templates(status: str | None = None):
     return {"items": ParserRepository().list_templates(status=status)}
+
+
+@router.get("/templates/export")
+def export_templates(status: str | None = "active"):
+    repository = ParserRepository()
+    asset_store = TemplateAssetStore()
+    asset_root = asset_store.root.resolve()
+    templates = repository.list_templates(status=status if status != "all" else None)
+    manifest: list[dict[str, Any]] = []
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for item in templates:
+            target = Path(str(item.get("asset_path") or "")).resolve()
+            if not target.is_file() or not target.is_relative_to(asset_root):
+                manifest.append({**item, "export_status": "missing_asset"})
+                continue
+            content = target.read_bytes()
+            actual_sha256 = hashlib.sha256(content).hexdigest()
+            export_path = (
+                f"templates/{item.get('vendor')}/{item.get('profile')}/"
+                f"{target.name}"
+            )
+            archive.writestr(export_path, content)
+            validation = item.get("validation_json") or {}
+            archive.writestr(
+                f"contracts/{item.get('id')}.json",
+                json.dumps(validation, ensure_ascii=False, indent=2),
+            )
+            manifest.append(
+                {
+                    "id": item.get("id"),
+                    "vendor": item.get("vendor"),
+                    "model": item.get("model"),
+                    "family": item.get("family"),
+                    "profile": item.get("profile"),
+                    "canonical_command": item.get("canonical_command"),
+                    "category": item.get("category"),
+                    "version": item.get("version"),
+                    "status": item.get("status"),
+                    "sha256": item.get("sha256"),
+                    "actual_sha256": actual_sha256,
+                    "hash_valid": actual_sha256 == item.get("sha256"),
+                    "template_path": export_path,
+                    "contract_path": f"contracts/{item.get('id')}.json",
+                    "export_status": "exported",
+                }
+            )
+        archive.writestr(
+            "manifest.json",
+            json.dumps(
+                {
+                    "exported_at": datetime.now(timezone.utc).isoformat(),
+                    "status_filter": status,
+                    "template_count": len(manifest),
+                    "templates": manifest,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
+    payload = buffer.getvalue()
+    return {
+        "success": True,
+        "filename": f"parser-templates-{status or 'all'}.zip",
+        "content_base64": base64.b64encode(payload).decode("ascii"),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+        "template_count": len(manifest),
+        "exported_count": sum(1 for item in manifest if item["export_status"] == "exported"),
+        "manifest": manifest,
+    }
 
 
 @router.get("/templates/{template_id}/preview")
@@ -259,6 +339,21 @@ def cancel_job(job_id: str):
     if item.get("celery_task_id"):
         celery.control.revoke(item["celery_task_id"], terminate=False)
     return {"success": True, "job_id": job_id, "status": "cancelled"}
+
+
+@router.delete("/jobs/{job_id}")
+def delete_job(job_id: str):
+    try:
+        result = ParserRepository().delete_job(job_id)
+    except ParserJobStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"success": True, "job_id": job_id, **result}
+
+
+@router.post("/jobs/bulk-delete")
+def bulk_delete_jobs(payload: ParserBulkJobDeleteRequest):
+    result = ParserRepository().delete_jobs(payload.job_ids)
+    return {"success": result["failed_count"] == 0, **result}
 
 
 @router.post("/jobs/{job_id}/dispatch")
@@ -570,6 +665,17 @@ def activate_command_profile(profile_version_id: str):
         repository = CommandProfileRepository()
         repository.validate_profile_activation(profile_version_id)
         return repository.activate_profile_version(profile_version_id)
+    except Exception as exc:
+        message = str(exc)
+        if message == "command profile impact evidence is required before activation":
+            message = "激活前需要先完成影响预览并保存证据"
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.delete("/command-profiles/{profile_version_id}")
+def delete_command_profile(profile_version_id: str):
+    try:
+        return CommandProfileRepository().delete_profile_version(profile_version_id)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

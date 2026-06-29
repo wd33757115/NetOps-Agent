@@ -56,10 +56,14 @@ Rules:
    TextFSM actions must use valid forms such as `-> Record`, `-> StateName`, or
    `-> Record StateName`; never emit `-> StateName.Record`.
 4. Every emitted record must contain every required field; accumulate fields before `-> Record`.
-5. Produce stable records suitable for comparing separate patrol runs.
-6. Ignore headings, legends, prompts, totals, and process-detail rows unless the requested
+5. For block-style entities, emit `-> Record` on the last field line of the entity
+   after all required fields are captured. Do not wait for the next entity header
+   to record the previous entity unless the next header line also captures the new
+   entity key correctly.
+6. Produce stable records suitable for comparing separate patrol runs.
+7. Ignore headings, legends, prompts, totals, and process-detail rows unless the requested
    fields need them.
-7. A sample may legitimately have no records when it says the feature is not configured.
+8. A sample may legitimately have no records when it says the feature is not configured.
 """
 
 

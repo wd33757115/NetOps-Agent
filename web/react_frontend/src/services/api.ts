@@ -261,6 +261,16 @@ export interface ParserIdentitySignature {
   status: string
 }
 
+export interface ParserTemplateExport {
+  success: boolean
+  filename: string
+  content_base64: string
+  sha256: string
+  template_count: number
+  exported_count: number
+  manifest: Array<Record<string, unknown>>
+}
+
 export interface ParserEventRule {
   rule_id: string
   rule_name: string
@@ -403,6 +413,7 @@ export interface ManagedDevice {
     profile_name?: string | null
     profile_version_id?: string | null
     violations?: Array<Record<string, unknown>>
+    plan_violations?: Array<Record<string, unknown>>
     connection_issues?: Array<Record<string, unknown>>
     error?: string
   }
@@ -503,7 +514,6 @@ export interface DeviceBulkFilters {
 
 export interface DeviceBulkUpdate {
   command_profile?: string
-  patrol_commands?: string[]
   credential_ref?: string
   status?: string
   platform?: string
@@ -538,6 +548,24 @@ export interface DeviceBulkPreview {
 
 export interface DeviceBulkApplyResult extends DeviceBulkPreview {
   applied_count: number
+  devices: ManagedDevice[]
+}
+
+export interface DeviceBulkDeletePreview {
+  success: boolean
+  target_count: number
+  rows: Array<{
+    device_id: string
+    device_name?: string
+    ip?: string
+    current: ManagedDevice
+  }>
+}
+
+export interface DeviceBulkDeleteResult {
+  success: boolean
+  target_count: number
+  deleted_count: number
   devices: ManagedDevice[]
 }
 
@@ -596,6 +624,8 @@ export interface DevicePatrolLaunchResult {
   patrol_batch_id?: string
   launch_mode: string
   workflow_name: string
+  skipped_count?: number
+  skipped_errors?: DevicePatrolPreview['errors']
   runs: Array<{
     device_id: string
     device_name?: string
@@ -745,6 +775,45 @@ export interface DeviceConnectivityTestResult {
   prompt?: string
   elapsed_seconds?: number
   error?: string
+}
+
+export interface DeviceIdentityDiscoveryResult {
+  success: boolean
+  identity_status: string
+  failure_code?: string | null
+  error?: string | null
+  device: ManagedDevice
+  connection_issues?: Array<Record<string, unknown>>
+  identity?: {
+    vendor?: string | null
+    model?: string | null
+    family?: string | null
+    confidence?: number
+    source?: string | null
+    evidence_command?: string | null
+    evidence_text?: string | null
+    discovered_at?: string | null
+  }
+  commands?: string[]
+  command_outputs?: Array<{
+    command: string
+    canonical_command?: string
+    output_preview?: string
+    output_length?: number
+  }>
+  warnings?: Array<{ code: string; message: string }>
+  device_type?: string
+  prompt?: string
+  elapsed_seconds?: number
+}
+
+export interface DatabaseResetResult {
+  success: boolean
+  dry_run: boolean
+  total_rows: number
+  table_counts: Record<string, number>
+  deleted_tables: string[]
+  preserved_tables: string[]
 }
 
 export interface DeviceConnectionHealthRecord {
@@ -1168,6 +1237,10 @@ export const parserApi = {
     const response = await api.get<ParserTemplateComparison>(`/parser/templates/${id}/comparison/`)
     return response.data
   },
+  exportTemplates: async (status = 'active') => {
+    const response = await api.get<ParserTemplateExport>('/parser/templates/export/', { params: { status } })
+    return response.data
+  },
   datasets: async () => {
     const response = await api.get<{ items: ParserDatasetCoverage[] }>('/parser/datasets/')
     return response.data.items
@@ -1183,6 +1256,10 @@ export const parserApi = {
   deprecate: async (id: string) => (await api.post(`/parser/templates/${id}/deprecate/`)).data,
   retryJob: async (id: string) => (await api.post(`/parser/jobs/${id}/retry/`)).data,
   cancelJob: async (id: string) => (await api.post(`/parser/jobs/${id}/cancel/`)).data,
+  deleteJob: async (id: string) => (await api.delete(`/parser/jobs/${id}/`)).data,
+  bulkDeleteJobs: async (job_ids: string[]) => (
+    await api.post('/parser/jobs/bulk-delete/', { job_ids })
+  ).data,
   dispatchJob: async (id: string) => (await api.post(`/parser/jobs/${id}/dispatch/`)).data,
   dispatch: async () => (await api.post('/parser/dispatch/')).data,
   dispatchControl: async () => {
@@ -1233,6 +1310,8 @@ export const parserApi = {
     (await api.post(`/parser/command-profiles/${profileVersionId}/deprecate/`, {})).data,
   rollbackCommandProfile: async (profileVersionId: string) =>
     (await api.post(`/parser/command-profiles/${profileVersionId}/rollback/`, {})).data,
+  deleteCommandProfile: async (profileVersionId: string) =>
+    (await api.delete(`/parser/command-profiles/${profileVersionId}/`)).data,
   commandProfileBindings: async () => {
     const response = await api.get<{ items: ParserCommandProfileBinding[] }>('/parser/command-profile-bindings/')
     return response.data.items
@@ -1324,12 +1403,24 @@ export const deviceApi = {
     const response = await api.get<DeviceImportTemplate>('/devices/import/template/')
     return response.data
   },
+  groups: async () => {
+    const response = await api.get<{ items: string[] }>('/devices/groups/')
+    return response.data.items
+  },
   previewBulk: async (data: DeviceBulkRequest) => {
     const response = await api.post<DeviceBulkPreview>('/devices/bulk/preview/', data)
     return response.data
   },
   applyBulk: async (data: DeviceBulkRequest) => {
     const response = await api.post<DeviceBulkApplyResult>('/devices/bulk/apply/', data)
+    return response.data
+  },
+  previewBulkDelete: async (data: Omit<DeviceBulkRequest, 'update'>) => {
+    const response = await api.post<DeviceBulkDeletePreview>('/devices/bulk/delete/preview/', data)
+    return response.data
+  },
+  bulkDelete: async (data: Omit<DeviceBulkRequest, 'update'>) => {
+    const response = await api.post<DeviceBulkDeleteResult>('/devices/bulk/delete/', data)
     return response.data
   },
   previewPatrol: async (data: DevicePatrolLaunchRequest) => {
@@ -1353,6 +1444,13 @@ export const deviceApi = {
   testConnectivity: async (deviceId: string) => {
     const response = await api.post<DeviceConnectivityTestResult>(
       `/devices/${deviceId}/connectivity-test/`,
+      {},
+    )
+    return response.data
+  },
+  discoverIdentity: async (deviceId: string) => {
+    const response = await api.post<DeviceIdentityDiscoveryResult>(
+      `/devices/${deviceId}/identity-discovery/`,
       {},
     )
     return response.data
@@ -1432,6 +1530,21 @@ export const deviceApi = {
       `/devices/agent-modules/${moduleId}/control/`,
       payload,
     )
+    return response.data
+  },
+}
+
+export const maintenanceApi = {
+  previewDatabaseReset: async () => {
+    const response = await api.get<DatabaseResetResult>('/maintenance/database-reset/preview/')
+    return response.data
+  },
+  resetDatabase: async (data: {
+    dry_run?: boolean
+    confirmation?: string
+    include_configuration?: boolean
+  }) => {
+    const response = await api.post<DatabaseResetResult>('/maintenance/database-reset/', data)
     return response.data
   },
 }

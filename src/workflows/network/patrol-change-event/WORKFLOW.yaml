@@ -21,6 +21,7 @@ steps:
     inputs:
       filter_params: ${context.filter_params}
       execution_plan: ${context.execution_plan}
+      execution_plan_id: ${context.execution_plan_id}
       ticket_id: ${context.ticket_id}
       save_baseline: ${context.save_baseline}
       mode: ${context.mode}
@@ -30,7 +31,6 @@ steps:
     skill: state-normalizer
     inputs:
       run_id: ${steps.patrol.result.snapshot_run_id}
-      update_current_state: true
 
   - name: change_detection
     label: 检测网络变化

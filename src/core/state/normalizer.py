@@ -131,6 +131,8 @@ def observations_from_snapshot(
     }
     ignore_fields.update(DEFAULT_IGNORE_FIELDS)
     observations: list[StateObservation] = []
+    external_device_id = str(snapshot["device_id"])
+    state_device_id = str(snapshot.get("inventory_device_id") or external_device_id)
     for record in _records(structured):
         if _looks_like_header_artifact(
             record,
@@ -147,7 +149,7 @@ def observations_from_snapshot(
             value_text, value_number, value_type = _value_parts(value)
             state_key = _digest(
                 [
-                    snapshot["device_id"],
+                    state_device_id,
                     entity_type,
                     entity_key,
                     field_name,
@@ -156,7 +158,7 @@ def observations_from_snapshot(
             observation_key = _digest(
                 [
                     snapshot["id"],
-                    snapshot["device_id"],
+                    state_device_id,
                     entity_type,
                     entity_key,
                     field_name,
@@ -177,7 +179,7 @@ def observations_from_snapshot(
                     evidence_id=snapshot.get("evidence_id"),
                     schema_id=snapshot.get("schema_id")
                     or snapshot.get("parser_template_id"),
-                    device_id=snapshot["device_id"],
+                    device_id=state_device_id,
                     vendor=snapshot.get("vendor"),
                     model=snapshot.get("model"),
                     canonical_command=snapshot["canonical_command"],
@@ -200,6 +202,13 @@ def observations_from_snapshot(
                         "primary_keys": primary_keys,
                         "evidence_id": snapshot.get("evidence_id"),
                         "source_type": str(snapshot.get("source_type") or "cli"),
+                        "external_device_id": external_device_id,
+                        "inventory_device_id": snapshot.get("inventory_device_id"),
+                        "identity_status": (
+                            "inventory_bound"
+                            if snapshot.get("inventory_device_id")
+                            else "external_fallback"
+                        ),
                     },
                 )
             )
@@ -258,15 +267,22 @@ def normalize_run(
     run_id: str,
     *,
     update_current_state: bool | None = None,
+    device_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     repository = StateRepository()
+    snapshot_ids = (
+        repository.list_run_snapshot_ids(run_id, device_ids=device_ids)
+        if device_ids
+        else repository.list_run_snapshot_ids(run_id)
+    )
     results = [
         normalize_snapshot(snapshot_id, update_current_state=update_current_state)
-        for snapshot_id in repository.list_run_snapshot_ids(run_id)
+        for snapshot_id in snapshot_ids
     ]
     return {
         "success": all(result.get("success") for result in results),
         "run_id": run_id,
+        "device_ids": device_ids or [],
         "snapshot_count": len(results),
         "observation_count": sum(int(r.get("observation_count") or 0) for r in results),
         "created_count": sum(int(r.get("created_count") or 0) for r in results),
@@ -287,5 +303,6 @@ def normalize_state_from_params(params: dict[str, Any]) -> dict[str, Any]:
         return normalize_run(
             str(params["run_id"]),
             update_current_state=params.get("update_current_state"),
+            device_ids=params.get("device_ids"),
         )
     raise ValueError("provide snapshot_id or run_id")

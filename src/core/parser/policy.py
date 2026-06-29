@@ -12,6 +12,20 @@ SHARED_PARSER_CONFIG_ROOT = (
     Path(__file__).resolve().parents[2] / "skills" / "shared" / "parser-config"
 )
 
+DEFAULT_COMMAND_ALIASES = {
+    "display cpu-us": "display cpu",
+    "display cpu-usage": "display cpu",
+    "display ip int brief": "display ip interface brief",
+    "display ip interface": "display ip interface brief",
+    "show env power": "show environment power",
+    "show env fan": "show environment fan",
+    "show env temperature": "show environment temperature",
+    "show int status": "show interface status",
+    "show ip int brief": "show ip interface brief",
+    "show proc cpu": "show processes cpu",
+    "show proc memory": "show processes memory",
+}
+
 
 @dataclass(frozen=True)
 class CategorySpec:
@@ -60,11 +74,15 @@ class ParserPolicy:
             repository = ParserRepository()
         self.repository = repository
         self.aliases = {
+            self._basic_normalize(alias): self._basic_normalize(canonical)
+            for alias, canonical in DEFAULT_COMMAND_ALIASES.items()
+        }
+        self.aliases.update({
             self._basic_normalize(item["alias"]): self._basic_normalize(
                 item["canonical_command"]
             )
             for item in repository.list_command_aliases()
-        }
+        })
 
     @staticmethod
     def _basic_normalize(command: str) -> str:

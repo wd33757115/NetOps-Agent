@@ -33,7 +33,11 @@ def is_down(value: Any) -> bool:
         "down",
         "administratively down",
         "admin-down",
+        "notconnec",
         "notconnect",
+        "notconnected",
+        "xcvrabsen",
+        "sfpabsent",
         "inactive",
         "failed",
         "fault",
@@ -49,6 +53,12 @@ def is_up(value: Any) -> bool:
         "normal",
         "ok",
     }
+
+
+def is_bgp_change(change: dict[str, Any]) -> bool:
+    entity_type = norm(change.get("entity_type"))
+    command = norm(change.get("command"))
+    return "bgp" in entity_type or "bgp" in command
 
 
 @dataclass(frozen=True)
@@ -68,23 +78,48 @@ def condition_matches(condition: dict[str, Any], change: dict[str, Any]) -> bool
     if kind == "threshold":
         fields = {norm_field(item) for item in condition.get("fields") or []}
         threshold = float(condition.get("gte"))
+        old_value = to_float(change.get("old"))
+        new_value = to_float(change.get("new"))
         return norm_field(change.get("field")) in fields and (
-            to_float(change.get("new")) is not None
-        ) and float(to_float(change.get("new")) or 0) >= threshold
-    if kind == "transition":
+            new_value is not None
+        ) and float(new_value or 0) >= threshold and (
+            change.get("change_type") == "initial"
+            or old_value is None
+            or float(old_value) < threshold
+        )
+    if kind == "threshold_recovery":
         fields = {norm_field(item) for item in condition.get("fields") or []}
+        threshold = float(condition.get("lt"))
+        old_value = to_float(change.get("old"))
+        new_value = to_float(change.get("new"))
         return (
             norm_field(change.get("field")) in fields
-            and _state_group(change.get("old")) == str(condition.get("from_group"))
+            and old_value is not None
+            and new_value is not None
+            and float(old_value) >= threshold
+            and float(new_value) < threshold
+        )
+    if kind == "transition":
+        fields = {norm_field(item) for item in condition.get("fields") or []}
+        old_group = _state_group(change.get("old"))
+        if change.get("change_type") == "initial":
+            old_group = str(condition.get("from_group"))
+        return (
+            norm_field(change.get("field")) in fields
+            and old_group == str(condition.get("from_group"))
             and _state_group(change.get("new")) == str(condition.get("to_group"))
         )
     if kind == "bgp_transition":
         fields = {norm_field(item) for item in condition.get("fields") or []}
         from_established = bool(condition.get("from_established"))
         to_established = bool(condition.get("to_established"))
+        old_established = norm(change.get("old")) == "established"
+        if change.get("change_type") == "initial":
+            old_established = from_established
         return (
-            norm_field(change.get("field")) in fields
-            and (norm(change.get("old")) == "established") is from_established
+            is_bgp_change(change)
+            and norm_field(change.get("field")) in fields
+            and old_established is from_established
             and (norm(change.get("new")) == "established") is to_established
         )
     if kind == "raw_config_hash":
@@ -417,16 +452,60 @@ def default_event_rules() -> list[EventRule]:
             version=1,
             event_type="CPUHigh",
             severity="warning",
+            predicate=lambda c: (
+                norm_field(c.get("field"))
+                in {"cpu", "cpu_5s", "cpu_1m", "cpu_5m", "cpu_usage"}
+                and (to_float(c.get("new")) is not None)
+                and float(to_float(c.get("new")) or 0) >= 90
+                and (
+                    c.get("change_type") == "initial"
+                    or to_float(c.get("old")) is None
+                    or float(to_float(c.get("old")) or 0) < 90
+                )
+            ),
+        ),
+        EventRule(
+            rule_id="cpu-recovered",
+            version=1,
+            event_type="CPURecovered",
+            severity="info",
             predicate=lambda c: norm_field(c.get("field"))
             in {"cpu", "cpu_5s", "cpu_1m", "cpu_5m", "cpu_usage"}
+            and (to_float(c.get("old")) is not None)
             and (to_float(c.get("new")) is not None)
-            and float(to_float(c.get("new")) or 0) >= 90,
+            and float(to_float(c.get("old")) or 0) >= 90
+            and float(to_float(c.get("new")) or 0) < 90,
         ),
         EventRule(
             rule_id="memory-high",
             version=1,
             event_type="MemoryHigh",
             severity="warning",
+            predicate=lambda c: (
+                norm_field(c.get("field"))
+                in {
+                    "memory",
+                    "memory_usage",
+                    "mem_usage",
+                    "usage",
+                    "used_percent",
+                    "memory_used_percent",
+                }
+                and norm(c.get("entity_type")) in {"memory", "system_resources"}
+                and (to_float(c.get("new")) is not None)
+                and float(to_float(c.get("new")) or 0) >= 90
+                and (
+                    c.get("change_type") == "initial"
+                    or to_float(c.get("old")) is None
+                    or float(to_float(c.get("old")) or 0) < 90
+                )
+            ),
+        ),
+        EventRule(
+            rule_id="memory-recovered",
+            version=1,
+            event_type="MemoryRecovered",
+            severity="info",
             predicate=lambda c: norm_field(c.get("field"))
             in {
                 "memory",
@@ -437,8 +516,10 @@ def default_event_rules() -> list[EventRule]:
                 "memory_used_percent",
             }
             and norm(c.get("entity_type")) in {"memory", "system_resources"}
+            and (to_float(c.get("old")) is not None)
             and (to_float(c.get("new")) is not None)
-            and float(to_float(c.get("new")) or 0) >= 90,
+            and float(to_float(c.get("old")) or 0) >= 90
+            and float(to_float(c.get("new")) or 0) < 90,
         ),
         EventRule(
             rule_id="interface-down",
@@ -456,7 +537,7 @@ def default_event_rules() -> list[EventRule]:
                     "line_protocol",
                 },
             )
-            and is_up(c.get("old"))
+            and (is_up(c.get("old")) or c.get("change_type") == "initial")
             and is_down(c.get("new")),
         ),
         EventRule(
@@ -483,9 +564,10 @@ def default_event_rules() -> list[EventRule]:
             version=1,
             event_type="BGPNeighborLost",
             severity="critical",
-            predicate=lambda c: norm_field(c.get("field"))
+            predicate=lambda c: is_bgp_change(c)
+            and norm_field(c.get("field"))
             in {"state", "bgp_state", "peer_state", "neighbor_state"}
-            and norm(c.get("old")) == "established"
+            and (norm(c.get("old")) == "established" or c.get("change_type") == "initial")
             and norm(c.get("new")) != "established",
         ),
         EventRule(
@@ -493,7 +575,8 @@ def default_event_rules() -> list[EventRule]:
             version=1,
             event_type="BGPNeighborEstablished",
             severity="info",
-            predicate=lambda c: norm_field(c.get("field"))
+            predicate=lambda c: is_bgp_change(c)
+            and norm_field(c.get("field"))
             in {"state", "bgp_state", "peer_state", "neighbor_state"}
             and norm(c.get("old")) != "established"
             and norm(c.get("new")) == "established",
@@ -577,6 +660,25 @@ def _default_condition(rule_id: str) -> dict[str, Any]:
                 "memory_used_percent",
             ],
             "gte": 90,
+        }
+    if rule_id == "cpu-recovered":
+        return {
+            "kind": "threshold_recovery",
+            "fields": ["cpu", "cpu_5s", "cpu_1m", "cpu_5m", "cpu_usage"],
+            "lt": 90,
+        }
+    if rule_id == "memory-recovered":
+        return {
+            "kind": "threshold_recovery",
+            "fields": [
+                "memory",
+                "memory_usage",
+                "mem_usage",
+                "usage",
+                "used_percent",
+                "memory_used_percent",
+            ],
+            "lt": 90,
         }
     if rule_id == "interface-down":
         return {

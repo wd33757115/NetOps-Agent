@@ -477,6 +477,25 @@ class NetworkDevice(Base):
         return {column.name: getattr(self, column.name) for column in self.__table__.columns}
 
 
+class NetworkDeviceTombstone(Base):
+    """Immutable audit snapshot written before a device asset is deleted."""
+
+    __tablename__ = "netops_device_tombstones"
+
+    id = Column(String(64), primary_key=True)
+    device_id = Column(String(64), nullable=False, index=True)
+    device_name = Column(String(256), nullable=False, index=True)
+    management_ip = Column(String(64), nullable=False, index=True)
+    vendor = Column(String(64), nullable=True, index=True)
+    model = Column(String(128), nullable=True, index=True)
+    family = Column(String(128), nullable=True, index=True)
+    snapshot_json = Column(JSON, nullable=False)
+    deleted_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
 class NetworkDeviceGroup(Base):
     __tablename__ = "netops_device_groups"
 

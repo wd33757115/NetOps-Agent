@@ -37,6 +37,25 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _event_dedupe_key(
+    *,
+    event_type: str,
+    device_id: str | None,
+    entity_type: str,
+    entity_key: str,
+    change: dict[str, Any],
+) -> str:
+    return "|".join(
+        [
+            event_type,
+            str(device_id or ""),
+            entity_type,
+            entity_key,
+            str(change.get("field") or ""),
+        ]
+    )
+
+
 def build_events_from_changes(changes: list[dict[str, Any]]) -> list[NetworkEvent]:
     events: list[NetworkEvent] = []
     occurred_at = _now()
@@ -44,15 +63,18 @@ def build_events_from_changes(changes: list[dict[str, Any]]) -> list[NetworkEven
         rule = match_event_rule(change)
         if not rule:
             continue
+        entity_type = str(change.get("entity_type") or "unknown")
+        entity_key = str(change.get("entity_key") or "")
+        device_id = change.get("device_id")
 
         events.append(
             NetworkEvent(
                 event_id=str(uuid.uuid4()),
                 event_type=rule.event_type,
                 severity=rule.severity,
-                device_id=change.get("device_id"),
-                entity_type=str(change.get("entity_type") or "unknown"),
-                entity_key=str(change.get("entity_key") or ""),
+                device_id=device_id,
+                entity_type=entity_type,
+                entity_key=entity_key,
                 source_change_id=change.get("change_id"),
                 run_id=change.get("run_id"),
                 occurred_at=change.get("detected_at") or occurred_at,
@@ -60,6 +82,13 @@ def build_events_from_changes(changes: list[dict[str, Any]]) -> list[NetworkEven
                 payload={
                     "change": change,
                     "rule": {"rule_id": rule.rule_id, "version": rule.version},
+                    "dedupe_key": _event_dedupe_key(
+                        event_type=rule.event_type,
+                        device_id=device_id,
+                        entity_type=entity_type,
+                        entity_key=entity_key,
+                        change=change,
+                    ),
                 },
             )
         )

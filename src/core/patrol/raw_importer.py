@@ -21,7 +21,7 @@ from src.core.patrol.modes import (
 )
 from src.core.patrol.repository import PatrolRepository
 from src.core.parser.identity import DeviceIdentityResolver
-from src.core.parser.runtime import ParserRuntime
+from src.core.parser.runtime import ParserRuntime, ParserRuntimeResult
 from src.infrastructure.db.postgres import require_postgres_connection
 
 
@@ -41,6 +41,9 @@ def _non_repairable_output(raw_text: str) -> bool:
             "command execution failed",
             "ssh connection failed",
             "output truncated",
+            "invalid command at",
+            "unrecognized command found",
+            "incomplete command found",
         )
     )
 
@@ -63,6 +66,29 @@ def _dataset_id(path: Path, metadata: dict[str, Any] | None) -> str:
     label = source.name or "parser-validation"
     digest = hashlib.sha256(str(source.resolve()).encode("utf-8")).hexdigest()[:10]
     return f"{label}-{digest}"
+
+
+def _resolve_capture_device(
+    *,
+    path: Path,
+    text: str,
+    explicit_device_name: str | None = None,
+    explicit_ip: str | None = None,
+) -> tuple[str, str | None, Any]:
+    inferred_name, inferred_ip = infer_device_from_filename(path)
+    inspected = inspect_raw_capture(text)
+    ip = explicit_ip or inferred_ip
+    # Field-export filenames usually carry the inventory name and management IP.
+    # Device prompts can be hostnames, aliases, or stale names, so use them only
+    # when the file name does not provide a stronger asset identity.
+    device_name = (
+        explicit_device_name
+        or (inferred_name if inferred_name and inferred_ip else None)
+        or inspected.device_name
+        or inferred_name
+        or path.stem
+    )
+    return device_name, ip, inspected
 
 
 def _import_fingerprint(
@@ -133,10 +159,11 @@ def preview_raw_path(
     for candidate in files:
         text = _read_text_best_effort(candidate)
         file_hash = hashlib.sha256(candidate.read_bytes()).hexdigest()
-        inferred_name, inferred_ip = infer_device_from_filename(candidate)
-        inspected = inspect_raw_capture(text)
-        resolved_name = inspected.device_name or inferred_name or candidate.stem
-        device_id = f"{resolved_name}-{inferred_ip}" if inferred_ip else resolved_name
+        resolved_name, resolved_ip, _inspected = _resolve_capture_device(
+            path=candidate,
+            text=text,
+        )
+        device_id = f"{resolved_name}-{resolved_ip}" if resolved_ip else resolved_name
         blocks = split_cli_capture(text, device_name=resolved_name)
         identity = DeviceIdentityResolver().resolve(
             blocks=blocks,
@@ -222,10 +249,12 @@ def import_raw_capture(
     path = Path(file_path)
     text = _read_text_best_effort(path)
     source_file_hash = hashlib.sha256(path.read_bytes()).hexdigest()
-    inferred_name, inferred_ip = infer_device_from_filename(path)
-    inspected = inspect_raw_capture(text)
-    device_name = device_name or inspected.device_name or inferred_name or path.stem
-    ip = ip or inferred_ip
+    device_name, ip, inspected = _resolve_capture_device(
+        path=path,
+        text=text,
+        explicit_device_name=device_name,
+        explicit_ip=ip,
+    )
     device_id = f"{device_name}-{ip}" if ip else device_name
     blocks = split_cli_capture(text, device_name=device_name)
     identity = DeviceIdentityResolver().resolve(
@@ -251,41 +280,43 @@ def import_raw_capture(
         if item["policy_status"] == "eligible"
         and item["coverage_status"] != "ready"
     ]
-    if mode == PRODUCTION_MODE and blocking:
-        raise ParserCoverageError(
-            f"production patrol blocked by {len(blocking)} parser coverage issue(s)",
-            blocking,
-        )
 
-    parsed_blocks = [
-        (
-            block,
-            runtime.parse(
+    parsed_blocks = []
+    for block in blocks:
+        try:
+            parsed = runtime.parse(
                 identity=identity,
                 command=block.command_canonical,
                 raw_text=block.raw_output,
-            ),
-        )
-        for block in blocks
-    ]
-    if mode == PRODUCTION_MODE:
-        parse_violations = [
-            {
-                "canonical_command": parsed.canonical_command,
-                "parser_status": parsed.parser_status,
-                "failure_code": parsed.failure_code,
-                "template_id": parsed.template_id,
-                "template_version": parsed.template_version,
-            }
-            for _, parsed in parsed_blocks
-            if parsed.policy_status == "eligible"
-            and parsed.parser_status not in {"success", "empty"}
-        ]
-        if parse_violations:
-            raise ParserCoverageError(
-                "production patrol blocked by parser validation failure",
-                parse_violations,
             )
+        except Exception as exc:
+            parsed = ParserRuntimeResult(
+                policy_status="eligible",
+                identity_status=identity.status,
+                parser_status="failed",
+                canonical_command=block.command_canonical,
+                handling="structured",
+                failure_code=f"parser_exception:{type(exc).__name__}",
+                identity_evidence={
+                    "confidence": identity.confidence,
+                    "source": identity.source,
+                    "command": identity.evidence_command,
+                    "text": identity.evidence_text,
+                },
+            )
+        parsed_blocks.append((block, parsed))
+    parse_violations = [
+        {
+            "canonical_command": parsed.canonical_command,
+            "parser_status": parsed.parser_status,
+            "failure_code": parsed.failure_code,
+            "template_id": parsed.template_id,
+            "template_version": parsed.template_version,
+        }
+        for _, parsed in parsed_blocks
+        if parsed.policy_status == "eligible"
+        and parsed.parser_status not in {"success", "empty"}
+    ]
 
     repository = PatrolRepository()
     dataset_id = _dataset_id(path, metadata)
@@ -328,6 +359,11 @@ def import_raw_capture(
             "storage": "postgresql",
             "legacy_db_path_ignored": str(db_path) if db_path else None,
             "coverage": coverage,
+            "coverage_violations": blocking,
+            "parse_violations": parse_violations,
+            "production_parser_ready": not (
+                mode == PRODUCTION_MODE and (blocking or parse_violations)
+            ),
             "parser_results": [
                 {
                     "snapshot_id": snapshot.snapshot_id,
@@ -476,6 +512,11 @@ def import_raw_capture(
         "storage": "postgresql",
         "legacy_db_path_ignored": str(db_path) if db_path else None,
         "coverage": coverage,
+        "coverage_violations": blocking,
+        "parse_violations": parse_violations,
+        "production_parser_ready": not (
+            mode == PRODUCTION_MODE and (blocking or parse_violations)
+        ),
         "parser_results": parser_results,
     }
 

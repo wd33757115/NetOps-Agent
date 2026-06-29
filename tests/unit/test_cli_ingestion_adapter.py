@@ -60,3 +60,41 @@ def test_cli_command_collector_writes_command_report(tmp_path):
     text = result.output_file.read_text(encoding="utf-8")
     assert "Command: show version" in text
     assert "Output:\noutput for show inventory" in text
+
+
+def test_cli_command_collector_retries_transient_connection_failure(tmp_path):
+    calls: dict[str, object] = {"connects": 0, "commands": []}
+
+    class FakeConnection:
+        def send_command(self, command, read_timeout=60):
+            calls["commands"].append(command)
+            return f"output for {command}"
+
+        def disconnect(self):
+            pass
+
+    def flaky_connector(device):
+        calls["connects"] = int(calls["connects"]) + 1
+        if calls["connects"] == 1:
+            raise RuntimeError("Error reading SSH protocol banner")
+        return FakeConnection()
+
+    collector = CLICommandCollector(output_root=tmp_path, connector=flaky_connector)
+    plan = ExecutionPlan(
+        device_id="device-1",
+        action="patrol",
+        mode="parser_validation",
+        profile_name="test-profile",
+        profile_version_id=None,
+        collector_options={"connection_attempts": 2, "connection_retry_delay": 0},
+        commands=(CollectionItem(command="display version", action="patrol"),),
+    )
+
+    output_file = collector.collect_command_outputs(
+        device={"device_name": "H3C-1", "ip": "10.10.1.1"},
+        execution_plan=plan,
+    )
+
+    assert calls["connects"] == 2
+    assert calls["commands"] == ["display version"]
+    assert output_file.exists()

@@ -10,6 +10,67 @@ from .assets import DEFAULT_ASSET_ROOT, TemplateAssetStore
 from .repository import ParserRepository
 
 
+def _candidate_template_paths(
+    *,
+    source_root: Path,
+    assets: TemplateAssetStore,
+    vendor: str,
+    model: str,
+    command: str,
+    version: str,
+    manifest_path: str | None,
+) -> list[Path]:
+    candidates: list[Path] = []
+    if manifest_path:
+        candidates.append(source_root / manifest_path)
+    candidates.append(
+        assets.version_path(
+            vendor=vendor,
+            profile=model,
+            command=command,
+            version=version,
+        )
+    )
+    if manifest_path:
+        legacy = Path(manifest_path)
+        candidates.append(source_root / vendor / model / legacy.name)
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(candidate)
+    return unique
+
+
+def _read_template_content(paths: list[Path]) -> tuple[Path, str]:
+    for path in paths:
+        if path.is_file():
+            return path, path.read_text(encoding="utf-8")
+    raise FileNotFoundError(
+        "template asset not found; tried: "
+        + ", ".join(str(path) for path in paths)
+    )
+
+
+def _activation_validation(entry: dict[str, Any]) -> dict[str, Any]:
+    validation = dict(entry)
+    pass_rate = float(validation.get("validation_pass_rate") or 0)
+    sample_count = int(validation.get("sample_count") or 0)
+    validation.setdefault(
+        "regression_validation",
+        {
+            "passed": pass_rate >= 1.0 and sample_count > 0,
+            "validation_pass_rate": pass_rate,
+            "sample_count": sample_count,
+            "source": "shared_manifest_bootstrap",
+        },
+    )
+    return validation
+
+
 def bootstrap_shared_templates(root: str | Path | None = None) -> dict[str, Any]:
     source_root = Path(root or DEFAULT_ASSET_ROOT)
     manifest_path = source_root / "manifest.json"
@@ -31,8 +92,17 @@ def bootstrap_shared_templates(root: str | Path | None = None) -> dict[str, Any]
             ):
                 skipped += 1
                 continue
-            legacy_path = source_root / str(entry["template_path"])
-            content = legacy_path.read_text(encoding="utf-8")
+            asset_path, content = _read_template_content(
+                _candidate_template_paths(
+                    source_root=source_root,
+                    assets=assets,
+                    vendor=vendor,
+                    model=model,
+                    command=command,
+                    version=version,
+                    manifest_path=str(entry.get("template_path") or ""),
+                )
+            )
             target, digest = assets.write_immutable(
                 vendor=vendor,
                 profile=model,
@@ -50,7 +120,10 @@ def bootstrap_shared_templates(root: str | Path | None = None) -> dict[str, Any]
                 version=version,
                 asset_path=str(target),
                 sha256=digest,
-                validation=dict(entry),
+                validation={
+                    **_activation_validation(entry),
+                    "bootstrap_source_path": str(asset_path),
+                },
                 status="draft",
             )
             repository.activate_template(template_id)

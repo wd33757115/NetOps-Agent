@@ -1,0 +1,4705 @@
+命令: terminal length 0
+输出:
+Cisco Nexus Operating System (NX-OS) Software
+TAC support: http://www.cisco.com/tac
+Copyright (C) 2002-2018, Cisco and/or its affiliates.
+All rights reserved.
+The copyrights to certain works contained in this software are
+owned by other third parties and used and distributed under their own
+licenses, such as open source.  This software is provided "as is," and unless
+otherwise stated, there is no warranty, express or implied, including but not
+limited to warranties of merchantability and fitness for a particular purpose.
+Certain components of this software are licensed under
+the GNU General Public License (GPL) version 2.0 or 
+GNU General Public License (GPL) version 3.0  or the GNU
+Lesser General Public License (LGPL) Version 2.1 or 
+Lesser General Public License (LGPL) Version 2.0. 
+A copy of each such license is available at
+http://www.opensource.org/licenses/gpl-2.0.php and
+http://opensource.org/licenses/gpl-3.0.html and
+http://www.opensource.org/licenses/lgpl-2.1.php and
+http://www.gnu.org/licenses/old-licenses/library.txt.
+
+sw-4012# 
+
+sw-4012# terminal length 0
+
+--------------------------------------------------
+命令: Show version
+输出:
+Cisco Nexus Operating System (NX-OS) Software
+TAC support: http://www.cisco.com/tac
+Copyright (C) 2002-2018, Cisco and/or its affiliates.
+All rights reserved.
+The copyrights to certain works contained in this software are
+owned by other third parties and used and distributed under their own
+licenses, such as open source.  This software is provided "as is," and unless
+otherwise stated, there is no warranty, express or implied, including but not
+limited to warranties of merchantability and fitness for a particular purpose.
+Certain components of this software are licensed under
+the GNU General Public License (GPL) version 2.0 or 
+GNU General Public License (GPL) version 3.0  or the GNU
+Lesser General Public License (LGPL) Version 2.1 or 
+Lesser General Public License (LGPL) Version 2.0. 
+A copy of each such license is available at
+http://www.opensource.org/licenses/gpl-2.0.php and
+http://opensource.org/licenses/gpl-3.0.html and
+http://www.opensource.org/licenses/lgpl-2.1.php and
+http://www.gnu.org/licenses/old-licenses/library.txt.
+
+Software
+  BIOS: version 05.31
+  NXOS: version 9.2(1)
+  BIOS compile time:  05/17/2018
+  NXOS image file is: bootflash:///nxos.9.2.1.bin
+  NXOS compile time:  7/17/2018 16:00:00 [07/18/2018 08:21:19]
+
+
+Hardware
+  cisco Nexus9000 C9364C Chassis 
+  Intel(R) Xeon(R) CPU D-1526 @ 1.80GHz with 32828228 kB of memory.
+  Processor Board ID 3N6E8VN8BEG
+
+  Device name: sw-4012
+  bootflash:  115805356 kB
+Kernel uptime is 269 day(s), 20 hour(s), 47 minute(s), 10 second(s)
+
+Last reset 
+  Reason: Unknown
+  System version: 9.2(1)
+  Service: 
+
+plugin
+  Core Plugin, Ethernet Plugin
+
+Active Package(s):
+        
+
+--------------------------------------------------
+命令: Show clock
+输出:
+14:06:00.341 GMT Fri Jun 26 2026
+Time source is NTP
+
+--------------------------------------------------
+命令: show module
+输出:
+Mod Ports             Module-Type                       Model          Status
+--- ----- ------------------------------------- --------------------- ---------
+1    66   64x100G QSFP28 + 2x10G SFP+ Ethernet  N9K-C9364C            active *  
+
+Mod  Sw                       Hw    Slot
+---  ----------------------- ------ ----
+1    9.2(1)                   1.0    NA  
+
+
+Mod  MAC-Address(es)                         Serial-Num
+---  --------------------------------------  ----------
+1    70-6d-15-6f-c9-80 to 70-6d-15-6f-c9-cd  FDO22350PHA
+
+Mod  Online Diag Status
+---  ------------------
+1    Pass
+
+* this terminal session 
+
+--------------------------------------------------
+命令: show inventory
+输出:
+NAME: "Chassis",  DESCR: "Nexus9000 C9364C Chassis"              
+PID: N9K-C9364C          ,  VID: V01 ,  SN: 3N6E8VN8BEG          
+
+NAME: "Slot 1",  DESCR: "64x100G QSFP28 + 2x10G SFP+ Ethernet Module"
+PID: N9K-C9364C          ,  VID: V01 ,  SN: 3N6E8VN8BEG          
+
+NAME: "Power Supply 1",  DESCR: "Nexus9000 C9364C Chassis Power Supply" 
+PID: NXA-PAC-1200W-PI    ,  VID: V02 ,  SN: SGJ8JD7R3C7          
+
+NAME: "Power Supply 2",  DESCR: "Nexus9000 C9364C Chassis Power Supply" 
+PID: NXA-PAC-1200W-PI    ,  VID: V02 ,  SN: 40BBJS6YWSS          
+
+NAME: "Fan 1",  DESCR: "Nexus9000 C9364C Chassis Fan Module"   
+PID: NXA-FAN-160CFM-PI   ,  VID: V01 ,  SN: N/A                  
+
+NAME: "Fan 2",  DESCR: "Nexus9000 C9364C Chassis Fan Module"   
+PID: NXA-FAN-160CFM-PI   ,  VID: V01 ,  SN: N/A                  
+
+NAME: "Fan 3",  DESCR: "Nexus9000 C9364C Chassis Fan Module"   
+PID: NXA-FAN-160CFM-PI   ,  VID: V01 ,  SN: N/A                  
+
+
+--------------------------------------------------
+命令: show environment power
+输出:
+Power Supply:
+Voltage: 12 Volts
+Power                      Actual             Actual        Total
+Supply    Model            Output             Input      Capacity       Status
+                           (Watts )           (Watts )     (Watts )
+-------  ----------  ---------------  ------  ----------  --------------------
+1        NXA-PAC-1200W-PI      129 W              158 W      1200 W      Ok
+2        NXA-PAC-1200W-PI      143 W              156 W      1200 W      Ok
+
+
+Power Usage Summary:
+--------------------
+Power Supply redundancy mode (configured)                PS-Redundant
+Power Supply redundancy mode (operational)               PS-Redundant
+
+Total Power Capacity (based on configured mode)            1200.00 W
+Total Grid-A (first half of PS slots) Power Capacity       1200.00 W
+Total Grid-B (second half of PS slots) Power Capacity      1200.00 W
+Total Power of all Inputs (cumulative)                     2400.00 W
+Total Power Output (actual draw)                            273.00 W
+Total Power Input (actual draw)                             314.00 W
+Total Power Allocated (budget)                                N/A   
+Total Power Available for additional modules                  N/A   
+
+
+--------------------------------------------------
+命令: show environment fan
+输出:
+  
+  
+  
+Fan:
+---------------------------------------------------------------------------
+Fan             Model                Hw     Direction       Status
+---------------------------------------------------------------------------
+Fan1(sys_fan1)  NXA-FAN-160CFM-PI    --     front-to-back   Ok 
+Fan2(sys_fan2)  NXA-FAN-160CFM-PI    --     front-to-back   Ok 
+Fan3(sys_fan3)  NXA-FAN-160CFM-PI    --     front-to-back   Ok 
+Fan_in_PS1      --                   --     front-to-back   Ok
+Fan_in_PS2      --                   --     front-to-back   Ok
+Fan Zone Speed: Zone 1: 0x66
+Fan Air Filter : NotSupported
+
+--------------------------------------------------
+命令: show environment temperature
+输出:
+Temperature:
+--------------------------------------------------------------------
+Module   Sensor        MajorThresh   MinorThres   CurTemp     Status
+                       (Celsius)     (Celsius)    (Celsius)         
+--------------------------------------------------------------------
+1        FRONT           70              42          22         Ok             
+1        BACK            80              70          31         Ok             
+1        CPU             90              80          42         Ok             
+1        Bigsky          110             100         56         Ok             
+
+--------------------------------------------------
+命令: show interface transceiver detail
+输出:
+Ethernet1/1
+    transceiver is not present
+
+Ethernet1/2
+    transceiver is not present
+
+Ethernet1/3
+    transceiver is present
+    type is QSFP-40G-SR-BD
+    name is CISCO-AVAGO
+    part number is AFBR-79EBPZ-CS2
+    revision is 01
+    serial number is MFX2XLN2AP7
+    nominal bitrate is 20600 MBit/sec per channel
+    Link length supported for 50/125um OM3 fiber is 100 m
+    cisco id is 13
+    cisco extended id number is 220
+    cisco part number is 10-2945-02
+    cisco product id is QSFP-40G-SR-BD
+
+DOM is not supported
+
+Ethernet1/4
+    transceiver is present
+    type is 1000base-SX
+    name is CISCO
+    part number is RTXM191-552-C88
+    revision is 1.0
+    serial number is Q3XPVNRBP3X
+    nominal bitrate is 1300 MBit/sec
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 10-2626-01
+    cisco product id is GLC-SX-MMD
+
+           SFP Detail Diagnostics Information (internal calibration)
+  ----------------------------------------------------------------------------
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  ----------------------------------------------------------------------------
+  Temperature   30.11 C        89.00 C     -9.00 C     85.00 C       -5.00 C
+  Voltage        3.26 V         3.59 V      3.00 V      3.50 V        3.09 V
+  Current        2.40 mA       15.00 mA     0.00 mA    10.00 mA       1.00 mA
+  Tx Power      -6.55 dBm       0.99 dBm  -13.56 dBm   -3.00 dBm     -9.50 dBm
+  Rx Power      -5.52 dBm       3.95 dBm  -21.54 dBm    0.00 dBm    -17.21 dBm
+  Transmit Fault Count = 0
+  ----------------------------------------------------------------------------
+  Note: ++  high-alarm; +  high-warning; --  low-alarm; -  low-warning
+
+Ethernet1/5
+    transceiver is present
+    type is 1000base-T
+    name is CISCO
+    part number is SP7041-TE
+    revision is A1
+    serial number is VQ9NMB7HAF7
+    nominal bitrate is 1300 MBit/sec
+    Link length supported for copper is 100 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 30-1475-01
+    cisco product id is GLC-TE
+
+DOM is not supported
+
+Ethernet1/6
+    transceiver is present
+    type is 1000base-SX
+    name is CISCO
+    part number is TRPUG1ESXECISE2G
+    revision is 01
+    serial number is IA070KLGET6
+    nominal bitrate is 1300 MBit/sec
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 10-2626-01
+    cisco product id is GLC-SX-MMD
+
+           SFP Detail Diagnostics Information (internal calibration)
+  ----------------------------------------------------------------------------
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  ----------------------------------------------------------------------------
+  Temperature   36.63 C        89.00 C     -9.00 C     85.00 C       -5.00 C
+  Voltage        3.24 V         3.59 V      3.00 V      3.50 V        3.09 V
+  Current        2.91 mA       12.00 mA     0.50 mA    10.00 mA       1.00 mA
+  Tx Power      -6.23 dBm       0.99 dBm  -13.56 dBm   -3.00 dBm     -9.50 dBm
+  Rx Power      -5.73 dBm       3.99 dBm  -21.54 dBm    0.00 dBm    -17.21 dBm
+  Transmit Fault Count = 0
+  ----------------------------------------------------------------------------
+  Note: ++  high-alarm; +  high-warning; --  low-alarm; -  low-warning
+
+Ethernet1/7
+    transceiver is present
+    type is QSFP-40G-SR-BD
+    name is CISCO-AVAGO
+    part number is AFBR-79EBPZ-CS2
+    revision is 01
+    serial number is AU5FG70OIMV
+    nominal bitrate is 20600 MBit/sec per channel
+    Link length supported for 50/125um OM3 fiber is 100 m
+    cisco id is 13
+    cisco extended id number is 220
+    cisco part number is 10-2945-02
+    cisco product id is QSFP-40G-SR-BD
+
+DOM is not supported
+
+Ethernet1/8
+    transceiver is present
+    type is QSFP-40G-SR-BD
+    name is CISCO-AVAGO
+    part number is AFBR-79EBPZ-CS2
+    revision is 01
+    serial number is HXQEMPPO03O
+    nominal bitrate is 20600 MBit/sec per channel
+    Link length supported for 50/125um OM3 fiber is 100 m
+    cisco id is 13
+    cisco extended id number is 220
+    cisco part number is 10-2945-02
+    cisco product id is QSFP-40G-SR-BD
+
+DOM is not supported
+
+Ethernet1/9
+    transceiver is present
+    type is 1000base-T
+    name is CISCO
+    part number is SP7041-TE
+    revision is A1
+    serial number is P32NYT9J1JW
+    nominal bitrate is 1300 MBit/sec
+    Link length supported for copper is 100 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 30-1475-01
+    cisco product id is GLC-TE
+
+DOM is not supported
+
+Ethernet1/10
+    transceiver is present
+    type is QSFP-40G-SR-BD
+    name is CISCO-AVAGO
+    part number is AFBR-79EBPZ-CS2
+    revision is 01
+    serial number is G8E4M39CQ6O
+    nominal bitrate is 20600 MBit/sec per channel
+    Link length supported for 50/125um OM3 fiber is 100 m
+    cisco id is 13
+    cisco extended id number is 220
+    cisco part number is 10-2945-02
+    cisco product id is QSFP-40G-SR-BD
+
+DOM is not supported
+
+Ethernet1/11
+    transceiver is present
+    type is QSFP-40G-SR-BD
+    name is CISCO-AVAGO
+    part number is AFBR-79EBPZ-CS2
+    revision is 01
+    serial number is OHMA3JV09A2
+    nominal bitrate is 20600 MBit/sec per channel
+    Link length supported for 50/125um OM3 fiber is 100 m
+    cisco id is 13
+    cisco extended id number is 220
+    cisco part number is 10-2945-02
+    cisco product id is QSFP-40G-SR-BD
+
+DOM is not supported
+
+Ethernet1/12
+    transceiver is present
+    type is QSFP-40G-SR-BD
+    name is CISCO-AVAGO
+    part number is AFBR-79EBPZ-CS2
+    revision is 01
+    serial number is 3LPACCWN3R3
+    nominal bitrate is 20600 MBit/sec per channel
+    Link length supported for 50/125um OM3 fiber is 100 m
+    cisco id is 13
+    cisco extended id number is 220
+    cisco part number is 10-2945-02
+    cisco product id is QSFP-40G-SR-BD
+
+DOM is not supported
+
+Ethernet1/13
+    transceiver is not present
+
+Ethernet1/14
+    transceiver is present
+    type is 1000base-SX
+    name is CISCO
+    part number is TRPUG1ESXECISE2A
+    revision is 01
+    serial number is HEJXM32T2SW
+    nominal bitrate is 1300 MBit/sec
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 10-2626-02
+    cisco product id is GLC-SX-MMD
+
+           SFP Detail Diagnostics Information (internal calibration)
+  ----------------------------------------------------------------------------
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  ----------------------------------------------------------------------------
+  Temperature   34.79 C        89.00 C     -9.00 C     85.00 C       -5.00 C
+  Voltage        3.27 V         3.59 V      3.00 V      3.50 V        3.09 V
+  Current        3.11 mA       12.00 mA     0.50 mA    10.00 mA       1.00 mA
+  Tx Power      -6.03 dBm       0.99 dBm  -13.56 dBm   -3.00 dBm     -9.50 dBm
+  Rx Power      -6.61 dBm       3.99 dBm  -21.54 dBm    0.00 dBm    -17.21 dBm
+  Transmit Fault Count = 0
+  ----------------------------------------------------------------------------
+  Note: ++  high-alarm; +  high-warning; --  low-alarm; -  low-warning
+
+Ethernet1/15
+    transceiver is present
+    type is 1000base-SX
+    name is CISCO
+    part number is TRPUG1ESXECISE2A
+    revision is 01
+    serial number is 7OH22AST8BC
+    nominal bitrate is 1300 MBit/sec
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 10-2626-02
+    cisco product id is GLC-SX-MMD
+
+           SFP Detail Diagnostics Information (internal calibration)
+  ----------------------------------------------------------------------------
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  ----------------------------------------------------------------------------
+  Temperature   34.81 C        89.00 C     -9.00 C     85.00 C       -5.00 C
+  Voltage        3.28 V         3.59 V      3.00 V      3.50 V        3.09 V
+  Current        2.83 mA       12.00 mA     0.50 mA    10.00 mA       1.00 mA
+  Tx Power      -6.45 dBm       0.99 dBm  -13.56 dBm   -3.00 dBm     -9.50 dBm
+  Rx Power      -6.10 dBm       3.99 dBm  -21.54 dBm    0.00 dBm    -17.21 dBm
+  Transmit Fault Count = 0
+  ----------------------------------------------------------------------------
+  Note: ++  high-alarm; +  high-warning; --  low-alarm; -  low-warning
+
+Ethernet1/16
+    transceiver is present
+    type is QSFP-40G-SR4
+    name is CISCO-FINISAR
+    part number is FTL410QE4C-C1
+    revision is A 
+    serial number is VOUSXNTBQCN
+    nominal bitrate is 10300 MBit/sec per channel
+    Link length supported for 50/125um OM2 fiber is 30 m
+    Link length supported for 50/125um OM3 fiber is 100 m
+    cisco id is 13
+    cisco extended id number is 16
+    cisco part number is 10-2672-03
+    cisco product id is QSFP-40G-SR4
+
+Lane Number:1 Network Lane
+           SFP Detail Diagnostics Information (internal calibration)
+  ----------------------------------------------------------------------------
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  ----------------------------------------------------------------------------
+  Temperature   27.25 C        75.00 C     -5.00 C     70.00 C        0.00 C
+  Voltage        3.29 V         3.63 V      2.97 V      3.46 V        3.09 V
+  Current        6.20 mA       15.00 mA     2.00 mA    14.00 mA       3.00 mA
+  Tx Power      -3.19 dBm       1.99 dBm  -11.61 dBm   -1.00 dBm     -7.61 dBm
+  Rx Power      -2.19 dBm       3.39 dBm  -13.56 dBm    2.39 dBm     -9.50 dBm
+  Transmit Fault Count = 0
+  ----------------------------------------------------------------------------
+  Note: ++  high-alarm; +  high-warning; --  low-alarm; -  low-warning
+
+Lane Number:2 Network Lane
+           SFP Detail Diagnostics Information (internal calibration)
+  ----------------------------------------------------------------------------
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  ----------------------------------------------------------------------------
+  Temperature   27.25 C        75.00 C     -5.00 C     70.00 C        0.00 C
+  Voltage        3.29 V         3.63 V      2.97 V      3.46 V        3.09 V
+  Current        5.56 mA       15.00 mA     2.00 mA    14.00 mA       3.00 mA
+  Tx Power      -3.23 dBm       1.99 dBm  -11.61 dBm   -1.00 dBm     -7.61 dBm
+  Rx Power      -2.42 dBm       3.39 dBm  -13.56 dBm    2.39 dBm     -9.50 dBm
+  Transmit Fault Count = 0
+  ----------------------------------------------------------------------------
+  Note: ++  high-alarm; +  high-warning; --  low-alarm; -  low-warning
+
+Lane Number:3 Network Lane
+           SFP Detail Diagnostics Information (internal calibration)
+  ----------------------------------------------------------------------------
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  ----------------------------------------------------------------------------
+  Temperature   27.25 C        75.00 C     -5.00 C     70.00 C        0.00 C
+  Voltage        3.29 V         3.63 V      2.97 V      3.46 V        3.09 V
+  Current        5.11 mA       15.00 mA     2.00 mA    14.00 mA       3.00 mA
+  Tx Power      -3.09 dBm       1.99 dBm  -11.61 dBm   -1.00 dBm     -7.61 dBm
+  Rx Power      -2.13 dBm       3.39 dBm  -13.56 dBm    2.39 dBm     -9.50 dBm
+  Transmit Fault Count = 0
+  ----------------------------------------------------------------------------
+  Note: ++  high-alarm; +  high-warning; --  low-alarm; -  low-warning
+
+Lane Number:4 Network Lane
+           SFP Detail Diagnostics Information (internal calibration)
+  ----------------------------------------------------------------------------
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  ----------------------------------------------------------------------------
+  Temperature   27.25 C        75.00 C     -5.00 C     70.00 C        0.00 C
+  Voltage        3.29 V         3.63 V      2.97 V      3.46 V        3.09 V
+  Current        5.56 mA       15.00 mA     2.00 mA    14.00 mA       3.00 mA
+  Tx Power      -3.23 dBm       1.99 dBm  -11.61 dBm   -1.00 dBm     -7.61 dBm
+  Rx Power      -2.54 dBm       3.39 dBm  -13.56 dBm    2.39 dBm     -9.50 dBm
+  Transmit Fault Count = 0
+  ----------------------------------------------------------------------------
+  Note: ++  high-alarm; +  high-warning; --  low-alarm; -  low-warning
+
+Ethernet1/17
+    transceiver is present
+    type is QSFP-40G-SR4
+    name is CISCO-FINISAR
+    part number is FTL410QE4C-C1
+    revision is A 
+    serial number is EMMXK3VN4ZU
+    nominal bitrate is 10300 MBit/sec per channel
+    Link length supported for 50/125um OM2 fiber is 30 m
+    Link length supported for 50/125um OM3 fiber is 100 m
+    cisco id is 13
+    cisco extended id number is 16
+    cisco part number is 10-2672-03
+    cisco product id is QSFP-40G-SR4
+
+Lane Number:1 Network Lane
+           SFP Detail Diagnostics Information (internal calibration)
+  ----------------------------------------------------------------------------
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  ----------------------------------------------------------------------------
+  Temperature   27.20 C        75.00 C     -5.00 C     70.00 C        0.00 C
+  Voltage        3.27 V         3.63 V      2.97 V      3.46 V        3.09 V
+  Current        5.31 mA       15.00 mA     2.00 mA    14.00 mA       3.00 mA
+  Tx Power      -2.41 dBm       1.99 dBm  -11.61 dBm   -1.00 dBm     -7.61 dBm
+  Rx Power      -1.60 dBm       3.39 dBm  -13.56 dBm    2.39 dBm     -9.50 dBm
+  Transmit Fault Count = 0
+  ----------------------------------------------------------------------------
+  Note: ++  high-alarm; +  high-warning; --  low-alarm; -  low-warning
+
+Lane Number:2 Network Lane
+           SFP Detail Diagnostics Information (internal calibration)
+  ----------------------------------------------------------------------------
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  ----------------------------------------------------------------------------
+  Temperature   27.20 C        75.00 C     -5.00 C     70.00 C        0.00 C
+  Voltage        3.27 V         3.63 V      2.97 V      3.46 V        3.09 V
+  Current        5.18 mA       15.00 mA     2.00 mA    14.00 mA       3.00 mA
+  Tx Power      -2.54 dBm       1.99 dBm  -11.61 dBm   -1.00 dBm     -7.61 dBm
+  Rx Power      -1.16 dBm       3.39 dBm  -13.56 dBm    2.39 dBm     -9.50 dBm
+  Transmit Fault Count = 0
+  ----------------------------------------------------------------------------
+  Note: ++  high-alarm; +  high-warning; --  low-alarm; -  low-warning
+
+Lane Number:3 Network Lane
+           SFP Detail Diagnostics Information (internal calibration)
+  ----------------------------------------------------------------------------
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  ----------------------------------------------------------------------------
+  Temperature   27.20 C        75.00 C     -5.00 C     70.00 C        0.00 C
+  Voltage        3.27 V         3.63 V      2.97 V      3.46 V        3.09 V
+  Current        5.44 mA       15.00 mA     2.00 mA    14.00 mA       3.00 mA
+  Tx Power      -2.54 dBm       1.99 dBm  -11.61 dBm   -1.00 dBm     -7.61 dBm
+  Rx Power      -1.95 dBm       3.39 dBm  -13.56 dBm    2.39 dBm     -9.50 dBm
+  Transmit Fault Count = 0
+  ----------------------------------------------------------------------------
+  Note: ++  high-alarm; +  high-warning; --  low-alarm; -  low-warning
+
+Lane Number:4 Network Lane
+           SFP Detail Diagnostics Information (internal calibration)
+  ----------------------------------------------------------------------------
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  ----------------------------------------------------------------------------
+  Temperature   27.20 C        75.00 C     -5.00 C     70.00 C        0.00 C
+  Voltage        3.27 V         3.63 V      2.97 V      3.46 V        3.09 V
+  Current        5.56 mA       15.00 mA     2.00 mA    14.00 mA       3.00 mA
+  Tx Power      -2.23 dBm       1.99 dBm  -11.61 dBm   -1.00 dBm     -7.61 dBm
+  Rx Power      -2.23 dBm       3.39 dBm  -13.56 dBm    2.39 dBm     -9.50 dBm
+  Transmit Fault Count = 0
+  ----------------------------------------------------------------------------
+  Note: ++  high-alarm; +  high-warning; --  low-alarm; -  low-warning
+
+Ethernet1/18
+    transceiver is present
+    type is 1000base-SX
+    name is CISCO
+    part number is TRPUG1ESXECISE2G
+    revision is 01
+    serial number is XZFVASMWFSB
+    nominal bitrate is 1300 MBit/sec
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 10-2626-01
+    cisco product id is GLC-SX-MMD
+
+           SFP Detail Diagnostics Information (internal calibration)
+  ----------------------------------------------------------------------------
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  ----------------------------------------------------------------------------
+  Temperature   34.92 C        89.00 C     -9.00 C     85.00 C       -5.00 C
+  Voltage        3.24 V         3.59 V      3.00 V      3.50 V        3.09 V
+  Current        2.78 mA       12.00 mA     0.50 mA    10.00 mA       1.00 mA
+  Tx Power      -6.45 dBm       0.99 dBm  -13.56 dBm   -3.00 dBm     -9.50 dBm
+  Rx Power      -4.86 dBm       3.99 dBm  -21.54 dBm    0.00 dBm    -17.21 dBm
+  Transmit Fault Count = 0
+  ----------------------------------------------------------------------------
+  Note: ++  high-alarm; +  high-warning; --  low-alarm; -  low-warning
+
+Ethernet1/19
+    transceiver is present
+    type is QSFP-40G-SR-BD
+    name is CISCO-AVAGO
+    part number is AFBR-79EBPZ-CS2
+    revision is 01
+    serial number is OT1VXKF1TTI
+    nominal bitrate is 20600 MBit/sec per channel
+    Link length supported for 50/125um OM3 fiber is 100 m
+    cisco id is 13
+    cisco extended id number is 220
+    cisco part number is 10-2945-02
+    cisco product id is QSFP-40G-SR-BD
+
+DOM is not supported
+
+Ethernet1/20
+    transceiver is present
+    type is QSFP-40G-SR-BD
+    name is CISCO-AVAGO
+    part number is AFBR-79EBPZ-CS2
+    revision is 01
+    serial number is ZKAXQ2EXF00
+    nominal bitrate is 20600 MBit/sec per channel
+    Link length supported for 50/125um OM3 fiber is 100 m
+    cisco id is 13
+    cisco extended id number is 220
+    cisco part number is 10-2945-02
+    cisco product id is QSFP-40G-SR-BD
+
+DOM is not supported
+
+Ethernet1/21
+    transceiver is present
+    type is 1000base-SX
+    name is CISCO
+    part number is TRPUG1ESXECISE2G
+    revision is 01
+    serial number is Q10VJD1ZZLY
+    nominal bitrate is 1300 MBit/sec
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 10-2626-01
+    cisco product id is GLC-SX-MMD
+
+           SFP Detail Diagnostics Information (internal calibration)
+  ----------------------------------------------------------------------------
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  ----------------------------------------------------------------------------
+  Temperature   31.93 C        89.00 C     -9.00 C     85.00 C       -5.00 C
+  Voltage        3.30 V         3.59 V      3.00 V      3.50 V        3.09 V
+  Current        2.58 mA       12.00 mA     0.50 mA    10.00 mA       1.00 mA
+  Tx Power      -6.02 dBm       0.99 dBm  -13.56 dBm   -3.00 dBm     -9.50 dBm
+  Rx Power      -5.60 dBm       3.99 dBm  -21.54 dBm    0.00 dBm    -17.21 dBm
+  Transmit Fault Count = 0
+  ----------------------------------------------------------------------------
+  Note: ++  high-alarm; +  high-warning; --  low-alarm; -  low-warning
+
+Ethernet1/22
+    transceiver is not present
+
+Ethernet1/23
+    transceiver is not present
+
+Ethernet1/24
+    transceiver is not present
+
+Ethernet1/25
+    transceiver is not present
+
+Ethernet1/26
+    transceiver is not present
+
+Ethernet1/27
+    transceiver is not present
+
+Ethernet1/28
+    transceiver is not present
+
+Ethernet1/29
+    transceiver is not present
+
+Ethernet1/30
+    transceiver is not present
+
+Ethernet1/31
+    transceiver is not present
+
+Ethernet1/32
+    transceiver is not present
+
+Ethernet1/33
+    transceiver is not present
+
+Ethernet1/34
+    transceiver is not present
+
+Ethernet1/35
+    transceiver is not present
+
+Ethernet1/36
+    transceiver is not present
+
+Ethernet1/37
+    transceiver is not present
+
+Ethernet1/38
+    transceiver is not present
+
+Ethernet1/39
+    transceiver is not present
+
+Ethernet1/40
+    transceiver is not present
+
+Ethernet1/41
+    transceiver is not present
+
+Ethernet1/42
+    transceiver is not present
+
+Ethernet1/43
+    transceiver is not present
+
+Ethernet1/44
+    transceiver is not present
+
+Ethernet1/45
+    transceiver is not present
+
+Ethernet1/46
+    transceiver is not present
+
+Ethernet1/47
+    transceiver is not present
+
+Ethernet1/48
+    transceiver is not present
+
+Ethernet1/49
+    transceiver is present
+    type is 10Gbase-SR-S
+    name is CISCO-ACCELINK
+    part number is RTXM228-551-C88
+    revision is 1.0
+    serial number is S1WEXBEORS8
+    nominal bitrate is 10300 MBit/sec
+    Link length supported for 50/125um OM2 fiber is 82 m
+    Link length supported for 62.5/125um fiber is 26 m
+    Link length supported for 50/125um OM3 fiber is 300 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 10-3105-01
+    cisco product id is SFP-10G-SR-S
+
+           SFP Detail Diagnostics Information (internal calibration)
+  ----------------------------------------------------------------------------
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  ----------------------------------------------------------------------------
+  Temperature   30.50 C        75.00 C     -5.00 C     70.00 C        0.00 C
+  Voltage        3.26 V         3.63 V      2.97 V      3.46 V        3.13 V
+  Current        5.40 mA       12.00 mA     1.00 mA    10.50 mA       2.50 mA
+  Tx Power      -2.18 dBm       1.99 dBm  -11.30 dBm   -1.00 dBm     -7.30 dBm
+  Rx Power      -2.58 dBm       1.99 dBm  -13.97 dBm   -1.00 dBm     -9.91 dBm
+  Transmit Fault Count = 0
+  ----------------------------------------------------------------------------
+  Note: ++  high-alarm; +  high-warning; --  low-alarm; -  low-warning
+
+Ethernet1/50
+    transceiver is present
+    type is 10Gbase-SR-S
+    name is CISCO-ACCELINK
+    part number is RTXM228-551-C88
+    revision is 1.0
+    serial number is W6PEPTW1A60
+    nominal bitrate is 10300 MBit/sec
+    Link length supported for 50/125um OM2 fiber is 82 m
+    Link length supported for 62.5/125um fiber is 26 m
+    Link length supported for 50/125um OM3 fiber is 300 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 10-3105-01
+    cisco product id is SFP-10G-SR-S
+
+           SFP Detail Diagnostics Information (internal calibration)
+  ----------------------------------------------------------------------------
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  ----------------------------------------------------------------------------
+  Temperature   31.37 C        75.00 C     -5.00 C     70.00 C        0.00 C
+  Voltage        3.25 V         3.63 V      2.97 V      3.46 V        3.13 V
+  Current        5.74 mA       12.00 mA     1.00 mA    10.50 mA       2.50 mA
+  Tx Power      -2.51 dBm       1.99 dBm  -11.30 dBm   -1.00 dBm     -7.30 dBm
+  Rx Power      -2.92 dBm       1.99 dBm  -13.97 dBm   -1.00 dBm     -9.91 dBm
+  Transmit Fault Count = 0
+  ----------------------------------------------------------------------------
+  Note: ++  high-alarm; +  high-warning; --  low-alarm; -  low-warning
+
+Ethernet1/51
+    transceiver is present
+    type is 10Gbase-SR-S
+    name is CISCO-OPLINK
+    part number is TPP4XGDS0CCISE3G
+    revision is 02
+    serial number is MIEIDQDP3FH
+    nominal bitrate is 10300 MBit/sec
+    Link length supported for 50/125um OM2 fiber is 82 m
+    Link length supported for 62.5/125um fiber is 26 m
+    Link length supported for 50/125um OM3 fiber is 300 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 10-3105-01
+    cisco product id is SFP-10G-SR-S
+
+           SFP Detail Diagnostics Information (internal calibration)
+  ----------------------------------------------------------------------------
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  ----------------------------------------------------------------------------
+  Temperature   33.26 C        75.00 C     -5.00 C     70.00 C        0.00 C
+  Voltage        3.26 V         3.63 V      2.97 V      3.46 V        3.13 V
+  Current        5.89 mA       12.00 mA     0.50 mA    11.50 mA       1.00 mA
+  Tx Power      -2.86 dBm       1.99 dBm  -11.30 dBm   -1.00 dBm     -7.30 dBm
+  Rx Power      -3.74 dBm       1.99 dBm  -13.97 dBm   -1.00 dBm     -9.91 dBm
+  Transmit Fault Count = 0
+  ----------------------------------------------------------------------------
+  Note: ++  high-alarm; +  high-warning; --  low-alarm; -  low-warning
+
+Ethernet1/52
+    transceiver is present
+    type is 10Gbase-SR-S
+    name is CISCO-OPLINK
+    part number is TPP4XGDS0CCISE3G
+    revision is 02
+    serial number is 03CWKFYSR1A
+    nominal bitrate is 10300 MBit/sec
+    Link length supported for 50/125um OM2 fiber is 82 m
+    Link length supported for 62.5/125um fiber is 26 m
+    Link length supported for 50/125um OM3 fiber is 300 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 10-3105-01
+    cisco product id is SFP-10G-SR-S
+
+           SFP Detail Diagnostics Information (internal calibration)
+  ----------------------------------------------------------------------------
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  ----------------------------------------------------------------------------
+  Temperature   32.94 C        75.00 C     -5.00 C     70.00 C        0.00 C
+  Voltage        3.27 V         3.63 V      2.97 V      3.46 V        3.13 V
+  Current        6.15 mA       12.00 mA     0.50 mA    11.50 mA       1.00 mA
+  Tx Power      -2.62 dBm       1.99 dBm  -11.30 dBm   -1.00 dBm     -7.30 dBm
+  Rx Power      -4.05 dBm       1.99 dBm  -13.97 dBm   -1.00 dBm     -9.91 dBm
+  Transmit Fault Count = 0
+  ----------------------------------------------------------------------------
+  Note: ++  high-alarm; +  high-warning; --  low-alarm; -  low-warning
+
+Ethernet1/53
+    transceiver is not present
+
+Ethernet1/54
+    transceiver is present
+    type is 10Gbase-SR-S
+    name is CISCO-OPLINK
+    part number is TPP4XGDS0CCISE3G
+    revision is 02
+    serial number is 2H9MIMZNTMW
+    nominal bitrate is 10300 MBit/sec
+    Link length supported for 50/125um OM2 fiber is 82 m
+    Link length supported for 62.5/125um fiber is 26 m
+    Link length supported for 50/125um OM3 fiber is 300 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 10-3105-01
+    cisco product id is SFP-10G-SR-S
+
+           SFP Detail Diagnostics Information (internal calibration)
+  ----------------------------------------------------------------------------
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  ----------------------------------------------------------------------------
+  Temperature   34.39 C        75.00 C     -5.00 C     70.00 C        0.00 C
+  Voltage        3.25 V         3.63 V      2.97 V      3.46 V        3.13 V
+  Current        6.23 mA       12.00 mA     0.50 mA    11.50 mA       1.00 mA
+  Tx Power      -2.82 dBm       1.99 dBm  -11.30 dBm   -1.00 dBm     -7.30 dBm
+  Rx Power      -2.58 dBm       1.99 dBm  -13.97 dBm   -1.00 dBm     -9.91 dBm
+  Transmit Fault Count = 0
+  ----------------------------------------------------------------------------
+  Note: ++  high-alarm; +  high-warning; --  low-alarm; -  low-warning
+
+Ethernet1/55
+    transceiver is present
+    type is 10Gbase-SR-S
+    name is CISCO-ACCELINK
+    part number is RTXM228-551-C88
+    revision is 1.0
+    serial number is WHMEUWIGZJR
+    nominal bitrate is 10300 MBit/sec
+    Link length supported for 50/125um OM2 fiber is 82 m
+    Link length supported for 62.5/125um fiber is 26 m
+    Link length supported for 50/125um OM3 fiber is 300 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 10-3105-01
+    cisco product id is SFP-10G-SR-S
+
+           SFP Detail Diagnostics Information (internal calibration)
+  ----------------------------------------------------------------------------
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  ----------------------------------------------------------------------------
+  Temperature   30.50 C        75.00 C     -5.00 C     70.00 C        0.00 C
+  Voltage        3.25 V         3.63 V      2.97 V      3.46 V        3.13 V
+  Current        5.32 mA       12.00 mA     1.00 mA    10.50 mA       2.50 mA
+  Tx Power      -2.25 dBm       1.99 dBm  -11.30 dBm   -1.00 dBm     -7.30 dBm
+  Rx Power      -3.34 dBm       1.99 dBm  -13.97 dBm   -1.00 dBm     -9.91 dBm
+  Transmit Fault Count = 0
+  ----------------------------------------------------------------------------
+  Note: ++  high-alarm; +  high-warning; --  low-alarm; -  low-warning
+
+Ethernet1/56
+    transceiver is not present
+
+Ethernet1/57
+    transceiver is not present
+
+Ethernet1/58
+    transceiver is not present
+
+Ethernet1/59
+    transceiver is not present
+
+Ethernet1/60
+    transceiver is not present
+
+Ethernet1/61
+    transceiver is not present
+
+Ethernet1/62
+    transceiver is present
+    type is QSFP-100G-AOC7M
+    name is CISCO-FINISAR
+    part number is FCBN425QE1C07-C2
+    revision is A
+    serial number is 2489YWC0LX4W9
+    nominal bitrate is 25500 MBit/sec per channel
+    cisco id is 17
+    cisco extended id number is 220
+    cisco part number is 10-3176-02
+    cisco product id is QSFP-100G-AOC7M
+
+DOM is not supported
+
+Ethernet1/63
+    transceiver is not present
+
+Ethernet1/64
+    transceiver is present
+    type is QSFP-100G-AOC10M
+    name is CISCO-FINISAR
+    part number is FCBN425QE1C10-C2
+    revision is A
+    serial number is BFMNV3KMNI90R
+    nominal bitrate is 25500 MBit/sec per channel
+    cisco id is 17
+    cisco extended id number is 220
+    cisco part number is 10-3177-02
+    cisco product id is QSFP-100G-AOC10M
+
+DOM is not supported
+
+Ethernet1/65
+    transceiver is present
+    type is 10Gbase-SR-S
+    name is CISCO-ACCELINK
+    part number is RTXM228-551-C88
+    revision is 1.0
+    serial number is HX6W54C0ATB
+    nominal bitrate is 10300 MBit/sec
+    Link length supported for 50/125um OM2 fiber is 82 m
+    Link length supported for 62.5/125um fiber is 26 m
+    Link length supported for 50/125um OM3 fiber is 300 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 10-3105-01
+    cisco product id is SFP-10G-SR-S
+
+           SFP Detail Diagnostics Information (internal calibration)
+  ----------------------------------------------------------------------------
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  ----------------------------------------------------------------------------
+  Temperature   27.79 C        75.00 C     -5.00 C     70.00 C        0.00 C
+  Voltage        3.22 V         3.63 V      2.97 V      3.46 V        3.13 V
+  Current        5.77 mA       12.00 mA     1.00 mA    10.50 mA       2.50 mA
+  Tx Power      -3.01 dBm       1.99 dBm  -11.30 dBm   -1.00 dBm     -7.30 dBm
+  Rx Power      -2.70 dBm       1.99 dBm  -13.97 dBm   -1.00 dBm     -9.91 dBm
+  Transmit Fault Count = 0
+  ----------------------------------------------------------------------------
+  Note: ++  high-alarm; +  high-warning; --  low-alarm; -  low-warning
+
+Ethernet1/66
+    transceiver is present
+    type is 10Gbase-SR-S
+    name is CISCO-ACCELINK
+    part number is RTXM228-551-C88
+    revision is 1.0
+    serial number is 7CWZMAP3Y6V
+    nominal bitrate is 10300 MBit/sec
+    Link length supported for 50/125um OM2 fiber is 82 m
+    Link length supported for 62.5/125um fiber is 26 m
+    Link length supported for 50/125um OM3 fiber is 300 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 10-3105-01
+    cisco product id is SFP-10G-SR-S
+
+           SFP Detail Diagnostics Information (internal calibration)
+  ----------------------------------------------------------------------------
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  ----------------------------------------------------------------------------
+  Temperature   26.79 C        75.00 C     -5.00 C     70.00 C        0.00 C
+  Voltage        3.24 V         3.63 V      2.97 V      3.46 V        3.13 V
+  Current        5.67 mA       12.00 mA     1.00 mA    10.50 mA       2.50 mA
+  Tx Power      -2.77 dBm       1.99 dBm  -11.30 dBm   -1.00 dBm     -7.30 dBm
+  Rx Power      -2.43 dBm       1.99 dBm  -13.97 dBm   -1.00 dBm     -9.91 dBm
+  Transmit Fault Count = 0
+  ----------------------------------------------------------------------------
+  Note: ++  high-alarm; +  high-warning; --  low-alarm; -  low-warning
+
+
+--------------------------------------------------
+命令: show interface status | include error
+输出:
+
+--------------------------------------------------
+命令: show interface status
+输出:
+
+--------------------------------------------------------------------------------
+Port          Name               Status    Vlan      Duplex  Speed   Type
+--------------------------------------------------------------------------------
+mgmt0         --                 connected routed    full    1000    --         
+
+--------------------------------------------------------------------------------
+Port          Name               Status    Vlan      Duplex  Speed   Type
+--------------------------------------------------------------------------------
+Eth1/1        --                 xcvrAbsen trunk     auto    auto    --         
+Eth1/2        --                 xcvrAbsen trunk     auto    auto    --         
+Eth1/3        Connect_to_XA-FOTI connected routed    full    40G     QSFP-40G-SR-BD
+Eth1/4        Connect_to_XA-FOTI connected routed    full    1000    1000base-SX
+Eth1/5        Connect_to_XA-FOTI connected routed    full    1000    1000base-T 
+Eth1/6        Connect_to_XA-FOTI connected trunk     full    1000    1000base-SX
+Eth1/7        Connect_to_XA-FOTI connected trunk     full    40G     QSFP-40G-SR-BD
+Eth1/8        Connect_to_XA-FOTI connected routed    full    40G     QSFP-40G-SR-BD
+Eth1/9        Connect_to_XA-FOTI connected routed    full    1000    1000base-T 
+Eth1/10       Connect_to_XA-FOTI connected trunk     full    40G     QSFP-40G-SR-BD
+Eth1/11       Connect_to_XA-FOTI connected trunk     full    40G     QSFP-40G-SR-BD
+Eth1/12       Connect_to_XA-FOTI connected trunk     full    40G     QSFP-40G-SR-BD
+Eth1/13       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/14       Connect_to_XA-FOTI connected trunk     full    1000    1000base-SX
+Eth1/15       Connect_to_XA-FOTI connected trunk     full    1000    1000base-SX
+Eth1/16       Connect_to_XA-FOTI connected trunk     full    40G     QSFP-40G-SR4
+Eth1/17       Connect_to_XA-FOTI connected trunk     full    40G     QSFP-40G-SR4
+Eth1/18       Connect_to_XA-FOTI connected trunk     full    1000    1000base-SX
+Eth1/19       Connect_to_XA-FOTI connected trunk     full    40G     QSFP-40G-SR-BD
+Eth1/20       Connect_to_XA-FOTI connected trunk     full    40G     QSFP-40G-SR-BD
+Eth1/21       Connect_to_XA-FOTI connected trunk     full    1000    1000base-SX
+Eth1/22       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/23       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/24       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/25       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/26       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/27       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/28       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/29       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/30       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/31       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/32       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/33       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/34       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/35       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/36       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/37       --                 xcvrAbsen 1         auto    auto    --         
+Eth1/38       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/39       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/40       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/41       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/42       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/43       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/44       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/45       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/46       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/47       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/48       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/49       Connect_to_XA-FOTI connected trunk     full    10G     10Gbase-SR-S
+Eth1/50       Connect_to_XA-FOTI connected trunk     full    10G     10Gbase-SR-S
+Eth1/51       Connect_to_XA-Pro- connected 853       full    10G     10Gbase-SR-S
+Eth1/52       Connect_to_XA-Pro- connected 853       full    10G     10Gbase-SR-S
+Eth1/53       Broken_Port-CanNot xcvrAbsen routed    auto    auto    --         
+Eth1/54       Connect_to_XA-FOTI connected 851       full    10G     10Gbase-SR-S
+Eth1/55       Connect_to_XA-FOTI connected 851       full    10G     10Gbase-SR-S
+Eth1/56       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/57       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/58       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/59       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/60       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/61       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/62       Connect_to_XA-FOTI connected trunk     full    100G    QSFP-100G-AOC7M
+Eth1/63       Connect_to_XA-FOTI xcvrAbsen trunk     auto    auto    --         
+Eth1/64       Connect_to_XA-FOTI connected trunk     full    100G    QSFP-100G-AOC10M
+Eth1/65       Connect_to_XA-FOTI connected trunk     full    10G     10Gbase-SR-S
+Eth1/66       Connect_to_XA-FOTI connected trunk     full    10G     10Gbase-SR-S
+Po1           --                 noOperMem 1         auto    auto    --         
+Po300         --                 connected trunk     full    100G    --         
+Po400         FPR4110-01         connected trunk     full    10G     --         
+Po401         FPR4110-02         connected trunk     full    10G     --         
+Po402         Connect_To_XA-FOTI connected trunk     full    40G     --         
+Po403         Connect_to_XA-FOTI connected trunk     full    1000    --         
+Po404         Connect_to_XA-FOTI connected trunk     full    40G     --         
+Po405         Connect_to_XA-FOTI connected trunk     full    1000    --         
+Po406         Connect_to_XA-FOTI connected trunk     full    1000    --         
+Po407         Connect_to_XA-FOTI connected 851       full    10G     --         
+Po408         Connect_to_XA-FOTI connected trunk     full    10G     --         
+Po409         Connect_to_XA-Pro- connected 853       full    10G     --         
+Po410         Connect_to_XA-Pro- connected 853       full    10G     --         
+Po411         Connect_to_XA-FOTI connected trunk     full    40G     --         
+Po412         Connect_to_XA-FOTI connected trunk     full    1000    --         
+Po413         Connect_to_XA-FOTI connected 851       full    10G     --         
+Po414         Connect_to_XA-FOTI connected trunk     full    40G     --         
+Po415         Connect_to_XA-FOTI connected trunk     full    1000    --         
+Lo1           --                 connected routed    auto    auto    --         
+Lo2           --                 connected routed    auto    auto    --         
+Lo3           --                 connected routed    auto    auto    --         
+Lo4           --                 connected routed    auto    auto    --         
+Lo5           --                 connected routed    auto    auto    --         
+Vlan1         --                 down      routed    auto    auto    --
+Vlan7         --                 connected routed    auto    auto    --
+Vlan8         --                 connected routed    auto    auto    --
+Vlan9         --                 connected routed    auto    auto    --
+Vlan10        --                 connected routed    auto    auto    --
+Vlan11        --                 connected routed    auto    auto    --
+Vlan37        --                 connected routed    auto    auto    --
+Vlan38        --                 connected routed    auto    auto    --
+Vlan40        --                 connected routed    auto    auto    --
+Vlan41        --                 connected routed    auto    auto    --
+Vlan42        --                 connected routed    auto    auto    --
+Vlan43        --                 connected routed    auto    auto    --
+Vlan44        --                 connected routed    auto    auto    --
+Vlan45        --                 connected routed    auto    auto    --
+Vlan46        --                 connected routed    auto    auto    --
+Vlan47        --                 connected routed    auto    auto    --
+Vlan48        --                 connected routed    auto    auto    --
+Vlan49        --                 connected routed    auto    auto    --
+Vlan702       --                 connected routed    auto    auto    --
+Vlan703       --                 connected routed    auto    auto    --
+Vlan704       --                 connected routed    auto    auto    --
+Vlan711       --                 connected routed    auto    auto    --
+Vlan712       --                 connected routed    auto    auto    --
+Vlan713       --                 connected routed    auto    auto    --
+Vlan714       --                 connected routed    auto    auto    --
+Vlan715       --                 connected routed    auto    auto    --
+Vlan716       --                 connected routed    auto    auto    --
+Vlan717       --                 connected routed    auto    auto    --
+Vlan718       --                 connected routed    auto    auto    --
+Vlan719       --                 connected routed    auto    auto    --
+Vlan720       --                 connected routed    auto    auto    --
+Vlan721       --                 connected routed    auto    auto    --
+Vlan722       --                 connected routed    auto    auto    --
+Vlan723       --                 connected routed    auto    auto    --
+Vlan724       --                 connected routed    auto    auto    --
+Vlan725       --                 connected routed    auto    auto    --
+Vlan726       --                 connected routed    auto    auto    --
+Vlan751       --                 connected routed    auto    auto    --
+Vlan752       --                 connected routed    auto    auto    --
+Vlan811       --                 connected routed    auto    auto    --
+Vlan812       --                 connected routed    auto    auto    --
+Vlan813       --                 connected routed    auto    auto    --
+Vlan814       --                 connected routed    auto    auto    --
+Vlan815       --                 connected routed    auto    auto    --
+Vlan851       --                 connected routed    auto    auto    --
+Vlan852       --                 connected routed    auto    auto    --
+Vlan853       --                 connected routed    auto    auto    --
+Vlan911       --                 connected routed    auto    auto    --
+Vlan912       --                 connected routed    auto    auto    --
+Vlan914       --                 connected routed    auto    auto    --
+Vlan915       --                 connected routed    auto    auto    --
+
+--------------------------------------------------
+命令: show system resources
+输出:
+Load average:   1 minute: 1.28   5 minutes: 0.83   15 minutes: 0.69
+Processes   :   678 total, 1 running
+CPU states  :   1.64% user,   3.68% kernel,   94.67% idle
+        CPU0 states  :   5.15% user,   23.71% kernel,   71.13% idle
+        CPU1 states  :   2.06% user,   2.06% kernel,   95.87% idle
+        CPU2 states  :   1.05% user,   1.05% kernel,   97.89% idle
+        CPU3 states  :   3.03% user,   3.03% kernel,   93.93% idle
+        CPU4 states  :   0.00% user,   0.00% kernel,   100.00% idle
+        CPU5 states  :   0.98% user,   1.96% kernel,   97.05% idle
+        CPU6 states  :   0.00% user,   0.00% kernel,   100.00% idle
+        CPU7 states  :   1.00% user,   0.00% kernel,   99.00% idle
+Memory usage:   32828228K total,   6724700K used,   26103528K free
+Current memory status: OK
+
+--------------------------------------------------
+命令: show debug
+输出:
+
+
+slot  1
+=======
+
+Debug level is set to Detail 
+Debug level is set to Minor(1) 
+
+L2RIB Enabled Debugs:
+ default for new sessions logging level: 3
+
+
+--------------------------------------------------
+命令: show ip interface brief
+输出:
+
+IP Interface Status for VRF "default"(1)
+Interface            IP Address      Interface Status
+
+--------------------------------------------------
+命令: show logging | include %[0-4]
+输出:
+
+--------------------------------------------------
+命令: show switch-profile
+输出:
+
+--------------------------------------------------
+命令: show vpc
+输出:
+
+--------------------------------------------------
+命令: show running-config
+输出:
+
+sw-4012# show switch-profile
+
+sw-4012# show vpc
+Legend:
+                (*) - local vPC is down, forwarding via vPC peer-link
+
+vPC domain id                     : 300 
+Peer status                       : peer adjacency formed ok      
+vPC keep-alive status             : peer is alive                 
+Configuration consistency status  : success 
+Per-vlan consistency status       : success                       
+Type-2 consistency status         : success 
+vPC role                          : primary                       
+Number of vPCs configured         : 15  
+Peer Gateway                      : Enabled
+Dual-active excluded VLANs        : -
+Graceful Consistency Check        : Enabled
+Auto-recovery status              : Enabled, timer is off.(timeout = 240s)
+Delay-restore status              : Timer is off.(timeout = 360s)
+Delay-restore SVI status          : Timer is off.(timeout = 10s)
+Operational Layer3 Peer-router    : Disabled
+
+vPC Peer-link status
+---------------------------------------------------------------------
+id    Port   Status Active vlans    
+--    ----   ------ -------------------------------------------------
+1     Po300  up     1,7-11,37-38,40-49,702-704,711-726,751-752,811-81                    
+                    5,851-853,911-912,914-915                                            
+
+vPC status
+----------------------------------------------------------------------------
+Id    Port          Status Consistency Reason                Active vlans
+--    ------------  ------ ----------- ------                ---------------
+400   Po400         up     success     success               1,7-11,37-38,4              
+                                                             0-49,702-704,7              
+                                                             11-726,751-752              
+                                                             ,811-815,851-8              
+                                                             53,911-912,914              
+                                                             -915                        
+401   Po401         up     success     success               1,7-11,37-38,4              
+                                                             0-49,702-704,7              
+                                                             11-726,751-752              
+                                                             ,811-815,851-8              
+                                                             53,911-912,914              
+                                                             -915                        
+402   Po402         up     success     success               1,7-11,37-38,4              
+                                                             0-49,702-704,7              
+                                                             11-726,751-752              
+                                                             ,811-815,851-8              
+                                                             53,911-912,914              
+                                                             -915                        
+403   Po403         up     success     success               1,7-11,37-38,4              
+                                                             0-49,702-704,7              
+                                                             11-726,751-752              
+                                                             ,811-815,851-8              
+                                                             53,911-912,914              
+                                                             -915                        
+404   Po404         up     success     success               1,7-11,37-38,4              
+                                                             0-49,702-704,7              
+                                                             11-726,751-752              
+                                                             ,811-815,851-8              
+                                                             53,911-912,914              
+                                                             -915                        
+405   Po405         up     success     success               1,7-11,37-38,4              
+                                                             0-49,702-704,7              
+                                                             11-726,751-752              
+                                                             ,811-815,851-8              
+                                                             53,911-912,914              
+                                                             -915                        
+406   Po406         up     success     success               1,7-11,37-38,4              
+                                                             0-49,702-704,7              
+                                                             11-726,751-752              
+                                                             ,811-815,851-8              
+                                                             53,911-912,914              
+                                                             -915                        
+407   Po407         up     success     success               851                         
+                                                                                         
+409   Po409         up     success     success               853                         
+                                                                                         
+410   Po410         up     success     success               853                         
+                                                                                         
+411   Po411         up     success     success               1,7-11,37-38,4              
+                                                             0-49,702-704,7              
+                                                             11-726,751-752              
+                                                             ,811-815,851-8              
+                                                             53,911-912,914              
+                                                             -915                        
+412   Po412         up     success     success               1,7-11,37-38,4              
+                                                             0-49,702-704,7              
+                                                             11-726,751-752              
+                                                             ,811-815,851-8              
+                                                             53,911-912,914              
+                                                             -915                        
+413   Po413         up     success     success               851                         
+                                                                                         
+414   Po414         up     success     success               1,7-11,37-38,4              
+                                                             0-49,702-704,7              
+                                                             11-726,751-752              
+                                                             ,811-815,851-8              
+                                                             53,911-912,914              
+                                                             -915                        
+415   Po415         up     success     success               1,7-11,37-38,4              
+                                                             0-49,702-704,7              
+                                                             11-726,751-752              
+                                                             ,811-815,851-8              
+                                                             53,911-912,914              
+                                                             -915                        
+
+Please check "show vpc consistency-parameters vpc <vpc-num>" for the 
+consistency reason of down vpc and for type-2 consistency reasons for 
+any vpc.
+
+
+sw-4012# show running-config
+
+!Command: show running-config
+!No configuration change since last restart
+!Time: Fri Jun 26 14:07:03 2026
+
+version 9.2(1) Bios:version 05.31 
+hostname sw-4012
+vdc sw-4012 id 1
+  limit-resource vlan minimum 16 maximum 4094
+  limit-resource vrf minimum 2 maximum 4096
+  limit-resource port-channel minimum 0 maximum 511
+  limit-resource u4route-mem minimum 248 maximum 248
+  limit-resource u6route-mem minimum 96 maximum 96
+  limit-resource m4route-mem minimum 58 maximum 58
+  limit-resource m6route-mem minimum 8 maximum 8
+
+cfs eth distribute
+feature ospf
+feature interface-vlan
+feature hsrp
+feature lacp
+feature vpc
+clock timezone GMT 8 0
+
+username admin password 5 $5$jNCI0cwU$DbUnYB9S4quW3OO.yec1wHUP9A2iKDcI04e4GjV1xX5  role network-admin
+username auditor password 5 $5$03XFLYq2$Eupj9Yto1pP/QIZXukiQe1uY1xk.emEgDPVkexZ9FSA  role network-operator
+ip domain-lookup
+ip access-list BJ
+ip access-list Return
+ip access-list mgt
+  10 permit ip 192.168.1.1/30 192.168.1.1/32 
+  20 permit ip 192.168.1.1/31 192.168.1.1/32 
+  30 permit ip 192.168.1.1/32 192.168.1.1/32 
+  40 permit ip 192.168.1.1/30 any 
+  50 permit ip 192.168.1.1/30 any 
+  60 permit ip 192.168.1.1/32 any 
+copp profile strict
+snmp-server user admin network-admin auth md5 0xef35282157719cee9020f3ced7d94328 priv 0xef35282157719cee9020f3ced7d94328 localizedkey
+snmp-server user auditor network-operator auth md5 0x0676c256e45f5f63062c1c2b5bfa6ca6 priv 0x0676c256e45f5f63062c1c2b5bfa6ca6 localizedkey
+snmp-server host 192.168.1.1 traps version 1 F0tic-XA
+snmp-server host 192.168.1.1 source-interface Vlan702
+rmon event 1 description FATAL(1) owner PMON@FATAL
+rmon event 2 description CRITICAL(2) owner PMON@CRITICAL
+rmon event 3 description ERROR(3) owner PMON@ERROR
+rmon event 4 description WARNING(4) owner PMON@WARNING
+rmon event 5 description INFORMATION(5) owner PMON@INFO
+snmp-server community F0tic-XA group network-operator
+ntp server 192.168.1.1 use-vrf Monitor-Manager
+system login block-for 300 attempts 5 within 60 
+
+vlan 1,7-11,37-38,40-49,702-704,711-726,751-752,811-815,851-853,911-912,914-915
+vlan 7
+  name Nas1
+vlan 8
+  name Nas2
+vlan 9
+  name Oracle
+vlan 10
+  name MySQLserver
+vlan 11
+  name OtherSQL
+vlan 37
+  name Monitor-Manager
+vlan 38
+  name SuZhuJi
+vlan 40
+  name XiaoWeiSvr
+vlan 41
+  name HSZGSvr
+vlan 42
+  name CaiFuSvr
+vlan 43
+  name XiaoWeiBigData
+vlan 44
+  name ZongHeYeWuGuanLi
+vlan 45
+  name Tools
+vlan 46
+  name CRM
+vlan 47
+  name DataExchange
+vlan 48
+  name CaiWuGuanLi
+vlan 49
+  name TA
+vlan 702
+  name MGT_Nei
+vlan 703
+  name MGT_Wai
+vlan 704
+  name MGT_Svr
+vlan 711
+  name Oracle_to_FW
+vlan 712
+  name MySQLserver_to_FW
+vlan 713
+  name DMZ_ls_to_FW
+vlan 714
+  name SuZhuJi_to_FW
+vlan 715
+  name XiaoWeiSvr_to_FW
+vlan 716
+  name HSZGSvr_to_FW
+vlan 717
+  name CaiFuSvr_to_FW
+vlan 718
+  name OtherSQL_to_FW
+vlan 719
+  name ZongHeYeWuGuanLi_to_FW
+vlan 720
+  name Test_to_FW
+vlan 721
+  name Monitor-Manager_to_FW
+vlan 722
+  name Nas_to_FW
+vlan 723
+  name Tools_to_FW
+vlan 724
+  name CRM_to_FW
+vlan 725
+  name DataExchange_to_FW
+vlan 726
+  name CaiWuGuanLi_to_FW
+vlan 751
+  name Pro-XiaoJin_to_FW
+vlan 752
+  name Pro-AntKeXinYu_to_FW
+vlan 811
+  name To-FW_BJ
+vlan 812
+  name To-FW_SF
+vlan 813
+  name To-FW_NM
+vlan 814
+  name To-FW_Internet
+vlan 815
+  name To-FW_DMZ-Test
+vlan 851
+  name To-Test_FW_Hillstone
+vlan 853
+  name To-Pro-AntKeXinYu_FW_Hillstone
+vlan 911
+  name BJ_HL
+vlan 912
+  name SF_HL
+vlan 914
+  name Internet_HL
+vlan 915
+  name DMZ-Test-HL
+
+route-map BJ permit 10
+  match ip address BJ 
+route-map Return permit 10
+  match ip address Return 
+vrf context BJ
+  ip route 192.168.1.1/16 192.168.1.1
+  ip route 192.168.1.1/29 192.168.1.1
+  ip route 192.168.1.1/24 192.168.1.1
+  ip route 192.168.1.1/24 192.168.1.1
+  ip route 192.168.1.1/32 192.168.1.1
+  ip route 192.168.1.1/30 192.168.1.1
+  ip route 192.168.1.1/31 192.168.1.1
+  ip route 192.168.1.1/30 192.168.1.1
+  ip route 192.168.1.1/24 192.168.1.1
+  ip route 192.168.1.1/29 192.168.1.1
+vrf context CRM
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context CaiFuSvr
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context CaiWuGuanLi
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context DMZ-Test
+  ip route 0.0.0.0/0 192.168.1.1
+  ip route 192.168.1.1/16 192.168.1.1
+  ip route 192.168.1.1/16 192.168.1.1
+  ip route 192.168.1.1/15 192.168.1.1
+vrf context DMZ_ls
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context DataExchange
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context F5
+vrf context HSZGSvr
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context Internet
+  ip route 192.168.1.1/16 192.168.1.1
+  ip route 192.168.1.1/16 192.168.1.1
+  ip route 192.168.1.1/15 192.168.1.1
+  ip route 192.168.1.1/24 192.168.1.1
+  ip route 192.168.1.1/24 192.168.1.1
+  ip route 192.168.1.1/23 192.168.1.1
+  ip route 192.168.1.1/21 192.168.1.1
+vrf context Monitor-Manager
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context MySQLserver
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context NM
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context Nas
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context Oracle
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context OtherSQL
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context Pro-AntKeXinYu
+  ip route 0.0.0.0/0 192.168.1.1
+  ip route 192.168.1.1/24 192.168.1.1
+  ip route 192.168.1.1/24 192.168.1.1
+vrf context Pro-XiaoJin
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context SF
+  ip route 192.168.1.1/16 192.168.1.1
+  ip route 192.168.1.1/16 192.168.1.1
+  ip route 192.168.1.1/16 192.168.1.1
+  ip route 192.168.1.1/23 192.168.1.1
+  ip route 192.168.1.1/21 192.168.1.1
+vrf context SuZhuJi
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context Test
+  ip route 0.0.0.0/0 192.168.1.1
+  ip route 192.168.1.1/32 192.168.1.1
+  ip route 192.168.1.1/32 192.168.1.1
+  ip route 192.168.1.1/24 192.168.1.1
+  ip route 192.168.1.1/24 192.168.1.1
+  ip route 192.168.1.1/24 192.168.1.1
+  ip route 192.168.1.1/24 192.168.1.1
+  ip route 192.168.1.1/24 192.168.1.1
+vrf context Tools
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context XiaoWeiSvr
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context ZongHeYeWuGuanLi
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context management
+vpc domain 300
+  role priority 1
+  peer-keepalive destination 192.168.1.1 source 192.168.1.1
+  delay restore 360
+  peer-gateway
+  auto-recovery
+  ipv6 nd synchronize
+  ip arp synchronize
+
+
+interface Vlan1
+  no ip redirects
+  no ipv6 redirects
+
+interface Vlan7
+  no shutdown
+  vrf member Nas
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 7 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan8
+  no shutdown
+  vrf member Nas
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 8 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan9
+  no shutdown
+  vrf member Oracle
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 9 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan10
+  no shutdown
+  vrf member MySQLserver
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 10 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan11
+  no shutdown
+  vrf member OtherSQL
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 11 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan37
+  no shutdown
+  vrf member Monitor-Manager
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 37 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan38
+  no shutdown
+  vrf member SuZhuJi
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 38 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan40
+  no shutdown
+  vrf member XiaoWeiSvr
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 40 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan41
+  no shutdown
+  vrf member HSZGSvr
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 41 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan42
+  no shutdown
+  vrf member CaiFuSvr
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 42 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan43
+  no shutdown
+  vrf member Pro-XiaoJin
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 43 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan44
+  no shutdown
+  vrf member ZongHeYeWuGuanLi
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 44 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan45
+  no shutdown
+  vrf member Tools
+  no ip redirects
+  ip address 192.168.1.1/24
+  ipv6 address 2400:6e60:1d12:10d::45:2/64
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 45 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+  hsrp 45 ipv6
+    preempt 
+    priority 105
+    ip 2400:6e60:1d12:10d::45:1
+
+interface Vlan46
+  no shutdown
+  vrf member CRM
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 46 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan47
+  no shutdown
+  vrf member DataExchange
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 47 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan48
+  no shutdown
+  vrf member CaiWuGuanLi
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 48 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan49
+  no shutdown
+  vrf member ZongHeYeWuGuanLi
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 49 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan702
+  no shutdown
+  vrf member NM
+  no ip redirects
+  ip address 192.168.1.1/27
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 702 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan703
+  no shutdown
+  vrf member NM
+  no ip redirects
+  ip address 192.168.1.1/25
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 703 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan704
+  no shutdown
+  vrf member NM
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 704 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan711
+  no shutdown
+  vrf member Oracle
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 711 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan712
+  no shutdown
+  vrf member MySQLserver
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 712 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan713
+  no shutdown
+  vrf member DMZ_ls
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 713 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan714
+  no shutdown
+  vrf member SuZhuJi
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 714 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan715
+  no shutdown
+  vrf member XiaoWeiSvr
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 715 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan716
+  no shutdown
+  vrf member HSZGSvr
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 716 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan717
+  no shutdown
+  vrf member CaiFuSvr
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 717 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan718
+  no shutdown
+  vrf member OtherSQL
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 718 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan719
+  no shutdown
+  vrf member ZongHeYeWuGuanLi
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 719 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan720
+  no shutdown
+  vrf member Test
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 720 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan721
+  no shutdown
+  vrf member Monitor-Manager
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 721 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan722
+  no shutdown
+  vrf member Nas
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 722 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan723
+  no shutdown
+  vrf member Tools
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 723 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan724
+  no shutdown
+  vrf member CRM
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 724 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan725
+  no shutdown
+  vrf member DataExchange
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 725 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan726
+  no shutdown
+  vrf member CaiWuGuanLi
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 726 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan751
+  no shutdown
+  vrf member Pro-XiaoJin
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 751 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan752
+  no shutdown
+  vrf member Pro-AntKeXinYu
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 752 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan811
+  no shutdown
+  vrf member BJ
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 811 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan812
+  no shutdown
+  vrf member SF
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 812 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan813
+  no shutdown
+  vrf member NM
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 813 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan814
+  no shutdown
+  vrf member Internet
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 814 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan815
+  no shutdown
+  vrf member DMZ-Test
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 815 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan851
+  no shutdown
+  vrf member Test
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 851 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan852
+  no shutdown
+  vrf member F5
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 852 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan853
+  no shutdown
+  vrf member Pro-AntKeXinYu
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 853 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan911
+  no shutdown
+  vrf member BJ
+  no ip redirects
+  ip address 192.168.1.1/30
+  no ipv6 redirects
+  ip router ospf 300 area 0.0.0.0
+
+interface Vlan912
+  no shutdown
+  vrf member SF
+  no ip redirects
+  ip address 192.168.1.1/30
+  no ipv6 redirects
+  ip router ospf 200 area 0.0.0.0
+
+interface Vlan914
+  no shutdown
+  vrf member Internet
+  no ip redirects
+  ip address 192.168.1.1/30
+  no ipv6 redirects
+  ip router ospf 100 area 0.0.0.0
+
+interface Vlan915
+  no shutdown
+  vrf member DMZ-Test
+  no ip redirects
+  ip address 192.168.1.1/30
+  no ipv6 redirects
+  ip router ospf 500 area 0.0.0.0
+
+interface port-channel1
+  switchport
+  switchport mode trunk
+
+interface port-channel300
+  switchport
+  switchport mode trunk
+  spanning-tree port type network
+  vpc peer-link
+
+interface port-channel400
+  description FPR4110-01
+  switchport
+  switchport mode trunk
+  vpc 400
+
+interface port-channel401
+  description FPR4110-02
+  switchport
+  switchport mode trunk
+  vpc 401
+
+interface port-channel402
+  description Connect_To_sw-7524&2
+  switchport
+  switchport mode trunk
+  vpc 402
+
+interface port-channel403
+  description Connect_to_XA-FOTIC-NM-C2960XR-1
+  switchport
+  switchport mode trunk
+  vpc 403
+
+interface port-channel404
+  description Connect_to_sw-4530&4
+  switchport
+  switchport mode trunk
+  vpc 404
+
+interface port-channel405
+  description Connect_to_XA-FOTIC-NM-AS2960-2
+  switchport
+  switchport mode trunk
+  vpc 405
+
+interface port-channel406
+  description Connect_to_XA-FOTIC-NM-AS2960-3
+  switchport
+  switchport mode trunk
+  vpc 406
+
+interface port-channel407
+  description Connect_to_XA-FOTIC-Test-FW-1
+  switchport
+  switchport access vlan 851
+  vpc 407
+
+interface port-channel408
+  description Connect_to_XA-FOTIC-SER-LTM-1
+  switchport
+  switchport mode trunk
+
+interface port-channel409
+  description Connect_to_XA-Pro-AntKeXinYu_FW-1 
+  switchport
+  switchport access vlan 853
+  vpc 409
+
+interface port-channel410
+  description Connect_to_XA-Pro-AntKeXinYu_FW-2
+  switchport
+  switchport access vlan 853
+  vpc 410
+
+interface port-channel411
+  description Connect_to_XA-FOTIC-SER-6850-5&6
+  switchport
+  switchport mode trunk
+  vpc 411
+
+interface port-channel412
+  description Connect_to_XA-FOTIC-NM-5130S-4
+  switchport
+  switchport mode trunk
+  vpc 412
+
+interface port-channel413
+  description Connect_to_XA-FOTIC-Test-FW-2
+  switchport
+  switchport access vlan 851
+  vpc 413
+
+interface port-channel414
+  description Connect_to_XA-FOTIC-SER-6520XP-7&8
+  switchport
+  switchport mode trunk
+  vpc 414
+
+interface port-channel415
+  description Connect_to_XA-FOTIC-NM-5130S-5
+  switchport
+  switchport mode trunk
+  vpc 415
+
+interface Ethernet1/1
+  switchport
+  switchport mode trunk
+  no shutdown
+
+interface Ethernet1/2
+  switchport
+  switchport mode trunk
+  no shutdown
+
+interface Ethernet1/3
+  description Connect_to_sw-9393_Eth1/54
+  vrf member Internet
+  ip address 192.168.1.1/30
+  ip router ospf 100 area 0.0.0.0
+  no shutdown
+
+interface Ethernet1/4
+  description Connect_to_XA-FOTIC-SF-AS2960-1-g1/0/27
+  vrf member SF
+  ip address 192.168.1.1/30
+  ip router ospf 200 area 0.0.0.0
+  no shutdown
+
+interface Ethernet1/5
+  description Connect_to_XA-FOTIC-DCHL-RT5620-1-G2/0/1
+  vrf member BJ
+  ip address 192.168.1.1/30
+  ip router ospf 300 area 0.0.0.0
+  no shutdown
+
+interface Ethernet1/6
+  description Connect_to_XA-FOTIC-NM-C2960XR-1-g1/0/27
+  switchport
+  switchport mode trunk
+  channel-group 403 mode active
+  no shutdown
+
+interface Ethernet1/7
+  description Connect_to_sw-7524-eth1/53
+  switchport
+  switchport mode trunk
+  channel-group 402 mode active
+  no shutdown
+
+interface Ethernet1/8
+  description Connect_to_sw-8679_Eth1/53
+  vrf member DMZ-Test
+  ip address 192.168.1.1/30
+  ip router ospf 500 area 0.0.0.0
+  no shutdown
+
+interface Ethernet1/9
+  description Connect_to_XA-FOTIC-DCHL-RT5620-2-G2/0/1
+  vrf member BJ
+  ip address 192.168.1.1/30
+  ip router ospf 300 area 0.0.0.0
+  no shutdown
+
+interface Ethernet1/10
+  description Connect_to_XA-FOTIC-SER-N93180-2-eth1/53 
+  switchport
+  switchport mode trunk
+  channel-group 402 mode active
+  no shutdown
+
+interface Ethernet1/11
+  description Connect_to_sw-4530-eth1/53 
+  switchport
+  switchport mode trunk
+  channel-group 404 mode active
+  no shutdown
+
+interface Ethernet1/12
+  description Connect_to_XA-FOTIC-SER-N93180-4-eth1/53 
+  switchport
+  switchport mode trunk
+  channel-group 404 mode active
+  no shutdown
+
+interface Ethernet1/13
+  no shutdown
+
+interface Ethernet1/14
+  description Connect_to_XA-FOTIC-NM-AS2960-2_G1/0/27 
+  switchport
+  switchport mode trunk
+  channel-group 405 mode active
+  no shutdown
+
+interface Ethernet1/15
+  description Connect_to_XA-FOTIC-NM-AS2960-3_G1/0/51 
+  switchport
+  switchport mode trunk
+  channel-group 406 mode active
+  no shutdown
+
+interface Ethernet1/16
+  description Connect_to_XA-FOTIC-SER-6850-5-1/0/25
+  switchport
+  switchport mode trunk
+  channel-group 411
+  no shutdown
+
+interface Ethernet1/17
+  description Connect_to_XA-FOTIC-SER-6850-6-1/0/25  
+  switchport
+  switchport mode trunk
+  channel-group 411
+  no shutdown
+
+interface Ethernet1/18
+  description Connect_to_XA-FOTIC-NM-5130S-4-1/0/51   
+  switchport
+  switchport mode trunk
+  channel-group 412
+  no shutdown
+
+interface Ethernet1/19
+  description Connect_to_XA-FOTIC-SER-6520XP-7-HGE1/0/49   
+  switchport
+  switchport mode trunk
+  channel-group 414
+  no shutdown
+
+interface Ethernet1/20
+  description Connect_to_XA-FOTIC-SER-6520XP-8-HGE1/0/49   
+  switchport
+  switchport mode trunk
+  channel-group 414
+  no shutdown
+
+interface Ethernet1/21
+  description Connect_to_XA-FOTIC-NM-5130S-5-G1/0/49   
+  switchport
+  switchport mode trunk
+  channel-group 415
+  no shutdown
+
+interface Ethernet1/22
+
+interface Ethernet1/23
+
+interface Ethernet1/24
+
+interface Ethernet1/25
+
+interface Ethernet1/26
+
+interface Ethernet1/27
+
+interface Ethernet1/28
+
+interface Ethernet1/29
+
+interface Ethernet1/30
+
+interface Ethernet1/31
+
+interface Ethernet1/32
+
+interface Ethernet1/33
+  no shutdown
+
+interface Ethernet1/34
+
+interface Ethernet1/35
+
+interface Ethernet1/36
+
+interface Ethernet1/37
+  switchport
+  no shutdown
+
+interface Ethernet1/38
+
+interface Ethernet1/39
+
+interface Ethernet1/40
+
+interface Ethernet1/41
+
+interface Ethernet1/42
+
+interface Ethernet1/43
+
+interface Ethernet1/44
+
+interface Ethernet1/45
+
+interface Ethernet1/46
+
+interface Ethernet1/47
+
+interface Ethernet1/48
+
+interface Ethernet1/49
+  description Connect_to_XA-FOTIC-SER-LTM-1_Eth5.0
+  switchport
+  switchport mode trunk
+  channel-group 408 mode active
+  no shutdown
+
+interface Ethernet1/50
+  description Connect_to_XA-FOTIC-SER-LTM-1_Eth6.0
+  switchport
+  switchport mode trunk
+  channel-group 408 mode active
+  no shutdown
+
+interface Ethernet1/51
+  description Connect_to_XA-Pro-AntKeXinYu_FW-1_xe4/1
+  switchport
+  switchport access vlan 853
+  channel-group 409
+  no shutdown
+
+interface Ethernet1/52
+  description Connect_to_XA-Pro-AntKeXinYu_FW-2_xe4/1
+  switchport
+  switchport access vlan 853
+  channel-group 410
+  no shutdown
+
+interface Ethernet1/53
+  description Broken_Port-CanNotBeUsed
+
+interface Ethernet1/54
+  description Connect_to_XA-FOTIC-Test-FW-1_Xe0/8
+  switchport
+  switchport access vlan 851
+  channel-group 407
+  no shutdown
+
+interface Ethernet1/55
+  description Connect_to_XA-FOTIC-Test-FW-2_Xe0/8
+  switchport
+  switchport access vlan 851
+  channel-group 413
+  no shutdown
+
+interface Ethernet1/56
+
+interface Ethernet1/57
+
+interface Ethernet1/58
+
+interface Ethernet1/59
+
+interface Ethernet1/60
+
+interface Ethernet1/61
+
+interface Ethernet1/62
+  description Connect_to_XA-FOTIC-Core-N9364C-2-eth1/62
+  switchport
+  switchport mode trunk
+  channel-group 300
+  no shutdown
+
+interface Ethernet1/63
+  description Connect_to_XA-FOTIC-Core-N9364C-2-eth1/64
+  switchport
+  switchport mode trunk
+  channel-group 300
+  no shutdown
+
+interface Ethernet1/64
+  description Connect_to_XA-FOTIC-Core-N9364C-2-eth1/63
+  switchport
+  switchport mode trunk
+  channel-group 300
+  no shutdown
+
+interface Ethernet1/65
+  description Connect_to_XA-FOTIC-Core-FPR4110-M-t0/3
+  switchport
+  switchport mode trunk
+  channel-group 400 mode active
+  no shutdown
+
+interface Ethernet1/66
+  description Connect_to_XA-FOTIC-Core-FPR4110-S-t0/3
+  switchport
+  switchport mode trunk
+  channel-group 401 mode active
+  no shutdown
+
+interface mgmt0
+  vrf member management
+  ip address 192.168.1.1/30
+
+interface loopback1
+  vrf member BJ
+  ip address 192.168.1.1/32
+  ip router ospf 300 area 0.0.0.0
+
+interface loopback2
+  vrf member SF
+  ip address 192.168.1.1/32
+  ip router ospf 200 area 0.0.0.0
+
+interface loopback3
+  vrf member NM
+  ip address 192.168.1.1/32
+  ip router ospf 400 area 0.0.0.0
+
+interface loopback4
+  vrf member Internet
+  ip address 192.168.1.1/32
+  ip router ospf 100 area 0.0.0.0
+
+interface loopback5
+  vrf member DMZ-Test
+  ip address 192.168.1.1/32
+  ip router ospf 500 area 0.0.0.0
+line console
+  exec-timeout 5
+line vty
+  access-class mgt in
+boot nxos bootflash:/nxos.9.2.1.bin 
+router ospf 100
+  router-id 192.168.1.1
+  vrf Internet
+    redistribute static route-map Return
+router ospf 200
+  router-id 192.168.1.1
+  vrf SF
+    redistribute static route-map Return
+router ospf 300
+  router-id 192.168.1.1
+  vrf BJ
+    redistribute static route-map BJ
+router ospf 400
+  router-id 192.168.1.1
+  vrf NM
+    redistribute static route-map Return
+router ospf 500
+  router-id 192.168.1.1
+  vrf DMZ-Test
+    redistribute static route-map Return
+logging server 192.168.1.1 6 use-vrf NM
+logging server 192.168.1.1 6 use-vrf NM
+logging source-interface Vlan702
+logging origin-id hostname
+
+
+
+--------------------------------------------------
+命令: show startup-config
+输出:
+
+!Command: show startup-config
+!Time: Fri Jun 26 14:07:07 2026
+!Startup config saved at: Wed Apr 29 16:06:34 2026
+
+version 9.2(1) Bios:version 05.31 
+hostname sw-4012
+vdc sw-4012 id 1
+  limit-resource vlan minimum 16 maximum 4094
+  limit-resource vrf minimum 2 maximum 4096
+  limit-resource port-channel minimum 0 maximum 511
+  limit-resource u4route-mem minimum 248 maximum 248
+  limit-resource u6route-mem minimum 96 maximum 96
+  limit-resource m4route-mem minimum 58 maximum 58
+  limit-resource m6route-mem minimum 8 maximum 8
+
+cfs eth distribute
+feature ospf
+feature interface-vlan
+feature hsrp
+feature lacp
+feature vpc
+clock timezone GMT 8 0
+
+username admin password 5 $5$jNCI0cwU$DbUnYB9S4quW3OO.yec1wHUP9A2iKDcI04e4GjV1xX5  role network-admin
+username auditor password 5 $5$03XFLYq2$Eupj9Yto1pP/QIZXukiQe1uY1xk.emEgDPVkexZ9FSA  role network-operator
+ip domain-lookup
+ip access-list BJ
+ip access-list Return
+ip access-list mgt
+  10 permit ip 192.168.1.1/30 192.168.1.1/32 
+  20 permit ip 192.168.1.1/31 192.168.1.1/32 
+  30 permit ip 192.168.1.1/32 192.168.1.1/32 
+  40 permit ip 192.168.1.1/30 any 
+  50 permit ip 192.168.1.1/30 any 
+  60 permit ip 192.168.1.1/32 any 
+copp profile strict
+snmp-server user admin network-admin auth md5 0xef35282157719cee9020f3ced7d94328 priv 0xef35282157719cee9020f3ced7d94328 localizedkey
+snmp-server user auditor network-operator auth md5 0x0676c256e45f5f63062c1c2b5bfa6ca6 priv 0x0676c256e45f5f63062c1c2b5bfa6ca6 localizedkey
+snmp-server host 192.168.1.1 traps version 1 F0tic-XA
+snmp-server host 192.168.1.1 source-interface Vlan702
+rmon event 1 description FATAL(1) owner PMON@FATAL
+rmon event 2 description CRITICAL(2) owner PMON@CRITICAL
+rmon event 3 description ERROR(3) owner PMON@ERROR
+rmon event 4 description WARNING(4) owner PMON@WARNING
+rmon event 5 description INFORMATION(5) owner PMON@INFO
+snmp-server community F0tic-XA group network-operator
+ntp server 192.168.1.1 use-vrf Monitor-Manager
+system login block-for 300 attempts 5 within 60 
+
+vlan 1,7-11,37-38,40-49,702-704,711-726,751-752,811-815,851-853,911-912,914-915
+vlan 7
+  name Nas1
+vlan 8
+  name Nas2
+vlan 9
+  name Oracle
+vlan 10
+  name MySQLserver
+vlan 11
+  name OtherSQL
+vlan 37
+  name Monitor-Manager
+vlan 38
+  name SuZhuJi
+vlan 40
+  name XiaoWeiSvr
+vlan 41
+  name HSZGSvr
+vlan 42
+  name CaiFuSvr
+vlan 43
+  name XiaoWeiBigData
+vlan 44
+  name ZongHeYeWuGuanLi
+vlan 45
+  name Tools
+vlan 46
+  name CRM
+vlan 47
+  name DataExchange
+vlan 48
+  name CaiWuGuanLi
+vlan 49
+  name TA
+vlan 702
+  name MGT_Nei
+vlan 703
+  name MGT_Wai
+vlan 704
+  name MGT_Svr
+vlan 711
+  name Oracle_to_FW
+vlan 712
+  name MySQLserver_to_FW
+vlan 713
+  name DMZ_ls_to_FW
+vlan 714
+  name SuZhuJi_to_FW
+vlan 715
+  name XiaoWeiSvr_to_FW
+vlan 716
+  name HSZGSvr_to_FW
+vlan 717
+  name CaiFuSvr_to_FW
+vlan 718
+  name OtherSQL_to_FW
+vlan 719
+  name ZongHeYeWuGuanLi_to_FW
+vlan 720
+  name Test_to_FW
+vlan 721
+  name Monitor-Manager_to_FW
+vlan 722
+  name Nas_to_FW
+vlan 723
+  name Tools_to_FW
+vlan 724
+  name CRM_to_FW
+vlan 725
+  name DataExchange_to_FW
+vlan 726
+  name CaiWuGuanLi_to_FW
+vlan 751
+  name Pro-XiaoJin_to_FW
+vlan 752
+  name Pro-AntKeXinYu_to_FW
+vlan 811
+  name To-FW_BJ
+vlan 812
+  name To-FW_SF
+vlan 813
+  name To-FW_NM
+vlan 814
+  name To-FW_Internet
+vlan 815
+  name To-FW_DMZ-Test
+vlan 851
+  name To-Test_FW_Hillstone
+vlan 853
+  name To-Pro-AntKeXinYu_FW_Hillstone
+vlan 911
+  name BJ_HL
+vlan 912
+  name SF_HL
+vlan 914
+  name Internet_HL
+vlan 915
+  name DMZ-Test-HL
+
+route-map BJ permit 10
+  match ip address BJ 
+route-map Return permit 10
+  match ip address Return 
+vrf context BJ
+  ip route 192.168.1.1/16 192.168.1.1
+  ip route 192.168.1.1/29 192.168.1.1
+  ip route 192.168.1.1/24 192.168.1.1
+  ip route 192.168.1.1/24 192.168.1.1
+  ip route 192.168.1.1/32 192.168.1.1
+  ip route 192.168.1.1/30 192.168.1.1
+  ip route 192.168.1.1/31 192.168.1.1
+  ip route 192.168.1.1/30 192.168.1.1
+  ip route 192.168.1.1/24 192.168.1.1
+  ip route 192.168.1.1/29 192.168.1.1
+vrf context CRM
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context CaiFuSvr
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context CaiWuGuanLi
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context DMZ-Test
+  ip route 0.0.0.0/0 192.168.1.1
+  ip route 192.168.1.1/16 192.168.1.1
+  ip route 192.168.1.1/16 192.168.1.1
+  ip route 192.168.1.1/15 192.168.1.1
+vrf context DMZ_ls
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context DataExchange
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context F5
+vrf context HSZGSvr
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context Internet
+  ip route 192.168.1.1/16 192.168.1.1
+  ip route 192.168.1.1/16 192.168.1.1
+  ip route 192.168.1.1/15 192.168.1.1
+  ip route 192.168.1.1/24 192.168.1.1
+  ip route 192.168.1.1/24 192.168.1.1
+  ip route 192.168.1.1/23 192.168.1.1
+  ip route 192.168.1.1/21 192.168.1.1
+vrf context Monitor-Manager
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context MySQLserver
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context NM
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context Nas
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context Oracle
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context OtherSQL
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context Pro-AntKeXinYu
+  ip route 0.0.0.0/0 192.168.1.1
+  ip route 192.168.1.1/24 192.168.1.1
+  ip route 192.168.1.1/24 192.168.1.1
+vrf context Pro-XiaoJin
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context SF
+  ip route 192.168.1.1/16 192.168.1.1
+  ip route 192.168.1.1/16 192.168.1.1
+  ip route 192.168.1.1/16 192.168.1.1
+  ip route 192.168.1.1/23 192.168.1.1
+  ip route 192.168.1.1/21 192.168.1.1
+vrf context SuZhuJi
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context Test
+  ip route 0.0.0.0/0 192.168.1.1
+  ip route 192.168.1.1/32 192.168.1.1
+  ip route 192.168.1.1/32 192.168.1.1
+  ip route 192.168.1.1/24 192.168.1.1
+  ip route 192.168.1.1/24 192.168.1.1
+  ip route 192.168.1.1/24 192.168.1.1
+  ip route 192.168.1.1/24 192.168.1.1
+  ip route 192.168.1.1/24 192.168.1.1
+vrf context Tools
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context XiaoWeiSvr
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context ZongHeYeWuGuanLi
+  ip route 0.0.0.0/0 192.168.1.1
+vrf context management
+vpc domain 300
+  role priority 1
+  peer-keepalive destination 192.168.1.1 source 192.168.1.1
+  delay restore 360
+  peer-gateway
+  auto-recovery
+  ipv6 nd synchronize
+  ip arp synchronize
+
+
+interface Vlan1
+  no ip redirects
+  no ipv6 redirects
+
+interface Vlan7
+  no shutdown
+  vrf member Nas
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 7 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan8
+  no shutdown
+  vrf member Nas
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 8 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan9
+  no shutdown
+  vrf member Oracle
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 9 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan10
+  no shutdown
+  vrf member MySQLserver
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 10 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan11
+  no shutdown
+  vrf member OtherSQL
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 11 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan37
+  no shutdown
+  vrf member Monitor-Manager
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 37 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan38
+  no shutdown
+  vrf member SuZhuJi
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 38 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan40
+  no shutdown
+  vrf member XiaoWeiSvr
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 40 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan41
+  no shutdown
+  vrf member HSZGSvr
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 41 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan42
+  no shutdown
+  vrf member CaiFuSvr
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 42 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan43
+  no shutdown
+  vrf member Pro-XiaoJin
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 43 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan44
+  no shutdown
+  vrf member ZongHeYeWuGuanLi
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 44 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan45
+  no shutdown
+  vrf member Tools
+  no ip redirects
+  ip address 192.168.1.1/24
+  ipv6 address 2400:6e60:1d12:10d::45:2/64
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 45 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+  hsrp 45 ipv6
+    preempt 
+    priority 105
+    ip 2400:6e60:1d12:10d::45:1
+
+interface Vlan46
+  no shutdown
+  vrf member CRM
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 46 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan47
+  no shutdown
+  vrf member DataExchange
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 47 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan48
+  no shutdown
+  vrf member CaiWuGuanLi
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 48 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan49
+  no shutdown
+  vrf member ZongHeYeWuGuanLi
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 49 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan702
+  no shutdown
+  vrf member NM
+  no ip redirects
+  ip address 192.168.1.1/27
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 702 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan703
+  no shutdown
+  vrf member NM
+  no ip redirects
+  ip address 192.168.1.1/25
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 703 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan704
+  no shutdown
+  vrf member NM
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 704 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan711
+  no shutdown
+  vrf member Oracle
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 711 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan712
+  no shutdown
+  vrf member MySQLserver
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 712 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan713
+  no shutdown
+  vrf member DMZ_ls
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 713 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan714
+  no shutdown
+  vrf member SuZhuJi
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 714 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan715
+  no shutdown
+  vrf member XiaoWeiSvr
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 715 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan716
+  no shutdown
+  vrf member HSZGSvr
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 716 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan717
+  no shutdown
+  vrf member CaiFuSvr
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 717 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan718
+  no shutdown
+  vrf member OtherSQL
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 718 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan719
+  no shutdown
+  vrf member ZongHeYeWuGuanLi
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 719 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan720
+  no shutdown
+  vrf member Test
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 720 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan721
+  no shutdown
+  vrf member Monitor-Manager
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 721 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan722
+  no shutdown
+  vrf member Nas
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 722 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan723
+  no shutdown
+  vrf member Tools
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 723 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan724
+  no shutdown
+  vrf member CRM
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 724 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan725
+  no shutdown
+  vrf member DataExchange
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 725 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan726
+  no shutdown
+  vrf member CaiWuGuanLi
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 726 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan751
+  no shutdown
+  vrf member Pro-XiaoJin
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 751 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan752
+  no shutdown
+  vrf member Pro-AntKeXinYu
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 752 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan811
+  no shutdown
+  vrf member BJ
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 811 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan812
+  no shutdown
+  vrf member SF
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 812 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan813
+  no shutdown
+  vrf member NM
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 813 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan814
+  no shutdown
+  vrf member Internet
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 814 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan815
+  no shutdown
+  vrf member DMZ-Test
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 815 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan851
+  no shutdown
+  vrf member Test
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 851 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan852
+  no shutdown
+  vrf member F5
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 852 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan853
+  no shutdown
+  vrf member Pro-AntKeXinYu
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  hsrp version 2
+  hsrp 853 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan911
+  no shutdown
+  vrf member BJ
+  no ip redirects
+  ip address 192.168.1.1/30
+  no ipv6 redirects
+  ip router ospf 300 area 0.0.0.0
+
+interface Vlan912
+  no shutdown
+  vrf member SF
+  no ip redirects
+  ip address 192.168.1.1/30
+  no ipv6 redirects
+  ip router ospf 200 area 0.0.0.0
+
+interface Vlan914
+  no shutdown
+  vrf member Internet
+  no ip redirects
+  ip address 192.168.1.1/30
+  no ipv6 redirects
+  ip router ospf 100 area 0.0.0.0
+
+interface Vlan915
+  no shutdown
+  vrf member DMZ-Test
+  no ip redirects
+  ip address 192.168.1.1/30
+  no ipv6 redirects
+  ip router ospf 500 area 0.0.0.0
+
+interface port-channel1
+  switchport
+  switchport mode trunk
+
+interface port-channel300
+  switchport
+  switchport mode trunk
+  spanning-tree port type network
+  vpc peer-link
+
+interface port-channel400
+  description FPR4110-01
+  switchport
+  switchport mode trunk
+  vpc 400
+
+interface port-channel401
+  description FPR4110-02
+  switchport
+  switchport mode trunk
+  vpc 401
+
+interface port-channel402
+  description Connect_To_sw-7524&2
+  switchport
+  switchport mode trunk
+  vpc 402
+
+interface port-channel403
+  description Connect_to_XA-FOTIC-NM-C2960XR-1
+  switchport
+  switchport mode trunk
+  vpc 403
+
+interface port-channel404
+  description Connect_to_sw-4530&4
+  switchport
+  switchport mode trunk
+  vpc 404
+
+interface port-channel405
+  description Connect_to_XA-FOTIC-NM-AS2960-2
+  switchport
+  switchport mode trunk
+  vpc 405
+
+interface port-channel406
+  description Connect_to_XA-FOTIC-NM-AS2960-3
+  switchport
+  switchport mode trunk
+  vpc 406
+
+interface port-channel407
+  description Connect_to_XA-FOTIC-Test-FW-1
+  switchport
+  switchport access vlan 851
+  vpc 407
+
+interface port-channel408
+  description Connect_to_XA-FOTIC-SER-LTM-1
+  switchport
+  switchport mode trunk
+
+interface port-channel409
+  description Connect_to_XA-Pro-AntKeXinYu_FW-1 
+  switchport
+  switchport access vlan 853
+  vpc 409
+
+interface port-channel410
+  description Connect_to_XA-Pro-AntKeXinYu_FW-2
+  switchport
+  switchport access vlan 853
+  vpc 410
+
+interface port-channel411
+  description Connect_to_XA-FOTIC-SER-6850-5&6
+  switchport
+  switchport mode trunk
+  vpc 411
+
+interface port-channel412
+  description Connect_to_XA-FOTIC-NM-5130S-4
+  switchport
+  switchport mode trunk
+  vpc 412
+
+interface port-channel413
+  description Connect_to_XA-FOTIC-Test-FW-2
+  switchport
+  switchport access vlan 851
+  vpc 413
+
+interface port-channel414
+  description Connect_to_XA-FOTIC-SER-6520XP-7&8
+  switchport
+  switchport mode trunk
+  vpc 414
+
+interface port-channel415
+  description Connect_to_XA-FOTIC-NM-5130S-5
+  switchport
+  switchport mode trunk
+  vpc 415
+
+interface Ethernet1/1
+  switchport
+  switchport mode trunk
+  no shutdown
+
+interface Ethernet1/2
+  switchport
+  switchport mode trunk
+  no shutdown
+
+interface Ethernet1/3
+  description Connect_to_sw-9393_Eth1/54
+  vrf member Internet
+  ip address 192.168.1.1/30
+  ip router ospf 100 area 0.0.0.0
+  no shutdown
+
+interface Ethernet1/4
+  description Connect_to_XA-FOTIC-SF-AS2960-1-g1/0/27
+  vrf member SF
+  ip address 192.168.1.1/30
+  ip router ospf 200 area 0.0.0.0
+  no shutdown
+
+interface Ethernet1/5
+  description Connect_to_XA-FOTIC-DCHL-RT5620-1-G2/0/1
+  vrf member BJ
+  ip address 192.168.1.1/30
+  ip router ospf 300 area 0.0.0.0
+  no shutdown
+
+interface Ethernet1/6
+  description Connect_to_XA-FOTIC-NM-C2960XR-1-g1/0/27
+  switchport
+  switchport mode trunk
+  channel-group 403 mode active
+  no shutdown
+
+interface Ethernet1/7
+  description Connect_to_sw-7524-eth1/53
+  switchport
+  switchport mode trunk
+  channel-group 402 mode active
+  no shutdown
+
+interface Ethernet1/8
+  description Connect_to_sw-8679_Eth1/53
+  vrf member DMZ-Test
+  ip address 192.168.1.1/30
+  ip router ospf 500 area 0.0.0.0
+  no shutdown
+
+interface Ethernet1/9
+  description Connect_to_XA-FOTIC-DCHL-RT5620-2-G2/0/1
+  vrf member BJ
+  ip address 192.168.1.1/30
+  ip router ospf 300 area 0.0.0.0
+  no shutdown
+
+interface Ethernet1/10
+  description Connect_to_XA-FOTIC-SER-N93180-2-eth1/53 
+  switchport
+  switchport mode trunk
+  channel-group 402 mode active
+  no shutdown
+
+interface Ethernet1/11
+  description Connect_to_sw-4530-eth1/53 
+  switchport
+  switchport mode trunk
+  channel-group 404 mode active
+  no shutdown
+
+interface Ethernet1/12
+  description Connect_to_XA-FOTIC-SER-N93180-4-eth1/53 
+  switchport
+  switchport mode trunk
+  channel-group 404 mode active
+  no shutdown
+
+interface Ethernet1/13
+  no shutdown
+
+interface Ethernet1/14
+  description Connect_to_XA-FOTIC-NM-AS2960-2_G1/0/27 
+  switchport
+  switchport mode trunk
+  channel-group 405 mode active
+  no shutdown
+
+interface Ethernet1/15
+  description Connect_to_XA-FOTIC-NM-AS2960-3_G1/0/51 
+  switchport
+  switchport mode trunk
+  channel-group 406 mode active
+  no shutdown
+
+interface Ethernet1/16
+  description Connect_to_XA-FOTIC-SER-6850-5-1/0/25
+  switchport
+  switchport mode trunk
+  channel-group 411
+  no shutdown
+
+interface Ethernet1/17
+  description Connect_to_XA-FOTIC-SER-6850-6-1/0/25  
+  switchport
+  switchport mode trunk
+  channel-group 411
+  no shutdown
+
+interface Ethernet1/18
+  description Connect_to_XA-FOTIC-NM-5130S-4-1/0/51   
+  switchport
+  switchport mode trunk
+  channel-group 412
+  no shutdown
+
+interface Ethernet1/19
+  description Connect_to_XA-FOTIC-SER-6520XP-7-HGE1/0/49   
+  switchport
+  switchport mode trunk
+  channel-group 414
+  no shutdown
+
+interface Ethernet1/20
+  description Connect_to_XA-FOTIC-SER-6520XP-8-HGE1/0/49   
+  switchport
+  switchport mode trunk
+  channel-group 414
+  no shutdown
+
+interface Ethernet1/21
+  description Connect_to_XA-FOTIC-NM-5130S-5-G1/0/49   
+  switchport
+  switchport mode trunk
+  channel-group 415
+  no shutdown
+
+interface Ethernet1/22
+
+interface Ethernet1/23
+
+interface Ethernet1/24
+
+interface Ethernet1/25
+
+interface Ethernet1/26
+
+interface Ethernet1/27
+
+interface Ethernet1/28
+
+interface Ethernet1/29
+
+interface Ethernet1/30
+
+interface Ethernet1/31
+
+interface Ethernet1/32
+
+interface Ethernet1/33
+  no shutdown
+
+interface Ethernet1/34
+
+interface Ethernet1/35
+
+interface Ethernet1/36
+
+interface Ethernet1/37
+  switchport
+  no shutdown
+
+interface Ethernet1/38
+
+interface Ethernet1/39
+
+interface Ethernet1/40
+
+interface Ethernet1/41
+
+interface Ethernet1/42
+
+interface Ethernet1/43
+
+interface Ethernet1/44
+
+interface Ethernet1/45
+
+interface Ethernet1/46
+
+interface Ethernet1/47
+
+interface Ethernet1/48
+
+interface Ethernet1/49
+  description Connect_to_XA-FOTIC-SER-LTM-1_Eth5.0
+  switchport
+  switchport mode trunk
+  channel-group 408 mode active
+  no shutdown
+
+interface Ethernet1/50
+  description Connect_to_XA-FOTIC-SER-LTM-1_Eth6.0
+  switchport
+  switchport mode trunk
+  channel-group 408 mode active
+  no shutdown
+
+interface Ethernet1/51
+  description Connect_to_XA-Pro-AntKeXinYu_FW-1_xe4/1
+  switchport
+  switchport access vlan 853
+  channel-group 409
+  no shutdown
+
+interface Ethernet1/52
+  description Connect_to_XA-Pro-AntKeXinYu_FW-2_xe4/1
+  switchport
+  switchport access vlan 853
+  channel-group 410
+  no shutdown
+
+interface Ethernet1/53
+  description Broken_Port-CanNotBeUsed
+
+interface Ethernet1/54
+  description Connect_to_XA-FOTIC-Test-FW-1_Xe0/8
+  switchport
+  switchport access vlan 851
+  channel-group 407
+  no shutdown
+
+interface Ethernet1/55
+  description Connect_to_XA-FOTIC-Test-FW-2_Xe0/8
+  switchport
+  switchport access vlan 851
+  channel-group 413
+  no shutdown
+
+interface Ethernet1/56
+
+interface Ethernet1/57
+
+interface Ethernet1/58
+
+interface Ethernet1/59
+
+interface Ethernet1/60
+
+interface Ethernet1/61
+
+interface Ethernet1/62
+  description Connect_to_XA-FOTIC-Core-N9364C-2-eth1/62
+  switchport
+  switchport mode trunk
+  channel-group 300
+  no shutdown
+
+interface Ethernet1/63
+  description Connect_to_XA-FOTIC-Core-N9364C-2-eth1/64
+  switchport
+  switchport mode trunk
+  channel-group 300
+  no shutdown
+
+interface Ethernet1/64
+  description Connect_to_XA-FOTIC-Core-N9364C-2-eth1/63
+  switchport
+  switchport mode trunk
+  channel-group 300
+  no shutdown
+
+interface Ethernet1/65
+  description Connect_to_XA-FOTIC-Core-FPR4110-M-t0/3
+  switchport
+  switchport mode trunk
+  channel-group 400 mode active
+  no shutdown
+
+interface Ethernet1/66
+  description Connect_to_XA-FOTIC-Core-FPR4110-S-t0/3
+  switchport
+  switchport mode trunk
+  channel-group 401 mode active
+  no shutdown
+
+interface mgmt0
+  vrf member management
+  ip address 192.168.1.1/30
+
+interface loopback1
+  vrf member BJ
+  ip address 192.168.1.1/32
+  ip router ospf 300 area 0.0.0.0
+
+interface loopback2
+  vrf member SF
+  ip address 192.168.1.1/32
+  ip router ospf 200 area 0.0.0.0
+
+interface loopback3
+  vrf member NM
+  ip address 192.168.1.1/32
+  ip router ospf 400 area 0.0.0.0
+
+interface loopback4
+  vrf member Internet
+  ip address 192.168.1.1/32
+  ip router ospf 100 area 0.0.0.0
+
+interface loopback5
+  vrf member DMZ-Test
+  ip address 192.168.1.1/32
+  ip router ospf 500 area 0.0.0.0
+line console
+  exec-timeout 5
+line vty
+  access-class mgt in
+boot nxos bootflash:/nxos.9.2.1.bin 
+router ospf 100
+  router-id 192.168.1.1
+  vrf Internet
+    redistribute static route-map Return
+router ospf 200
+  router-id 192.168.1.1
+  vrf SF
+    redistribute static route-map Return
+router ospf 300
+  router-id 192.168.1.1
+  vrf BJ
+    redistribute static route-map BJ
+router ospf 400
+  router-id 192.168.1.1
+  vrf NM
+    redistribute static route-map Return
+router ospf 500
+  router-id 192.168.1.1
+  vrf DMZ-Test
+    redistribute static route-map Return
+logging server 192.168.1.1 6 use-vrf NM
+logging server 192.168.1.1 6 use-vrf NM
+logging source-interface Vlan702
+logging origin-id hostname
+
+
+
+--------------------------------------------------
+命令: show ip arp
+输出:
+
+Flags: * - Adjacencies learnt on non-active FHRP router
+       + - Adjacencies synced via CFSoE
+       # - Adjacencies Throttled for Glean
+       CP - Added via L2RIB, Control plane Adjacencies
+       PS - Added via L2RIB, Peer Sync
+       RO - Re-Originated Peer Sync Entry
+       D - Static Adjacencies attached to down interface
+
+IP ARP Table for context default
+Total number of entries: 0
+Address         Age       MAC Address     Interface       Flags
+
+--------------------------------------------------
+命令: show mac address-table
+输出:
+Legend: 
+        * - primary entry, G - Gateway MAC, (R) - Routed MAC, O - Overlay MAC
+        age - seconds since last seen,+ - primary entry using vPC Peer-Link,
+        (T) - True, (F) - False, C - ControlPlane MAC, ~ - vsan
+   VLAN     MAC Address      Type      age     Secure NTFY Ports
+---------+-----------------+--------+---------+------+----+------------------
++    1     20fa.db8d.3414   dynamic  0         F      F    Po402
+*    1     20fa.db8d.3464   dynamic  0         F      F    Po402
++    1     20fa.db8d.3484   dynamic  0         F      F    Po402
+*    1     3868.dda0.88d9   dynamic  0         F      F    Po402
+*    1     3cfd.fe5f.38bd   dynamic  0         F      F    Po402
++    1     3cfd.fe5f.3ae9   dynamic  0         F      F    Po402
++    1     3cfd.fe5f.3b05   dynamic  0         F      F    Po402
++    1     6805.ca82.bea1   dynamic  0         F      F    Po402
+*    1     6805.ca82.befd   dynamic  0         F      F    Po402
++    1     6805.ca8f.3a99   dynamic  0         F      F    Po402
+*    1     6805.ca8f.3abd   dynamic  0         F      F    Po402
+*    1     6805.ca9b.fd49   dynamic  0         F      F    Po402
+*    1     6805.ca9b.fdc9   dynamic  0         F      F    Po402
++    7     00c0.ff5b.55d5   dynamic  0         F      F    Po411
++    7     00c0.ff5b.5695   dynamic  0         F      F    Po411
++    7     1470.5734.134a   dynamic  0         F      F    Po411
++    7     1470.5734.1372   dynamic  0         F      F    Po411
++    7     1470.5734.13c0   dynamic  0         F      F    Po411
++    7     5254.00ab.41bb   dynamic  0         F      F    Po411
++    7     5254.00d9.f2d6   dynamic  0         F      F    Po411
++    7     f8f2.1e3e.d750   dynamic  0         F      F    Po411
++    7     f8f2.1e3e.dc70   dynamic  0         F      F    Po411
++    7     f8f2.1e3e.e0c8   dynamic  0         F      F    Po411
++    7     f8f2.1e3e.e125   dynamic  0         F      F    Po411
++    7     f8f2.1e47.1ea4   dynamic  0         F      F    Po411
++    7     f8f2.1e4b.ef80   dynamic  0         F      F    Po411
+*    8     1470.5734.1360   dynamic  0         F      F    Po411
+*    8     1470.5734.1366   dynamic  0         F      F    Po411
++    8     1470.5734.13e6   dynamic  0         F      F    Po411
++    9     b026.2859.8396   dynamic  0         F      F    Po402
++    9     b026.2859.9452   dynamic  0         F      F    Po402
++   10     5254.000d.cffb   dynamic  0         F      F    Po402
++   10     5254.0014.5264   dynamic  0         F      F    Po402
++   10     5254.005e.a4e4   dynamic  0         F      F    Po402
++   10     5254.006d.044c   dynamic  0         F      F    Po402
++   10     5254.00b6.0404   dynamic  0         F      F    Po402
++   10     5254.00ce.c930   dynamic  0         F      F    Po402
++   10     5254.00cf.a73e   dynamic  0         F      F    Po402
++   10     5254.00d2.7665   dynamic  0         F      F    Po402
++   10     5254.00d2.8e19   dynamic  0         F      F    Po402
++   10     5254.00d7.2a08   dynamic  0         F      F    Po402
++   10     5254.00ea.1fd9   dynamic  0         F      F    Po402
++   10     5254.00f0.de95   dynamic  0         F      F    Po402
++   10     5254.00f6.cc65   dynamic  0         F      F    Po402
++   10     5254.00fa.1426   dynamic  0         F      F    Po402
++   10     5254.00fa.3c23   dynamic  0         F      F    Po402
++   11     5254.0069.b441   dynamic  0         F      F    Po402
++   11     5254.006d.5b56   dynamic  0         F      F    Po402
++   11     5254.00bc.bd65   dynamic  0         F      F    Po402
++   11     5254.00da.8752   dynamic  0         F      F    Po402
++   11     5254.00fb.54ff   dynamic  0         F      F    Po402
++   11     5254.00ff.3ba5   dynamic  0         F      F    Po402
++   37     000d.486d.6e4f   dynamic  0         F      F    Po404
++   37     0050.5687.de44   dynamic  0         F      F    Po402
++   37     00c0.ff53.be28   dynamic  0         F      F    Po411
++   37     00c0.ff53.be48   dynamic  0         F      F    Po411
++   37     18d6.dd75.db7f   dynamic  0         F      F    Po411
++   37     18d6.dd75.db9d   dynamic  0         F      F    Po411
++   37     18d6.dd75.dbc5   dynamic  0         F      F    Po411
++   37     5254.0018.d9a0   dynamic  0         F      F    Po402
++   37     5254.0023.75dc   dynamic  0         F      F    Po402
+*   37     5254.002a.725e   dynamic  0         F      F    Po402
++   37     5254.002e.7102   dynamic  0         F      F    Po402
++   37     5254.0045.7eb9   dynamic  0         F      F    Po402
++   37     5254.004b.93db   dynamic  0         F      F    Po402
++   37     5254.004b.bc82   dynamic  0         F      F    Po402
++   37     5254.005e.281b   dynamic  0         F      F    Po402
++   37     5254.007b.d279   dynamic  0         F      F    Po402
++   37     5254.0080.1bdd   dynamic  0         F      F    Po402
++   37     5254.0083.3e21   dynamic  0         F      F    Po402
++   37     5254.00a4.4043   dynamic  0         F      F    Po402
++   37     5254.00b8.80f9   dynamic  0         F      F    Po402
++   37     5254.00c4.74e7   dynamic  0         F      F    Po402
++   37     5254.00ca.48f7   dynamic  0         F      F    Po402
++   37     5254.00cb.9b36   dynamic  0         F      F    Po402
++   37     5254.00d5.b388   dynamic  0         F      F    Po402
++   37     5254.00eb.bf36   dynamic  0         F      F    Po402
++   37     5254.00ec.912b   dynamic  0         F      F    Po402
++   37     6805.ca94.0c58   dynamic  0         F      F    Po411
++   37     b4a9.fc08.735c   dynamic  0         F      F    Po411
++   37     b4a9.fc08.74a3   dynamic  0         F      F    Po411
++   37     b4a9.fc08.7adc   dynamic  0         F      F    Po411
++   37     b4a9.fc08.7d25   dynamic  0         F      F    Po411
++   37     b4a9.fc08.c519   dynamic  0         F      F    Po411
++   37     b4a9.fc1b.b6fc   dynamic  0         F      F    Po411
++   37     b4a9.fc1b.b7a3   dynamic  0         F      F    Po411
++   37     b4a9.fc1b.b98c   dynamic  0         F      F    Po411
++   37     c407.78d9.18c3   dynamic  0         F      F    Po402
++   37     d8c4.97d1.fa81   dynamic  0         F      F    Po411
++   37     d8c4.97d1.fa82   dynamic  0         F      F    Po411
++   37     d8c4.97d1.fd4b   dynamic  0         F      F    Po411
++   37     d8c4.97d1.fd4c   dynamic  0         F      F    Po411
++   38     0aff.df1a.ea5d   dynamic  0         F      F    Po402
+*   38     0ea4.a4e8.b8c2   dynamic  0         F      F    Po402
++   38     1244.442f.e6f6   dynamic  0         F      F    Po402
++   38     20fa.db8d.3424   dynamic  0         F      F    Po402
++   38     20fa.db8d.3444   dynamic  0         F      F    Po402
++   38     20fa.db8d.3445   dynamic  0         F      F    Po402
++   38     20fa.db8d.3454   dynamic  0         F      F    Po402
+*   38     20fa.db8d.3455   dynamic  0         F      F    Po402
+*   38     20fa.db8d.3465   dynamic  0         F      F    Po402
++   38     20fa.db8d.3474   dynamic  0         F      F    Po402
+*   38     20fa.db8d.3475   dynamic  0         F      F    Po402
+*   38     20fa.db8d.3485   dynamic  0         F      F    Po402
++   38     2edd.789b.2577   dynamic  0         F      F    Po402
++   38     3868.dd01.d568   dynamic  0         F      F    Po402
+*   38     3868.dd01.d5a8   dynamic  0         F      F    Po402
+*   38     3cfd.fe5f.3b04   dynamic  0         F      F    Po402
++   38     4612.9043.bfe4   dynamic  0         F      F    Po402
++   38     5254.0068.a3fb   dynamic  0         F      F    Po402
++   38     5254.00de.510c   dynamic  0         F      F    Po402
++   38     5629.d560.77d1   dynamic  0         F      F    Po402
++   38     5e15.0d82.9d28   dynamic  0         F      F    Po402
++   38     5e39.2635.08ee   dynamic  0         F      F    Po402
++   38     6257.5c87.0346   dynamic  0         F      F    Po402
++   38     6646.a202.8045   dynamic  0         F      F    Po402
+*   38     6805.ca82.bea0   dynamic  0         F      F    Po402
+*   38     6805.ca82.befc   dynamic  0         F      F    Po402
++   38     6805.ca8f.3a98   dynamic  0         F      F    Po402
+*   38     6805.ca8f.3abc   dynamic  0         F      F    Po402
++   38     6805.ca9b.fdc8   dynamic  0         F      F    Po402
++   38     6ac8.ea52.715c   dynamic  0         F      F    Po402
++   38     72ec.c64d.4b5f   dynamic  0         F      F    Po402
+*   38     72f0.f0b0.c969   dynamic  0         F      F    Po402
++   38     7631.fa53.7152   dynamic  0         F      F    Po402
++   38     8649.3546.996b   dynamic  0         F      F    Po402
+*   38     a29c.95f0.9ab8   dynamic  0         F      F    Po402
++   38     a6cb.8078.2ccf   dynamic  0         F      F    Po402
+*   38     d2e3.1c1e.4efb   dynamic  0         F      F    Po402
+*   40     0094.a190.5c86   dynamic  0         F      F    Po408
++   40     5254.0004.fd93   dynamic  0         F      F    Po402
++   40     5254.0010.2531   dynamic  0         F      F    Po402
++   40     5254.0017.fe84   dynamic  0         F      F    Po402
++   40     5254.0018.dd0f   dynamic  0         F      F    Po402
++   40     5254.0019.b1c7   dynamic  0         F      F    Po402
++   40     5254.0019.bd80   dynamic  0         F      F    Po402
++   40     5254.0021.06a0   dynamic  0         F      F    Po402
++   40     5254.0022.197e   dynamic  0         F      F    Po402
++   40     5254.0022.5620   dynamic  0         F      F    Po402
++   40     5254.0028.1226   dynamic  0         F      F    Po402
++   40     5254.0028.3afa   dynamic  0         F      F    Po402
++   40     5254.002b.9a1c   dynamic  0         F      F    Po402
++   40     5254.0037.066c   dynamic  0         F      F    Po402
++   40     5254.003b.7ba6   dynamic  0         F      F    Po402
++   40     5254.0042.5b82   dynamic  0         F      F    Po402
++   40     5254.0042.f0f3   dynamic  0         F      F    Po402
++   40     5254.0046.a671   dynamic  0         F      F    Po402
++   40     5254.0048.07d6   dynamic  0         F      F    Po402
++   40     5254.004b.b5fa   dynamic  0         F      F    Po402
++   40     5254.004d.8a17   dynamic  0         F      F    Po402
++   40     5254.0052.e64f   dynamic  0         F      F    Po402
++   40     5254.0052.e6e4   dynamic  0         F      F    Po402
++   40     5254.0054.a583   dynamic  0         F      F    Po402
++   40     5254.0056.291b   dynamic  0         F      F    Po402
++   40     5254.0056.f693   dynamic  0         F      F    Po402
++   40     5254.0057.556a   dynamic  0         F      F    Po402
++   40     5254.0057.883a   dynamic  0         F      F    Po402
++   40     5254.005f.396e   dynamic  0         F      F    Po402
++   40     5254.0062.2b7c   dynamic  0         F      F    Po402
++   40     5254.0064.622a   dynamic  0         F      F    Po402
++   40     5254.006a.6c90   dynamic  0         F      F    Po402
++   40     5254.006d.090b   dynamic  0         F      F    Po402
++   40     5254.0070.48b6   dynamic  0         F      F    Po402
++   40     5254.0072.23b3   dynamic  0         F      F    Po402
++   40     5254.0076.9f27   dynamic  0         F      F    Po402
++   40     5254.0078.fa10   dynamic  0         F      F    Po402
++   40     5254.007a.0185   dynamic  0         F      F    Po402
++   40     5254.0080.040f   dynamic  0         F      F    Po402
++   40     5254.0085.b4f7   dynamic  0         F      F    Po402
++   40     5254.0087.e5e1   dynamic  0         F      F    Po402
++   40     5254.0087.f727   dynamic  0         F      F    Po402
++   40     5254.008a.3139   dynamic  0         F      F    Po402
++   40     5254.008a.3822   dynamic  0         F      F    Po402
++   40     5254.008f.b2f2   dynamic  0         F      F    Po402
++   40     5254.0091.f13a   dynamic  0         F      F    Po402
++   40     5254.0095.8b65   dynamic  0         F      F    Po402
++   40     5254.0099.3704   dynamic  0         F      F    Po402
++   40     5254.0099.b984   dynamic  0         F      F    Po402
++   40     5254.009d.3151   dynamic  0         F      F    Po402
++   40     5254.009e.058d   dynamic  0         F      F    Po402
++   40     5254.009f.e917   dynamic  0         F      F    Po402
++   40     5254.00a0.3515   dynamic  0         F      F    Po402
++   40     5254.00a2.357f   dynamic  0         F      F    Po402
++   40     5254.00a2.d1b5   dynamic  0         F      F    Po402
++   40     5254.00a4.a347   dynamic  0         F      F    Po402
++   40     5254.00a8.3ca7   dynamic  0         F      F    Po402
++   40     5254.00ac.3c3f   dynamic  0         F      F    Po402
++   40     5254.00ad.770b   dynamic  0         F      F    Po402
++   40     5254.00b1.e3e8   dynamic  0         F      F    Po402
++   40     5254.00b4.8e61   dynamic  0         F      F    Po402
++   40     5254.00b4.e423   dynamic  0         F      F    Po402
++   40     5254.00c0.1bc0   dynamic  0         F      F    Po402
++   40     5254.00c0.43e3   dynamic  0         F      F    Po402
++   40     5254.00c4.a632   dynamic  0         F      F    Po402
++   40     5254.00c7.a423   dynamic  0         F      F    Po402
++   40     5254.00c7.b807   dynamic  0         F      F    Po402
++   40     5254.00ca.593e   dynamic  0         F      F    Po402
++   40     5254.00d5.89ff   dynamic  0         F      F    Po402
++   40     5254.00d6.e7e8   dynamic  0         F      F    Po402
++   40     5254.00d8.a8fd   dynamic  0         F      F    Po402
++   40     5254.00da.3881   dynamic  0         F      F    Po402
++   40     5254.00df.2e7d   dynamic  0         F      F    Po402
++   40     5254.00e4.9312   dynamic  0         F      F    Po402
++   40     5254.00eb.83d1   dynamic  0         F      F    Po402
++   40     5254.00f8.4461   dynamic  0         F      F    Po402
++   40     5254.00fb.aefb   dynamic  0         F      F    Po402
++   40     5254.00ff.9b29   dynamic  0         F      F    Po402
++   41     5254.000b.f04c   dynamic  0         F      F    Po402
++   41     5254.0019.1850   dynamic  0         F      F    Po402
++   41     5254.0051.3bcc   dynamic  0         F      F    Po402
++   41     5254.0078.2134   dynamic  0         F      F    Po402
++   41     5254.009e.ed96   dynamic  0         F      F    Po402
++   41     5254.00bb.9c30   dynamic  0         F      F    Po402
++   41     5254.00dd.c92c   dynamic  0         F      F    Po402
++   41     5254.00e9.3cd2   dynamic  0         F      F    Po402
++   41     5254.00f9.ee79   dynamic  0         F      F    Po402
+*   42     0094.a190.5c87   dynamic  0         F      F    Po408
++   42     5254.0023.86f1   dynamic  0         F      F    Po402
++   42     5254.003d.55dd   dynamic  0         F      F    Po402
++   42     5254.0097.5b43   dynamic  0         F      F    Po402
++   42     5254.00a8.057b   dynamic  0         F      F    Po402
++   42     5254.00fc.ff05   dynamic  0         F      F    Po402
+*   43     0094.a190.5c88   dynamic  0         F      F    Po408
++   43     5254.0033.427e   dynamic  0         F      F    Po402
++   43     5254.003a.13d4   dynamic  0         F      F    Po402
++   43     5254.0064.6484   dynamic  0         F      F    Po402
++   43     5254.006c.3463   dynamic  0         F      F    Po402
++   43     5254.0086.0907   dynamic  0         F      F    Po402
++   43     5254.009b.f6be   dynamic  0         F      F    Po402
++   43     5254.00d3.156f   dynamic  0         F      F    Po402
++   43     5254.00ea.7c1c   dynamic  0         F      F    Po402
++   43     6c92.bfc3.ee6e   dynamic  0         F      F    Po404
++   43     6c92.bfc3.f0ae   dynamic  0         F      F    Po411
++   43     6c92.bfc3.f0d8   dynamic  0         F      F    Po411
++   43     6c92.bfc3.f228   dynamic  0         F      F    Po404
++   43     6c92.bfc3.f30c   dynamic  0         F      F    Po404
++   43     6c92.bfc3.f456   dynamic  0         F      F    Po404
++   43     6c92.bfc3.f468   dynamic  0         F      F    Po404
++   43     6c92.bfc3.f4a4   dynamic  0         F      F    Po404
++   43     6c92.bfc3.f50a   dynamic  0         F      F    Po411
++   43     6c92.bfc3.f510   dynamic  0         F      F    Po404
++   43     6c92.bfc3.f534   dynamic  0         F      F    Po404
++   43     6c92.bfc3.f540   dynamic  0         F      F    Po411
++   43     6c92.bff2.3f1c   dynamic  0         F      F    Po404
++   43     6c92.bff2.4120   dynamic  0         F      F    Po404
++   43     6c92.bff2.4124   dynamic  0         F      F    Po411
++   43     6c92.bff3.4c8e   dynamic  0         F      F    Po411
++   43     6c92.bff3.4d9c   dynamic  0         F      F    Po404
++   43     90e2.ba89.a6fc   dynamic  0         F      F    Po411
++   43     90e2.ba89.a724   dynamic  0         F      F    Po404
++   43     90e2.ba89.a764   dynamic  0         F      F    Po404
++   43     90e2.ba89.a7a0   dynamic  0         F      F    Po411
++   43     90e2.ba89.a83c   dynamic  0         F      F    Po411
++   43     90e2.ba89.a8d4   dynamic  0         F      F    Po404
++   43     90e2.ba89.a964   dynamic  0         F      F    Po404
++   43     90e2.ba89.a9c8   dynamic  0         F      F    Po404
++   43     90e2.ba89.ab68   dynamic  0         F      F    Po404
++   43     90e2.ba89.ac94   dynamic  0         F      F    Po404
++   43     90e2.ba89.acd8   dynamic  0         F      F    Po411
++   43     90e2.ba89.adc4   dynamic  0         F      F    Po404
++   43     b405.5d1d.112f   dynamic  0         F      F    Po404
++   43     b405.5de1.5b30   dynamic  0         F      F    Po404
++   43     b405.5de1.6378   dynamic  0         F      F    Po411
++   43     b405.5de1.6396   dynamic  0         F      F    Po404
++   43     b405.5de1.6c88   dynamic  0         F      F    Po404
++   43     b405.5de1.6c94   dynamic  0         F      F    Po404
++   43     b405.5de1.6d30   dynamic  0         F      F    Po411
++   43     b405.5dfd.0800   dynamic  0         F      F    Po404
++   43     b405.5dfd.080e   dynamic  0         F      F    Po404
++   43     b405.5dfd.0812   dynamic  0         F      F    Po404
++   43     b405.5dfd.0814   dynamic  0         F      F    Po404
++   43     b405.5dfd.0818   dynamic  0         F      F    Po404
++   43     b405.5dfd.0884   dynamic  0         F      F    Po411
++   43     b405.5dfd.089a   dynamic  0         F      F    Po404
++   43     b405.5dfd.08b0   dynamic  0         F      F    Po404
++   43     b405.5dfd.08bc   dynamic  0         F      F    Po411
++   43     b405.5dfd.08d4   dynamic  0         F      F    Po411
++   43     b405.5dfd.08ea   dynamic  0         F      F    Po404
++   43     b405.5dfd.0ba0   dynamic  0         F      F    Po411
++   43     b405.5dff.12ba   dynamic  0         F      F    Po404
++   43     b405.5dff.12e6   dynamic  0         F      F    Po411
++   43     b405.5dff.12f0   dynamic  0         F      F    Po404
++   43     b405.5dff.27a6   dynamic  0         F      F    Po404
++   43     b405.5dff.2974   dynamic  0         F      F    Po411
++   43     b405.5dff.297a   dynamic  0         F      F    Po404
++   43     c407.78dc.e868   dynamic  0         F      F    Po404
++   43     c407.78dc.e878   dynamic  0         F      F    Po411
++   43     c407.78dc.e898   dynamic  0         F      F    Po411
++   43     c407.78dc.e948   dynamic  0         F      F    Po411
++   43     c407.78dd.14b8   dynamic  0         F      F    Po404
++   43     c407.78dd.1568   dynamic  0         F      F    Po411
++   43     c407.78dd.1578   dynamic  0         F      F    Po404
++   43     c407.78dd.15a8   dynamic  0         F      F    Po404
++   43     c407.78dd.16b8   dynamic  0         F      F    Po404
++   43     c407.78dd.3f28   dynamic  0         F      F    Po404
++   43     c407.78dd.45a8   dynamic  0         F      F    Po404
++   43     c407.78dd.45b8   dynamic  0         F      F    Po404
++   43     e0e2.d105.eff6   dynamic  0         F      F    Po404
++   43     e0e2.d105.f424   dynamic  0         F      F    Po404
++   43     e0e2.d105.f426   dynamic  0         F      F    Po404
++   43     e0e2.d105.f42c   dynamic  0         F      F    Po411
++   43     e0e2.d105.f48a   dynamic  0         F      F    Po404
++   43     e0e2.d105.f48c   dynamic  0         F      F    Po411
++   43     e0e2.d105.f492   dynamic  0         F      F    Po411
++   43     e0e2.d105.f496   dynamic  0         F      F    Po404
++   43     e0e2.d105.f500   dynamic  0         F      F    Po411
++   43     e0e2.d105.f512   dynamic  0         F      F    Po404
++   43     e0e2.d105.f522   dynamic  0         F      F    Po404
++   43     e0e2.d105.f524   dynamic  0         F      F    Po404
+*   44     0094.a190.5c89   dynamic  0         F      F    Po408
++   44     5254.0012.f8da   dynamic  0         F      F    Po402
++   44     5254.0015.1bc6   dynamic  0         F      F    Po402
++   44     5254.0020.6026   dynamic  0         F      F    Po402
++   44     5254.003d.296f   dynamic  0         F      F    Po402
++   44     5254.0043.7d28   dynamic  0         F      F    Po402
++   44     5254.0076.ac39   dynamic  0         F      F    Po402
++   44     5254.008d.328e   dynamic  0         F      F    Po402
++   44     5254.008e.0372   dynamic  0         F      F    Po402
++   44     5254.0092.cd33   dynamic  0         F      F    Po402
++   44     5254.009a.2450   dynamic  0         F      F    Po402
++   44     5254.00ac.ca8b   dynamic  0         F      F    Po402
++   44     5254.00ba.f39b   dynamic  0         F      F    Po402
++   44     5254.00cc.cd24   dynamic  0         F      F    Po402
++   44     5254.00f9.3dd4   dynamic  0         F      F    Po402
++   44     5254.00fb.a21a   dynamic  0         F      F    Po402
++   45     000a.f78d.0f1c   dynamic  0         F      F    Po402
+*   45     0094.a190.5c8a   dynamic  0         F      F    Po408
++   45     0894.ef1a.6eef   dynamic  0         F      F    Po402
++   45     0894.ef1a.6f2f   dynamic  0         F      F    Po402
++   45     5254.0003.6c50   dynamic  0         F      F    Po402
++   45     5254.0004.e990   dynamic  0         F      F    Po402
++   45     5254.0008.d19b   dynamic  0         F      F    Po402
++   45     5254.0015.2174   dynamic  0         F      F    Po402
++   45     5254.0023.107d   dynamic  0         F      F    Po402
++   45     5254.0026.d410   dynamic  0         F      F    Po402
++   45     5254.0031.952e   dynamic  0         F      F    Po402
++   45     5254.0032.b9cb   dynamic  0         F      F    Po402
++   45     5254.0037.586e   dynamic  0         F      F    Po402
++   45     5254.003d.b505   dynamic  0         F      F    Po402
++   45     5254.003f.d42f   dynamic  0         F      F    Po402
++   45     5254.0049.8937   dynamic  0         F      F    Po402
++   45     5254.005f.a3c3   dynamic  0         F      F    Po402
++   45     5254.0061.1c6d   dynamic  0         F      F    Po402
++   45     5254.0061.e331   dynamic  0         F      F    Po402
++   45     5254.0073.8efa   dynamic  0         F      F    Po402
++   45     5254.0081.9db9   dynamic  0         F      F    Po402
++   45     5254.0096.b23a   dynamic  0         F      F    Po402
++   45     5254.0097.0176   dynamic  0         F      F    Po402
++   45     5254.00a4.71da   dynamic  0         F      F    Po402
++   45     5254.00b1.e124   dynamic  0         F      F    Po402
++   45     5254.00b7.d015   dynamic  0         F      F    Po402
++   45     5254.00b9.4ecb   dynamic  0         F      F    Po402
++   45     5254.00c6.d840   dynamic  0         F      F    Po402
++   45     5254.00d2.ffd9   dynamic  0         F      F    Po402
++   45     5254.00d5.ce89   dynamic  0         F      F    Po402
++   45     5254.00dd.9ff2   dynamic  0         F      F    Po402
++   45     5254.00e5.1155   dynamic  0         F      F    Po402
++   45     5254.00e5.dab9   dynamic  0         F      F    Po402
++   45     5254.00eb.b8b7   dynamic  0         F      F    Po402
++   45     5254.00eb.fdf1   dynamic  0         F      F    Po402
++   45     5254.00ed.6cc7   dynamic  0         F      F    Po402
++   45     5254.00ef.26f3   dynamic  0         F      F    Po402
++   45     5254.00f3.11b8   dynamic  0         F      F    Po402
++   45     5254.00fc.b122   dynamic  0         F      F    Po402
+*   46     0094.a190.5c8e   dynamic  0         F      F    Po408
++   46     5254.0036.ec24   dynamic  0         F      F    Po402
++   46     5254.0052.26bc   dynamic  0         F      F    Po402
++   46     5254.0064.92ca   dynamic  0         F      F    Po402
++   46     5254.0077.25e2   dynamic  0         F      F    Po402
++   46     5254.008c.48c9   dynamic  0         F      F    Po402
++   46     5254.008c.5b7f   dynamic  0         F      F    Po402
++   46     5254.00ec.30e7   dynamic  0         F      F    Po402
++   46     5254.00f4.6bc5   dynamic  0         F      F    Po402
+*   47     0094.a190.5c8f   dynamic  0         F      F    Po408
++   47     5254.002e.2cd3   dynamic  0         F      F    Po402
++   47     5254.0068.31f8   dynamic  0         F      F    Po402
++   47     5254.0081.7d94   dynamic  0         F      F    Po402
++   47     5254.0092.0e57   dynamic  0         F      F    Po402
++   47     5254.00cf.1fa9   dynamic  0         F      F    Po402
++   47     5254.00db.bfdb   dynamic  0         F      F    Po402
+*   48     0094.a190.5c8d   dynamic  0         F      F    Po408
++   48     5254.000b.1ae5   dynamic  0         F      F    Po402
++   48     5254.000c.3d06   dynamic  0         F      F    Po402
++   48     5254.002f.669e   dynamic  0         F      F    Po402
+*   49     0094.a190.5c8b   dynamic  0         F      F    Po408
++   49     5254.000d.2a43   dynamic  0         F      F    Po402
++   49     5254.002c.7047   dynamic  0         F      F    Po402
++   49     5254.00bf.fa40   dynamic  0         F      F    Po402
++  702     003a.9c39.f8c7   dynamic  0         F      F    Po402
++  702     003a.9c81.6f07   dynamic  0         F      F    Po404
++  702     003a.9c84.1797   dynamic  0         F      F    Po404
++  702     003a.9c85.3c87   dynamic  0         F      F    Po402
++  702     6ce2.d38c.ec27   dynamic  0         F      F    Po415
++  702     90f7.b2ab.1928   dynamic  0         F      F    Po411
++  702     90f7.b2b1.0540   dynamic  0         F      F    Po411
++  702     90f7.b2cd.06ab   dynamic  0         F      F    Po412
++  702     c064.e487.f7c1   dynamic  0         F      F    Po406
++  702     cc70.ed95.3fc1   dynamic  0         F      F    Po405
++  702     d4ad.7193.8241   dynamic  0         F      F    Po403
++  702     eccd.4cc0.d481   dynamic  0         F      F    Po414
++  702     eccd.4cc0.e6c1   dynamic  0         F      F    Po414
++  703     000d.487a.a0c6   dynamic  0         F      F    Po412
++  703     0010.f37b.a430   dynamic  0         F      F    Po412
++  703     0010.f389.d283   dynamic  0         F      F    Po412
++  703     001c.54e1.3e75   dynamic  0         F      F    Po412
++  703     001c.54ff.2575   dynamic  0         F      F    Po412
++  703     003a.9c85.2a20   dynamic  0         F      F    Po412
++  703     0080.e102.372c   dynamic  0         F      F    Po412
++  703     0094.a165.9f82   dynamic  0         F      F    Po412
++  703     0094.a18f.e602   dynamic  0         F      F    Po412
++  703     0094.a190.5102   dynamic  0         F      F    Po412
++  703     0094.a190.5c82   dynamic  0         F      F    Po412
++  703     2c0b.e9da.5eb9   dynamic  0         F      F    Po412
++  703     3c41.0e7c.9e39   dynamic  0         F      F    Po412
++  703     9830.0011.d494   dynamic  0         F      F    Po412
++  703     9830.0011.f8bc   dynamic  0         F      F    Po412
++  703     9830.0036.8370   dynamic  0         F      F    Po412
++  703     9830.0036.83d0   dynamic  0         F      F    Po412
++  703     9cc2.c442.1f15   dynamic  0         F      F    Po412
++  703     9cc2.c442.1f19   dynamic  0         F      F    Po412
++  703     a069.d998.9619   dynamic  0         F      F    Po412
++  703     a069.d998.961c   dynamic  0         F      F    Po412
++  703     a453.0e0e.b0ff   dynamic  0         F      F    Po412
++  703     a8b4.56d0.a22f   dynamic  0         F      F    Po412
++  703     b44b.d652.2b89   dynamic  0         F      F    Po412
++  703     b456.b90f.0005   dynamic  0         F      F    Po412
++  703     cc70.ed95.7839   dynamic  0         F      F    Po412
++  703     d4ad.7193.8139   dynamic  0         F      F    Po412
++  703     ecd6.8a20.eab7   dynamic  0         F      F    Po412
++  703     ecd6.8a61.c514   dynamic  0         F      F    Po412
++  703     f80f.6fa1.d8c9   dynamic  0         F      F    Po412
++  703     f80f.6fa1.e161   dynamic  0         F      F    Po412
++  704     000e.1115.063c   dynamic  0         F      F    Po406
+*  704     0094.a190.5c8c   dynamic  0         F      F    Po408
++  704     0894.ef1a.6e84   dynamic  0         F      F    Po405
++  704     0894.ef1a.6ef4   dynamic  0         F      F    Po405
++  704     0894.ef1a.6f34   dynamic  0         F      F    Po415
++  704     0894.ef1a.8954   dynamic  0         F      F    Po415
++  704     0894.ef1a.9404   dynamic  0         F      F    Po405
++  704     0894.ef68.0949   dynamic  0         F      F    Po415
++  704     0894.ef68.09e5   dynamic  0         F      F    Po405
++  704     0894.ef69.c63d   dynamic  0         F      F    Po405
++  704     18d6.dd75.db7d   dynamic  0         F      F    Po406
++  704     18d6.dd75.db9b   dynamic  0         F      F    Po406
++  704     2c94.52be.be50   dynamic  0         F      F    Po406
++  704     3868.dd01.d56d   dynamic  0         F      F    Po405
++  704     3868.dd01.d5ad   dynamic  0         F      F    Po415
++  704     3868.dda0.88dd   dynamic  0         F      F    Po415
++  704     40f2.e994.961e   dynamic  0         F      F    Po405
++  704     40f2.e9db.63b6   dynamic  0         F      F    Po405
++  704     4cd9.8f34.796a   dynamic  0         F      F    Po405
++  704     4cd9.8f34.7f58   dynamic  0         F      F    Po415
++  704     5cf3.fd35.4065   dynamic  0         F      F    Po405
++  704     5cf3.fd35.4891   dynamic  0         F      F    Po405
++  704     6c92.bfc3.ee6d   dynamic  0         F      F    Po403
++  704     6c92.bfc3.f0ad   dynamic  0         F      F    Po406
++  704     6c92.bfc3.f0d7   dynamic  0         F      F    Po406
++  704     6c92.bfc3.f227   dynamic  0         F      F    Po403
++  704     6c92.bfc3.f30b   dynamic  0         F      F    Po403
++  704     6c92.bfc3.f455   dynamic  0         F      F    Po403
++  704     6c92.bfc3.f467   dynamic  0         F      F    Po403
++  704     6c92.bfc3.f4a3   dynamic  0         F      F    Po403
++  704     6c92.bfc3.f509   dynamic  0         F      F    Po406
++  704     6c92.bfc3.f50f   dynamic  0         F      F    Po403
++  704     6c92.bfc3.f533   dynamic  0         F      F    Po403
++  704     6c92.bfc3.f53f   dynamic  0         F      F    Po406
++  704     6cab.05c2.5e60   dynamic  0         F      F    Po406
++  704     6cae.8b27.f1ce   dynamic  0         F      F    Po405
++  704     7cd3.0a68.c85d   dynamic  0         F      F    Po415
++  704     7cd3.0a68.ddbd   dynamic  0         F      F    Po405
++  704     8894.7147.8858   dynamic  0         F      F    Po403
++  704     8894.71a9.7e04   dynamic  0         F      F    Po403
++  704     9cc2.c403.ae9a   dynamic  0         F      F    Po406
++  704     9cc2.c404.db78   dynamic  0         F      F    Po403
++  704     9cc2.c40b.38b8   dynamic  0         F      F    Po403
++  704     9cc2.c40b.f944   dynamic  0         F      F    Po403
++  704     9cc2.c43e.6c3d   dynamic  0         F      F    Po403
++  704     9cc2.c44e.d052   dynamic  0         F      F    Po406
++  704     9cc2.c44e.f0fe   dynamic  0         F      F    Po406
++  704     9cc2.c44e.f260   dynamic  0         F      F    Po403
++  704     9cc2.c44e.f31c   dynamic  0         F      F    Po406
++  704     9cc2.c44e.fc2c   dynamic  0         F      F    Po403
++  704     9cc2.c44f.073c   dynamic  0         F      F    Po406
++  704     ac1f.6b61.173b   dynamic  0         F      F    Po405
++  704     acce.92f7.324e   dynamic  0         F      F    Po415
++  704     b04f.a615.ad01   dynamic  0         F      F    Po415
++  704     b04f.a62f.0e7e   dynamic  0         F      F    Po405
++  704     b04f.a635.7491   dynamic  0         F      F    Po405
++  704     b405.5d12.65c8   dynamic  0         F      F    Po403
++  704     b405.5d6f.40fa   dynamic  0         F      F    Po403
++  704     b405.5d7f.9eda   dynamic  0         F      F    Po406
++  704     b405.5d91.7c90   dynamic  0         F      F    Po406
++  704     b405.5ded.57b2   dynamic  0         F      F    Po406
++  704     b405.5ded.61fa   dynamic  0         F      F    Po406
++  704     c407.78de.013e   dynamic  0         F      F    Po406
++  704     c407.78de.018c   dynamic  0         F      F    Po403
++  704     c407.78de.0234   dynamic  0         F      F    Po403
++  704     c407.78de.0c54   dynamic  0         F      F    Po406
++  704     c407.78de.0d18   dynamic  0         F      F    Po406
++  704     c407.78de.0e94   dynamic  0         F      F    Po406
++  704     d039.ea05.a04a   dynamic  0         F      F    Po405
++  704     d039.ea05.a04c   dynamic  0         F      F    Po405
++  704     d039.ea05.b5c1   dynamic  0         F      F    Po405
++  704     d039.ea05.b5c3   dynamic  0         F      F    Po405
+*  704     d478.9b45.9f14   dynamic  0         F      F    Po415
++  704     d478.9b45.a2c0   dynamic  0         F      F    Po405
++  704     e861.1a47.6e78   dynamic  0         F      F    Po406
++  704     e861.1a4d.f5e5   dynamic  0         F      F    Po406
++  704     e861.1a4d.f5fd   dynamic  0         F      F    Po406
++  704     e861.1a4d.f669   dynamic  0         F      F    Po403
++  704     e861.1a4d.f679   dynamic  0         F      F    Po406
++  704     e861.1a4d.f6dd   dynamic  0         F      F    Po403
++  704     f848.976e.4600   dynamic  0         F      F    Po405
++  704     f848.97ae.9148   dynamic  0         F      F    Po405
++  711     f80f.6fa1.d8ee   dynamic  0         F      F    Po400
++  711     f80f.6fa1.e18d   dynamic  0         F      F    Po401
++  712     f80f.6fa1.d8ee   dynamic  0         F      F    Po400
++  712     f80f.6fa1.e18d   dynamic  0         F      F    Po401
++  713     f80f.6fa1.d8ee   dynamic  0         F      F    Po400
++  713     f80f.6fa1.e18d   dynamic  0         F      F    Po401
++  714     f80f.6fa1.d8ee   dynamic  0         F      F    Po400
++  714     f80f.6fa1.e18d   dynamic  0         F      F    Po401
++  715     f80f.6fa1.d8ee   dynamic  0         F      F    Po400
++  715     f80f.6fa1.e18d   dynamic  0         F      F    Po401
++  716     f80f.6fa1.d8ee   dynamic  0         F      F    Po400
++  716     f80f.6fa1.e18d   dynamic  0         F      F    Po401
++  717     f80f.6fa1.d8ee   dynamic  0         F      F    Po400
++  717     f80f.6fa1.e18d   dynamic  0         F      F    Po401
++  718     f80f.6fa1.d8ee   dynamic  0         F      F    Po400
++  718     f80f.6fa1.e18d   dynamic  0         F      F    Po401
++  719     f80f.6fa1.d8ee   dynamic  0         F      F    Po400
++  719     f80f.6fa1.e18d   dynamic  0         F      F    Po401
++  720     f80f.6fa1.d8ee   dynamic  0         F      F    Po400
++  720     f80f.6fa1.e18d   dynamic  0         F      F    Po401
++  721     f80f.6fa1.d8ee   dynamic  0         F      F    Po400
++  721     f80f.6fa1.e18d   dynamic  0         F      F    Po401
++  722     f80f.6fa1.d8ee   dynamic  0         F      F    Po400
++  722     f80f.6fa1.e18d   dynamic  0         F      F    Po401
++  723     f80f.6fa1.d8ee   dynamic  0         F      F    Po400
++  723     f80f.6fa1.e18d   dynamic  0         F      F    Po401
++  724     f80f.6fa1.d8ee   dynamic  0         F      F    Po400
++  724     f80f.6fa1.e18d   dynamic  0         F      F    Po401
++  725     f80f.6fa1.d8ee   dynamic  0         F      F    Po400
++  725     f80f.6fa1.e18d   dynamic  0         F      F    Po401
++  726     f80f.6fa1.d8ee   dynamic  0         F      F    Po400
++  726     f80f.6fa1.e18d   dynamic  0         F      F    Po401
++  751     f80f.6fa1.d8ee   dynamic  0         F      F    Po400
++  751     f80f.6fa1.e18d   dynamic  0         F      F    Po401
++  752     f80f.6fa1.d8ee   dynamic  0         F      F    Po400
++  752     f80f.6fa1.e18d   dynamic  0         F      F    Po401
++  811     f80f.6fa1.d8ee   dynamic  0         F      F    Po400
++  811     f80f.6fa1.e18d   dynamic  0         F      F    Po401
++  812     f80f.6fa1.d8ee   dynamic  0         F      F    Po400
++  812     f80f.6fa1.e18d   dynamic  0         F      F    Po401
++  813     f80f.6fa1.d8ee   dynamic  0         F      F    Po400
++  813     f80f.6fa1.e18d   dynamic  0         F      F    Po401
++  814     f80f.6fa1.d8ee   dynamic  0         F      F    Po400
++  814     f80f.6fa1.e18d   dynamic  0         F      F    Po401
++  815     f80f.6fa1.d8ee   dynamic  0         F      F    Po400
++  815     f80f.6fa1.e18d   dynamic  0         F      F    Po401
++  851     001c.54ff.082c   dynamic  0         F      F    Po407
+*  852     0094.a190.5c85   dynamic  0         F      F    Po408
++  853     001c.54ff.082c   dynamic  0         F      F    Po409
++   40     0094.a190.5106   dynamic  0         F      F    vPC Peer-Link
++   42     0094.a190.5107   dynamic  0         F      F    vPC Peer-Link
++   43     0094.a190.5108   dynamic  0         F      F    vPC Peer-Link
++   44     0094.a190.5109   dynamic  0         F      F    vPC Peer-Link
++   45     0094.a190.510a   dynamic  0         F      F    vPC Peer-Link
++   46     0094.a190.510e   dynamic  0         F      F    vPC Peer-Link
++   47     0094.a190.510f   dynamic  0         F      F    vPC Peer-Link
++   48     0094.a190.510d   dynamic  0         F      F    vPC Peer-Link
++   49     0094.a190.510b   dynamic  0         F      F    vPC Peer-Link
++  704     0094.a190.510c   dynamic  0         F      F    vPC Peer-Link
++  852     0094.a190.5105   dynamic  0         F      F    vPC Peer-Link
+G    7     0000.0c9f.f007   static   -         F      F    sup-eth1(R)
+G    8     0000.0c9f.f008   static   -         F      F    sup-eth1(R)
+G    9     0000.0c9f.f009   static   -         F      F    sup-eth1(R)
+G   10     0000.0c9f.f00a   static   -         F      F    sup-eth1(R)
+G   11     0000.0c9f.f00b   static   -         F      F    sup-eth1(R)
+G   37     0000.0c9f.f025   static   -         F      F    sup-eth1(R)
+G   38     0000.0c9f.f026   static   -         F      F    sup-eth1(R)
+G   40     0000.0c9f.f028   static   -         F      F    sup-eth1(R)
+G   41     0000.0c9f.f029   static   -         F      F    sup-eth1(R)
+G   42     0000.0c9f.f02a   static   -         F      F    sup-eth1(R)
+G   43     0000.0c9f.f02b   static   -         F      F    sup-eth1(R)
+G   44     0000.0c9f.f02c   static   -         F      F    sup-eth1(R)
+G   45     0000.0c9f.f02d   static   -         F      F    sup-eth1(R)
+G   46     0000.0c9f.f02e   static   -         F      F    sup-eth1(R)
+G   47     0000.0c9f.f02f   static   -         F      F    sup-eth1(R)
+G   48     0000.0c9f.f030   static   -         F      F    sup-eth1(R)
+G   49     0000.0c9f.f031   static   -         F      F    sup-eth1(R)
+G  702     0000.0c9f.f2be   static   -         F      F    sup-eth1(R)
+G  703     0000.0c9f.f2bf   static   -         F      F    sup-eth1(R)
+G  704     0000.0c9f.f2c0   static   -         F      F    sup-eth1(R)
+G  711     0000.0c9f.f2c7   static   -         F      F    sup-eth1(R)
+G  712     0000.0c9f.f2c8   static   -         F      F    sup-eth1(R)
+G  713     0000.0c9f.f2c9   static   -         F      F    sup-eth1(R)
+G  714     0000.0c9f.f2ca   static   -         F      F    sup-eth1(R)
+G  715     0000.0c9f.f2cb   static   -         F      F    sup-eth1(R)
+G  716     0000.0c9f.f2cc   static   -         F      F    sup-eth1(R)
+G  717     0000.0c9f.f2cd   static   -         F      F    sup-eth1(R)
+G  718     0000.0c9f.f2ce   static   -         F      F    sup-eth1(R)
+G  719     0000.0c9f.f2cf   static   -         F      F    sup-eth1(R)
+G  720     0000.0c9f.f2d0   static   -         F      F    sup-eth1(R)
+G  721     0000.0c9f.f2d1   static   -         F      F    sup-eth1(R)
+G  722     0000.0c9f.f2d2   static   -         F      F    sup-eth1(R)
+G  723     0000.0c9f.f2d3   static   -         F      F    sup-eth1(R)
+G  724     0000.0c9f.f2d4   static   -         F      F    sup-eth1(R)
+G  725     0000.0c9f.f2d5   static   -         F      F    sup-eth1(R)
+G  726     0000.0c9f.f2d6   static   -         F      F    sup-eth1(R)
+G  751     0000.0c9f.f2ef   static   -         F      F    sup-eth1(R)
+G  752     0000.0c9f.f2f0   static   -         F      F    sup-eth1(R)
+G  811     0000.0c9f.f32b   static   -         F      F    sup-eth1(R)
+G  812     0000.0c9f.f32c   static   -         F      F    sup-eth1(R)
+G  813     0000.0c9f.f32d   static   -         F      F    sup-eth1(R)
+G  814     0000.0c9f.f32e   static   -         F      F    sup-eth1(R)
+G  815     0000.0c9f.f32f   static   -         F      F    sup-eth1(R)
+G  851     0000.0c9f.f353   static   -         F      F    sup-eth1(R)
+G  852     0000.0c9f.f354   static   -         F      F    sup-eth1(R)
+G  853     0000.0c9f.f355   static   -         F      F    sup-eth1(R)
+G   45     0005.73a0.002d   static   -         F      F    sup-eth1(R)
+G    -     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G    7     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G    8     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G    9     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G   10     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G   11     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G   37     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G   38     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G   40     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G   41     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G   42     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G   43     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  811     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G   44     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  812     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G   45     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  813     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G   46     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  814     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G   47     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  815     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G   48     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G   49     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  851     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  852     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  853     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  911     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  912     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  914     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  915     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  702     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  703     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  704     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  711     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  712     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  713     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  714     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  715     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  716     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  717     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  718     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  719     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  720     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  721     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  722     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  723     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  724     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  725     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  726     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  751     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G  752     706d.156f.c987   static   -         F      F    sup-eth1(R)
+G    7     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G    8     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G    9     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G   10     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G   11     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G   37     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G   38     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G   40     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G   41     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G   42     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G   43     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  811     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G   44     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  812     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G   45     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  813     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G   46     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  814     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G   47     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  815     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G   48     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G   49     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  851     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  852     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  853     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  911     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  912     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  914     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  915     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  702     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  703     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  704     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  711     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  712     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  713     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  714     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  715     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  716     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  717     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  718     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  719     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  720     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  721     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  722     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  723     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  724     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  725     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  726     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  751     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+G  752     f80f.6fc9.8e25   static   -         F      F    vPC Peer-Link(R)
+
+--------------------------------------------------

@@ -1,5 +1,5 @@
 import React from 'react'
-import { Col, Input, Row, Select, Table, type TableProps } from 'antd'
+import { Col, Input, Row, Select, Space, Table, Tag, Typography, type TableProps } from 'antd'
 import { SearchOutlined } from '@ant-design/icons'
 import type { ManagedDevice } from '../../services/api'
 
@@ -40,7 +40,12 @@ const DeviceAssetInventoryPanel: React.FC<DeviceAssetInventoryPanelProps> = ({
   onFiltersChange,
   onSelectedRowKeysChange,
 }) => (
-  <>
+  <Space direction="vertical" size={12} style={{ width: '100%' }}>
+    <Space wrap>
+      <Typography.Title level={5} style={{ margin: 0 }}>设备资产</Typography.Title>
+      <Tag color="blue">共 {total} 台</Tag>
+      {selectedRowKeys.length > 0 && <Tag color="geekblue">已选 {selectedRowKeys.length} 台</Tag>}
+    </Space>
     <Row gutter={[12, 12]}>
       <Col xs={24} md={8} xl={5}>
         <Input
@@ -91,7 +96,7 @@ const DeviceAssetInventoryPanel: React.FC<DeviceAssetInventoryPanelProps> = ({
           options={[
             { value: '', label: '全部状态' },
             { value: 'active', label: '启用' },
-            { value: 'inactive', label: '停用' },
+            { value: 'disabled', label: '停用' },
           ]}
         />
       </Col>
@@ -119,10 +124,11 @@ const DeviceAssetInventoryPanel: React.FC<DeviceAssetInventoryPanelProps> = ({
       rowSelection={{
         selectedRowKeys,
         onChange: onSelectedRowKeysChange,
+        getCheckboxProps: (record) => ({ disabled: record.status === 'deleted' }),
       }}
       scroll={{ x: 1910 }}
     />
-  </>
+  </Space>
 )
 
 export default DeviceAssetInventoryPanel

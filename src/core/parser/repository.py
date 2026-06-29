@@ -497,13 +497,26 @@ class ParserRepository:
                 raise ValueError(
                     "template activation requires a passing regression validation set"
                 )
-            db.query(ParserTemplate).filter(
-                ParserTemplate.vendor == template.vendor,
-                ParserTemplate.profile == template.profile,
-                ParserTemplate.canonical_command == template.canonical_command,
-                ParserTemplate.status == "active",
-                ParserTemplate.id != template.id,
-            ).update({"status": "deprecated", "deprecated_at": utcnow()})
+            old_active_templates = (
+                db.query(ParserTemplate)
+                .filter(
+                    ParserTemplate.vendor == template.vendor,
+                    ParserTemplate.profile == template.profile,
+                    ParserTemplate.canonical_command == template.canonical_command,
+                    ParserTemplate.status == "active",
+                    ParserTemplate.id != template.id,
+                )
+                .all()
+            )
+            for old_template in old_active_templates:
+                old_template.status = "deprecated"
+                old_template.deprecated_at = utcnow()
+                old_template.updated_at = utcnow()
+                ObservationContractRepository().upsert_from_parser_template_row(
+                    db,
+                    old_template,
+                    status="deprecated",
+                )
             db.flush()
             template.status = "active"
             validation["contract_approval_status"] = "approved"
@@ -658,6 +671,11 @@ class ParserRepository:
             row = db.query(ParserTemplate).filter(ParserTemplate.id == template_id).one()
             row.status = status
             row.updated_at = utcnow()
+            ObservationContractRepository().upsert_from_parser_template_row(
+                db,
+                row,
+                status="active" if status == "active" else "deprecated",
+            )
 
     def record_regression_validation(
         self,
@@ -700,6 +718,39 @@ class ParserRepository:
                 f"parser job {job_id} cannot be retried from {current['status']}"
             )
         return self.transition_job_status(job_id, "pending", clear_dispatch=True)
+
+    def delete_job(self, job_id: str) -> dict[str, Any]:
+        with get_db_session() as db:
+            job = db.query(ParserTemplateJob).filter(ParserTemplateJob.id == job_id).first()
+            if job is None:
+                raise ParserJobStateError(f"parser job {job_id} not found")
+            if job.status in OPEN_JOB_STATUSES:
+                raise ParserJobStateError(
+                    f"parser job {job_id} must be cancelled before deletion"
+                )
+            item = job.to_dict()
+            sample_count = (
+                db.query(ParserJobSample)
+                .filter(ParserJobSample.job_id == job_id)
+                .delete(synchronize_session=False)
+            )
+            db.delete(job)
+            return {"job": item, "deleted_samples": int(sample_count or 0)}
+
+    def delete_jobs(self, job_ids: list[str]) -> dict[str, Any]:
+        deleted: list[dict[str, Any]] = []
+        failed: list[dict[str, str]] = []
+        for job_id in list(dict.fromkeys(job_ids)):
+            try:
+                deleted.append({"job_id": job_id, **self.delete_job(job_id)})
+            except ParserJobStateError as exc:
+                failed.append({"job_id": job_id, "error": str(exc)})
+        return {
+            "deleted_count": len(deleted),
+            "failed_count": len(failed),
+            "deleted": deleted,
+            "failed": failed,
+        }
 
     def list_dispatchable_jobs(
         self, *, limit: int | None = None, job_id: str | None = None

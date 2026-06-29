@@ -207,6 +207,16 @@ def test_preview_device_import_reports_header_errors():
     assert "supported_columns" in detail
 
 
+def test_list_device_groups_returns_static_asset_groups(monkeypatch):
+    class FakeRepository:
+        def list_groups(self):
+            return ["H3C", "gns3", "lab"]
+
+    monkeypatch.setattr(devices_api, "DeviceRepository", FakeRepository)
+
+    assert devices_api.list_device_groups() == {"items": ["H3C", "gns3", "lab"]}
+
+
 def test_list_devices_can_include_patrol_readiness(monkeypatch):
     class FakeRepository:
         def get_devices_by_filter(self, **kwargs):
@@ -218,11 +228,20 @@ def test_list_devices_can_include_patrol_readiness(monkeypatch):
                     "password": "secret",
                     "vendor": "Cisco",
                     "model": "WS-C2960XR-24TS-I",
-                    "attributes": {"patrol_commands": ["show version", "show inventory"]},
+                    "command_file": "cisco-access",
+                    "attributes": {},
                 }
             ]
 
     monkeypatch.setattr(devices_api, "DeviceRepository", FakeRepository)
+    monkeypatch.setattr(
+        devices_api.CollectionPolicyResolver,
+        "_load_active_profile",
+        lambda self, profile_name, action: {
+            "profile_version_id": "profile-version-1",
+            "commands": ["show version", "show inventory"],
+        },
+    )
     monkeypatch.setattr(
         devices_api,
         "_production_parser_coverage",
@@ -254,7 +273,7 @@ def test_list_devices_can_include_patrol_readiness(monkeypatch):
     assert readiness["eligible_count"] == 2
     assert readiness["ready_count"] == 1
     assert readiness["blocked_count"] == 1
-    assert readiness["policy_source"] == "device_attributes"
+    assert readiness["policy_source"] == "device_profile"
     assert readiness["violations"][0]["canonical_command"] == "show inventory"
 
 
@@ -268,7 +287,7 @@ def test_preview_device_plan_returns_execution_plan(monkeypatch):
                     "device_name": "SW1",
                     "ip": "10.0.0.1",
                     "vendor": "Cisco",
-                    "attributes": {"patrol_commands": ["show version"]},
+                    "attributes": {"collector_options": {"read_timeout": 60}},
                 }
             ]
 
@@ -664,7 +683,7 @@ def test_preview_device_import_accepts_xlsx(monkeypatch):
         "Cisco",
         "WS-C2960XR-24TS-I",
         "core,xian",
-        '{"patrol_commands":["show version"]}',
+        '{"collector_options":{"read_timeout":60}}',
     ])
     buffer = BytesIO()
     workbook.save(buffer)
@@ -682,7 +701,7 @@ def test_preview_device_import_accepts_xlsx(monkeypatch):
     assert result["invalid_count"] == 0
     assert result["rows"][0]["device"]["device_name"] == "SW-XLSX-1"
     assert result["rows"][0]["device"]["groups"] == ["core", "xian"]
-    assert result["rows"][0]["device"]["attributes"] == {"patrol_commands": ["show version"]}
+    assert result["rows"][0]["device"]["attributes"] == {"collector_options": {"read_timeout": 60}}
 
 
 def test_apply_device_import_upserts_valid_rows(monkeypatch):
@@ -706,7 +725,7 @@ def test_apply_device_import_upserts_valid_rows(monkeypatch):
     csv_text = "\n".join(
         [
             "device_name,management_ip,vendor,attributes_json",
-            "SW1,10.0.0.1,Cisco,\"{\"\"patrol_commands\"\": [\"\"show version\"\"]}\"",
+            "SW1,10.0.0.1,Cisco,\"{\"\"collector_options\"\": {\"\"read_timeout\"\": 60}}\"",
             "BROKEN,,Cisco,{}",
         ]
     )
@@ -719,7 +738,7 @@ def test_apply_device_import_upserts_valid_rows(monkeypatch):
     assert result["applied_count"] == 1
     assert result["invalid_count"] == 1
     assert calls[0]["device_name"] == "SW1"
-    assert calls[0]["attributes"] == {"patrol_commands": ["show version"]}
+    assert calls[0]["attributes"] == {"collector_options": {"read_timeout": 60}}
     assert "password" not in result["applied"][0]["device"]
 
 
@@ -858,7 +877,7 @@ def test_apply_device_bulk_update_can_bind_credential_ref(monkeypatch):
     assert "password" not in result["devices"][0]
 
 
-def test_apply_device_bulk_update_sets_patrol_commands(monkeypatch):
+def test_apply_device_bulk_update_does_not_touch_attributes(monkeypatch):
     calls = []
 
     class FakeRepository:
@@ -869,7 +888,7 @@ def test_apply_device_bulk_update_sets_patrol_commands(monkeypatch):
                     "device_name": "SW1",
                     "ip": "10.0.0.1",
                     "groups": [],
-                    "attributes": {"owner": "netops", "patrol_commands": ["show clock"]},
+                    "attributes": {"owner": "netops"},
                 }
             ]
 
@@ -878,7 +897,8 @@ def test_apply_device_bulk_update_sets_patrol_commands(monkeypatch):
             return {
                 "device_id": device_id,
                 "device_name": "SW1",
-                "attributes": kwargs["attributes"],
+                "credential_ref": kwargs["credential_ref"],
+                "attributes": {"owner": "netops"},
                 "password": "secret",
             }
 
@@ -888,7 +908,7 @@ def test_apply_device_bulk_update_sets_patrol_commands(monkeypatch):
         devices_api.DeviceBulkRequest(
             device_ids=["device-1"],
             update=devices_api.DeviceBulkUpdate(
-                patrol_commands=["show version", "show version", " show ip interface brief "],
+                credential_ref="env:NETOPS_PASSWORD",
             ),
         ),
         None,
@@ -899,14 +919,12 @@ def test_apply_device_bulk_update_sets_patrol_commands(monkeypatch):
         (
             "device-1",
             {
-                "attributes": {
-                    "owner": "netops",
-                    "patrol_commands": ["show version", "show ip interface brief"],
-                },
+                "credential_ref": "env:NETOPS_PASSWORD",
             },
         )
     ]
-    assert result["devices"][0]["attributes"]["patrol_commands"] == ["show version", "show ip interface brief"]
+    assert result["devices"][0]["credential_ref"] == "env:NETOPS_PASSWORD"
+    assert result["devices"][0]["attributes"] == {"owner": "netops"}
     assert "password" not in result["devices"][0]
 
 
@@ -1171,6 +1189,56 @@ def test_preview_device_patrol_launch_blocks_production_without_active_profile(m
     assert result["error_count"] == 1
     assert result["errors"][0]["failure_code"] == "command_profile_not_ready"
     assert result["errors"][0]["plan_violations"][0]["failure_code"] == "active_command_profile_required"
+
+
+def test_preview_device_patrol_launch_blocks_empty_plan_in_validation_mode(monkeypatch):
+    class FakeRepository:
+        def get_devices_by_filter(self, **kwargs):
+            return [
+                {
+                    "device_id": "device-1",
+                    "device_name": "SW1",
+                    "ip": "10.0.0.1",
+                    "vendor": "Cisco",
+                    "password": "secret",
+                }
+            ]
+
+    class FakePlan:
+        commands = []
+        profile_version_id = None
+        profile_name = "missing-profile"
+        policy_source = "default"
+
+        def to_metadata(self):
+            return {
+                "device_id": "device-1",
+                "action": "patrol",
+                "mode": "parser_validation",
+                "profile_name": self.profile_name,
+                "policy_source": self.policy_source,
+                "collection_items": [],
+            }
+
+        def command_texts(self):
+            return []
+
+    class FakeResolver:
+        def build_plan(self, *, device, action, mode):
+            return FakePlan()
+
+    monkeypatch.setattr(devices_api, "DeviceRepository", FakeRepository)
+    monkeypatch.setattr(devices_api, "CollectionPolicyResolver", FakeResolver)
+
+    result = devices_api.preview_device_patrol_launch(
+        devices_api.DevicePatrolLaunchRequest(device_ids=["device-1"], mode="parser-validation")
+    )
+
+    assert result["success"] is False
+    assert result["ready_count"] == 0
+    assert result["error_count"] == 1
+    assert result["errors"][0]["failure_code"] == "command_profile_not_ready"
+    assert result["errors"][0]["plan_violations"][0]["failure_code"] == "collection_commands_required"
 
 
 def test_preview_device_patrol_launch_blocks_production_without_parser_coverage(monkeypatch):
@@ -1630,3 +1698,99 @@ def test_launch_device_patrol_starts_workflow_by_default(monkeypatch):
     assert started[0][1]["save_baseline"] is True
     assert started[0][1]["patrol_batch_id"] == result["patrol_batch_id"]
     assert started[0][2] == "device-management"
+
+
+def test_launch_device_patrol_skips_failed_preflight_when_some_devices_ready(monkeypatch):
+    started = []
+
+    class FakePlanRepository:
+        def create_plan(self, plan, **kwargs):
+            assert kwargs["launch_source"] == "workflow"
+            return {"execution_plan_id": "plan-1"}
+
+        def mark_launched(self, plan_id, **kwargs):
+            return {"execution_plan_id": plan_id}
+
+        def mark_failed(self, plan_id, **kwargs):
+            raise AssertionError("ready workflow launch should not fail")
+
+    class FakeRepository:
+        def get_devices_by_filter(self, **kwargs):
+            devices = [
+                {
+                    "device_id": "device-ready",
+                    "device_name": "SW1",
+                    "ip": "10.0.0.1",
+                    "password": "secret",
+                    "status": "active",
+                },
+                {
+                    "device_id": "device-blocked",
+                    "device_name": "SW2",
+                    "ip": "10.0.0.2",
+                    "credential_ref": "env:MISSING_PASSWORD",
+                    "status": "active",
+                },
+            ]
+            if kwargs.get("device_id"):
+                return [device for device in devices if device["device_id"] == kwargs["device_id"]]
+            return devices
+
+        def record_connection_health(self, *args, **kwargs):
+            return None
+
+    class FakePlan:
+        commands = ["show version"]
+        profile_version_id = "profile-version-1"
+        profile_name = "site-patrol"
+        policy_source = "profile_binding"
+
+        def __init__(self, device_id):
+            self.device_id = device_id
+
+        def to_metadata(self):
+            return {
+                "device_id": self.device_id,
+                "action": "patrol",
+                "mode": "parser_validation",
+                "profile_name": self.profile_name,
+                "profile_version_id": self.profile_version_id,
+                "policy_source": self.policy_source,
+                "collection_items": [{"command": "show version", "action": "patrol"}],
+            }
+
+        def command_texts(self):
+            return self.commands
+
+    class FakeResolver:
+        def build_plan(self, *, device, action, mode):
+            return FakePlan(device["device_id"])
+
+    class FakeWorkflowEngine:
+        @staticmethod
+        def start(template_name, context, *, source):
+            started.append((template_name, context, source))
+            return "workflow-run-1"
+
+    monkeypatch.setattr(devices_api, "DeviceRepository", FakeRepository)
+    monkeypatch.setattr(devices_api, "CollectionPolicyResolver", FakeResolver)
+    monkeypatch.setattr(devices_api, "ExecutionPlanRepository", FakePlanRepository)
+
+    import src.core.workflows.engine as workflow_engine
+
+    monkeypatch.setattr(workflow_engine, "WorkflowEngine", FakeWorkflowEngine)
+
+    result = devices_api.launch_device_patrol(
+        devices_api.DevicePatrolLaunchRequest(
+            device_ids=["device-ready", "device-blocked"],
+            mode="parser_validation",
+            launch_mode="workflow",
+        ),
+        None,
+    )
+
+    assert result["success"] is True
+    assert result["launched_count"] == 1
+    assert result["skipped_count"] == 1
+    assert result["skipped_errors"][0]["device_id"] == "device-blocked"
+    assert started[0][1]["device_id"] == "device-ready"

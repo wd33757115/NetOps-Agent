@@ -25,7 +25,12 @@ from src.core.agent_modules.control import (
 )
 from src.core.collection import CollectionPolicyResolver, ExecutionPlanRepository
 from src.core.credentials import CredentialResolver
-from src.core.device_ops.repository import DeviceRepository
+from src.core.device_ops.identity_discovery import (
+    discover_device_identity,
+    identity_evidence,
+    platform_for_identity,
+)
+from src.core.device_ops.repository import DeviceRepository, normalize_device_status
 from src.core.evidence import evidence_id_for_command_snapshot
 from src.core.patrol.modes import PRODUCTION_MODE, normalize_patrol_mode
 from src.gateway.audit_service import write_audit_log
@@ -151,7 +156,6 @@ class DeviceBulkFilters(BaseModel):
 
 class DeviceBulkUpdate(BaseModel):
     command_profile: str | None = None
-    patrol_commands: list[str] | None = None
     credential_ref: str | None = None
     status: str | None = None
     platform: str | None = None
@@ -167,6 +171,12 @@ class DeviceBulkRequest(BaseModel):
     dynamic_group_id: str | None = None
     filters: DeviceBulkFilters | None = None
     update: DeviceBulkUpdate
+
+
+class DeviceBulkSelectionRequest(BaseModel):
+    device_ids: list[str] | None = None
+    dynamic_group_id: str | None = None
+    filters: DeviceBulkFilters | None = None
 
 
 class DevicePatrolLaunchRequest(BaseModel):
@@ -205,7 +215,7 @@ DEVICE_IMPORT_COLUMNS: list[dict[str, Any]] = [
     {"name": "vendor", "required": False, "aliases": [], "description": "厂商，例如 Cisco、H3C。", "example": "Cisco"},
     {"name": "model", "required": False, "aliases": [], "description": "精确型号。", "example": "WS-C2960XR-24TS-I"},
     {"name": "family", "required": False, "aliases": [], "description": "设备族。", "example": "IOS-C2960"},
-    {"name": "platform", "required": False, "aliases": [], "description": "平台类型。", "example": "ios"},
+    {"name": "platform", "required": False, "aliases": [], "description": "采集平台类型。", "example": "ios"},
     {
         "name": "device_type",
         "required": False,
@@ -214,20 +224,14 @@ DEVICE_IMPORT_COLUMNS: list[dict[str, Any]] = [
         "example": "access_switch",
     },
     {"name": "os_version", "required": False, "aliases": [], "description": "系统版本。", "example": "15.2(7)E10"},
-    {
-        "name": "serial_number",
-        "required": False,
-        "aliases": ["serial"],
-        "description": "序列号。",
-        "example": "FOC1234",
-    },
+    {"name": "serial_number", "required": False, "aliases": ["serial"], "description": "序列号。", "example": "FOC1234"},
     {"name": "site", "required": False, "aliases": [], "description": "站点或机房。", "example": "xian"},
     {"name": "role", "required": False, "aliases": [], "description": "设备角色。", "example": "access"},
     {
         "name": "status",
         "required": False,
         "aliases": [],
-        "description": "设备状态，留空默认为 active。",
+        "description": "设备状态，active=启用，disabled=停用。留空默认 active；旧值 inactive 会自动转换为 disabled。",
         "example": "active",
     },
     {
@@ -241,7 +245,7 @@ DEVICE_IMPORT_COLUMNS: list[dict[str, Any]] = [
         "name": "command_profile",
         "required": False,
         "aliases": [],
-        "description": "巡检命令模板或 Parser 命令 Profile 名称。",
+        "description": "采集命令集名称或版本引用。",
         "example": "browser-test-patrol",
     },
     {
@@ -251,19 +255,13 @@ DEVICE_IMPORT_COLUMNS: list[dict[str, Any]] = [
         "description": "设备原始巡检输出目录，留空使用系统默认位置。",
         "example": "",
     },
-    {
-        "name": "groups",
-        "required": False,
-        "aliases": [],
-        "description": "逗号分隔的设备分组。",
-        "example": "core,xian",
-    },
+    {"name": "groups", "required": False, "aliases": [], "description": "逗号分隔的设备分组。", "example": "core,xian"},
     {
         "name": "attributes_json",
         "required": False,
         "aliases": [],
-        "description": "扩展属性 JSON 对象。",
-        "example": '{"patrol_commands":["show version"]}',
+        "description": "扩展属性 JSON 对象，用于采集参数、身份发现证据等高级配置。",
+        "example": '{"collector_options":{"read_timeout":60}}',
     },
 ]
 
@@ -337,9 +335,13 @@ def _build_import_row(
         errors.append(f"第 {row_number} 行缺少必填列 device_name")
     if not management_ip:
         errors.append(f"第 {row_number} 行缺少必填列 management_ip")
-    status = normalized.get("status") or "active"
-    if status not in {"active", "inactive"}:
-        errors.append(f"第 {row_number} 行 status 只能是 active 或 inactive")
+    try:
+        status = normalize_device_status(normalized.get("status") or "active")
+        if status == "deleted":
+            errors.append(f"第 {row_number} 行 status 只能是 active 或 disabled")
+    except ValueError:
+        status = normalized.get("status") or "active"
+        errors.append(f"第 {row_number} 行 status 只能是 active 或 disabled")
     attributes = _parse_json_field(normalized.get("attributes_json"), row_number=row_number, errors=errors)
     payload = {
         "device_name": device_name,
@@ -539,11 +541,16 @@ def _preview_import(payload: DeviceImportRequest, repository: DeviceRepository) 
     }
 
 
-def _resolve_bulk_devices(payload: DeviceBulkRequest, repository: DeviceRepository) -> list[dict[str, Any]]:
+def _resolve_bulk_devices(
+    payload: DeviceBulkRequest | DeviceBulkSelectionRequest,
+    repository: DeviceRepository,
+    *,
+    active_only: bool = False,
+) -> list[dict[str, Any]]:
     devices_by_id: dict[str, dict[str, Any]] = {}
     for device_id in payload.device_ids or []:
         matches = repository.get_devices_by_filter(device_id=device_id, status=None)
-        if matches:
+        if matches and (not active_only or matches[0].get("status", "active") == "active"):
             devices_by_id[matches[0]["device_id"]] = matches[0]
     if payload.dynamic_group_id:
         group, group_devices = repository.resolve_dynamic_group_devices(payload.dynamic_group_id)
@@ -552,26 +559,15 @@ def _resolve_bulk_devices(payload: DeviceBulkRequest, repository: DeviceReposito
         if group.get("status") != "active":
             raise HTTPException(status_code=400, detail="dynamic group is not active")
         for device in group_devices:
-            devices_by_id[device["device_id"]] = device
+            if not active_only or device.get("status", "active") == "active":
+                devices_by_id[device["device_id"]] = device
     if payload.filters:
-        for device in repository.get_devices_by_filter(**payload.filters.model_dump()):
+        filters = payload.filters.model_dump()
+        if active_only:
+            filters["status"] = "active"
+        for device in repository.get_devices_by_filter(**filters):
             devices_by_id[device["device_id"]] = device
     return sorted(devices_by_id.values(), key=lambda item: (item.get("device_name") or "", item.get("ip") or ""))
-
-
-def _merge_patrol_commands(
-    attributes: dict[str, Any] | None,
-    patrol_commands: list[str] | None,
-) -> dict[str, Any]:
-    next_attributes = dict(attributes or {})
-    if patrol_commands is None:
-        return next_attributes
-    commands = list(dict.fromkeys(str(command).strip() for command in patrol_commands if str(command).strip()))
-    if commands:
-        next_attributes["patrol_commands"] = commands
-    else:
-        next_attributes.pop("patrol_commands", None)
-    return next_attributes
 
 
 def _production_parser_coverage(device: dict[str, Any], commands: list[str]) -> list[dict[str, Any]]:
@@ -591,20 +587,32 @@ def _blocking_parser_coverage(device: dict[str, Any], commands: list[str], mode:
 
 
 def _execution_plan_violations(plan: Any, mode: str) -> list[dict[str, Any]]:
-    if normalize_patrol_mode(mode) != PRODUCTION_MODE:
-        return []
-    profile_version_id = str(getattr(plan, "profile_version_id", "") or "").strip()
     policy_source = str(getattr(plan, "policy_source", "") or "").strip()
-    if profile_version_id:
+    commands = list(getattr(plan, "commands", []) or [])
+    profile_version_id = str(getattr(plan, "profile_version_id", "") or "").strip()
+    normalized_mode = normalize_patrol_mode(mode)
+    if normalized_mode != PRODUCTION_MODE and commands:
         return []
-    return [
-        {
-            "failure_code": "active_command_profile_required",
-            "message": "production patrol requires an active command profile version",
-            "policy_source": policy_source or "unknown",
-            "profile_name": getattr(plan, "profile_name", None),
-        }
-    ]
+    violations = []
+    if normalized_mode == PRODUCTION_MODE and not profile_version_id:
+        violations.append(
+            {
+                "failure_code": "active_command_profile_required",
+                "message": "production patrol requires an active command profile version",
+                "policy_source": policy_source or "unknown",
+                "profile_name": getattr(plan, "profile_name", None),
+            }
+        )
+    if not commands:
+        violations.append(
+            {
+                "failure_code": "collection_commands_required",
+                "message": "patrol requires commands from an active command profile binding",
+                "policy_source": policy_source or "unknown",
+                "profile_name": getattr(plan, "profile_name", None),
+            }
+        )
+    return violations
 
 
 def _coverage_summary(
@@ -846,7 +854,7 @@ def _parser_control_evidence(db: Any) -> list[dict[str, Any]]:
                 title="最近激活模板",
                 object_id=active_template.id,
                 occurred_at=active_template.activated_at or active_template.updated_at,
-                summary=f"{active_template.vendor}/{active_template.profile} · {active_template.canonical_command}",
+                summary=f"{active_template.vendor}/{active_template.profile} 路 {active_template.canonical_command}",
                 detail={"version": active_template.version, "asset_path": active_template.asset_path},
                 target_url="/devices?tab=parser",
             )
@@ -865,7 +873,7 @@ def _parser_control_evidence(db: Any) -> list[dict[str, Any]]:
                 title="最近失败模板任务",
                 object_id=failed_job.id,
                 occurred_at=failed_job.completed_at or failed_job.updated_at,
-                summary=f"{failed_job.vendor}/{failed_job.model or failed_job.family or failed_job.profile} · {failed_job.canonical_command}",
+                summary=f"{failed_job.vendor}/{failed_job.model or failed_job.family or failed_job.profile} 路 {failed_job.canonical_command}",
                 detail={"failure_code": failed_job.failure_code, "last_error": failed_job.last_error},
                 target_url="/devices?tab=parser",
             )
@@ -884,7 +892,7 @@ def _parser_control_evidence(db: Any) -> list[dict[str, Any]]:
                 title="最近开放模板任务",
                 object_id=open_job.id,
                 occurred_at=open_job.updated_at,
-                summary=f"{open_job.status} · {open_job.vendor}/{open_job.model or open_job.family or open_job.profile} · {open_job.canonical_command}",
+                summary=f"{open_job.status} 路 {open_job.vendor}/{open_job.model or open_job.family or open_job.profile} 路 {open_job.canonical_command}",
                 detail={"sample_count": open_job.sample_count, "attempts": open_job.attempts},
                 target_url="/devices?tab=parser",
             )
@@ -903,7 +911,7 @@ def _state_normalizer_evidence(db: Any) -> list[dict[str, Any]]:
                 title="最近状态观测",
                 object_id=observation.id,
                 occurred_at=observation.observed_at,
-                summary=f"{observation.device_id} · {observation.entity_type}/{observation.field_name}",
+                summary=f"{observation.device_id} 路 {observation.entity_type}/{observation.field_name}",
                 detail={"run_id": observation.run_id, "snapshot_id": observation.snapshot_id},
                 target_url="/devices?tab=overview",
             )
@@ -914,10 +922,10 @@ def _state_normalizer_evidence(db: Any) -> list[dict[str, Any]]:
             _evidence(
                 kind="current_state",
                 status="ok",
-                title="最近 CurrentState 更新",
+                title="鏈€杩?CurrentState 鏇存柊",
                 object_id=current_state.id,
                 occurred_at=current_state.updated_at,
-                summary=f"{current_state.device_id} · {current_state.entity_type}/{current_state.field_name}",
+                summary=f"{current_state.device_id} 路 {current_state.entity_type}/{current_state.field_name}",
                 detail={"source": current_state.source, "version": current_state.version},
                 target_url="/devices?tab=overview",
             )
@@ -933,10 +941,10 @@ def _state_normalizer_evidence(db: Any) -> list[dict[str, Any]]:
             _evidence(
                 kind="current_state",
                 status="blocked",
-                title="验证数据污染证据",
+                title="楠岃瘉鏁版嵁姹℃煋璇佹嵁",
                 object_id=polluted.id,
                 occurred_at=polluted.updated_at,
-                summary=f"{polluted.device_id} · {polluted.entity_type}/{polluted.field_name}",
+                summary=f"{polluted.device_id} 路 {polluted.entity_type}/{polluted.field_name}",
                 detail={"source_run_id": polluted.source_run_id, "source_snapshot_id": polluted.source_snapshot_id},
                 target_url="/devices?tab=overview",
             )
@@ -955,7 +963,7 @@ def _change_detector_evidence(db: Any) -> list[dict[str, Any]]:
                 title="最近网络变化",
                 object_id=change.id,
                 occurred_at=change.detected_at,
-                summary=f"{change.device_id or '-'} · {change.entity_type}/{change.entity_key} · {change.field}",
+                summary=f"{change.device_id or '-'} 路 {change.entity_type}/{change.entity_key} 路 {change.field}",
                 detail={"run_id": change.run_id, "event_status": change.event_status},
                 target_url="/devices?tab=overview",
             )
@@ -974,7 +982,7 @@ def _change_detector_evidence(db: Any) -> list[dict[str, Any]]:
                 title="最近待事件处理变化",
                 object_id=pending.id,
                 occurred_at=pending.detected_at,
-                summary=f"{pending.device_id or '-'} · {pending.entity_type}/{pending.entity_key} · {pending.field}",
+                summary=f"{pending.device_id or '-'} 路 {pending.entity_type}/{pending.entity_key} 路 {pending.field}",
                 detail={"run_id": pending.run_id, "canonical_command": pending.canonical_command},
                 target_url="/devices?tab=overview",
             )
@@ -1007,7 +1015,7 @@ def _event_builder_evidence(db: Any) -> list[dict[str, Any]]:
                 title="最近网络事件",
                 object_id=event.id,
                 occurred_at=event.occurred_at,
-                summary=f"{event.event_type} · {event.severity} · {event.device_id or '-'}",
+                summary=f"{event.event_type} 路 {event.severity} 路 {event.device_id or '-'}",
                 detail={"run_id": event.run_id, "source_change_id": event.source_change_id},
                 target_url="/devices?tab=overview",
             )
@@ -1026,7 +1034,7 @@ def _event_builder_evidence(db: Any) -> list[dict[str, Any]]:
                 title="最近激活事件规则",
                 object_id=rule.id,
                 occurred_at=rule.activated_at or rule.created_at,
-                summary=f"{rule.event_type} · {rule.severity} · v{rule.version}",
+                summary=f"{rule.event_type} 路 {rule.severity} 路 v{rule.version}",
                 detail={"rule_id": rule.rule_id},
                 target_url="/devices?tab=parser",
             )
@@ -1059,7 +1067,7 @@ def _device_management_evidence(db: Any) -> list[dict[str, Any]]:
                 title="最近设备资产更新",
                 object_id=device.id,
                 occurred_at=device.updated_at,
-                summary=f"{device.device_name} · {device.management_ip}",
+                summary=f"{device.device_name} 路 {device.management_ip}",
                 detail={"vendor": device.vendor, "model": device.model, "status": device.status},
                 target_url="/devices?tab=overview",
             )
@@ -1078,7 +1086,7 @@ def _device_management_evidence(db: Any) -> list[dict[str, Any]]:
                 title="最近连接异常",
                 object_id=failed_device.id,
                 occurred_at=failed_device.last_connection_checked_at,
-                summary=f"{failed_device.device_name} · {failed_device.last_connection_failure_code or failed_device.last_connection_status}",
+                summary=f"{failed_device.device_name} 路 {failed_device.last_connection_failure_code or failed_device.last_connection_status}",
                 detail={"error": failed_device.last_connection_error},
                 target_url="/devices?tab=overview",
             )
@@ -1099,10 +1107,10 @@ def _collection_profile_evidence(db: Any) -> list[dict[str, Any]]:
             _evidence(
                 kind="command_profile",
                 status="ok",
-                title="最近激活 Profile 版本",
+                title="最近激活采集命令集版本",
                 object_id=profile.id,
                 occurred_at=profile.activated_at or profile.created_at,
-                summary=f"profile={profile.profile_id} · v{profile.version}",
+                summary=f"profile={profile.profile_id} 路 v{profile.version}",
                 detail={"item_count": len(profile.items_json or [])},
                 target_url="/devices?tab=parser",
             )
@@ -1118,10 +1126,10 @@ def _collection_profile_evidence(db: Any) -> list[dict[str, Any]]:
             _evidence(
                 kind="profile_binding",
                 status="ok",
-                title="最近 Profile 绑定",
+                title="最近采集命令集绑定",
                 object_id=binding.id,
                 occurred_at=binding.updated_at,
-                summary=f"profile_version={binding.profile_version_id} · priority={binding.priority}",
+                summary=f"profile_version={binding.profile_version_id} 路 priority={binding.priority}",
                 detail={"selector": binding.selector_json},
                 target_url="/devices?tab=parser",
             )
@@ -1146,7 +1154,7 @@ def _report_diff_evidence(db: Any) -> list[dict[str, Any]]:
                 title="最近巡检 Workflow",
                 object_id=run.id,
                 occurred_at=run.completed_at or run.created_at,
-                summary=f"{run.status} · {context.get('device_name') or context.get('device_id') or '-'}",
+                summary=f"{run.status} 路 {context.get('device_name') or context.get('device_id') or '-'}",
                 detail={"patrol_batch_id": context.get("patrol_batch_id"), "error_message": run.error_message},
                 target_url="/devices?tab=overview",
             )
@@ -1157,7 +1165,7 @@ def _report_diff_evidence(db: Any) -> list[dict[str, Any]]:
             _evidence(
                 kind="workflow_step",
                 status="failed",
-                title="最近报告/差异失败",
+                title="鏈€杩戞姤鍛?宸紓澶辫触",
                 object_id=failed_step.id,
                 occurred_at=failed_step.completed_at or failed_step.created_at,
                 summary=failed_step.error_message or "Workflow step failed",
@@ -1305,22 +1313,22 @@ def _build_agent_module_health(db: Any) -> list[dict[str, Any]]:
             evidence=_parser_control_evidence(db),
             metrics=[
                 _metric("已激活模板", active_templates),
-                _metric("模板总数", total_templates),
+                _metric("妯℃澘鎬绘暟", total_templates),
                 _metric("开放任务", open_jobs, "warning" if open_jobs else "ok"),
-                _metric("失败任务", failed_jobs, "warning" if failed_jobs else "ok"),
+                _metric("澶辫触浠诲姟", failed_jobs, "warning" if failed_jobs else "ok"),
                 _metric("缺模板快照", template_missing, "warning" if template_missing else "ok"),
-                _metric("解析失败快照", parse_failed, "warning" if parse_failed else "ok"),
+                _metric("瑙ｆ瀽澶辫触蹇収", parse_failed, "warning" if parse_failed else "ok"),
             ],
             checks=[
                 _module_check(
-                    name="模板资产",
+                    name="妯℃澘璧勪骇",
                     status="ok" if active_templates else "blocked",
                     value=active_templates,
-                    target="至少 1 个 active 模板",
+                    target="鑷冲皯 1 涓?active 妯℃澘",
                     message="存在已激活模板" if active_templates else "没有 active 模板，生产巡检会缺少结构化资产",
                 ),
                 _module_check(
-                    name="任务队列",
+                    name="浠诲姟闃熷垪",
                     status="ok" if failed_jobs == 0 else "warning",
                     value=failed_jobs,
                     target="失败任务可定位且可重试",
@@ -1342,31 +1350,31 @@ def _build_agent_module_health(db: Any) -> list[dict[str, Any]]:
             evidence=_state_normalizer_evidence(db),
             metrics=[
                 _metric("状态观测", observations),
-                _metric("生产观测", production_observations),
+                _metric("鐢熶骇瑙傛祴", production_observations),
                 _metric("当前状态", current_states),
-                _metric("验证数据污染", validation_current_states, "blocked" if validation_current_states else "ok"),
+                _metric("楠岃瘉鏁版嵁姹℃煋", validation_current_states, "blocked" if validation_current_states else "ok"),
             ],
             checks=[
                 _module_check(
-                    name="Observation 写入",
+                    name="Observation 鍐欏叆",
                     status="ok" if observations else "warning",
                     value=observations,
-                    target="结构化快照可生成 StateObservation",
+                    target="缁撴瀯鍖栧揩鐓у彲鐢熸垚 StateObservation",
                     message="已有状态观测" if observations else "尚未看到 StateObservation 数据",
                 ),
                 _module_check(
-                    name="CurrentState 更新",
+                    name="CurrentState 鏇存柊",
                     status="ok" if current_states else "warning",
                     value=current_states,
-                    target="生产状态可更新 CurrentState",
+                    target="鐢熶骇鐘舵€佸彲鏇存柊 CurrentState",
                     message="已有当前状态" if current_states else "尚未看到 CurrentState 数据",
                 ),
                 _module_check(
-                    name="生产隔离",
+                    name="鐢熶骇闅旂",
                     status="ok" if validation_current_states == 0 else "blocked",
                     value=validation_current_states,
-                    target="parser_validation 不更新 CurrentState",
-                    message="验证数据未污染 CurrentState" if validation_current_states == 0 else "发现验证数据写入 CurrentState",
+                    target="parser_validation 涓嶆洿鏂?CurrentState",
+                    message="楠岃瘉鏁版嵁鏈薄鏌?CurrentState" if validation_current_states == 0 else "鍙戠幇楠岃瘉鏁版嵁鍐欏叆 CurrentState",
                 ),
             ],
         ),
@@ -1377,16 +1385,16 @@ def _build_agent_module_health(db: Any) -> list[dict[str, Any]]:
             evidence=_change_detector_evidence(db),
             metrics=[
                 _metric("变化数", changes),
-                _metric("观测证据变化", observation_backed_changes),
+                _metric("瑙傛祴璇佹嵁鍙樺寲", observation_backed_changes),
                 _metric("待事件处理", pending_changes, "warning" if pending_changes else "ok"),
             ],
             checks=[
                 _module_check(
-                    name="变化生成",
+                    name="鍙樺寲鐢熸垚",
                     status="ok" if changes else "warning",
                     value=changes,
-                    target="StateObservation 可生成 NetworkChange",
-                    message="已有变化记录" if changes else "尚未看到 NetworkChange 数据",
+                    target="StateObservation 鍙敓鎴?NetworkChange",
+                    message="宸叉湁鍙樺寲璁板綍" if changes else "灏氭湭鐪嬪埌 NetworkChange 鏁版嵁",
                 ),
                 _module_check(
                     name="证据引用",
@@ -1416,25 +1424,25 @@ def _build_agent_module_health(db: Any) -> list[dict[str, Any]]:
             ],
             checks=[
                 _module_check(
-                    name="事件规则",
+                    name="浜嬩欢瑙勫垯",
                     status="ok" if active_event_rules else "blocked",
                     value=active_event_rules,
-                    target="至少 1 个 active 事件规则",
-                    message="已有 active 事件规则" if active_event_rules else "没有 active 事件规则",
+                    target="鑷冲皯 1 涓?active 浜嬩欢瑙勫垯",
+                    message="宸叉湁 active 浜嬩欢瑙勫垯" if active_event_rules else "娌℃湁 active 浜嬩欢瑙勫垯",
                 ),
                 _module_check(
-                    name="事件生成",
+                    name="浜嬩欢鐢熸垚",
                     status="ok" if events else "warning",
                     value=events,
-                    target="NetworkChange 可生成 NetworkEvent",
-                    message="已有网络事件" if events else "尚未看到 NetworkEvent 数据",
+                    target="NetworkChange 鍙敓鎴?NetworkEvent",
+                    message="宸叉湁缃戠粶浜嬩欢" if events else "灏氭湭鐪嬪埌 NetworkEvent 鏁版嵁",
                 ),
                 _module_check(
-                    name="小幅变化抑制",
+                    name="灏忓箙鍙樺寲鎶戝埗",
                     status="ok" if no_event_changes or not changes else "warning",
                     value=no_event_changes,
-                    target="无事件变化应被标记为 no_event",
-                    message="已有 no_event 变化" if no_event_changes else "尚未看到 no_event 标记",
+                    target="鏃犱簨浠跺彉鍖栧簲琚爣璁颁负 no_event",
+                    message="宸叉湁 no_event 鍙樺寲" if no_event_changes else "灏氭湭鐪嬪埌 no_event 鏍囪",
                 ),
             ],
         ),
@@ -1444,30 +1452,30 @@ def _build_agent_module_health(db: Any) -> list[dict[str, Any]]:
             control=controls.get("device-management"),
             evidence=_device_management_evidence(db),
             metrics=[
-                _metric("设备总数", devices),
-                _metric("启用设备", active_devices),
+                _metric("璁惧鎬绘暟", devices),
+                _metric("鍚敤璁惧", active_devices),
                 _metric("已配置凭据", credential_devices),
                 _metric("已连接", connected_devices),
-                _metric("连接异常", connection_failed, "warning" if connection_failed else "ok"),
+                _metric("杩炴帴寮傚父", connection_failed, "warning" if connection_failed else "ok"),
                 _metric("动态分组", dynamic_groups),
             ],
             checks=[
                 _module_check(
-                    name="资产可见",
+                    name="璧勪骇鍙",
                     status="ok" if devices else "warning",
                     value=devices,
                     target="设备列表、筛选、详情稳定可用",
-                    message="已有设备资产" if devices else "尚未添加设备资产",
+                    message="宸叉湁璁惧璧勪骇" if devices else "灏氭湭娣诲姞璁惧璧勪骇",
                 ),
                 _module_check(
-                    name="凭据引用",
+                    name="鍑嵁寮曠敤",
                     status="ok" if active_devices == 0 or credential_devices == active_devices else "warning",
                     value=f"{credential_devices}/{active_devices}",
-                    target="启用设备都具备 credential_ref",
-                    message="启用设备凭据引用完整" if active_devices == 0 or credential_devices == active_devices else "部分启用设备缺少凭据引用",
+                    target="鍚敤璁惧閮藉叿澶?credential_ref",
+                    message="鍚敤璁惧鍑嵁寮曠敤瀹屾暣" if active_devices == 0 or credential_devices == active_devices else "閮ㄥ垎鍚敤璁惧缂哄皯鍑嵁寮曠敤",
                 ),
                 _module_check(
-                    name="连接健康",
+                    name="杩炴帴鍋ュ悍",
                     status="ok" if connection_failed == 0 else "warning",
                     value=connection_failed,
                     target="连接失败可定位且不阻塞资产查询",
@@ -1481,27 +1489,27 @@ def _build_agent_module_health(db: Any) -> list[dict[str, Any]]:
             control=controls.get("collection-profile"),
             evidence=_collection_profile_evidence(db),
             metrics=[
-                _metric("已激活 Profile", active_profiles),
+                _metric("宸叉縺娲?Profile", active_profiles),
                 _metric("已激活绑定", active_bindings),
-                _metric("带策略元数据快照", profiled_snapshots),
+                _metric("甯︾瓥鐣ュ厓鏁版嵁蹇収", profiled_snapshots),
             ],
             checks=[
                 _module_check(
-                    name="Profile 版本",
+                    name="Profile 鐗堟湰",
                     status="ok" if active_profiles else "blocked",
                     value=active_profiles,
-                    target="至少 1 个 active Command Profile",
-                    message="已有 active Command Profile" if active_profiles else "没有 active Command Profile",
+                    target="鑷冲皯 1 涓?active Command Profile",
+                    message="已有 active 采集命令集" if active_profiles else "没有 active 采集命令集",
                 ),
                 _module_check(
                     name="绑定策略",
                     status="ok" if active_bindings else "warning",
                     value=active_bindings,
-                    target="Profile 可绑定到设备集合",
-                    message="已有 active Profile 绑定" if active_bindings else "尚未配置 Profile 绑定",
+                    target="采集命令集可绑定到设备集合",
+                    message="已有 active 采集命令集绑定" if active_bindings else "尚未配置采集命令集绑定",
                 ),
                 _module_check(
-                    name="策略追溯",
+                    name="策略追踪",
                     status="ok" if profiled_snapshots else "warning",
                     value=profiled_snapshots,
                     target="快照携带采集策略元数据",
@@ -1515,31 +1523,31 @@ def _build_agent_module_health(db: Any) -> list[dict[str, Any]]:
             control=controls.get("report-diff"),
             evidence=_report_diff_evidence(db),
             metrics=[
-                _metric("生产巡检运行", patrol_runs),
-                _metric("巡检 Workflow", patrol_workflows),
-                _metric("报告/差异步骤", report_steps),
-                _metric("失败报告步骤", failed_report_steps, "warning" if failed_report_steps else "ok"),
+                _metric("鐢熶骇宸℃杩愯", patrol_runs),
+                _metric("宸℃ Workflow", patrol_workflows),
+                _metric("鎶ュ憡/宸紓姝ラ", report_steps),
+                _metric("澶辫触鎶ュ憡姝ラ", failed_report_steps, "warning" if failed_report_steps else "ok"),
             ],
             checks=[
                 _module_check(
-                    name="巡检运行",
+                    name="宸℃杩愯",
                     status="ok" if patrol_runs or patrol_workflows else "warning",
                     value=patrol_runs + patrol_workflows,
                     target="历史巡检可作为报告输入",
-                    message="已有巡检运行证据" if patrol_runs or patrol_workflows else "尚未看到生产巡检运行",
+                    message="宸叉湁宸℃杩愯璇佹嵁" if patrol_runs or patrol_workflows else "灏氭湭鐪嬪埌鐢熶骇宸℃杩愯",
                 ),
                 _module_check(
-                    name="报告解耦",
+                    name="报告解析",
                     status="ok" if report_steps else "warning",
                     value=report_steps,
-                    target="报告由 patrol-diff/report-generator 独立生成",
-                    message="已有报告/差异步骤记录" if report_steps else "尚未看到独立报告步骤",
+                    target="鎶ュ憡鐢?patrol-diff/report-generator 鐙珛鐢熸垚",
+                    message="宸叉湁鎶ュ憡/宸紓姝ラ璁板綍" if report_steps else "灏氭湭鐪嬪埌鐙珛鎶ュ憡姝ラ",
                 ),
                 _module_check(
-                    name="报告失败",
+                    name="鎶ュ憡澶辫触",
                     status="ok" if failed_report_steps == 0 else "warning",
                     value=failed_report_steps,
-                    target="报告失败可定位且不影响巡检入库",
+                    target="鎶ュ憡澶辫触鍙畾浣嶄笖涓嶅奖鍝嶅贰妫€鍏ュ簱",
                     message="没有失败报告步骤" if failed_report_steps == 0 else f"{failed_report_steps} 个报告步骤失败",
                 ),
             ],
@@ -1909,13 +1917,19 @@ def _patrol_readiness(device: dict[str, Any], mode: str = PRODUCTION_MODE) -> di
 def _bulk_update_preview(payload: DeviceBulkRequest, repository: DeviceRepository) -> dict[str, Any]:
     devices = _resolve_bulk_devices(payload, repository)
     update = payload.update
+    if update.status is not None:
+        try:
+            update.status = normalize_device_status(update.status)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if update.status == "deleted":
+            raise HTTPException(status_code=400, detail="use bulk delete to delete devices")
     if update.group_mode not in {"replace", "append"}:
         raise HTTPException(status_code=400, detail="group_mode must be replace or append")
     changed_fields = [
         name
         for name in (
             "command_profile",
-            "patrol_commands",
             "credential_ref",
             "status",
             "platform",
@@ -1944,11 +1958,6 @@ def _bulk_update_preview(payload: DeviceBulkRequest, repository: DeviceRepositor
                 "current": _redact_device(device),
                 "update": {
                     "command_profile": update.command_profile,
-                    "patrol_commands": (
-                        _merge_patrol_commands({}, update.patrol_commands).get("patrol_commands")
-                        if update.patrol_commands is not None
-                        else None
-                    ),
                     "credential_ref": update.credential_ref,
                     "status": update.status,
                     "platform": update.platform,
@@ -1977,6 +1986,7 @@ def _patrol_launch_preview(payload: DevicePatrolLaunchRequest, repository: Devic
             update=DeviceBulkUpdate(status="preview"),
         ),
         repository,
+        active_only=True,
     )
     module_violations = _agent_module_control_violations(_required_agent_modules_for_patrol(payload))
     if module_violations:
@@ -2118,6 +2128,11 @@ def list_devices(
     offset: int = Query(0, ge=0),
 ):
     repository = DeviceRepository()
+    normalized_status = status
+    if normalized_status in {"", "all"}:
+        normalized_status = None
+    elif normalized_status is not None:
+        normalized_status = normalize_device_status(normalized_status)
     devices = repository.get_devices_by_filter(
         device_id=device_id,
         device_name=device_name,
@@ -2130,9 +2145,11 @@ def list_devices(
         device_type=device_type,
         site=site,
         role=role,
-        status=status,
+        status=normalized_status,
         connection_status=connection_status,
     )
+    if normalized_status is None:
+        devices = [device for device in devices if device.get("status") != "deleted"]
     total = len(devices)
     page = devices[offset : offset + limit]
     items: list[dict[str, Any]] = []
@@ -2152,7 +2169,14 @@ def list_devices(
 @router.post("")
 def upsert_device(payload: DeviceUpsertRequest, request: Request):
     repository = DeviceRepository()
-    device_id = repository.upsert_device(**payload.model_dump())
+    values = payload.model_dump()
+    try:
+        values["status"] = normalize_device_status(values.get("status"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if values["status"] == "deleted":
+        raise HTTPException(status_code=400, detail="new devices cannot be created as deleted")
+    device_id = repository.upsert_device(**values)
     matches = repository.get_devices_by_filter(device_id=device_id, status=None)
     _audit_device_action(
         request,
@@ -2253,11 +2277,6 @@ def apply_device_bulk_update(payload: DeviceBulkRequest, request: Request):
             "site": update.site,
             "role": update.role,
         }
-        if update.patrol_commands is not None:
-            update_values["attributes"] = _merge_patrol_commands(
-                row["current"].get("attributes"),
-                update.patrol_commands,
-            )
         if update.groups is not None:
             update_values["groups"] = row["update"]["groups"]
         update_values = {key: value for key, value in update_values.items() if value is not None}
@@ -2287,6 +2306,53 @@ def apply_device_bulk_update(payload: DeviceBulkRequest, request: Request):
     return result
 
 
+@router.post("/bulk/delete/preview")
+def preview_device_bulk_delete(payload: DeviceBulkSelectionRequest):
+    devices = _resolve_bulk_devices(payload, DeviceRepository())
+    return {
+        "success": True,
+        "target_count": len(devices),
+        "rows": [
+            {
+                "device_id": device["device_id"],
+                "device_name": device.get("device_name"),
+                "ip": device.get("ip") or device.get("management_ip"),
+                "current": _redact_device(device),
+            }
+            for device in devices
+        ],
+    }
+
+
+@router.post("/bulk/delete")
+def apply_device_bulk_delete(payload: DeviceBulkSelectionRequest, request: Request):
+    repository = DeviceRepository()
+    devices = _resolve_bulk_devices(payload, repository)
+    deleted: list[dict[str, Any]] = []
+    for device in devices:
+        snapshot = repository.delete_device(device["device_id"])
+        if snapshot:
+            deleted.append(_redact_device(snapshot))
+    _audit_device_action(
+        request,
+        "device_bulk_delete",
+        "device",
+        None,
+        {
+            "target_count": len(devices),
+            "deleted_count": len(deleted),
+            "device_ids": [item.get("device_id") for item in deleted[:50]],
+            "dynamic_group_id": payload.dynamic_group_id,
+        },
+    )
+    return {
+        "success": True,
+        "target_count": len(devices),
+        "deleted_count": len(deleted),
+        "devices": deleted,
+    }
+
+
 @router.get("/credentials")
 def list_device_credentials():
     return {"items": CredentialResolver().list_references()}
@@ -2295,6 +2361,11 @@ def list_device_credentials():
 @router.post("/credentials/inspect")
 def inspect_device_credential(payload: CredentialInspectRequest):
     return CredentialResolver().inspect_reference(payload.credential_ref)
+
+
+@router.get("/groups")
+def list_device_groups():
+    return {"items": DeviceRepository().list_groups()}
 
 
 @router.get("/dynamic-groups")
@@ -2411,11 +2482,11 @@ def preview_device_patrol_launch(payload: DevicePatrolLaunchRequest):
 @router.post("/patrol/launch")
 def launch_device_patrol(payload: DevicePatrolLaunchRequest, request: Request):
     preview = _patrol_launch_preview(payload, DeviceRepository())
-    if preview["error_count"]:
+    if preview["error_count"] and not preview["rows"]:
         raise HTTPException(
             status_code=400,
             detail={
-                "message": "some devices cannot build patrol execution plans",
+                "message": "no devices can build patrol execution plans",
                 "errors": preview["errors"],
             },
         )
@@ -2440,6 +2511,7 @@ def launch_device_patrol(payload: DevicePatrolLaunchRequest, request: Request):
                 "ticket_id": payload.ticket_id,
                 "save_baseline": payload.save_baseline,
                 "mode": payload.mode,
+                "update_current_state": normalize_patrol_mode(payload.mode) == PRODUCTION_MODE,
                 "publish_events": False,
                 "patrol_batch_id": patrol_batch_id,
                 "device_id": row["device_id"],
@@ -2488,6 +2560,8 @@ def launch_device_patrol(payload: DevicePatrolLaunchRequest, request: Request):
             "workflow_name": payload.workflow_name,
             "runs": launched,
             "tasks": [],
+            "skipped_count": preview["error_count"],
+            "skipped_errors": preview["errors"],
         }
         _audit_device_action(
             request,
@@ -2501,6 +2575,7 @@ def launch_device_patrol(payload: DevicePatrolLaunchRequest, request: Request):
                 "save_baseline": payload.save_baseline,
                 "target_count": result["target_count"],
                 "launched_count": result["launched_count"],
+                "skipped_count": result["skipped_count"],
                 "device_ids": [item.get("device_id") for item in launched[:50]],
             },
         )
@@ -2560,10 +2635,12 @@ def launch_device_patrol(payload: DevicePatrolLaunchRequest, request: Request):
         "ticket_id": payload.ticket_id,
         "patrol_batch_id": patrol_batch_id,
         "launch_mode": payload.launch_mode,
-        "workflow_name": payload.workflow_name,
-        "runs": [],
-        "tasks": launched,
-    }
+            "workflow_name": payload.workflow_name,
+            "runs": [],
+            "tasks": launched,
+            "skipped_count": preview["error_count"],
+            "skipped_errors": preview["errors"],
+        }
     _audit_device_action(
         request,
         "device_patrol_launch",
@@ -2576,6 +2653,7 @@ def launch_device_patrol(payload: DevicePatrolLaunchRequest, request: Request):
             "save_baseline": payload.save_baseline,
             "target_count": result["target_count"],
             "launched_count": result["launched_count"],
+            "skipped_count": result["skipped_count"],
             "device_ids": [item.get("device_id") for item in launched[:50]],
         },
     )
@@ -2600,7 +2678,7 @@ def delete_device(device_id: str, request: Request):
         "device_delete",
         "device",
         device_id,
-        {"status": "deleted"},
+        {"deleted_device": _redact_device(device)},
     )
     return {"success": True, "device": _redact_device(device)}
 
@@ -2608,6 +2686,13 @@ def delete_device(device_id: str, request: Request):
 @router.patch("/{device_id}")
 def update_device(device_id: str, payload: DeviceUpdateRequest, request: Request):
     values = payload.model_dump(exclude_unset=True)
+    if values.get("status") is not None:
+        try:
+            values["status"] = normalize_device_status(values.get("status"))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if values["status"] == "deleted":
+            raise HTTPException(status_code=400, detail="use DELETE /devices/{device_id} to delete a device")
     device = DeviceRepository().update_device(device_id, **values)
     if not device:
         raise HTTPException(status_code=404, detail="device not found")
@@ -2623,7 +2708,10 @@ def update_device(device_id: str, payload: DeviceUpdateRequest, request: Request
 
 @router.post("/{device_id}/status")
 def update_device_status(device_id: str, payload: DeviceStatusRequest, request: Request):
-    device = DeviceRepository().set_device_status(device_id, payload.status)
+    try:
+        device = DeviceRepository().set_device_status(device_id, payload.status)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not device:
         raise HTTPException(status_code=404, detail="device not found")
     _audit_device_action(
@@ -2730,6 +2818,97 @@ def test_device_connectivity_endpoint(device_id: str):
         **result,
         "device": _redact_device(updated or device),
         "connection_issues": [],
+    }
+
+
+@router.post("/{device_id}/identity-discovery")
+def discover_device_identity_endpoint(device_id: str, request: Request):
+    repository = DeviceRepository()
+    matches = repository.get_devices_by_filter(device_id=device_id, status=None)
+    if not matches:
+        raise HTTPException(status_code=404, detail="device not found")
+    device = matches[0]
+    issues = _connection_preflight(device)
+    if issues:
+        issue_code, issue_message = _first_issue(issues)
+        updated = repository.record_connection_health(
+            device_id,
+            status="preflight_failed",
+            failure_code=issue_code,
+            error=issue_message,
+            source="identity-discovery",
+        )
+        return {
+            "success": False,
+            "failure_code": "collector_preflight_failed",
+            "identity_status": "unknown",
+            "device": _redact_device(updated or device),
+            "connection_issues": issues,
+        }
+
+    result = discover_device_identity(device)
+    profile_registration_error = None
+    metadata = {
+        "device_type": result.device_type,
+        "prompt": result.prompt,
+        "identity": identity_evidence(result.identity),
+    }
+    updated = repository.record_connection_health(
+        device_id,
+        status="connected" if result.failure_code != "connection_failed" else "failed",
+        failure_code=result.failure_code,
+        error=result.error,
+        latency_ms=_latency_ms(result.elapsed_seconds),
+        source="identity-discovery",
+        metadata=metadata,
+    )
+    device_after_health = updated or device
+    if result.identity.status == "known":
+        attrs = dict(device_after_health.get("attributes") or {})
+        attrs["identity_discovery"] = identity_evidence(result.identity)
+        updated_identity = repository.update_device(
+            device_id,
+            vendor=result.identity.vendor,
+            model=result.identity.model,
+            family=result.identity.family,
+            platform=platform_for_identity(result.identity, device_after_health.get("platform")),
+            attributes=attrs,
+        )
+        device_after_health = updated_identity or device_after_health
+        try:
+            from src.core.parser.repository import ParserRepository
+
+            ParserRepository().upsert_device_profile(
+                vendor=result.identity.vendor or "",
+                model=result.identity.model or "",
+                family=result.identity.family,
+                confidence=result.identity.confidence,
+                evidence=identity_evidence(result.identity),
+                status="confirmed",
+            )
+        except Exception as exc:
+            profile_registration_error = str(exc)
+    _audit_device_action(
+        request,
+        "device_identity_discovery",
+        "device",
+        device_id,
+        {
+            "success": result.success,
+            "identity_status": result.identity_status,
+            "identity": identity_evidence(result.identity),
+            "profile_registration_error": profile_registration_error,
+        },
+    )
+    return {
+        **result.to_dict(),
+        "device": _redact_device(device_after_health),
+        "connection_issues": [],
+        "warnings": (
+            [{"code": "profile_registration_failed", "message": profile_registration_error}]
+            if profile_registration_error
+            else []
+        ),
     }
 
 

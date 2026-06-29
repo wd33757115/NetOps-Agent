@@ -31,6 +31,19 @@ def _digest(parts: Iterable[Any]) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def _event_key(
+    *,
+    event_type: str,
+    device_id: str | None,
+    entity_type: str,
+    entity_key: str,
+    field: Any,
+) -> str:
+    return "|".join(
+        [event_type, str(device_id or ""), entity_type, entity_key, str(field or "")]
+    )
+
+
 class ChangeEventRepository:
     def save_changes(self, changes: list[Any]) -> int:
         created = 0
@@ -152,6 +165,11 @@ class ChangeEventRepository:
         created = 0
         with get_db_session() as db:
             for event in events:
+                if self._resolve_recovered_event(db, event):
+                    if event.source_change_id:
+                        change = db.get(NetworkChangeRecord, event.source_change_id)
+                        if change is not None:
+                            change.event_status = "event_created"
                 key = _digest(
                     (
                         event.source_change_id,
@@ -167,6 +185,19 @@ class ChangeEventRepository:
                     .filter(NetworkEventRecord.idempotency_key == key)
                     .first()
                 ):
+                    continue
+                active = self._find_active_event(db, event)
+                if active is not None:
+                    payload = dict(active.payload_json or {})
+                    payload["latest_change"] = event.payload.get("change")
+                    payload["latest_source_change_id"] = event.source_change_id
+                    payload["latest_observed_at"] = event.occurred_at
+                    active.payload_json = payload
+                    active.run_id = event.run_id or active.run_id
+                    if event.source_change_id:
+                        change = db.get(NetworkChangeRecord, event.source_change_id)
+                        if change is not None:
+                            change.event_status = "event_created"
                     continue
                 db.add(
                     NetworkEventRecord(
@@ -185,12 +216,72 @@ class ChangeEventRepository:
                         created_at=datetime.now(timezone.utc),
                     )
                 )
+                db.flush()
                 if event.source_change_id:
                     change = db.get(NetworkChangeRecord, event.source_change_id)
                     if change is not None:
                         change.event_status = "event_created"
                 created += 1
         return created
+
+    def _find_active_event(self, db, event: Any) -> NetworkEventRecord | None:
+        dedupe_key = (event.payload or {}).get("dedupe_key")
+        if not dedupe_key:
+            return None
+        rows = (
+            db.query(NetworkEventRecord)
+            .filter(NetworkEventRecord.event_type == event.event_type)
+            .filter(NetworkEventRecord.device_id == event.device_id)
+            .filter(NetworkEventRecord.entity_type == event.entity_type)
+            .filter(NetworkEventRecord.entity_key == event.entity_key)
+            .filter(NetworkEventRecord.status.in_(["open", "acknowledged", "recovering"]))
+            .order_by(NetworkEventRecord.occurred_at.desc())
+            .all()
+        )
+        for row in rows:
+            if (row.payload_json or {}).get("dedupe_key") == dedupe_key:
+                return row
+        return None
+
+    def _resolve_recovered_event(self, db, event: Any) -> bool:
+        recovery_pairs = {
+            "CPURecovered": "CPUHigh",
+            "MemoryRecovered": "MemoryHigh",
+            "InterfaceUp": "InterfaceDown",
+            "BGPNeighborEstablished": "BGPNeighborLost",
+        }
+        target_type = recovery_pairs.get(event.event_type)
+        if not target_type:
+            return False
+        change = (event.payload or {}).get("change") or {}
+        target_key = _event_key(
+            event_type=target_type,
+            device_id=event.device_id,
+            entity_type=event.entity_type,
+            entity_key=event.entity_key,
+            field=change.get("field"),
+        )
+        rows = (
+            db.query(NetworkEventRecord)
+            .filter(NetworkEventRecord.event_type == target_type)
+            .filter(NetworkEventRecord.device_id == event.device_id)
+            .filter(NetworkEventRecord.entity_type == event.entity_type)
+            .filter(NetworkEventRecord.entity_key == event.entity_key)
+            .filter(NetworkEventRecord.status.in_(["open", "acknowledged", "recovering"]))
+            .all()
+        )
+        resolved = False
+        for row in rows:
+            if (row.payload_json or {}).get("dedupe_key") != target_key:
+                continue
+            payload = dict(row.payload_json or {})
+            payload["recovery_change"] = change
+            payload["recovered_by_event_type"] = event.event_type
+            payload["resolved_at"] = event.occurred_at
+            row.payload_json = payload
+            row.status = "resolved"
+            resolved = True
+        return resolved
 
     def list_events(
         self,

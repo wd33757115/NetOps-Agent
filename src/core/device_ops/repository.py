@@ -9,6 +9,7 @@ from typing import Any
 from src.infrastructure.db.models import (
     NetworkDevice,
     NetworkDeviceConnectionHealth,
+    NetworkDeviceTombstone,
     NetworkDeviceDynamicGroup,
     NetworkDeviceGroup,
     NetworkDeviceGroupMember,
@@ -30,6 +31,21 @@ def stable_device_id(device_name: str, management_ip: str) -> str:
 
 def stable_group_id(name: str) -> str:
     return str(uuid.uuid5(GROUP_NAMESPACE, name.strip().lower()))
+
+
+def normalize_device_status(status: str | None, *, default: str = "active") -> str:
+    value = (status or default).strip().lower()
+    if value == "inactive":
+        return "disabled"
+    if value not in {"active", "disabled", "deleted"}:
+        raise ValueError("device status must be active, disabled or deleted")
+    return value
+
+
+def sanitize_device_attributes(attributes: dict[str, Any] | None) -> dict[str, Any]:
+    next_attributes = dict(attributes or {})
+    next_attributes.pop("patrol_commands", None)
+    return next_attributes
 
 
 def _selector_matches(device: dict[str, Any], selector: dict[str, Any]) -> bool:
@@ -107,8 +123,8 @@ class DeviceRepository:
             row.role = role
             row.output_path = output_path
             row.command_profile = command_profile
-            row.attributes_json = attributes or {}
-            row.status = status
+            row.attributes_json = sanitize_device_attributes(attributes)
+            row.status = normalize_device_status(status)
             row.updated_at = now
             if groups is not None:
                 self._replace_device_groups(db, device_id, groups)
@@ -155,10 +171,10 @@ class DeviceRepository:
                 "serial_number": serial_number,
                 "site": site,
                 "role": role,
-                "status": status,
+                    "status": normalize_device_status(status) if status is not None else None,
                 "output_path": output_path,
                 "command_profile": command_profile,
-                "attributes_json": attributes,
+                "attributes_json": sanitize_device_attributes(attributes) if attributes is not None else None,
             }.items():
                 if value is not None:
                     setattr(row, field, value)
@@ -169,11 +185,34 @@ class DeviceRepository:
             return self._legacy_shape(row, groups=group_names)
 
     def set_device_status(self, device_id: str, status: str) -> dict[str, Any] | None:
-        return self.update_device(device_id, status=status)
+        normalized = normalize_device_status(status)
+        if normalized == "deleted":
+            raise ValueError("use delete_device to delete a device")
+        return self.update_device(device_id, status=normalized)
 
     def delete_device(self, device_id: str) -> dict[str, Any] | None:
-        """Archive a device without removing historical patrol evidence."""
-        return self.update_device(device_id, status="deleted")
+        """Delete the inventory asset while preserving denormalized historical evidence."""
+        with get_db_session() as db:
+            row = db.get(NetworkDevice, device_id)
+            if row is None:
+                return None
+            groups = self._groups_by_device(db, [device_id]).get(device_id, [])
+            snapshot = self._legacy_shape(row, groups=groups)
+            db.add(
+                NetworkDeviceTombstone(
+                    id=str(uuid.uuid4()),
+                    device_id=device_id,
+                    device_name=row.device_name,
+                    management_ip=row.management_ip,
+                    vendor=row.vendor,
+                    model=row.model,
+                    family=row.family,
+                    snapshot_json=snapshot,
+                    deleted_at=datetime.now(timezone.utc),
+                )
+            )
+            db.delete(row)
+            return snapshot
 
     def record_connection_health(
         self,
@@ -280,6 +319,8 @@ class DeviceRepository:
         status: str = "active",
         group_id: str | None = None,
     ) -> dict[str, Any]:
+        if status == "inactive":
+            status = "disabled"
         if status not in {"active", "disabled"}:
             raise ValueError("dynamic group status must be active or disabled")
         normalized_name = name.strip()
@@ -325,6 +366,8 @@ class DeviceRepository:
             return self._dynamic_group_shape(row) if row else None
 
     def set_dynamic_group_status(self, group_id: str, status: str) -> dict[str, Any] | None:
+        if status == "inactive":
+            status = "disabled"
         if status not in {"active", "disabled"}:
             raise ValueError("dynamic group status must be active or disabled")
         with get_db_session() as db:
@@ -339,7 +382,7 @@ class DeviceRepository:
         group = self.get_dynamic_group(group_id)
         if group is None or group.get("status") != "active":
             return group, []
-        devices = self.get_devices_by_filter(status=None)
+        devices = self.get_devices_by_filter(status="active")
         selector = dict(group.get("selector") or {})
         return group, [device for device in devices if _selector_matches(device, selector)]
 
@@ -394,6 +437,10 @@ class DeviceRepository:
                 query = query.filter(NetworkDevice.site.ilike(f"%{site}%"))
             if role:
                 query = query.filter(NetworkDevice.role.ilike(f"%{role}%"))
+            if status == "all":
+                status = None
+            if status == "inactive":
+                status = "disabled"
             if status:
                 query = query.filter(NetworkDevice.status == status)
             if connection_status:

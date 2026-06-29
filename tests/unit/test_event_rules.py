@@ -20,7 +20,15 @@ def test_threshold_condition_matches_cpu_high():
             "fields": ["cpu_5s"],
             "gte": 90,
         },
-        {"field": "cpu_5s", "new": "18%"},
+        {"field": "cpu_5s", "old": "15%", "new": "18%"},
+    )
+    assert not condition_matches(
+        {
+            "kind": "threshold",
+            "fields": ["cpu_5s"],
+            "gte": 90,
+        },
+        {"field": "cpu_5s", "old": "91%", "new": "92%"},
     )
 
 
@@ -44,6 +52,79 @@ def test_transition_condition_matches_interface_down():
             "to_group": "down",
         },
         {"field": "protocol", "old": "up", "new": "down"},
+    )
+
+
+def test_transition_condition_matches_initial_interface_down():
+    assert condition_matches(
+        {
+            "kind": "transition",
+            "fields": ["protocol"],
+            "from_group": "up",
+            "to_group": "down",
+        },
+        {"field": "protocol", "old": None, "new": "down", "change_type": "initial"},
+    )
+
+
+def test_bgp_condition_matches_initial_neighbor_lost():
+    assert condition_matches(
+        {
+            "kind": "bgp_transition",
+            "fields": ["state"],
+            "from_established": True,
+            "to_established": False,
+        },
+        {
+            "command": "display bgp peer",
+            "entity_type": "bgp_neighbor",
+            "field": "state",
+            "old": None,
+            "new": "Idle",
+            "change_type": "initial",
+        },
+    )
+
+
+def test_bgp_condition_does_not_match_unrelated_state_field():
+    assert not condition_matches(
+        {
+            "kind": "bgp_transition",
+            "fields": ["state"],
+            "from_established": True,
+            "to_established": False,
+        },
+        {
+            "command": "display power",
+            "entity_type": "power_supply",
+            "field": "state",
+            "old": None,
+            "new": "normal",
+            "change_type": "initial",
+        },
+    )
+
+
+def test_threshold_recovery_condition_matches_cpu_recovered():
+    assert condition_matches(
+        {
+            "kind": "threshold_recovery",
+            "fields": ["cpu_5s"],
+            "lt": 90,
+        },
+        {"field": "cpu_5s", "old": "92%", "new": "85%"},
+    )
+
+
+def test_transition_condition_matches_cisco_interface_status_down():
+    assert condition_matches(
+        {
+            "kind": "transition",
+            "fields": ["status"],
+            "from_group": "up",
+            "to_group": "down",
+        },
+        {"field": "status", "old": "connected", "new": "notconnec"},
     )
 
 

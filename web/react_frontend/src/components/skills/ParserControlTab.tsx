@@ -1,11 +1,11 @@
 import React, { useMemo, useState } from 'react'
 import {
-  Alert, Button, Col, Descriptions, Drawer, Input, Row, Select, Space, Spin,
+  Alert, Button, Col, Descriptions, Drawer, Input, Popconfirm, Row, Select, Space, Spin,
   Statistic, Switch, Table, Tabs, Tag, Typography, message,
 } from 'antd'
 import {
-  CheckOutlined, CloseOutlined, EyeOutlined, PlayCircleOutlined, ReloadOutlined,
-  StopOutlined,
+  CheckOutlined, CloseOutlined, DeleteOutlined, DownloadOutlined, EyeOutlined,
+  PlayCircleOutlined, ReloadOutlined, StopOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from 'react-query'
 import {
@@ -51,6 +51,23 @@ const codePanelStyle: React.CSSProperties = {
   padding: 16, whiteSpace: 'pre',
 }
 
+const downloadBase64File = (filename: string, contentBase64: string, mimeType = 'application/zip') => {
+  const binary = window.atob(contentBase64)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+  const blob = new Blob([bytes], { type: mimeType })
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
 const ParserControlTab: React.FC = () => {
   const queryClient = useQueryClient()
   const isMobile = useIsMobile()
@@ -64,6 +81,7 @@ const ParserControlTab: React.FC = () => {
   const [jobStatus, setJobStatus] = useState<string>()
   const [jobType, setJobType] = useState<string>()
   const [jobSearch, setJobSearch] = useState('')
+  const [selectedJobIds, setSelectedJobIds] = useState<React.Key[]>([])
   const [sourcePath, setSourcePath] = useState('')
   const [datasetId, setDatasetId] = useState('')
   const [importPreview, setImportPreview] = useState<ParserImportPreview | null>(null)
@@ -85,6 +103,10 @@ const ParserControlTab: React.FC = () => {
   const [effectiveDevice, setEffectiveDevice] = useState('{\n  "device_id": "device-1",\n  "vendor": "Cisco",\n  "command_file": "default-patrol",\n  "attributes": {}\n}')
   const [effectivePlan, setEffectivePlan] = useState<ParserEffectivePlanPreview | null>(null)
   const [profileImpact, setProfileImpact] = useState<ParserCommandProfileImpactPreview | null>(null)
+  const [activationOpen, setActivationOpen] = useState(false)
+  const [activationProfile, setActivationProfile] = useState<ParserCommandProfile | null>(null)
+  const [activationSelector, setActivationSelector] = useState('{}')
+  const [activationImpact, setActivationImpact] = useState<ParserCommandProfileImpactPreview | null>(null)
 
   const polling = { refetchInterval: 5000 }
   const { data: coverage } = useQuery('parser-coverage', parserApi.coverage, polling)
@@ -162,6 +184,41 @@ const ParserControlTab: React.FC = () => {
     },
   )
 
+  const exportTemplates = useMutation(
+    () => parserApi.exportTemplates('all'),
+    {
+      onSuccess: (result) => {
+        downloadBase64File(result.filename || 'parser-templates.zip', result.content_base64)
+        message.success(`已导出 ${result.exported_count}/${result.template_count} 个模板`)
+      },
+      onError: (error: any) => message.error(error?.response?.data?.detail || '模板导出失败'),
+    },
+  )
+
+  const deleteJob = useMutation(
+    (id: string) => parserApi.deleteJob(id),
+    {
+      onSuccess: () => { message.success('任务已删除'); refresh() },
+      onError: (error: any) => message.error(error?.response?.data?.detail || '任务删除失败'),
+    },
+  )
+
+  const bulkDeleteJobs = useMutation(
+    () => parserApi.bulkDeleteJobs(selectedJobIds.map(String)),
+    {
+      onSuccess: (result: any) => {
+        if (result.failed_count) {
+          message.warning(`已删除 ${result.deleted_count} 个任务，${result.failed_count} 个任务未删除`)
+        } else {
+          message.success(`已删除 ${result.deleted_count} 个任务`)
+        }
+        setSelectedJobIds([])
+        refresh()
+      },
+      onError: (error: any) => message.error(error?.response?.data?.detail || '批量删除任务失败'),
+    },
+  )
+
   const showPreview = async (id: string) => {
     setPreviewOpen(true); setPreviewLoading(true); setPreview(null)
     try { setPreview(await parserApi.preview(id)) } catch {
@@ -200,8 +257,8 @@ const ParserControlTab: React.FC = () => {
   )
 
   const bootstrapRules = useMutation(parserApi.bootstrapEventRules, {
-    onSuccess: () => { message.success('默认事件规则已初始化'); refresh() },
-    onError: (error: any) => message.error(error?.response?.data?.detail || '事件规则初始化失败'),
+    onSuccess: () => { message.success('默认变化转事件规则已初始化'); refresh() },
+    onError: (error: any) => message.error(error?.response?.data?.detail || '变化转事件规则初始化失败'),
   })
 
   const upsertRule = useMutation(
@@ -213,8 +270,8 @@ const ParserControlTab: React.FC = () => {
       status: 'draft',
     }),
     {
-      onSuccess: () => { message.success('事件规则草稿已保存'); refresh() },
-      onError: (error: any) => message.error(error?.response?.data?.detail || error?.message || '事件规则保存失败'),
+      onSuccess: () => { message.success('变化转事件规则草稿已保存'); refresh() },
+      onError: (error: any) => message.error(error?.response?.data?.detail || error?.message || '变化转事件规则保存失败'),
     },
   )
 
@@ -224,8 +281,8 @@ const ParserControlTab: React.FC = () => {
         ? parserApi.activateEventRule(id)
         : parserApi.deprecateEventRule(id),
     {
-      onSuccess: () => { message.success('事件规则状态已更新'); refresh() },
-      onError: (error: any) => message.error(error?.response?.data?.detail || '事件规则状态更新失败'),
+      onSuccess: () => { message.success('变化转事件规则状态已更新'); refresh() },
+      onError: (error: any) => message.error(error?.response?.data?.detail || '变化转事件规则状态更新失败'),
     },
   )
 
@@ -239,7 +296,7 @@ const ParserControlTab: React.FC = () => {
         setRuleTest(result)
         message.success(`命中 ${result.matched_count}/${result.sample_count} 条样本`)
       },
-      onError: (error: any) => message.error(error?.response?.data?.detail || error?.message || '事件规则测试失败'),
+      onError: (error: any) => message.error(error?.response?.data?.detail || error?.message || '变化转事件规则测试失败'),
     },
   )
 
@@ -251,8 +308,8 @@ const ParserControlTab: React.FC = () => {
       status: 'draft',
     }),
     {
-      onSuccess: () => { message.success('命令 Profile 草稿已保存'); refresh() },
-      onError: (error: any) => message.error(error?.response?.data?.detail || '命令 Profile 保存失败'),
+      onSuccess: () => { message.success('采集命令集草稿已保存'); refresh() },
+      onError: (error: any) => message.error(error?.response?.data?.detail || '采集命令集保存失败'),
     },
   )
 
@@ -264,8 +321,62 @@ const ParserControlTab: React.FC = () => {
           ? parserApi.rollbackCommandProfile(id)
           : parserApi.deprecateCommandProfile(id),
     {
-      onSuccess: () => { message.success('命令 Profile 状态已更新'); refresh() },
-      onError: (error: any) => message.error(error?.response?.data?.detail || '命令 Profile 状态更新失败'),
+      onSuccess: () => { message.success('采集命令集状态已更新'); refresh() },
+      onError: (error: any) => message.error(error?.response?.data?.detail || '采集命令集状态更新失败'),
+    },
+  )
+
+  const deleteProfile = useMutation(
+    (profileVersionId: string) => parserApi.deleteCommandProfile(profileVersionId),
+    {
+      onSuccess: () => { message.success('采集命令集已删除'); refresh() },
+      onError: (error: any) => message.error(error?.response?.data?.detail || '采集命令集删除失败'),
+    },
+  )
+
+  const openCommandProfileActivation = (row: ParserCommandProfile) => {
+    setActivationProfile(row)
+    setActivationSelector('{}')
+    setActivationImpact(null)
+    setActivationOpen(true)
+  }
+
+  const previewActivationImpact = useMutation(
+    () => {
+      if (!activationProfile?.profile_version_id) throw new Error('缺少采集命令集版本')
+      return parserApi.commandProfileImpactPreview({
+        profile_version_id: activationProfile.profile_version_id,
+        action: 'patrol',
+        selector: activationSelector.trim() ? JSON.parse(activationSelector) : {},
+        mode: 'production',
+        limit: 100,
+        save_evidence: true,
+      })
+    },
+    {
+      onSuccess: (result) => {
+        setActivationImpact(result)
+        message.success(result.evidence_saved ? '影响证据已保存' : '影响预览已完成')
+        refresh()
+      },
+      onError: (error: any) => message.error(error?.response?.data?.detail || error?.message || '激活影响预览失败'),
+    },
+  )
+
+  const activateProfileWithEvidence = useMutation(
+    () => {
+      if (!activationProfile?.profile_version_id) throw new Error('缺少采集命令集版本')
+      return parserApi.activateCommandProfile(activationProfile.profile_version_id)
+    },
+    {
+      onSuccess: () => {
+        message.success('采集命令集已激活')
+        setActivationOpen(false)
+        setActivationProfile(null)
+        setActivationImpact(null)
+        refresh()
+      },
+      onError: (error: any) => message.error(error?.response?.data?.detail || error?.message || '采集命令集激活失败'),
     },
   )
 
@@ -277,8 +388,8 @@ const ParserControlTab: React.FC = () => {
       status: 'active',
     }),
     {
-      onSuccess: () => { message.success('Profile 绑定已保存'); refresh() },
-      onError: (error: any) => message.error(error?.response?.data?.detail || error?.message || 'Profile 绑定保存失败'),
+      onSuccess: () => { message.success('采集命令集绑定已保存'); refresh() },
+      onError: (error: any) => message.error(error?.response?.data?.detail || error?.message || '采集命令集绑定保存失败'),
     },
   )
 
@@ -310,7 +421,7 @@ const ParserControlTab: React.FC = () => {
         message.success(result.evidence_saved ? '影响证据已保存' : '影响预览已完成')
         refresh()
       },
-      onError: (error: any) => message.error(error?.response?.data?.detail || error?.message || 'Profile 影响预览失败'),
+      onError: (error: any) => message.error(error?.response?.data?.detail || error?.message || '采集命令集影响预览失败'),
     },
   )
 
@@ -355,7 +466,7 @@ const ParserControlTab: React.FC = () => {
     { title: '尝试', dataIndex: 'attempts', width: 70 },
     { title: '状态', dataIndex: 'status', width: 120,
       render: (value: string) => <Tag color={statusColor(value)}>{statusLabel(value)}</Tag> },
-    { title: '操作', width: 170, render: (_: unknown, row: ParserJobItem) => (
+    { title: '操作', width: 210, render: (_: unknown, row: ParserJobItem) => (
       <Space>
         <Button icon={<EyeOutlined />} size="small" title="查看任务" onClick={() => showJob(row.id)} />
         {['collecting', 'pending'].includes(row.status) &&
@@ -364,6 +475,8 @@ const ParserControlTab: React.FC = () => {
           <Button icon={<ReloadOutlined />} size="small" title="重试" onClick={() => action.mutate({ type: 'retry', id: row.id })} />}
         {['collecting', 'pending', 'running', 'validating'].includes(row.status) &&
           <Button icon={<StopOutlined />} size="small" title="取消" onClick={() => action.mutate({ type: 'cancel', id: row.id })} />}
+        {!['collecting', 'pending', 'running', 'validating'].includes(row.status) &&
+          <Button danger icon={<DeleteOutlined />} size="small" title="删除" onClick={() => deleteJob.mutate(row.id)} />}
       </Space>
     )},
   ]
@@ -431,7 +544,7 @@ const ParserControlTab: React.FC = () => {
   ]
 
   const commandProfileColumns = [
-    { title: 'Profile', dataIndex: 'profile_name', width: 220 },
+    { title: '命令集', dataIndex: 'profile_name', width: 220 },
     { title: '动作', dataIndex: 'items', width: 120,
       render: (value: Array<{ action: string; command: string }>) =>
         Array.from(new Set((value || []).map((item) => item.action))).join(', ') },
@@ -448,8 +561,7 @@ const ParserControlTab: React.FC = () => {
       <Space>
         {row.profile_version_id && row.version_status !== 'active' && row.version_status !== 'deprecated' &&
           <Button size="small" icon={<CheckOutlined />}
-            loading={profileLifecycle.isLoading}
-            onClick={() => profileLifecycle.mutate({ type: 'activate', id: row.profile_version_id as string })}>
+            onClick={() => openCommandProfileActivation(row)}>
             激活
           </Button>}
         {row.profile_version_id && row.version_status === 'active' &&
@@ -464,12 +576,24 @@ const ParserControlTab: React.FC = () => {
             onClick={() => profileLifecycle.mutate({ type: 'rollback', id: row.profile_version_id as string })}>
             回滚
           </Button>}
+        {row.profile_version_id && row.version_status !== 'active' &&
+          <Popconfirm
+            title="删除采集命令集版本"
+            description="删除后无法恢复；如果这是最后一个版本，命令集也会被删除。"
+            okText="删除"
+            cancelText="取消"
+            onConfirm={() => deleteProfile.mutate(row.profile_version_id as string)}
+          >
+            <Button size="small" danger icon={<DeleteOutlined />} loading={deleteProfile.isLoading}>
+              删除
+            </Button>
+          </Popconfirm>}
       </Space>
     ) },
   ]
 
   const bindingColumns = [
-    { title: 'Profile', dataIndex: 'profile_name', width: 200 },
+    { title: '命令集', dataIndex: 'profile_name', width: 200 },
     { title: '版本', dataIndex: 'profile_version', width: 90 },
     { title: '优先级', dataIndex: 'priority', width: 90 },
     { title: '状态', dataIndex: 'status', width: 100,
@@ -508,6 +632,10 @@ const ParserControlTab: React.FC = () => {
           : '-' },
   ]
 
+  const activationReady = Boolean(
+    activationImpact?.evidence_saved,
+  )
+
   const activeProfileVersionOptions = commandProfiles
     .filter((item) => item.profile_version_id && item.version_status === 'active')
     .map((item) => ({
@@ -517,11 +645,11 @@ const ParserControlTab: React.FC = () => {
 
   return <div>
     <Row gutter={16} style={{ marginBottom: 16 }}>
-      <Col span={4}><Statistic title="模板" value={coverage?.templates_total || 0} /></Col>
+      <Col span={4}><Statistic title="模板总数" value={coverage?.templates_total || 0} /></Col>
       <Col span={4}><Statistic title="Active" value={coverage?.templates_active || 0} /></Col>
       <Col span={4}><Statistic title="待处理任务" value={coverage?.jobs_pending || 0} /></Col>
-      <Col span={4}><Statistic title="缺模板" value={coverage?.missing_candidates || 0} /></Col>
-      <Col span={4}><Statistic title="待修复" value={coverage?.repair_candidates || 0} /></Col>
+      <Col span={4}><Statistic title="缺模板候选" value={coverage?.missing_candidates || 0} /></Col>
+      <Col span={4}><Statistic title="待修复候选" value={coverage?.repair_candidates || 0} /></Col>
       <Col span={4}><Button icon={<ReloadOutlined />} title="刷新" onClick={refresh} /></Col>
     </Row>
     <Tabs items={[
@@ -537,6 +665,7 @@ const ParserControlTab: React.FC = () => {
                 { value: 'rejected', label: 'rejected' }, { value: 'deprecated', label: 'deprecated' },
               ]} />
           </Space>
+            <Button icon={<DownloadOutlined />} loading={exportTemplates.isLoading} onClick={() => exportTemplates.mutate()}>导出全部模板</Button>
           <Table rowKey="id" loading={templatesLoading} dataSource={filteredTemplates} columns={templateColumns} pagination={{ pageSize: 20 }} size="small" scroll={{ x: 980 }} />
         </Space> },
       { key: 'jobs', label: '任务队列', children:
@@ -559,6 +688,7 @@ const ParserControlTab: React.FC = () => {
             </Col>
             <Col>
               <Space>
+                <Button danger icon={<DeleteOutlined />} disabled={!selectedJobIds.length} loading={bulkDeleteJobs.isLoading} onClick={() => bulkDeleteJobs.mutate()}>删除已选任务</Button>
                 <Typography.Text>自动调度</Typography.Text>
                 <Switch checked={Boolean(dispatchControl?.auto_dispatch_enabled)}
                   loading={toggleDispatch.isLoading}
@@ -566,7 +696,7 @@ const ParserControlTab: React.FC = () => {
               </Space>
             </Col>
           </Row>
-          <Table rowKey="id" loading={jobsLoading} dataSource={filteredJobs} columns={jobColumns} pagination={{ pageSize: 20 }} size="small" scroll={{ x: 930 }} />
+          <Table rowKey="id" loading={jobsLoading} dataSource={filteredJobs} columns={jobColumns} pagination={{ pageSize: 20 }} size="small" scroll={{ x: 930 }} rowSelection={{ selectedRowKeys: selectedJobIds, onChange: setSelectedJobIds, getCheckboxProps: (row: ParserJobItem) => ({ disabled: ['collecting', 'pending', 'running', 'validating'].includes(row.status) }) }} />
         </Space> },
       { key: 'aliases', label: `命令别名 (${aliases.length})`, children:
         <Table<ParserCommandAlias> rowKey="id" dataSource={aliases} columns={aliasColumns} pagination={{ pageSize: 20 }} size="small" /> },
@@ -574,10 +704,10 @@ const ParserControlTab: React.FC = () => {
         <Table<ParserDeviceProfile> rowKey="id" dataSource={deviceProfiles} columns={profileColumns} pagination={{ pageSize: 20 }} size="small" /> },
       { key: 'signatures', label: `身份规则 (${identitySignatures.length})`, children:
         <Table<ParserIdentitySignature> rowKey="id" dataSource={identitySignatures} columns={signatureColumns} pagination={{ pageSize: 20 }} size="small" scroll={{ x: 900 }} /> },
-      { key: 'event-rules', label: `事件规则 (${eventRules.length})`, children:
+      { key: 'event-rules', label: `变化转事件规则 (${eventRules.length})`, children:
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
           <Alert type="info" showIcon
-            message="事件规则把 NetworkChange 转换为 NetworkEvent，规则版本写入 PostgreSQL，Event Builder 优先使用 active 规则。" />
+            message="变化转事件规则把 NetworkChange 转换为 NetworkEvent；Event Builder 优先使用 active 规则。" />
           <Row gutter={[12, 12]} align="top">
             <Col flex="220px"><Input value={ruleName} onChange={(event) => setRuleName(event.target.value)}
               placeholder="规则名，例如 cpu-high" /></Col>
@@ -637,25 +767,25 @@ const ParserControlTab: React.FC = () => {
             dataSource={eventRules} columns={eventRuleColumns}
             pagination={{ pageSize: 20 }} size="small" scroll={{ x: 1100 }} />
         </Space> },
-      { key: 'command-profiles', label: `采集 Profile (${commandProfiles.length})`, children:
+      { key: 'command-profiles', label: `采集命令集 (${commandProfiles.length})`, children:
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
           <Alert type="info" showIcon
-            message="采集 Profile 定义巡检命令版本。device-patrol 和 device-backup 通过 CollectionPolicyResolver 获取 ExecutionPlan。" />
+            message="采集命令集定义巡检命令版本。device-patrol 和 device-backup 通过 CollectionPolicyResolver 获取 ExecutionPlan。" />
           <Row gutter={[12, 12]} align="top">
             <Col flex="260px"><Input value={profileName} onChange={(event) => setProfileName(event.target.value)}
-              placeholder="Profile 名称，例如 default-patrol" /></Col>
+              placeholder="命令集名称，例如 default-patrol" /></Col>
             <Col flex="auto"><Input.TextArea rows={4} value={profileCommands}
               onChange={(event) => setProfileCommands(event.target.value)}
               style={{ fontFamily: 'Consolas, Monaco, monospace' }}
               placeholder="每行一条命令" /></Col>
             <Col><Button type="primary" loading={upsertProfile.isLoading}
               disabled={!profileName.trim() || !profileCommands.trim()}
-              onClick={() => upsertProfile.mutate()}>保存 Profile</Button></Col>
+              onClick={() => upsertProfile.mutate()}>保存命令集</Button></Col>
           </Row>
           <Row gutter={[12, 12]} align="top">
             <Col flex="260px"><Select value={bindingProfileVersionId}
               onChange={setBindingProfileVersionId}
-              placeholder="选择已激活的 Profile 版本"
+              placeholder="选择已激活的命令集版本"
               style={{ width: '100%' }}
               options={activeProfileVersionOptions} /></Col>
             <Col flex="120px"><Input value={bindingPriority}
@@ -673,7 +803,7 @@ const ParserControlTab: React.FC = () => {
               onClick={() => upsertProfileBinding.mutate()}>保存绑定</Button></Col>
           </Row>
           {profileImpact && <Alert type={profileImpact.blocked_device_count ? 'warning' : 'success'} showIcon
-            message={`影响范围：${profileImpact.matched_device_count} 台设备，${profileImpact.blocked_device_count} 台阻塞`}
+            message={`影响范围：${profileImpact.matched_device_count} 台设备，${profileImpact.blocked_device_count} 台阻断`}
             description={`覆盖率 ${(profileImpact.coverage_rate * 100).toFixed(1)}%；就绪命令 ${profileImpact.ready_command_count}/${profileImpact.eligible_command_count}；阻塞命令 ${profileImpact.blocked_command_count}`} />}
           {profileImpact && <Table rowKey="device_id" size="small"
             dataSource={profileImpact.rows} columns={impactColumns}
@@ -699,7 +829,7 @@ const ParserControlTab: React.FC = () => {
             message={`执行计划：${effectivePlan.commands.length} 条命令`}
             description={<Space direction="vertical" size={8} style={{ width: '100%', marginTop: 8 }}>
               <Descriptions size="small" bordered column={isMobile ? 1 : 3}>
-                <Descriptions.Item label="Profile">{effectivePlan.plan.profile_name || '-'}</Descriptions.Item>
+                <Descriptions.Item label="命令集">{effectivePlan.plan.profile_name || '-'}</Descriptions.Item>
                 <Descriptions.Item label="凭据引用">{effectivePlan.plan.credential_ref || '-'}</Descriptions.Item>
                 <Descriptions.Item label="命令数">{effectivePlan.commands.length}</Descriptions.Item>
                 <Descriptions.Item label="采集参数" span={isMobile ? 1 : 3}>
@@ -719,7 +849,7 @@ const ParserControlTab: React.FC = () => {
             dataSource={commandProfileBindings} columns={bindingColumns}
             pagination={{ pageSize: 20 }} size="small" scroll={{ x: 900 }} />
         </Space> },
-      { key: 'datasets', label: `数据集覆盖率 (${datasets.length})`, children:
+      { key: 'datasets', label: `验证数据集覆盖率 (${datasets.length})`, children:
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
           <Row gutter={[12, 12]}>
             <Col flex="auto"><Input value={sourcePath} onChange={(event) => {
@@ -832,14 +962,61 @@ const ParserControlTab: React.FC = () => {
             scroll={{ x: 780 }} columns={[
               { title: '设备', dataIndex: 'device_id', width: 170 },
               { title: 'Snapshot', dataIndex: 'snapshot_id', width: 250 },
-              {
-                title: '数据源',
-                dataIndex: 'snapshot_source',
-                render: () => 'PostgreSQL',
-              },
+              { title: '数据源', dataIndex: 'snapshot_source', render: () => 'PostgreSQL' },
               { title: '数据集', dataIndex: 'dataset_id' },
             ]} />
         </Space> : null}
+    </Drawer>
+
+    <Drawer title="激活采集命令集" open={activationOpen}
+      onClose={() => {
+        setActivationOpen(false)
+        setActivationProfile(null)
+        setActivationImpact(null)
+      }}
+      width={isMobile ? '100vw' : 920} destroyOnClose
+      extra={<Button type="primary" icon={<CheckOutlined />}
+        disabled={!activationReady}
+        loading={activateProfileWithEvidence.isLoading}
+        onClick={() => activateProfileWithEvidence.mutate()}>
+        确认激活
+      </Button>}>
+      {activationProfile ? <Space direction="vertical" size={16} style={{ width: '100%' }}>
+        <Alert type="info" showIcon
+          message="激活前必须先预览影响并保存证据。"
+          description="选择器决定本次命令集面向哪些启用设备生效；缺模板、身份未知和解析覆盖不足会作为生产巡检风险提示保存，但不阻断命令集激活。" />
+        <Descriptions size="small" bordered column={isMobile ? 1 : 3}>
+          <Descriptions.Item label="命令集">{activationProfile.profile_name}</Descriptions.Item>
+          <Descriptions.Item label="版本">{activationProfile.version || '-'}</Descriptions.Item>
+          <Descriptions.Item label="状态">{statusLabel(activationProfile.version_status)}</Descriptions.Item>
+          <Descriptions.Item label="命令数">{activationProfile.items?.length || 0}</Descriptions.Item>
+          <Descriptions.Item label="动作" span={isMobile ? 1 : 2}>
+            {Array.from(new Set((activationProfile.items || []).map((item) => item.action))).join(', ') || '-'}
+          </Descriptions.Item>
+        </Descriptions>
+        <Input.TextArea rows={5} value={activationSelector}
+          onChange={(event) => { setActivationSelector(event.target.value); setActivationImpact(null) }}
+          style={{ fontFamily: 'Consolas, Monaco, monospace' }}
+          placeholder='设备选择器 JSON，例如 {"vendor":"H3C"}；{} 表示全部启用设备' />
+        <Space wrap>
+          <Button icon={<EyeOutlined />} loading={previewActivationImpact.isLoading}
+            disabled={!activationSelector.trim()}
+            onClick={() => previewActivationImpact.mutate()}>
+            预览并保存影响证据
+          </Button>
+          <Typography.Text type="secondary">
+            保存影响证据后，右上角“确认激活”才会可用；生产巡检仍会按 Parser 覆盖率单独预检。
+          </Typography.Text>
+        </Space>
+        {activationImpact && <Alert
+          type={activationReady ? 'success' : 'warning'}
+          showIcon
+          message={`影响范围：${activationImpact.matched_device_count} 台设备，${activationImpact.blocked_device_count} 台存在 Parser 风险`}
+          description={`证据${activationImpact.evidence_saved ? '已保存' : '未保存'}；覆盖率 ${(activationImpact.coverage_rate * 100).toFixed(1)}%；就绪命令 ${activationImpact.ready_command_count}/${activationImpact.eligible_command_count}；阻塞命令 ${activationImpact.blocked_command_count}`} />}
+        {activationImpact && <Table rowKey="device_id" size="small"
+          dataSource={activationImpact.rows} columns={impactColumns}
+          pagination={{ pageSize: 10 }} scroll={{ x: 1180 }} />}
+      </Space> : null}
     </Drawer>
   </div>
 }

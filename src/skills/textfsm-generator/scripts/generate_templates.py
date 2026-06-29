@@ -23,6 +23,7 @@ from directory_reader import DirectoryCandidate, TemplateSample, discover_direct
 from input_parser import extract_direct_input, infer_vendor_model
 from llm_generator import call_llm, generate_template_text
 from report_generator import GenerationReport, save_report, save_summary
+from template_synthesizer import expected_min_records, synthesize_template
 from template_validator import ValidationResult, strip_llm_template, validate_template
 
 from src.core.parser.assets import (
@@ -189,6 +190,15 @@ def _prompt_samples(samples: tuple[TemplateSample, ...], limit: int) -> str:
     return "\n\n".join(parts)
 
 
+def _deterministic_template(candidate: Candidate, spec: CategorySpec) -> str | None:
+    synthesized = synthesize_template(
+        command=candidate.command,
+        samples=candidate.samples,
+        spec=spec,
+    )
+    return synthesized.template_text if synthesized else None
+
+
 def _validate_samples(
     template_text: str,
     samples: tuple[TemplateSample, ...],
@@ -205,6 +215,7 @@ def _validate_samples(
             allow_empty=spec.allow_empty,
             empty_patterns=spec.empty_patterns,
             primary_keys=spec.primary_keys,
+            expected_min_records=expected_min_records(sample.output, spec),
         )
         validations.append(result)
         details.append(
@@ -218,9 +229,27 @@ def _validate_samples(
                 "validation_score": result.validation_score,
                 "errors": result.errors,
                 "key_errors": result.key_errors,
+                "completeness_errors": result.completeness_errors,
             }
         )
     return validations, details
+
+
+def _is_non_template_sample(raw_text: str) -> bool:
+    text = (raw_text or "").lower()
+    return len(text.strip()) < 20 or any(
+        marker in text
+        for marker in (
+            "connection timed out",
+            "connection reset",
+            "command execution failed",
+            "ssh connection failed",
+            "output truncated",
+            "invalid command at",
+            "unrecognized command found",
+            "incomplete command found",
+        )
+    )
 
 
 def _regression_samples(candidate: Candidate) -> tuple[TemplateSample, ...]:
@@ -240,6 +269,8 @@ def _regression_samples(candidate: Candidate) -> tuple[TemplateSample, ...]:
             continue
         digest = hashlib.sha256(snapshot.raw_text.encode("utf-8")).hexdigest()
         if digest in existing_hashes:
+            continue
+        if _is_non_template_sample(snapshot.raw_text):
             continue
         existing_hashes.add(digest)
         output.append(
@@ -338,22 +369,33 @@ def _process_candidate(
     previous_errors: list[str] = []
     missing_fields: list[str] = []
     value_errors: list[str] = []
-    for attempt in range(max_retries + 1):
+    synthesized = synthesize_template(
+        command=candidate.command,
+        samples=candidate.samples,
+        spec=spec,
+    )
+    deterministic = synthesized.template_text if synthesized else None
+    attempts = [deterministic] if deterministic else []
+    attempts.extend([None] * (max_retries + 1))
+    for attempt, preset_template in enumerate(attempts):
         retry_count = attempt
-        raw = generate_template_text(
-            vendor=candidate.vendor,
-            model=candidate.model,
-            command=candidate.command,
-            cli_output=_prompt_samples(candidate.samples, max_samples_per_prompt),
-            required_fields=spec.required_fields,
-            optional_fields=spec.optional_fields,
-            primary_keys=spec.primary_keys,
-            previous_template=template_text or None,
-            validation_errors=previous_errors,
-            missing_fields=missing_fields,
-            value_errors=value_errors,
-        )
-        template_text = strip_llm_template(raw)
+        if preset_template:
+            template_text = preset_template
+        else:
+            raw = generate_template_text(
+                vendor=candidate.vendor,
+                model=candidate.model,
+                command=candidate.command,
+                cli_output=_prompt_samples(candidate.samples, max_samples_per_prompt),
+                required_fields=spec.required_fields,
+                optional_fields=spec.optional_fields,
+                primary_keys=spec.primary_keys,
+                previous_template=template_text or None,
+                validation_errors=previous_errors,
+                missing_fields=missing_fields,
+                value_errors=value_errors,
+            )
+            template_text = strip_llm_template(raw)
         validations, sample_results = _validate_samples(
             template_text, validation_candidate.samples, spec
         )
@@ -400,6 +442,7 @@ def _process_candidate(
             "ignore_fields": spec.ignore_fields or [],
             "contract_source": proposal.source,
             "contract_confidence": proposal.confidence,
+            "template_synthesis_strategy": synthesized.strategy if synthesized else "llm",
             "contract_approval_status": "pending",
             "regression_validation": {
                 "passed": pass_rate >= minimum_pass_rate,
@@ -486,7 +529,7 @@ def _process_candidate(
         errors=errors or None,
         parsed_records=all_records or None,
         mode=mode,
-        sample_count=len(candidate.samples),
+        sample_count=len(validation_candidate.samples),
         passed_samples=passed_samples,
         validation_pass_rate=pass_rate,
         sample_results=sample_results,

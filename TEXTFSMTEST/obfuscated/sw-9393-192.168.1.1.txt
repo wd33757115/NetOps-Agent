@@ -1,0 +1,1542 @@
+命令: terminal length 0
+输出:
+Cisco Nexus Operating System (NX-OS) Software
+TAC support: http://www.cisco.com/tac
+Copyright (C) 2002-2019, Cisco and/or its affiliates.
+All rights reserved.
+The copyrights to certain works contained in this software are
+owned by other third parties and used and distributed under their own
+licenses, such as open source.  This software is provided "as is," and unless
+otherwise stated, there is no warranty, express or implied, including but not
+limited to warranties of merchantability and fitness for a particular purpose.
+Certain components of this software are licensed under
+the GNU General Public License (GPL) version 2.0 or 
+GNU General Public License (GPL) version 3.0  or the GNU
+Lesser General Public License (LGPL) Version 2.1 or 
+Lesser General Public License (LGPL) Version 2.0. 
+A copy of each such license is available at
+http://www.opensource.org/licenses/gpl-2.0.php and
+http://opensource.org/licenses/gpl-3.0.html and
+http://www.opensource.org/licenses/lgpl-2.1.php and
+http://www.gnu.org/licenses/old-licenses/library.txt.
+
+sw-9393# 
+
+sw-9393# terminal length 0
+
+--------------------------------------------------
+命令: Show version
+输出:
+Cisco Nexus Operating System (NX-OS) Software
+TAC support: http://www.cisco.com/tac
+Copyright (C) 2002-2019, Cisco and/or its affiliates.
+All rights reserved.
+The copyrights to certain works contained in this software are
+owned by other third parties and used and distributed under their own
+licenses, such as open source.  This software is provided "as is," and unless
+otherwise stated, there is no warranty, express or implied, including but not
+limited to warranties of merchantability and fitness for a particular purpose.
+Certain components of this software are licensed under
+the GNU General Public License (GPL) version 2.0 or 
+GNU General Public License (GPL) version 3.0  or the GNU
+Lesser General Public License (LGPL) Version 2.1 or 
+Lesser General Public License (LGPL) Version 2.0. 
+A copy of each such license is available at
+http://www.opensource.org/licenses/gpl-2.0.php and
+http://opensource.org/licenses/gpl-3.0.html and
+http://www.opensource.org/licenses/lgpl-2.1.php and
+http://www.gnu.org/licenses/old-licenses/library.txt.
+
+Software
+  BIOS: version 05.34
+ NXOS: version 9.2(3)
+  BIOS compile time:  10/24/2018
+  NXOS image file is: bootflash:///nxos.9.2.3.bin
+  NXOS compile time:  2/17/2019 5:00:00 [02/17/2019 23:07:27]
+
+
+Hardware
+  cisco Nexus9000 C93180YC-FX Chassis 
+  Intel(R) Xeon(R) CPU D-1528 @ 1.90GHz with 65808588 kB of memory.
+  Processor Board ID EVE9O5MFT3G
+
+  Device name: sw-9393
+  bootflash:   12503040 kB
+Kernel uptime is 250 day(s), 1 hour(s), 33 minute(s), 26 second(s)
+
+Last reset at 874944 usecs after Sun Oct 19 12:34:26 2025
+  Reason: Module PowerCycled
+  System version: 
+  Service: HW check by card-client
+
+plugin
+  Core Plugin, Ethernet Plugin
+
+Active Package(s):
+        
+
+--------------------------------------------------
+命令: Show clock
+输出:
+14:07:01.740 Beijing Fri Jun 26 2026
+Time source is NTP
+
+--------------------------------------------------
+命令: show module
+输出:
+Mod Ports             Module-Type                       Model          Status
+--- ----- ------------------------------------- --------------------- ---------
+1    54   48x10/25G/32G + 6x40/100G Ethernet/FC N9K-C93180YC-FX       active *  
+
+Mod  Sw                       Hw    Slot
+---  ----------------------- ------ ----
+1    9.2(3)                   1.1    NA  
+
+
+Mod  MAC-Address(es)                         Serial-Num
+---  --------------------------------------  ----------
+1    00-3a-9c-84-12-b0 to 00-3a-9c-84-13-0f  FDO23180PUS
+
+Mod  Online Diag Status
+---  ------------------
+1    Pass
+
+* this terminal session 
+
+--------------------------------------------------
+命令: show inventory
+输出:
+NAME: "Chassis",  DESCR: "Nexus9000 C93180YC-FX Chassis"         
+PID: N9K-C93180YC-FX     ,  VID: V03 ,  SN: EVE9O5MFT3G          
+
+NAME: "Slot 1",  DESCR: "48x10/25G/32G + 6x40/100G Ethernet/FC Module"
+PID: N9K-C93180YC-FX     ,  VID: V03 ,  SN: EVE9O5MFT3G          
+
+NAME: "Power Supply 1",  DESCR: "Nexus9000 C93180YC-FX Chassis Power Supply"
+PID: NXA-PAC-500W-PE     ,  VID: V01 ,  SN: 52SGO2RLPN9          
+
+NAME: "Power Supply 2",  DESCR: "Nexus9000 C93180YC-FX Chassis Power Supply"
+PID: NXA-PAC-500W-PE     ,  VID: V01 ,  SN: 54QX0DIXMIG          
+
+NAME: "Fan 1",  DESCR: "Nexus9000 C93180YC-FX Chassis Fan Module"
+PID: NXA-FAN-30CFM-F     ,  VID: V01 ,  SN: N/A                  
+
+NAME: "Fan 2",  DESCR: "Nexus9000 C93180YC-FX Chassis Fan Module"
+PID: NXA-FAN-30CFM-F     ,  VID: V01 ,  SN: N/A                  
+
+NAME: "Fan 3",  DESCR: "Nexus9000 C93180YC-FX Chassis Fan Module"
+PID: NXA-FAN-30CFM-F     ,  VID: V01 ,  SN: N/A                  
+
+NAME: "Fan 4",  DESCR: "Nexus9000 C93180YC-FX Chassis Fan Module"
+PID: NXA-FAN-30CFM-F     ,  VID: V01 ,  SN: N/A                  
+
+
+--------------------------------------------------
+命令: show environment power
+输出:
+Power Supply:
+Voltage: 12 Volts
+Power                      Actual             Actual        Total
+Supply    Model            Output             Input      Capacity       Status
+                           (Watts )           (Watts )     (Watts )
+-------  ----------  ---------------  ------  ----------  --------------------
+1        NXA-PAC-500W-PE        72 W               82 W       500 W      Ok
+2        NXA-PAC-500W-PE        74 W               90 W       500 W      Ok
+
+
+Power Usage Summary:
+--------------------
+Power Supply redundancy mode (configured)                PS-Redundant
+Power Supply redundancy mode (operational)               PS-Redundant
+
+Total Power Capacity (based on configured mode)             500.00 W
+Total Grid-A (first half of PS slots) Power Capacity        500.00 W
+Total Grid-B (second half of PS slots) Power Capacity       500.00 W
+Total Power of all Inputs (cumulative)                     1000.00 W
+Total Power Output (actual draw)                            146.00 W
+Total Power Input (actual draw)                             173.00 W
+Total Power Allocated (budget)                                N/A   
+Total Power Available for additional modules                  N/A   
+
+
+--------------------------------------------------
+命令: show environment fan
+输出:
+Fan:
+---------------------------------------------------------------------------
+Fan             Model                Hw     Direction       Status
+---------------------------------------------------------------------------
+Fan1(sys_fan1)  NXA-FAN-30CFM-F      --     back-to-front   Ok 
+Fan2(sys_fan2)  NXA-FAN-30CFM-F      --     back-to-front   Ok 
+Fan3(sys_fan3)  NXA-FAN-30CFM-F      --     back-to-front   Ok 
+Fan4(sys_fan4)  NXA-FAN-30CFM-F      --     back-to-front   Ok 
+Fan_in_PS1      --                   --     back-to-front   Ok
+Fan_in_PS2      --                   --     back-to-front   Ok
+Fan Zone Speed: Zone 1: 0xb3
+Fan Air Filter : NotSupported
+
+--------------------------------------------------
+命令: show environment temperature
+输出:
+Temperature:
+--------------------------------------------------------------------
+Module   Sensor        MajorThresh   MinorThres   CurTemp     Status
+                       (Celsius)     (Celsius)    (Celsius)         
+--------------------------------------------------------------------
+1        FRONT           80              70          27         Ok             
+1        BACK            70              42          24         Ok             
+1        CPU             90              80          38         Ok             
+1        Homewood        110             90          44         Ok             
+
+--------------------------------------------------
+命令: show interface transceiver detail
+输出:
+Ethernet1/1
+    transceiver is present
+    type is 1000base-T
+    name is CISCO
+    part number is SBCU-5740ARZ-CS1
+    revision is G3.1
+    serial number is 5MRADZ7Q23B
+    nominal bitrate is 1300 MBit/sec
+    Link length supported for copper is 100 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 30-1475-01
+    cisco product id is GLC-TE
+
+DOM is not supported
+
+Ethernet1/2
+    transceiver is present
+    type is 1000base-T
+    name is CISCO
+    part number is SBCU-5740ARZ-CS1
+    revision is G3.1
+    serial number is B60STNI9205
+    nominal bitrate is 1300 MBit/sec
+    Link length supported for copper is 100 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 30-1475-01
+    cisco product id is GLC-TE
+
+DOM is not supported
+
+Ethernet1/3
+    transceiver is not present
+
+Ethernet1/4
+    transceiver is not present
+
+Ethernet1/5
+    transceiver is not present
+
+Ethernet1/6
+    transceiver is not present
+
+Ethernet1/7
+    transceiver is not present
+
+Ethernet1/8
+    transceiver is not present
+
+Ethernet1/9
+    transceiver is not present
+
+Ethernet1/10
+    transceiver is not present
+
+Ethernet1/11
+    transceiver is present
+    type is 1000base-T
+    name is CISCO
+    part number is SBCU-5740ARZ-CS1
+    revision is G3.1
+    serial number is 3REMW6M0NBM
+    nominal bitrate is 1300 MBit/sec
+    Link length supported for copper is 100 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 30-1475-01
+    cisco product id is GLC-TE
+
+DOM is not supported
+
+Ethernet1/12
+    transceiver is not present
+
+Ethernet1/13
+    transceiver is not present
+
+Ethernet1/14
+    transceiver is not present
+
+Ethernet1/15
+    transceiver is not present
+
+Ethernet1/16
+    transceiver is not present
+
+Ethernet1/17
+    transceiver is present
+    type is 10Gbase-SR
+    name is CISCO-ACCELINK
+    part number is RTXM228-551-C88
+    revision is 1.0
+    serial number is AQXMCIOO5TH
+    nominal bitrate is 10300 MBit/sec
+    Link length supported for 50/125um OM2 fiber is 82 m
+    Link length supported for 62.5/125um fiber is 26 m
+    Link length supported for 50/125um OM3 fiber is 300 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 10-3105-01
+    cisco product id is SFP-10G-SR-S
+
+           SFP Detail Diagnostics Information (internal calibration)
+  ----------------------------------------------------------------------------
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  ----------------------------------------------------------------------------
+  Temperature   32.50 C        75.00 C     -5.00 C     70.00 C        0.00 C
+  Voltage        3.26 V         3.63 V      2.97 V      3.46 V        3.13 V
+  Current        5.77 mA       12.00 mA     1.00 mA    10.50 mA       2.50 mA
+  Tx Power      -2.11 dBm       1.99 dBm  -11.30 dBm   -1.00 dBm     -7.30 dBm
+  Rx Power      -2.38 dBm       1.99 dBm  -13.97 dBm   -1.00 dBm     -9.91 dBm
+  Transmit Fault Count = 0
+  ----------------------------------------------------------------------------
+  Note: ++  high-alarm; +  high-warning; --  low-alarm; -  low-warning
+
+Ethernet1/18
+    transceiver is present
+    type is 10Gbase-SR
+    name is CISCO-ACCELINK
+    part number is RTXM228-551-C88
+    revision is 1.0
+    serial number is 2608SP02PTW
+    nominal bitrate is 10300 MBit/sec
+    Link length supported for 50/125um OM2 fiber is 82 m
+    Link length supported for 62.5/125um fiber is 26 m
+    Link length supported for 50/125um OM3 fiber is 300 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 10-3105-01
+    cisco product id is SFP-10G-SR-S
+
+           SFP Detail Diagnostics Information (internal calibration)
+  ----------------------------------------------------------------------------
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  ----------------------------------------------------------------------------
+  Temperature   33.12 C        75.00 C     -5.00 C     70.00 C        0.00 C
+  Voltage        3.26 V         3.63 V      2.97 V      3.46 V        3.13 V
+  Current        5.22 mA       12.00 mA     1.00 mA    10.50 mA       2.50 mA
+  Tx Power      -2.37 dBm       1.99 dBm  -11.30 dBm   -1.00 dBm     -7.30 dBm
+  Rx Power      -2.41 dBm       1.99 dBm  -13.97 dBm   -1.00 dBm     -9.91 dBm
+  Transmit Fault Count = 0
+  ----------------------------------------------------------------------------
+  Note: ++  high-alarm; +  high-warning; --  low-alarm; -  low-warning
+
+Ethernet1/19
+    transceiver is present
+    type is 10Gbase-SR
+    name is CISCO-AVAGO
+    part number is SFBR-709SMZ-CS2
+    revision is G4.1
+    serial number is AE5DJOUD186
+    nominal bitrate is 10300 MBit/sec
+    Link length supported for 50/125um OM2 fiber is 82 m
+    Link length supported for 62.5/125um fiber is 26 m
+    Link length supported for 50/125um OM3 fiber is 300 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 10-3105-01
+    cisco product id is SFP-10G-SR-S
+
+           SFP Detail Diagnostics Information (internal calibration)
+  ----------------------------------------------------------------------------
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  ----------------------------------------------------------------------------
+  Temperature   32.24 C        75.00 C     -5.00 C     70.00 C        0.00 C
+  Voltage        3.29 V         3.63 V      2.97 V      3.46 V        3.13 V
+  Current        6.62 mA       10.50 mA     2.50 mA    10.50 mA       2.50 mA
+  Tx Power      -2.24 dBm       1.69 dBm  -11.30 dBm   -1.30 dBm     -7.30 dBm
+  Rx Power      -3.20 dBm       1.99 dBm  -13.97 dBm   -1.00 dBm     -9.91 dBm
+  Transmit Fault Count = 0
+  ----------------------------------------------------------------------------
+  Note: ++  high-alarm; +  high-warning; --  low-alarm; -  low-warning
+
+Ethernet1/20
+    transceiver is present
+    type is 10Gbase-SR
+    name is CISCO-ACCELINK
+    part number is RTXM228-551-C88
+    revision is 1.0
+    serial number is JOYS88NVESL
+    nominal bitrate is 10300 MBit/sec
+    Link length supported for 50/125um OM2 fiber is 82 m
+    Link length supported for 62.5/125um fiber is 26 m
+    Link length supported for 50/125um OM3 fiber is 300 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 10-3105-01
+    cisco product id is SFP-10G-SR-S
+
+           SFP Detail Diagnostics Information (internal calibration)
+  ----------------------------------------------------------------------------
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  ----------------------------------------------------------------------------
+  Temperature   33.62 C        75.00 C     -5.00 C     70.00 C        0.00 C
+  Voltage        3.26 V         3.63 V      2.97 V      3.46 V        3.13 V
+  Current        5.77 mA       12.00 mA     1.00 mA    10.50 mA       2.50 mA
+  Tx Power      -2.00 dBm       1.99 dBm  -11.30 dBm   -1.00 dBm     -7.30 dBm
+  Rx Power      -2.13 dBm       1.99 dBm  -13.97 dBm   -1.00 dBm     -9.91 dBm
+  Transmit Fault Count = 0
+  ----------------------------------------------------------------------------
+  Note: ++  high-alarm; +  high-warning; --  low-alarm; -  low-warning
+
+Ethernet1/21
+    transceiver is not present
+
+Ethernet1/22
+    transceiver is not present
+
+Ethernet1/23
+    transceiver is not present
+
+Ethernet1/24
+    transceiver is not present
+
+Ethernet1/25
+    transceiver is not present
+
+Ethernet1/26
+    transceiver is not present
+
+Ethernet1/27
+    transceiver is not present
+
+Ethernet1/28
+    transceiver is not present
+
+Ethernet1/29
+    transceiver is not present
+
+Ethernet1/30
+    transceiver is not present
+
+Ethernet1/31
+    transceiver is not present
+
+Ethernet1/32
+    transceiver is not present
+
+Ethernet1/33
+    transceiver is present
+    type is 1000base-T
+    name is CISCO
+    part number is SBCU-5740ARZ-CS1
+    revision is G3.1
+    serial number is 790GUEIT972
+    nominal bitrate is 1300 MBit/sec
+    Link length supported for copper is 100 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 30-1475-01
+    cisco product id is GLC-TE
+
+DOM is not supported
+
+Ethernet1/34
+    transceiver is not present
+
+Ethernet1/35
+    transceiver is not present
+
+Ethernet1/36
+    transceiver is not present
+
+Ethernet1/37
+    transceiver is not present
+
+Ethernet1/38
+    transceiver is not present
+
+Ethernet1/39
+    transceiver is not present
+
+Ethernet1/40
+    transceiver is not present
+
+Ethernet1/41
+    transceiver is not present
+
+Ethernet1/42
+    transceiver is not present
+
+Ethernet1/43
+    transceiver is not present
+
+Ethernet1/44
+    transceiver is not present
+
+Ethernet1/45
+    transceiver is not present
+
+Ethernet1/46
+    transceiver is not present
+
+Ethernet1/47
+    transceiver is not present
+
+Ethernet1/48
+    transceiver is not present
+
+Ethernet1/49
+    transceiver is present
+    type is QSFP-H40G-AOC15M
+    name is CISCO
+    part number is FCBN410QE2C15-C1
+    revision is D
+    serial number is RIZCSWHL97MTH
+    nominal bitrate is 10300 MBit/sec per channel
+    cisco id is 13
+    cisco extended id number is 16
+    cisco part number is 10-3028-01
+    cisco product id is QSFP-H40G-AOC15M
+
+DOM is not supported
+
+Ethernet1/50
+    transceiver is present
+    type is QSFP-H40G-AOC15M
+    name is CISCO-FINISAR
+    part number is FCBN410QE2C15-C2
+    revision is A
+    serial number is VX2TQIM8UZ90C
+    nominal bitrate is 10300 MBit/sec per channel
+    cisco id is 13
+    cisco extended id number is 16
+    cisco part number is 10-3028-02
+    cisco product id is QSFP-H40G-AOC15M
+
+DOM is not supported
+
+Ethernet1/51
+    transceiver is not present
+
+Ethernet1/52
+    transceiver is not present
+
+Ethernet1/53
+    transceiver is not present
+
+Ethernet1/54
+    transceiver is present
+    type is QSFP-40G-SR-BD
+    name is CISCO-AVAGO
+    part number is AFBR-79EBPZ-CS2
+    revision is 01
+    serial number is 6MUHQXG7XE6
+    nominal bitrate is 20600 MBit/sec per channel
+    Link length supported for 50/125um OM3 fiber is 100 m
+    cisco id is 13
+    cisco extended id number is 220
+    cisco part number is 10-2945-02
+    cisco product id is QSFP-40G-SR-BD
+
+DOM is not supported
+
+
+--------------------------------------------------
+命令: show interface status | include error
+输出:
+
+--------------------------------------------------
+命令: show interface status
+输出:
+
+--------------------------------------------------------------------------------
+Port          Name               Status    Vlan      Duplex  Speed   Type
+--------------------------------------------------------------------------------
+mgmt0         --                 connected routed    full    1000    --         
+
+--------------------------------------------------------------------------------
+Port          Name               Status    Vlan      Duplex  Speed   Type
+--------------------------------------------------------------------------------
+Eth1/1        Connect_to_XA-FOTI connected 952       full    1000    1000base-T 
+Eth1/2        --                 disabled  routed    auto    auto    1000base-T 
+Eth1/3        --                 xcvrAbsen routed    auto    auto    --         
+Eth1/4        --                 xcvrAbsen routed    auto    auto    --         
+Eth1/5        --                 xcvrAbsen routed    auto    auto    --         
+Eth1/6        --                 xcvrAbsen routed    auto    auto    --         
+Eth1/7        --                 xcvrAbsen routed    auto    auto    --         
+Eth1/8        --                 xcvrAbsen routed    auto    auto    --         
+Eth1/9        --                 xcvrAbsen routed    auto    auto    --         
+Eth1/10       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/11       To_XA-FOTIC-WAN-TA connected 1         full    1000    1000base-T 
+Eth1/12       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/13       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/14       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/15       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/16       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/17       To_XA-DMZ-ESXI01_N connected 19        full    10G     10Gbase-SR 
+Eth1/18       To_XA-DMZ-ESXI01_N connected trunk     full    10G     10Gbase-SR 
+Eth1/19       To_XA-DMZ-ESXI02_N connected 19        full    10G     10Gbase-SR 
+Eth1/20       To_XA-DMZ-ESXI02_N connected trunk     full    10G     10Gbase-SR 
+Eth1/21       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/22       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/23       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/24       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/25       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/26       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/27       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/28       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/29       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/30       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/31       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/32       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/33       XA-FOTIC-WAN-Honey connected 16        full    1000    1000base-T 
+Eth1/34       --                 xcvrAbsen 16        auto    auto    --         
+Eth1/35       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/36       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/37       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/38       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/39       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/40       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/41       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/42       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/43       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/44       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/45       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/46       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/47       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/48       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/49       Connect_to_XA-FOTI connected trunk     full    40G     QSFP-H40G-AOC15M
+Eth1/50       Connect_to_XA-FOTI connected trunk     full    40G     QSFP-H40G-AOC15M
+Eth1/51       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/52       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/53       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/54       Connect_to_XA-FOTI connected routed    full    40G     QSFP-40G-SR-BD
+Po330         --                 connected trunk     full    40G     --         
+Lo1           --                 connected routed    auto    auto    --         
+Vlan1         --                 down      routed    auto    auto    --
+Vlan16        --                 connected routed    auto    auto    --
+Vlan17        --                 connected routed    auto    auto    --
+Vlan18        --                 connected routed    auto    auto    --
+Vlan19        --                 connected routed    auto    auto    --
+Vlan952       --                 connected routed    auto    auto    --
+Vlan953       --                 connected routed    auto    auto    --
+
+--------------------------------------------------------------------------------
+Port          Name               Status    Vlan      Duplex  Speed   Type
+--------------------------------------------------------------------------------
+
+--------------------------------------------------
+命令: show system resources
+输出:
+Load average:   1 minute: 0.07   5 minutes: 0.15   15 minutes: 0.14
+Processes   :   668 total, 2 running
+CPU states  :   0.67% user,   0.75% kernel,   98.57% idle
+        CPU0 states  :   1.01% user,   1.01% kernel,   97.97% idle
+        CPU1 states  :   1.00% user,   0.00% kernel,   99.00% idle
+        CPU2 states  :   1.05% user,   0.00% kernel,   98.94% idle
+        CPU3 states  :   0.00% user,   1.04% kernel,   98.95% idle
+        CPU4 states  :   0.00% user,   2.00% kernel,   98.00% idle
+        CPU5 states  :   1.00% user,   1.00% kernel,   98.00% idle
+        CPU6 states  :   0.00% user,   0.00% kernel,   100.00% idle
+        CPU7 states  :   4.00% user,   2.00% kernel,   94.00% idle
+        CPU8 states  :   0.00% user,   0.00% kernel,   100.00% idle
+        CPU9 states  :   0.00% user,   0.00% kernel,   100.00% idle
+        CPU10 states  :   1.00% user,   1.00% kernel,   98.00% idle
+        CPU11 states  :   0.00% user,   1.00% kernel,   99.00% idle
+Memory usage:   65808588K total,   5169984K used,   60638604K free
+Current memory status: OK
+
+--------------------------------------------------
+命令: show debug
+输出:
+
+
+slot  1
+=======
+
+Debug level is set to Detail 
+Debug level is set to Minor(1) 
+
+L2RIB Enabled Debugs:
+ default for new sessions logging level: 3
+
+
+--------------------------------------------------
+命令: show ip interface brief
+输出:
+
+IP Interface Status for VRF "default"(1)
+Interface            IP Address      Interface Status
+Vlan16               192.168.1.1      protocol-up/link-up/admin-up       
+Vlan17               192.168.1.1      protocol-up/link-up/admin-up       
+Vlan18               192.168.1.1      protocol-up/link-up/admin-up       
+Vlan19               192.168.1.1      protocol-up/link-up/admin-up       
+Vlan952              192.168.1.1     protocol-up/link-up/admin-up       
+Vlan953              192.168.1.1       protocol-up/link-up/admin-up       
+Lo1                  192.168.1.1      protocol-up/link-up/admin-up       
+Eth1/54              192.168.1.1      protocol-up/link-up/admin-up       
+
+--------------------------------------------------
+命令: show logging | include %[0-4]
+输出:
+
+--------------------------------------------------
+命令: show switch-profile
+输出:
+
+sw-9393# show switch-profile
+
+--------------------------------------------------
+命令: show vpc
+输出:
+Legend:
+                (*) - local vPC is down, forwarding via vPC peer-link
+
+vPC domain id                     : 330 
+Peer status                       : peer adjacency formed ok      
+vPC keep-alive status             : peer is alive                 
+Configuration consistency status  : success 
+Per-vlan consistency status       : success                       
+Type-2 consistency status         : success 
+vPC role                          : primary                       
+Number of vPCs configured         : 0   
+Peer Gateway                      : Enabled
+Dual-active excluded VLANs        : -
+Graceful Consistency Check        : Enabled
+Auto-recovery status              : Enabled, timer is off.(timeout = 240s)
+Delay-restore status              : Timer is off.(timeout = 360s)
+Delay-restore SVI status          : Timer is off.(timeout = 10s)
+Operational Layer3 Peer-router    : Disabled
+Virtual-peerlink mode             : Disabled
+
+vPC Peer-link status
+---------------------------------------------------------------------
+id    Port   Status Active vlans    
+--    ----   ------ -------------------------------------------------
+1     Po330  up     1,16-19,255,952-953                                                  
+
+--------------------------------------------------
+命令: show running-config
+输出:
+
+!Command: show running-config
+!Running configuration last done at: Thu Jan 15 16:10:25 2026
+!Time: Fri Jun 26 14:07:44 2026
+
+version 9.2(3) Bios:version 05.34 
+hostname sw-9393
+vdc sw-9393 id 1
+  limit-resource vlan minimum 16 maximum 4094
+  limit-resource vrf minimum 2 maximum 4096
+  limit-resource port-channel minimum 0 maximum 511
+  limit-resource u4route-mem minimum 248 maximum 248
+  limit-resource u6route-mem minimum 96 maximum 96
+  limit-resource m4route-mem minimum 58 maximum 58
+  limit-resource m6route-mem minimum 8 maximum 8
+
+cfs eth distribute
+feature ospf
+feature interface-vlan
+feature hsrp
+feature lacp
+feature vpc
+feature lldp
+clock timezone Beijing 8 0
+
+no password strength-check
+username admin password 5 $5$QnKqQM2U$UtrbzL.JHgzrj/7mPaYx58IhtjvAIjoaiGS0z70jn69  role network-admin
+ip domain-lookup
+crypto key param rsa label sw-9393 modulus 512 
+ip access-list Return
+ip access-list Vedge1
+  10 deny ip 192.168.1.1/32 192.168.1.1/32 
+  20 deny ip 192.168.1.1/32 192.168.1.1/32 
+  30 permit ip any any 
+ip access-list edge1
+  10 deny ip 192.168.1.1/32 192.168.1.1/32 
+  20 deny ip 192.168.1.1/32 192.168.1.1/32 
+  30 permit ip any any 
+ip access-list honey
+  8 permit ip 192.168.1.1/24 192.168.1.1/30 
+  9 permit ip 192.168.1.1/24 192.168.1.1/32 
+  10 permit ip 192.168.1.1/24 192.168.1.1/30 
+  15 permit ip 192.168.1.1/24 192.168.1.1/31 
+  16 permit ip 192.168.1.1/24 192.168.1.1/32 
+  17 permit ip 192.168.1.1/24 192.168.1.1/32 
+  20 deny ip 192.168.1.1/24 192.168.1.1/8 
+  25 deny ip 192.168.1.1/24 192.168.1.1/12 
+  30 deny ip 192.168.1.1/24 192.168.1.1/16 
+  100 permit ip any any 
+copp profile strict
+snmp-server user admin network-admin auth md5 0x775da10f8bad233e8f753ce650a03b46 priv 0x775da10f8bad233e8f753ce650a03b46 localizedkey
+snmp-server host 192.168.1.1 traps version 1 F0tic-XA
+snmp-server host 192.168.1.1 source-interface loopback1
+rmon event 1 description FATAL(1) owner PMON@FATAL
+rmon event 2 description CRITICAL(2) owner PMON@CRITICAL
+rmon event 3 description ERROR(3) owner PMON@ERROR
+rmon event 4 description WARNING(4) owner PMON@WARNING
+rmon event 5 description INFORMATION(5) owner PMON@INFO
+snmp-server community F0tic-XA group network-operator
+ntp server 192.168.1.1 use-vrf default
+ntp source-interface  loopback1
+
+ip route 0.0.0.0/0 192.168.1.1
+vlan 1,16-19,255,952-953
+vlan 16
+  name HoneyNet
+vlan 17
+  name DMZ-Pro
+vlan 18
+  name DMZ-Pro1
+vlan 19
+  name DMZ-Pro2
+vlan 255
+  name DMZ-Pro-ShanShiYunGe-Internal
+vlan 952
+  name To-FW
+vlan 953
+  name To-DMZ-PRO-HL
+
+no cdp enable
+route-map Return permit 10
+  match ip address Return 
+vrf context management
+vpc domain 330
+  role priority 1
+  peer-keepalive destination 192.168.1.1 source 192.168.1.1
+  delay restore 360
+  peer-gateway
+  auto-recovery
+  ip arp synchronize
+
+
+interface Vlan1
+  no ip redirects
+  no ipv6 redirects
+
+interface Vlan16
+  no shutdown
+  ip access-group honey in
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  ip ospf passive-interface
+  ip router ospf 100 area 0.0.0.0
+  hsrp version 2
+  hsrp 16 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan17
+  no shutdown
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  ip ospf passive-interface
+  ip router ospf 100 area 0.0.0.0
+  hsrp version 2
+  hsrp 17 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan18
+  no shutdown
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  ip ospf passive-interface
+  ip router ospf 100 area 0.0.0.0
+  hsrp version 2
+  hsrp 18 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan19
+  no shutdown
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  ip ospf passive-interface
+  ip router ospf 100 area 0.0.0.0
+  hsrp version 2
+  hsrp 19 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan952
+  no shutdown
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  ip router ospf 100 area 0.0.0.0
+  hsrp version 2
+  hsrp 952 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan953
+  no shutdown
+  no ip redirects
+  ip address 192.168.1.1/30
+  no ipv6 redirects
+  ip router ospf 100 area 0.0.0.0
+
+interface port-channel330
+  switchport
+  switchport mode trunk
+  spanning-tree port type network
+  vpc peer-link
+
+interface Ethernet1/1
+  description Connect_to_XA-FOTIC-WAN-AC-1_eth0
+  switchport
+  switchport access vlan 952
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/2
+
+interface Ethernet1/3
+
+interface Ethernet1/4
+
+interface Ethernet1/5
+
+interface Ethernet1/6
+
+interface Ethernet1/7
+
+interface Ethernet1/8
+
+interface Ethernet1/9
+
+interface Ethernet1/10
+
+interface Ethernet1/11
+  description To_XA-FOTIC-WAN-TAP-1_X1
+  switchport
+  switchport monitor
+  no shutdown
+
+interface Ethernet1/12
+
+interface Ethernet1/13
+
+interface Ethernet1/14
+
+interface Ethernet1/15
+
+interface Ethernet1/16
+
+interface Ethernet1/17
+  description To_XA-DMZ-ESXI01_NIC1
+  switchport
+  switchport access vlan 19
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/18
+  description To_XA-DMZ-ESXI01_NIC2
+  switchport
+  switchport mode trunk
+  switchport trunk allowed vlan 17-19,255
+  spanning-tree port type edge trunk
+  no shutdown
+
+interface Ethernet1/19
+  description To_XA-DMZ-ESXI02_NIC1
+  switchport
+  switchport access vlan 19
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/20
+  description To_XA-DMZ-ESXI02_NIC2
+  switchport
+  switchport mode trunk
+  switchport trunk allowed vlan 17-19,255
+  spanning-tree port type edge trunk
+  no shutdown
+
+interface Ethernet1/21
+
+interface Ethernet1/22
+
+interface Ethernet1/23
+
+interface Ethernet1/24
+
+interface Ethernet1/25
+
+interface Ethernet1/26
+
+interface Ethernet1/27
+
+interface Ethernet1/28
+
+interface Ethernet1/29
+
+interface Ethernet1/30
+
+interface Ethernet1/31
+
+interface Ethernet1/32
+
+interface Ethernet1/33
+  description XA-FOTIC-WAN-Honey-1_LAN1
+  switchport
+  switchport access vlan 16
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/34
+  switchport
+  switchport access vlan 16
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/35
+
+interface Ethernet1/36
+
+interface Ethernet1/37
+
+interface Ethernet1/38
+
+interface Ethernet1/39
+
+interface Ethernet1/40
+
+interface Ethernet1/41
+
+interface Ethernet1/42
+
+interface Ethernet1/43
+
+interface Ethernet1/44
+
+interface Ethernet1/45
+
+interface Ethernet1/46
+
+interface Ethernet1/47
+
+interface Ethernet1/48
+
+interface Ethernet1/49
+  description Connect_to_XA-FOTIC-DMZ-PRO-N93180-2_E1/49 
+  switchport
+  switchport mode trunk
+  channel-group 330 mode active
+  no shutdown
+
+interface Ethernet1/50
+  description Connect_to_XA-FOTIC-DMZ-PRO-N93180-2_E1/50
+  switchport
+  switchport mode trunk
+  channel-group 330 mode active
+  no shutdown
+
+interface Ethernet1/51
+
+interface Ethernet1/52
+
+interface Ethernet1/53
+
+interface Ethernet1/54
+  description Connect_to_XA-FOTIC-CORE- N9364C-1_Eth1/3
+  ip address 192.168.1.1/30
+  ip router ospf 100 area 0.0.0.0
+  no shutdown
+
+interface mgmt0
+  vrf member management
+  ip address 192.168.1.1/25
+
+interface loopback1
+  ip address 192.168.1.1/32
+  ip router ospf 100 area 0.0.0.0
+line console
+line vty
+boot nxos bootflash:/nxos.9.2.3.bin 
+router ospf 100
+  router-id 192.168.1.1
+  default-information originate always
+  redistribute static route-map Return
+monitor session 1 
+  source interface Ethernet1/1 both
+  destination interface Ethernet1/11
+  no shut
+
+logging server 192.168.1.1 6
+logging server 192.168.1.1 6
+logging source-interface loopback1
+logging origin-id hostname
+
+
+
+--------------------------------------------------
+命令: show startup-config
+输出:
+
+!Command: show startup-config
+!Time: Fri Jun 26 14:07:46 2026
+!Startup config saved at: Thu Jan 15 16:10:50 2026
+
+version 9.2(3) Bios:version 05.34 
+hostname sw-9393
+vdc sw-9393 id 1
+  limit-resource vlan minimum 16 maximum 4094
+  limit-resource vrf minimum 2 maximum 4096
+  limit-resource port-channel minimum 0 maximum 511
+  limit-resource u4route-mem minimum 248 maximum 248
+  limit-resource u6route-mem minimum 96 maximum 96
+  limit-resource m4route-mem minimum 58 maximum 58
+  limit-resource m6route-mem minimum 8 maximum 8
+
+cfs eth distribute
+feature ospf
+feature interface-vlan
+feature hsrp
+feature lacp
+feature vpc
+feature lldp
+clock timezone Beijing 8 0
+
+no password strength-check
+username admin password 5 $5$QnKqQM2U$UtrbzL.JHgzrj/7mPaYx58IhtjvAIjoaiGS0z70jn69  role network-admin
+ip domain-lookup
+crypto key param rsa label sw-9393 modulus 512 
+ip access-list Return
+ip access-list Vedge1
+  10 deny ip 192.168.1.1/32 192.168.1.1/32 
+  20 deny ip 192.168.1.1/32 192.168.1.1/32 
+  30 permit ip any any 
+ip access-list edge1
+  10 deny ip 192.168.1.1/32 192.168.1.1/32 
+  20 deny ip 192.168.1.1/32 192.168.1.1/32 
+  30 permit ip any any 
+ip access-list honey
+  8 permit ip 192.168.1.1/24 192.168.1.1/30 
+  9 permit ip 192.168.1.1/24 192.168.1.1/32 
+  10 permit ip 192.168.1.1/24 192.168.1.1/30 
+  15 permit ip 192.168.1.1/24 192.168.1.1/31 
+  16 permit ip 192.168.1.1/24 192.168.1.1/32 
+  17 permit ip 192.168.1.1/24 192.168.1.1/32 
+  20 deny ip 192.168.1.1/24 192.168.1.1/8 
+  25 deny ip 192.168.1.1/24 192.168.1.1/12 
+  30 deny ip 192.168.1.1/24 192.168.1.1/16 
+  100 permit ip any any 
+copp profile strict
+snmp-server user admin network-admin auth md5 0x775da10f8bad233e8f753ce650a03b46 priv 0x775da10f8bad233e8f753ce650a03b46 localizedkey
+snmp-server host 192.168.1.1 traps version 1 F0tic-XA
+snmp-server host 192.168.1.1 source-interface loopback1
+rmon event 1 description FATAL(1) owner PMON@FATAL
+rmon event 2 description CRITICAL(2) owner PMON@CRITICAL
+rmon event 3 description ERROR(3) owner PMON@ERROR
+rmon event 4 description WARNING(4) owner PMON@WARNING
+rmon event 5 description INFORMATION(5) owner PMON@INFO
+snmp-server community F0tic-XA group network-operator
+ntp server 192.168.1.1 use-vrf default
+ntp source-interface  loopback1
+
+ip route 0.0.0.0/0 192.168.1.1
+vlan 1,16-19,255,952-953
+vlan 16
+  name HoneyNet
+vlan 17
+  name DMZ-Pro
+vlan 18
+  name DMZ-Pro1
+vlan 19
+  name DMZ-Pro2
+vlan 255
+  name DMZ-Pro-ShanShiYunGe-Internal
+vlan 952
+  name To-FW
+vlan 953
+  name To-DMZ-PRO-HL
+
+no cdp enable
+route-map Return permit 10
+  match ip address Return 
+vrf context management
+vpc domain 330
+  role priority 1
+  peer-keepalive destination 192.168.1.1 source 192.168.1.1
+  delay restore 360
+  peer-gateway
+  auto-recovery
+  ip arp synchronize
+
+
+interface Vlan1
+  no ip redirects
+  no ipv6 redirects
+
+interface Vlan16
+  no shutdown
+  ip access-group honey in
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  ip ospf passive-interface
+  ip router ospf 100 area 0.0.0.0
+  hsrp version 2
+  hsrp 16 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan17
+  no shutdown
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  ip ospf passive-interface
+  ip router ospf 100 area 0.0.0.0
+  hsrp version 2
+  hsrp 17 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan18
+  no shutdown
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  ip ospf passive-interface
+  ip router ospf 100 area 0.0.0.0
+  hsrp version 2
+  hsrp 18 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan19
+  no shutdown
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  ip ospf passive-interface
+  ip router ospf 100 area 0.0.0.0
+  hsrp version 2
+  hsrp 19 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan952
+  no shutdown
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  ip router ospf 100 area 0.0.0.0
+  hsrp version 2
+  hsrp 952 
+    preempt 
+    priority 105
+    ip 192.168.1.1
+
+interface Vlan953
+  no shutdown
+  no ip redirects
+  ip address 192.168.1.1/30
+  no ipv6 redirects
+  ip router ospf 100 area 0.0.0.0
+
+interface port-channel330
+  switchport
+  switchport mode trunk
+  spanning-tree port type network
+  vpc peer-link
+
+interface Ethernet1/1
+  description Connect_to_XA-FOTIC-WAN-AC-1_eth0
+  switchport
+  switchport access vlan 952
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/2
+
+interface Ethernet1/3
+
+interface Ethernet1/4
+
+interface Ethernet1/5
+
+interface Ethernet1/6
+
+interface Ethernet1/7
+
+interface Ethernet1/8
+
+interface Ethernet1/9
+
+interface Ethernet1/10
+
+interface Ethernet1/11
+  description To_XA-FOTIC-WAN-TAP-1_X1
+  switchport
+  switchport monitor
+  no shutdown
+
+interface Ethernet1/12
+
+interface Ethernet1/13
+
+interface Ethernet1/14
+
+interface Ethernet1/15
+
+interface Ethernet1/16
+
+interface Ethernet1/17
+  description To_XA-DMZ-ESXI01_NIC1
+  switchport
+  switchport access vlan 19
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/18
+  description To_XA-DMZ-ESXI01_NIC2
+  switchport
+  switchport mode trunk
+  switchport trunk allowed vlan 17-19,255
+  spanning-tree port type edge trunk
+  no shutdown
+
+interface Ethernet1/19
+  description To_XA-DMZ-ESXI02_NIC1
+  switchport
+  switchport access vlan 19
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/20
+  description To_XA-DMZ-ESXI02_NIC2
+  switchport
+  switchport mode trunk
+  switchport trunk allowed vlan 17-19,255
+  spanning-tree port type edge trunk
+  no shutdown
+
+interface Ethernet1/21
+
+interface Ethernet1/22
+
+interface Ethernet1/23
+
+interface Ethernet1/24
+
+interface Ethernet1/25
+
+interface Ethernet1/26
+
+interface Ethernet1/27
+
+interface Ethernet1/28
+
+interface Ethernet1/29
+
+interface Ethernet1/30
+
+interface Ethernet1/31
+
+interface Ethernet1/32
+
+interface Ethernet1/33
+  description XA-FOTIC-WAN-Honey-1_LAN1
+  switchport
+  switchport access vlan 16
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/34
+  switchport
+  switchport access vlan 16
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/35
+
+interface Ethernet1/36
+
+interface Ethernet1/37
+
+interface Ethernet1/38
+
+interface Ethernet1/39
+
+interface Ethernet1/40
+
+interface Ethernet1/41
+
+interface Ethernet1/42
+
+interface Ethernet1/43
+
+interface Ethernet1/44
+
+interface Ethernet1/45
+
+interface Ethernet1/46
+
+interface Ethernet1/47
+
+interface Ethernet1/48
+
+interface Ethernet1/49
+  description Connect_to_XA-FOTIC-DMZ-PRO-N93180-2_E1/49 
+  switchport
+  switchport mode trunk
+  channel-group 330 mode active
+  no shutdown
+
+interface Ethernet1/50
+  description Connect_to_XA-FOTIC-DMZ-PRO-N93180-2_E1/50
+  switchport
+  switchport mode trunk
+  channel-group 330 mode active
+  no shutdown
+
+interface Ethernet1/51
+
+interface Ethernet1/52
+
+interface Ethernet1/53
+
+interface Ethernet1/54
+  description Connect_to_XA-FOTIC-CORE- N9364C-1_Eth1/3
+  ip address 192.168.1.1/30
+  ip router ospf 100 area 0.0.0.0
+  no shutdown
+
+interface mgmt0
+  vrf member management
+  ip address 192.168.1.1/25
+
+interface loopback1
+  ip address 192.168.1.1/32
+  ip router ospf 100 area 0.0.0.0
+line console
+line vty
+boot nxos bootflash:/nxos.9.2.3.bin 
+router ospf 100
+  router-id 192.168.1.1
+  default-information originate always
+  redistribute static route-map Return
+monitor session 1 
+  source interface Ethernet1/1 both
+  destination interface Ethernet1/11
+  no shut
+
+logging server 192.168.1.1 6
+logging server 192.168.1.1 6
+logging source-interface loopback1
+logging origin-id hostname
+
+
+
+--------------------------------------------------
+命令: show ip arp
+输出:
+
+Flags: * - Adjacencies learnt on non-active FHRP router
+       + - Adjacencies synced via CFSoE
+       # - Adjacencies Throttled for Glean
+       CP - Added via L2RIB, Control plane Adjacencies
+       PS - Added via L2RIB, Peer Sync
+       RO - Re-Originated Peer Sync Entry
+       D - Static Adjacencies attached to down interface
+
+IP ARP Table for context default
+Total number of entries: 25
+Address         Age       MAC Address     Interface       Flags
+192.168.1.1      00:06:12  003a.9c85.3c27  Vlan953         
+192.168.1.1     0.611234  0000.5e00.0179  Vlan952         
+192.168.1.1     00:00:28  003a.9c85.3c27  Vlan952         
+192.168.1.1      00:14:14  003a.9c85.3c27  Vlan19          
+192.168.1.1     00:05:45  0050.56a0.50df  Vlan19          
+192.168.1.1     00:06:39  6805.ca9e.6f64  Vlan19          
+192.168.1.1     00:02:10  6805.ca9e.73fc  Vlan19          
+192.168.1.1     00:10:11  0050.5687.f7bc  Vlan19          + 
+192.168.1.1     00:15:02  0050.56a0.5de6  Vlan19          + 
+192.168.1.1      00:02:51  003a.9c85.3c27  Vlan18          
+192.168.1.1      00:13:06  003a.9c85.3c27  Vlan17          
+192.168.1.1     00:05:17  0050.5687.d701  Vlan17          + 
+192.168.1.1     00:05:20  0050.5687.963e  Vlan17          + 
+192.168.1.1     00:05:10  0050.5687.1974  Vlan17          + 
+192.168.1.1     00:04:41  0050.56a0.d484  Vlan17          
+192.168.1.1     00:10:15  0050.56a0.fc4c  Vlan17          + 
+192.168.1.1     00:05:07  0050.56a0.9242  Vlan17          + 
+192.168.1.1     00:05:14  0050.56a0.4db0  Vlan17          + 
+192.168.1.1      00:04:22  003a.9c85.3c27  Vlan16          
+192.168.1.1      00:17:49  706d.156f.c987  Ethernet1/54    
+192.168.1.1        -      0000.0c9f.f3b8  Vlan952         
+192.168.1.1         -      0000.0c9f.f013  Vlan19          
+192.168.1.1         -      0000.0c9f.f012  Vlan18          
+192.168.1.1         -      0000.0c9f.f011  Vlan17          
+192.168.1.1         -      0000.0c9f.f010  Vlan16          
+
+--------------------------------------------------
+命令: show mac address-table
+输出:
+Legend: 
+        * - primary entry, G - Gateway MAC, (R) - Routed MAC, O - Overlay MAC
+        age - seconds since last seen,+ - primary entry using vPC Peer-Link,
+        (T) - True, (F) - False, C - ControlPlane MAC, ~ - vsan
+   VLAN     MAC Address      Type      age     Secure NTFY Ports
+---------+-----------------+--------+---------+------+----+------------------
+*   17     0050.5687.963e   dynamic  0         F      F    Eth1/18
+*   17     0050.5687.d701   dynamic  0         F      F    Eth1/18
+*   17     0050.56a0.9242   dynamic  0         F      F    Eth1/18
+*   19     0050.5687.f7bc   dynamic  0         F      F    Eth1/18
+*   19     0050.56a0.50df   dynamic  0         F      F    Eth1/17
+*  255     0050.56a0.6a72   dynamic  0         F      F    Eth1/18
+*  952     0000.5e00.0179   dynamic  0         F      F    Eth1/1
++   17     0050.5687.1974   dynamic  0         F      F    vPC Peer-Link
++   17     0050.56a0.4db0   dynamic  0         F      F    vPC Peer-Link
++   17     0050.56a0.d484   dynamic  0         F      F    vPC Peer-Link
++   17     0050.56a0.fc4c   dynamic  0         F      F    vPC Peer-Link
++   19     0050.56a0.5de6   dynamic  0         F      F    vPC Peer-Link
++   19     6805.ca9e.6f64   dynamic  0         F      F    vPC Peer-Link
++   19     6805.ca9e.73fc   dynamic  0         F      F    vPC Peer-Link
++  255     0050.56a0.d8af   dynamic  0         F      F    vPC Peer-Link
+G   16     0000.0c9f.f010   static   -         F      F    sup-eth1(R)
+G   17     0000.0c9f.f011   static   -         F      F    sup-eth1(R)
+G   18     0000.0c9f.f012   static   -         F      F    sup-eth1(R)
+G   19     0000.0c9f.f013   static   -         F      F    sup-eth1(R)
+G  952     0000.0c9f.f3b8   static   -         F      F    sup-eth1(R)
+G    -     003a.9c84.12b7   static   -         F      F    sup-eth1(R)
+G   16     003a.9c84.12b7   static   -         F      F    sup-eth1(R)
+G   17     003a.9c84.12b7   static   -         F      F    sup-eth1(R)
+G   18     003a.9c84.12b7   static   -         F      F    sup-eth1(R)
+G   19     003a.9c84.12b7   static   -         F      F    sup-eth1(R)
+G  952     003a.9c84.12b7   static   -         F      F    sup-eth1(R)
+G  953     003a.9c84.12b7   static   -         F      F    sup-eth1(R)
+G   16     003a.9c85.3c27   static   -         F      F    vPC Peer-Link(R)
+G   17     003a.9c85.3c27   static   -         F      F    vPC Peer-Link(R)
+G   18     003a.9c85.3c27   static   -         F      F    vPC Peer-Link(R)
+G   19     003a.9c85.3c27   static   -         F      F    vPC Peer-Link(R)
+G  952     003a.9c85.3c27   static   -         F      F    vPC Peer-Link(R)
+G  953     003a.9c85.3c27   static   -         F      F    vPC Peer-Link(R)
+
+--------------------------------------------------

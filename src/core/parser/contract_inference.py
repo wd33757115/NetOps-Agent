@@ -53,7 +53,7 @@ SEMANTIC_RULES: tuple[tuple[re.Pattern[str], ContractProposal], ...] = (
     (
         re.compile(r"\b(?:inventory|manuinfo)$"),
         ContractProposal(
-            "inventory", "inventory_component", ("component", "serial"),
+            "inventory", "inventory_component", ("component",),
             ("component", "name"), ("pid", "serial", "vendor"),
         ),
     ),
@@ -129,7 +129,8 @@ SEMANTIC_RULES: tuple[tuple[re.Pattern[str], ContractProposal], ...] = (
         re.compile(r"\b(?:environment|environment temperature|env all)$"),
         ContractProposal(
             "environment", "environment_sensor", ("component", "location"),
-            ("component", "location", "state"), ("reading", "unit"),
+            ("component", "location", "state"),
+            ("reading", "unit", "warning_threshold", "minor_threshold"),
         ),
     ),
     (
@@ -171,6 +172,134 @@ def infer_contract(
     llm_call: Callable[[str], str] | None = None,
 ) -> ContractProposal:
     normalized = " ".join(command.lower().split())
+    if re.search(r"\b(?:environment|env) fan$", normalized):
+        return ContractProposal(
+            "fan",
+            "fan",
+            ("fan",),
+            ("fan", "state"),
+            ("slot", "speed", "direction", "model"),
+        )
+    if re.search(r"\b(?:environment|env) power$", normalized):
+        return ContractProposal(
+            "power",
+            "power_supply",
+            ("power_supply",),
+            ("power_supply", "state"),
+            ("slot", "model", "output_watts", "input_watts", "capacity_watts"),
+        )
+    if normalized == "display device manuinfo":
+        return ContractProposal(
+            "inventory",
+            "inventory_component",
+            ("component", "serial"),
+            ("component", "name", "serial"),
+            ("pid", "vendor", "mac_address", "manufacturing_date"),
+        )
+    if normalized == "display memory":
+        return ContractProposal(
+            "memory",
+            "memory",
+            ("slot",),
+            ("slot", "total", "used", "free"),
+            ("shared", "buffers", "cached", "free_ratio"),
+            validators={"free_ratio": {"type": "percent"}},
+        )
+    if normalized == "display power":
+        if re.search(r"(?mi)^\s*Slot\s+\S+\s*:", samples_text or ""):
+            return ContractProposal(
+                "power",
+                "power_supply",
+                ("slot", "power_supply"),
+                ("slot", "power_supply", "state"),
+                ("mode", "current", "voltage", "power", "fan_direction", "model"),
+            )
+        return ContractProposal(
+            "power",
+            "power_supply",
+            ("power_supply",),
+            ("power_supply", "state"),
+            ("slot", "mode", "current", "voltage", "power", "fan_direction", "model"),
+        )
+    if normalized == "display environment":
+        if re.search(r"(?mi)^\s*Slot\s+Subslot\s+Sensor\s+ID\s+Temperature", samples_text or ""):
+            return ContractProposal(
+                "environment",
+                "environment_sensor",
+                ("component", "subslot", "location", "sensor_id"),
+                ("component", "subslot", "location", "sensor_id", "reading"),
+                ("lower_threshold", "warning_threshold", "alarm_threshold", "state", "unit"),
+            )
+        return ContractProposal(
+            "environment",
+            "environment_sensor",
+            ("component", "location"),
+            ("component", "location", "reading"),
+            ("lower_threshold", "warning_threshold", "alarm_threshold", "shutdown_threshold", "state", "unit"),
+        )
+    if normalized == "display irf":
+        return ContractProposal(
+            "redundancy",
+            "redundancy_member",
+            ("member",),
+            ("member", "role"),
+            ("state", "priority", "cpu_mac", "description"),
+            allow_empty=True,
+            empty_patterns=(r"(?i)(?:not configured|incomplete command|unrecognized command)",),
+        )
+    if normalized == "display m-lag system":
+        return ContractProposal(
+            "redundancy",
+            "redundancy_member",
+            ("member",),
+            ("member", "state"),
+            ("role", "peer", "priority", "description"),
+            allow_empty=True,
+            empty_patterns=(r"(?i)(?:m-lag is not configured|not configured)",),
+        )
+    if re.search(r"\bsystem resources$", normalized):
+        return ContractProposal(
+            "system_resources",
+            "system_resource",
+            (),
+            ("cpu_idle", "total", "used", "free"),
+            (
+                "cpu_user",
+                "cpu_kernel",
+                "load_1m",
+                "load_5m",
+                "load_15m",
+                "process_total",
+                "process_running",
+                "memory_status",
+            ),
+            validators={
+                "cpu_user": {"type": "percent"},
+                "cpu_kernel": {"type": "percent"},
+                "cpu_idle": {"type": "percent"},
+            },
+        )
+    if re.search(r"\bvpc$", normalized):
+        return ContractProposal(
+            "redundancy",
+            "redundancy_member",
+            ("member", "peer"),
+            ("member", "peer", "state"),
+            ("role", "consistency", "reason", "priority", "description"),
+            allow_empty=True,
+            empty_patterns=(r"(?i)(?:not configured|no vpc)",),
+        )
+    if re.search(r"\bfan$", normalized):
+        if re.search(
+            r"(?mi)^\s*Index\s+Status\s+Speedlevel\b", samples_text or ""
+        ) and not re.search(r"(?mi)^\s*Slot\s+\S+\s*:", samples_text or ""):
+            return ContractProposal(
+                "fan",
+                "fan",
+                ("fan",),
+                ("fan", "state"),
+                ("speed", "slot", "direction", "model"),
+            )
     for pattern, proposal in SEMANTIC_RULES:
         if pattern.search(normalized):
             return proposal

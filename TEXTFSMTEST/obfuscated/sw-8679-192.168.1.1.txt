@@ -1,0 +1,1366 @@
+命令: terminal length 0
+输出:
+Cisco Nexus Operating System (NX-OS) Software
+TAC support: http://www.cisco.com/tac
+Copyright (C) 2002-2019, Cisco and/or its affiliates.
+All rights reserved.
+The copyrights to certain works contained in this software are
+owned by other third parties and used and distributed under their own
+licenses, such as open source.  This software is provided "as is," and unless
+otherwise stated, there is no warranty, express or implied, including but not
+limited to warranties of merchantability and fitness for a particular purpose.
+Certain components of this software are licensed under
+the GNU General Public License (GPL) version 2.0 or 
+GNU General Public License (GPL) version 3.0  or the GNU
+Lesser General Public License (LGPL) Version 2.1 or 
+Lesser General Public License (LGPL) Version 2.0. 
+A copy of each such license is available at
+http://www.opensource.org/licenses/gpl-2.0.php and
+http://opensource.org/licenses/gpl-3.0.html and
+http://www.opensource.org/licenses/lgpl-2.1.php and
+http://www.gnu.org/licenses/old-licenses/library.txt.
+
+sw-8679# 
+
+sw-8679# terminal length 0
+
+--------------------------------------------------
+命令: Show version
+输出:
+Cisco Nexus Operating System (NX-OS) Software
+TAC support: http://www.cisco.com/tac
+Copyright (C) 2002-2019, Cisco and/or its affiliates.
+All rights reserved.
+The copyrights to certain works contained in this software are
+owned by other third parties and used and distributed under their own
+licenses, such as open source.  This software is provided "as is," and unless
+otherwise stated, there is no warranty, express or implied, including but not
+limited to warranties of merchantability and fitness for a particular purpose.
+Certain components of this software are licensed under
+the GNU General Public License (GPL) version 2.0 or 
+GNU General Public License (GPL) version 3.0  or the GNU
+Lesser General Public License (LGPL) Version 2.1 or 
+Lesser General Public License (LGPL) Version 2.0. 
+A copy of each such license is available at
+http://www.opensource.org/licenses/gpl-2.0.php and
+http://opensource.org/licenses/gpl-3.0.html and
+http://www.opensource.org/licenses/lgpl-2.1.php and
+http://www.gnu.org/licenses/old-licenses/library.txt.
+
+Software
+  BIOS: version 05.33
+ NXOS: version 9.2(3)
+  BIOS compile time:  09/08/2018
+  NXOS image file is: bootflash:///nxos.9.2.3.bin
+  NXOS compile time:  2/17/2019 5:00:00 [02/17/2019 23:07:27]
+
+
+Hardware
+  cisco Nexus9000 C93180YC-FX Chassis 
+  Intel(R) Xeon(R) CPU D-1528 @ 1.90GHz with 65808592 kB of memory.
+  Processor Board ID Z2LAELJ4N7W
+
+  Device name: sw-8679
+  bootflash:  115805356 kB
+Kernel uptime is 250 day(s), 1 hour(s), 34 minute(s), 11 second(s)
+
+Last reset at 386815 usecs after Sun Oct 19 12:33:41 2025
+  Reason: Module PowerCycled
+  System version: 
+  Service: HW check by card-client
+
+plugin
+  Core Plugin, Ethernet Plugin
+
+Active Package(s):
+        nxos.CSCvo71854-n9k_ALL-1.0.0-9.2.3.lib32_n9000
+        
+
+--------------------------------------------------
+命令: Show clock
+输出:
+14:07:04.694 GMT Fri Jun 26 2026
+Time source is NTP
+
+--------------------------------------------------
+命令: show module
+输出:
+Mod Ports             Module-Type                       Model          Status
+--- ----- ------------------------------------- --------------------- ---------
+1    54   48x10/25G/32G + 6x40/100G Ethernet/FC N9K-C93180YC-FX       active *  
+
+Mod  Sw                       Hw    Slot
+---  ----------------------- ------ ----
+1    9.2(3)                   1.1    NA  
+
+
+Mod  MAC-Address(es)                         Serial-Num
+---  --------------------------------------  ----------
+1    00-3a-9c-85-2a-20 to 00-3a-9c-85-2a-7f  FDO23180Z91
+
+Mod  Online Diag Status
+---  ------------------
+1    Pass
+
+* this terminal session 
+
+--------------------------------------------------
+命令: show inventory
+输出:
+NAME: "Chassis",  DESCR: "Nexus9000 C93180YC-FX Chassis"         
+PID: N9K-C93180YC-FX     ,  VID: V03 ,  SN: Z2LAELJ4N7W          
+
+NAME: "Slot 1",  DESCR: "48x10/25G/32G + 6x40/100G Ethernet/FC Module"
+PID: N9K-C93180YC-FX     ,  VID: V03 ,  SN: Z2LAELJ4N7W          
+
+NAME: "Power Supply 1",  DESCR: "Nexus9000 C93180YC-FX Chassis Power Supply"
+PID: NXA-PAC-500W-PE     ,  VID: V01 ,  SN: R7YMIRZKJ0A          
+
+NAME: "Power Supply 2",  DESCR: "Nexus9000 C93180YC-FX Chassis Power Supply"
+PID: NXA-PAC-500W-PE     ,  VID: V01 ,  SN: FUKN9J2BAW3          
+
+NAME: "Fan 1",  DESCR: "Nexus9000 C93180YC-FX Chassis Fan Module"
+PID: NXA-FAN-30CFM-F     ,  VID: V01 ,  SN: N/A                  
+
+NAME: "Fan 2",  DESCR: "Nexus9000 C93180YC-FX Chassis Fan Module"
+PID: NXA-FAN-30CFM-F     ,  VID: V01 ,  SN: N/A                  
+
+NAME: "Fan 3",  DESCR: "Nexus9000 C93180YC-FX Chassis Fan Module"
+PID: NXA-FAN-30CFM-F     ,  VID: V01 ,  SN: N/A                  
+
+NAME: "Fan 4",  DESCR: "Nexus9000 C93180YC-FX Chassis Fan Module"
+PID: NXA-FAN-30CFM-F     ,  VID: V01 ,  SN: N/A                  
+
+
+--------------------------------------------------
+命令: show environment power
+输出:
+Power Supply:
+Voltage: 12 Volts
+Power                      Actual             Actual        Total
+Supply    Model            Output             Input      Capacity       Status
+                           (Watts )           (Watts )     (Watts )
+-------  ----------  ---------------  ------  ----------  --------------------
+1        NXA-PAC-500W-PE        72 W               85 W       500 W      Ok
+2        NXA-PAC-500W-PE        73 W               89 W       500 W      Ok
+
+
+Power Usage Summary:
+--------------------
+Power Supply redundancy mode (configured)                PS-Redundant
+Power Supply redundancy mode (operational)               PS-Redundant
+
+Total Power Capacity (based on configured mode)             500.00 W
+Total Grid-A (first half of PS slots) Power Capacity        500.00 W
+Total Grid-B (second half of PS slots) Power Capacity       500.00 W
+Total Power of all Inputs (cumulative)                     1000.00 W
+Total Power Output (actual draw)                            146.00 W
+Total Power Input (actual draw)                             174.00 W
+Total Power Allocated (budget)                                N/A   
+Total Power Available for additional modules                  N/A   
+
+
+--------------------------------------------------
+命令: show environment fan
+输出:
+Fan:
+---------------------------------------------------------------------------
+Fan             Model                Hw     Direction       Status
+---------------------------------------------------------------------------
+Fan1(sys_fan1)  NXA-FAN-30CFM-F      --     back-to-front   Ok 
+Fan2(sys_fan2)  NXA-FAN-30CFM-F      --     back-to-front   Ok 
+Fan3(sys_fan3)  NXA-FAN-30CFM-F      --     back-to-front   Ok 
+Fan4(sys_fan4)  NXA-FAN-30CFM-F      --     back-to-front   Ok 
+Fan_in_PS1      --                   --     back-to-front   Ok
+Fan_in_PS2      --                   --     back-to-front   Ok
+Fan Zone Speed: Zone 1: 0xb3
+Fan Air Filter : NotSupported
+
+--------------------------------------------------
+命令: show environment temperature
+输出:
+Temperature:
+--------------------------------------------------------------------
+Module   Sensor        MajorThresh   MinorThres   CurTemp     Status
+                       (Celsius)     (Celsius)    (Celsius)         
+--------------------------------------------------------------------
+1        FRONT           80              70          27         Ok             
+1        BACK            70              42          24         Ok             
+1        CPU             90              80          39         Ok             
+1        Homewood        110             90          41         Ok             
+
+--------------------------------------------------
+命令: show interface transceiver detail
+输出:
+Ethernet1/1
+    transceiver is present
+    type is 1000base-T
+    name is CISCO
+    part number is SBCU-5740ARZ-CS1
+    revision is G3.1
+    serial number is LXA6LIMOZAE
+    nominal bitrate is 1300 MBit/sec
+    Link length supported for copper is 100 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 30-1475-01
+    cisco product id is GLC-TE
+
+DOM is not supported
+
+Ethernet1/2
+    transceiver is present
+    type is 1000base-T
+    name is CISCO
+    part number is SBCU-5740ARZ-CS1
+    revision is G3.1
+    serial number is LSWTBK7JP83
+    nominal bitrate is 1300 MBit/sec
+    Link length supported for copper is 100 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 30-1475-01
+    cisco product id is GLC-TE
+
+DOM is not supported
+
+Ethernet1/3
+    transceiver is not present
+
+Ethernet1/4
+    transceiver is not present
+
+Ethernet1/5
+    transceiver is not present
+
+Ethernet1/6
+    transceiver is not present
+
+Ethernet1/7
+    transceiver is not present
+
+Ethernet1/8
+    transceiver is not present
+
+Ethernet1/9
+    transceiver is not present
+
+Ethernet1/10
+    transceiver is not present
+
+Ethernet1/11
+    transceiver is not present
+
+Ethernet1/12
+    transceiver is not present
+
+Ethernet1/13
+    transceiver is present
+    type is 1000base-T
+    name is CISCO
+    part number is SBCU-5740ARZ-CS1
+    revision is G3.1
+    serial number is 45CYTEBTDAQ
+    nominal bitrate is 1300 MBit/sec
+    Link length supported for copper is 100 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 30-1475-01
+    cisco product id is GLC-TE
+
+DOM is not supported
+
+Ethernet1/14
+    transceiver is not present
+
+Ethernet1/15
+    transceiver is not present
+
+Ethernet1/16
+    transceiver is not present
+
+Ethernet1/17
+    transceiver is not present
+
+Ethernet1/18
+    transceiver is present
+    type is 1000base-T
+    name is CISCO
+    part number is SBCU-5740ARZ-CS1
+    revision is G3.1
+    serial number is 3QYD1PYFRBG
+    nominal bitrate is 1300 MBit/sec
+    Link length supported for copper is 100 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 30-1475-01
+    cisco product id is GLC-TE
+
+DOM is not supported
+
+Ethernet1/19
+    transceiver is present
+    type is 1000base-T
+    name is CISCO
+    part number is SBCU-5740ARZ-CS1
+    revision is G3.1
+    serial number is XDJX4MNQ10A
+    nominal bitrate is 1300 MBit/sec
+    Link length supported for copper is 100 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 30-1475-01
+    cisco product id is GLC-TE
+
+DOM is not supported
+
+Ethernet1/20
+    transceiver is present
+    type is 1000base-T
+    name is CISCO
+    part number is SBCU-5740ARZ-CS1
+    revision is G3.1
+    serial number is GXYQFCPN14H
+    nominal bitrate is 1300 MBit/sec
+    Link length supported for copper is 100 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 30-1475-01
+    cisco product id is GLC-TE
+
+DOM is not supported
+
+Ethernet1/21
+    transceiver is not present
+
+Ethernet1/22
+    transceiver is not present
+
+Ethernet1/23
+    transceiver is not present
+
+Ethernet1/24
+    transceiver is not present
+
+Ethernet1/25
+    transceiver is not present
+
+Ethernet1/26
+    transceiver is not present
+
+Ethernet1/27
+    transceiver is present
+    type is 1000base-T
+    name is CISCO
+    part number is SBCU-5740ARZ-CS1
+    revision is G3.1
+    serial number is O7DBEQKQWT6
+    nominal bitrate is 1300 MBit/sec
+    Link length supported for copper is 100 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 30-1475-01
+    cisco product id is GLC-TE
+
+DOM is not supported
+
+Ethernet1/28
+    transceiver is present
+    type is 1000base-T
+    name is CISCO
+    part number is SBCU-5740ARZ-CS1
+    revision is G3.1
+    serial number is NPAI4VKFXDO
+    nominal bitrate is 1300 MBit/sec
+    Link length supported for copper is 100 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 30-1475-01
+    cisco product id is GLC-TE
+
+DOM is not supported
+
+Ethernet1/29
+    transceiver is present
+    type is 1000base-T
+    name is CISCO
+    part number is SBCU-5740ARZ-CS1
+    revision is G3.1
+    serial number is LD0P7JDN0P3
+    nominal bitrate is 1300 MBit/sec
+    Link length supported for copper is 100 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 30-1475-01
+    cisco product id is GLC-TE
+
+DOM is not supported
+
+Ethernet1/30
+    transceiver is present
+    type is 1000base-T
+    name is CISCO
+    part number is SBCU-5740ARZ-CS1
+    revision is G3.1
+    serial number is UVTI6RJAG4B
+    nominal bitrate is 1300 MBit/sec
+    Link length supported for copper is 100 m
+    cisco id is 3
+    cisco extended id number is 4
+    cisco part number is 30-1475-01
+    cisco product id is GLC-TE
+
+DOM is not supported
+
+Ethernet1/31
+    transceiver is not present
+
+Ethernet1/32
+    transceiver is not present
+
+Ethernet1/33
+    transceiver is not present
+
+Ethernet1/34
+    transceiver is not present
+
+Ethernet1/35
+    transceiver is not present
+
+Ethernet1/36
+    transceiver is not present
+
+Ethernet1/37
+    transceiver is not present
+
+Ethernet1/38
+    transceiver is not present
+
+Ethernet1/39
+    transceiver is not present
+
+Ethernet1/40
+    transceiver is not present
+
+Ethernet1/41
+    transceiver is not present
+
+Ethernet1/42
+    transceiver is not present
+
+Ethernet1/43
+    transceiver is not present
+
+Ethernet1/44
+    transceiver is not present
+
+Ethernet1/45
+    transceiver is not present
+
+Ethernet1/46
+    transceiver is not present
+
+Ethernet1/47
+    transceiver is not present
+
+Ethernet1/48
+    transceiver is not present
+
+Ethernet1/49
+    transceiver is not present
+
+Ethernet1/50
+    transceiver is not present
+
+Ethernet1/51
+    transceiver is not present
+
+Ethernet1/52
+    transceiver is not present
+
+Ethernet1/53
+    transceiver is present
+    type is QSFP-40G-SR-BD
+    name is CISCO-AVAGO
+    part number is AFBR-79EBPZ-CS2
+    revision is 01
+    serial number is MVK6IRGH004
+    nominal bitrate is 20600 MBit/sec per channel
+    Link length supported for 50/125um OM3 fiber is 100 m
+    cisco id is 13
+    cisco extended id number is 220
+    cisco part number is 10-2945-02
+    cisco product id is QSFP-40G-SR-BD
+
+DOM is not supported
+
+Ethernet1/54
+    transceiver is present
+    type is QSFP-40G-SR-BD
+    name is CISCO-AVAGO
+    part number is AFBR-79EBPZ-CS2
+    revision is 01
+    serial number is 2UT4129QKFE
+    nominal bitrate is 20600 MBit/sec per channel
+    Link length supported for 50/125um OM3 fiber is 100 m
+    cisco id is 13
+    cisco extended id number is 220
+    cisco part number is 10-2945-02
+    cisco product id is QSFP-40G-SR-BD
+
+DOM is not supported
+
+
+--------------------------------------------------
+命令: show interface status | include error
+输出:
+
+--------------------------------------------------
+命令: show interface status
+输出:
+
+--------------------------------------------------------------------------------
+Port          Name               Status    Vlan      Duplex  Speed   Type
+--------------------------------------------------------------------------------
+mgmt0         --                 connected routed    full    1000    --         
+
+--------------------------------------------------------------------------------
+Port          Name               Status    Vlan      Duplex  Speed   Type
+--------------------------------------------------------------------------------
+Eth1/1        Connect_to_XA-FOTI connected 951       full    1000    1000base-T 
+Eth1/2        Connect_to_XA-FOTI connected 951       full    1000    1000base-T 
+Eth1/3        --                 xcvrAbsen routed    auto    auto    --         
+Eth1/4        --                 xcvrAbsen routed    auto    auto    --         
+Eth1/5        --                 xcvrAbsen routed    auto    auto    --         
+Eth1/6        --                 xcvrAbsen routed    auto    auto    --         
+Eth1/7        --                 xcvrAbsen routed    auto    auto    --         
+Eth1/8        --                 xcvrAbsen 20        auto    auto    --         
+Eth1/9        --                 xcvrAbsen routed    auto    auto    --         
+Eth1/10       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/11       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/12       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/13       --                 connected 951       full    1000    1000base-T 
+Eth1/14       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/15       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/16       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/17       --                 xcvrAbsen 20        auto    auto    --         
+Eth1/18       --                 notconnec trunk     auto    auto    1000base-T 
+Eth1/19       --                 notconnec 20        auto    auto    1000base-T 
+Eth1/20       --                 notconnec trunk     auto    auto    1000base-T 
+Eth1/21       --                 xcvrAbsen 21        auto    auto    --         
+Eth1/22       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/23       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/24       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/25       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/26       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/27       To_XA-DMZ-Test-ESX connected 20        full    100     1000base-T 
+Eth1/28       To_XA-DMZ-Test-ESX connected trunk     full    100     1000base-T 
+Eth1/29       To_XA-DMZ-Test-ESX connected 20        full    100     1000base-T 
+Eth1/30       To_XA-DMZ-Test-ESX connected trunk     full    100     1000base-T 
+Eth1/31       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/32       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/33       --                 xcvrAbsen 20        auto    auto    --         
+Eth1/34       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/35       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/36       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/37       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/38       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/39       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/40       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/41       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/42       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/43       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/44       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/45       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/46       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/47       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/48       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/49       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/50       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/51       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/52       --                 xcvrAbsen routed    auto    auto    --         
+Eth1/53       Connect_to_XA-FOTI connected routed    full    40G     QSFP-40G-SR-BD
+Eth1/54       Connect_to_XA-FOTI connected routed    full    40G     QSFP-40G-SR-BD
+Lo1           --                 connected routed    auto    auto    --         
+Vlan1         --                 down      routed    auto    auto    --
+Vlan20        --                 connected routed    auto    auto    --
+Vlan21        --                 connected routed    auto    auto    --
+Vlan951       --                 connected routed    auto    auto    --
+
+--------------------------------------------------------------------------------
+Port          Name               Status    Vlan      Duplex  Speed   Type
+--------------------------------------------------------------------------------
+
+--------------------------------------------------
+命令: show system resources
+输出:
+Load average:   1 minute: 0.57   5 minutes: 0.40   15 minutes: 0.34
+Processes   :   652 total, 2 running
+CPU states  :   0.41% user,   2.43% kernel,   97.14% idle
+        CPU0 states  :   1.01% user,   15.15% kernel,   83.83% idle
+        CPU1 states  :   0.00% user,   0.00% kernel,   100.00% idle
+        CPU2 states  :   0.00% user,   2.12% kernel,   97.87% idle
+        CPU3 states  :   4.04% user,   6.06% kernel,   89.89% idle
+        CPU4 states  :   0.00% user,   1.00% kernel,   99.00% idle
+        CPU5 states  :   0.00% user,   1.00% kernel,   99.00% idle
+        CPU6 states  :   0.99% user,   0.99% kernel,   98.01% idle
+        CPU7 states  :   0.00% user,   1.00% kernel,   99.00% idle
+        CPU8 states  :   0.00% user,   0.00% kernel,   100.00% idle
+        CPU9 states  :   0.00% user,   0.00% kernel,   100.00% idle
+        CPU10 states  :   0.00% user,   0.00% kernel,   100.00% idle
+        CPU11 states  :   0.00% user,   0.00% kernel,   100.00% idle
+Memory usage:   65808592K total,   5123552K used,   60685040K free
+Current memory status: OK
+
+--------------------------------------------------
+命令: show debug
+输出:
+
+
+slot  1
+=======
+
+Debug level is set to Detail 
+Debug level is set to Minor(1) 
+
+L2RIB Enabled Debugs:
+ default for new sessions logging level: 3
+
+
+--------------------------------------------------
+命令: show ip interface brief
+输出:
+
+IP Interface Status for VRF "default"(1)
+Interface            IP Address      Interface Status
+Vlan20               192.168.1.1      protocol-up/link-up/admin-up       
+Vlan21               192.168.1.1      protocol-up/link-up/admin-up       
+Vlan951              192.168.1.1     protocol-up/link-up/admin-up       
+Lo1                  192.168.1.1      protocol-up/link-up/admin-up       
+Eth1/53              192.168.1.1     protocol-up/link-up/admin-up       
+Eth1/54              192.168.1.1     protocol-up/link-up/admin-up       
+
+--------------------------------------------------
+命令: show logging | include %[0-4]
+输出:
+
+--------------------------------------------------
+命令: show switch-profile
+输出:
+
+sw-8679# show switch-profile
+
+--------------------------------------------------
+命令: show vpc
+输出:
+                                  ^
+% Invalid command at '^' marker.
+
+--------------------------------------------------
+命令: show running-config
+输出:
+
+!Command: show running-config
+!No configuration change since last restart
+!Time: Fri Jun 26 14:07:49 2026
+
+version 9.2(3) Bios:version 05.33 
+hostname sw-8679
+vdc sw-8679 id 1
+  limit-resource vlan minimum 16 maximum 4094
+  limit-resource vrf minimum 2 maximum 4096
+  limit-resource port-channel minimum 0 maximum 511
+  limit-resource u4route-mem minimum 248 maximum 248
+  limit-resource u6route-mem minimum 96 maximum 96
+  limit-resource m4route-mem minimum 58 maximum 58
+  limit-resource m6route-mem minimum 8 maximum 8
+
+feature ospf
+feature interface-vlan
+feature hsrp
+feature lacp
+feature lldp
+clock timezone GMT 8 0
+
+username admin password 5 $5$.52bmWGb$QzdC4On78uDJJOsKWz/odqUv.io.9GsXui5PW6vGTK6  role network-admin
+username appuser password 5 $5$YkYTMHVb$nrH6C/2sL7dCtvjLl/wBeejuvl/TmCGNXGbfEvo2vtD  role network-operator
+username appuser passphrase  lifetime 99999 warntime 14 gracetime 3
+ip domain-lookup
+crypto key param rsa label sw-8679 modulus 512 
+ip access-list mgt
+  10 permit ip 192.168.1.1/30 192.168.1.1/32 
+  20 permit ip 192.168.1.1/31 192.168.1.1/32 
+  30 permit ip 192.168.1.1/31 192.168.1.1/32 
+  40 permit ip 192.168.1.1/30 any 
+  50 permit ip 192.168.1.1/30 any 
+  60 permit ip 192.168.1.1/32 any 
+copp profile strict
+snmp-server user admin network-admin auth md5 0xae5ef264874b390bfa9a08c42fb574a3 priv 0xae5ef264874b390bfa9a08c42fb574a3 localizedkey
+snmp-server user appuser network-operator auth md5 0xc6d8a8aeb06785da2d79eadf6a524497 priv 0xc6d8a8aeb06785da2d79eadf6a524497 localizedkey
+snmp-server host 192.168.1.1 traps version 1 F0tic-XA
+snmp-server host 192.168.1.1 source-interface loopback1
+rmon event 1 description FATAL(1) owner PMON@FATAL
+rmon event 2 description CRITICAL(2) owner PMON@CRITICAL
+rmon event 3 description ERROR(3) owner PMON@ERROR
+rmon event 4 description WARNING(4) owner PMON@WARNING
+rmon event 5 description INFORMATION(5) owner PMON@INFO
+snmp-server community F0tic-XA group network-operator
+ntp server 192.168.1.1 use-vrf management
+system login block-for 1800 attempts 5 within 60 
+
+ip route 0.0.0.0/0 192.168.1.1
+vlan 1,20-21,254,951
+vlan 20
+  name DMZ-Test-1
+vlan 21
+  name DMZ-Test-2
+vlan 254
+  name DMZ-Test-ShanShiYunGe-Internal
+vlan 951
+  name To-FW
+
+no cdp enable
+vrf context management
+  ip route 0.0.0.0/0 192.168.1.1
+
+
+interface Vlan1
+
+interface Vlan20
+  no shutdown
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  ip ospf passive-interface
+  ip router ospf 500 area 0.0.0.0
+
+interface Vlan21
+  no shutdown
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  ip ospf passive-interface
+  ip router ospf 500 area 0.0.0.0
+
+interface Vlan951
+  no shutdown
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  no ip ospf passive-interface
+
+interface Ethernet1/1
+  description Connect_to_XA-FOTIC-WAN-AC-1_eth1
+  switchport
+  switchport access vlan 951
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/2
+  description Connect_to_XA-FOTIC-WAN-AC-2_eth1
+  switchport
+  switchport access vlan 951
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/3
+
+interface Ethernet1/4
+
+interface Ethernet1/5
+
+interface Ethernet1/6
+
+interface Ethernet1/7
+
+interface Ethernet1/8
+  switchport
+  switchport access vlan 20
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/9
+
+interface Ethernet1/10
+
+interface Ethernet1/11
+
+interface Ethernet1/12
+  no shutdown
+
+interface Ethernet1/13
+  switchport
+  switchport access vlan 951
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/14
+
+interface Ethernet1/15
+
+interface Ethernet1/16
+
+interface Ethernet1/17
+  switchport
+  switchport access vlan 20
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/18
+  switchport
+  switchport mode trunk
+  spanning-tree port type edge trunk
+  no shutdown
+
+interface Ethernet1/19
+  switchport
+  switchport access vlan 20
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/20
+  switchport
+  switchport mode trunk
+  spanning-tree port type edge trunk
+  no shutdown
+
+interface Ethernet1/21
+  switchport
+  switchport access vlan 21
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/22
+
+interface Ethernet1/23
+
+interface Ethernet1/24
+
+interface Ethernet1/25
+
+interface Ethernet1/26
+
+interface Ethernet1/27
+  description To_XA-DMZ-Test-ESXI01_NIC1(new)
+  switchport
+  switchport access vlan 20
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/28
+  description To_XA-DMZ-Test-ESXI01_NIC2(new)
+  switchport
+  switchport mode trunk
+  spanning-tree port type edge trunk
+  no shutdown
+
+interface Ethernet1/29
+  description To_XA-DMZ-Test-ESXI02_NIC1(new)
+  switchport
+  switchport access vlan 20
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/30
+  description To_XA-DMZ-Test-ESXI02_NIC2(new)
+  switchport
+  switchport mode trunk
+  spanning-tree port type edge trunk
+  no shutdown
+
+interface Ethernet1/31
+
+interface Ethernet1/32
+
+interface Ethernet1/33
+  switchport
+  switchport access vlan 20
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/34
+
+interface Ethernet1/35
+
+interface Ethernet1/36
+
+interface Ethernet1/37
+
+interface Ethernet1/38
+
+interface Ethernet1/39
+
+interface Ethernet1/40
+
+interface Ethernet1/41
+
+interface Ethernet1/42
+
+interface Ethernet1/43
+
+interface Ethernet1/44
+
+interface Ethernet1/45
+
+interface Ethernet1/46
+
+interface Ethernet1/47
+
+interface Ethernet1/48
+
+interface Ethernet1/49
+
+interface Ethernet1/50
+
+interface Ethernet1/51
+
+interface Ethernet1/52
+
+interface Ethernet1/53
+  description Connect_to_XA-FOTIC-CORE- N9364C-1_Eth1/8
+  ip address 192.168.1.1/30
+  ip router ospf 500 area 0.0.0.0
+  no shutdown
+
+interface Ethernet1/54
+  description Connect_to_XA-FOTIC-CORE- N9364C-2_Eth1/8
+  ip address 192.168.1.1/30
+  ip router ospf 500 area 0.0.0.0
+  no shutdown
+
+interface mgmt0
+  vrf member management
+  ip address 192.168.1.1/25
+
+interface loopback1
+  ip address 192.168.1.1/32
+  ip router ospf 500 area 0.0.0.0
+line console
+line vty
+  access-class mgt in
+boot nxos bootflash:/nxos.9.2.3.bin 
+router ospf 500
+  router-id 192.168.1.1
+
+logging server 192.168.1.1 6 use-vrf management
+logging server 192.168.1.1 6 use-vrf management
+logging source-interface mgmt0
+logging origin-id hostname
+
+
+
+--------------------------------------------------
+命令: show startup-config
+输出:
+
+!Command: show startup-config
+!Time: Fri Jun 26 14:07:51 2026
+!Startup config saved at: Tue Dec 16 16:42:52 2025
+
+version 9.2(3) Bios:version 05.33 
+hostname sw-8679
+vdc sw-8679 id 1
+  limit-resource vlan minimum 16 maximum 4094
+  limit-resource vrf minimum 2 maximum 4096
+  limit-resource port-channel minimum 0 maximum 511
+  limit-resource u4route-mem minimum 248 maximum 248
+  limit-resource u6route-mem minimum 96 maximum 96
+  limit-resource m4route-mem minimum 58 maximum 58
+  limit-resource m6route-mem minimum 8 maximum 8
+
+feature ospf
+feature interface-vlan
+feature hsrp
+feature lacp
+feature lldp
+clock timezone GMT 8 0
+
+username admin password 5 $5$.52bmWGb$QzdC4On78uDJJOsKWz/odqUv.io.9GsXui5PW6vGTK6  role network-admin
+username appuser password 5 $5$YkYTMHVb$nrH6C/2sL7dCtvjLl/wBeejuvl/TmCGNXGbfEvo2vtD  role network-operator
+username appuser passphrase  lifetime 99999 warntime 14 gracetime 3
+ip domain-lookup
+crypto key param rsa label sw-8679 modulus 512 
+ip access-list mgt
+  10 permit ip 192.168.1.1/30 192.168.1.1/32 
+  20 permit ip 192.168.1.1/31 192.168.1.1/32 
+  30 permit ip 192.168.1.1/31 192.168.1.1/32 
+  40 permit ip 192.168.1.1/30 any 
+  50 permit ip 192.168.1.1/30 any 
+  60 permit ip 192.168.1.1/32 any 
+copp profile strict
+snmp-server user admin network-admin auth md5 0xae5ef264874b390bfa9a08c42fb574a3 priv 0xae5ef264874b390bfa9a08c42fb574a3 localizedkey
+snmp-server user appuser network-operator auth md5 0xc6d8a8aeb06785da2d79eadf6a524497 priv 0xc6d8a8aeb06785da2d79eadf6a524497 localizedkey
+snmp-server host 192.168.1.1 traps version 1 F0tic-XA
+snmp-server host 192.168.1.1 source-interface loopback1
+rmon event 1 description FATAL(1) owner PMON@FATAL
+rmon event 2 description CRITICAL(2) owner PMON@CRITICAL
+rmon event 3 description ERROR(3) owner PMON@ERROR
+rmon event 4 description WARNING(4) owner PMON@WARNING
+rmon event 5 description INFORMATION(5) owner PMON@INFO
+snmp-server community F0tic-XA group network-operator
+ntp server 192.168.1.1 use-vrf management
+system login block-for 1800 attempts 5 within 60 
+
+ip route 0.0.0.0/0 192.168.1.1
+vlan 1,20-21,254,951
+vlan 20
+  name DMZ-Test-1
+vlan 21
+  name DMZ-Test-2
+vlan 254
+  name DMZ-Test-ShanShiYunGe-Internal
+vlan 951
+  name To-FW
+
+no cdp enable
+vrf context management
+  ip route 0.0.0.0/0 192.168.1.1
+
+
+interface Vlan1
+
+interface Vlan20
+  no shutdown
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  ip ospf passive-interface
+  ip router ospf 500 area 0.0.0.0
+
+interface Vlan21
+  no shutdown
+  no ip redirects
+  ip address 192.168.1.1/24
+  no ipv6 redirects
+  ip ospf passive-interface
+  ip router ospf 500 area 0.0.0.0
+
+interface Vlan951
+  no shutdown
+  no ip redirects
+  ip address 192.168.1.1/29
+  no ipv6 redirects
+  no ip ospf passive-interface
+
+interface Ethernet1/1
+  description Connect_to_XA-FOTIC-WAN-AC-1_eth1
+  switchport
+  switchport access vlan 951
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/2
+  description Connect_to_XA-FOTIC-WAN-AC-2_eth1
+  switchport
+  switchport access vlan 951
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/3
+
+interface Ethernet1/4
+
+interface Ethernet1/5
+
+interface Ethernet1/6
+
+interface Ethernet1/7
+
+interface Ethernet1/8
+  switchport
+  switchport access vlan 20
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/9
+
+interface Ethernet1/10
+
+interface Ethernet1/11
+
+interface Ethernet1/12
+  no shutdown
+
+interface Ethernet1/13
+  switchport
+  switchport access vlan 951
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/14
+
+interface Ethernet1/15
+
+interface Ethernet1/16
+
+interface Ethernet1/17
+  switchport
+  switchport access vlan 20
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/18
+  switchport
+  switchport mode trunk
+  spanning-tree port type edge trunk
+  no shutdown
+
+interface Ethernet1/19
+  switchport
+  switchport access vlan 20
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/20
+  switchport
+  switchport mode trunk
+  spanning-tree port type edge trunk
+  no shutdown
+
+interface Ethernet1/21
+  switchport
+  switchport access vlan 21
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/22
+
+interface Ethernet1/23
+
+interface Ethernet1/24
+
+interface Ethernet1/25
+
+interface Ethernet1/26
+
+interface Ethernet1/27
+  description To_XA-DMZ-Test-ESXI01_NIC1(new)
+  switchport
+  switchport access vlan 20
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/28
+  description To_XA-DMZ-Test-ESXI01_NIC2(new)
+  switchport
+  switchport mode trunk
+  spanning-tree port type edge trunk
+  no shutdown
+
+interface Ethernet1/29
+  description To_XA-DMZ-Test-ESXI02_NIC1(new)
+  switchport
+  switchport access vlan 20
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/30
+  description To_XA-DMZ-Test-ESXI02_NIC2(new)
+  switchport
+  switchport mode trunk
+  spanning-tree port type edge trunk
+  no shutdown
+
+interface Ethernet1/31
+
+interface Ethernet1/32
+
+interface Ethernet1/33
+  switchport
+  switchport access vlan 20
+  spanning-tree port type edge
+  no shutdown
+
+interface Ethernet1/34
+
+interface Ethernet1/35
+
+interface Ethernet1/36
+
+interface Ethernet1/37
+
+interface Ethernet1/38
+
+interface Ethernet1/39
+
+interface Ethernet1/40
+
+interface Ethernet1/41
+
+interface Ethernet1/42
+
+interface Ethernet1/43
+
+interface Ethernet1/44
+
+interface Ethernet1/45
+
+interface Ethernet1/46
+
+interface Ethernet1/47
+
+interface Ethernet1/48
+
+interface Ethernet1/49
+
+interface Ethernet1/50
+
+interface Ethernet1/51
+
+interface Ethernet1/52
+
+interface Ethernet1/53
+  description Connect_to_XA-FOTIC-CORE- N9364C-1_Eth1/8
+  ip address 192.168.1.1/30
+  ip router ospf 500 area 0.0.0.0
+  no shutdown
+
+interface Ethernet1/54
+  description Connect_to_XA-FOTIC-CORE- N9364C-2_Eth1/8
+  ip address 192.168.1.1/30
+  ip router ospf 500 area 0.0.0.0
+  no shutdown
+
+interface mgmt0
+  vrf member management
+  ip address 192.168.1.1/25
+
+interface loopback1
+  ip address 192.168.1.1/32
+  ip router ospf 500 area 0.0.0.0
+line console
+line vty
+  access-class mgt in
+boot nxos bootflash:/nxos.9.2.3.bin 
+router ospf 500
+  router-id 192.168.1.1
+
+logging server 192.168.1.1 6 use-vrf management
+logging server 192.168.1.1 6 use-vrf management
+logging source-interface mgmt0
+logging origin-id hostname
+
+
+
+--------------------------------------------------
+命令: show ip arp
+输出:
+
+Flags: * - Adjacencies learnt on non-active FHRP router
+       + - Adjacencies synced via CFSoE
+       # - Adjacencies Throttled for Glean
+       CP - Added via L2RIB, Control plane Adjacencies
+       PS - Added via L2RIB, Peer Sync
+       RO - Re-Originated Peer Sync Entry
+       D - Static Adjacencies attached to down interface
+
+IP ARP Table for context default
+Total number of entries: 3
+Address         Age       MAC Address     Interface       Flags
+192.168.1.1     0.467224  0000.5e00.0179  Vlan951         
+192.168.1.1     00:15:52  706d.156f.c987  Ethernet1/53    
+192.168.1.1     00:05:09  f80f.6fc9.8e25  Ethernet1/54    
+
+--------------------------------------------------
+命令: show mac address-table
+输出:
+Legend: 
+	* - primary entry, G - Gateway MAC, (R) - Routed MAC, O - Overlay MAC
+	age - seconds since last seen,+ - primary entry using vPC Peer-Link,
+	(T) - True, (F) - False, C - ControlPlane MAC, ~ - vsan
+   VLAN     MAC Address      Type      age     Secure NTFY Ports
+---------+-----------------+--------+---------+------+----+------------------
+*  951     0000.5e00.0179   dynamic  0         F      F    Eth1/1
+*  951     001a.d320.4221   dynamic  0         F      F    Eth1/13
+*  951     001a.d320.4223   dynamic  0         F      F    Eth1/13
+*  951     001a.d320.4225   dynamic  0         F      F    Eth1/13
+*  951     001a.d320.4226   dynamic  0         F      F    Eth1/13
+*  951     001a.d325.09c6   dynamic  0         F      F    Eth1/13
+*  951     001a.d325.09c8   dynamic  0         F      F    Eth1/13
+*  951     001a.d325.09ca   dynamic  0         F      F    Eth1/13
+*  951     001a.d325.09cb   dynamic  0         F      F    Eth1/13
+*  951     001a.d325.09cd   dynamic  0         F      F    Eth1/13
+*  951     001a.d325.09ce   dynamic  0         F      F    Eth1/13
+*  951     001a.d325.09cf   dynamic  0         F      F    Eth1/13
+*  951     0026.7703.604d   dynamic  0         F      F    Eth1/13
+*  951     0026.7703.6050   dynamic  0         F      F    Eth1/13
+*  951     0026.7703.6d56   dynamic  0         F      F    Eth1/13
+*  951     0026.7703.6d5b   dynamic  0         F      F    Eth1/13
+*  951     0026.7703.b12e   dynamic  0         F      F    Eth1/13
+*  951     0026.7703.b133   dynamic  0         F      F    Eth1/13
+*  951     00e0.fc09.bcf9   dynamic  0         F      F    Eth1/13
+*  951     5811.2292.1192   dynamic  0         F      F    Eth1/13
+*  951     5811.2292.11b6   dynamic  0         F      F    Eth1/13
+*  951     58d0.6176.417f   dynamic  0         F      F    Eth1/13
+*  951     58d0.6176.41e1   dynamic  0         F      F    Eth1/13
+*  951     58d0.61eb.c284   dynamic  0         F      F    Eth1/13
+*  951     5c64.7a40.06a1   dynamic  0         F      F    Eth1/13
+*  951     6c14.6e4f.ea76   dynamic  0         F      F    Eth1/13
+*  951     6c14.6e4f.eef6   dynamic  0         F      F    Eth1/13
+*  951     a400.e2b7.39c9   dynamic  0         F      F    Eth1/13
+*  951     b008.75e7.d425   dynamic  0         F      F    Eth1/13
+*  951     bc76.c5b3.fa57   dynamic  0         F      F    Eth1/13
+*  951     bc76.c5b3.fa58   dynamic  0         F      F    Eth1/13
+*  951     bc76.c5b3.fa72   dynamic  0         F      F    Eth1/13
+*  951     bc76.c5b3.fa76   dynamic  0         F      F    Eth1/13
+*  951     bc76.c5b3.fa78   dynamic  0         F      F    Eth1/13
+*  951     bc76.c5b3.fa8a   dynamic  0         F      F    Eth1/13
+*  951     bc76.c5b3.faa2   dynamic  0         F      F    Eth1/13
+*  951     bc76.c5b3.fab2   dynamic  0         F      F    Eth1/13
+*  951     bc76.c5cc.f644   dynamic  0         F      F    Eth1/13
+*  951     bc76.c5cc.f656   dynamic  0         F      F    Eth1/13
+*  951     bc76.c5cc.f691   dynamic  0         F      F    Eth1/13
+*  951     bc76.c5cc.f69d   dynamic  0         F      F    Eth1/13
+*  951     bc76.c5cc.f69f   dynamic  0         F      F    Eth1/13
+*  951     bc76.c5cc.f6a0   dynamic  0         F      F    Eth1/13
+*  951     bc76.c5cc.f6ed   dynamic  0         F      F    Eth1/13
+*  951     bc76.c5cc.f6ef   dynamic  0         F      F    Eth1/13
+*  951     c400.ad50.56c8   dynamic  0         F      F    Eth1/13
+*  951     c400.ad7a.7b8e   dynamic  0         F      F    Eth1/13
+*  951     c40d.96c0.f68c   dynamic  0         F      F    Eth1/13
+*  951     c40d.96c0.f734   dynamic  0         F      F    Eth1/13
+*  951     c40d.96c0.f765   dynamic  0         F      F    Eth1/13
+*  951     d4d5.1bda.192d   dynamic  0         F      F    Eth1/13
+*  951     d4d5.1bda.1965   dynamic  0         F      F    Eth1/13
+*  951     d4d5.1bda.1995   dynamic  0         F      F    Eth1/13
+*  951     d4d5.1bda.19b1   dynamic  0         F      F    Eth1/13
+*  951     d4d5.1bda.1a05   dynamic  0         F      F    Eth1/13
+*  951     d4d5.1bda.1a39   dynamic  0         F      F    Eth1/13
+*  951     d4d5.1bda.1a41   dynamic  0         F      F    Eth1/13
+*  951     d4d5.1bda.1a9d   dynamic  0         F      F    Eth1/13
+*  951     d4d5.1bda.1a9f   dynamic  0         F      F    Eth1/13
+*  951     d4d5.1bda.1abf   dynamic  0         F      F    Eth1/13
+*  951     d4d5.1bda.1ae9   dynamic  0         F      F    Eth1/13
+*  951     d4d5.1bda.1b29   dynamic  0         F      F    Eth1/13
+*  951     d4d5.1bda.1b85   dynamic  0         F      F    Eth1/13
+*  951     d4d5.1bda.1b89   dynamic  0         F      F    Eth1/13
+*  951     d4d5.1bda.1b8b   dynamic  0         F      F    Eth1/13
+*  951     d4d5.1bda.1bc3   dynamic  0         F      F    Eth1/13
+*  951     d4d5.1bda.1bc9   dynamic  0         F      F    Eth1/13
+*  951     d4d5.1bda.1cc7   dynamic  0         F      F    Eth1/13
+*  951     d4d5.1bda.1cdf   dynamic  0         F      F    Eth1/13
+*  951     d4d5.1bda.1ce1   dynamic  0         F      F    Eth1/13
+*  951     d4d5.1bda.1cfb   dynamic  0         F      F    Eth1/13
+*  951     e813.6ef9.fe0b   dynamic  0         F      F    Eth1/13
+*  951     e8f6.5437.3162   dynamic  0         F      F    Eth1/13
+*  951     e8f6.545e.38fc   dynamic  0         F      F    Eth1/13
+*  951     f82e.3f4e.0bb5   dynamic  0         F      F    Eth1/13
+*  951     f82e.3f4e.0bb9   dynamic  0         F      F    Eth1/13
+*  951     f82e.3fa1.5a32   dynamic  0         F      F    Eth1/13
+*  951     f82e.3fa1.5a7a   dynamic  0         F      F    Eth1/13
+*  951     f82e.3fa1.5a86   dynamic  0         F      F    Eth1/13
+*  951     f82e.3fa1.5aae   dynamic  0         F      F    Eth1/13
+*  951     f82e.3fa1.5ab6   dynamic  0         F      F    Eth1/13
+*  951     f82e.3fa1.5af0   dynamic  0         F      F    Eth1/13
+*  951     f82e.3fa1.5b14   dynamic  0         F      F    Eth1/13
+*  951     f82e.3fa1.5b16   dynamic  0         F      F    Eth1/13
+*  951     f82e.3fa1.5b66   dynamic  0         F      F    Eth1/13
+*  951     f82e.3fa1.5bc4   dynamic  0         F      F    Eth1/13
+*  951     f82e.3fa1.5bee   dynamic  0         F      F    Eth1/13
+*  951     fc73.fbbf.c780   dynamic  0         F      F    Eth1/13
+G    -     003a.9c85.2a27   static   -         F      F    sup-eth1(R)
+G   20     003a.9c85.2a27   static   -         F      F    sup-eth1(R)
+G   21     003a.9c85.2a27   static   -         F      F    sup-eth1(R)
+G  951     003a.9c85.2a27   static   -         F      F    sup-eth1(R)
+
+--------------------------------------------------
