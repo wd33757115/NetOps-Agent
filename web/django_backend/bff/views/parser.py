@@ -47,3 +47,13 @@ async def proxy_parser_action(
 @sync_bff_view
 async def proxy_parser_job_detail(request: HttpRequest, job_id: str) -> JsonResponse:
     return await _proxy(request, f"jobs/{job_id}")
+
+
+@csrf_exempt
+@require_jwt
+@require_role("admin")
+@sync_bff_view
+async def proxy_parser_path(request: HttpRequest, path: str) -> JsonResponse:
+    query = request.META.get("QUERY_STRING", "")
+    target = path + (f"?{query}" if query else "")
+    return await _proxy(request, target)

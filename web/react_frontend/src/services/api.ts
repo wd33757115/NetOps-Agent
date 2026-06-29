@@ -261,6 +261,599 @@ export interface ParserIdentitySignature {
   status: string
 }
 
+export interface ParserEventRule {
+  rule_id: string
+  rule_name: string
+  description?: string
+  status: string
+  current_version: number
+  version_id: string
+  version: number
+  event_type: string
+  severity: string
+  condition: Record<string, unknown>
+  version_status: string
+}
+
+export interface ParserEventRuleTestResult {
+  success: boolean
+  sample_count: number
+  matched_count: number
+  unmatched_count: number
+  rows: Array<{
+    index: number
+    matched: boolean
+    error?: string | null
+    sample: Record<string, unknown>
+  }>
+}
+
+export interface ParserCommandProfile {
+  profile_id: string
+  profile_name: string
+  status: string
+  current_version: number
+  profile_version_id?: string
+  version?: number
+  version_status?: string
+  items: Array<{ action: string; command: string }>
+  coverage?: Record<string, unknown>
+}
+
+export interface ParserCommandProfileBinding {
+  binding_id: string
+  profile_version_id: string
+  profile_id: string
+  profile_name: string
+  profile_version: number
+  version_status: string
+  selector_json: Record<string, unknown>
+  priority: number
+  status: string
+}
+
+export interface ParserCommandProfileImpactPreview {
+  success: boolean
+  mode: string
+  profile_name: string
+  profile_version_id?: string | null
+  selector: Record<string, unknown>
+  command_count: number
+  matched_device_count: number
+  returned_device_count: number
+  blocked_device_count: number
+  ready_device_count: number
+  eligible_command_count: number
+  ready_command_count: number
+  blocked_command_count: number
+  coverage_rate: number
+  evidence_saved?: boolean
+  rows: Array<{
+    device_id?: string
+    device_name?: string
+    ip?: string
+    vendor?: string
+    model?: string
+    family?: string
+    site?: string
+    role?: string
+    groups?: string[]
+    command_count: number
+    eligible_count: number
+    ready_count: number
+    blocked_count: number
+    status: string
+    violations: Array<Record<string, unknown>>
+    plan: Record<string, unknown>
+  }>
+}
+
+export interface ParserEffectivePlanPreview {
+  success: boolean
+  plan: {
+    profile_name: string
+    profile_version_id?: string
+    credential_ref?: string | null
+    collector_options?: Record<string, unknown>
+    policy_source?: string
+    binding_id?: string
+    selector?: Record<string, unknown>
+    collection_items: Array<{
+      command: string
+      action: string
+      collection_item_id?: string
+    }>
+  }
+  commands: string[]
+}
+
+export interface ManagedDevice {
+  device_id: string
+  device_name: string
+  ip?: string
+  management_ip?: string
+  username?: string
+  credential_ref?: string
+  vendor?: string
+  model?: string
+  family?: string
+  platform?: string
+  device_type?: string
+  os_version?: string
+  serial_number?: string
+  site?: string
+  role?: string
+  status?: string
+  last_connection_status?: string
+  last_connection_checked_at?: string | null
+  last_connection_failure_code?: string | null
+  last_connection_error?: string | null
+  last_connection_latency_ms?: number | null
+  groups?: string[]
+  command_file?: string
+  attributes?: Record<string, unknown>
+  patrol_readiness?: {
+    status: string
+    mode: string
+    command_count: number
+    eligible_count: number
+    ready_count: number
+    blocked_count: number
+    policy_source?: string | null
+    profile_name?: string | null
+    profile_version_id?: string | null
+    violations?: Array<Record<string, unknown>>
+    connection_issues?: Array<Record<string, unknown>>
+    error?: string
+  }
+}
+
+export interface DeviceUpsertPayload {
+  device_name: string
+  management_ip: string
+  username?: string
+  credential_ref?: string
+  vendor?: string
+  model?: string
+  family?: string
+  platform?: string
+  device_type?: string
+  os_version?: string
+  serial_number?: string
+  site?: string
+  role?: string
+  status?: string
+  output_path?: string
+  command_profile?: string
+  attributes?: Record<string, unknown>
+  groups?: string[]
+}
+
+export interface DeviceMutationResponse {
+  success: boolean
+  device_id?: string
+  device: ManagedDevice
+}
+
+export interface DeviceImportRow {
+  row_number: number
+  valid: boolean
+  errors: string[]
+  action: 'create' | 'update' | 'invalid'
+  existing_device_id?: string
+  device: DeviceUpsertPayload
+}
+
+export interface DeviceImportPreview {
+  success: boolean
+  total: number
+  create_count: number
+  update_count: number
+  invalid_count: number
+  rows: DeviceImportRow[]
+}
+
+export interface DeviceImportApplyResult extends DeviceImportPreview {
+  dry_run: boolean
+  applied_count: number
+  applied: Array<{
+    row_number: number
+    action: 'create' | 'update'
+    device_id: string
+    device: ManagedDevice
+  }>
+  skipped: DeviceImportRow[]
+}
+
+export interface DeviceImportPayload {
+  content: string
+  format?: 'csv' | 'xlsx'
+  filename?: string
+}
+
+export interface DeviceImportTemplate {
+  filename: string
+  format: 'csv'
+  columns: Array<{
+    name: string
+    required: boolean
+    aliases?: string[]
+    description?: string
+    example?: string
+  }>
+  required_columns: string[]
+  csv: string
+}
+
+export interface DeviceBulkFilters {
+  device_id?: string
+  device_name?: string
+  ip?: string
+  group?: string
+  vendor?: string
+  model?: string
+  family?: string
+  platform?: string
+  device_type?: string
+  site?: string
+  role?: string
+  status?: string
+  connection_status?: string
+}
+
+export interface DeviceBulkUpdate {
+  command_profile?: string
+  patrol_commands?: string[]
+  credential_ref?: string
+  status?: string
+  platform?: string
+  device_type?: string
+  site?: string
+  role?: string
+  groups?: string[]
+  group_mode?: 'replace' | 'append'
+}
+
+export interface DeviceBulkRequest {
+  device_ids?: string[]
+  dynamic_group_id?: string
+  filters?: DeviceBulkFilters
+  update: DeviceBulkUpdate
+}
+
+export interface DeviceBulkPreviewRow {
+  device_id: string
+  device_name?: string
+  ip?: string
+  current: ManagedDevice
+  update: DeviceBulkUpdate
+}
+
+export interface DeviceBulkPreview {
+  success: boolean
+  target_count: number
+  changed_fields: string[]
+  rows: DeviceBulkPreviewRow[]
+}
+
+export interface DeviceBulkApplyResult extends DeviceBulkPreview {
+  applied_count: number
+  devices: ManagedDevice[]
+}
+
+export interface DevicePatrolLaunchRequest {
+  device_ids?: string[]
+  dynamic_group_id?: string
+  filters?: DeviceBulkFilters
+  mode?: string
+  save_baseline?: boolean
+  ticket_id?: string
+  launch_mode?: string
+  workflow_name?: string
+}
+
+export interface DevicePatrolPreviewRow {
+  device_id: string
+  device_name?: string
+  ip?: string
+  device: ManagedDevice
+  plan: ParserEffectivePlanPreview['plan']
+  commands: string[]
+  command_count: number
+  coverage_violations?: Array<Record<string, unknown>>
+  connection_issues?: Array<Record<string, unknown>>
+}
+
+export interface DevicePatrolPreview {
+  success: boolean
+  target_count: number
+  ready_count: number
+  error_count: number
+  mode: string
+  save_baseline: boolean
+  launch_mode: string
+  workflow_name: string
+  module_violations?: Array<Record<string, unknown>>
+  rows: DevicePatrolPreviewRow[]
+  errors: Array<{
+    device_id?: string
+    device_name?: string
+    error: string
+    failure_code?: string
+    module_violations?: Array<Record<string, unknown>>
+    coverage_violations?: Array<Record<string, unknown>>
+    connection_issues?: Array<Record<string, unknown>>
+  }>
+}
+
+export interface DevicePatrolLaunchResult {
+  success: boolean
+  target_count: number
+  launched_count: number
+  mode: string
+  save_baseline: boolean
+  ticket_id?: string
+  patrol_batch_id?: string
+  launch_mode: string
+  workflow_name: string
+  runs: Array<{
+    device_id: string
+    device_name?: string
+    ip?: string
+    execution_plan_id?: string
+    workflow_run_id: string
+    workflow_name: string
+    patrol_batch_id?: string
+    command_count: number
+  }>
+  tasks: Array<{
+    device_id: string
+    device_name?: string
+    ip?: string
+    execution_plan_id?: string
+    celery_task_id: string
+    patrol_batch_id?: string
+    command_count: number
+  }>
+}
+
+export interface DeviceListResponse {
+  items: ManagedDevice[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface DeviceAgentModuleHealthCheck {
+  name: string
+  status: 'ok' | 'warning' | 'blocked' | string
+  message: string
+  value?: string | number | null
+  target?: string | null
+}
+
+export interface DeviceAgentModuleMetric {
+  label: string
+  value: string | number
+  status?: 'ok' | 'warning' | 'blocked' | string
+}
+
+export interface DeviceAgentModuleEvidence {
+  kind: string
+  status: 'ok' | 'warning' | 'blocked' | 'failed' | string
+  title: string
+  object_id?: string | null
+  occurred_at?: string | null
+  summary?: string | null
+  detail?: Record<string, unknown>
+  target_url?: string | null
+}
+
+export interface DeviceAgentModuleControl {
+  module_id: string
+  status: 'enabled' | 'disabled' | 'maintenance' | string
+  maintenance_reason?: string | null
+  maintenance_starts_at?: string | null
+  maintenance_ends_at?: string | null
+  updated_by?: string | null
+  updated_at?: string | null
+}
+
+export interface DeviceAgentModuleHealth {
+  module_id: string
+  design_status: string
+  runtime_status: 'healthy' | 'degraded' | 'blocked' | string
+  effective_status?: 'healthy' | 'degraded' | 'blocked' | 'disabled' | 'maintenance' | string
+  control?: DeviceAgentModuleControl
+  metrics: DeviceAgentModuleMetric[]
+  checks: DeviceAgentModuleHealthCheck[]
+  evidence?: DeviceAgentModuleEvidence[]
+}
+
+export interface DeviceAgentModuleHealthResponse {
+  items: DeviceAgentModuleHealth[]
+  generated_at: string
+}
+
+export interface DeviceDynamicGroup {
+  id: string
+  name: string
+  description?: string | null
+  selector: Record<string, unknown>
+  status: string
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export interface DeviceDynamicGroupPreview {
+  success: boolean
+  group: DeviceDynamicGroup
+  total: number
+  limit: number
+  items: ManagedDevice[]
+}
+
+export interface DeviceCredentialReference {
+  ref: string
+  scheme: string
+  name: string
+  available: boolean
+}
+
+export interface DeviceCredentialInspection {
+  ref: string
+  scheme?: string | null
+  supported: boolean
+  available: boolean
+  failure_code?: string | null
+  message?: string
+}
+
+export interface DeviceEffectivePlanPreview {
+  success: boolean
+  device: ManagedDevice
+  plan: ParserEffectivePlanPreview['plan'] & {
+    device_id: string
+    action: string
+    mode: string
+  }
+  commands: string[]
+  parser_coverage?: Array<Record<string, unknown>>
+  coverage_summary?: {
+    status: string
+    mode: string
+    command_count: number
+    eligible_count: number
+    ready_count: number
+    blocked_count: number
+    coverage_rate: number
+    violations: Array<Record<string, unknown>>
+    connection_issues: Array<Record<string, unknown>>
+  }
+}
+
+export interface DeviceConnectivityTestResult {
+  success: boolean
+  failure_code?: string | null
+  device: ManagedDevice
+  connection_issues?: Array<Record<string, unknown>>
+  device_name?: string
+  ip?: string
+  device_type?: string
+  username?: string
+  credential_ref?: string
+  prompt?: string
+  elapsed_seconds?: number
+  error?: string
+}
+
+export interface DeviceConnectionHealthRecord {
+  id: string
+  device_id: string
+  status: string
+  failure_code?: string | null
+  error?: string | null
+  latency_ms?: number | null
+  source: string
+  metadata?: Record<string, unknown>
+  checked_at?: string | null
+}
+
+export interface DeviceConnectionHealthResponse {
+  device: ManagedDevice
+  items: DeviceConnectionHealthRecord[]
+  limit: number
+}
+
+export interface DeviceExecutionPlanRecord {
+  execution_plan_id: string
+  device_id: string
+  action: string
+  mode: string
+  profile_name: string
+  profile_version_id?: string | null
+  binding_id?: string | null
+  policy_source: string
+  credential_ref?: string | null
+  collector_options?: Record<string, unknown>
+  selector?: Record<string, unknown>
+  plan?: Record<string, unknown>
+  command_count: number
+  plan_sha256: string
+  status: string
+  launch_source?: string | null
+  patrol_batch_id?: string | null
+  workflow_run_id?: string | null
+  celery_task_id?: string | null
+  failure_code?: string | null
+  error?: string | null
+  created_at?: string | null
+  launched_at?: string | null
+  updated_at?: string | null
+}
+
+export interface DeviceExecutionPlanResponse {
+  device: ManagedDevice
+  items: DeviceExecutionPlanRecord[]
+  limit: number
+}
+
+export interface DeviceEvidenceTimelineItem {
+  workflow_run_id: string
+  workflow_status?: string
+  workflow_created_at?: string | null
+  workflow_completed_at?: string | null
+  execution_plan_id?: string | null
+  execution_plan?: DeviceExecutionPlanRecord | null
+  patrol_batch_id?: string | null
+  snapshot_run_id?: string | null
+  snapshot_count: number
+  observation_count: number
+  change_count: number
+  event_count: number
+  parse_counts: Record<string, number>
+  steps: Array<{
+    step_name: string
+    skill_name: string
+    status: string
+    started_at?: string | null
+    completed_at?: string | null
+    error?: string | null
+  }>
+  snapshots: Array<{
+    snapshot_id: string
+    command: string
+    parse_status: string
+    parser_template_id?: string | null
+    raw_text_hash: string
+    observed_at?: string | null
+  }>
+  changes: Array<{
+    change_id: string
+    entity_type: string
+    entity_key: string
+    field: string
+    change_type: string
+    event_status: string
+    detected_at?: string | null
+  }>
+  events: Array<{
+    event_id: string
+    event_type: string
+    severity: string
+    entity_type: string
+    entity_key: string
+    status: string
+    occurred_at?: string | null
+  }>
+}
+
+export interface DeviceEvidenceTimelineResponse {
+  device: ManagedDevice
+  items: DeviceEvidenceTimelineItem[]
+  limit: number
+}
+
 export type SkillRolloutStatus = 'draft' | 'canary' | 'stable' | 'deprecated'
 
 export interface SkillCatalogStats {
@@ -600,6 +1193,247 @@ export const parserApi = {
     await api.post<ParserDispatchControl>('/parser/dispatch-control/', { enabled })
   ).data,
   bootstrap: async () => (await api.post('/parser/bootstrap/')).data,
+  eventRules: async () => {
+    const response = await api.get<{ items: ParserEventRule[] }>('/parser/event-rules/')
+    return response.data.items
+  },
+  bootstrapEventRules: async () => (await api.post('/parser/event-rules/bootstrap/')).data,
+  upsertEventRule: async (data: {
+    name: string
+    event_type: string
+    severity: string
+    condition: Record<string, unknown>
+    description?: string
+    status?: string
+  }) => (await api.post('/parser/event-rules/', data)).data,
+  activateEventRule: async (versionId: string) =>
+    (await api.post(`/parser/event-rules/${versionId}/activate/`, {})).data,
+  deprecateEventRule: async (versionId: string) =>
+    (await api.post(`/parser/event-rules/${versionId}/deprecate/`, {})).data,
+  testEventRule: async (data: {
+    condition: Record<string, unknown>
+    samples: Array<Record<string, unknown>>
+  }): Promise<ParserEventRuleTestResult> => {
+    const response = await api.post<ParserEventRuleTestResult>('/parser/event-rules/test/', data)
+    return response.data
+  },
+  commandProfiles: async () => {
+    const response = await api.get<{ items: ParserCommandProfile[] }>('/parser/command-profiles/')
+    return response.data.items
+  },
+  upsertCommandProfile: async (data: {
+    name: string
+    action?: string
+    commands: string[]
+    status?: string
+  }) => (await api.post('/parser/command-profiles/', data)).data,
+  activateCommandProfile: async (profileVersionId: string) =>
+    (await api.post(`/parser/command-profiles/${profileVersionId}/activate/`, {})).data,
+  deprecateCommandProfile: async (profileVersionId: string) =>
+    (await api.post(`/parser/command-profiles/${profileVersionId}/deprecate/`, {})).data,
+  rollbackCommandProfile: async (profileVersionId: string) =>
+    (await api.post(`/parser/command-profiles/${profileVersionId}/rollback/`, {})).data,
+  commandProfileBindings: async () => {
+    const response = await api.get<{ items: ParserCommandProfileBinding[] }>('/parser/command-profile-bindings/')
+    return response.data.items
+  },
+  upsertCommandProfileBinding: async (data: {
+    profile_version_id: string
+    selector: Record<string, unknown>
+    priority?: number
+    status?: string
+  }) => (await api.post('/parser/command-profile-bindings/', data)).data,
+  enableCommandProfileBinding: async (bindingId: string) =>
+    (await api.post(`/parser/command-profile-bindings/${bindingId}/enable/`, {})).data,
+  disableCommandProfileBinding: async (bindingId: string) =>
+    (await api.post(`/parser/command-profile-bindings/${bindingId}/disable/`, {})).data,
+  commandProfileImpactPreview: async (data: {
+    profile_version_id?: string
+    profile_name?: string
+    action?: string
+    commands?: string[]
+    selector?: Record<string, unknown>
+    mode?: string
+    limit?: number
+    save_evidence?: boolean
+  }) => {
+    const response = await api.post<ParserCommandProfileImpactPreview>(
+      '/parser/command-profiles/impact-preview/',
+      data,
+    )
+    return response.data
+  },
+  effectivePlanPreview: async (data: {
+    device: Record<string, unknown>
+    action?: string
+    mode?: string
+  }) => {
+    const response = await api.post<ParserEffectivePlanPreview>('/parser/effective-plan-preview/', data)
+    return response.data
+  },
+}
+
+export const deviceApi = {
+  list: async (params: Record<string, string | number | undefined> = {}) => {
+    const response = await api.get<DeviceListResponse>('/devices/', { params })
+    return response.data
+  },
+  upsert: async (data: DeviceUpsertPayload) => {
+    const response = await api.post<DeviceMutationResponse>('/devices/', data)
+    return response.data
+  },
+  detail: async (deviceId: string) => {
+    const response = await api.get<ManagedDevice>(`/devices/${deviceId}/`)
+    return response.data
+  },
+  update: async (deviceId: string, data: Partial<DeviceUpsertPayload>) => {
+    const response = await api.patch<DeviceMutationResponse>(`/devices/${deviceId}/`, data)
+    return response.data
+  },
+  delete: async (deviceId: string) => {
+    const response = await api.delete<DeviceMutationResponse>(`/devices/${deviceId}/`)
+    return response.data
+  },
+  setStatus: async (deviceId: string, status: string) => {
+    const response = await api.post<DeviceMutationResponse>(`/devices/${deviceId}/status/`, { status })
+    return response.data
+  },
+  setGroups: async (deviceId: string, groups: string[]) => {
+    const response = await api.post<DeviceMutationResponse>(`/devices/${deviceId}/groups/`, { groups })
+    return response.data
+  },
+  previewImport: async (input: string | DeviceImportPayload) => {
+    const payload = typeof input === 'string'
+      ? { content: input, format: 'csv', dry_run: true }
+      : { ...input, dry_run: true }
+    const response = await api.post<DeviceImportPreview>('/devices/import/preview/', {
+      ...payload,
+    })
+    return response.data
+  },
+  applyImport: async (input: string | DeviceImportPayload) => {
+    const payload = typeof input === 'string'
+      ? { content: input, format: 'csv', dry_run: false }
+      : { ...input, dry_run: false }
+    const response = await api.post<DeviceImportApplyResult>('/devices/import/apply/', {
+      ...payload,
+    })
+    return response.data
+  },
+  importTemplate: async () => {
+    const response = await api.get<DeviceImportTemplate>('/devices/import/template/')
+    return response.data
+  },
+  previewBulk: async (data: DeviceBulkRequest) => {
+    const response = await api.post<DeviceBulkPreview>('/devices/bulk/preview/', data)
+    return response.data
+  },
+  applyBulk: async (data: DeviceBulkRequest) => {
+    const response = await api.post<DeviceBulkApplyResult>('/devices/bulk/apply/', data)
+    return response.data
+  },
+  previewPatrol: async (data: DevicePatrolLaunchRequest) => {
+    const response = await api.post<DevicePatrolPreview>('/devices/patrol/preview/', data)
+    return response.data
+  },
+  launchPatrol: async (data: DevicePatrolLaunchRequest) => {
+    const response = await api.post<DevicePatrolLaunchResult>('/devices/patrol/launch/', data)
+    return response.data
+  },
+  effectivePlan: async (
+    deviceId: string,
+    data: { action?: string; mode?: string } = {},
+  ) => {
+    const response = await api.post<DeviceEffectivePlanPreview>(
+      `/devices/${deviceId}/effective-plan/`,
+      data,
+    )
+    return response.data
+  },
+  testConnectivity: async (deviceId: string) => {
+    const response = await api.post<DeviceConnectivityTestResult>(
+      `/devices/${deviceId}/connectivity-test/`,
+      {},
+    )
+    return response.data
+  },
+  connectionHealth: async (deviceId: string, params: { limit?: number } = {}) => {
+    const response = await api.get<DeviceConnectionHealthResponse>(
+      `/devices/${deviceId}/connection-health/`,
+      { params },
+    )
+    return response.data
+  },
+  executionPlans: async (deviceId: string, params: { limit?: number } = {}) => {
+    const response = await api.get<DeviceExecutionPlanResponse>(
+      `/devices/${deviceId}/execution-plans/`,
+      { params },
+    )
+    return response.data
+  },
+  evidenceTimeline: async (deviceId: string, params: { limit?: number } = {}) => {
+    const response = await api.get<DeviceEvidenceTimelineResponse>(
+      `/devices/${deviceId}/evidence-timeline/`,
+      { params },
+    )
+    return response.data
+  },
+  dynamicGroups: async (params: { status?: string } = {}) => {
+    const response = await api.get<{ items: DeviceDynamicGroup[] }>('/devices/dynamic-groups/', { params })
+    return response.data.items
+  },
+  saveDynamicGroup: async (data: {
+    name: string
+    description?: string
+    selector: Record<string, unknown>
+    status?: string
+  }, groupId?: string) => {
+    const response = groupId
+      ? await api.patch<{ success: boolean; group: DeviceDynamicGroup }>(`/devices/dynamic-groups/${groupId}/`, data)
+      : await api.post<{ success: boolean; group: DeviceDynamicGroup }>('/devices/dynamic-groups/', data)
+    return response.data
+  },
+  setDynamicGroupStatus: async (groupId: string, status: string) => {
+    const response = await api.post<{ success: boolean; group: DeviceDynamicGroup }>(
+      `/devices/dynamic-groups/${groupId}/status/`,
+      { status },
+    )
+    return response.data
+  },
+  previewDynamicGroup: async (groupId: string, params: { limit?: number } = {}) => {
+    const response = await api.get<DeviceDynamicGroupPreview>(
+      `/devices/dynamic-groups/${groupId}/preview/`,
+      { params },
+    )
+    return response.data
+  },
+  credentials: async () => {
+    const response = await api.get<{ items: DeviceCredentialReference[] }>('/devices/credentials/')
+    return response.data.items
+  },
+  inspectCredential: async (credential_ref?: string) => {
+    const response = await api.post<DeviceCredentialInspection>('/devices/credentials/inspect/', { credential_ref })
+    return response.data
+  },
+  agentModuleHealth: async () => {
+    const response = await api.get<DeviceAgentModuleHealthResponse>('/devices/agent-modules/health/')
+    return response.data
+  },
+  updateAgentModuleControl: async (
+    moduleId: string,
+    payload: {
+      status: string
+      maintenance_reason?: string | null
+      maintenance_starts_at?: string | null
+      maintenance_ends_at?: string | null
+    },
+  ) => {
+    const response = await api.patch<{ success: boolean; control: DeviceAgentModuleControl }>(
+      `/devices/agent-modules/${moduleId}/control/`,
+      payload,
+    )
+    return response.data
+  },
 }
 
 export const skillCatalogApi = {
@@ -977,6 +1811,76 @@ export interface WorkflowRunSummary {
   error_message?: string | null
   created_at?: string | null
   completed_at?: string | null
+  device_id?: string | null
+  device_name?: string | null
+  patrol_batch_id?: string | null
+  retry_of_run_id?: string | null
+  rerun_of_batch_id?: string | null
+  rerun_of_run_id?: string | null
+}
+
+export interface PatrolBatchSummary {
+  patrol_batch_id: string
+  workflow_name?: string
+  source?: string
+  ticket_id?: string | null
+  total: number
+  status_counts: Record<string, number>
+  failed_count: number
+  running_count: number
+  completed_count: number
+  pending_count: number
+  cancelled_count: number
+  created_at?: string | null
+  completed_at?: string | null
+  sample_devices: string[]
+  archived?: boolean
+  archived_count?: number
+  archived_at?: string | null
+  archive_reason?: string | null
+  archived_by?: string | null
+  keep_until?: string | null
+}
+
+export interface PatrolBatchGovernanceResult {
+  success: boolean
+  patrol_batch_id: string
+  archived: boolean
+  affected_runs: number
+  active_run_count?: number
+  archived_at?: string | null
+  archived_by?: string | null
+  restored_at?: string | null
+  restored_by?: string | null
+  reason?: string | null
+  keep_until?: string | null
+}
+
+export interface PatrolBatchResultSummary {
+  patrol_batch_id: string
+  run_count: number
+  device_count: number
+  change_count: number
+  event_count: number
+  status_counts: Record<string, number>
+  event_types: Record<string, number>
+  severities: Record<string, number>
+  runs: Array<{
+    run_id: string
+    device_id?: string | null
+    device_name?: string | null
+    status: string
+    snapshot_run_id?: string | null
+    change_count: number
+    event_count: number
+    error_message?: string | null
+  }>
+  sample_events: Array<Record<string, unknown>>
+  sample_changes: Array<Record<string, unknown>>
+  deliverables: {
+    csv_url: string
+    report_url: string
+  }
 }
 
 export interface WorkflowStepDetail {
@@ -1085,12 +1989,74 @@ export const workflowApi = {
     const response = await api.post<ChatIntentPreviewResult>('/workflows/chat-intent/preview/', data)
     return response.data
   },
-  listRuns: async (params?: { limit?: number; template_name?: string; ticket_id?: string }): Promise<WorkflowRunSummary[]> => {
+  listRuns: async (params?: {
+    limit?: number
+    template_name?: string
+    ticket_id?: string
+    source?: string
+    status?: string
+    device_id?: string
+    patrol_batch_id?: string
+  }): Promise<WorkflowRunSummary[]> => {
     const response = await api.get<WorkflowRunSummary[]>('/workflows/runs/', { params })
+    return response.data
+  },
+  listPatrolBatches: async (params?: { limit?: number; include_archived?: boolean }): Promise<PatrolBatchSummary[]> => {
+    const response = await api.get<{ items: PatrolBatchSummary[] }>('/workflows/runs/patrol-batches/', { params })
+    return response.data.items
+  },
+  archivePatrolBatch: async (batchId: string, data?: { reason?: string; keep_until?: string; force?: boolean }): Promise<PatrolBatchGovernanceResult> => {
+    const response = await api.post<PatrolBatchGovernanceResult>(`/workflows/runs/patrol-batches/${batchId}/archive/`, data || {})
+    return response.data
+  },
+  restorePatrolBatch: async (batchId: string, data?: { reason?: string; keep_until?: string }): Promise<PatrolBatchGovernanceResult> => {
+    const response = await api.post<PatrolBatchGovernanceResult>(`/workflows/runs/patrol-batches/${batchId}/restore/`, data || {})
+    return response.data
+  },
+  getPatrolBatchSummary: async (batchId: string): Promise<PatrolBatchResultSummary> => {
+    const response = await api.get<PatrolBatchResultSummary>(`/workflows/runs/patrol-batches/${batchId}/summary/`)
+    return response.data
+  },
+  retryPatrolBatch: async (batchId: string): Promise<{
+    success: boolean
+    patrol_batch_id: string
+    retryable_count: number
+    retried_count: number
+    runs: Array<{ run_id: string; retry_of_run_id: string; device_id?: string; device_name?: string }>
+  }> => {
+    const response = await api.post(`/workflows/runs/patrol-batches/${batchId}/retry/`, {})
+    return response.data
+  },
+  rerunPatrolBatch: async (batchId: string): Promise<{
+    success: boolean
+    patrol_batch_id: string
+    new_patrol_batch_id: string
+    source_run_count: number
+    deduplicated_device_count: number
+    rerun_count: number
+    runs: Array<{ run_id: string; rerun_of_run_id: string; device_id?: string; device_name?: string }>
+  }> => {
+    const response = await api.post(`/workflows/runs/patrol-batches/${batchId}/rerun/`, {})
+    return response.data
+  },
+  exportPatrolBatch: async (batchId: string): Promise<Blob> => {
+    const response = await api.get(`/workflows/runs/patrol-batches/${batchId}/export.csv`, {
+      responseType: 'blob',
+    })
+    return response.data
+  },
+  exportPatrolBatchReport: async (batchId: string): Promise<Blob> => {
+    const response = await api.get(`/workflows/runs/patrol-batches/${batchId}/report.md`, {
+      responseType: 'blob',
+    })
     return response.data
   },
   getRun: async (runId: string): Promise<WorkflowRunDetail> => {
     const response = await api.get<WorkflowRunDetail>(`/workflows/${runId}/`)
+    return response.data
+  },
+  retryRun: async (runId: string): Promise<{ success: boolean; run_id: string; retry_of_run_id: string; run?: WorkflowRunDetail }> => {
+    const response = await api.post(`/workflows/${runId}/retry/`, {})
     return response.data
   },
   getRunTimeline: async (runId: string) => {

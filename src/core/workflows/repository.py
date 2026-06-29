@@ -232,6 +232,10 @@ def list_workflow_runs(
     limit: int = 50,
     template_name: str | None = None,
     ticket_id: str | None = None,
+    source: str | None = None,
+    status: str | None = None,
+    device_id: str | None = None,
+    patrol_batch_id: str | None = None,
 ) -> list[WorkflowRun]:
     """列出最近的 Workflow 运行实例。"""
     with get_db_session() as db:
@@ -240,7 +244,26 @@ def list_workflow_runs(
             q = q.filter(WorkflowRun.template_name == template_name)
         if ticket_id:
             q = q.filter(WorkflowRun.ticket_id == ticket_id)
-        runs = q.limit(max(1, min(limit, 200))).all()
+        if source:
+            q = q.filter(WorkflowRun.source == source)
+        if status:
+            q = q.filter(WorkflowRun.status == status)
+        has_context_filter = bool(device_id or patrol_batch_id)
+        fetch_limit = 1000 if has_context_filter else max(1, min(limit, 200))
+        runs = q.limit(fetch_limit).all()
+        if device_id:
+            runs = [
+                run
+                for run in runs
+                if str((run.context or {}).get("device_id") or "") == str(device_id)
+            ]
+        if patrol_batch_id:
+            runs = [
+                run
+                for run in runs
+                if str((run.context or {}).get("patrol_batch_id") or "") == str(patrol_batch_id)
+            ]
+        runs = runs[: max(1, min(limit, 200))]
         for r in runs:
             db.expunge(r)
         return runs

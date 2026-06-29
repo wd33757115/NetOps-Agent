@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from src.common.config import get_settings
+from src.core.agent_modules.control import enforce_workflow_modules_enabled
 from src.core.logging import get_logger
 from src.core.workflows.artifacts import normalize_step_result
 from src.core.workflows.events import publish_workflow_event
@@ -121,6 +122,7 @@ class WorkflowEngine:
 
         ticket_id = context.get("ticket_id")
         ctx = dict(context or {})
+        enforce_workflow_modules_enabled(template_name, ctx)
         if parent_run_id:
             ctx["parent_run_id"] = parent_run_id
         chat_parent_trace = parent_trace_id or ctx.get("langfuse_parent_trace_id")

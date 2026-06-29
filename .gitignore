@@ -173,6 +173,9 @@ dev_test*/
 docs/test-reports/
 .runtime/
 _diag_out.txt
+.playwright-cli/
+parser-dashboard.png
+template-detail.png
 
 # ============================================================
 # Node.js / Frontend

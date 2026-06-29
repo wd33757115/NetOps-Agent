@@ -3,6 +3,10 @@
 
 """Workflow 表达式与注册表单元测试。"""
 
+import asyncio
+
+import pytest
+
 from src.core.workflows.expression import build_step_env, resolve_inputs, resolve_value
 from src.core.workflows.registry import get_template, load_workflows
 
@@ -23,14 +27,17 @@ def test_load_patrol_change_event_workflow():
     assert tpl is not None
     assert [step.skill_name for step in tpl.steps] == [
         "device-patrol",
+        "state-normalizer",
         "change-detector",
         "event-builder",
     ]
     assert (
-        tpl.steps[1].inputs["current_run_id"]
+        tpl.steps[2].inputs["current_run_id"]
         == "${steps.patrol.result.snapshot_run_id}"
     )
-    assert tpl.steps[2].inputs["run_id"] == "${steps.patrol.result.snapshot_run_id}"
+    assert tpl.steps[1].inputs["run_id"] == "${steps.patrol.result.snapshot_run_id}"
+    assert tpl.steps[2].inputs["use_state_observations"] is True
+    assert tpl.steps[3].inputs["run_id"] == "${steps.patrol.result.snapshot_run_id}"
 
 
 def test_workflow_owns_test_context_contract():
@@ -117,3 +124,782 @@ def test_resolve_step_artifacts_expression():
     )
     assert params["manifest"] == {"devices": []}
     assert params["config_file_key"] == "fk1"
+
+
+def test_list_workflow_runs_filters_device_context(monkeypatch):
+    from types import SimpleNamespace
+
+    from src.core.workflows import repository
+
+    runs = [
+        SimpleNamespace(
+            id="run-1",
+            template_name="patrol-change-event",
+            ticket_id=None,
+            source="device-management",
+            status="failed",
+            context={"device_id": "device-1"},
+            created_at=3,
+        ),
+        SimpleNamespace(
+            id="run-2",
+            template_name="patrol-change-event",
+            ticket_id=None,
+            source="device-management",
+            status="completed",
+            context={"device_id": "device-2"},
+            created_at=2,
+        ),
+        SimpleNamespace(
+            id="run-3",
+            template_name="other",
+            ticket_id=None,
+            source="chat",
+            status="failed",
+            context={"device_id": "device-1"},
+            created_at=1,
+        ),
+        SimpleNamespace(
+            id="run-4",
+            template_name="patrol-change-event",
+            ticket_id=None,
+            source="device-management",
+            status="failed",
+            context={"device_id": "device-1", "patrol_batch_id": "batch-2"},
+            created_at=0,
+        ),
+    ]
+
+    class FakeQuery:
+        def __init__(self, items):
+            self.items = list(items)
+
+        def order_by(self, *_args):
+            return self
+
+        def filter(self, predicate):
+            self.items = [item for item in self.items if predicate(item)]
+            return self
+
+        def limit(self, _limit):
+            return self
+
+        def all(self):
+            return self.items
+
+    class FakeColumn:
+        def __init__(self, name):
+            self.name = name
+
+        def desc(self):
+            return self
+
+        def __eq__(self, other):
+            return lambda item: getattr(item, self.name) == other
+
+    class FakeWorkflowRun:
+        created_at = FakeColumn("created_at")
+        template_name = FakeColumn("template_name")
+        ticket_id = FakeColumn("ticket_id")
+        source = FakeColumn("source")
+        status = FakeColumn("status")
+
+    class FakeSession:
+        def query(self, _model):
+            return FakeQuery(runs)
+
+        def expunge(self, _item):
+            return None
+
+    class FakeSessionContext:
+        def __enter__(self):
+            return FakeSession()
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(repository, "WorkflowRun", FakeWorkflowRun)
+    monkeypatch.setattr(repository, "get_db_session", lambda: FakeSessionContext())
+
+    result = repository.list_workflow_runs(
+        template_name="patrol-change-event",
+        source="device-management",
+        status="failed",
+        device_id="device-1",
+        patrol_batch_id=None,
+    )
+
+    assert [item.id for item in result] == ["run-1", "run-4"]
+
+    batch_result = repository.list_workflow_runs(
+        template_name="patrol-change-event",
+        source="device-management",
+        status="failed",
+        device_id="device-1",
+        patrol_batch_id="batch-2",
+    )
+
+    assert [item.id for item in batch_result] == ["run-4"]
+
+
+def test_retry_workflow_run_reuses_context(monkeypatch):
+    from types import SimpleNamespace
+
+    from src.gateway import workflow_api
+
+    started = []
+    original = SimpleNamespace(
+        id="run-1",
+        template_name="patrol-change-event",
+        ticket_id=None,
+        source="device-management",
+        user_id="user-1",
+        thread_id="thread-1",
+        status="failed",
+        context={
+            "device_id": "device-1",
+            "langfuse_trace_id": "old-trace",
+            "langfuse_workflow_root_span_id": "old-span",
+        },
+    )
+    retried = SimpleNamespace(
+        id="run-2",
+        template_name="patrol-change-event",
+        ticket_id=None,
+        source="device-management",
+        user_id="user-1",
+        thread_id="thread-1",
+        status="running",
+        context={"device_id": "device-1", "retry_of_run_id": "run-1"},
+        current_step_index=0,
+        error_message=None,
+        created_at=None,
+        completed_at=None,
+    )
+
+    def fake_get_run(run_id):
+        return original if run_id == "run-1" else retried
+
+    class FakeEngine:
+        @staticmethod
+        def start(template_name, context, **kwargs):
+            started.append((template_name, context, kwargs))
+            return "run-2"
+
+    monkeypatch.setattr(workflow_api, "get_workflow_run", fake_get_run)
+    monkeypatch.setattr(workflow_api, "list_workflow_steps", lambda _run_id: [])
+    monkeypatch.setattr(workflow_api, "get_workflow_timeline", lambda _run_id: [])
+    monkeypatch.setattr(workflow_api, "list_child_runs", lambda _run_id: [])
+    monkeypatch.setattr(workflow_api, "WorkflowEngine", FakeEngine)
+
+    result = asyncio.run(
+        workflow_api.retry_workflow_run(
+            "run-1",
+            workflow_api.WorkflowRetryRequest(),
+            user=None,
+        )
+    )
+
+    assert result["success"] is True
+    assert result["run_id"] == "run-2"
+    assert result["retry_of_run_id"] == "run-1"
+    assert started[0][0] == "patrol-change-event"
+    assert started[0][1]["device_id"] == "device-1"
+    assert started[0][1]["retry_of_run_id"] == "run-1"
+    assert "langfuse_trace_id" not in started[0][1]
+    assert started[0][2]["source"] == "device-management"
+    assert started[0][2]["parent_run_id"] == "run-1"
+
+
+def test_retry_workflow_run_rejects_completed(monkeypatch):
+    from types import SimpleNamespace
+
+    import pytest
+    from fastapi import HTTPException
+
+    from src.gateway import workflow_api
+
+    monkeypatch.setattr(
+        workflow_api,
+        "get_workflow_run",
+        lambda _run_id: SimpleNamespace(id="run-1", status="completed"),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            workflow_api.retry_workflow_run(
+                "run-1",
+                workflow_api.WorkflowRetryRequest(),
+                user=None,
+            )
+        )
+
+    assert exc.value.status_code == 400
+
+
+def test_list_patrol_batches_groups_runs(monkeypatch):
+    from types import SimpleNamespace
+
+    from src.gateway import workflow_api
+
+    runs = [
+        SimpleNamespace(
+            id="run-1",
+            template_name="patrol-change-event",
+            ticket_id="PATROL-1",
+            source="device-management",
+            status="completed",
+            current_step_index=3,
+            error_message=None,
+            created_at="2026-06-21T10:00:00",
+            completed_at="2026-06-21T10:10:00",
+            context={"patrol_batch_id": "batch-1", "device_id": "device-1", "device_name": "SW1"},
+        ),
+        SimpleNamespace(
+            id="run-2",
+            template_name="patrol-change-event",
+            ticket_id="PATROL-1",
+            source="device-management",
+            status="failed",
+            current_step_index=1,
+            error_message="boom",
+            created_at="2026-06-21T10:01:00",
+            completed_at="2026-06-21T10:11:00",
+            context={"patrol_batch_id": "batch-1", "device_id": "device-2", "device_name": "SW2"},
+        ),
+        SimpleNamespace(
+            id="run-3",
+            template_name="patrol-change-event",
+            ticket_id=None,
+            source="device-management",
+            status="running",
+            current_step_index=1,
+            error_message=None,
+            created_at="2026-06-21T11:00:00",
+            completed_at=None,
+            context={"patrol_batch_id": "batch-2", "device_id": "device-3", "device_name": "SW3"},
+        ),
+        SimpleNamespace(
+            id="run-4",
+            template_name="patrol-change-event",
+            ticket_id=None,
+            source="device-management",
+            status="completed",
+            current_step_index=3,
+            error_message=None,
+            created_at="2026-06-21T12:00:00",
+            completed_at="2026-06-21T12:05:00",
+            context={
+                "patrol_batch_id": "batch-archived",
+                "device_id": "device-4",
+                "device_name": "SW4",
+                "patrol_batch_archived": True,
+                "patrol_batch_archived_at": "2026-06-21T13:00:00Z",
+                "patrol_batch_archive_reason": "old batch",
+            },
+        ),
+    ]
+    monkeypatch.setattr(workflow_api, "list_workflow_runs", lambda **_kwargs: runs)
+
+    result = asyncio.run(workflow_api.list_patrol_batches())
+
+    assert result["items"][0]["patrol_batch_id"] == "batch-2"
+    assert result["items"][1]["patrol_batch_id"] == "batch-1"
+    assert result["items"][1]["total"] == 2
+    assert result["items"][1]["completed_count"] == 1
+    assert result["items"][1]["failed_count"] == 1
+    assert result["items"][1]["sample_devices"] == ["SW1", "SW2"]
+    assert all(item["patrol_batch_id"] != "batch-archived" for item in result["items"])
+
+    with_archived = asyncio.run(workflow_api.list_patrol_batches(include_archived=True))
+    archived = next(item for item in with_archived["items"] if item["patrol_batch_id"] == "batch-archived")
+    assert archived["archived"] is True
+    assert archived["archived_count"] == 1
+    assert archived["archive_reason"] == "old batch"
+
+
+def test_archive_patrol_batch_writes_governance_context(monkeypatch):
+    from types import SimpleNamespace
+
+    from src.gateway import workflow_api
+
+    runs = [
+        SimpleNamespace(
+            id="run-1",
+            template_name="patrol-change-event",
+            ticket_id=None,
+            source="device-management",
+            status="completed",
+            context={"patrol_batch_id": "batch-1", "device_id": "device-1"},
+        ),
+        SimpleNamespace(
+            id="run-2",
+            template_name="patrol-change-event",
+            ticket_id=None,
+            source="device-management",
+            status="failed",
+            context={"patrol_batch_id": "batch-1", "device_id": "device-2"},
+        ),
+    ]
+    updated = {}
+
+    monkeypatch.setattr(workflow_api, "list_workflow_runs", lambda **_kwargs: runs)
+    monkeypatch.setattr(workflow_api, "update_run_context", lambda run_id, context: updated.setdefault(run_id, context))
+
+    result = asyncio.run(
+        workflow_api.archive_patrol_batch(
+            "batch-1",
+            workflow_api.PatrolBatchGovernanceRequest(reason="operator cleanup", keep_until="2026-12-31T00:00:00Z"),
+            user=None,
+        )
+    )
+
+    assert result["success"] is True
+    assert result["archived"] is True
+    assert result["affected_runs"] == 2
+    assert set(updated) == {"run-1", "run-2"}
+    assert updated["run-1"]["patrol_batch_archived"] is True
+    assert updated["run-1"]["patrol_batch_archive_reason"] == "operator cleanup"
+    assert updated["run-1"]["patrol_batch_keep_until"] == "2026-12-31T00:00:00Z"
+
+
+def test_retry_patrol_batch_rejects_archived_batch(monkeypatch):
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from src.gateway import workflow_api
+
+    runs = [
+        SimpleNamespace(
+            id="run-1",
+            template_name="patrol-change-event",
+            ticket_id=None,
+            source="device-management",
+            status="failed",
+            context={"patrol_batch_id": "batch-1", "device_id": "device-1", "patrol_batch_archived": True},
+        )
+    ]
+    monkeypatch.setattr(workflow_api, "list_workflow_runs", lambda **_kwargs: runs)
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            workflow_api.retry_patrol_batch(
+                "batch-1",
+                workflow_api.WorkflowRetryRequest(),
+                user=None,
+            )
+        )
+
+    assert exc.value.status_code == 409
+
+
+def test_retry_patrol_batch_only_retries_failed_and_cancelled(monkeypatch):
+    from types import SimpleNamespace
+
+    from src.gateway import workflow_api
+
+    runs = [
+        SimpleNamespace(
+            id="run-1",
+            template_name="patrol-change-event",
+            ticket_id=None,
+            source="device-management",
+            user_id=None,
+            thread_id=None,
+            status="completed",
+            context={"patrol_batch_id": "batch-1", "device_id": "device-1"},
+        ),
+        SimpleNamespace(
+            id="run-2",
+            template_name="patrol-change-event",
+            ticket_id=None,
+            source="device-management",
+            user_id=None,
+            thread_id=None,
+            status="failed",
+            context={"patrol_batch_id": "batch-1", "device_id": "device-2"},
+        ),
+        SimpleNamespace(
+            id="run-3",
+            template_name="patrol-change-event",
+            ticket_id=None,
+            source="device-management",
+            user_id=None,
+            thread_id=None,
+            status="cancelled",
+            context={"patrol_batch_id": "batch-1", "device_id": "device-3"},
+        ),
+    ]
+    started = []
+
+    class FakeEngine:
+        @staticmethod
+        def start(template_name, context, **kwargs):
+            started.append((template_name, context, kwargs))
+            return f"retry-{len(started)}"
+
+    monkeypatch.setattr(workflow_api, "list_workflow_runs", lambda **_kwargs: runs)
+    monkeypatch.setattr(workflow_api, "WorkflowEngine", FakeEngine)
+
+    result = asyncio.run(
+        workflow_api.retry_patrol_batch(
+            "batch-1",
+            workflow_api.WorkflowRetryRequest(),
+            user=None,
+        )
+    )
+
+    assert result["retried_count"] == 2
+    assert [item["retry_of_run_id"] for item in result["runs"]] == ["run-2", "run-3"]
+    assert [call[1]["retry_of_run_id"] for call in started] == ["run-2", "run-3"]
+    assert all(call[1]["patrol_batch_id"] == "batch-1" for call in started)
+
+
+def test_rerun_patrol_batch_starts_new_batch_with_latest_device_context(monkeypatch):
+    from types import SimpleNamespace
+
+    from src.gateway import workflow_api
+
+    started = []
+    runs = [
+        SimpleNamespace(
+            id="run-old",
+            template_name="patrol-change-event",
+            ticket_id=None,
+            source="device-management",
+            user_id="user-1",
+            thread_id="thread-1",
+            status="failed",
+            created_at="2026-06-21T10:00:00",
+            context={
+                "patrol_batch_id": "batch-1",
+                "device_id": "device-1",
+                "device_name": "SW1",
+                "retry_of_run_id": "previous",
+                "langfuse_trace_id": "old-trace",
+            },
+        ),
+        SimpleNamespace(
+            id="run-new",
+            template_name="patrol-change-event",
+            ticket_id=None,
+            source="device-management",
+            user_id="user-1",
+            thread_id="thread-1",
+            status="completed",
+            created_at="2026-06-21T10:05:00",
+            context={"patrol_batch_id": "batch-1", "device_id": "device-1", "device_name": "SW1"},
+        ),
+        SimpleNamespace(
+            id="run-2",
+            template_name="patrol-change-event",
+            ticket_id=None,
+            source="device-management",
+            user_id="user-1",
+            thread_id="thread-1",
+            status="completed",
+            created_at="2026-06-21T10:01:00",
+            context={"patrol_batch_id": "batch-1", "device_id": "device-2", "device_name": "SW2"},
+        ),
+    ]
+
+    class FakeEngine:
+        @staticmethod
+        def start(template_name, context, **kwargs):
+            started.append((template_name, context, kwargs))
+            return f"rerun-{len(started)}"
+
+    monkeypatch.setattr(workflow_api, "list_workflow_runs", lambda **_kwargs: runs)
+    monkeypatch.setattr(workflow_api, "WorkflowEngine", FakeEngine)
+
+    result = asyncio.run(
+        workflow_api.rerun_patrol_batch(
+            "batch-1",
+            workflow_api.WorkflowRetryRequest(),
+            user=None,
+        )
+    )
+
+    assert result["success"] is True
+    assert result["source_run_count"] == 3
+    assert result["deduplicated_device_count"] == 2
+    assert result["rerun_count"] == 2
+    assert result["new_patrol_batch_id"].startswith("patrol-batch-")
+    assert [item[1]["device_id"] for item in started] == ["device-1", "device-2"]
+    assert started[0][1]["rerun_of_run_id"] == "run-new"
+    assert started[0][1]["rerun_of_batch_id"] == "batch-1"
+    assert started[0][1]["patrol_batch_id"] == result["new_patrol_batch_id"]
+    assert "retry_of_run_id" not in started[0][1]
+    assert "langfuse_trace_id" not in started[0][1]
+
+
+def test_export_patrol_batch_csv(monkeypatch):
+    from types import SimpleNamespace
+
+    from src.gateway import workflow_api
+
+    runs = [
+        SimpleNamespace(
+            id="run-1",
+            template_name="patrol-change-event",
+            ticket_id="PATROL-1",
+            source="device-management",
+            status="failed",
+            current_step_index=2,
+            error_message="boom",
+            created_at="2026-06-21T10:00:00",
+            completed_at="2026-06-21T10:05:00",
+            context={"patrol_batch_id": "batch-1", "device_id": "device-1", "device_name": "SW1"},
+        )
+    ]
+    monkeypatch.setattr(workflow_api, "list_workflow_runs", lambda **_kwargs: runs)
+
+    response = asyncio.run(workflow_api.export_patrol_batch_csv("batch-1"))
+    body = response.body.decode("utf-8")
+
+    assert "patrol_batch_id,run_id,retry_of_run_id,device_id" in body
+    assert "batch-1,run-1,,device-1,SW1,failed,2,PATROL-1" in body
+
+
+def test_export_patrol_batch_report_summarizes_changes_and_events(monkeypatch):
+    from types import SimpleNamespace
+
+    from src.gateway import workflow_api
+
+    runs = [
+        SimpleNamespace(
+            id="workflow-1",
+            template_name="patrol-change-event",
+            ticket_id=None,
+            source="device-management",
+            status="completed",
+            current_step_index=3,
+            error_message=None,
+            created_at="2026-06-21T10:00:00",
+            completed_at="2026-06-21T10:05:00",
+            context={"patrol_batch_id": "batch-1", "device_id": "device-1", "device_name": "SW1"},
+        )
+    ]
+
+    class FakeColumn:
+        def __init__(self, name):
+            self.name = name
+
+        def __eq__(self, other):
+            return lambda item: getattr(item, self.name) == other
+
+        def asc(self):
+            return self
+
+        def desc(self):
+            return self
+
+    class FakeWorkflowStepRecord:
+        run_id = FakeColumn("run_id")
+        step_index = FakeColumn("step_index")
+
+    class FakeNetworkChangeRecord:
+        run_id = FakeColumn("run_id")
+        detected_at = FakeColumn("detected_at")
+
+    class FakeNetworkEventRecord:
+        run_id = FakeColumn("run_id")
+        occurred_at = FakeColumn("occurred_at")
+
+    rows_by_model = {
+        FakeWorkflowStepRecord: [
+            SimpleNamespace(
+                run_id="workflow-1",
+                step_index=0,
+                result={"snapshot_run_id": "snapshot-run-1"},
+            )
+        ],
+        FakeNetworkChangeRecord: [
+            SimpleNamespace(
+                run_id="snapshot-run-1",
+                device_id="device-1",
+                entity_type="interface",
+                entity_key="GE1/0/1",
+                field="status",
+                old_value_json="up",
+                new_value_json="down",
+                detected_at="2026-06-21T10:03:00",
+            )
+        ],
+        FakeNetworkEventRecord: [
+            SimpleNamespace(
+                run_id="snapshot-run-1",
+                device_id="device-1",
+                event_type="InterfaceDown",
+                severity="critical",
+                entity_type="interface",
+                entity_key="GE1/0/1",
+                occurred_at="2026-06-21T10:04:00",
+            )
+        ],
+    }
+
+    class FakeQuery:
+        def __init__(self, items):
+            self.items = list(items)
+
+        def filter(self, predicate):
+            self.items = [item for item in self.items if predicate(item)]
+            return self
+
+        def order_by(self, *_args):
+            return self
+
+        def all(self):
+            return self.items
+
+    class FakeSession:
+        def query(self, model):
+            return FakeQuery(rows_by_model.get(model, []))
+
+    class FakeSessionContext:
+        def __enter__(self):
+            return FakeSession()
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(workflow_api, "list_workflow_runs", lambda **_kwargs: runs)
+    monkeypatch.setattr(workflow_api, "WorkflowStepRecord", FakeWorkflowStepRecord)
+    monkeypatch.setattr(workflow_api, "NetworkChangeRecord", FakeNetworkChangeRecord)
+    monkeypatch.setattr(workflow_api, "NetworkEventRecord", FakeNetworkEventRecord)
+    monkeypatch.setattr(workflow_api, "get_db_session", lambda: FakeSessionContext())
+
+    response = asyncio.run(workflow_api.export_patrol_batch_report("batch-1"))
+    body = response.body.decode("utf-8")
+
+    assert "# Patrol Batch Report: batch-1" in body
+    assert "- Changes: 1" in body
+    assert "- Events: 1" in body
+    assert "- InterfaceDown: 1" in body
+    assert "| SW1 | workflow-1 | completed | snapshot-run-1 | 1 | 1 | - |" in body
+
+
+def test_patrol_batch_summary_exposes_report_counts(monkeypatch):
+    from types import SimpleNamespace
+
+    from src.gateway import workflow_api
+
+    runs = [
+        SimpleNamespace(
+            id="workflow-1",
+            template_name="patrol-change-event",
+            ticket_id=None,
+            source="device-management",
+            status="completed",
+            current_step_index=3,
+            error_message=None,
+            created_at="2026-06-21T10:00:00",
+            completed_at="2026-06-21T10:05:00",
+            context={"patrol_batch_id": "batch-1", "device_id": "device-1", "device_name": "SW1"},
+        )
+    ]
+
+    class FakeColumn:
+        def __init__(self, name):
+            self.name = name
+
+        def __eq__(self, other):
+            return lambda item: getattr(item, self.name) == other
+
+        def asc(self):
+            return self
+
+        def desc(self):
+            return self
+
+    class FakeWorkflowStepRecord:
+        run_id = FakeColumn("run_id")
+        step_index = FakeColumn("step_index")
+
+    class FakeNetworkChangeRecord:
+        run_id = FakeColumn("run_id")
+        detected_at = FakeColumn("detected_at")
+
+    class FakeNetworkEventRecord:
+        run_id = FakeColumn("run_id")
+        occurred_at = FakeColumn("occurred_at")
+
+    rows_by_model = {
+        FakeWorkflowStepRecord: [
+            SimpleNamespace(
+                run_id="workflow-1",
+                step_index=0,
+                result={"snapshot_run_id": "snapshot-run-1"},
+            )
+        ],
+        FakeNetworkChangeRecord: [
+            SimpleNamespace(
+                id="change-1",
+                run_id="snapshot-run-1",
+                device_id="device-1",
+                entity_type="interface",
+                entity_key="GE1/0/1",
+                field="status",
+                old_value_json="up",
+                new_value_json="down",
+                detected_at="2026-06-21T10:03:00",
+            )
+        ],
+        FakeNetworkEventRecord: [
+            SimpleNamespace(
+                id="event-1",
+                run_id="snapshot-run-1",
+                device_id="device-1",
+                event_type="InterfaceDown",
+                severity="critical",
+                entity_type="interface",
+                entity_key="GE1/0/1",
+                occurred_at="2026-06-21T10:04:00",
+            )
+        ],
+    }
+
+    class FakeQuery:
+        def __init__(self, items):
+            self.items = list(items)
+
+        def filter(self, predicate):
+            self.items = [item for item in self.items if predicate(item)]
+            return self
+
+        def order_by(self, *_args):
+            return self
+
+        def all(self):
+            return self.items
+
+    class FakeSession:
+        def query(self, model):
+            return FakeQuery(rows_by_model.get(model, []))
+
+    class FakeSessionContext:
+        def __enter__(self):
+            return FakeSession()
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(workflow_api, "list_workflow_runs", lambda **_kwargs: runs)
+    monkeypatch.setattr(workflow_api, "WorkflowStepRecord", FakeWorkflowStepRecord)
+    monkeypatch.setattr(workflow_api, "NetworkChangeRecord", FakeNetworkChangeRecord)
+    monkeypatch.setattr(workflow_api, "NetworkEventRecord", FakeNetworkEventRecord)
+    monkeypatch.setattr(workflow_api, "get_db_session", lambda: FakeSessionContext())
+
+    result = asyncio.run(workflow_api.get_patrol_batch_summary("batch-1"))
+
+    assert result["run_count"] == 1
+    assert result["device_count"] == 1
+    assert result["change_count"] == 1
+    assert result["event_count"] == 1
+    assert result["event_types"] == {"InterfaceDown": 1}
+    assert result["severities"] == {"critical": 1}
+    assert result["runs"][0]["snapshot_run_id"] == "snapshot-run-1"
+    assert result["sample_events"][0]["id"] == "event-1"
+    assert result["deliverables"]["report_url"].endswith("/batch-1/report.md")

@@ -33,6 +33,7 @@
 |------|------|
 | [SKILL_CREATION_GUIDE.md](./SKILL_CREATION_GUIDE.md) | Skill 创建与 SKILL.md v2.0 |
 | [测试手册.md](./测试手册.md) | 单元/集成/E2E 测试 |
+| [system-overall-design-and-phased-implementation-plan.md](./system-overall-design-and-phased-implementation-plan.md) | NetOps Agent 总体设计、改造方案与分阶段实施计划 |
 | [auth-rbac-plan.md](./auth-rbac-plan.md) | JWT、RBAC、BFF 可信头 |
 | [langfuse-sse-plan.md](./langfuse-sse-plan.md) | Langfuse + SSE Trace 方案 |
 | [storage-minio-plan.md](./storage-minio-plan.md) | MinIO 网盘方案 |

@@ -12,6 +12,9 @@ import {
   parserApi, type ParserCommandAlias, type ParserDeviceProfile,
   type ParserIdentitySignature, type ParserJobItem, type ParserTemplateItem,
   type ParserImportPreview, type ParserTemplateComparison, type ParserTemplatePreview,
+  type ParserEventRule, type ParserCommandProfile, type ParserCommandProfileBinding,
+  type ParserCommandProfileImpactPreview, type ParserEffectivePlanPreview,
+  type ParserEventRuleTestResult,
 } from '../../services/api'
 import { useIsMobile } from '../../hooks/useBreakpoint'
 
@@ -20,6 +23,26 @@ const statusColor = (status: string) => {
   if (status === 'failed' || status === 'rejected') return 'red'
   if (status === 'deprecated' || status === 'cancelled' || status === 'superseded') return 'default'
   return 'blue'
+}
+
+const statusLabel = (status?: string) => {
+  const labels: Record<string, string> = {
+    active: '已激活',
+    cancelled: '已取消',
+    collecting: '收集中',
+    deprecated: '已废弃',
+    draft: '草稿',
+    failed: '失败',
+    pending: '待处理',
+    pending_approval: '待审批',
+    rejected: '已拒绝',
+    running: '运行中',
+    succeeded: '成功',
+    superseded: '已替换',
+    unavailable: '不可用',
+    validating: '验证中',
+  }
+  return status ? labels[status] || status : '无'
 }
 
 const codePanelStyle: React.CSSProperties = {
@@ -48,6 +71,20 @@ const ParserControlTab: React.FC = () => {
   const [comparisonTemplate, setComparisonTemplate] = useState<ParserTemplateItem | null>(null)
   const [comparison, setComparison] = useState<ParserTemplateComparison | null>(null)
   const [comparisonLoading, setComparisonLoading] = useState(false)
+  const [ruleName, setRuleName] = useState('')
+  const [ruleEventType, setRuleEventType] = useState('')
+  const [ruleSeverity, setRuleSeverity] = useState('warning')
+  const [ruleCondition, setRuleCondition] = useState('{\n  "kind": "threshold",\n  "fields": ["cpu_5s"],\n  "gte": 90\n}')
+  const [ruleSamples, setRuleSamples] = useState('[\n  { "field": "cpu_5s", "new": 95 },\n  { "field": "cpu_5s", "new": 20 }\n]')
+  const [ruleTest, setRuleTest] = useState<ParserEventRuleTestResult | null>(null)
+  const [profileName, setProfileName] = useState('')
+  const [profileCommands, setProfileCommands] = useState('show version\nshow inventory')
+  const [bindingProfileVersionId, setBindingProfileVersionId] = useState<string>()
+  const [bindingPriority, setBindingPriority] = useState('100')
+  const [bindingSelector, setBindingSelector] = useState('{\n  "vendor": "Cisco",\n  "role": "core"\n}')
+  const [effectiveDevice, setEffectiveDevice] = useState('{\n  "device_id": "device-1",\n  "vendor": "Cisco",\n  "command_file": "default-patrol",\n  "attributes": {}\n}')
+  const [effectivePlan, setEffectivePlan] = useState<ParserEffectivePlanPreview | null>(null)
+  const [profileImpact, setProfileImpact] = useState<ParserCommandProfileImpactPreview | null>(null)
 
   const polling = { refetchInterval: 5000 }
   const { data: coverage } = useQuery('parser-coverage', parserApi.coverage, polling)
@@ -70,6 +107,11 @@ const ParserControlTab: React.FC = () => {
     'parser-identity-signatures', parserApi.identitySignatures,
   )
   const { data: datasets = [] } = useQuery('parser-datasets', parserApi.datasets, polling)
+  const { data: eventRules = [] } = useQuery('parser-event-rules', parserApi.eventRules, polling)
+  const { data: commandProfiles = [] } = useQuery('parser-command-profiles', parserApi.commandProfiles, polling)
+  const { data: commandProfileBindings = [] } = useQuery(
+    'parser-command-profile-bindings', parserApi.commandProfileBindings, polling,
+  )
 
   const filteredTemplates = useMemo(() => templates.filter((item) => {
     const text = `${item.vendor} ${item.profile} ${item.canonical_command} ${item.category}`.toLowerCase()
@@ -86,7 +128,9 @@ const ParserControlTab: React.FC = () => {
 
   const refresh = () => {
     ;['parser-coverage', 'parser-templates', 'parser-jobs', 'parser-aliases',
-      'parser-device-profiles', 'parser-identity-signatures', 'parser-datasets'].forEach((key) =>
+      'parser-device-profiles', 'parser-identity-signatures', 'parser-datasets',
+      'parser-event-rules', 'parser-command-profiles',
+      'parser-command-profile-bindings'].forEach((key) =>
       queryClient.invalidateQueries(key))
     queryClient.invalidateQueries('parser-dispatch-control')
     if (jobId) queryClient.invalidateQueries(['parser-job', jobId])
@@ -155,6 +199,133 @@ const ParserControlTab: React.FC = () => {
     },
   )
 
+  const bootstrapRules = useMutation(parserApi.bootstrapEventRules, {
+    onSuccess: () => { message.success('默认事件规则已初始化'); refresh() },
+    onError: (error: any) => message.error(error?.response?.data?.detail || '事件规则初始化失败'),
+  })
+
+  const upsertRule = useMutation(
+    () => parserApi.upsertEventRule({
+      name: ruleName.trim(),
+      event_type: ruleEventType.trim(),
+      severity: ruleSeverity,
+      condition: JSON.parse(ruleCondition),
+      status: 'draft',
+    }),
+    {
+      onSuccess: () => { message.success('事件规则草稿已保存'); refresh() },
+      onError: (error: any) => message.error(error?.response?.data?.detail || error?.message || '事件规则保存失败'),
+    },
+  )
+
+  const ruleLifecycle = useMutation(
+    ({ type, id }: { type: 'activate' | 'deprecate'; id: string }) =>
+      type === 'activate'
+        ? parserApi.activateEventRule(id)
+        : parserApi.deprecateEventRule(id),
+    {
+      onSuccess: () => { message.success('事件规则状态已更新'); refresh() },
+      onError: (error: any) => message.error(error?.response?.data?.detail || '事件规则状态更新失败'),
+    },
+  )
+
+  const testRule = useMutation(
+    () => parserApi.testEventRule({
+      condition: JSON.parse(ruleCondition),
+      samples: JSON.parse(ruleSamples),
+    }),
+    {
+      onSuccess: (result) => {
+        setRuleTest(result)
+        message.success(`命中 ${result.matched_count}/${result.sample_count} 条样本`)
+      },
+      onError: (error: any) => message.error(error?.response?.data?.detail || error?.message || '事件规则测试失败'),
+    },
+  )
+
+  const upsertProfile = useMutation(
+    () => parserApi.upsertCommandProfile({
+      name: profileName.trim(),
+      action: 'patrol',
+      commands: profileCommands.split(/\r?\n/).map((item) => item.trim()).filter(Boolean),
+      status: 'draft',
+    }),
+    {
+      onSuccess: () => { message.success('命令 Profile 草稿已保存'); refresh() },
+      onError: (error: any) => message.error(error?.response?.data?.detail || '命令 Profile 保存失败'),
+    },
+  )
+
+  const profileLifecycle = useMutation(
+    ({ type, id }: { type: 'activate' | 'deprecate' | 'rollback'; id: string }) =>
+      type === 'activate'
+        ? parserApi.activateCommandProfile(id)
+        : type === 'rollback'
+          ? parserApi.rollbackCommandProfile(id)
+          : parserApi.deprecateCommandProfile(id),
+    {
+      onSuccess: () => { message.success('命令 Profile 状态已更新'); refresh() },
+      onError: (error: any) => message.error(error?.response?.data?.detail || '命令 Profile 状态更新失败'),
+    },
+  )
+
+  const upsertProfileBinding = useMutation(
+    () => parserApi.upsertCommandProfileBinding({
+      profile_version_id: bindingProfileVersionId || '',
+      selector: JSON.parse(bindingSelector),
+      priority: Number.parseInt(bindingPriority, 10) || 100,
+      status: 'active',
+    }),
+    {
+      onSuccess: () => { message.success('Profile 绑定已保存'); refresh() },
+      onError: (error: any) => message.error(error?.response?.data?.detail || error?.message || 'Profile 绑定保存失败'),
+    },
+  )
+
+  const bindingLifecycle = useMutation(
+    ({ type, id }: { type: 'enable' | 'disable'; id: string }) =>
+      type === 'enable'
+        ? parserApi.enableCommandProfileBinding(id)
+        : parserApi.disableCommandProfileBinding(id),
+    {
+      onSuccess: () => { message.success('绑定状态已更新'); refresh() },
+      onError: (error: any) => message.error(error?.response?.data?.detail || '绑定状态更新失败'),
+    },
+  )
+
+  const previewProfileImpact = useMutation(
+    () => parserApi.commandProfileImpactPreview({
+      profile_version_id: bindingProfileVersionId,
+      profile_name: profileName.trim() || undefined,
+      action: 'patrol',
+      commands: profileCommands.split(/\r?\n/).map((item) => item.trim()).filter(Boolean),
+      selector: bindingSelector.trim() ? JSON.parse(bindingSelector) : {},
+      mode: 'production',
+      limit: 100,
+      save_evidence: Boolean(bindingProfileVersionId),
+    }),
+    {
+      onSuccess: (result) => {
+        setProfileImpact(result)
+        message.success(result.evidence_saved ? '影响证据已保存' : '影响预览已完成')
+        refresh()
+      },
+      onError: (error: any) => message.error(error?.response?.data?.detail || error?.message || 'Profile 影响预览失败'),
+    },
+  )
+
+  const previewEffectivePlan = useMutation(
+    () => parserApi.effectivePlanPreview({
+      device: JSON.parse(effectiveDevice),
+      action: 'patrol',
+      mode: 'production',
+    }),
+    {
+      onSuccess: setEffectivePlan,
+      onError: (error: any) => message.error(error?.response?.data?.detail || error?.message || '执行计划预览失败'),
+    },
+  )
+
   const templateColumns = [
     { title: '厂商', dataIndex: 'vendor', width: 90 },
     { title: '型号 / 设备族', dataIndex: 'profile', width: 180 },
@@ -162,7 +333,7 @@ const ParserControlTab: React.FC = () => {
     { title: '类别', dataIndex: 'category', width: 130 },
     { title: '版本', dataIndex: 'version', width: 150 },
     { title: '状态', dataIndex: 'status', width: 120,
-      render: (value: string) => <Tag color={statusColor(value)}>{value}</Tag> },
+      render: (value: string) => <Tag color={statusColor(value)}>{statusLabel(value)}</Tag> },
     { title: '操作', width: 190, render: (_: unknown, row: ParserTemplateItem) => (
       <Space>
         <Button icon={<EyeOutlined />} size="small" title="查看解析模板" onClick={() => showPreview(row.id)} />
@@ -183,7 +354,7 @@ const ParserControlTab: React.FC = () => {
     { title: '样本', dataIndex: 'sample_count', width: 70 },
     { title: '尝试', dataIndex: 'attempts', width: 70 },
     { title: '状态', dataIndex: 'status', width: 120,
-      render: (value: string) => <Tag color={statusColor(value)}>{value}</Tag> },
+      render: (value: string) => <Tag color={statusColor(value)}>{statusLabel(value)}</Tag> },
     { title: '操作', width: 170, render: (_: unknown, row: ParserJobItem) => (
       <Space>
         <Button icon={<EyeOutlined />} size="small" title="查看任务" onClick={() => showJob(row.id)} />
@@ -201,13 +372,13 @@ const ParserControlTab: React.FC = () => {
     { title: '输入命令', dataIndex: 'alias' }, { title: '规范命令', dataIndex: 'canonical_command' },
     { title: '置信度', dataIndex: 'confidence', width: 100 },
     { title: '状态', dataIndex: 'status', width: 110,
-      render: (value: string) => <Tag color={statusColor(value)}>{value}</Tag> },
+      render: (value: string) => <Tag color={statusColor(value)}>{statusLabel(value)}</Tag> },
   ]
   const profileColumns = [
     { title: '厂商', dataIndex: 'vendor', width: 100 }, { title: '型号', dataIndex: 'model' },
     { title: '设备族', dataIndex: 'family' }, { title: '置信度', dataIndex: 'confidence', width: 100 },
     { title: '状态', dataIndex: 'status', width: 110,
-      render: (value: string) => <Tag color={statusColor(value)}>{value}</Tag> },
+      render: (value: string) => <Tag color={statusColor(value)}>{statusLabel(value)}</Tag> },
   ]
   const signatureColumns = [
     { title: '厂商', dataIndex: 'vendor', width: 90 }, { title: '型号', dataIndex: 'model', width: 180 },
@@ -228,6 +399,121 @@ const ParserControlTab: React.FC = () => {
       render: (value: number) => `${(value * 100).toFixed(1)}%` },
     { title: '最后导入', dataIndex: 'last_imported_at', width: 190 },
   ]
+
+  const eventRuleColumns = [
+    { title: '规则名', dataIndex: 'rule_name', width: 180 },
+    { title: '事件类型', dataIndex: 'event_type', width: 180 },
+    { title: '严重级别', dataIndex: 'severity', width: 120,
+      render: (value: string) => <Tag color={value === 'critical' ? 'red' : value === 'warning' ? 'orange' : 'blue'}>{value}</Tag> },
+    { title: '版本', dataIndex: 'version', width: 90 },
+    { title: '状态', dataIndex: 'version_status', width: 110,
+      render: (value: string) => <Tag color={statusColor(value)}>{statusLabel(value)}</Tag> },
+    { title: '条件', dataIndex: 'condition',
+      render: (value: Record<string, unknown>) =>
+        <Typography.Text code>{JSON.stringify(value)}</Typography.Text> },
+    { title: '更新时间', dataIndex: 'updated_at', width: 190 },
+    { title: '操作', width: 170, render: (_: unknown, row: ParserEventRule) => (
+      <Space>
+        {row.version_id && row.version_status !== 'active' && row.version_status !== 'deprecated' &&
+          <Button size="small" icon={<CheckOutlined />}
+            loading={ruleLifecycle.isLoading}
+            onClick={() => ruleLifecycle.mutate({ type: 'activate', id: row.version_id })}>
+            激活
+          </Button>}
+        {row.version_id && row.version_status === 'active' &&
+          <Button size="small" icon={<StopOutlined />}
+            loading={ruleLifecycle.isLoading}
+            onClick={() => ruleLifecycle.mutate({ type: 'deprecate', id: row.version_id })}>
+            废弃
+          </Button>}
+      </Space>
+    ) },
+  ]
+
+  const commandProfileColumns = [
+    { title: 'Profile', dataIndex: 'profile_name', width: 220 },
+    { title: '动作', dataIndex: 'items', width: 120,
+      render: (value: Array<{ action: string; command: string }>) =>
+        Array.from(new Set((value || []).map((item) => item.action))).join(', ') },
+    { title: '版本', dataIndex: 'version', width: 90 },
+    { title: '状态', dataIndex: 'version_status', width: 110,
+      render: (value: string) => <Tag color={statusColor(value)}>{statusLabel(value)}</Tag> },
+    { title: '命令数', dataIndex: 'items', width: 90,
+      render: (value: Array<{ action: string; command: string }>) => value?.length || 0 },
+    { title: '命令', dataIndex: 'items',
+      render: (value: Array<{ action: string; command: string }>) =>
+        <Typography.Text code>{(value || []).map((item) => item.command).join(' | ')}</Typography.Text> },
+    { title: '更新时间', dataIndex: 'updated_at', width: 190 },
+    { title: '操作', width: 170, render: (_: unknown, row: ParserCommandProfile) => (
+      <Space>
+        {row.profile_version_id && row.version_status !== 'active' && row.version_status !== 'deprecated' &&
+          <Button size="small" icon={<CheckOutlined />}
+            loading={profileLifecycle.isLoading}
+            onClick={() => profileLifecycle.mutate({ type: 'activate', id: row.profile_version_id as string })}>
+            激活
+          </Button>}
+        {row.profile_version_id && row.version_status === 'active' &&
+          <Button size="small" icon={<StopOutlined />}
+            loading={profileLifecycle.isLoading}
+            onClick={() => profileLifecycle.mutate({ type: 'deprecate', id: row.profile_version_id as string })}>
+            废弃
+          </Button>}
+        {row.profile_version_id && row.version_status === 'deprecated' &&
+          <Button size="small" icon={<ReloadOutlined />}
+            loading={profileLifecycle.isLoading}
+            onClick={() => profileLifecycle.mutate({ type: 'rollback', id: row.profile_version_id as string })}>
+            回滚
+          </Button>}
+      </Space>
+    ) },
+  ]
+
+  const bindingColumns = [
+    { title: 'Profile', dataIndex: 'profile_name', width: 200 },
+    { title: '版本', dataIndex: 'profile_version', width: 90 },
+    { title: '优先级', dataIndex: 'priority', width: 90 },
+    { title: '状态', dataIndex: 'status', width: 100,
+      render: (value: string) => <Tag color={statusColor(value)}>{statusLabel(value)}</Tag> },
+    { title: '选择器', dataIndex: 'selector_json',
+      render: (value: Record<string, unknown>) =>
+        <Typography.Text code>{JSON.stringify(value)}</Typography.Text> },
+    { title: '操作', width: 120, render: (_: unknown, row: ParserCommandProfileBinding) => (
+      row.status === 'active'
+        ? <Button size="small" icon={<StopOutlined />} loading={bindingLifecycle.isLoading}
+          onClick={() => bindingLifecycle.mutate({ type: 'disable', id: row.binding_id })}>停用</Button>
+        : <Button size="small" icon={<CheckOutlined />} loading={bindingLifecycle.isLoading}
+          onClick={() => bindingLifecycle.mutate({ type: 'enable', id: row.binding_id })}>启用</Button>
+    ) },
+  ]
+
+  const impactColumns = [
+    { title: '设备', dataIndex: 'device_name', width: 190,
+      render: (value: string, row: any) => value || row.device_id || '-' },
+    { title: '厂商', dataIndex: 'vendor', width: 100 },
+    { title: '型号', dataIndex: 'model', width: 170 },
+    { title: '站点', dataIndex: 'site', width: 110,
+      render: (value: string) => value || '-' },
+    { title: '角色', dataIndex: 'role', width: 110,
+      render: (value: string) => value || '-' },
+    { title: '状态', dataIndex: 'status', width: 100,
+      render: (value: string) => <Tag color={value === 'ready' ? 'green' : 'red'}>{value === 'ready' ? '就绪' : value}</Tag> },
+    { title: '覆盖率', width: 130,
+      render: (_: unknown, row: any) => `${row.ready_count}/${row.eligible_count} 就绪` },
+    { title: '阻塞数', dataIndex: 'blocked_count', width: 90,
+      render: (value: number) => <Tag color={value ? 'red' : 'green'}>{value}</Tag> },
+    { title: '阻塞原因', dataIndex: 'violations',
+      render: (value: Array<Record<string, unknown>>) =>
+        value?.length
+          ? <Typography.Text code>{value.map((item) => `${item.canonical_command || item.command}: ${item.coverage_status || item.failure_code}`).join(' | ')}</Typography.Text>
+          : '-' },
+  ]
+
+  const activeProfileVersionOptions = commandProfiles
+    .filter((item) => item.profile_version_id && item.version_status === 'active')
+    .map((item) => ({
+      value: item.profile_version_id as string,
+      label: `${item.profile_name} v${item.version || ''}`,
+    }))
 
   return <div>
     <Row gutter={16} style={{ marginBottom: 16 }}>
@@ -288,6 +574,151 @@ const ParserControlTab: React.FC = () => {
         <Table<ParserDeviceProfile> rowKey="id" dataSource={deviceProfiles} columns={profileColumns} pagination={{ pageSize: 20 }} size="small" /> },
       { key: 'signatures', label: `身份规则 (${identitySignatures.length})`, children:
         <Table<ParserIdentitySignature> rowKey="id" dataSource={identitySignatures} columns={signatureColumns} pagination={{ pageSize: 20 }} size="small" scroll={{ x: 900 }} /> },
+      { key: 'event-rules', label: `事件规则 (${eventRules.length})`, children:
+        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <Alert type="info" showIcon
+            message="事件规则把 NetworkChange 转换为 NetworkEvent，规则版本写入 PostgreSQL，Event Builder 优先使用 active 规则。" />
+          <Row gutter={[12, 12]} align="top">
+            <Col flex="220px"><Input value={ruleName} onChange={(event) => setRuleName(event.target.value)}
+              placeholder="规则名，例如 cpu-high" /></Col>
+            <Col flex="220px"><Input value={ruleEventType} onChange={(event) => setRuleEventType(event.target.value)}
+              placeholder="事件类型，例如 CPUHigh" /></Col>
+            <Col flex="160px"><Select value={ruleSeverity} style={{ width: '100%' }} onChange={setRuleSeverity}
+              options={[
+                { value: 'info', label: 'info' },
+                { value: 'warning', label: 'warning' },
+                { value: 'critical', label: 'critical' },
+              ]} /></Col>
+            <Col><Button type="primary" loading={upsertRule.isLoading}
+              disabled={!ruleName.trim() || !ruleEventType.trim()}
+              onClick={() => upsertRule.mutate()}>保存规则</Button></Col>
+            <Col><Button loading={bootstrapRules.isLoading}
+              onClick={() => bootstrapRules.mutate()}>初始化默认规则</Button></Col>
+          </Row>
+          <Input.TextArea rows={5} value={ruleCondition}
+            onChange={(event) => setRuleCondition(event.target.value)}
+            style={{ fontFamily: 'Consolas, Monaco, monospace' }}
+            placeholder="规则条件 JSON" />
+          <Row gutter={[12, 12]} align="top">
+            <Col flex="auto"><Input.TextArea rows={5} value={ruleSamples}
+              onChange={(event) => setRuleSamples(event.target.value)}
+              style={{ fontFamily: 'Consolas, Monaco, monospace' }}
+              placeholder="变化样本 JSON 数组" /></Col>
+            <Col><Button icon={<PlayCircleOutlined />} loading={testRule.isLoading}
+              disabled={!ruleCondition.trim() || !ruleSamples.trim()}
+              onClick={() => testRule.mutate()}>测试规则</Button></Col>
+          </Row>
+          {ruleTest && (
+            <Descriptions bordered size="small" column={isMobile ? 1 : 4}>
+              <Descriptions.Item label="样本数">{ruleTest.sample_count}</Descriptions.Item>
+              <Descriptions.Item label="命中">{ruleTest.matched_count}</Descriptions.Item>
+              <Descriptions.Item label="未命中">{ruleTest.unmatched_count}</Descriptions.Item>
+              <Descriptions.Item label="状态">{ruleTest.success ? '成功' : '失败'}</Descriptions.Item>
+            </Descriptions>
+          )}
+          {ruleTest && (
+            <Table
+              rowKey="index"
+              dataSource={ruleTest.rows}
+              columns={[
+                { title: '#', dataIndex: 'index', width: 60 },
+                { title: '是否命中', dataIndex: 'matched', width: 100,
+                  render: (value: boolean) => <Tag color={value ? 'green' : 'default'}>{value ? '是' : '否'}</Tag> },
+                { title: '错误', dataIndex: 'error', width: 180,
+                  render: (value: string | null) => value || '-' },
+                { title: '样本', dataIndex: 'sample',
+                  render: (value: Record<string, unknown>) => <Typography.Text code>{JSON.stringify(value)}</Typography.Text> },
+              ]}
+              pagination={{ pageSize: 5 }}
+              size="small"
+            />
+          )}
+          <Table<ParserEventRule> rowKey={(row) => row.version_id || row.rule_id}
+            dataSource={eventRules} columns={eventRuleColumns}
+            pagination={{ pageSize: 20 }} size="small" scroll={{ x: 1100 }} />
+        </Space> },
+      { key: 'command-profiles', label: `采集 Profile (${commandProfiles.length})`, children:
+        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <Alert type="info" showIcon
+            message="采集 Profile 定义巡检命令版本。device-patrol 和 device-backup 通过 CollectionPolicyResolver 获取 ExecutionPlan。" />
+          <Row gutter={[12, 12]} align="top">
+            <Col flex="260px"><Input value={profileName} onChange={(event) => setProfileName(event.target.value)}
+              placeholder="Profile 名称，例如 default-patrol" /></Col>
+            <Col flex="auto"><Input.TextArea rows={4} value={profileCommands}
+              onChange={(event) => setProfileCommands(event.target.value)}
+              style={{ fontFamily: 'Consolas, Monaco, monospace' }}
+              placeholder="每行一条命令" /></Col>
+            <Col><Button type="primary" loading={upsertProfile.isLoading}
+              disabled={!profileName.trim() || !profileCommands.trim()}
+              onClick={() => upsertProfile.mutate()}>保存 Profile</Button></Col>
+          </Row>
+          <Row gutter={[12, 12]} align="top">
+            <Col flex="260px"><Select value={bindingProfileVersionId}
+              onChange={setBindingProfileVersionId}
+              placeholder="选择已激活的 Profile 版本"
+              style={{ width: '100%' }}
+              options={activeProfileVersionOptions} /></Col>
+            <Col flex="120px"><Input value={bindingPriority}
+              onChange={(event) => setBindingPriority(event.target.value)}
+              placeholder="优先级" /></Col>
+            <Col flex="auto"><Input.TextArea rows={4} value={bindingSelector}
+              onChange={(event) => setBindingSelector(event.target.value)}
+              style={{ fontFamily: 'Consolas, Monaco, monospace' }}
+              placeholder="选择器 JSON，例如 vendor/site/role/group" /></Col>
+            <Col><Button icon={<EyeOutlined />} loading={previewProfileImpact.isLoading}
+              disabled={!bindingSelector.trim() || (!bindingProfileVersionId && !profileCommands.trim())}
+              onClick={() => previewProfileImpact.mutate()}>预览影响</Button></Col>
+            <Col><Button loading={upsertProfileBinding.isLoading}
+              disabled={!bindingProfileVersionId || !bindingSelector.trim()}
+              onClick={() => upsertProfileBinding.mutate()}>保存绑定</Button></Col>
+          </Row>
+          {profileImpact && <Alert type={profileImpact.blocked_device_count ? 'warning' : 'success'} showIcon
+            message={`影响范围：${profileImpact.matched_device_count} 台设备，${profileImpact.blocked_device_count} 台阻塞`}
+            description={`覆盖率 ${(profileImpact.coverage_rate * 100).toFixed(1)}%；就绪命令 ${profileImpact.ready_command_count}/${profileImpact.eligible_command_count}；阻塞命令 ${profileImpact.blocked_command_count}`} />}
+          {profileImpact && <Table rowKey="device_id" size="small"
+            dataSource={profileImpact.rows} columns={impactColumns}
+            pagination={{ pageSize: 10 }} scroll={{ x: 1180 }} />}
+          <Row gutter={[12, 12]} align="top">
+            <Col flex="auto"><Input.TextArea rows={6} value={effectiveDevice}
+              onChange={(event) => { setEffectiveDevice(event.target.value); setEffectivePlan(null) }}
+              style={{ fontFamily: 'Consolas, Monaco, monospace' }}
+              placeholder="设备上下文 JSON" /></Col>
+            <Col><Button icon={<EyeOutlined />} loading={previewEffectivePlan.isLoading}
+              onClick={() => previewEffectivePlan.mutate()}>预览执行计划</Button></Col>
+          </Row>
+          {effectivePlan && <Space wrap>
+            <Tag color="blue">来源：{effectivePlan.plan.policy_source || 'unknown'}</Tag>
+            {effectivePlan.plan.binding_id && <Tag color="green">binding: {effectivePlan.plan.binding_id}</Tag>}
+            {effectivePlan.plan.profile_version_id && <Tag>version: {effectivePlan.plan.profile_version_id}</Tag>}
+            {effectivePlan.plan.credential_ref && <Tag color="purple">凭据：{effectivePlan.plan.credential_ref}</Tag>}
+            {effectivePlan.plan.collector_options
+              && Object.keys(effectivePlan.plan.collector_options).length > 0
+              && <Tag color="cyan">采集参数：{Object.keys(effectivePlan.plan.collector_options).length}</Tag>}
+          </Space>}
+          {effectivePlan && <Alert type="success" showIcon
+            message={`执行计划：${effectivePlan.commands.length} 条命令`}
+            description={<Space direction="vertical" size={8} style={{ width: '100%', marginTop: 8 }}>
+              <Descriptions size="small" bordered column={isMobile ? 1 : 3}>
+                <Descriptions.Item label="Profile">{effectivePlan.plan.profile_name || '-'}</Descriptions.Item>
+                <Descriptions.Item label="凭据引用">{effectivePlan.plan.credential_ref || '-'}</Descriptions.Item>
+                <Descriptions.Item label="命令数">{effectivePlan.commands.length}</Descriptions.Item>
+                <Descriptions.Item label="采集参数" span={isMobile ? 1 : 3}>
+                  {effectivePlan.plan.collector_options && Object.keys(effectivePlan.plan.collector_options).length > 0
+                    ? <Typography.Text code>{JSON.stringify(effectivePlan.plan.collector_options)}</Typography.Text>
+                    : '-'}
+                </Descriptions.Item>
+              </Descriptions>
+              <Typography.Paragraph style={{ ...codePanelStyle, whiteSpace: 'pre-wrap' }}>
+                {JSON.stringify(effectivePlan.plan, null, 2)}
+              </Typography.Paragraph>
+            </Space>} />}
+          <Table<ParserCommandProfile> rowKey={(row) => row.profile_version_id || row.profile_id}
+            dataSource={commandProfiles} columns={commandProfileColumns}
+            pagination={{ pageSize: 20 }} size="small" scroll={{ x: 1000 }} />
+          <Table<ParserCommandProfileBinding> rowKey="binding_id"
+            dataSource={commandProfileBindings} columns={bindingColumns}
+            pagination={{ pageSize: 20 }} size="small" scroll={{ x: 900 }} />
+        </Space> },
       { key: 'datasets', label: `数据集覆盖率 (${datasets.length})`, children:
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
           <Row gutter={[12, 12]}>

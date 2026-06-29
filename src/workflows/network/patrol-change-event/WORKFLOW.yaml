@@ -8,8 +8,10 @@ version: "1.0"
 test:
   context:
     filter_params: {}
+    execution_plan:
     ticket_id:
     save_baseline: false
+    mode: production
     publish_events: false
 
 steps:
@@ -18,15 +20,24 @@ steps:
     skill: device-patrol
     inputs:
       filter_params: ${context.filter_params}
+      execution_plan: ${context.execution_plan}
       ticket_id: ${context.ticket_id}
       save_baseline: ${context.save_baseline}
-      mode: production
+      mode: ${context.mode}
+
+  - name: state_normalization
+    label: 生成状态观察
+    skill: state-normalizer
+    inputs:
+      run_id: ${steps.patrol.result.snapshot_run_id}
+      update_current_state: true
 
   - name: change_detection
     label: 检测网络变化
     skill: change-detector
     inputs:
       current_run_id: ${steps.patrol.result.snapshot_run_id}
+      use_state_observations: true
       persist: true
 
   - name: event_building

@@ -100,3 +100,18 @@ def test_normalize_step_result_preserves_raw_fields():
     out = normalize_step_result(raw)
     assert out["manifest"]["ticket_id"] == "T1"
     assert out["custom_field"] == "x"
+
+
+def test_normalize_step_result_exposes_raw_outputs_archive():
+    from src.core.workflows.artifacts import normalize_step_result
+
+    raw = {
+        "success": True,
+        "download_url": "https://minio/device_patrol/raw.zip",
+        "raw_outputs_url": "https://minio/device_patrol/raw.zip",
+    }
+    out = normalize_step_result(raw)
+
+    assert "raw_outputs_archive" in out["artifacts"]
+    assert out["artifacts"]["raw_outputs_archive"]["download_url"] == raw["raw_outputs_url"]
+    assert out["artifacts"]["raw_outputs_archive"]["content_type"] == "application/zip"

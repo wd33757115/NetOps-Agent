@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
+from src.core.evidence import RawEvidenceRepository, evidence_id_for_command_snapshot
 from src.core.patrol.domain import SnapshotRecord
 from src.infrastructure.db.models import (
     CommandSnapshot,
@@ -178,6 +179,10 @@ class PatrolRepository:
             with get_db_session() as db:
                 existing_by_id = db.get(CommandSnapshot, snapshot_id)
                 if existing_by_id is not None:
+                    RawEvidenceRepository().upsert_cli_command_evidence_row(
+                        db,
+                        existing_by_id,
+                    )
                     return existing_by_id.id, False
                 if import_fingerprint:
                     existing = (
@@ -186,6 +191,10 @@ class PatrolRepository:
                         .first()
                     )
                     if existing is not None:
+                        RawEvidenceRepository().upsert_cli_command_evidence_row(
+                            db,
+                            existing,
+                        )
                         return existing.id, False
                 inventory = (
                     db.query(NetworkDevice)
@@ -201,36 +210,37 @@ class PatrolRepository:
                 if parser_name:
                     template = db.get(ParserTemplate, parser_name)
                     contract_version = template.contract_version if template else None
-                db.add(
-                    CommandSnapshot(
-                        id=snapshot_id,
-                        run_id=run_id,
-                        dataset_id=dataset_id,
-                        inventory_device_id=inventory.id if inventory else None,
-                        device_id=device_id,
-                        device_name=device_name,
-                        management_ip=ip,
-                        vendor=vendor,
-                        model=model,
-                        command=command,
-                        canonical_command=command_canonical,
-                        parser_template_id=parser_name,
-                        parser_version=parser_version,
-                        contract_version=contract_version,
-                        observed_at=_as_datetime(observed_at),
-                        structured_json=structured_json,
-                        raw_text=raw_text or "",
-                        raw_text_hash=raw_hash,
-                        parse_status=status,
-                        snapshot_kind=snapshot_kind,
-                        source_file_hash=source_file_hash,
-                        import_fingerprint=import_fingerprint,
-                        start_line=start_line,
-                        end_line=end_line,
-                        metadata_json=metadata or {},
-                        created_at=_utcnow(),
-                    )
+                snapshot = CommandSnapshot(
+                    id=snapshot_id,
+                    run_id=run_id,
+                    dataset_id=dataset_id,
+                    inventory_device_id=inventory.id if inventory else None,
+                    device_id=device_id,
+                    device_name=device_name,
+                    management_ip=ip,
+                    vendor=vendor,
+                    model=model,
+                    command=command,
+                    canonical_command=command_canonical,
+                    parser_template_id=parser_name,
+                    parser_version=parser_version,
+                    contract_version=contract_version,
+                    observed_at=_as_datetime(observed_at),
+                    structured_json=structured_json,
+                    raw_text=raw_text or "",
+                    raw_text_hash=raw_hash,
+                    parse_status=status,
+                    snapshot_kind=snapshot_kind,
+                    source_file_hash=source_file_hash,
+                    import_fingerprint=import_fingerprint,
+                    start_line=start_line,
+                    end_line=end_line,
+                    metadata_json=metadata or {},
+                    created_at=_utcnow(),
                 )
+                db.add(snapshot)
+                db.flush()
+                RawEvidenceRepository().upsert_cli_command_evidence_row(db, snapshot)
             return snapshot_id, True
         except IntegrityError:
             if not import_fingerprint:
@@ -241,6 +251,7 @@ class PatrolRepository:
                     .filter(CommandSnapshot.import_fingerprint == import_fingerprint)
                     .one()
                 )
+                RawEvidenceRepository().upsert_cli_command_evidence_row(db, existing)
                 return existing.id, False
 
     def list_dataset_snapshots(
@@ -459,4 +470,7 @@ class PatrolRepository:
             dataset_id=row.dataset_id,
             source_file_hash=row.source_file_hash,
             import_fingerprint=row.import_fingerprint,
+            evidence_id=evidence_id_for_command_snapshot(row.id),
+            source_type="cli",
+            schema_id=row.parser_template_id,
         )

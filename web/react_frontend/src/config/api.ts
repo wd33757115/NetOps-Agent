@@ -5,7 +5,7 @@ import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
 import { message } from 'antd'
 import { ApiError, resolveApiError } from '../utils/apiError'
 
-/** Django BFF 前缀，开发环境走 Vite 代理，生产环境由 Django 同源提供 */
+/** Django BFF 前缀：开发环境走 Vite 代理，生产环境由 Django 同源提供。 */
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
 
 export const TOKEN_KEY = 'access_token'
@@ -175,7 +175,7 @@ api.interceptors.response.use(
 
 export { ApiError }
 
-/** WebSocket 连接地址，统一经 Django（8001）代理；携带 JWT 供 BFF 鉴权 */
+/** WebSocket 连接地址：统一经 Django（8001）代理，携带 JWT 供 BFF 鉴权。 */
 export function getChatWebSocketUrl(threadId?: string): string {
   const token = getAccessToken()
   const wsBase = import.meta.env.VITE_WS_BASE_URL

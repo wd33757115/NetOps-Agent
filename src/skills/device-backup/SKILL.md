@@ -17,6 +17,10 @@ triggers:
   - "保存配置"
   - "device backup"
 inputs:
+  - name: execution_plan
+    type: object
+    required: false
+    description: Optional explicit ExecutionPlan from Device Management. When provided, device-backup executes this plan instead of resolving commands from filters.
   - name: device_name
     type: string
     required: false

@@ -6,11 +6,13 @@
 from __future__ import annotations
 
 import uuid
+from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 from src.core.patrol.change_event_repository import ChangeEventRepository
+from src.core.patrol.event_rules import match_event_rule
 
 
 @dataclass(frozen=True)
@@ -35,86 +37,19 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _norm(value: Any) -> str:
-    return str(value or "").strip().lower()
-
-
-def _to_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    text = str(value).strip().replace("%", "")
-    try:
-        return float(text)
-    except ValueError:
-        return None
-
-
-def _is_down(value: Any) -> bool:
-    text = _norm(value)
-    return text in {"down", "administratively down", "admin-down", "notconnect", "inactive"}
-
-
-def _is_up(value: Any) -> bool:
-    text = _norm(value)
-    return text in {"up", "connected", "active", "established", "normal"}
-
-
-def _field_in(change: dict[str, Any], names: set[str]) -> bool:
-    return _norm(change.get("field")).replace("-", "_") in names
-
-
 def build_events_from_changes(changes: list[dict[str, Any]]) -> list[NetworkEvent]:
     events: list[NetworkEvent] = []
     occurred_at = _now()
     for change in changes:
-        field = _norm(change.get("field")).replace("-", "_")
-        old = change.get("old")
-        new = change.get("new")
-        event_type = None
-        severity = None
-
-        if field in {"cpu", "cpu_5s", "cpu_1m", "cpu_5m", "cpu_usage"}:
-            value = _to_float(new)
-            if value is not None and value >= 90:
-                event_type = "CPUHigh"
-                severity = "warning"
-        elif _field_in(
-            change,
-            {"status", "protocol", "physical", "physical_status", "oper_status", "line_protocol"},
-        ):
-            if _is_up(old) and _is_down(new):
-                event_type = "InterfaceDown"
-                severity = "major"
-            elif _is_down(old) and _is_up(new):
-                event_type = "InterfaceUp"
-                severity = "info"
-        elif field in {"state", "bgp_state", "peer_state", "neighbor_state"}:
-            if _norm(old) == "established" and _norm(new) != "established":
-                event_type = "BGPNeighborLost"
-                severity = "critical"
-            elif _norm(old) != "established" and _norm(new) == "established":
-                event_type = "BGPNeighborEstablished"
-                severity = "info"
-        elif (
-            change.get("entity_type") == "raw_command_output"
-            and change.get("field") == "raw_text_hash"
-        ):
-            command = _norm(change.get("command"))
-            if any(
-                marker in command
-                for marker in ("configuration", "running-config", "current-configuration")
-            ):
-                event_type = "ConfigChanged"
-                severity = "minor"
-
-        if not event_type:
+        rule = match_event_rule(change)
+        if not rule:
             continue
 
         events.append(
             NetworkEvent(
                 event_id=str(uuid.uuid4()),
-                event_type=event_type,
-                severity=severity or "info",
+                event_type=rule.event_type,
+                severity=rule.severity,
                 device_id=change.get("device_id"),
                 entity_type=str(change.get("entity_type") or "unknown"),
                 entity_key=str(change.get("entity_key") or ""),
@@ -122,10 +57,58 @@ def build_events_from_changes(changes: list[dict[str, Any]]) -> list[NetworkEven
                 run_id=change.get("run_id"),
                 occurred_at=change.get("detected_at") or occurred_at,
                 status="open",
-                payload={"change": change},
+                payload={
+                    "change": change,
+                    "rule": {"rule_id": rule.rule_id, "version": rule.version},
+                },
             )
         )
     return events
+
+
+def summarize_no_event_changes(
+    changes: list[dict[str, Any]],
+    event_change_ids: set[str],
+    *,
+    limit: int = 10,
+) -> dict[str, Any]:
+    no_event_changes = [
+        change
+        for change in changes
+        if change.get("change_id") and str(change.get("change_id")) not in event_change_ids
+    ]
+    by_field = Counter(str(change.get("field") or "unknown") for change in no_event_changes)
+    by_entity_type = Counter(
+        str(change.get("entity_type") or "unknown") for change in no_event_changes
+    )
+    by_command = Counter(
+        str(change.get("command") or "unknown") for change in no_event_changes
+    )
+    by_change_type = Counter(
+        str(change.get("change_type") or "unknown") for change in no_event_changes
+    )
+    examples = [
+        {
+            "change_id": change.get("change_id"),
+            "device_id": change.get("device_id"),
+            "command": change.get("command"),
+            "entity_type": change.get("entity_type"),
+            "entity_key": change.get("entity_key"),
+            "field": change.get("field"),
+            "change_type": change.get("change_type"),
+            "old": change.get("old"),
+            "new": change.get("new"),
+        }
+        for change in no_event_changes[:limit]
+    ]
+    return {
+        "total": len(no_event_changes),
+        "by_field": dict(by_field.most_common(limit)),
+        "by_entity_type": dict(by_entity_type.most_common(limit)),
+        "by_command": dict(by_command.most_common(limit)),
+        "by_change_type": dict(by_change_type.most_common(limit)),
+        "examples": examples,
+    }
 
 
 def save_events(events: list[NetworkEvent]) -> int:
@@ -174,9 +157,23 @@ def build_events_from_params(params: dict[str, Any]) -> dict[str, Any]:
             device_id=params.get("device_id"),
         )
     events = build_events_from_changes(list(changes or []))
-    persisted_event_count = (
-        save_events(events) if params.get("persist", True) else 0
-    )
+    persist = params.get("persist", True)
+    persisted_event_count = save_events(events) if persist else 0
+    event_change_ids = {
+        event.source_change_id for event in events if event.source_change_id
+    }
+    event_change_ids = {str(change_id) for change_id in event_change_ids}
+    no_event_count = 0
+    if persist:
+        no_event_change_ids = [
+            str(change["change_id"])
+            for change in changes or []
+            if change.get("change_id") and change.get("change_id") not in event_change_ids
+        ]
+        no_event_count = ChangeEventRepository().mark_changes_event_status(
+            no_event_change_ids,
+            status="no_event",
+        )
     message_ids: list[str] = []
     if params.get("publish", False):
         message_ids = publish_events(events)
@@ -184,6 +181,11 @@ def build_events_from_params(params: dict[str, Any]) -> dict[str, Any]:
         "success": True,
         "event_count": len(events),
         "persisted_event_count": persisted_event_count,
+        "no_event_change_count": no_event_count,
+        "no_event_summary": summarize_no_event_changes(
+            list(changes or []),
+            event_change_ids,
+        ),
         "storage": "postgresql",
         "events": [event.to_dict() for event in events],
         "published_message_ids": message_ids,

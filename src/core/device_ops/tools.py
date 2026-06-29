@@ -5,20 +5,23 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from enum import Enum
-from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from src.core.collection import CollectionPolicyResolver, ExecutionPlan
 from src.core.device_ops.manager import DeviceInventoryManager
+from src.core.ingestion.adapters.cli import (
+    CLICommandCollector,
+    device_type_for,
+    connect_cli_device,
+    test_cli_connectivity,
+)
 from src.core.parser.identity import DeviceIdentity, DeviceIdentityResolver
 from src.core.parser.runtime import ParserRuntime
 from src.core.patrol.modes import PRODUCTION_MODE, normalize_patrol_mode
-
-BEIJING_TZ = timezone(timedelta(hours=8))
-OUTPUT_ROOT = Path(__file__).resolve().parents[2] / "skills" / "shared" / "outputs"
 
 
 class ActionType(str, Enum):
@@ -32,10 +35,16 @@ class ActionType(str, Enum):
 class DeviceFilter(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    device_id: str | None = None
     device_name: str | None = None
     ip: str | None = None
     group: str | None = None
+    vendor: str | None = None
     model: str | None = None
+    family: str | None = None
+    site: str | None = None
+    role: str | None = None
+    status: str | None = None
 
     @field_validator("ip")
     @classmethod
@@ -64,104 +73,107 @@ DBManager = DeviceInventoryManager
 
 
 def _device_type(device: dict[str, Any]) -> str:
-    attributes = dict(device.get("attributes") or {})
-    explicit = str(attributes.get("netmiko_device_type") or "").strip()
-    if explicit:
-        return explicit
-    vendor = str(device.get("vendor") or "").lower()
-    if vendor == "cisco":
-        return "cisco_ios"
-    if vendor in {"h3c", "hp"}:
-        return "hp_comware"
-    if vendor == "huawei":
-        return "huawei"
-    return "generic"
-
-
-def _commands(device: dict[str, Any], action: str) -> list[str]:
-    attributes = dict(device.get("attributes") or {})
-    configured = attributes.get(f"{action}_commands")
-    if isinstance(configured, list) and configured:
-        return [str(item) for item in configured]
-    vendor = str(device.get("vendor") or "").lower()
-    if action == "backup":
-        return (
-            ["show version", "show running-config"]
-            if vendor == "cisco"
-            else ["display version", "display current-configuration"]
-        )
-    if vendor == "cisco":
-        return [
-            "show version",
-            "show inventory",
-            "show interface status",
-            "show processes cpu",
-            "show processes memory",
-        ]
-    return [
-        "display version",
-        "display device manuinfo",
-        "display interface brief",
-        "display cpu-usage",
-        "display memory",
-    ]
+    return device_type_for(device)
 
 
 def _connect(device: dict[str, Any]):
-    from netmiko import ConnectHandler
+    return connect_cli_device(device)
 
-    password = device.get("password")
-    if not password:
-        raise ValueError(
-            "device credential is unavailable; configure credential_ref as env:VARIABLE"
+
+def test_device_connectivity(device: dict[str, Any]) -> dict[str, Any]:
+    """Open and close a real device session using the same path as patrol."""
+    return test_cli_connectivity(device)
+
+
+def _record_connection_health(
+    db_manager: DeviceInventoryManager,
+    device: dict[str, Any],
+    *,
+    status: str,
+    failure_code: str | None = None,
+    error: str | None = None,
+    source: str = "collector",
+) -> None:
+    repository = getattr(db_manager, "repository", None)
+    if repository is None or not device.get("device_id"):
+        return
+    try:
+        repository.record_connection_health(
+            str(device["device_id"]),
+            status=status,
+            failure_code=failure_code,
+            error=error,
+            source=source,
         )
-    return ConnectHandler(
-        device_type=_device_type(device),
-        host=device.get("ip"),
-        username=device.get("username") or "admin",
-        password=password,
-        read_timeout_override=60,
+    except Exception:
+        pass
+
+
+def _collect_command_outputs(
+    *,
+    device: dict[str, Any],
+    plan: ExecutionPlan,
+) -> Any:
+    """Collect raw CLI command outputs for later snapshot parsing and reporting."""
+    return CLICommandCollector().collect_command_outputs(
+        device=device,
+        execution_plan=plan,
     )
 
 
-def _write_command_report(
+def _validate_plan_for_device(
     *,
     device: dict[str, Any],
+    plan: ExecutionPlan,
     action: str,
-    commands: list[str],
-) -> Path:
-    device_name = str(device.get("device_name") or "unknown")
-    timestamp = datetime.now(BEIJING_TZ).strftime("%Y%m%d%H%M%S")
-    output_dir = OUTPUT_ROOT / action / timestamp / device_name
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_file = output_dir / f"{device_name}_{device.get('ip')}_{timestamp}.txt"
-
-    connection = _connect(device)
-    sections: list[str] = []
-    try:
-        for command in commands:
-            output = connection.send_command(command, read_timeout=60)
-            sections.append(
-                f"Command: {command}\nOutput:\n{output}\n{'-' * 50}"
-            )
-    finally:
-        connection.disconnect()
-    output_file.write_text("\n".join(sections), encoding="utf-8")
-    return output_file
+    mode: str,
+) -> None:
+    if plan.action != action:
+        raise ValueError(f"execution plan action mismatch: {plan.action} != {action}")
+    if normalize_patrol_mode(plan.mode) != mode:
+        raise ValueError(f"execution plan mode mismatch: {plan.mode} != {mode}")
+    device_id = str(device.get("device_id") or "")
+    if plan.device_id and plan.device_id != device_id:
+        raise ValueError(
+            f"execution plan device mismatch: {plan.device_id} != {device_id}"
+        )
+    if not plan.commands:
+        raise ValueError("execution plan has no commands")
 
 
 class ConfigBackupTool:
-    def __init__(self, db_manager: DeviceInventoryManager):
+    def __init__(
+        self,
+        db_manager: DeviceInventoryManager,
+        *,
+        cli_collector: CLICommandCollector | None = None,
+    ):
         self.db_manager = db_manager
+        self.policy_resolver = CollectionPolicyResolver()
+        self.cli_collector = cli_collector or CLICommandCollector()
 
-    async def backup_device(self, device: dict[str, Any]) -> dict[str, Any]:
+    async def backup_device(
+        self,
+        device: dict[str, Any],
+        execution_plan: ExecutionPlan | None = None,
+    ) -> dict[str, Any]:
         try:
-            commands = _commands(device, "backup")
+            plan = execution_plan or self.policy_resolver.build_plan(
+                device=device, action="backup", mode=PRODUCTION_MODE
+            )
+            _validate_plan_for_device(
+                device=device, plan=plan, action="backup", mode=PRODUCTION_MODE
+            )
             output_file = await asyncio.to_thread(
-                _write_command_report,
+                self.cli_collector.collect_command_outputs,
                 device=device,
-                action="backup",
-                commands=commands,
+                execution_plan=plan,
+            )
+            _record_connection_health(
+                self.db_manager,
+                device,
+                status="connected",
+                source="device-backup",
             )
             return {
                 "device_name": device.get("device_name"),
@@ -170,9 +182,18 @@ class ConfigBackupTool:
                 "model": device.get("model"),
                 "success": True,
                 "output_file": str(output_file),
-                "commands_count": len(commands),
+                "commands_count": len(plan.commands),
+                "execution_plan": plan.to_metadata(),
             }
         except Exception as exc:
+            _record_connection_health(
+                self.db_manager,
+                device,
+                status="failed",
+                failure_code="connection_failed",
+                error=str(exc),
+                source="device-backup",
+            )
             return {
                 "device_name": device.get("device_name"),
                 "ip": device.get("ip"),
@@ -194,10 +215,34 @@ class ConfigBackupTool:
         )
         return _task_result(ActionType.BACKUP, devices, results, started_at)
 
+    async def backup_by_plan(self, execution_plan: ExecutionPlan) -> TaskResult:
+        started_at = datetime.now()
+        device = self.db_manager.get_device_by_ip_or_name(execution_plan.device_id)
+        if device is None:
+            matches = self.db_manager.get_devices_by_filter(
+                DeviceFilter(device_id=execution_plan.device_id)
+            )
+            device = matches[0] if matches else None
+        if device is None:
+            return TaskResult(
+                success=False,
+                action=ActionType.BACKUP,
+                message=f"Execution plan device not found: {execution_plan.device_id}",
+            )
+        result = await self.backup_device(device, execution_plan=execution_plan)
+        return _task_result(ActionType.BACKUP, [device], [result], started_at)
+
 
 class PatrolTool:
-    def __init__(self, db_manager: DeviceInventoryManager):
+    def __init__(
+        self,
+        db_manager: DeviceInventoryManager,
+        *,
+        cli_collector: CLICommandCollector | None = None,
+    ):
         self.db_manager = db_manager
+        self.policy_resolver = CollectionPolicyResolver()
+        self.cli_collector = cli_collector or CLICommandCollector()
 
     @staticmethod
     def _production_coverage(
@@ -225,14 +270,18 @@ class PatrolTool:
         device: dict[str, Any],
         save_baseline: bool = False,
         mode: str = PRODUCTION_MODE,
+        execution_plan: ExecutionPlan | None = None,
     ) -> dict[str, Any]:
         try:
             mode = normalize_patrol_mode(mode)
-            commands = _commands(device, "patrol")
+            plan = execution_plan or self.policy_resolver.build_plan(
+                device=device, action="patrol", mode=mode
+            )
+            _validate_plan_for_device(device=device, plan=plan, action="patrol", mode=mode)
             if mode == PRODUCTION_MODE:
                 blocking = [
                     item
-                    for item in self._production_coverage(device, commands)
+                    for item in self._production_coverage(device, plan.command_texts())
                     if item["policy_status"] == "eligible"
                     and item["coverage_status"] != "ready"
                 ]
@@ -247,10 +296,15 @@ class PatrolTool:
                         "coverage_violations": blocking,
                     }
             output_file = await asyncio.to_thread(
-                _write_command_report,
+                self.cli_collector.collect_command_outputs,
                 device=device,
-                action="patrol",
-                commands=commands,
+                execution_plan=plan,
+            )
+            _record_connection_health(
+                self.db_manager,
+                device,
+                status="connected",
+                source="device-patrol",
             )
             return {
                 "device_name": device.get("device_name"),
@@ -259,10 +313,19 @@ class PatrolTool:
                 "model": device.get("model"),
                 "success": True,
                 "output_file": str(output_file),
-                "commands_count": len(commands),
+                "commands_count": len(plan.commands),
+                "execution_plan": plan.to_metadata(),
                 "baseline_saved": save_baseline,
             }
         except Exception as exc:
+            _record_connection_health(
+                self.db_manager,
+                device,
+                status="failed",
+                failure_code="connection_failed",
+                error=str(exc),
+                source="device-patrol",
+            )
             return {
                 "device_name": device.get("device_name"),
                 "ip": device.get("ip"),
@@ -291,6 +354,32 @@ class PatrolTool:
             )
         )
         return _task_result(ActionType.PATROL, devices, results, started_at)
+
+    async def patrol_by_plan(
+        self,
+        execution_plan: ExecutionPlan,
+        save_baseline: bool = False,
+    ) -> TaskResult:
+        started_at = datetime.now()
+        device = self.db_manager.get_device_by_ip_or_name(execution_plan.device_id)
+        if device is None:
+            matches = self.db_manager.get_devices_by_filter(
+                DeviceFilter(device_id=execution_plan.device_id)
+            )
+            device = matches[0] if matches else None
+        if device is None:
+            return TaskResult(
+                success=False,
+                action=ActionType.PATROL,
+                message=f"Execution plan device not found: {execution_plan.device_id}",
+            )
+        result = await self.patrol_device(
+            device,
+            save_baseline,
+            mode=execution_plan.mode,
+            execution_plan=execution_plan,
+        )
+        return _task_result(ActionType.PATROL, [device], [result], started_at)
 
 
 def _task_result(

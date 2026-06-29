@@ -47,6 +47,13 @@ def normalize_step_result(raw: dict[str, Any] | None) -> dict[str, Any]:
             filename=filename or art_key.replace("_", " "),
             content_type=_guess_content_type(filename, art_key),
         )
+    if raw.get("raw_outputs_url") and not artifacts.get("raw_outputs_archive"):
+        artifacts["raw_outputs_archive"] = make_file_artifact(
+            file_key=raw.get("raw_outputs_file_key"),
+            download_url=raw.get("raw_outputs_url"),
+            filename=raw.get("raw_outputs_filename") or "raw-cli-outputs.zip",
+            content_type="application/zip",
+        )
     elif not artifacts.get("change_excel") and raw.get("change_excel_url"):
         artifacts["change_excel"] = make_file_artifact(
             file_key=raw.get("change_excel_file_key"),

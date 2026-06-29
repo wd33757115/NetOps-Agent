@@ -9,6 +9,15 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from src.auth.dependencies import require_role
+from src.core.collection.policy import (
+    CollectionItem,
+    CollectionPolicyResolver,
+    CommandProfileRepository,
+    ExecutionPlan,
+)
+from src.core.device_ops.repository import DeviceRepository
+from src.core.device_ops.tools import PatrolTool
+from src.core.patrol.modes import PRODUCTION_MODE, normalize_patrol_mode
 from src.core.parser.assets import TemplateAssetStore
 from src.core.parser.bootstrap import bootstrap_shared_templates
 from src.core.parser.discovery_assets import bootstrap_discovery_assets
@@ -22,6 +31,7 @@ from src.core.parser.runtime import ParserRuntime
 from src.core.patrol.raw_importer import import_raw_path, preview_raw_path
 from src.core.patrol.repository import PatrolRepository
 from src.core.parser.tasks import dispatch_ready_parser_jobs
+from src.core.patrol.event_rules import EventRuleRepository, condition_matches
 from src.core.celery_tasks.celery_app import celery
 
 router = APIRouter(
@@ -40,6 +50,53 @@ class ParserImportRequest(BaseModel):
     dataset_id: str | None = None
     vendor: str | None = None
     model: str | None = None
+
+
+class EventRuleUpsertRequest(BaseModel):
+    name: str
+    event_type: str
+    severity: str
+    condition: dict[str, Any]
+    description: str | None = None
+    created_by: str | None = None
+    status: str = "draft"
+
+
+class EventRuleTestRequest(BaseModel):
+    condition: dict[str, Any]
+    samples: list[dict[str, Any]]
+
+
+class CommandProfileUpsertRequest(BaseModel):
+    name: str
+    action: str = "patrol"
+    commands: list[str]
+    status: str = "draft"
+    created_by: str | None = None
+
+
+class CommandProfileBindingUpsertRequest(BaseModel):
+    profile_version_id: str
+    selector: dict[str, Any]
+    priority: int = 100
+    status: str = "active"
+
+
+class EffectivePlanPreviewRequest(BaseModel):
+    device: dict[str, Any]
+    action: str = "patrol"
+    mode: str = "production"
+
+
+class CommandProfileImpactPreviewRequest(BaseModel):
+    profile_version_id: str | None = None
+    profile_name: str | None = None
+    action: str = "patrol"
+    commands: list[str] | None = None
+    selector: dict[str, Any] | None = None
+    mode: str = "production"
+    limit: int = 100
+    save_evidence: bool = False
 
 
 @router.get("/templates")
@@ -394,3 +451,325 @@ def parser_coverage():
         "identity_signatures": len(repository.list_identity_signatures()),
         "auto_dispatch_enabled": repository.get_auto_dispatch_enabled(),
     }
+
+
+@router.get("/event-rules")
+def list_event_rules():
+    return {"items": EventRuleRepository().list_versions()}
+
+
+@router.post("/event-rules")
+def upsert_event_rule(payload: EventRuleUpsertRequest):
+    try:
+        if payload.status == "active":
+            version_id = EventRuleRepository().upsert_active_rule(
+                name=payload.name,
+                event_type=payload.event_type,
+                severity=payload.severity,
+                condition=payload.condition,
+                description=payload.description,
+                created_by=payload.created_by,
+            )
+        else:
+            version_id = EventRuleRepository().create_rule_version(
+                name=payload.name,
+                event_type=payload.event_type,
+                severity=payload.severity,
+                condition=payload.condition,
+                description=payload.description,
+                created_by=payload.created_by,
+                status=payload.status,
+            )
+        return {"success": True, "version_id": version_id}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/event-rules/{version_id}/activate")
+def activate_event_rule(version_id: str):
+    try:
+        return EventRuleRepository().activate_rule_version(version_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/event-rules/{version_id}/deprecate")
+def deprecate_event_rule(version_id: str):
+    try:
+        return EventRuleRepository().deprecate_rule_version(version_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/event-rules/test")
+def test_event_rule(payload: EventRuleTestRequest):
+    rows: list[dict[str, Any]] = []
+    matched_count = 0
+    for index, sample in enumerate(payload.samples, start=1):
+        try:
+            matched = condition_matches(payload.condition, sample)
+            error = None
+        except Exception as exc:
+            matched = False
+            error = str(exc)
+        if matched:
+            matched_count += 1
+        rows.append(
+            {
+                "index": index,
+                "matched": matched,
+                "error": error,
+                "sample": sample,
+            }
+        )
+    return {
+        "success": True,
+        "sample_count": len(payload.samples),
+        "matched_count": matched_count,
+        "unmatched_count": len(payload.samples) - matched_count,
+        "rows": rows,
+    }
+
+
+@router.post("/event-rules/bootstrap")
+def bootstrap_event_rules():
+    return {"success": True, "created": EventRuleRepository().ensure_default_rules()}
+
+
+@router.get("/command-profiles")
+def list_command_profiles():
+    return {"items": CommandProfileRepository().list_profiles()}
+
+
+@router.post("/command-profiles")
+def upsert_command_profile(payload: CommandProfileUpsertRequest):
+    try:
+        if payload.status == "active":
+            version_id = CommandProfileRepository().upsert_active_profile(
+                name=payload.name,
+                action=payload.action,
+                commands=payload.commands,
+                created_by=payload.created_by,
+            )
+        else:
+            version_id = CommandProfileRepository().create_profile_version(
+                name=payload.name,
+                action=payload.action,
+                commands=payload.commands,
+                created_by=payload.created_by,
+                status="draft",
+            )
+        return {"success": True, "profile_version_id": version_id, "status": payload.status}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/command-profiles/{profile_version_id}/activate")
+def activate_command_profile(profile_version_id: str):
+    try:
+        repository = CommandProfileRepository()
+        repository.validate_profile_activation(profile_version_id)
+        return repository.activate_profile_version(profile_version_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/command-profiles/{profile_version_id}/deprecate")
+def deprecate_command_profile(profile_version_id: str):
+    try:
+        return CommandProfileRepository().deprecate_profile_version(profile_version_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/command-profiles/{profile_version_id}/rollback")
+def rollback_command_profile(profile_version_id: str):
+    try:
+        return CommandProfileRepository().rollback_profile_version(profile_version_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/command-profiles/activate")
+def activate_command_profile_legacy(payload: CommandProfileUpsertRequest):
+    try:
+        version_id = CommandProfileRepository().upsert_active_profile(
+            name=payload.name,
+            action=payload.action,
+            commands=payload.commands,
+            created_by=payload.created_by,
+        )
+        return {"success": True, "profile_version_id": version_id, "status": "active"}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/command-profile-bindings")
+def list_command_profile_bindings():
+    return {"items": CommandProfileRepository().list_bindings()}
+
+
+@router.post("/command-profile-bindings")
+def upsert_command_profile_binding(payload: CommandProfileBindingUpsertRequest):
+    try:
+        binding_id = CommandProfileRepository().upsert_binding(
+            profile_version_id=payload.profile_version_id,
+            selector=payload.selector,
+            priority=payload.priority,
+            status=payload.status,
+        )
+        return {"success": True, "binding_id": binding_id}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/command-profile-bindings/{binding_id}/enable")
+def enable_command_profile_binding(binding_id: str):
+    try:
+        return CommandProfileRepository().set_binding_status(binding_id, "active")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/command-profile-bindings/{binding_id}/disable")
+def disable_command_profile_binding(binding_id: str):
+    try:
+        return CommandProfileRepository().set_binding_status(binding_id, "disabled")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _profile_impact_commands(payload: CommandProfileImpactPreviewRequest) -> tuple[str, str | None, list[str]]:
+    if payload.commands:
+        commands = [str(item).strip() for item in payload.commands if str(item).strip()]
+        if not commands:
+            raise ValueError("commands cannot be empty")
+        return payload.profile_name or "proposed-profile", payload.profile_version_id, commands
+    if not payload.profile_version_id:
+        raise ValueError("profile_version_id or commands is required")
+    item = CommandProfileRepository().get_profile_version(payload.profile_version_id)
+    if not item:
+        raise ValueError(f"command profile version not found: {payload.profile_version_id}")
+    commands = [
+        str(command_item["command"])
+        for command_item in item.get("items") or []
+        if str(command_item.get("action") or payload.action) == payload.action
+        and command_item.get("command")
+    ]
+    if not commands:
+        raise ValueError("profile version has no commands for requested action")
+    return str(item["profile_name"]), payload.profile_version_id, commands
+
+
+@router.post("/command-profiles/impact-preview")
+def preview_command_profile_impact(payload: CommandProfileImpactPreviewRequest):
+    try:
+        repository = CommandProfileRepository()
+        mode = normalize_patrol_mode(payload.mode)
+        profile_name, profile_version_id, commands = _profile_impact_commands(payload)
+        selector = dict(payload.selector or {})
+        devices = [
+            device
+            for device in DeviceRepository().get_devices_by_filter(status="active")
+            if CollectionPolicyResolver._selector_matches(device, selector)
+        ]
+        limit = max(1, min(int(payload.limit or 100), 500))
+        rows: list[dict[str, Any]] = []
+        blocked_devices = 0
+        eligible_commands = 0
+        ready_commands = 0
+        blocked_commands = 0
+        for device in devices[:limit]:
+            plan = ExecutionPlan(
+                device_id=str(device.get("device_id") or ""),
+                action=payload.action,
+                mode=mode,
+                profile_name=profile_name,
+                profile_version_id=profile_version_id,
+                commands=tuple(
+                    CollectionItem(command=command, action=payload.action)
+                    for command in commands
+                ),
+                policy_source="impact_preview",
+                selector=selector,
+            )
+            coverage = (
+                PatrolTool._production_coverage(device, plan.command_texts())
+                if mode == PRODUCTION_MODE
+                else []
+            )
+            violations = [
+                item
+                for item in coverage
+                if item.get("policy_status") == "eligible"
+                and item.get("coverage_status") != "ready"
+            ]
+            device_eligible = sum(1 for item in coverage if item.get("policy_status") == "eligible")
+            device_ready = sum(
+                1
+                for item in coverage
+                if item.get("policy_status") == "eligible"
+                and item.get("coverage_status") == "ready"
+            )
+            eligible_commands += device_eligible
+            ready_commands += device_ready
+            blocked_commands += len(violations)
+            if violations:
+                blocked_devices += 1
+            rows.append(
+                {
+                    "device_id": device.get("device_id"),
+                    "device_name": device.get("device_name"),
+                    "ip": device.get("ip") or device.get("management_ip"),
+                    "vendor": device.get("vendor"),
+                    "model": device.get("model"),
+                    "family": device.get("family"),
+                    "platform": device.get("platform"),
+                    "device_type": device.get("device_type"),
+                    "site": device.get("site"),
+                    "role": device.get("role"),
+                    "groups": device.get("groups") or [],
+                    "command_count": len(commands),
+                    "eligible_count": device_eligible,
+                    "ready_count": device_ready,
+                    "blocked_count": len(violations),
+                    "status": "blocked" if violations else "ready",
+                    "violations": violations,
+                    "plan": plan.to_metadata(),
+                }
+            )
+        result = {
+            "success": True,
+            "mode": mode,
+            "profile_name": profile_name,
+            "profile_version_id": profile_version_id,
+            "selector": selector,
+            "command_count": len(commands),
+            "matched_device_count": len(devices),
+            "returned_device_count": len(rows),
+            "blocked_device_count": blocked_devices,
+            "ready_device_count": len(rows) - blocked_devices,
+            "eligible_command_count": eligible_commands,
+            "ready_command_count": ready_commands,
+            "blocked_command_count": blocked_commands,
+            "coverage_rate": ready_commands / eligible_commands if eligible_commands else 1.0,
+            "rows": rows,
+        }
+        if payload.save_evidence and profile_version_id:
+            repository.record_profile_coverage(profile_version_id, result)
+            result["evidence_saved"] = True
+        else:
+            result["evidence_saved"] = False
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/effective-plan-preview")
+def effective_plan_preview(payload: EffectivePlanPreviewRequest):
+    plan = CollectionPolicyResolver().build_plan(
+        device=payload.device,
+        action=payload.action,
+        mode=payload.mode,
+    )
+    return {"success": True, "plan": plan.to_metadata(), "commands": plan.command_texts()}

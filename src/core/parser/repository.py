@@ -11,6 +11,7 @@ from typing import Any
 
 from sqlalchemy import func
 
+from src.core.observation import ObservationContractRepository
 from src.core.patrol.repository import PatrolRepository
 from src.infrastructure.db.models import (
     CommandSnapshot,
@@ -92,6 +93,11 @@ class ParserRepository:
                 validation["contract_sha256"] = row.contract_sha256
                 row.validation_json = validation
                 row.updated_at = utcnow()
+                ObservationContractRepository().upsert_from_parser_template_row(
+                    db,
+                    row,
+                    status="active" if row.status == "active" else "draft",
+                )
                 count += 1
         return count
 
@@ -454,26 +460,31 @@ class ParserRepository:
                     contract_version = int(previous.contract_version or 1) + 1
             validation["contract_version"] = int(contract_version)
             validation["contract_sha256"] = digest
-            db.add(
-                ParserTemplate(
-                    id=template_id,
-                    vendor=vendor,
-                    model=model,
-                    family=family,
-                    profile=profile,
-                    canonical_command=command,
-                    category=category,
-                    version=version,
-                    asset_path=asset_path,
-                    sha256=sha256,
-                    status=status,
-                    validation_json=validation,
-                    contract_version=int(contract_version),
-                    contract_sha256=digest,
-                    source_job_id=source_job_id,
-                    created_at=utcnow(),
-                    updated_at=utcnow(),
-                )
+            template = ParserTemplate(
+                id=template_id,
+                vendor=vendor,
+                model=model,
+                family=family,
+                profile=profile,
+                canonical_command=command,
+                category=category,
+                version=version,
+                asset_path=asset_path,
+                sha256=sha256,
+                status=status,
+                validation_json=validation,
+                contract_version=int(contract_version),
+                contract_sha256=digest,
+                source_job_id=source_job_id,
+                created_at=utcnow(),
+                updated_at=utcnow(),
+            )
+            db.add(template)
+            db.flush()
+            ObservationContractRepository().upsert_from_parser_template_row(
+                db,
+                template,
+                status="active" if status == "active" else "draft",
             )
         return template_id
 
@@ -500,6 +511,11 @@ class ParserRepository:
             template.validation_json = validation
             template.activated_at = utcnow()
             template.updated_at = utcnow()
+            ObservationContractRepository().upsert_from_parser_template_row(
+                db,
+                template,
+                status="active",
+            )
             profile = (
                 db.query(ParserDeviceProfile)
                 .filter(

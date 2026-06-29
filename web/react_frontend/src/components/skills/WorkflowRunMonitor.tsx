@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React, { useEffect, useMemo, useState } from 'react'
-import { Alert, Card, List, Spin, Steps, Tag, Typography } from 'antd'
+import { Alert, Card, List, Space, Spin, Steps, Tag, Typography } from 'antd'
 import { LinkOutlined } from '@ant-design/icons'
 import { useQuery } from 'react-query'
 import { workflowApi, WorkflowTimelineEvent } from '../../services/api'
@@ -25,6 +25,65 @@ const STATUS_COLOR: Record<string, string> = {
 
 function hasArtifacts(value?: Record<string, unknown> | null) {
   return !!value && Object.keys(value).length > 0
+}
+
+type ArtifactMeta = {
+  download_url?: string
+  filename?: string
+  content_type?: string
+  file_key?: string
+}
+
+function artifactLabel(key: string, meta?: ArtifactMeta) {
+  if (key === 'raw_outputs_archive') return 'Raw CLI outputs'
+  if (key === 'analysis_report') return 'Analysis report'
+  if (key === 'patrol_report') return 'Patrol report'
+  if (key === 'change_excel') return 'Change ticket'
+  if (key === 'config_zip') return 'Config package'
+  return meta?.filename || key.replaceAll('_', ' ')
+}
+
+function artifactColor(key: string) {
+  if (key === 'raw_outputs_archive') return 'default'
+  if (key === 'analysis_report' || key === 'patrol_report' || key.includes('report')) return 'green'
+  if (key === 'config_zip') return 'blue'
+  if (key === 'change_excel') return 'gold'
+  return 'geekblue'
+}
+
+function artifactDescription(key: string) {
+  if (key === 'raw_outputs_archive') {
+    return '原始 CLI 输出归档，用于审计、离线解析和排查；不是巡检报告。'
+  }
+  if (key === 'analysis_report' || key === 'patrol_report') {
+    return '下游生成的人类可读报告。'
+  }
+  return undefined
+}
+
+function renderArtifacts(value?: Record<string, unknown> | null) {
+  if (!hasArtifacts(value)) return null
+  const entries = Object.entries(value || {}).filter(([, meta]) => {
+    return typeof meta === 'object' && meta !== null
+  }) as Array<[string, ArtifactMeta]>
+  if (!entries.length) return null
+  return (
+    <Space direction="vertical" size={4}>
+      {entries.map(([key, meta]) => {
+        const tag = <Tag color={artifactColor(key)}>{artifactLabel(key, meta)}</Tag>
+        return (
+          <span key={key}>
+            {meta.download_url ? (
+              <a href={meta.download_url} target="_blank" rel="noreferrer">{tag}</a>
+            ) : tag}
+            {artifactDescription(key) && (
+              <Text type="secondary" style={{ fontSize: 12 }}>{artifactDescription(key)}</Text>
+            )}
+          </span>
+        )
+      })}
+    </Space>
+  )
 }
 
 function formatTime(ts?: string) {
@@ -154,7 +213,7 @@ const WorkflowRunMonitor: React.FC<WorkflowRunMonitorProps> = ({ runId, onClose,
                     : s.status === 'running'
                       ? 'process'
                       : 'wait',
-              description: s.error_message || (hasArtifacts(s.output_artifacts) ? '已有产物' : undefined),
+              description: s.error_message || renderArtifacts(s.output_artifacts),
             }))}
           />
 

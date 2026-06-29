@@ -94,7 +94,10 @@ SEMANTIC_RULES: tuple[tuple[re.Pattern[str], ContractProposal], ...] = (
         ContractProposal(
             "interface_l3", "interface_l3", ("interface",),
             ("interface", "status", "protocol"), ("ip_address", "description"),
-            validators={"ip_address": {"type": "ip_or_unassigned"}},
+            validators={
+                "interface": {"type": "interface_name"},
+                "ip_address": {"type": "ip_or_unassigned"},
+            },
             allow_empty=True,
             empty_patterns=(r"(?is)Interface\s+IP Address.*Status\s*$",),
         ),
@@ -104,6 +107,7 @@ SEMANTIC_RULES: tuple[tuple[re.Pattern[str], ContractProposal], ...] = (
         ContractProposal(
             "interface_l2", "interface_l2", ("interface",),
             ("interface", "status"), ("vlan", "duplex", "speed", "description", "type"),
+            validators={"interface": {"type": "interface_name"}},
         ),
     ),
     (

@@ -21,6 +21,10 @@ inputs:
     type: string
     required: false
     description: production 或 parser_validation，默认 production
+  - name: execution_plan
+    type: object
+    required: false
+    description: Optional explicit ExecutionPlan from Device Management. When provided, device-patrol executes this plan instead of resolving commands from filters.
   - name: device_name
     type: string
     required: false
@@ -46,9 +50,9 @@ inputs:
     required: false
     description: 是否保存巡检结果作为基线，默认 false
 outputs:
-  - name: patrol_report
+  - name: raw_outputs_archive
     type: download
-    description: 巡检报告文件
+    description: Raw CLI output archive collected by device-patrol; human reports are generated downstream by report-generator.
   - name: patrol_summary
     type: text
     description: 巡检摘要
@@ -138,7 +142,7 @@ fallback_to_rag: true
   "message": "巡检任务已完成",
   "data": {
     "task_id": "...",
-    "patrol_report": "下载链接",
+    "raw_outputs_archive": "下载链接",
     "patrol_summary": "摘要内容"
   }
 }

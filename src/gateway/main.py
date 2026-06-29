@@ -84,6 +84,7 @@ from src.gateway.workflow_api import router as workflow_router
 from src.gateway.notification_api import router as notification_router
 from src.gateway.events_api import router as events_router
 from src.gateway.parser_api import router as parser_router
+from src.gateway.devices_api import router as devices_router
 from src.gateway.schemas import (
     AddMessageRequest,
     ChatFileUploadRequest,
@@ -275,6 +276,7 @@ app.include_router(workflow_router)
 app.include_router(notification_router)
 app.include_router(events_router)
 app.include_router(parser_router)
+app.include_router(devices_router)
 register_exception_handlers(app)
 
 # =============================================================================

@@ -15,6 +15,7 @@ from src.core.patrol.change_detector import (
 )
 from src.core.patrol.command_splitter import split_cli_capture
 from src.core.patrol.event_builder import build_events_from_changes
+from src.core.patrol.event_builder import build_events_from_params
 from src.core.patrol.raw_importer import import_raw_capture, import_raw_path
 from src.infrastructure.db.models import (
     CommandSnapshot,
@@ -180,6 +181,19 @@ def test_change_detector_field_changes():
     assert changes[0].new_value == "down"
 
 
+def test_change_detector_ignores_status_case_noise():
+    changes = detect_changes_between_values(
+        [{"interface": "Vlan1", "status": "up", "protocol": "down"}],
+        [{"interface": "Vlan1", "status": "UP", "protocol": "DOWN"}],
+        entity_type="interface_l3",
+        primary_keys=["interface"],
+        device_id="SW1",
+        command="display interface brief",
+    )
+
+    assert changes == []
+
+
 def test_event_builder_distinguishes_change_from_event():
     small_cpu_change = [
         {
@@ -208,8 +222,87 @@ def test_event_builder_distinguishes_change_from_event():
     ]
 
     assert build_events_from_changes(small_cpu_change) == []
-    assert build_events_from_changes(high_cpu_change)[0].event_type == "CPUHigh"
-    assert build_events_from_changes(interface_down)[0].event_type == "InterfaceDown"
+    high_cpu_event = build_events_from_changes(high_cpu_change)[0]
+    interface_event = build_events_from_changes(interface_down)[0]
+
+    assert high_cpu_event.event_type == "CPUHigh"
+    assert high_cpu_event.payload["rule"] == {"rule_id": "cpu-high", "version": 1}
+    assert interface_event.event_type == "InterfaceDown"
+    assert interface_event.payload["rule"]["rule_id"] == "interface-down"
+
+
+def test_event_builder_detects_memory_high():
+    memory_high = [
+        {
+            "change_id": "memory-high",
+            "device_id": "SW1",
+            "entity_type": "memory",
+            "entity_key": "slot1",
+            "field": "memory_usage",
+            "old": 70,
+            "new": "93%",
+            "change_type": "modified",
+        }
+    ]
+
+    event = build_events_from_changes(memory_high)[0]
+
+    assert event.event_type == "MemoryHigh"
+    assert event.payload["rule"] == {"rule_id": "memory-high", "version": 1}
+
+
+def test_event_builder_marks_non_event_changes(monkeypatch):
+    calls = {}
+
+    class FakeRepository:
+        def list_changes(self, *, run_id=None, device_id=None):
+            return [
+                {
+                    "change_id": "small-cpu",
+                    "run_id": run_id,
+                    "device_id": "SW1",
+                    "entity_type": "cpu",
+                    "entity_key": "slot1",
+                    "field": "cpu_5s",
+                    "old": 15,
+                    "new": 18,
+                    "change_type": "modified",
+                },
+                {
+                    "change_id": "high-cpu",
+                    "run_id": run_id,
+                    "device_id": "SW1",
+                    "entity_type": "cpu",
+                    "entity_key": "slot1",
+                    "field": "cpu_5s",
+                    "old": 15,
+                    "new": 95,
+                    "change_type": "modified",
+                },
+            ]
+
+        def save_events(self, events):
+            calls["events"] = events
+            return len(events)
+
+        def mark_changes_event_status(self, change_ids, *, status, only_pending=True):
+            calls["no_event"] = (change_ids, status, only_pending)
+            return len(change_ids)
+
+    monkeypatch.setattr(
+        "src.core.patrol.event_builder.ChangeEventRepository",
+        FakeRepository,
+    )
+
+    result = build_events_from_params({"run_id": "run-1", "persist": True})
+
+    assert result["event_count"] == 1
+    assert result["persisted_event_count"] == 1
+    assert result["no_event_change_count"] == 1
+    assert result["no_event_summary"]["total"] == 1
+    assert result["no_event_summary"]["by_field"] == {"cpu_5s": 1}
+    assert result["no_event_summary"]["by_entity_type"] == {"cpu": 1}
+    assert calls["no_event"] == (["small-cpu"], "no_event", True)
 
 
 def test_import_and_raw_hash_change_roundtrip(tmp_path: Path):

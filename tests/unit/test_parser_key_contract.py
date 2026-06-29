@@ -84,6 +84,7 @@ def test_contract_inference_proposes_stable_interface_identity():
 
     assert proposal.category == "interface_l3"
     assert proposal.primary_keys == ("interface",)
+    assert proposal.validators["interface"]["type"] == "interface_name"
     assert proposal.validators["ip_address"]["type"] == "ip_or_unassigned"
 
 

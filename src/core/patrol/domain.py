@@ -27,3 +27,6 @@ class SnapshotRecord:
     dataset_id: str | None = None
     source_file_hash: str | None = None
     import_fingerprint: str | None = None
+    evidence_id: str | None = None
+    source_type: str = "cli"
+    schema_id: str | None = None

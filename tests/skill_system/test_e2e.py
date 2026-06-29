@@ -99,7 +99,7 @@ inputs:
     required: false
     description: 分组名称
 outputs:
-  - name: patrol_report
+  - name: raw_outputs_archive
     type: text
     description: 巡检报告
 enabled: false

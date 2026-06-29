@@ -4,7 +4,7 @@
 from django.urls import path
 
 from . import auth, user_admin
-from .views import chat, conversations, health, itsm, knowledge, notifications, parser, rag, skills, storage, system, tasks, upload, workflows, artifacts
+from .views import chat, conversations, devices, health, itsm, knowledge, notifications, parser, rag, skills, storage, system, tasks, upload, workflows, artifacts
 
 urlpatterns = [
     path("auth/login/", auth.bff_login, name="bff_login"),
@@ -52,9 +52,21 @@ urlpatterns = [
     path("workflows/market/templates/<str:template_id>/", workflows.proxy_market_template_detail, name="bff_market_template_detail"),
     path("workflows/chat-intent/preview/", workflows.proxy_chat_intent_preview, name="bff_chat_intent_preview"),
     path("workflows/runs/", workflows.proxy_workflow_runs, name="bff_workflow_runs"),
+    path("workflows/runs/patrol-batches/", workflows.proxy_patrol_batches, name="bff_patrol_batches"),
+    path(
+        "workflows/runs/patrol-batches/<str:patrol_batch_id>/retry/",
+        workflows.proxy_patrol_batch_retry,
+        name="bff_patrol_batch_retry",
+    ),
+    path(
+        "workflows/runs/patrol-batches/<str:patrol_batch_id>/export.csv",
+        workflows.proxy_patrol_batch_export,
+        name="bff_patrol_batch_export",
+    ),
     path("workflows/runs/test/", workflows.proxy_workflow_test_run, name="bff_workflow_test_run"),
     path("workflows/<str:run_id>/timeline/", workflows.proxy_workflow_timeline, name="bff_workflow_timeline"),
     path("workflows/<str:run_id>/events/stream/", workflows.proxy_workflow_events_stream, name="bff_workflow_events_stream"),
+    path("workflows/<str:run_id>/retry/", workflows.proxy_workflow_retry, name="bff_workflow_retry"),
     path("workflows/<str:run_id>/", workflows.proxy_workflow_detail, name="bff_workflow_detail"),
     path("notifications/", notifications.proxy_notifications_list, name="bff_notifications"),
     path("notifications/clear/", notifications.proxy_notifications_clear, name="bff_notifications_clear"),
@@ -116,6 +128,9 @@ urlpatterns = [
         parser.proxy_parser_action,
         name="bff_parser_action",
     ),
+    path("parser/<path:path>/", parser.proxy_parser_path, name="bff_parser_path"),
+    path("devices/", devices.proxy_devices_collection, name="bff_devices_collection"),
+    path("devices/<path:path>/", devices.proxy_device_path, name="bff_device_path"),
     path("knowledge/documents/", knowledge.proxy_knowledge_documents, name="bff_knowledge_documents"),
     path(
         "knowledge/documents/<path:doc_path>/content/",

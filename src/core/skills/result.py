@@ -238,6 +238,14 @@ class SkillExecutionResult(BaseModel):
                 filename=raw.get("change_excel_filename") or "change_ticket.xlsx",
                 content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
+        if raw.get("raw_outputs_url") and "raw_outputs_archive" not in artifacts:
+            artifacts["raw_outputs_archive"] = ArtifactRef(
+                kind="raw_outputs_archive",
+                file_key=raw.get("raw_outputs_file_key"),
+                download_url=raw.get("raw_outputs_url"),
+                filename=raw.get("raw_outputs_filename") or "raw-cli-outputs.zip",
+                content_type="application/zip",
+            )
 
         download_url = raw.get("download_url")
         if _is_downloadable_url(download_url):
@@ -268,6 +276,7 @@ class SkillExecutionResult(BaseModel):
             "error",
             "artifacts",
             "download_url",
+            "raw_outputs_url",
             "config_file_key",
             "change_excel_url",
             "execution_time_ms",

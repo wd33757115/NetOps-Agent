@@ -13,7 +13,9 @@ from src.core.parser.repository import ParserRepository
 from src.core.parser.repository import contract_digest
 from src.core.patrol.modes import normalize_patrol_mode
 from src.core.patrol.repository import PatrolRepository
+from src.core.state.repository import StateRepository
 from src.infrastructure.db.models import CommandSnapshot, PatrolDataset, PatrolRun
+from src.infrastructure.db.models import RawEvidenceRecord
 from src.infrastructure.db.postgres import get_db_session
 import pytest
 
@@ -153,6 +155,46 @@ Start
     assert result.failure_code is None
 
 
+def test_interface_name_validator_rejects_header_artifact(tmp_path):
+    content = """Value interface (\\S+)
+Value status (\\S+)
+Value protocol (\\S+)
+
+Start
+  ^${interface}\\s+${status}\\s+${protocol} -> Record
+"""
+    store = TemplateAssetStore(tmp_path)
+    path, digest = store.write_immutable(
+        vendor="H3C",
+        profile="S5130S-54S-HI-G",
+        command="display interface brief",
+        version="1",
+        content=content,
+    )
+    template = SimpleNamespace(
+        id="t3",
+        version="1",
+        asset_path=str(path),
+        sha256=digest,
+        category="interface_l3",
+        validation_json={
+            "entity_type": "interface_l3",
+            "primary_keys": ["interface"],
+            "required_fields": ["interface", "status", "protocol"],
+            "validators": {"interface": {"type": "interface_name"}},
+        },
+    )
+
+    result = ParserRuntime(registry=FakeRegistry(template)).parse(
+        identity=known_h3c_identity(),
+        command="display interface brief",
+        raw_text="Interface Link Protocol\n",
+    )
+
+    assert result.parser_status == "failed"
+    assert result.failure_code == "field_validation_failed"
+
+
 def test_patrol_modes_are_normalized_without_storage_paths():
     assert normalize_patrol_mode("production") == "production"
     assert normalize_patrol_mode("test") == "parser_validation"
@@ -217,6 +259,30 @@ def test_snapshot_import_is_idempotent_and_dataset_is_queryable():
         assert first_created is True
         assert second_created is False
         assert first_id == second_id
+        with get_db_session() as db:
+            evidence_rows = (
+                db.query(RawEvidenceRecord)
+                .filter(RawEvidenceRecord.source_snapshot_id == first_id)
+                .all()
+            )
+            assert len(evidence_rows) == 1
+            assert evidence_rows[0].source_type == "cli"
+            assert evidence_rows[0].evidence_type == "cli_command_output"
+            assert evidence_rows[0].content_ref == f"command_snapshot:{first_id}"
+            db.query(RawEvidenceRecord).filter(
+                RawEvidenceRecord.source_snapshot_id == first_id
+            ).delete()
+        context = StateRepository().get_snapshot_context(first_id)
+        assert context is not None
+        assert context["snapshot"]["source_type"] == "cli"
+        assert context["snapshot"]["evidence_id"]
+        with get_db_session() as db:
+            assert (
+                db.query(RawEvidenceRecord)
+                .filter(RawEvidenceRecord.source_snapshot_id == first_id)
+                .count()
+                == 1
+            )
         dataset = next(
             item
             for item in repository.list_datasets(mode="parser_validation")

@@ -14,6 +14,7 @@ import StatusPage from './pages/StatusPage'
 import StoragePage from './pages/StoragePage'
 import UsersPage from './pages/UsersPage'
 import LoginPage from './pages/LoginPage'
+import DevicesPage from './pages/DevicesPage'
 
 const App: React.FC = () => {
   return (
@@ -32,6 +33,7 @@ const App: React.FC = () => {
             <Route index element={<Navigate to="/chat" replace />} />
             <Route path="chat" element={<ChatPage />} />
             <Route path="skills" element={<SkillsPage />} />
+            <Route path="devices" element={<DevicesPage />} />
             <Route path="knowledge" element={<KnowledgePage />} />
             <Route path="storage" element={<StoragePage />} />
             <Route path="status" element={<StatusPage />} />

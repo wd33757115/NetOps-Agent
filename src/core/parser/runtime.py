@@ -248,6 +248,15 @@ class ParserRuntime:
                                 "field_validation_failed",
                                 evidence,
                             )
+                    if validator.get("type") == "interface_name":
+                        if _looks_like_interface_header(value):
+                            return self._failed(
+                                decision,
+                                identity,
+                                template,
+                                "field_validation_failed",
+                                evidence,
+                            )
         return ParserRuntimeResult(
             policy_status="eligible",
             identity_status="known",
@@ -298,3 +307,14 @@ class ParserRuntime:
             entity_type=spec.entity_type,
             primary_keys=spec.primary_keys,
         )
+
+
+def _looks_like_interface_header(value: Any) -> bool:
+    text = str(value or "").strip().lower()
+    return text in {
+        "interface",
+        "port",
+        "name",
+        "interface name",
+        "port name",
+    }

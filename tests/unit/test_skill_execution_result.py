@@ -52,6 +52,20 @@ def test_docx_download_roundtrip():
     assert legacy["artifacts"]["docx_file"]["download_url"] == raw["download_url"]
 
 
+def test_raw_outputs_archive_roundtrip():
+    raw = {
+        "success": True,
+        "message": "patrol complete",
+        "download_url": "https://minio/device_patrol/raw.zip",
+        "raw_outputs_url": "https://minio/device_patrol/raw.zip",
+    }
+    ser = SkillExecutionResult.from_legacy_dict(raw, skill_name="device-patrol")
+
+    assert "raw_outputs_archive" in ser.artifacts
+    legacy = ser.to_legacy_dict()
+    assert legacy["artifacts"]["raw_outputs_archive"]["download_url"] == raw["raw_outputs_url"]
+
+
 def test_error_status():
     raw = {"success": False, "error": "脚本超时"}
     ser = SkillExecutionResult.from_legacy_dict(raw, skill_name="device-backup")

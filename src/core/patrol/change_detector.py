@@ -16,6 +16,7 @@ from src.core.patrol.command_splitter import canonicalize_command
 from src.core.patrol.change_event_repository import ChangeEventRepository
 from src.core.patrol.domain import SnapshotRecord
 from src.core.patrol.repository import PatrolRepository
+from src.core.state.repository import StateRepository
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,11 @@ class NetworkChange:
     change_type: str
     previous_snapshot_id: str | None = None
     current_snapshot_id: str | None = None
+    previous_observation_id: str | None = None
+    current_observation_id: str | None = None
+    source: str = "patrol"
+    old_number: float | None = None
+    new_number: float | None = None
     detected_at: str = ""
     confidence: float = 1.0
 
@@ -54,6 +60,14 @@ def _stringify(value: Any) -> str:
     return str(value)
 
 
+def _equivalent_values(field: str, old: Any, new: Any) -> bool:
+    old_text = _stringify(old).strip()
+    new_text = _stringify(new).strip()
+    if str(field).lower() in {"status", "protocol", "state"}:
+        return old_text.casefold() == new_text.casefold()
+    return old_text == new_text
+
+
 def _normalize_records(value: Any) -> list[dict[str, Any]]:
     if value is None:
         return []
@@ -62,6 +76,94 @@ def _normalize_records(value: Any) -> list[dict[str, Any]]:
     if isinstance(value, list):
         return [item for item in value if isinstance(item, dict)]
     return [{"value": value}]
+
+
+def _number(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return float(int(value))
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip().rstrip("%"))
+        except ValueError:
+            return None
+    return None
+
+
+def _state_key(observation: dict[str, Any]) -> str:
+    return json.dumps(
+        [
+            observation.get("device_id"),
+            observation.get("entity_type"),
+            observation.get("entity_key"),
+            observation.get("field_name"),
+        ],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
+def _collection_key(observation: dict[str, Any]) -> str:
+    return json.dumps(
+        [
+            observation.get("device_id"),
+            observation.get("canonical_command"),
+            observation.get("entity_type"),
+            observation.get("field_name"),
+        ],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
+def _observation_to_change(
+    *,
+    previous: dict[str, Any] | None,
+    current: dict[str, Any] | None,
+    run_id: str,
+    change_type: str,
+    detected_at: str,
+) -> NetworkChange:
+    basis = current or previous or {}
+    old = previous.get("value_json") if previous else None
+    new = current.get("value_json") if current else None
+    return NetworkChange(
+        change_id=str(uuid.uuid4()),
+        run_id=run_id,
+        device_id=basis.get("device_id"),
+        command=basis.get("canonical_command"),
+        entity_type=str(basis.get("entity_type") or "record"),
+        entity_key=str(basis.get("entity_key") or ""),
+        field=str(basis.get("field_name") or ""),
+        old_value=old,
+        new_value=new,
+        change_type=change_type,
+        previous_snapshot_id=previous.get("snapshot_id") if previous else None,
+        current_snapshot_id=current.get("snapshot_id") if current else None,
+        previous_observation_id=previous.get("id") if previous else None,
+        current_observation_id=current.get("id") if current else None,
+        source="state_observation",
+        old_number=(
+            previous.get("value_number")
+            if previous and previous.get("value_number") is not None
+            else _number(old)
+        ),
+        new_number=(
+            current.get("value_number")
+            if current and current.get("value_number") is not None
+            else _number(new)
+        ),
+        detected_at=detected_at,
+        confidence=min(
+            float(previous.get("confidence") or 1.0) if previous else 1.0,
+            float(current.get("confidence") or 1.0) if current else 1.0,
+        ),
+    )
 
 
 def detect_changes_between_values(
@@ -130,7 +232,7 @@ def detect_changes_between_values(
                 continue
             old = prev.get(field)
             new = curr.get(field)
-            if _stringify(old).strip() == _stringify(new).strip():
+            if _equivalent_values(str(field), old, new):
                 continue
             changes.append(
                 NetworkChange(
@@ -283,7 +385,18 @@ def detect_changes_from_params(params: dict[str, Any]) -> dict[str, Any]:
     )
     persist = bool(params.get("persist", True))
     use_versioned = bool(params.get("use_versioned_parser_results", False))
+    use_state_observations = bool(params.get("use_state_observations", False))
 
+    if params.get("current_run_id") and use_state_observations:
+        return detect_observation_changes_against_history(
+            current_run_id=str(params["current_run_id"]),
+            previous_run_id=(
+                str(params["previous_run_id"])
+                if params.get("previous_run_id")
+                else None
+            ),
+            persist=persist,
+        )
     if "previous_snapshot" in params or "current_snapshot" in params:
         changes = detect_changes_between_values(
             params.get("previous_snapshot"),
@@ -354,6 +467,93 @@ def detect_changes_from_params(params: dict[str, Any]) -> dict[str, Any]:
         "persisted_change_count": persisted_change_count,
         "storage": "postgresql",
         "changes": [c.to_dict() for c in changes],
+    }
+
+
+def detect_observation_changes_against_history(
+    *,
+    current_run_id: str,
+    previous_run_id: str | None = None,
+    persist: bool = True,
+) -> dict[str, Any]:
+    repository = StateRepository()
+    changes: list[NetworkChange] = []
+    compared_observations = 0
+    baseline_observations = 0
+    detected_at = _now()
+    current_observations = repository.list_run_observations(current_run_id)
+    current_by_key = {_state_key(item): item for item in current_observations}
+    current_collections = {_collection_key(item) for item in current_observations}
+    prior_by_key: dict[str, dict[str, Any]] = {}
+    prior_observations = (
+        repository.list_observations_for_runs([previous_run_id])
+        if previous_run_id
+        else repository.list_prior_observations_for_run(current_run_id)
+    )
+    prior_collections = {_collection_key(item) for item in prior_observations}
+    for prior in prior_observations:
+        prior_by_key.setdefault(_state_key(prior), prior)
+    for current in current_observations:
+        previous = prior_by_key.get(_state_key(current))
+        if previous is None:
+            if _collection_key(current) in prior_collections:
+                changes.append(
+                    _observation_to_change(
+                        previous=None,
+                        current=current,
+                        run_id=current_run_id,
+                        change_type="added",
+                        detected_at=detected_at,
+                    )
+                )
+            else:
+                baseline_observations += 1
+            continue
+        compared_observations += 1
+        old = previous.get("value_json")
+        new = current.get("value_json")
+        if _equivalent_values(str(current.get("field_name") or ""), old, new):
+            continue
+        changes.append(
+            _observation_to_change(
+                previous=previous,
+                current=current,
+                run_id=current_run_id,
+                change_type="modified",
+                detected_at=detected_at,
+            )
+        )
+    for key, previous in prior_by_key.items():
+        if key in current_by_key:
+            continue
+        if _collection_key(previous) not in current_collections:
+            continue
+        changes.append(
+            _observation_to_change(
+                previous=previous,
+                current=None,
+                run_id=current_run_id,
+                change_type="deleted",
+                detected_at=detected_at,
+            )
+        )
+
+    persisted_change_count = save_changes(changes) if persist else 0
+    return {
+        "success": True,
+        "current_run_id": current_run_id,
+        "previous_run_id": previous_run_id,
+        "compared_observations": compared_observations,
+        "baseline_observations": baseline_observations,
+        "added_observations": sum(1 for change in changes if change.change_type == "added"),
+        "deleted_observations": sum(
+            1 for change in changes if change.change_type == "deleted"
+        ),
+        "change_count": len(changes),
+        "persisted_change_count": persisted_change_count,
+        "storage": "postgresql",
+        "source": "state_observation",
+        "changes": [change.to_dict() for change in changes],
     }
 
 
