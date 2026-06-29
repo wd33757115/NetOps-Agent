@@ -317,6 +317,56 @@ def test_event_builder_handles_initial_abnormal_state():
     assert build_events_from_changes(initial_interface_down)[0].event_type == "InterfaceDown"
 
 
+def test_event_builder_does_not_emit_initial_recovery_events():
+    initial_interface_up = [
+        {
+            "change_id": "initial-interface-up",
+            "device_id": "SW1",
+            "entity_type": "interface_l3",
+            "entity_key": "Gi1/0/1",
+            "field": "protocol",
+            "old": None,
+            "new": "up",
+            "change_type": "initial",
+        }
+    ]
+    initial_bgp_established = [
+        {
+            "change_id": "initial-bgp-established",
+            "device_id": "SW1",
+            "command": "display bgp peer",
+            "entity_type": "bgp_neighbor",
+            "entity_key": "10.0.0.2",
+            "field": "state",
+            "old": None,
+            "new": "Established",
+            "change_type": "initial",
+        }
+    ]
+
+    assert build_events_from_changes(initial_interface_up) == []
+    assert build_events_from_changes(initial_bgp_established) == []
+
+
+def test_event_builder_prefers_power_failed_over_interface_down_for_power_status():
+    power_failed = [
+        {
+            "change_id": "power-failed",
+            "device_id": "SW1",
+            "entity_type": "power_supply",
+            "entity_key": "PWR1",
+            "field": "status",
+            "old": "normal",
+            "new": "failed",
+            "change_type": "modified",
+        }
+    ]
+
+    events = build_events_from_changes(power_failed)
+
+    assert [event.event_type for event in events] == ["PowerFailed"]
+
+
 def test_event_builder_suppresses_repeated_threshold_high_change():
     repeated_high = [
         {
@@ -393,7 +443,8 @@ def test_event_repository_dedupes_active_event_and_resolves_recovery():
             assert high.status == "resolved"
             assert high.payload_json["latest_source_change_id"] == "change-high-1"
             assert high.payload_json["recovered_by_event_type"] == "CPURecovered"
-            assert recovered.status == "open"
+            assert recovered.status == "resolved"
+            assert recovered.payload_json["event_class"] == "recovery"
     finally:
         _cleanup_runs(run_id)
 

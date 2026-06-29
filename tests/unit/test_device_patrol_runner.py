@@ -149,6 +149,64 @@ def test_device_patrol_runner_fails_when_snapshot_persist_fails():
         runner.run(DevicePatrolRunRequest(filter_params={"vendor": "Cisco"}))
 
 
+def test_device_patrol_runner_surfaces_partial_parser_health():
+    class FakeDBManager:
+        pass
+
+    class FakeDeviceFilter:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class FakePatrolTool:
+        def __init__(self, db_manager):
+            self.db_manager = db_manager
+
+        async def patrol_by_filter(self, filter_params, save_baseline, mode):
+            return TaskResult(
+                success=True,
+                action=ActionType.PATROL,
+                total_devices=1,
+                success_devices=1,
+                failed_devices=0,
+                details=[{"output_file": "sw1.txt"}],
+                output_files=["sw1.txt"],
+            )
+
+    def partial_snapshot_persister(**kwargs):
+        return {
+            "snapshot_run_id": kwargs["snapshot_run_id"],
+            "snapshot_storage": "postgresql",
+            "legacy_db_path_ignored": None,
+            "snapshot_devices": 1,
+            "snapshot_commands": 2,
+            "snapshot_errors": [],
+            "snapshot_health": "partial",
+            "parsed_commands": 1,
+            "failed_parse_commands": 1,
+            "coverage_violations": [],
+            "parse_violations": [{"canonical_command": "show version"}],
+            "production_parser_ready": False,
+        }
+
+    runner = DevicePatrolRunner(
+        tools_loader=lambda: SimpleNamespace(
+            DBManager=FakeDBManager,
+            DeviceFilter=FakeDeviceFilter,
+            PatrolTool=FakePatrolTool,
+        ),
+        minio_storage_factory=lambda: None,
+        snapshot_persister=partial_snapshot_persister,
+    )
+
+    result = runner.run(DevicePatrolRunRequest(filter_params={"vendor": "Cisco"}))
+
+    assert result["status"] == "partial"
+    assert result["data_quality_status"] == "partial"
+    assert result["production_parser_ready"] is False
+    assert result["failed_parse_commands"] == 1
+    assert result["parse_violations"] == [{"canonical_command": "show version"}]
+
+
 def test_device_patrol_runner_can_replay_execution_plan_by_id(monkeypatch):
     captured: dict[str, object] = {}
 

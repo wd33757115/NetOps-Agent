@@ -51,6 +51,11 @@ def persist_patrol_snapshots(
     imported_commands = 0
     imported_devices = 0
     import_errors: list[str] = []
+    parsed_commands = 0
+    failed_parse_commands = 0
+    coverage_violations: list[dict[str, Any]] = []
+    parse_violations: list[dict[str, Any]] = []
+    production_parser_ready = True
     for detail in details:
         output_file = detail.get("output_file")
         if not output_file or not os.path.isfile(str(output_file)):
@@ -72,8 +77,31 @@ def persist_patrol_snapshots(
             )
             imported_commands += int(imported.get("command_count") or 0)
             imported_devices += 1
+            production_parser_ready = production_parser_ready and bool(
+                imported.get("production_parser_ready", True)
+            )
+            coverage_violations.extend(imported.get("coverage_violations") or [])
+            parse_violations.extend(imported.get("parse_violations") or [])
+            for parser_result in imported.get("parser_results") or []:
+                parse_status = str(parser_result.get("parse_status") or "")
+                if parse_status in {"parsed", "parse_empty"}:
+                    parsed_commands += 1
+                elif parse_status in {
+                    "parse_failed",
+                    "template_missing",
+                    "identity_unknown",
+                }:
+                    failed_parse_commands += 1
         except Exception as exc:
             import_errors.append(f"{output_file}: {exc}")
+
+    snapshot_health = "ready"
+    if import_errors:
+        snapshot_health = "failed"
+    elif coverage_violations or parse_violations:
+        snapshot_health = "partial"
+        if imported_commands > 0 and parsed_commands == 0:
+            snapshot_health = "failed_data_quality"
 
     return {
         "snapshot_run_id": snapshot_run_id,
@@ -82,6 +110,12 @@ def persist_patrol_snapshots(
         "snapshot_devices": imported_devices,
         "snapshot_commands": imported_commands,
         "snapshot_errors": import_errors,
+        "snapshot_health": snapshot_health,
+        "parsed_commands": parsed_commands,
+        "failed_parse_commands": failed_parse_commands,
+        "coverage_violations": coverage_violations,
+        "parse_violations": parse_violations,
+        "production_parser_ready": production_parser_ready,
     }
 
 
@@ -152,15 +186,17 @@ class DevicePatrolRunner:
             mode=mode,
             execution_plan_id=request.execution_plan_id,
         )
-        if snapshot_result["snapshot_errors"]:
-            raise RuntimeError("; ".join(snapshot_result["snapshot_errors"]))
-
         raw_outputs_url = self._archive_raw_outputs(
             output_files=result.output_files or [],
             ticket_id=request.ticket_id,
         )
+        if snapshot_result["snapshot_errors"]:
+            raise RuntimeError("; ".join(snapshot_result["snapshot_errors"]))
 
         execution_time_ms = int((datetime.now() - execution_start).total_seconds() * 1000)
+        status = "success"
+        if snapshot_result.get("snapshot_health") in {"partial", "failed_data_quality"}:
+            status = str(snapshot_result["snapshot_health"])
         return runner_success_payload(
             action="patrol",
             ticket_id=request.ticket_id,
@@ -170,6 +206,8 @@ class DevicePatrolRunner:
             extra={
                 "save_baseline": request.save_baseline,
                 "mode": mode,
+                "status": status,
+                "data_quality_status": snapshot_result.get("snapshot_health", "ready"),
                 "execution_plan_id": request.execution_plan_id,
                 "raw_outputs_url": raw_outputs_url,
                 "raw_outputs_archive": raw_outputs_url,

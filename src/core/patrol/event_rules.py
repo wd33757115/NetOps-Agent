@@ -61,6 +61,15 @@ def is_bgp_change(change: dict[str, Any]) -> bool:
     return "bgp" in entity_type or "bgp" in command
 
 
+def is_interface_change(change: dict[str, Any]) -> bool:
+    return norm(change.get("entity_type")) in {
+        "interface",
+        "interface_l2",
+        "interface_l3",
+        "physical_interface",
+    }
+
+
 @dataclass(frozen=True)
 class EventRule:
     rule_id: str
@@ -101,21 +110,33 @@ def condition_matches(condition: dict[str, Any], change: dict[str, Any]) -> bool
         )
     if kind == "transition":
         fields = {norm_field(item) for item in condition.get("fields") or []}
-        old_group = _state_group(change.get("old"))
+        entity_types = {norm(item) for item in condition.get("entity_types") or []}
+        if entity_types and norm(change.get("entity_type")) not in entity_types:
+            return False
+        new_group = _state_group(change.get("new"))
         if change.get("change_type") == "initial":
-            old_group = str(condition.get("from_group"))
+            return bool(condition.get("allow_initial_target")) and (
+                norm_field(change.get("field")) in fields
+                and new_group == str(condition.get("to_group"))
+            )
+        old_group = _state_group(change.get("old"))
         return (
             norm_field(change.get("field")) in fields
             and old_group == str(condition.get("from_group"))
-            and _state_group(change.get("new")) == str(condition.get("to_group"))
+            and new_group == str(condition.get("to_group"))
         )
     if kind == "bgp_transition":
         fields = {norm_field(item) for item in condition.get("fields") or []}
         from_established = bool(condition.get("from_established"))
         to_established = bool(condition.get("to_established"))
-        old_established = norm(change.get("old")) == "established"
         if change.get("change_type") == "initial":
-            old_established = from_established
+            return (
+                bool(condition.get("allow_initial_target"))
+                and is_bgp_change(change)
+                and norm_field(change.get("field")) in fields
+                and (norm(change.get("new")) == "established") is to_established
+            )
+        old_established = norm(change.get("old")) == "established"
         return (
             is_bgp_change(change)
             and norm_field(change.get("field")) in fields
@@ -140,6 +161,16 @@ def condition_matches(condition: dict[str, Any], change: dict[str, Any]) -> bool
             and is_down(change.get("new"))
         )
     return False
+
+
+def _effective_condition(rule_name: str, condition: dict[str, Any]) -> dict[str, Any]:
+    """Fill new built-in rule guard fields for older active DB rule versions."""
+    current = dict(condition or {})
+    defaults = _default_condition(rule_name)
+    if defaults.get("kind") == current.get("kind"):
+        for key, value in defaults.items():
+            current.setdefault(key, value)
+    return current
 
 
 def _state_group(value: Any) -> str:
@@ -198,7 +229,10 @@ class EventRuleRepository:
                     version=int(version.version),
                     event_type=version.event_type,
                     severity=version.severity,
-                    predicate=lambda change, condition=dict(version.condition_json or {}): condition_matches(
+                    predicate=lambda change, condition=_effective_condition(
+                        str(rule.name),
+                        dict(version.condition_json or {}),
+                    ): condition_matches(
                         condition,
                         change,
                     ),
@@ -537,6 +571,7 @@ def default_event_rules() -> list[EventRule]:
                     "line_protocol",
                 },
             )
+            and is_interface_change(c)
             and (is_up(c.get("old")) or c.get("change_type") == "initial")
             and is_down(c.get("new")),
         ),
@@ -556,6 +591,7 @@ def default_event_rules() -> list[EventRule]:
                     "line_protocol",
                 },
             )
+            and is_interface_change(c)
             and is_down(c.get("old"))
             and is_up(c.get("new")),
         ),
@@ -567,7 +603,13 @@ def default_event_rules() -> list[EventRule]:
             predicate=lambda c: is_bgp_change(c)
             and norm_field(c.get("field"))
             in {"state", "bgp_state", "peer_state", "neighbor_state"}
-            and (norm(c.get("old")) == "established" or c.get("change_type") == "initial")
+            and (
+                norm(c.get("old")) == "established"
+                or (
+                    c.get("change_type") == "initial"
+                    and norm(c.get("new")) != "established"
+                )
+            )
             and norm(c.get("new")) != "established",
         ),
         EventRule(
@@ -578,6 +620,7 @@ def default_event_rules() -> list[EventRule]:
             predicate=lambda c: is_bgp_change(c)
             and norm_field(c.get("field"))
             in {"state", "bgp_state", "peer_state", "neighbor_state"}
+            and c.get("change_type") != "initial"
             and norm(c.get("old")) != "established"
             and norm(c.get("new")) == "established",
         ),
@@ -683,6 +726,12 @@ def _default_condition(rule_id: str) -> dict[str, Any]:
     if rule_id == "interface-down":
         return {
             "kind": "transition",
+            "entity_types": [
+                "interface",
+                "interface_l2",
+                "interface_l3",
+                "physical_interface",
+            ],
             "fields": [
                 "status",
                 "protocol",
@@ -693,10 +742,17 @@ def _default_condition(rule_id: str) -> dict[str, Any]:
             ],
             "from_group": "up",
             "to_group": "down",
+            "allow_initial_target": True,
         }
     if rule_id == "interface-up":
         return {
             "kind": "transition",
+            "entity_types": [
+                "interface",
+                "interface_l2",
+                "interface_l3",
+                "physical_interface",
+            ],
             "fields": [
                 "status",
                 "protocol",
@@ -707,6 +763,7 @@ def _default_condition(rule_id: str) -> dict[str, Any]:
             ],
             "from_group": "down",
             "to_group": "up",
+            "allow_initial_target": False,
         }
     if rule_id == "bgp-neighbor-lost":
         return {
@@ -714,6 +771,7 @@ def _default_condition(rule_id: str) -> dict[str, Any]:
             "fields": ["state", "bgp_state", "peer_state", "neighbor_state"],
             "from_established": True,
             "to_established": False,
+            "allow_initial_target": True,
         }
     if rule_id == "bgp-neighbor-established":
         return {
@@ -721,6 +779,7 @@ def _default_condition(rule_id: str) -> dict[str, Any]:
             "fields": ["state", "bgp_state", "peer_state", "neighbor_state"],
             "from_established": False,
             "to_established": True,
+            "allow_initial_target": False,
         }
     if rule_id == "config-changed":
         return {

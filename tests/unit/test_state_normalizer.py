@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from types import SimpleNamespace
-
 import pytest
 
 from src.core.patrol.change_detector import detect_observation_changes_against_history
@@ -51,37 +48,41 @@ def _state_observation(observed_at: str, value: str = "up") -> StateObservation:
     )
 
 
-class _CurrentStateQuery:
-    def __init__(self, row):
-        self.row = row
-
-    def filter(self, *_args, **_kwargs):
-        return self
-
-    def first(self):
-        return self.row
-
-
 class _CurrentStateDb:
-    def __init__(self, row):
-        self.row = row
-        self.added = []
+    def __init__(self, scalar):
+        self.scalar = scalar
+        self.statements = []
 
-    def query(self, _model):
-        return _CurrentStateQuery(self.row)
+    def execute(self, statement):
+        self.statements.append(statement)
 
-    def add(self, row):
-        self.added.append(row)
-        self.row = row
+        class Result:
+            def __init__(self, scalar):
+                self.scalar = scalar
+
+            def scalar_one_or_none(self):
+                return self.scalar
+
+        return Result(self.scalar)
 
 
-def test_current_state_ignores_older_observations():
-    row = SimpleNamespace(
-        observed_at=datetime(2026, 6, 20, 10, 5, tzinfo=timezone.utc),
-        version=3,
-        value_json="down",
+def test_current_state_upsert_is_atomic_and_guards_observed_at():
+    db = _CurrentStateDb("state-row-id")
+
+    updated = StateRepository()._upsert_current_state(
+        db,
+        _state_observation("2026-06-20T10:10:00+00:00", value="up"),
     )
-    db = _CurrentStateDb(row)
+
+    sql = str(db.statements[0]).lower()
+    assert updated == 1
+    assert "on conflict" in sql
+    assert "state_key" in sql
+    assert "excluded.observed_at > netops_current_state.observed_at" in sql
+
+
+def test_current_state_upsert_reports_zero_when_db_skips_stale_observation():
+    db = _CurrentStateDb(None)
 
     updated = StateRepository()._upsert_current_state(
         db,
@@ -89,27 +90,21 @@ def test_current_state_ignores_older_observations():
     )
 
     assert updated == 0
-    assert row.version == 3
-    assert row.value_json == "down"
 
 
-def test_current_state_accepts_newer_observations():
-    row = SimpleNamespace(
-        observed_at=datetime(2026, 6, 20, 10, 5, tzinfo=timezone.utc),
-        version=3,
-        value_json="down",
-    )
-    db = _CurrentStateDb(row)
+def test_state_observation_insert_uses_conflict_do_nothing():
+    db = _CurrentStateDb("obs-id")
 
-    updated = StateRepository()._upsert_current_state(
+    inserted = StateRepository()._insert_observation(
         db,
-        _state_observation("2026-06-20T10:10:00+00:00", value="up"),
+        _state_observation("2026-06-20T10:00:00+00:00", value="up"),
     )
 
-    assert updated == 1
-    assert row.version == 4
-    assert row.value_json == "up"
-    assert row.observed_at == datetime(2026, 6, 20, 10, 10, tzinfo=timezone.utc)
+    sql = str(db.statements[0]).lower()
+    assert inserted is True
+    assert "on conflict" in sql
+    assert "do nothing" in sql
+    assert "idempotency_key" in sql
 
 
 def test_template_contract_prefers_observation_contract(monkeypatch):

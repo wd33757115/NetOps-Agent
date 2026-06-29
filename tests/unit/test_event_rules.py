@@ -59,11 +59,39 @@ def test_transition_condition_matches_initial_interface_down():
     assert condition_matches(
         {
             "kind": "transition",
+            "entity_types": ["interface_l3"],
             "fields": ["protocol"],
             "from_group": "up",
             "to_group": "down",
+            "allow_initial_target": True,
         },
-        {"field": "protocol", "old": None, "new": "down", "change_type": "initial"},
+        {
+            "entity_type": "interface_l3",
+            "field": "protocol",
+            "old": None,
+            "new": "down",
+            "change_type": "initial",
+        },
+    )
+
+
+def test_transition_condition_does_not_match_initial_interface_up():
+    assert not condition_matches(
+        {
+            "kind": "transition",
+            "entity_types": ["interface_l3"],
+            "fields": ["protocol"],
+            "from_group": "down",
+            "to_group": "up",
+            "allow_initial_target": False,
+        },
+        {
+            "entity_type": "interface_l3",
+            "field": "protocol",
+            "old": None,
+            "new": "up",
+            "change_type": "initial",
+        },
     )
 
 
@@ -74,6 +102,7 @@ def test_bgp_condition_matches_initial_neighbor_lost():
             "fields": ["state"],
             "from_established": True,
             "to_established": False,
+            "allow_initial_target": True,
         },
         {
             "command": "display bgp peer",
@@ -86,6 +115,26 @@ def test_bgp_condition_matches_initial_neighbor_lost():
     )
 
 
+def test_bgp_condition_does_not_match_initial_established():
+    assert not condition_matches(
+        {
+            "kind": "bgp_transition",
+            "fields": ["state"],
+            "from_established": False,
+            "to_established": True,
+            "allow_initial_target": False,
+        },
+        {
+            "command": "display bgp peer",
+            "entity_type": "bgp_neighbor",
+            "field": "state",
+            "old": None,
+            "new": "Established",
+            "change_type": "initial",
+        },
+    )
+
+
 def test_bgp_condition_does_not_match_unrelated_state_field():
     assert not condition_matches(
         {
@@ -93,6 +142,7 @@ def test_bgp_condition_does_not_match_unrelated_state_field():
             "fields": ["state"],
             "from_established": True,
             "to_established": False,
+            "allow_initial_target": True,
         },
         {
             "command": "display power",
@@ -120,11 +170,35 @@ def test_transition_condition_matches_cisco_interface_status_down():
     assert condition_matches(
         {
             "kind": "transition",
+            "entity_types": ["interface_l2"],
             "fields": ["status"],
             "from_group": "up",
             "to_group": "down",
         },
-        {"field": "status", "old": "connected", "new": "notconnec"},
+        {
+            "entity_type": "interface_l2",
+            "field": "status",
+            "old": "connected",
+            "new": "notconnec",
+        },
+    )
+
+
+def test_transition_condition_does_not_match_power_supply_status():
+    assert not condition_matches(
+        {
+            "kind": "transition",
+            "entity_types": ["interface_l2", "interface_l3"],
+            "fields": ["status"],
+            "from_group": "up",
+            "to_group": "down",
+        },
+        {
+            "entity_type": "power_supply",
+            "field": "status",
+            "old": "normal",
+            "new": "failed",
+        },
     )
 
 

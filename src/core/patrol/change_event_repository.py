@@ -44,6 +44,14 @@ def _event_key(
     )
 
 
+RECOVERY_EVENT_TYPES = {
+    "CPURecovered",
+    "MemoryRecovered",
+    "InterfaceUp",
+    "BGPNeighborEstablished",
+}
+
+
 class ChangeEventRepository:
     def save_changes(self, changes: list[Any]) -> int:
         created = 0
@@ -211,8 +219,12 @@ class ChangeEventRepository:
                         source_change_id=event.source_change_id,
                         run_id=event.run_id,
                         occurred_at=_datetime(event.occurred_at),
-                        status=event.status,
-                        payload_json=event.payload,
+                        status=(
+                            "resolved"
+                            if event.event_type in RECOVERY_EVENT_TYPES
+                            else event.status
+                        ),
+                        payload_json=self._event_payload(event),
                         created_at=datetime.now(timezone.utc),
                     )
                 )
@@ -223,6 +235,15 @@ class ChangeEventRepository:
                         change.event_status = "event_created"
                 created += 1
         return created
+
+    @staticmethod
+    def _event_payload(event: Any) -> dict[str, Any]:
+        payload = dict(event.payload or {})
+        payload.setdefault(
+            "event_class",
+            "recovery" if event.event_type in RECOVERY_EVENT_TYPES else "fault",
+        )
+        return payload
 
     def _find_active_event(self, db, event: Any) -> NetworkEventRecord | None:
         dedupe_key = (event.payload or {}).get("dedupe_key")

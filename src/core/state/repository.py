@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from src.core.evidence import RawEvidenceRepository, evidence_id_for_command_snapshot
 from src.core.state.domain import StateObservation
@@ -172,95 +172,117 @@ class StateRepository:
         current_updates = 0
         with get_db_session() as db:
             for item in observations:
-                if (
-                    db.query(StateObservationRecord.id)
-                    .filter(
-                        StateObservationRecord.idempotency_key == item.idempotency_key
-                    )
-                    .first()
-                ):
+                inserted = self._insert_observation(db, item)
+                if not inserted:
                     continue
-                db.add(
-                    StateObservationRecord(
-                        id=item.observation_id,
-                        idempotency_key=item.idempotency_key,
-                        run_id=item.run_id,
-                        snapshot_id=item.snapshot_id,
-                        dataset_id=item.dataset_id,
-                        mode=item.mode,
-                        source=item.source,
-                        source_type=item.source_type,
-                        evidence_id=item.evidence_id,
-                        schema_id=item.schema_id,
-                        device_id=item.device_id,
-                        vendor=item.vendor,
-                        model=item.model,
-                        canonical_command=item.canonical_command,
-                        entity_type=item.entity_type,
-                        entity_key=item.entity_key,
-                        field_name=item.field_name,
-                        value_json=item.value,
-                        value_text=item.value_text,
-                        value_number=item.value_number,
-                        value_type=item.value_type,
-                        observation_kind=item.observation_kind,
-                        observed_at=_datetime(item.observed_at),
-                        parser_template_id=item.parser_template_id,
-                        parser_version=item.parser_version,
-                        contract_version=item.contract_version,
-                        confidence=item.confidence,
-                        metadata_json=item.metadata or {},
-                    )
-                )
                 created += 1
                 if update_current_state:
                     current_updates += self._upsert_current_state(db, item)
-            try:
-                db.flush()
-            except IntegrityError:
-                # Let the session rollback and surface the original data problem.
-                raise
         return created, current_updates
 
-    def _upsert_current_state(self, db, item: StateObservation) -> int:
-        row = (
-            db.query(CurrentStateRecord)
-            .filter(CurrentStateRecord.state_key == item.state_key)
-            .first()
+    def _observation_values(self, item: StateObservation) -> dict[str, Any]:
+        return {
+            "id": item.observation_id,
+            "idempotency_key": item.idempotency_key,
+            "run_id": item.run_id,
+            "snapshot_id": item.snapshot_id,
+            "dataset_id": item.dataset_id,
+            "mode": item.mode,
+            "source": item.source,
+            "source_type": item.source_type,
+            "evidence_id": item.evidence_id,
+            "schema_id": item.schema_id,
+            "device_id": item.device_id,
+            "vendor": item.vendor,
+            "model": item.model,
+            "canonical_command": item.canonical_command,
+            "entity_type": item.entity_type,
+            "entity_key": item.entity_key,
+            "field_name": item.field_name,
+            "value_json": item.value,
+            "value_text": item.value_text,
+            "value_number": item.value_number,
+            "value_type": item.value_type,
+            "observation_kind": item.observation_kind,
+            "observed_at": _datetime(item.observed_at),
+            "parser_template_id": item.parser_template_id,
+            "parser_version": item.parser_version,
+            "contract_version": item.contract_version,
+            "confidence": item.confidence,
+            "metadata_json": item.metadata or {},
+        }
+
+    def _insert_observation(self, db, item: StateObservation) -> bool:
+        stmt = (
+            pg_insert(StateObservationRecord)
+            .values(**self._observation_values(item))
+            .on_conflict_do_nothing(index_elements=["idempotency_key"])
+            .returning(StateObservationRecord.id)
         )
+        return db.execute(stmt).scalar_one_or_none() is not None
+
+    def _upsert_current_state(self, db, item: StateObservation) -> int:
         now = datetime.now(timezone.utc)
         incoming_observed_at = _datetime(item.observed_at)
-        if row is not None and row.observed_at is not None:
-            current_observed_at = _datetime(row.observed_at)
-            if incoming_observed_at <= current_observed_at:
-                return 0
-        if row is None:
-            row = CurrentStateRecord(
-                id=item.observation_id,
-                state_key=item.state_key,
-                created_at=now,
+        values = {
+            "id": item.observation_id,
+            "state_key": item.state_key,
+            "device_id": item.device_id,
+            "vendor": item.vendor,
+            "model": item.model,
+            "entity_type": item.entity_type,
+            "entity_key": item.entity_key,
+            "field_name": item.field_name,
+            "value_json": item.value,
+            "value_text": item.value_text,
+            "value_number": item.value_number,
+            "value_type": item.value_type,
+            "observation_kind": item.observation_kind,
+            "source": item.source,
+            "source_type": item.source_type,
+            "source_run_id": item.run_id,
+            "source_snapshot_id": item.snapshot_id,
+            "source_evidence_id": item.evidence_id,
+            "schema_id": item.schema_id,
+            "observed_at": incoming_observed_at,
+            "version": 1,
+            "confidence": item.confidence,
+            "metadata_json": item.metadata or {},
+            "created_at": now,
+            "updated_at": now,
+        }
+        stmt = pg_insert(CurrentStateRecord).values(**values)
+        excluded = stmt.excluded
+        update_values = {
+            "device_id": excluded.device_id,
+            "vendor": excluded.vendor,
+            "model": excluded.model,
+            "entity_type": excluded.entity_type,
+            "entity_key": excluded.entity_key,
+            "field_name": excluded.field_name,
+            "value_json": excluded.value_json,
+            "value_text": excluded.value_text,
+            "value_number": excluded.value_number,
+            "value_type": excluded.value_type,
+            "observation_kind": excluded.observation_kind,
+            "source": excluded.source,
+            "source_type": excluded.source_type,
+            "source_run_id": excluded.source_run_id,
+            "source_snapshot_id": excluded.source_snapshot_id,
+            "source_evidence_id": excluded.source_evidence_id,
+            "schema_id": excluded.schema_id,
+            "observed_at": excluded.observed_at,
+            "version": CurrentStateRecord.version + 1,
+            "confidence": excluded.confidence,
+            "metadata_json": excluded.metadata_json,
+            "updated_at": excluded.updated_at,
+        }
+        stmt = (
+            stmt.on_conflict_do_update(
+                index_elements=["state_key"],
+                set_=update_values,
+                where=excluded.observed_at > CurrentStateRecord.observed_at,
             )
-            db.add(row)
-        row.device_id = item.device_id
-        row.vendor = item.vendor
-        row.model = item.model
-        row.entity_type = item.entity_type
-        row.entity_key = item.entity_key
-        row.field_name = item.field_name
-        row.value_json = item.value
-        row.value_text = item.value_text
-        row.value_number = item.value_number
-        row.value_type = item.value_type
-        row.observation_kind = item.observation_kind
-        row.source = item.source
-        row.source_type = item.source_type
-        row.source_run_id = item.run_id
-        row.source_snapshot_id = item.snapshot_id
-        row.source_evidence_id = item.evidence_id
-        row.schema_id = item.schema_id
-        row.observed_at = incoming_observed_at
-        row.version = int(row.version or 0) + 1
-        row.confidence = item.confidence
-        row.metadata_json = item.metadata or {}
-        row.updated_at = now
-        return 1
+            .returning(CurrentStateRecord.id)
+        )
+        return 1 if db.execute(stmt).scalar_one_or_none() is not None else 0
