@@ -38,6 +38,15 @@ from src.core.patrol.raw_importer import import_raw_path, preview_raw_path
 from src.core.patrol.repository import PatrolRepository
 from src.core.parser.tasks import dispatch_ready_parser_jobs
 from src.core.patrol.event_rules import EventRuleRepository, condition_matches
+from src.core.patrol.rule_validation import (
+    EventRuleValidationCase,
+    validate_event_rule_pack,
+    validate_event_rule_set,
+)
+from src.core.rule_control import (
+    RuleGenerationJobRepository,
+    RuleGenerationJobStateError,
+)
 from src.core.celery_tasks.celery_app import celery
 
 router = APIRouter(
@@ -75,6 +84,43 @@ class EventRuleUpsertRequest(BaseModel):
 class EventRuleTestRequest(BaseModel):
     condition: dict[str, Any]
     samples: list[dict[str, Any]]
+
+
+class EventRuleValidationCaseRequest(BaseModel):
+    name: str
+    change: dict[str, Any]
+    expected_event_type: str | None = None
+    expected_rule_id: str | None = None
+
+
+class EventRuleValidationRequest(BaseModel):
+    cases: list[EventRuleValidationCaseRequest] | None = None
+
+
+class RuleGenerationJobCreateRequest(BaseModel):
+    job_type: str
+    source_ref: str | None = None
+    asset_ref: str | None = None
+    payload: dict[str, Any] | None = None
+    validation_report: dict[str, Any] | None = None
+    approval_required: bool = True
+    created_by: str | None = None
+    status: str = "draft"
+
+
+class RuleGenerationJobTransitionRequest(BaseModel):
+    status: str
+    validation_report: dict[str, Any] | None = None
+    asset_ref: str | None = None
+
+
+class RuleGenerationJobValidationRequest(BaseModel):
+    validation_report: dict[str, Any]
+
+
+class RuleGenerationJobApprovalRequest(BaseModel):
+    actor: str | None = None
+    reason: str | None = None
 
 
 class CommandProfileUpsertRequest(BaseModel):
@@ -548,6 +594,181 @@ def parser_coverage():
     }
 
 
+@router.get("/rule-generation-jobs")
+def list_rule_generation_jobs(
+    job_type: str | None = None,
+    status: str | None = None,
+    limit: int = 200,
+):
+    return {
+        "items": RuleGenerationJobRepository().list_jobs(
+            job_type=job_type,
+            status=status,
+            limit=limit,
+        )
+    }
+
+
+@router.post("/rule-generation-jobs")
+def create_rule_generation_job(payload: RuleGenerationJobCreateRequest):
+    try:
+        return RuleGenerationJobRepository().create_job(
+            job_type=payload.job_type,
+            source_ref=payload.source_ref,
+            asset_ref=payload.asset_ref,
+            payload=payload.payload,
+            validation_report=payload.validation_report,
+            approval_required=payload.approval_required,
+            created_by=payload.created_by,
+            status=payload.status,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/rule-generation-jobs/{job_id}")
+def get_rule_generation_job(job_id: str):
+    item = RuleGenerationJobRepository().get_job(job_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="rule generation job not found")
+    return item
+
+
+@router.post("/rule-generation-jobs/{job_id}/transition")
+def transition_rule_generation_job(
+    job_id: str,
+    payload: RuleGenerationJobTransitionRequest,
+):
+    try:
+        return RuleGenerationJobRepository().transition_job(
+            job_id,
+            status=payload.status,
+            validation_report=payload.validation_report,
+            asset_ref=payload.asset_ref,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuleGenerationJobStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/rule-generation-jobs/{job_id}/validation-report")
+def attach_rule_generation_validation_report(
+    job_id: str,
+    payload: RuleGenerationJobValidationRequest,
+):
+    try:
+        return RuleGenerationJobRepository().attach_validation_report(
+            job_id,
+            validation_report=payload.validation_report,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+def _event_rule_version_id_from_ref(asset_ref: str | None) -> str | None:
+    if not asset_ref:
+        return None
+    prefix = "event_rule_version:"
+    if asset_ref.startswith(prefix):
+        return asset_ref[len(prefix):]
+    return None
+
+
+def _activate_rule_generation_asset(job: dict[str, Any]) -> dict[str, Any] | None:
+    if job.get("job_type") != "EVENT_RULE":
+        return None
+    version_id = _event_rule_version_id_from_ref(job.get("asset_ref"))
+    if not version_id:
+        return None
+    return EventRuleRepository().activate_rule_version(version_id)
+
+
+def _deprecate_rule_generation_asset(job: dict[str, Any]) -> dict[str, Any] | None:
+    if job.get("job_type") != "EVENT_RULE":
+        return None
+    version_id = _event_rule_version_id_from_ref(job.get("asset_ref"))
+    if not version_id:
+        return None
+    return EventRuleRepository().deprecate_rule_version(version_id)
+
+
+@router.post("/rule-generation-jobs/{job_id}/approve")
+def approve_rule_generation_job(
+    job_id: str,
+    payload: RuleGenerationJobApprovalRequest | None = None,
+):
+    repository = RuleGenerationJobRepository()
+    job = repository.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="rule generation job not found")
+    if job.get("status") != "pending_approval":
+        raise HTTPException(
+            status_code=409,
+            detail="rule generation job must be pending_approval before approval",
+        )
+    try:
+        asset_activation = _activate_rule_generation_asset(job)
+        updated = repository.approve_job(
+            job_id,
+            approved_by=payload.actor if payload else None,
+        )
+        return {
+            "success": True,
+            "job": updated,
+            "asset_activation": asset_activation,
+        }
+    except RuleGenerationJobStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/rule-generation-jobs/{job_id}/reject")
+def reject_rule_generation_job(
+    job_id: str,
+    payload: RuleGenerationJobApprovalRequest | None = None,
+):
+    try:
+        updated = RuleGenerationJobRepository().reject_job(
+            job_id,
+            rejected_by=payload.actor if payload else None,
+            reason=payload.reason if payload else None,
+        )
+        return {"success": True, "job": updated}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuleGenerationJobStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/rule-generation-jobs/{job_id}/deprecate")
+def deprecate_rule_generation_job(
+    job_id: str,
+    payload: RuleGenerationJobApprovalRequest | None = None,
+):
+    repository = RuleGenerationJobRepository()
+    job = repository.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="rule generation job not found")
+    try:
+        asset_deprecation = _deprecate_rule_generation_asset(job)
+        updated = repository.deprecate_job(
+            job_id,
+            deprecated_by=payload.actor if payload else None,
+            reason=payload.reason if payload else None,
+        )
+        return {
+            "success": True,
+            "job": updated,
+            "asset_deprecation": asset_deprecation,
+        }
+    except RuleGenerationJobStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/event-rules")
 def list_event_rules():
     return {"items": EventRuleRepository().list_versions()}
@@ -624,6 +845,25 @@ def test_event_rule(payload: EventRuleTestRequest):
         "unmatched_count": len(payload.samples) - matched_count,
         "rows": rows,
     }
+
+
+@router.post("/event-rules/validate")
+def validate_event_rules(payload: EventRuleValidationRequest | None = None):
+    case_payloads = payload.cases if payload and payload.cases is not None else None
+    if case_payloads is None:
+        return validate_event_rule_pack()
+    cases = (
+        [
+            EventRuleValidationCase(
+                name=item.name,
+                change=item.change,
+                expected_event_type=item.expected_event_type,
+                expected_rule_id=item.expected_rule_id,
+            )
+            for item in case_payloads
+        ]
+    )
+    return validate_event_rule_set(cases)
 
 
 @router.post("/event-rules/bootstrap")

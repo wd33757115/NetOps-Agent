@@ -1,0 +1,81 @@
+# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
+# SPDX-License-Identifier: Apache-2.0
+
+name: rule-asset-generation
+description: 离线生成并验证 ObservationContract、ChangePolicy 与 EventRule 候选资产
+version: "1.0"
+
+test:
+  context:
+    command: display cpu
+    vendor: Generic
+    model: LAB
+    records:
+      - slot: "0"
+        cpu_5s: "18"
+        cpu_1m: "20"
+        cpu_5m: "19"
+      - slot: "1"
+        cpu_5s: "92"
+        cpu_1m: "88"
+        cpu_5m: "85"
+    observation_type: device.cpu.utilization
+    field_name: cpu_5s
+    field_semantics:
+      semantic_type: gauge
+      unit: percent
+    historical_values: [18, 20, 25, 40, 88, 92]
+    device_role: lab
+    policy_intent: CPU 高利用率需要产生告警，恢复阈值必须低于告警阈值
+    event_intent: 生成 CPUHigh 与 CPURecovered 候选规则
+  required_context:
+    - command
+    - records
+    - observation_type
+    - field_name
+
+steps:
+  - name: observation_contract
+    label: 生成数据映射契约
+    skill: observation-contract-generator
+    inputs:
+      mode: infer_and_validate
+      command: ${context.command}
+      vendor: ${context.vendor}
+      model: ${context.model}
+      records: ${context.records}
+
+  - name: change_policy
+    label: 生成变化策略
+    skill: change-policy-generator
+    inputs:
+      mode: infer_and_validate
+      observation_type: ${context.observation_type}
+      field_name: ${context.field_name}
+      field_semantics: ${context.field_semantics}
+      historical_values: ${context.historical_values}
+      device_role: ${context.device_role}
+      policy_intent: ${context.policy_intent}
+
+  - name: event_rule
+    label: 生成事件规则候选
+    skill: event-rule-generator
+    inputs:
+      contract: ${steps.observation_contract.result.proposal}
+      change_policy: ${steps.change_policy.result.policy}
+      intent: ${context.event_intent}
+
+  - name: event_rule_validation
+    label: 验证事件规则候选
+    skill: event-rule-validator
+    inputs:
+      mode: candidate
+      candidate_rule: ${steps.event_rule.result.rules.0}
+      agent_loop: true
+
+on_complete:
+  message: 规则资产候选生成与验证已完成
+  notification:
+    title: 规则资产生成完成
+    body: ObservationContract、ChangePolicy 与 EventRule 候选资产已完成确定性验证，可进入审批。
+    level: success

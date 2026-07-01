@@ -22,6 +22,7 @@ class ContractProposal:
     allow_empty: bool = False
     empty_patterns: tuple[str, ...] = ()
     ignore_fields: tuple[str, ...] = ()
+    state_semantics: dict[str, Any] | None = None
     source: str = "semantic_rules"
     confidence: float = 0.9
 
@@ -39,7 +40,74 @@ class ContractProposal:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        data["state_semantics"] = self.state_semantics or infer_field_semantics(self)
+        return data
+
+
+def infer_field_semantics(proposal: ContractProposal) -> dict[str, Any]:
+    """Infer stable field-level semantics for draft ObservationContract metadata."""
+    semantics: dict[str, Any] = {}
+    key_fields = {field.lower() for field in proposal.primary_keys}
+    ignore_fields = {field.lower() for field in proposal.ignore_fields}
+    fields = [*proposal.required_fields, *proposal.optional_fields]
+    for field in fields:
+        name = str(field)
+        lowered = name.lower()
+        if lowered in key_fields:
+            semantics[name] = {"semantic_type": "identity"}
+        elif lowered in ignore_fields or lowered in {"uptime", "description"}:
+            semantics[name] = {"semantic_type": "text", "ignore": True}
+        elif lowered in {"status", "state", "protocol", "oper_status", "line_protocol"}:
+            semantics[name] = {
+                "semantic_type": "state",
+                "value_mapping": {
+                    "up": "up",
+                    "connected": "up",
+                    "established": "up",
+                    "normal": "normal",
+                    "ok": "normal",
+                    "down": "down",
+                    "notconnect": "down",
+                    "notconnec": "down",
+                    "idle": "down",
+                    "failed": "failed",
+                    "fault": "failed",
+                },
+            }
+        elif lowered.startswith("cpu") or lowered in {
+            "usage",
+            "used_percent",
+            "memory_usage",
+            "mem_usage",
+            "free_ratio",
+        }:
+            semantics[name] = {"semantic_type": "gauge", "unit": "percent"}
+        elif lowered in {
+            "total",
+            "used",
+            "free",
+            "shared",
+            "buffers",
+            "cached",
+            "reading",
+            "temperature",
+            "warning_threshold",
+            "alarm_threshold",
+            "lower_threshold",
+            "minor_threshold",
+            "shutdown_threshold",
+            "speed",
+            "priority",
+        }:
+            semantics[name] = {"semantic_type": "gauge"}
+        elif lowered.endswith("count") or lowered.endswith("_total"):
+            semantics[name] = {"semantic_type": "counter"}
+        elif "ip" in lowered:
+            semantics[name] = {"semantic_type": "text", "unit": "ip"}
+        else:
+            semantics[name] = {"semantic_type": "text"}
+    return semantics
 
 
 SEMANTIC_RULES: tuple[tuple[re.Pattern[str], ContractProposal], ...] = (

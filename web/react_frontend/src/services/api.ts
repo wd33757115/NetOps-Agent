@@ -216,6 +216,21 @@ export interface ParserJobSample {
   created_at: string
 }
 
+export interface ParserRuleGenerationJob {
+  id: string
+  job_type: string
+  status: string
+  source_ref?: string | null
+  asset_ref?: string | null
+  payload_json: Record<string, unknown>
+  validation_report_json?: Record<string, unknown> | null
+  approval_required: boolean
+  created_by?: string | null
+  created_at?: string
+  updated_at?: string
+  completed_at?: string | null
+}
+
 export interface ParserCoverage {
   templates_total: number
   templates_active: number
@@ -1209,6 +1224,19 @@ export const parserApi = {
     const response = await api.get<{ items: ParserJobItem[] }>('/parser/jobs/')
     return response.data.items
   },
+  ruleGenerationJobs: async () => {
+    const response = await api.get<{ items: ParserRuleGenerationJob[] }>('/parser/rule-generation-jobs/')
+    return response.data.items
+  },
+  approveRuleGenerationJob: async (id: string, data: { actor?: string; reason?: string } = {}) => (
+    await api.post(`/parser/rule-generation-jobs/${id}/approve/`, data)
+  ).data,
+  rejectRuleGenerationJob: async (id: string, data: { actor?: string; reason?: string } = {}) => (
+    await api.post(`/parser/rule-generation-jobs/${id}/reject/`, data)
+  ).data,
+  deprecateRuleGenerationJob: async (id: string, data: { actor?: string; reason?: string } = {}) => (
+    await api.post(`/parser/rule-generation-jobs/${id}/deprecate/`, data)
+  ).data,
   job: async (id: string) => {
     const response = await api.get<ParserJobItem>(`/parser/jobs/${id}/`)
     return response.data

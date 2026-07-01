@@ -14,7 +14,7 @@ import {
   type ParserImportPreview, type ParserTemplateComparison, type ParserTemplatePreview,
   type ParserEventRule, type ParserCommandProfile, type ParserCommandProfileBinding,
   type ParserCommandProfileImpactPreview, type ParserEffectivePlanPreview,
-  type ParserEventRuleTestResult,
+  type ParserEventRuleTestResult, type ParserRuleGenerationJob,
 } from '../../services/api'
 import { useIsMobile } from '../../hooks/useBreakpoint'
 
@@ -116,6 +116,9 @@ const ParserControlTab: React.FC = () => {
   const { data: jobs = [], isLoading: jobsLoading } = useQuery(
     'parser-jobs', parserApi.jobs, polling,
   )
+  const { data: ruleGenerationJobs = [], isLoading: ruleGenerationJobsLoading } = useQuery(
+    'parser-rule-generation-jobs', parserApi.ruleGenerationJobs, polling,
+  )
   const { data: dispatchControl } = useQuery(
     'parser-dispatch-control', parserApi.dispatchControl, polling,
   )
@@ -152,7 +155,7 @@ const ParserControlTab: React.FC = () => {
     ;['parser-coverage', 'parser-templates', 'parser-jobs', 'parser-aliases',
       'parser-device-profiles', 'parser-identity-signatures', 'parser-datasets',
       'parser-event-rules', 'parser-command-profiles',
-      'parser-command-profile-bindings'].forEach((key) =>
+      'parser-command-profile-bindings', 'parser-rule-generation-jobs'].forEach((key) =>
       queryClient.invalidateQueries(key))
     queryClient.invalidateQueries('parser-dispatch-control')
     if (jobId) queryClient.invalidateQueries(['parser-job', jobId])
@@ -323,6 +326,18 @@ const ParserControlTab: React.FC = () => {
     {
       onSuccess: () => { message.success('采集命令集状态已更新'); refresh() },
       onError: (error: any) => message.error(error?.response?.data?.detail || '采集命令集状态更新失败'),
+    },
+  )
+
+  const ruleGenerationLifecycle = useMutation(
+    ({ type, id }: { type: 'approve' | 'reject' | 'deprecate'; id: string }) => {
+      if (type === 'approve') return parserApi.approveRuleGenerationJob(id, { actor: 'ui' })
+      if (type === 'reject') return parserApi.rejectRuleGenerationJob(id, { actor: 'ui' })
+      return parserApi.deprecateRuleGenerationJob(id, { actor: 'ui' })
+    },
+    {
+      onSuccess: () => { message.success('规则资产任务已更新'); refresh() },
+      onError: (error: any) => message.error(error?.response?.data?.detail || '规则资产任务操作失败'),
     },
   )
 
@@ -632,6 +647,47 @@ const ParserControlTab: React.FC = () => {
           : '-' },
   ]
 
+  const ruleGenerationColumns = [
+    { title: '资产类型', dataIndex: 'job_type', width: 170 },
+    { title: '状态', dataIndex: 'status', width: 120,
+      render: (value: string) => <Tag color={statusColor(value)}>{statusLabel(value)}</Tag> },
+    { title: '来源', dataIndex: 'source_ref', width: 220,
+      render: (value: string | null) => value || '-' },
+    { title: '资产引用', dataIndex: 'asset_ref', width: 260,
+      render: (value: string | null) => value || '-' },
+    { title: '验证', dataIndex: 'validation_report_json', width: 110,
+      render: (value: Record<string, unknown> | null) => {
+        if (!value) return <Tag>无报告</Tag>
+        const success = value.success
+        return <Tag color={success === false ? 'red' : 'green'}>{success === false ? '未通过' : '已验证'}</Tag>
+      } },
+    { title: '创建人', dataIndex: 'created_by', width: 120,
+      render: (value: string | null) => value || '-' },
+    { title: '更新时间', dataIndex: 'updated_at', width: 190 },
+    { title: '操作', width: 190, render: (_: unknown, row: ParserRuleGenerationJob) => (
+      <Space>
+        {row.status === 'pending_approval' && (
+          <>
+            <Button size="small" icon={<CheckOutlined />} loading={ruleGenerationLifecycle.isLoading}
+              onClick={() => ruleGenerationLifecycle.mutate({ type: 'approve', id: row.id })}>
+              批准
+            </Button>
+            <Button size="small" icon={<CloseOutlined />} loading={ruleGenerationLifecycle.isLoading}
+              onClick={() => ruleGenerationLifecycle.mutate({ type: 'reject', id: row.id })}>
+              拒绝
+            </Button>
+          </>
+        )}
+        {row.status === 'active' && (
+          <Button size="small" icon={<StopOutlined />} loading={ruleGenerationLifecycle.isLoading}
+            onClick={() => ruleGenerationLifecycle.mutate({ type: 'deprecate', id: row.id })}>
+            废弃
+          </Button>
+        )}
+      </Space>
+    ) },
+  ]
+
   const activationReady = Boolean(
     activationImpact?.evidence_saved,
   )
@@ -697,6 +753,30 @@ const ParserControlTab: React.FC = () => {
             </Col>
           </Row>
           <Table rowKey="id" loading={jobsLoading} dataSource={filteredJobs} columns={jobColumns} pagination={{ pageSize: 20 }} size="small" scroll={{ x: 930 }} rowSelection={{ selectedRowKeys: selectedJobIds, onChange: setSelectedJobIds, getCheckboxProps: (row: ParserJobItem) => ({ disabled: ['collecting', 'pending', 'running', 'validating'].includes(row.status) }) }} />
+        </Space> },
+      { key: 'rule-generation', label: `规则资产任务 (${ruleGenerationJobs.length})`, children:
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Alert type="info" showIcon
+            message="规则资产任务用于治理 TextFSM、ObservationContract、ChangePolicy 与 EventRule 候选资产；批准后才允许进入生产 active 资产。" />
+          <Table<ParserRuleGenerationJob>
+            rowKey="id"
+            loading={ruleGenerationJobsLoading}
+            dataSource={ruleGenerationJobs}
+            columns={ruleGenerationColumns}
+            expandable={{
+              expandedRowRender: (row) => (
+                <pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap' }}>
+                  {JSON.stringify({
+                    payload: row.payload_json,
+                    validation_report: row.validation_report_json,
+                  }, null, 2)}
+                </pre>
+              ),
+            }}
+            pagination={{ pageSize: 20 }}
+            size="small"
+            scroll={{ x: 1260 }}
+          />
         </Space> },
       { key: 'aliases', label: `命令别名 (${aliases.length})`, children:
         <Table<ParserCommandAlias> rowKey="id" dataSource={aliases} columns={aliasColumns} pagination={{ pageSize: 20 }} size="small" /> },

@@ -1,0 +1,35 @@
+# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
+# SPDX-License-Identifier: Apache-2.0
+
+workflow: rule-asset-generation
+priority: 95
+description: 聊天触发离线规则资产生成与验证，不直接激活生产规则
+
+match:
+  require_any:
+    - 生成规则资产
+    - 生成数据映射规则
+    - 生成事件规则
+    - 规则验证
+    - rule asset
+  require_any_secondary:
+    - ObservationContract
+    - ChangePolicy
+    - EventRule
+    - 验证
+    - 审批
+
+context_defaults:
+  vendor: Generic
+  model: LAB
+  device_role: lab
+  policy_intent: 离线生成候选策略，运行时只执行已审批资产
+  event_intent: 离线生成候选事件规则，必须通过验证后审批
+
+response_template: |
+  [OK] 已启动规则资产生成与验证 Workflow
+
+  - **流程 ID**: `{run_id}`
+  - **流程**: {workflow_description}
+
+  该流程只生成候选资产和验证报告，不会直接修改生产规则。

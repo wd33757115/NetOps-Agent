@@ -25,6 +25,11 @@ def _lookup(path: str, env: dict[str, Any]) -> Any:
             return None
         if isinstance(cur, dict):
             cur = cur.get(part)
+        elif isinstance(cur, list):
+            try:
+                cur = cur[int(part)]
+            except (TypeError, ValueError, IndexError):
+                return None
         else:
             return None
     return cur

@@ -41,6 +41,30 @@ def test_load_patrol_change_event_workflow():
     assert tpl.steps[3].inputs["run_id"] == "${steps.patrol.result.snapshot_run_id}"
 
 
+def test_load_rule_asset_generation_workflow():
+    load_workflows(force=True)
+    tpl = get_template("rule-asset-generation")
+
+    assert tpl is not None
+    assert [step.skill_name for step in tpl.steps] == [
+        "observation-contract-generator",
+        "change-policy-generator",
+        "event-rule-generator",
+        "event-rule-validator",
+    ]
+    assert tpl.test_context["command"] == "display cpu"
+    assert tpl.test_required_context == [
+        "command",
+        "records",
+        "observation_type",
+        "field_name",
+    ]
+    assert (
+        tpl.steps[3].inputs["candidate_rule"]
+        == "${steps.event_rule.result.rules.0}"
+    )
+
+
 def test_workflow_owns_test_context_contract():
     from src.core.workflows.registry import missing_test_context
 
@@ -125,6 +149,29 @@ def test_resolve_step_artifacts_expression():
     )
     assert params["manifest"] == {"devices": []}
     assert params["config_file_key"] == "fk1"
+
+
+def test_resolve_step_result_list_index_expression():
+    env = build_step_env(
+        context={},
+        run_id="run-1",
+        ticket_id=None,
+        step_records=[],
+        current_step_index=0,
+    )
+    env["steps"] = {
+        "event_rule": {
+            "result": {"rules": [{"name": "cpu-high"}, {"name": "cpu-recovered"}]},
+            "artifacts": {},
+        }
+    }
+
+    params = resolve_inputs(
+        {"candidate_rule": "${steps.event_rule.result.rules.0}"},
+        env,
+    )
+
+    assert params["candidate_rule"] == {"name": "cpu-high"}
 
 
 def test_list_workflow_runs_filters_device_context(monkeypatch):

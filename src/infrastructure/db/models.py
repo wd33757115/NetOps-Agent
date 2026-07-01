@@ -1433,6 +1433,36 @@ class ParserControlSetting(Base):
         return {column.name: getattr(self, column.name) for column in self.__table__.columns}
 
 
+class RuleGenerationJobRecord(Base):
+    """Unified control-plane job for generated parser/rule assets."""
+
+    __tablename__ = "netops_rule_generation_jobs"
+
+    id = Column(String(64), primary_key=True)
+    job_type = Column(String(64), nullable=False, index=True)
+    status = Column(String(32), nullable=False, default="draft", index=True)
+    source_ref = Column(String(512), nullable=True, index=True)
+    asset_ref = Column(String(512), nullable=True, index=True)
+    payload_json = Column(JSON, nullable=False, default=dict)
+    validation_report_json = Column(JSON, nullable=True)
+    approval_required = Column(Boolean, nullable=False, default=True)
+    created_by = Column(String(128), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+    completed_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("ix_rule_generation_jobs_type_status", "job_type", "status"),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
 class AgentModuleControlRecord(Base):
     __tablename__ = "netops_agent_module_controls"
 

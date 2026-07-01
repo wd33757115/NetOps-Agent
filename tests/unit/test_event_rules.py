@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from src.core.patrol.event_rules import EventRule
 from src.core.patrol.event_rules import condition_matches
+from src.core.patrol.event_rules import default_event_rule_definitions
 from src.core.patrol.event_rules import load_event_rules
+from src.core.patrol.rule_validation import (
+    builtin_event_rule_validation_cases,
+    sanitize_change,
+    validate_builtin_event_rules,
+    validate_event_rule_definition,
+    validate_event_rule_pack,
+)
 
 
 def test_threshold_condition_matches_cpu_high():
@@ -40,6 +48,18 @@ def test_threshold_condition_matches_memory_high():
             "gte": 90,
         },
         {"field": "memory_usage", "new": "93%"},
+    )
+
+
+def test_threshold_condition_respects_entity_scope():
+    assert not condition_matches(
+        {
+            "kind": "threshold",
+            "entity_types": ["cpu"],
+            "fields": ["cpu_5s"],
+            "gte": 90,
+        },
+        {"entity_type": "memory", "field": "cpu_5s", "new": "95%"},
     )
 
 
@@ -236,3 +256,59 @@ def test_load_event_rules_merges_new_builtin_defaults(monkeypatch):
 
     assert by_id["cpu-high"].version == 99
     assert by_id["memory-high"].event_type == "MemoryHigh"
+
+
+def test_builtin_event_rules_are_loaded_from_rule_pack():
+    definitions = default_event_rule_definitions()
+    by_id = {definition.rule_id: definition for definition in definitions}
+
+    assert by_id["interface-down"].condition["kind"] == "transition"
+    assert by_id["interface-down"].condition["allow_initial_target"] is True
+    assert "interface_l3" in by_id["interface-down"].condition["entity_types"]
+    assert by_id["power-failed"].condition["entity_types"] == [
+        "power",
+        "power_supply",
+        "environment_power",
+    ]
+
+
+def test_builtin_event_rule_validation_cases_pass_and_are_generic():
+    result = validate_builtin_event_rules()
+
+    assert result["success"] is True
+    assert result["failed_count"] == 0
+    assert result["case_count"] == len(builtin_event_rule_validation_cases())
+    assert all("10." not in str(row["change"]) for row in result["rows"])
+
+
+def test_event_rule_pack_validation_generates_rule_cases():
+    result = validate_event_rule_pack()
+
+    assert result["success"] is True
+    assert result["rule_count"] >= 10
+    assert result["generated_case_count"] >= result["rule_count"]
+    assert result["invariant_case_count"] == len(builtin_event_rule_validation_cases())
+
+
+def test_candidate_rule_validation_generates_repair_feedback_surface():
+    definition = default_event_rule_definitions()[0]
+    result = validate_event_rule_definition(definition)
+
+    assert result["success"] is True
+    assert result["case_count"] >= 2
+    assert all("device_id" not in row["change"] for row in result["rows"])
+
+
+def test_rule_validation_sanitizes_private_identifiers():
+    sanitized = sanitize_change(
+        {
+            "device_id": "private-device",
+            "run_id": "run-1",
+            "previous_snapshot_id": "snapshot-1",
+            "entity_type": "cpu",
+            "field": "cpu_5s",
+            "new": 95,
+        }
+    )
+
+    assert sanitized == {"entity_type": "cpu", "field": "cpu_5s", "new": 95}

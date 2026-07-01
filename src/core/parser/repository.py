@@ -68,6 +68,7 @@ def contract_digest(validation: dict[str, Any]) -> str:
             "allow_empty",
             "empty_patterns",
             "ignore_fields",
+            "state_semantics",
         )
     }
     encoded = json.dumps(

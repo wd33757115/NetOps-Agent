@@ -4,11 +4,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable
 import uuid
 
 from src.infrastructure.db.models import EventRuleRecord, EventRuleVersionRecord
 from src.infrastructure.db.postgres import get_db_session
+from src.core.parser.policy import load_yaml
+
+
+SHARED_RULE_PACK_ROOT = (
+    Path(__file__).resolve().parents[2] / "skills" / "shared" / "rule-packs"
+)
+BUILTIN_EVENT_RULE_PACK = SHARED_RULE_PACK_ROOT / "event_rules.builtin.yaml"
 
 def norm(value: Any) -> str:
     return str(value or "").strip().lower()
@@ -82,9 +90,38 @@ class EventRule:
         return self.predicate(change)
 
 
+@dataclass(frozen=True)
+class EventRuleDefinition:
+    rule_id: str
+    version: int
+    event_type: str
+    severity: str
+    condition: dict[str, Any]
+    description: str | None = None
+
+    def to_rule(self) -> EventRule:
+        return EventRule(
+            rule_id=self.rule_id,
+            version=self.version,
+            event_type=self.event_type,
+            severity=self.severity,
+            predicate=lambda change, condition=dict(self.condition): condition_matches(
+                condition,
+                change,
+            ),
+        )
+
+
+def _entity_type_allowed(condition: dict[str, Any], change: dict[str, Any]) -> bool:
+    entity_types = {norm(item) for item in condition.get("entity_types") or []}
+    return not entity_types or norm(change.get("entity_type")) in entity_types
+
+
 def condition_matches(condition: dict[str, Any], change: dict[str, Any]) -> bool:
     kind = str(condition.get("kind") or "").strip()
     if kind == "threshold":
+        if not _entity_type_allowed(condition, change):
+            return False
         fields = {norm_field(item) for item in condition.get("fields") or []}
         threshold = float(condition.get("gte"))
         old_value = to_float(change.get("old"))
@@ -97,6 +134,8 @@ def condition_matches(condition: dict[str, Any], change: dict[str, Any]) -> bool
             or float(old_value) < threshold
         )
     if kind == "threshold_recovery":
+        if not _entity_type_allowed(condition, change):
+            return False
         fields = {norm_field(item) for item in condition.get("fields") or []}
         threshold = float(condition.get("lt"))
         old_value = to_float(change.get("old"))
@@ -243,19 +282,20 @@ class EventRuleRepository:
     def ensure_default_rules(self) -> int:
         created = 0
         with get_db_session() as db:
-            for rule in default_event_rules():
+            for definition in default_event_rule_definitions():
                 row = (
                     db.query(EventRuleRecord)
-                    .filter(EventRuleRecord.name == rule.rule_id)
+                    .filter(EventRuleRecord.name == definition.rule_id)
                     .first()
                 )
                 if row is None:
                     row = EventRuleRecord(
                         id=str(uuid.uuid4()),
-                        name=rule.rule_id,
-                        description=f"Built-in rule for {rule.event_type}",
+                        name=definition.rule_id,
+                        description=definition.description
+                        or f"Built-in rule for {definition.event_type}",
                         status="active",
-                        current_version=rule.version,
+                        current_version=definition.version,
                     )
                     db.add(row)
                     db.flush()
@@ -264,7 +304,7 @@ class EventRuleRepository:
                     db.query(EventRuleVersionRecord)
                     .filter(
                         EventRuleVersionRecord.rule_id == row.id,
-                        EventRuleVersionRecord.version == rule.version,
+                        EventRuleVersionRecord.version == definition.version,
                     )
                     .first()
                     is None
@@ -273,14 +313,14 @@ class EventRuleRepository:
                         EventRuleVersionRecord(
                             id=str(uuid.uuid4()),
                             rule_id=row.id,
-                            version=rule.version,
-                            event_type=rule.event_type,
-                            severity=rule.severity,
-                            condition_json=_default_condition(rule.rule_id),
+                            version=definition.version,
+                            event_type=definition.event_type,
+                            severity=definition.severity,
+                            condition_json=definition.condition,
                             status="active",
                         )
                     )
-                    row.current_version = rule.version
+                    row.current_version = definition.version
                     created += 1
         return created
 
@@ -479,187 +519,37 @@ def _field_in(change: dict[str, Any], names: set[str]) -> bool:
     return norm_field(change.get("field")) in names
 
 
+def load_event_rule_pack(path: str | Path | None = None) -> list[EventRuleDefinition]:
+    payload = load_yaml(path or BUILTIN_EVENT_RULE_PACK)
+    rules = payload.get("rules") or []
+    if not isinstance(rules, list):
+        raise ValueError("event rule pack rules must be a list")
+    definitions: list[EventRuleDefinition] = []
+    for item in rules:
+        if not isinstance(item, dict):
+            raise ValueError("event rule pack item must be an object")
+        condition = item.get("condition") or {}
+        if not isinstance(condition, dict):
+            raise ValueError(f"event rule condition must be an object: {item.get('name')}")
+        definitions.append(
+            EventRuleDefinition(
+                rule_id=str(item["name"]),
+                version=int(item.get("version") or 1),
+                event_type=str(item["event_type"]),
+                severity=str(item["severity"]),
+                condition=dict(condition),
+                description=item.get("description"),
+            )
+        )
+    return definitions
+
+
+def default_event_rule_definitions() -> list[EventRuleDefinition]:
+    return load_event_rule_pack(BUILTIN_EVENT_RULE_PACK)
+
+
 def default_event_rules() -> list[EventRule]:
-    return [
-        EventRule(
-            rule_id="cpu-high",
-            version=1,
-            event_type="CPUHigh",
-            severity="warning",
-            predicate=lambda c: (
-                norm_field(c.get("field"))
-                in {"cpu", "cpu_5s", "cpu_1m", "cpu_5m", "cpu_usage"}
-                and (to_float(c.get("new")) is not None)
-                and float(to_float(c.get("new")) or 0) >= 90
-                and (
-                    c.get("change_type") == "initial"
-                    or to_float(c.get("old")) is None
-                    or float(to_float(c.get("old")) or 0) < 90
-                )
-            ),
-        ),
-        EventRule(
-            rule_id="cpu-recovered",
-            version=1,
-            event_type="CPURecovered",
-            severity="info",
-            predicate=lambda c: norm_field(c.get("field"))
-            in {"cpu", "cpu_5s", "cpu_1m", "cpu_5m", "cpu_usage"}
-            and (to_float(c.get("old")) is not None)
-            and (to_float(c.get("new")) is not None)
-            and float(to_float(c.get("old")) or 0) >= 90
-            and float(to_float(c.get("new")) or 0) < 90,
-        ),
-        EventRule(
-            rule_id="memory-high",
-            version=1,
-            event_type="MemoryHigh",
-            severity="warning",
-            predicate=lambda c: (
-                norm_field(c.get("field"))
-                in {
-                    "memory",
-                    "memory_usage",
-                    "mem_usage",
-                    "usage",
-                    "used_percent",
-                    "memory_used_percent",
-                }
-                and norm(c.get("entity_type")) in {"memory", "system_resources"}
-                and (to_float(c.get("new")) is not None)
-                and float(to_float(c.get("new")) or 0) >= 90
-                and (
-                    c.get("change_type") == "initial"
-                    or to_float(c.get("old")) is None
-                    or float(to_float(c.get("old")) or 0) < 90
-                )
-            ),
-        ),
-        EventRule(
-            rule_id="memory-recovered",
-            version=1,
-            event_type="MemoryRecovered",
-            severity="info",
-            predicate=lambda c: norm_field(c.get("field"))
-            in {
-                "memory",
-                "memory_usage",
-                "mem_usage",
-                "usage",
-                "used_percent",
-                "memory_used_percent",
-            }
-            and norm(c.get("entity_type")) in {"memory", "system_resources"}
-            and (to_float(c.get("old")) is not None)
-            and (to_float(c.get("new")) is not None)
-            and float(to_float(c.get("old")) or 0) >= 90
-            and float(to_float(c.get("new")) or 0) < 90,
-        ),
-        EventRule(
-            rule_id="interface-down",
-            version=1,
-            event_type="InterfaceDown",
-            severity="major",
-            predicate=lambda c: _field_in(
-                c,
-                {
-                    "status",
-                    "protocol",
-                    "physical",
-                    "physical_status",
-                    "oper_status",
-                    "line_protocol",
-                },
-            )
-            and is_interface_change(c)
-            and (is_up(c.get("old")) or c.get("change_type") == "initial")
-            and is_down(c.get("new")),
-        ),
-        EventRule(
-            rule_id="interface-up",
-            version=1,
-            event_type="InterfaceUp",
-            severity="info",
-            predicate=lambda c: _field_in(
-                c,
-                {
-                    "status",
-                    "protocol",
-                    "physical",
-                    "physical_status",
-                    "oper_status",
-                    "line_protocol",
-                },
-            )
-            and is_interface_change(c)
-            and is_down(c.get("old"))
-            and is_up(c.get("new")),
-        ),
-        EventRule(
-            rule_id="bgp-neighbor-lost",
-            version=1,
-            event_type="BGPNeighborLost",
-            severity="critical",
-            predicate=lambda c: is_bgp_change(c)
-            and norm_field(c.get("field"))
-            in {"state", "bgp_state", "peer_state", "neighbor_state"}
-            and (
-                norm(c.get("old")) == "established"
-                or (
-                    c.get("change_type") == "initial"
-                    and norm(c.get("new")) != "established"
-                )
-            )
-            and norm(c.get("new")) != "established",
-        ),
-        EventRule(
-            rule_id="bgp-neighbor-established",
-            version=1,
-            event_type="BGPNeighborEstablished",
-            severity="info",
-            predicate=lambda c: is_bgp_change(c)
-            and norm_field(c.get("field"))
-            in {"state", "bgp_state", "peer_state", "neighbor_state"}
-            and c.get("change_type") != "initial"
-            and norm(c.get("old")) != "established"
-            and norm(c.get("new")) == "established",
-        ),
-        EventRule(
-            rule_id="config-changed",
-            version=1,
-            event_type="ConfigChanged",
-            severity="minor",
-            predicate=lambda c: c.get("entity_type") == "raw_command_output"
-            and c.get("field") == "raw_text_hash"
-            and any(
-                marker in norm(c.get("command"))
-                for marker in (
-                    "configuration",
-                    "running-config",
-                    "current-configuration",
-                )
-            ),
-        ),
-        EventRule(
-            rule_id="fan-failed",
-            version=1,
-            event_type="FanFailed",
-            severity="major",
-            predicate=lambda c: norm(c.get("entity_type")) in {"fan", "environment_fan"}
-            and _field_in(c, {"state", "status"})
-            and is_down(c.get("new")),
-        ),
-        EventRule(
-            rule_id="power-failed",
-            version=1,
-            event_type="PowerFailed",
-            severity="major",
-            predicate=lambda c: norm(c.get("entity_type"))
-            in {"power", "power_supply", "environment_power"}
-            and _field_in(c, {"state", "status"})
-            and is_down(c.get("new")),
-        ),
-    ]
+    return [definition.to_rule() for definition in default_event_rule_definitions()]
 
 
 def match_event_rule(change: dict[str, Any]) -> EventRule | None:
@@ -685,121 +575,7 @@ def load_event_rules() -> list[EventRule]:
 
 
 def _default_condition(rule_id: str) -> dict[str, Any]:
-    if rule_id == "cpu-high":
-        return {
-            "kind": "threshold",
-            "fields": ["cpu", "cpu_5s", "cpu_1m", "cpu_5m", "cpu_usage"],
-            "gte": 90,
-        }
-    if rule_id == "memory-high":
-        return {
-            "kind": "threshold",
-            "fields": [
-                "memory",
-                "memory_usage",
-                "mem_usage",
-                "usage",
-                "used_percent",
-                "memory_used_percent",
-            ],
-            "gte": 90,
-        }
-    if rule_id == "cpu-recovered":
-        return {
-            "kind": "threshold_recovery",
-            "fields": ["cpu", "cpu_5s", "cpu_1m", "cpu_5m", "cpu_usage"],
-            "lt": 90,
-        }
-    if rule_id == "memory-recovered":
-        return {
-            "kind": "threshold_recovery",
-            "fields": [
-                "memory",
-                "memory_usage",
-                "mem_usage",
-                "usage",
-                "used_percent",
-                "memory_used_percent",
-            ],
-            "lt": 90,
-        }
-    if rule_id == "interface-down":
-        return {
-            "kind": "transition",
-            "entity_types": [
-                "interface",
-                "interface_l2",
-                "interface_l3",
-                "physical_interface",
-            ],
-            "fields": [
-                "status",
-                "protocol",
-                "physical",
-                "physical_status",
-                "oper_status",
-                "line_protocol",
-            ],
-            "from_group": "up",
-            "to_group": "down",
-            "allow_initial_target": True,
-        }
-    if rule_id == "interface-up":
-        return {
-            "kind": "transition",
-            "entity_types": [
-                "interface",
-                "interface_l2",
-                "interface_l3",
-                "physical_interface",
-            ],
-            "fields": [
-                "status",
-                "protocol",
-                "physical",
-                "physical_status",
-                "oper_status",
-                "line_protocol",
-            ],
-            "from_group": "down",
-            "to_group": "up",
-            "allow_initial_target": False,
-        }
-    if rule_id == "bgp-neighbor-lost":
-        return {
-            "kind": "bgp_transition",
-            "fields": ["state", "bgp_state", "peer_state", "neighbor_state"],
-            "from_established": True,
-            "to_established": False,
-            "allow_initial_target": True,
-        }
-    if rule_id == "bgp-neighbor-established":
-        return {
-            "kind": "bgp_transition",
-            "fields": ["state", "bgp_state", "peer_state", "neighbor_state"],
-            "from_established": False,
-            "to_established": True,
-            "allow_initial_target": False,
-        }
-    if rule_id == "config-changed":
-        return {
-            "kind": "raw_config_hash",
-            "command_markers": [
-                "configuration",
-                "running-config",
-                "current-configuration",
-            ],
-        }
-    if rule_id == "fan-failed":
-        return {
-            "kind": "entity_status_down",
-            "entity_types": ["fan", "environment_fan"],
-            "fields": ["state", "status"],
-        }
-    if rule_id == "power-failed":
-        return {
-            "kind": "entity_status_down",
-            "entity_types": ["power", "power_supply", "environment_power"],
-            "fields": ["state", "status"],
-        }
+    for definition in default_event_rule_definitions():
+        if definition.rule_id == rule_id:
+            return dict(definition.condition)
     return {"kind": "unknown"}
