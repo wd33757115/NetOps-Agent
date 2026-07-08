@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
+# SPDX-License-Identifier: Apache-2.0
+
+name: rule-asset-submit
+description: Submit a validated rule generation job to the rule asset approval queue.
+version: "1.0"
+
+test:
+  context:
+    job_id: rule-generation-job-id
+    actor: workflow
+  required_context:
+    - job_id
+
+steps:
+  - name: submit_candidate
+    label: Submit rule asset candidate
+    skill: rule-asset-submitter
+    inputs:
+      job_id: ${context.job_id}
+      actor: ${context.actor}
+
+on_complete:
+  message: Rule asset candidate has been submitted to the approval queue.
+  notification:
+    title: Rule Asset Submitted
+    body: The candidate asset is now ready for deterministic approval review.
+    level: success

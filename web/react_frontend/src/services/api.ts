@@ -222,6 +222,10 @@ export interface ParserRuleGenerationJob {
   status: string
   source_ref?: string | null
   asset_ref?: string | null
+  asset_type?: string | null
+  asset_id?: string | null
+  asset_version_id?: string | null
+  asset_digest?: string | null
   payload_json: Record<string, unknown>
   validation_report_json?: Record<string, unknown> | null
   approval_required: boolean
@@ -229,6 +233,168 @@ export interface ParserRuleGenerationJob {
   created_at?: string
   updated_at?: string
   completed_at?: string | null
+}
+
+export interface ParserRuleGenerationJobPreview {
+  success: boolean
+  job: ParserRuleGenerationJob
+  asset_summary: Record<string, unknown>
+  candidate_preview: Record<string, unknown>
+  payload_summary: Record<string, unknown>
+  validation_summary: Record<string, unknown>
+  historical_replay?: Record<string, unknown> | null
+  agent_loop?: Record<string, unknown> | null
+  approval_readiness: {
+    can_approve: boolean
+    blockers: string[]
+  }
+  validation_report: Record<string, unknown>
+}
+
+export interface ParserReplayReport {
+  id: string
+  job_id: string
+  job_type: string
+  job_status: string
+  asset_type?: string | null
+  asset_id?: string | null
+  asset_version_id?: string | null
+  asset_digest?: string | null
+  source_ref?: string | null
+  created_by?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+  success?: boolean | null
+  sampled_change_count: number
+  matched_change_count: number
+  estimated_daily_event_count: number
+  collision_count: number
+  event_types: Record<string, number>
+  matched_entity_types: Record<string, number>
+  top_devices: Record<string, number>
+  collision_rules: Record<string, number>
+  unexpected_matches: Array<Record<string, unknown>>
+  recovery_pair_coverage?: unknown
+  report_json: Record<string, unknown>
+}
+
+export interface ParserApprovalAudit {
+  id: string
+  job_id: string
+  job_type: string
+  job_status: string
+  action: 'approved' | 'rejected' | 'deprecated' | string
+  actor?: string | null
+  reason?: string | null
+  occurred_at?: string | null
+  asset_type?: string | null
+  asset_id?: string | null
+  asset_version_id?: string | null
+  asset_ref?: string | null
+  asset_digest?: string | null
+  source_ref?: string | null
+  validation_success?: boolean | null
+  synthetic_success?: boolean | null
+  replay_success?: boolean | null
+  created_by?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+  governance?: Record<string, unknown>
+}
+
+export interface ParserAgentLoopAttempt {
+  id: string
+  job_id: string
+  job_type: string
+  job_status: string
+  asset_type?: string | null
+  asset_id?: string | null
+  asset_version_id?: string | null
+  asset_digest?: string | null
+  source_ref?: string | null
+  attempt: number
+  stage: string
+  generator?: string | null
+  mode?: string | null
+  success?: boolean | null
+  input_summary: Record<string, unknown>
+  output_summary: Record<string, unknown>
+  validator_feedback: Record<string, unknown>
+  revision_request?: Record<string, unknown> | null
+  ready_for_approval?: boolean | null
+  next_action?: string | null
+  created_by?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export interface ParserObservationContract {
+  id: string
+  source_type: string
+  schema_id: string
+  schema_ref?: string | null
+  source_template_id?: string | null
+  entity_type: string
+  primary_keys_json: string[]
+  required_fields_json: string[]
+  optional_fields_json?: string[] | null
+  validators_json?: Record<string, unknown> | null
+  ignore_fields_json?: string[] | null
+  allow_empty: boolean
+  empty_patterns_json?: string[] | null
+  state_semantics_json?: Record<string, unknown> | null
+  version: number
+  contract_sha256: string
+  status: string
+  source_job_id?: string | null
+  approval_json?: Record<string, unknown> | null
+  created_at?: string
+  updated_at?: string
+  activated_at?: string | null
+  deprecated_at?: string | null
+}
+
+export interface ParserChangePolicy {
+  id: string
+  policy_id: string
+  policy_name: string
+  version_id: string
+  version: number
+  observation_type: string
+  semantic_type: string
+  compare_mode: string
+  policy: Record<string, unknown>
+  validation_report?: Record<string, unknown> | null
+  version_status: string
+  status: string
+  source_job_id?: string | null
+  digest: string
+  activated_at?: string | null
+  deprecated_at?: string | null
+  created_at?: string
+  updated_at?: string
+}
+
+export interface ParserRuntimeRuleAssetBundle {
+  ready: boolean
+  observation_contracts: Record<string, Record<string, unknown>>
+  change_policies: Record<string, ParserChangePolicy | Record<string, unknown>>
+  event_rules: ParserEventRule[] | Array<Record<string, unknown>>
+  missing_observation_contracts: string[]
+  missing_change_policies: string[]
+  counts: {
+    observation_contracts: number
+    change_policies: number
+    event_rules: number
+  }
+}
+
+export interface ParserRuntimeRuleAssetHealth extends Partial<ParserRuntimeRuleAssetBundle> {
+  status?: string
+  missing_count?: number
+  observation_schemas?: string[]
+  reason?: string
+  error?: string
 }
 
 export interface ParserCoverage {
@@ -298,6 +464,13 @@ export interface ParserEventRule {
   severity: string
   condition: Record<string, unknown>
   version_status: string
+  source_job_id?: string | null
+  validation_report?: Record<string, unknown> | null
+  digest?: string | null
+  created_by?: string | null
+  created_at?: string | null
+  activated_at?: string | null
+  deprecated_at?: string | null
 }
 
 export interface ParserEventRuleTestResult {
@@ -311,6 +484,22 @@ export interface ParserEventRuleTestResult {
     error?: string | null
     sample: Record<string, unknown>
   }>
+}
+
+export interface ParserEventRuleReplayResult {
+  success: boolean
+  rule_count: number
+  sampled_change_count: number
+  matched_change_count: number
+  estimated_daily_event_count: number
+  event_count: number
+  event_types: Record<string, number>
+  matched_entity_types: Record<string, number>
+  top_devices: Record<string, number>
+  collision_count: number
+  collision_rules: Record<string, number>
+  unexpected_matches: Array<Record<string, unknown>>
+  recovery_pair_coverage?: unknown
 }
 
 export interface ParserCommandProfile {
@@ -430,6 +619,7 @@ export interface ManagedDevice {
     violations?: Array<Record<string, unknown>>
     plan_violations?: Array<Record<string, unknown>>
     connection_issues?: Array<Record<string, unknown>>
+    runtime_asset_health?: ParserRuntimeRuleAssetHealth
     error?: string
   }
 }
@@ -774,6 +964,7 @@ export interface DeviceEffectivePlanPreview {
     coverage_rate: number
     violations: Array<Record<string, unknown>>
     connection_issues: Array<Record<string, unknown>>
+    runtime_asset_health?: ParserRuntimeRuleAssetHealth
   }
 }
 
@@ -1228,6 +1419,34 @@ export const parserApi = {
     const response = await api.get<{ items: ParserRuleGenerationJob[] }>('/parser/rule-generation-jobs/')
     return response.data.items
   },
+  observationContracts: async () => {
+    const response = await api.get<{ items: ParserObservationContract[] }>('/parser/observation-contracts/')
+    return response.data.items
+  },
+  changePolicies: async () => {
+    const response = await api.get<{ items: ParserChangePolicy[] }>('/parser/change-policies/')
+    return response.data.items
+  },
+  resolveRuntimeAssets: async (data: {
+    observation_schemas?: Array<[string, string]>
+    observation_types?: string[]
+    include_event_rules?: boolean
+  }): Promise<ParserRuntimeRuleAssetBundle> => {
+    const response = await api.post<ParserRuntimeRuleAssetBundle>('/parser/runtime-assets/resolve/', data)
+    return response.data
+  },
+  replayReports: async () => {
+    const response = await api.get<{ items: ParserReplayReport[] }>('/parser/replay-reports/')
+    return response.data.items
+  },
+  approvalAudit: async () => {
+    const response = await api.get<{ items: ParserApprovalAudit[] }>('/parser/approval-audit/')
+    return response.data.items
+  },
+  agentLoopAttempts: async () => {
+    const response = await api.get<{ items: ParserAgentLoopAttempt[] }>('/parser/agent-loop-attempts/')
+    return response.data.items
+  },
   approveRuleGenerationJob: async (id: string, data: { actor?: string; reason?: string } = {}) => (
     await api.post(`/parser/rule-generation-jobs/${id}/approve/`, data)
   ).data,
@@ -1237,6 +1456,19 @@ export const parserApi = {
   deprecateRuleGenerationJob: async (id: string, data: { actor?: string; reason?: string } = {}) => (
     await api.post(`/parser/rule-generation-jobs/${id}/deprecate/`, data)
   ).data,
+  reviseRuleGenerationJob: async (id: string, data: { actor?: string } = {}) => (
+    await api.post(`/parser/rule-generation-jobs/${id}/revise/`, data)
+  ).data,
+  executeRuleGenerationRevisionJob: async (id: string, data: { actor?: string } = {}) => (
+    await api.post(`/parser/rule-generation-jobs/${id}/execute-revision/`, data)
+  ).data,
+  submitRuleGenerationJobCandidate: async (id: string, data: { actor?: string } = {}) => (
+    await api.post(`/parser/rule-generation-jobs/${id}/submit/`, data)
+  ).data,
+  previewRuleGenerationJob: async (id: string) => {
+    const response = await api.get<ParserRuleGenerationJobPreview>(`/parser/rule-generation-jobs/${id}/preview/`)
+    return response.data
+  },
   job: async (id: string) => {
     const response = await api.get<ParserJobItem>(`/parser/jobs/${id}/`)
     return response.data
@@ -1320,6 +1552,22 @@ export const parserApi = {
     samples: Array<Record<string, unknown>>
   }): Promise<ParserEventRuleTestResult> => {
     const response = await api.post<ParserEventRuleTestResult>('/parser/event-rules/test/', data)
+    return response.data
+  },
+  replayEventRules: async (data: {
+    candidate_rules: Array<{
+      name?: string
+      rule_id?: string
+      version?: number
+      event_type: string
+      severity?: string
+      condition: Record<string, unknown>
+      description?: string
+    }>
+    limit?: number
+    include_active_collisions?: boolean
+  }): Promise<ParserEventRuleReplayResult> => {
+    const response = await api.post<ParserEventRuleReplayResult>('/parser/event-rules/replay/', data)
     return response.data
   },
   commandProfiles: async () => {

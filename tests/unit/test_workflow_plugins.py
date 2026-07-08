@@ -4,11 +4,13 @@
 """Workflow 表达式与注册表单元测试。"""
 
 import asyncio
+from pathlib import Path
 
 import pytest
+import yaml
 
 from src.core.workflows.expression import build_step_env, resolve_inputs, resolve_value
-from src.core.workflows.registry import get_template, load_workflows
+from src.core.workflows.registry import WORKFLOWS_ROOT, get_template, load_workflows
 
 
 def test_load_firewall_workflow_plugin():
@@ -51,6 +53,8 @@ def test_load_rule_asset_generation_workflow():
         "change-policy-generator",
         "event-rule-generator",
         "event-rule-validator",
+        "event-rule-replay",
+        "rule-asset-persister",
     ]
     assert tpl.test_context["command"] == "display cpu"
     assert tpl.test_required_context == [
@@ -60,9 +64,83 @@ def test_load_rule_asset_generation_workflow():
         "field_name",
     ]
     assert (
-        tpl.steps[3].inputs["candidate_rule"]
-        == "${steps.event_rule.result.rules.0}"
+        tpl.steps[3].inputs["candidate_rules"]
+        == "${steps.event_rule.result.rules}"
     )
+    assert tpl.steps[3].inputs["mode"] == "candidates"
+    assert (
+        tpl.steps[4].inputs["candidate_rules"]
+        == "${steps.event_rule.result.rules}"
+    )
+    assert tpl.steps[4].inputs["include_active_collisions"] is True
+    assert tpl.steps[5].inputs["contract_result"] == "${steps.observation_contract.result}"
+    assert tpl.steps[5].inputs["event_rule_validation"] == "${steps.event_rule_validation.result}"
+    assert tpl.steps[5].inputs["event_rule_replay"] == "${steps.event_rule_replay.result}"
+
+
+def test_load_rule_asset_submit_workflow():
+    load_workflows(force=True)
+    tpl = get_template("rule-asset-submit")
+
+    assert tpl is not None
+    assert [step.skill_name for step in tpl.steps] == ["rule-asset-submitter"]
+    assert tpl.test_context["actor"] == "workflow"
+    assert tpl.test_required_context == ["job_id"]
+    assert tpl.steps[0].inputs["job_id"] == "${context.job_id}"
+
+
+def test_load_rule_asset_approve_workflow():
+    load_workflows(force=True)
+    tpl = get_template("rule-asset-approve")
+
+    assert tpl is not None
+    assert [step.skill_name for step in tpl.steps] == ["rule-asset-approver"]
+    assert tpl.test_context["actor"] == "workflow"
+    assert tpl.test_required_context == ["job_id"]
+    assert tpl.steps[0].inputs["job_id"] == "${context.job_id}"
+    assert tpl.steps[0].inputs["actor"] == "${context.actor}"
+
+
+def test_rule_asset_submit_and_approve_chat_intents_require_job_id():
+    from src.core.plugins.chat_intent import get_chat_intent_registry
+
+    registry = get_chat_intent_registry()
+    registry.load(force=True)
+    submit = registry.get_intent("rule-asset-submit")
+    approve = registry.get_intent("rule-asset-approve")
+
+    assert submit is not None
+    assert submit.required_context == ["job_id"]
+    assert submit.context_from_query == {"job_id": "job_id"}
+    assert approve is not None
+    assert approve.required_context == ["job_id"]
+    assert approve.context_from_query == {"job_id": "job_id"}
+
+
+def test_chat_intent_workflow_names_match_local_workflow_files():
+    for chat_path in sorted(Path(WORKFLOWS_ROOT).rglob("CHAT.intent.yaml")):
+        workflow_path = chat_path.with_name("WORKFLOW.yaml")
+        assert workflow_path.exists(), f"{chat_path} missing sibling WORKFLOW.yaml"
+
+        chat = yaml.safe_load(chat_path.read_text(encoding="utf-8")) or {}
+        workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8")) or {}
+
+        assert chat.get("workflow") == workflow.get("name"), (
+            f"{chat_path} workflow {chat.get('workflow')!r} does not match "
+            f"{workflow_path} name {workflow.get('name')!r}"
+        )
+
+
+def test_rule_asset_workflows_are_documented_and_chat_triggerable():
+    for workflow_name in [
+        "rule-asset-generation",
+        "rule-asset-submit",
+        "rule-asset-approve",
+    ]:
+        workflow_dir = Path(WORKFLOWS_ROOT) / "network" / workflow_name
+        assert (workflow_dir / "WORKFLOW.yaml").exists()
+        assert (workflow_dir / "CHAT.intent.yaml").exists()
+        assert (workflow_dir / "README.md").exists()
 
 
 def test_workflow_owns_test_context_contract():

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -30,6 +31,10 @@ def _field_value(record: dict[str, Any], field_name: str) -> Any:
     return record.get(actual) if actual is not None else None
 
 
+def _is_missing(value: Any) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
 def _check_required_fields(
     records: list[dict[str, Any]],
     required_fields: tuple[str, ...],
@@ -41,7 +46,7 @@ def _check_required_fields(
     missing = [
         field
         for field in required_fields
-        if any(str(_field_value(record, field) or "").strip() == "" for record in records)
+        if any(_is_missing(_field_value(record, field)) for record in records)
     ]
     coverage = round(100 * (len(required_fields) - len(missing)) / len(required_fields))
     return int(coverage), missing
@@ -52,6 +57,13 @@ def _parse_percent(value: Any) -> float | None:
         return float(str(value).strip().rstrip("%"))
     except ValueError:
         return None
+
+
+def _empty_output_matches(samples_text: str, empty_patterns: tuple[str, ...]) -> bool:
+    if not empty_patterns:
+        return True
+    text = samples_text or ""
+    return any(re.search(pattern, text) for pattern in empty_patterns if pattern)
 
 
 def _validate_field_values(
@@ -141,17 +153,16 @@ def infer_and_validate_contract(
     valid_empty = (
         not records
         and contract.allow_empty
-        and (
-            not contract.empty_patterns
-            or any(pattern for pattern in contract.empty_patterns)
-        )
+        and _empty_output_matches(samples_text, contract.empty_patterns)
     )
     success = (
-        (bool(records) or valid_empty)
-        and required_coverage == 100
-        and key_result.valid
-        and not value_errors
-    )
+        (
+            bool(records)
+            and required_coverage == 100
+            and key_result.valid
+        )
+        or valid_empty
+    ) and not value_errors
     return {
         "success": success,
         "proposal": {**contract.to_dict(), "state_semantics": state_semantics},

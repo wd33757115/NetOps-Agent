@@ -13,7 +13,9 @@ from typing import Any
 
 from src.core.parser.key_contract import EntityKeyError, index_records
 from src.core.patrol.command_splitter import canonicalize_command
+from src.core.patrol.change_policy import compare_with_policy, policy_from_dict
 from src.core.patrol.change_event_repository import ChangeEventRepository
+from src.core.patrol.change_policy_repository import ChangePolicyRepository
 from src.core.patrol.domain import SnapshotRecord
 from src.core.patrol.repository import PatrolRepository
 from src.core.state.repository import StateRepository
@@ -66,6 +68,57 @@ def _equivalent_values(field: str, old: Any, new: Any) -> bool:
     if str(field).lower() in {"status", "protocol", "state"}:
         return old_text.casefold() == new_text.casefold()
     return old_text == new_text
+
+
+def _observation_type(observation: dict[str, Any]) -> str:
+    metadata = observation.get("metadata_json")
+    if isinstance(metadata, dict):
+        for key in ("observation_type", "semantic_observation_type"):
+            if metadata.get(key):
+                return str(metadata[key])
+        semantics = metadata.get("semantics")
+        if isinstance(semantics, dict) and semantics.get("observation_type"):
+            return str(semantics["observation_type"])
+    return str(observation.get("field_name") or "")
+
+
+class ChangePolicyResolver:
+    def __init__(self) -> None:
+        self._repo = ChangePolicyRepository()
+        self._cache: dict[str, dict[str, Any] | None] = {}
+
+    def resolve(self, observation_type: str) -> dict[str, Any] | None:
+        if not observation_type:
+            return None
+        if observation_type not in self._cache:
+            self._cache[observation_type] = self._repo.get_active_policy(observation_type)
+        return self._cache[observation_type]
+
+
+def _policy_compare_result(
+    *,
+    resolver: ChangePolicyResolver,
+    current: dict[str, Any],
+    old: Any,
+    new: Any,
+) -> dict[str, Any] | None:
+    observation_type = _observation_type(current)
+    active = resolver.resolve(observation_type)
+    if not active:
+        return None
+    policy_payload = active.get("policy")
+    if not isinstance(policy_payload, dict):
+        return None
+    result = compare_with_policy(
+        policy_from_dict(policy_payload),
+        old=old,
+        new=new,
+        field=str(current.get("field_name") or ""),
+    )
+    result["policy_id"] = active.get("policy_id")
+    result["policy_version_id"] = active.get("version_id")
+    result["observation_type"] = observation_type
+    return result
 
 
 def _normalize_records(value: Any) -> list[dict[str, Any]]:
@@ -499,6 +552,7 @@ def detect_observation_changes_against_history(
     current_by_key = {_state_key(item): item for item in current_observations}
     current_collections = {_collection_key(item) for item in current_observations}
     prior_by_key: dict[str, dict[str, Any]] = {}
+    policy_resolver = ChangePolicyResolver()
     if previous_run_id:
         prior_observations = (
             repository.list_observations_for_runs(
@@ -541,7 +595,16 @@ def detect_observation_changes_against_history(
         compared_observations += 1
         old = previous.get("value_json")
         new = current.get("value_json")
-        if _equivalent_values(str(current.get("field_name") or ""), old, new):
+        policy_result = _policy_compare_result(
+            resolver=policy_resolver,
+            current=current,
+            old=old,
+            new=new,
+        )
+        if policy_result is not None:
+            if not policy_result.get("changed"):
+                continue
+        elif _equivalent_values(str(current.get("field_name") or ""), old, new):
             continue
         changes.append(
             _observation_to_change(

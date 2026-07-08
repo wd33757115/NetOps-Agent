@@ -1283,6 +1283,26 @@ const DevicesPage: React.FC = () => {
     return profile
   }
 
+  const runtimeAssetIssues = (value?: ManagedDevice['patrol_readiness'] | DeviceEffectivePlanPreview['coverage_summary']) => {
+    const health = value?.runtime_asset_health
+    if (!health || ['ready', 'not_required', 'not_checked'].includes(String(health.status || ''))) return 0
+    if (typeof health.missing_count === 'number') return health.missing_count
+    return (health.missing_observation_contracts?.length || 0) + (health.missing_change_policies?.length || 0)
+  }
+
+  const runtimeAssetIssueText = (value?: ManagedDevice['patrol_readiness'] | DeviceEffectivePlanPreview['coverage_summary']) => {
+    const health = value?.runtime_asset_health
+    if (!health || ['ready', 'not_required', 'not_checked'].includes(String(health.status || ''))) return null
+    const missingContracts = health.missing_observation_contracts || []
+    const missingPolicies = health.missing_change_policies || []
+    const parts = [
+      missingContracts.length ? `缺 ObservationContract：${missingContracts.join(', ')}` : '',
+      missingPolicies.length ? `缺 ChangePolicy：${missingPolicies.join(', ')}` : '',
+      health.error ? `错误：${health.error}` : '',
+    ].filter(Boolean)
+    return parts.length ? parts.join('；') : `运行时资产状态：${health.status || 'unknown'}`
+  }
+
   const connectionColor = (status?: string) => {
     if (status === 'connected') return 'green'
     if (status === 'failed' || status === 'preflight_failed') return 'red'
@@ -1293,7 +1313,7 @@ const DevicesPage: React.FC = () => {
     Modal.confirm({
       title: '删除设备资产',
       content: '设备 ' + (device.device_name || device.device_id) + ' 将从资产清单中删除，历史巡检、证据链和 Workflow 记录会保留。',
-      okText: '鍒犻櫎',
+      okText: '删除',
       okButtonProps: { danger: true, loading: deleteDevice.isLoading },
       cancelText: '取消',
       onOk: () => deleteDevice.mutateAsync(device),
@@ -1335,14 +1355,18 @@ const DevicesPage: React.FC = () => {
         const parserIssues = value.blocked_count || 0
         const connectionIssues = value.connection_issues?.length || 0
         const planIssues = value.plan_violations?.length || 0
-        const blockerCount = parserIssues + connectionIssues + planIssues
+        const assetIssues = runtimeAssetIssues(value)
+        const assetIssueText = runtimeAssetIssueText(value)
+        const blockerCount = parserIssues + connectionIssues + planIssues + assetIssues
         const title = value.error
           || [
             readinessSourceText(value),
             `${value.ready_count}/${value.eligible_count} 个结构化命令已就绪`,
             `计划阻断 ${planIssues}`,
             `Parser 阻断 ${parserIssues}`,
+            `规则资产阻断 ${assetIssues}`,
             `连接阻断 ${connectionIssues}`,
+            assetIssueText,
           ].join('；')
         return (
           <Space direction="vertical" size={2}>
@@ -2278,7 +2302,14 @@ const DevicesPage: React.FC = () => {
                         </Descriptions.Item>
                         <Descriptions.Item label="阻塞">
                           {plan.coverage_summary
-                            ? plan.coverage_summary.blocked_count + (plan.coverage_summary.connection_issues?.length || 0)
+                            ? plan.coverage_summary.blocked_count
+                              + (plan.coverage_summary.connection_issues?.length || 0)
+                              + runtimeAssetIssues(plan.coverage_summary)
+                            : '-'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="规则资产">
+                          {plan.coverage_summary?.runtime_asset_health
+                            ? statusLabel(plan.coverage_summary.runtime_asset_health.status || 'unknown')
                             : '-'}
                         </Descriptions.Item>
                         <Descriptions.Item label="覆盖率">
@@ -2310,6 +2341,14 @@ const DevicesPage: React.FC = () => {
                               ))}
                             </Space>
                           }
+                        />
+                      )}
+                      {runtimeAssetIssueText(plan.coverage_summary) && (
+                        <Alert
+                          type="warning"
+                          showIcon
+                          message="运行时规则资产不完整"
+                          description={runtimeAssetIssueText(plan.coverage_summary)}
                         />
                       )}
                       {plan.plan.selector && Object.keys(plan.plan.selector).length > 0 && (

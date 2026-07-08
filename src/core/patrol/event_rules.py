@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +26,23 @@ def norm(value: Any) -> str:
 
 def norm_field(value: Any) -> str:
     return norm(value).replace("-", "_")
+
+
+def event_rule_digest(
+    *,
+    name: str,
+    event_type: str,
+    severity: str,
+    condition: dict[str, Any],
+) -> str:
+    payload = {
+        "name": name,
+        "event_type": event_type,
+        "severity": severity,
+        "condition": condition,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def to_float(value: Any) -> float | None:
@@ -221,15 +240,25 @@ def _state_group(value: Any) -> str:
 
 
 class EventRuleRepository:
-    def list_versions(self) -> list[dict[str, Any]]:
+    def list_versions(
+        self,
+        *,
+        status: str | None = None,
+        event_type: str | None = None,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
         with get_db_session() as db:
+            query = db.query(EventRuleRecord, EventRuleVersionRecord).join(
+                EventRuleVersionRecord,
+                EventRuleVersionRecord.rule_id == EventRuleRecord.id,
+            )
+            if status:
+                query = query.filter(EventRuleVersionRecord.status == status)
+            if event_type:
+                query = query.filter(EventRuleVersionRecord.event_type == event_type)
             rows = (
-                db.query(EventRuleRecord, EventRuleVersionRecord)
-                .join(
-                    EventRuleVersionRecord,
-                    EventRuleVersionRecord.rule_id == EventRuleRecord.id,
-                )
-                .order_by(EventRuleRecord.name, EventRuleVersionRecord.version.desc())
+                query.order_by(EventRuleRecord.name, EventRuleVersionRecord.version.desc())
+                .limit(max(1, min(int(limit), 2000)))
                 .all()
             )
             return [
@@ -243,6 +272,11 @@ class EventRuleRepository:
                     "severity": version.severity,
                     "condition": version.condition_json,
                     "version_status": version.status,
+                    "source_job_id": version.source_job_id,
+                    "validation_report": version.validation_report_json,
+                    "digest": version.digest,
+                    "created_by": version.created_by,
+                    "created_at": version.created_at,
                     "activated_at": version.activated_at,
                     "deprecated_at": version.deprecated_at,
                 }
@@ -318,6 +352,12 @@ class EventRuleRepository:
                             severity=definition.severity,
                             condition_json=definition.condition,
                             status="active",
+                            digest=event_rule_digest(
+                                name=definition.rule_id,
+                                event_type=definition.event_type,
+                                severity=definition.severity,
+                                condition=definition.condition,
+                            ),
                         )
                     )
                     row.current_version = definition.version
@@ -373,6 +413,12 @@ class EventRuleRepository:
                 status="active",
                 created_by=created_by,
                 activated_at=datetime.now(timezone.utc),
+                digest=event_rule_digest(
+                    name=name,
+                    event_type=event_type,
+                    severity=severity,
+                    condition=condition,
+                ),
             )
             db.add(version)
             rule.current_version = next_version
@@ -387,6 +433,9 @@ class EventRuleRepository:
         condition: dict[str, Any],
         description: str | None = None,
         created_by: str | None = None,
+        source_job_id: str | None = None,
+        validation_report: dict[str, Any] | None = None,
+        digest: str | None = None,
         status: str = "draft",
     ) -> str:
         if status not in {"draft", "pending_approval"}:
@@ -424,6 +473,15 @@ class EventRuleRepository:
                 condition_json=condition,
                 status=status,
                 created_by=created_by,
+                source_job_id=source_job_id,
+                validation_report_json=validation_report,
+                digest=digest
+                or event_rule_digest(
+                    name=name,
+                    event_type=event_type,
+                    severity=severity,
+                    condition=condition,
+                ),
             )
             db.add(version)
             return version.id

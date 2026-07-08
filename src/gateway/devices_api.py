@@ -33,6 +33,7 @@ from src.core.device_ops.identity_discovery import (
 from src.core.device_ops.repository import DeviceRepository, normalize_device_status
 from src.core.evidence import evidence_id_for_command_snapshot
 from src.core.patrol.modes import PRODUCTION_MODE, normalize_patrol_mode
+from src.core.rule_control import RuntimeRuleAssetResolver
 from src.gateway.audit_service import write_audit_log
 from src.infrastructure.db.models import (
     AgentModuleControlRecord,
@@ -586,6 +587,50 @@ def _blocking_parser_coverage(device: dict[str, Any], commands: list[str], mode:
     ]
 
 
+def _runtime_rule_asset_health(
+    *,
+    mode: str,
+    coverage: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if normalize_patrol_mode(mode) != PRODUCTION_MODE:
+        return {"status": "not_required", "ready": True}
+    schemas = []
+    for item in coverage:
+        template_id = str(item.get("template_id") or "").strip()
+        if (
+            item.get("policy_status") == "eligible"
+            and item.get("coverage_status") == "ready"
+            and template_id
+        ):
+            schemas.append(("cli", template_id))
+    if not schemas:
+        return {
+            "status": "not_required",
+            "ready": True,
+            "reason": "no ready parser templates require runtime rule asset checks",
+        }
+    try:
+        bundle = RuntimeRuleAssetResolver().load_bundle(
+            observation_schemas=schemas,
+            include_event_rules=True,
+        ).to_dict()
+    except Exception as exc:
+        return {
+            "status": "error",
+            "ready": False,
+            "error": str(exc),
+            "observation_schemas": [f"{source}:{schema}" for source, schema in schemas],
+        }
+    missing_count = len(bundle.get("missing_observation_contracts") or []) + len(
+        bundle.get("missing_change_policies") or []
+    )
+    return {
+        **bundle,
+        "status": "ready" if bundle.get("ready") else "blocked",
+        "missing_count": missing_count,
+    }
+
+
 def _execution_plan_violations(plan: Any, mode: str) -> list[dict[str, Any]]:
     policy_source = str(getattr(plan, "policy_source", "") or "").strip()
     commands = list(getattr(plan, "commands", []) or [])
@@ -622,6 +667,7 @@ def _coverage_summary(
     coverage: list[dict[str, Any]],
     connection_issues: list[dict[str, Any]],
     plan_violations: list[dict[str, Any]] | None = None,
+    runtime_asset_health: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     normalized_mode = normalize_patrol_mode(mode)
     plan_violations = plan_violations or []
@@ -639,7 +685,12 @@ def _coverage_summary(
     status = "ready"
     if normalized_mode != PRODUCTION_MODE:
         status = "blocked" if connection_issues else "not_required"
-    elif plan_violations or blocking or connection_issues:
+    elif (
+        plan_violations
+        or blocking
+        or connection_issues
+        or (runtime_asset_health or {}).get("status") in {"blocked", "error"}
+    ):
         status = "blocked"
     return {
         "status": status,
@@ -652,6 +703,8 @@ def _coverage_summary(
         "violations": blocking,
         "plan_violations": plan_violations,
         "connection_issues": connection_issues,
+        "runtime_asset_health": runtime_asset_health
+        or {"status": "not_checked", "ready": False},
     }
 
 
@@ -1884,12 +1937,17 @@ def _patrol_readiness(device: dict[str, Any], mode: str = PRODUCTION_MODE) -> di
         )
         connection_issues = _connection_preflight(device)
         plan_violations = _execution_plan_violations(plan, normalized_mode)
+        runtime_asset_health = _runtime_rule_asset_health(
+            mode=normalized_mode,
+            coverage=coverage,
+        )
         summary = _coverage_summary(
             mode=normalized_mode,
             commands=commands,
             coverage=coverage,
             connection_issues=connection_issues,
             plan_violations=plan_violations,
+            runtime_asset_health=runtime_asset_health,
         )
         return {
             **summary,
@@ -2039,15 +2097,32 @@ def _patrol_launch_preview(payload: DevicePatrolLaunchRequest, repository: Devic
             )
             commands = plan.command_texts()
             plan_violations = _execution_plan_violations(plan, payload.mode)
-            coverage_violations = _blocking_parser_coverage(device, commands, payload.mode)
+            parser_coverage = (
+                _production_parser_coverage(device, commands)
+                if normalize_patrol_mode(payload.mode) == PRODUCTION_MODE
+                else []
+            )
+            coverage_violations = [
+                item
+                for item in parser_coverage
+                if item.get("policy_status") == "eligible"
+                and item.get("coverage_status") != "ready"
+            ]
+            runtime_asset_health = _runtime_rule_asset_health(
+                mode=payload.mode,
+                coverage=parser_coverage,
+            )
             connection_issues = _connection_preflight(device)
-            if plan_violations or coverage_violations or connection_issues:
+            runtime_asset_blocked = runtime_asset_health.get("status") in {"blocked", "error"}
+            if plan_violations or coverage_violations or connection_issues or runtime_asset_blocked:
                 failure_code = (
                     "collector_preflight_failed"
                     if connection_issues
                     else "command_profile_not_ready"
                     if plan_violations
                     else "parser_coverage_not_ready"
+                    if coverage_violations
+                    else "runtime_rule_assets_not_ready"
                 )
                 if connection_issues and device.get("device_id"):
                     issue_code, issue_message = _first_issue(connection_issues)
@@ -2067,6 +2142,7 @@ def _patrol_launch_preview(payload: DevicePatrolLaunchRequest, repository: Devic
                         "plan_violations": plan_violations,
                         "coverage_violations": coverage_violations,
                         "connection_issues": connection_issues,
+                        "runtime_asset_health": runtime_asset_health,
                     }
                 )
                 continue
@@ -2082,6 +2158,7 @@ def _patrol_launch_preview(payload: DevicePatrolLaunchRequest, repository: Devic
                     "plan_violations": [],
                     "coverage_violations": [],
                     "connection_issues": [],
+                    "runtime_asset_health": runtime_asset_health,
                 }
             )
         except Exception as exc:
@@ -2759,12 +2836,17 @@ def preview_device_plan(device_id: str, payload: DevicePlanPreviewRequest):
     )
     connection_issues = _connection_preflight(device)
     plan_violations = _execution_plan_violations(plan, normalized_mode)
+    runtime_asset_health = _runtime_rule_asset_health(
+        mode=normalized_mode,
+        coverage=parser_coverage,
+    )
     coverage_summary = _coverage_summary(
         mode=normalized_mode,
         commands=commands,
         coverage=parser_coverage,
         connection_issues=connection_issues,
         plan_violations=plan_violations,
+        runtime_asset_health=runtime_asset_health,
     )
     return {
         "success": True,

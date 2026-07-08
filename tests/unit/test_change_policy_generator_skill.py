@@ -81,9 +81,14 @@ def test_change_policy_generator_skill(tmp_path: Path):
             "field_name": "cpu_5s",
             "field_semantics": {"semantic_type": "gauge", "unit": "percent"},
             "historical_values": [10, 20, 30, 88],
+            "agent_loop": True,
         },
     )
 
     assert result["success"] is True
     assert result["policy"]["compare_mode"] == "threshold_and_deadband"
     assert result["historical_stats"]["numeric_count"] == 4
+    assert result["agent_loop"]["ready_for_approval"] is True
+    attempt = result["agent_loop"]["attempts"][0]
+    assert attempt["stage"] == "change_policy_generation"
+    assert attempt["input_summary"]["historical_count"] == 4

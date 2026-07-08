@@ -130,3 +130,49 @@ def test_query_paths_can_be_mapped_by_intent():
 
     assert ctx["baseline_path"] == r"C:\data\previous"
     assert ctx["current_path"] == r"C:\data\current"
+
+
+def test_query_job_id_can_be_mapped_by_intent():
+    intent = ChatIntentPlugin(
+        workflow="rule-asset-approve",
+        priority=100,
+        description="test",
+        plugin_dir=Path("."),
+        required_context=["job_id"],
+        context_from_query={"job_id": "job_id"},
+        context_defaults={"actor": "chat"},
+    )
+    query = "审批激活规则资产 job_id=689eb656-815d-49c6-9961-90b141bb43c2"
+
+    ctx = build_chat_workflow_context(
+        {"messages": [{"content": query}]},
+        intent,
+    )
+
+    assert ctx["job_id"] == "689eb656-815d-49c6-9961-90b141bb43c2"
+    assert ctx["actor"] == "chat"
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "审批激活规则资产 任务ID: 689eb656-815d-49c6-9961-90b141bb43c2",
+        "审批激活规则资产 任务编号：689eb656-815d-49c6-9961-90b141bb43c2",
+    ],
+)
+def test_chinese_job_id_labels_do_not_pollute_value(query: str):
+    intent = ChatIntentPlugin(
+        workflow="rule-asset-approve",
+        priority=100,
+        description="test",
+        plugin_dir=Path("."),
+        required_context=["job_id"],
+        context_from_query={"job_id": "job_id"},
+    )
+
+    ctx = build_chat_workflow_context(
+        {"messages": [{"content": query}]},
+        intent,
+    )
+
+    assert ctx["job_id"] == "689eb656-815d-49c6-9961-90b141bb43c2"

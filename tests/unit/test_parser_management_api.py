@@ -82,6 +82,278 @@ def test_event_rule_validation_endpoint_uses_builtin_generic_cases():
     )
 
 
+def test_event_rule_replay_endpoint(monkeypatch):
+    captured = {}
+
+    def fake_replay(definitions, *, limit, include_active_collisions):
+        captured["definitions"] = definitions
+        captured["limit"] = limit
+        captured["include_active_collisions"] = include_active_collisions
+        return {
+            "success": True,
+            "matched_change_count": 0,
+            "collision_count": 0,
+        }
+
+    monkeypatch.setattr(parser_api, "replay_event_rule_definitions", fake_replay)
+
+    result = parser_api.replay_event_rules(
+        parser_api.EventRuleReplayRequest(
+            limit=50,
+            include_active_collisions=False,
+            candidate_rules=[
+                parser_api.EventRuleCandidateRequest(
+                    name="cpu-high-candidate",
+                    event_type="CPUHigh",
+                    severity="warning",
+                    condition={"kind": "threshold", "fields": ["cpu_5s"], "gte": 90},
+                )
+            ],
+        )
+    )
+
+    assert result["success"] is True
+    assert captured["limit"] == 50
+    assert captured["include_active_collisions"] is False
+    assert captured["definitions"][0].rule_id == "cpu-high-candidate"
+
+
+def test_event_rule_list_endpoint_passes_version_filters(monkeypatch):
+    captured = {}
+
+    class FakeRepository:
+        def list_versions(self, *, status, event_type, limit):
+            captured["status"] = status
+            captured["event_type"] = event_type
+            captured["limit"] = limit
+            return [
+                {
+                    "rule_id": "rule-1",
+                    "version_id": "version-1",
+                    "version_status": status,
+                    "event_type": event_type,
+                    "source_job_id": "job-1",
+                    "validation_report": {"success": True},
+                    "digest": "abc",
+                }
+            ]
+
+    monkeypatch.setattr(parser_api, "EventRuleRepository", FakeRepository)
+
+    result = parser_api.list_event_rules(
+        status="pending_approval",
+        event_type="CPUHigh",
+        limit=25,
+    )
+
+    assert result["items"] == [
+        {
+            "rule_id": "rule-1",
+            "version_id": "version-1",
+            "version_status": "pending_approval",
+            "event_type": "CPUHigh",
+            "source_job_id": "job-1",
+            "validation_report": {"success": True},
+            "digest": "abc",
+        }
+    ]
+    assert captured == {
+        "status": "pending_approval",
+        "event_type": "CPUHigh",
+        "limit": 25,
+    }
+
+
+def test_observation_contract_list_endpoint(monkeypatch):
+    captured = {}
+
+    class FakeRepository:
+        def list_contracts(self, *, source_type, status, limit):
+            captured["source_type"] = source_type
+            captured["status"] = status
+            captured["limit"] = limit
+            return [{"id": "contract-1", "status": status}]
+
+    monkeypatch.setattr(parser_api, "ObservationContractRepository", FakeRepository)
+
+    result = parser_api.list_observation_contracts(
+        source_type="cli",
+        status="active",
+        limit=25,
+    )
+
+    assert result["items"] == [{"id": "contract-1", "status": "active"}]
+    assert captured == {"source_type": "cli", "status": "active", "limit": 25}
+
+
+def test_change_policy_list_endpoint(monkeypatch):
+    captured = {}
+
+    class FakeRepository:
+        def list_versions(self, *, status, observation_type, limit):
+            captured["status"] = status
+            captured["observation_type"] = observation_type
+            captured["limit"] = limit
+            return [{"version_id": "policy-version-1", "version_status": status}]
+
+    monkeypatch.setattr(parser_api, "ChangePolicyRepository", FakeRepository)
+
+    result = parser_api.list_change_policies(
+        status="draft",
+        observation_type="device.cpu.utilization",
+        limit=50,
+    )
+
+    assert result["items"] == [
+        {"version_id": "policy-version-1", "version_status": "draft"}
+    ]
+    assert captured == {
+        "status": "draft",
+        "observation_type": "device.cpu.utilization",
+        "limit": 50,
+    }
+
+
+def test_replay_report_list_endpoint(monkeypatch):
+    captured = {}
+
+    class FakeRepository:
+        def list_replay_reports(self, *, success, asset_type, limit):
+            captured["success"] = success
+            captured["asset_type"] = asset_type
+            captured["limit"] = limit
+            return [
+                {
+                    "id": "job-1:historical_replay",
+                    "job_id": "job-1",
+                    "success": success,
+                    "asset_type": asset_type,
+                    "matched_change_count": 2,
+                    "collision_count": 0,
+                }
+            ]
+
+    monkeypatch.setattr(parser_api, "RuleGenerationJobRepository", FakeRepository)
+
+    result = parser_api.list_replay_reports(
+        success=True,
+        asset_type="EVENT_RULE",
+        limit=25,
+    )
+
+    assert result["items"] == [
+        {
+            "id": "job-1:historical_replay",
+            "job_id": "job-1",
+            "success": True,
+            "asset_type": "EVENT_RULE",
+            "matched_change_count": 2,
+            "collision_count": 0,
+        }
+    ]
+    assert captured == {"success": True, "asset_type": "EVENT_RULE", "limit": 25}
+
+
+def test_rule_asset_approval_audit_endpoint(monkeypatch):
+    captured = {}
+
+    class FakeRepository:
+        def list_approval_audit(self, *, action, asset_type, actor, limit):
+            captured["action"] = action
+            captured["asset_type"] = asset_type
+            captured["actor"] = actor
+            captured["limit"] = limit
+            return [
+                {
+                    "id": "job-1:approved",
+                    "job_id": "job-1",
+                    "action": action,
+                    "asset_type": asset_type,
+                    "actor": actor,
+                    "validation_success": True,
+                }
+            ]
+
+    monkeypatch.setattr(parser_api, "RuleGenerationJobRepository", FakeRepository)
+
+    result = parser_api.list_rule_asset_approval_audit(
+        action="approved",
+        asset_type="EVENT_RULE",
+        actor="operator",
+        limit=25,
+    )
+
+    assert result["items"] == [
+        {
+            "id": "job-1:approved",
+            "job_id": "job-1",
+            "action": "approved",
+            "asset_type": "EVENT_RULE",
+            "actor": "operator",
+            "validation_success": True,
+        }
+    ]
+    assert captured == {
+        "action": "approved",
+        "asset_type": "EVENT_RULE",
+        "actor": "operator",
+        "limit": 25,
+    }
+
+
+def test_agent_loop_attempts_endpoint(monkeypatch):
+    captured = {}
+
+    class FakeRepository:
+        def list_agent_loop_attempts(self, *, asset_type, stage, success, limit):
+            captured["asset_type"] = asset_type
+            captured["stage"] = stage
+            captured["success"] = success
+            captured["limit"] = limit
+            return [
+                {
+                    "id": "job-1:agent_loop:1",
+                    "job_id": "job-1",
+                    "asset_type": asset_type,
+                    "stage": stage,
+                    "success": success,
+                    "attempt": 1,
+                    "revision_request": {
+                        "target_generator": "event-rule-generator",
+                    },
+                }
+            ]
+
+    monkeypatch.setattr(parser_api, "RuleGenerationJobRepository", FakeRepository)
+
+    result = parser_api.list_rule_asset_agent_loop_attempts(
+        asset_type="EVENT_RULE",
+        stage="event_rule_validation",
+        success=False,
+        limit=25,
+    )
+
+    assert result["items"] == [
+        {
+            "id": "job-1:agent_loop:1",
+            "job_id": "job-1",
+            "asset_type": "EVENT_RULE",
+            "stage": "event_rule_validation",
+            "success": False,
+            "attempt": 1,
+            "revision_request": {
+                "target_generator": "event-rule-generator",
+            },
+        }
+    ]
+    assert captured == {
+        "asset_type": "EVENT_RULE",
+        "stage": "event_rule_validation",
+        "success": False,
+        "limit": 25,
+    }
+
+
 def test_rule_generation_job_create_endpoint(monkeypatch):
     class FakeRepository:
         def create_job(
@@ -90,6 +362,10 @@ def test_rule_generation_job_create_endpoint(monkeypatch):
             job_type,
             source_ref,
             asset_ref,
+            asset_type,
+            asset_id,
+            asset_version_id,
+            asset_digest,
             payload,
             validation_report,
             approval_required,
@@ -99,6 +375,10 @@ def test_rule_generation_job_create_endpoint(monkeypatch):
             assert job_type == "EVENT_RULE"
             assert source_ref == "contract:1"
             assert asset_ref is None
+            assert asset_type is None
+            assert asset_id is None
+            assert asset_version_id is None
+            assert asset_digest is None
             assert payload == {"candidate": True}
             assert validation_report == {"success": True}
             assert approval_required is True
@@ -123,11 +403,26 @@ def test_rule_generation_job_create_endpoint(monkeypatch):
 
 def test_rule_generation_job_transition_endpoint(monkeypatch):
     class FakeRepository:
-        def transition_job(self, job_id, *, status, validation_report, asset_ref):
+        def transition_job(
+            self,
+            job_id,
+            *,
+            status,
+            validation_report,
+            asset_ref,
+            asset_type,
+            asset_id,
+            asset_version_id,
+            asset_digest,
+        ):
             assert job_id == "job-1"
             assert status == "validating"
             assert validation_report is None
             assert asset_ref is None
+            assert asset_type is None
+            assert asset_id is None
+            assert asset_version_id is None
+            assert asset_digest is None
             return {"id": job_id, "status": status}
 
     monkeypatch.setattr(parser_api, "RuleGenerationJobRepository", FakeRepository)
@@ -159,31 +454,54 @@ def test_rule_generation_job_validation_report_endpoint(monkeypatch):
     assert result["validation_report_json"] == {"success": True}
 
 
-def test_rule_generation_job_approve_activates_event_rule_asset(monkeypatch):
-    calls = []
-
-    class FakeRuleJobRepository:
-        def get_job(self, job_id):
+def test_rule_generation_job_preview_endpoint(monkeypatch):
+    class FakeRepository:
+        def preview_job(self, job_id):
             assert job_id == "job-1"
             return {
-                "id": job_id,
-                "job_type": "EVENT_RULE",
-                "status": "pending_approval",
-                "asset_ref": "event_rule_version:event-rule-version-1",
+                "success": True,
+                "job": {"id": job_id, "status": "pending_approval"},
+                "approval_readiness": {"can_approve": True, "blockers": []},
             }
 
-        def approve_job(self, job_id, *, approved_by):
+    monkeypatch.setattr(parser_api, "RuleGenerationJobRepository", FakeRepository)
+
+    result = parser_api.preview_rule_generation_job("job-1")
+
+    assert result["success"] is True
+    assert result["approval_readiness"]["can_approve"] is True
+
+
+def test_rule_generation_job_preview_endpoint_reports_404(monkeypatch):
+    class FakeRepository:
+        def preview_job(self, job_id):
+            raise KeyError("rule generation job not found")
+
+    monkeypatch.setattr(parser_api, "RuleGenerationJobRepository", FakeRepository)
+
+    try:
+        parser_api.preview_rule_generation_job("missing")
+    except parser_api.HTTPException as exc:
+        assert exc.status_code == 404
+    else:
+        raise AssertionError("preview should report missing jobs")
+
+
+def test_rule_generation_job_approve_activates_event_rule_asset(monkeypatch):
+    class FakeApprovalService:
+        def approve(self, job_id, *, actor):
             assert job_id == "job-1"
-            assert approved_by == "operator"
-            return {"id": job_id, "status": "active"}
+            assert actor == "operator"
+            return {
+                "success": True,
+                "job": {"id": job_id, "status": "active"},
+                "asset_activation": {
+                    "version_id": "event-rule-version-1",
+                    "version_status": "active",
+                },
+            }
 
-    class FakeEventRuleRepository:
-        def activate_rule_version(self, version_id):
-            calls.append(version_id)
-            return {"version_id": version_id, "version_status": "active"}
-
-    monkeypatch.setattr(parser_api, "RuleGenerationJobRepository", FakeRuleJobRepository)
-    monkeypatch.setattr(parser_api, "EventRuleRepository", FakeEventRuleRepository)
+    monkeypatch.setattr(parser_api, "RuleAssetApprovalService", FakeApprovalService)
 
     result = parser_api.approve_rule_generation_job(
         "job-1",
@@ -192,15 +510,15 @@ def test_rule_generation_job_approve_activates_event_rule_asset(monkeypatch):
 
     assert result["success"] is True
     assert result["job"]["status"] == "active"
-    assert calls == ["event-rule-version-1"]
+    assert result["asset_activation"]["version_status"] == "active"
 
 
 def test_rule_generation_job_approve_rejects_non_pending(monkeypatch):
-    class FakeRuleJobRepository:
-        def get_job(self, job_id):
-            return {"id": job_id, "job_type": "EVENT_RULE", "status": "draft"}
+    class FakeApprovalService:
+        def approve(self, job_id, *, actor):
+            raise parser_api.RuleGenerationJobStateError("must be pending_approval")
 
-    monkeypatch.setattr(parser_api, "RuleGenerationJobRepository", FakeRuleJobRepository)
+    monkeypatch.setattr(parser_api, "RuleAssetApprovalService", FakeApprovalService)
 
     try:
         parser_api.approve_rule_generation_job("job-1", None)
@@ -210,15 +528,129 @@ def test_rule_generation_job_approve_rejects_non_pending(monkeypatch):
         raise AssertionError("approve should reject non pending_approval jobs")
 
 
-def test_rule_generation_job_reject_endpoint(monkeypatch):
-    class FakeRepository:
-        def reject_job(self, job_id, *, rejected_by, reason):
+def test_rule_generation_job_revise_endpoint(monkeypatch):
+    class FakeRevisionService:
+        def create_revision_job(self, job_id, *, actor):
             assert job_id == "job-1"
-            assert rejected_by == "operator"
-            assert reason == "bad candidate"
-            return {"id": job_id, "status": "rejected"}
+            assert actor == "operator"
+            return {
+                "success": True,
+                "created": True,
+                "parent_job_id": job_id,
+                "job": {"id": "job-2", "status": "draft"},
+            }
 
-    monkeypatch.setattr(parser_api, "RuleGenerationJobRepository", FakeRepository)
+    monkeypatch.setattr(parser_api, "AgentLoopRevisionService", FakeRevisionService)
+
+    result = parser_api.revise_rule_generation_job(
+        "job-1",
+        parser_api.RuleGenerationJobApprovalRequest(actor="operator"),
+    )
+
+    assert result["created"] is True
+    assert result["job"]["id"] == "job-2"
+
+
+def test_rule_generation_job_revise_requires_revision_request(monkeypatch):
+    class FakeRevisionService:
+        def create_revision_job(self, job_id, *, actor):
+            raise ValueError("agent loop revision_request is required")
+
+    monkeypatch.setattr(parser_api, "AgentLoopRevisionService", FakeRevisionService)
+
+    try:
+        parser_api.revise_rule_generation_job("job-1", None)
+    except parser_api.HTTPException as exc:
+        assert exc.status_code == 409
+    else:
+        raise AssertionError("revise should require revision_request")
+
+
+def test_rule_generation_job_execute_revision_endpoint(monkeypatch):
+    class FakeRevisionExecutor:
+        def execute(self, job_id, *, actor):
+            assert job_id == "job-2"
+            assert actor == "operator"
+            return {
+                "success": True,
+                "job": {"id": job_id, "status": "validating"},
+                "skill_name": "event-rule-validator",
+            }
+
+    monkeypatch.setattr(parser_api, "AgentLoopRevisionExecutor", FakeRevisionExecutor)
+
+    result = parser_api.execute_rule_generation_revision_job(
+        "job-2",
+        parser_api.RuleGenerationJobApprovalRequest(actor="operator"),
+    )
+
+    assert result["success"] is True
+    assert result["skill_name"] == "event-rule-validator"
+
+
+def test_rule_generation_job_execute_revision_rejects_non_revision(monkeypatch):
+    class FakeRevisionExecutor:
+        def execute(self, job_id, *, actor):
+            raise parser_api.RuleGenerationJobStateError(
+                "only agent loop revision jobs can be executed"
+            )
+
+    monkeypatch.setattr(parser_api, "AgentLoopRevisionExecutor", FakeRevisionExecutor)
+
+    try:
+        parser_api.execute_rule_generation_revision_job("job-1", None)
+    except parser_api.HTTPException as exc:
+        assert exc.status_code == 409
+    else:
+        raise AssertionError("execute_revision should reject non revision jobs")
+
+
+def test_rule_generation_job_submit_candidate_endpoint(monkeypatch):
+    class FakeSubmissionService:
+        def submit_candidate(self, job_id, *, actor):
+            assert job_id == "job-1"
+            assert actor == "operator"
+            return {
+                "success": True,
+                "submitted_job": {"id": job_id},
+                "persister_result": {"asset_count": 1},
+            }
+
+    monkeypatch.setattr(parser_api, "RuleAssetSubmissionService", FakeSubmissionService)
+
+    result = parser_api.submit_rule_generation_job_candidate(
+        "job-1",
+        parser_api.RuleGenerationJobApprovalRequest(actor="operator"),
+    )
+
+    assert result["success"] is True
+    assert result["persister_result"]["asset_count"] == 1
+
+
+def test_rule_generation_job_submit_candidate_rejects_invalid_state(monkeypatch):
+    class FakeSubmissionService:
+        def submit_candidate(self, job_id, *, actor):
+            raise parser_api.RuleGenerationJobStateError("validation required")
+
+    monkeypatch.setattr(parser_api, "RuleAssetSubmissionService", FakeSubmissionService)
+
+    try:
+        parser_api.submit_rule_generation_job_candidate("job-1", None)
+    except parser_api.HTTPException as exc:
+        assert exc.status_code == 409
+    else:
+        raise AssertionError("submit should reject invalid jobs")
+
+
+def test_rule_generation_job_reject_endpoint(monkeypatch):
+    class FakeApprovalService:
+        def reject(self, job_id, *, actor, reason):
+            assert job_id == "job-1"
+            assert actor == "operator"
+            assert reason == "bad candidate"
+            return {"success": True, "job": {"id": job_id, "status": "rejected"}}
+
+    monkeypatch.setattr(parser_api, "RuleAssetApprovalService", FakeApprovalService)
 
     result = parser_api.reject_rule_generation_job(
         "job-1",
@@ -232,29 +664,20 @@ def test_rule_generation_job_reject_endpoint(monkeypatch):
 
 
 def test_rule_generation_job_deprecate_deprecates_event_rule_asset(monkeypatch):
-    calls = []
-
-    class FakeRuleJobRepository:
-        def get_job(self, job_id):
+    class FakeApprovalService:
+        def deprecate(self, job_id, *, actor, reason):
+            assert actor == "operator"
+            assert reason == "superseded"
             return {
-                "id": job_id,
-                "job_type": "EVENT_RULE",
-                "status": "active",
-                "asset_ref": "event_rule_version:event-rule-version-1",
+                "success": True,
+                "job": {"id": job_id, "status": "deprecated"},
+                "asset_deprecation": {
+                    "version_id": "event-rule-version-1",
+                    "version_status": "deprecated",
+                },
             }
 
-        def deprecate_job(self, job_id, *, deprecated_by, reason):
-            assert deprecated_by == "operator"
-            assert reason == "superseded"
-            return {"id": job_id, "status": "deprecated"}
-
-    class FakeEventRuleRepository:
-        def deprecate_rule_version(self, version_id):
-            calls.append(version_id)
-            return {"version_id": version_id, "version_status": "deprecated"}
-
-    monkeypatch.setattr(parser_api, "RuleGenerationJobRepository", FakeRuleJobRepository)
-    monkeypatch.setattr(parser_api, "EventRuleRepository", FakeEventRuleRepository)
+    monkeypatch.setattr(parser_api, "RuleAssetApprovalService", FakeApprovalService)
 
     result = parser_api.deprecate_rule_generation_job(
         "job-1",
@@ -265,7 +688,7 @@ def test_rule_generation_job_deprecate_deprecates_event_rule_asset(monkeypatch):
     )
 
     assert result["job"]["status"] == "deprecated"
-    assert calls == ["event-rule-version-1"]
+    assert result["asset_deprecation"]["version_status"] == "deprecated"
 
 
 def test_event_rule_save_creates_draft_by_default(monkeypatch):
@@ -302,6 +725,33 @@ def test_event_rule_save_creates_draft_by_default(monkeypatch):
     )
 
     assert result == {"success": True, "version_id": "event-rule-version-1"}
+
+
+def test_event_rule_save_rejects_direct_active_create(monkeypatch):
+    class FakeRepository:
+        def upsert_active_rule(self, **_kwargs):
+            raise AssertionError("active rule creation must not bypass approval")
+
+        def create_rule_version(self, **_kwargs):
+            raise AssertionError("active status should be rejected before persistence")
+
+    monkeypatch.setattr(parser_api, "EventRuleRepository", FakeRepository)
+
+    try:
+        parser_api.upsert_event_rule(
+            parser_api.EventRuleUpsertRequest(
+                name="cpu-high-custom",
+                event_type="CPUHigh",
+                severity="warning",
+                condition={"kind": "threshold"},
+                status="active",
+            )
+        )
+    except parser_api.HTTPException as exc:
+        assert exc.status_code == 400
+        assert "draft or pending_approval" in exc.detail
+    else:
+        raise AssertionError("active rule creation should be rejected")
 
 
 def test_event_rule_activate_endpoint(monkeypatch):
@@ -576,3 +1026,60 @@ def test_command_profile_impact_preview_can_load_profile_version(monkeypatch):
     assert result["evidence_saved"] is True
     assert saved[0][0] == "profile-version-1"
     assert saved[0][1]["blocked_device_count"] == 0
+
+
+def test_runtime_rule_asset_resolve_endpoint(monkeypatch):
+    calls = []
+
+    class FakeBundle:
+        def to_dict(self):
+            return {
+                "ready": False,
+                "observation_contracts": {"cli:template-1": {"entity_type": "interface"}},
+                "change_policies": {},
+                "event_rules": [{"rule_id": "InterfaceDown"}],
+                "missing_observation_contracts": [],
+                "missing_change_policies": ["interface.oper_status"],
+                "counts": {
+                    "observation_contracts": 1,
+                    "change_policies": 0,
+                    "event_rules": 1,
+                },
+            }
+
+    class FakeResolver:
+        def load_bundle(
+            self,
+            *,
+            observation_schemas,
+            observation_types,
+            include_event_rules,
+        ):
+            calls.append(
+                {
+                    "observation_schemas": observation_schemas,
+                    "observation_types": observation_types,
+                    "include_event_rules": include_event_rules,
+                }
+            )
+            return FakeBundle()
+
+    monkeypatch.setattr(parser_api, "RuntimeRuleAssetResolver", FakeResolver)
+
+    result = parser_api.resolve_runtime_rule_assets(
+        parser_api.RuntimeRuleAssetResolveRequest(
+            observation_schemas=[("cli", "template-1")],
+            observation_types=["interface.oper_status"],
+        )
+    )
+
+    assert result["ready"] is False
+    assert result["counts"]["observation_contracts"] == 1
+    assert result["missing_change_policies"] == ["interface.oper_status"]
+    assert calls == [
+        {
+            "observation_schemas": [("cli", "template-1")],
+            "observation_types": ["interface.oper_status"],
+            "include_event_rules": True,
+        }
+    ]

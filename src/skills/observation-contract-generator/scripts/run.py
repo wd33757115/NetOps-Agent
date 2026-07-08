@@ -33,6 +33,75 @@ def _records(params: dict[str, Any]) -> list[dict[str, Any]]:
     return normalized
 
 
+def _agent_loop(
+    *,
+    mode: str,
+    result: dict[str, Any],
+    command: str,
+) -> dict[str, Any]:
+    proposal = result.get("proposal") if isinstance(result.get("proposal"), dict) else {}
+    validation = result.get("validation") if isinstance(result.get("validation"), dict) else {}
+    errors: list[str] = []
+    for field in validation.get("missing_fields") or []:
+        errors.append(f"required field missing: {field}")
+    if validation.get("primary_key_status") == "invalid":
+        errors.append("primary key validation failed")
+    value_error_count = int(validation.get("value_error_count") or 0)
+    if value_error_count:
+        errors.append(f"value validation failed: {value_error_count} errors")
+    success = result.get("success") is True
+    revision_request = None
+    if not success:
+        revision_request = {
+            "target_generator": "observation-contract-generator",
+            "reason": errors or ["contract validation failed"],
+            "required_fixes": [
+                "choose stable non-empty primary keys",
+                "keep required_fields aligned with parsed records",
+                "remove dynamic fields from primary_keys",
+                "fix validators for fields that failed deterministic checks",
+            ],
+            "next_params_patch": {
+                "mode": "infer_and_validate",
+                "command": command,
+                "agent_loop": True,
+            },
+        }
+    return {
+        "ready_for_approval": success,
+        "next_action": "submit_for_approval" if success else "revise_observation_contract",
+        "revision_request": revision_request,
+        "attempts": [
+            {
+                "attempt": 1,
+                "stage": "observation_contract_generation",
+                "generator": "observation-contract-generator",
+                "mode": mode,
+                "success": success,
+                "input_summary": {
+                    "command": command,
+                    "record_count": validation.get("record_count", 0),
+                },
+                "output_summary": {
+                    "category": proposal.get("category"),
+                    "entity_type": proposal.get("entity_type"),
+                    "primary_keys": proposal.get("primary_keys") or [],
+                    "required_fields": proposal.get("required_fields") or [],
+                    "semantic_field_count": validation.get("semantic_field_count", 0),
+                },
+                "validator_feedback": {
+                    "errors": errors,
+                    "missing_fields": validation.get("missing_fields") or [],
+                    "duplicate_key_count": validation.get("duplicate_key_count", 0),
+                    "key_error_count": validation.get("key_error_count", 0),
+                    "value_error_count": value_error_count,
+                },
+                "revision_request": revision_request,
+            }
+        ],
+    }
+
+
 def run_contract_generation(params: dict[str, Any]) -> dict[str, Any]:
     mode = str(params.get("mode") or "infer_and_validate").strip().lower()
     command = str(params.get("command") or "").strip()
@@ -49,12 +118,15 @@ def run_contract_generation(params: dict[str, Any]) -> dict[str, Any]:
 
     if mode == "infer":
         inferred = proposal or infer_contract(command=command, samples_text=samples_text)
-        return {
+        result = {
             "success": True,
             "mode": mode,
             "proposal": inferred.to_dict(),
             "validation": None,
         }
+        if params.get("agent_loop"):
+            result["agent_loop"] = _agent_loop(mode=mode, result=result, command=command)
+        return result
     if mode == "validate":
         if proposal is None:
             raise ValueError("proposal is required in validate mode")
@@ -64,7 +136,10 @@ def run_contract_generation(params: dict[str, Any]) -> dict[str, Any]:
             samples_text=samples_text,
             proposal=proposal,
         )
-        return {"mode": mode, **report}
+        result = {"mode": mode, **report}
+        if params.get("agent_loop"):
+            result["agent_loop"] = _agent_loop(mode=mode, result=result, command=command)
+        return result
     if mode == "infer_and_validate":
         report = infer_and_validate_contract(
             command=command,
@@ -72,7 +147,10 @@ def run_contract_generation(params: dict[str, Any]) -> dict[str, Any]:
             samples_text=samples_text,
             proposal=proposal,
         )
-        return {"mode": mode, **report}
+        result = {"mode": mode, **report}
+        if params.get("agent_loop"):
+            result["agent_loop"] = _agent_loop(mode=mode, result=result, command=command)
+        return result
     raise ValueError("mode must be infer, validate, or infer_and_validate")
 
 

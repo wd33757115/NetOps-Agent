@@ -19,6 +19,7 @@ from src.core.patrol.rule_validation import (  # noqa: E402
     EventRuleValidationCase,
     validate_builtin_event_rules,
     validate_event_rule_definition,
+    validate_event_rule_definitions,
     validate_event_rule_pack,
     validate_event_rule_set,
 )
@@ -39,6 +40,38 @@ def _candidate_definition(payload: dict[str, Any]) -> EventRuleDefinition:
         condition=dict(condition),
         description=candidate.get("description"),
     )
+
+
+def _definition_from_candidate(candidate: dict[str, Any], index: int = 1) -> EventRuleDefinition:
+    condition = candidate.get("condition") or {}
+    if not isinstance(condition, dict):
+        raise ValueError(f"candidate_rules[{index}].condition must be an object")
+    return EventRuleDefinition(
+        rule_id=str(
+            candidate.get("name")
+            or candidate.get("rule_id")
+            or f"candidate-rule-{index}"
+        ),
+        version=int(candidate.get("version") or 1),
+        event_type=str(candidate["event_type"]),
+        severity=str(candidate.get("severity") or "warning"),
+        condition=dict(condition),
+        description=candidate.get("description"),
+    )
+
+
+def _candidate_definitions(payload: dict[str, Any]) -> list[EventRuleDefinition]:
+    candidates = payload.get("candidate_rules") or payload.get("rules")
+    if candidates is None:
+        return [_candidate_definition(payload)]
+    if not isinstance(candidates, list):
+        raise ValueError("candidate_rules must be a list")
+    definitions: list[EventRuleDefinition] = []
+    for index, candidate in enumerate(candidates, start=1):
+        if not isinstance(candidate, dict):
+            raise ValueError(f"candidate_rules[{index}] must be an object")
+        definitions.append(_definition_from_candidate(candidate, index))
+    return definitions
 
 
 def _case_payloads(payload: dict[str, Any]) -> list[EventRuleValidationCase]:
@@ -78,15 +111,41 @@ def _agent_loop_advice(report: dict[str, Any]) -> dict[str, Any]:
                         "event_type": rule_result.get("event_type"),
                     }
                 )
+    generated = report.get("generated_result") or {}
+    for row in generated.get("rows") or []:
+        if not row.get("passed"):
+            failed_rows.append({**row, "source": "generated"})
     invariant = report.get("invariant_result") or {}
     for row in invariant.get("rows") or []:
         if not row.get("passed"):
             failed_rows.append({**row, "source": "invariant"})
 
+    attempt = {
+        "attempt": 1,
+        "stage": "event_rule_validation",
+        "generator": "event-rule-validator",
+        "mode": "deterministic_validation",
+        "success": bool(report.get("success")),
+        "input_summary": {
+            "rule_count": report.get("rule_count", 1),
+            "case_count": report.get("case_count", 0),
+        },
+        "output_summary": {
+            "failed_case_count": len(failed_rows),
+            "collision_count": report.get("collision_count", 0),
+            "failed_count": report.get("failed_count", 0),
+        },
+        "validator_feedback": {
+            "failed_cases": failed_rows[:10],
+        },
+    }
+
     if not failed_rows:
         return {
             "ready_for_approval": True,
             "next_action": "submit_for_approval",
+            "revision_request": None,
+            "attempts": [attempt],
             "hints": [
                 "All generated and invariant cases passed.",
                 "Runtime execution can remain deterministic; do not call LLM in the event path.",
@@ -108,9 +167,34 @@ def _agent_loop_advice(report: dict[str, Any]) -> dict[str, Any]:
             hints.append(
                 f"{row.get('name')}: expected {expected}, got {actual}; check rule priority and condition semantics."
             )
+    revision_request = {
+        "target_generator": "event-rule-generator",
+        "reason": hints or ["event rule validation failed"],
+        "required_fixes": [
+            "narrow or broaden entity_types according to failed cases",
+            "adjust transition/threshold conditions to match expected events",
+            "ensure initial observations only open explicit fault events",
+            "keep recovery rules from becoming open active events",
+        ],
+        "failed_cases": failed_rows[:10],
+        "next_params_patch": {
+            "agent_loop": True,
+        },
+    }
     return {
         "ready_for_approval": False,
         "next_action": "revise_candidate_rule",
+        "revision_request": revision_request,
+        "attempts": [
+            {
+                **attempt,
+                "validator_feedback": {
+                    **attempt["validator_feedback"],
+                    "hints": hints,
+                },
+                "revision_request": revision_request,
+            }
+        ],
         "failed_case_count": len(failed_rows),
         "hints": hints,
     }
@@ -124,10 +208,12 @@ def run_validation(params: dict[str, Any]) -> dict[str, Any]:
         report = validate_event_rule_pack(params.get("rule_pack_path"))
     elif mode == "candidate":
         report = validate_event_rule_definition(_candidate_definition(params))
+    elif mode == "candidates":
+        report = validate_event_rule_definitions(_candidate_definitions(params))
     elif mode == "cases":
         report = validate_event_rule_set(_case_payloads(params))
     else:
-        raise ValueError("mode must be builtin, rule_pack, candidate, or cases")
+        raise ValueError("mode must be builtin, rule_pack, candidate, candidates, or cases")
 
     result = {
         "success": bool(report.get("success")),

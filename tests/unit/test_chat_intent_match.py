@@ -37,3 +37,29 @@ def test_webhook_source_skips_ticket_check():
     intent = match_chat_workflow("", "itsm_webhook")
     assert intent is not None
     assert intent.workflow == "itsm-firewall-change"
+
+
+def test_rule_asset_submit_requires_job_id_in_query():
+    assert match_chat_workflow("提交规则资产审批", "chat") is None
+    assert match_chat_workflow("提交规则资产审批 job status", "chat") is None
+
+    intent = match_chat_workflow(
+        "提交规则资产审批 job_id=689eb656-815d-49c6-9961-90b141bb43c2",
+        "chat",
+    )
+
+    assert intent is not None
+    assert intent.workflow == "rule-asset-submit"
+
+
+def test_rule_asset_approve_requires_job_id_in_query():
+    assert match_chat_workflow("审批激活规则资产", "chat") is None
+    assert match_chat_workflow("审批激活规则资产 job pending", "chat") is None
+
+    intent = match_chat_workflow(
+        "审批激活规则资产 任务 689eb656-815d-49c6-9961-90b141bb43c2",
+        "chat",
+    )
+
+    assert intent is not None
+    assert intent.workflow == "rule-asset-approve"

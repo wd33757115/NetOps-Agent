@@ -34,6 +34,13 @@
 | [SKILL_CREATION_GUIDE.md](./SKILL_CREATION_GUIDE.md) | Skill 创建与 SKILL.md v2.0 |
 | [测试手册.md](./测试手册.md) | 单元/集成/E2E 测试 |
 | [system-overall-design-and-phased-implementation-plan.md](./system-overall-design-and-phased-implementation-plan.md) | NetOps Agent 总体设计、改造方案与分阶段实施计划 |
+| [patrol-parser-dual-mode-guide.md](./patrol-parser-dual-mode-guide.md) | 测试巡检库、生产巡检库与 Parser 资产生成边界 |
+| [parser-automation-guide.md](./parser-automation-guide.md) | Parser 自动发现、命令策略、身份识别和契约审批 |
+| [textfsm-generator-guide.md](./textfsm-generator-guide.md) | TextFSM Generator 工作流程、设备品牌型号识别和使用方法 |
+| [observation-fabric-system-design.md](./observation-fabric-system-design.md) | Observation、CurrentState、Change、Event 事实层设计 |
+| [patrol-change-event-pipeline.md](./patrol-change-event-pipeline.md) | 巡检到变化检测、事件构建和事件流的链路说明 |
+| [rule-asset-control-plane-guide.md](./rule-asset-control-plane-guide.md) | 规则资产生成、提交审批、审批激活和聊天触发使用说明 |
+| [llm-rule-control-plane-implementation-plan.md](./llm-rule-control-plane-implementation-plan.md) | LLM 规则资产控制面完整改造计划与分阶段验收 |
 | [auth-rbac-plan.md](./auth-rbac-plan.md) | JWT、RBAC、BFF 可信头 |
 | [langfuse-sse-plan.md](./langfuse-sse-plan.md) | Langfuse + SSE Trace 方案 |
 | [storage-minio-plan.md](./storage-minio-plan.md) | MinIO 网盘方案 |

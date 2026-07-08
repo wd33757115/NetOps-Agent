@@ -2,14 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: rule-asset-generation
-description: 离线生成并验证 ObservationContract、ChangePolicy 与 EventRule 候选资产
-version: "1.0"
+description: 离线生成、验证、历史回放并持久化 ObservationContract、ChangePolicy 和 EventRule 候选资产
+version: "1.2"
 
 test:
   context:
     command: display cpu
     vendor: Generic
     model: LAB
+    source_ref: workflow:test:rule-asset-generation
     records:
       - slot: "0"
         cpu_5s: "18"
@@ -27,7 +28,8 @@ test:
     historical_values: [18, 20, 25, 40, 88, 92]
     device_role: lab
     policy_intent: CPU 高利用率需要产生告警，恢复阈值必须低于告警阈值
-    event_intent: 生成 CPUHigh 与 CPURecovered 候选规则
+    event_intent: 生成 CPUHigh 和 CPURecovered 候选规则
+    replay_limit: 1000
   required_context:
     - command
     - records
@@ -44,6 +46,7 @@ steps:
       vendor: ${context.vendor}
       model: ${context.model}
       records: ${context.records}
+      agent_loop: true
 
   - name: change_policy
     label: 生成变化策略
@@ -56,6 +59,7 @@ steps:
       historical_values: ${context.historical_values}
       device_role: ${context.device_role}
       policy_intent: ${context.policy_intent}
+      agent_loop: true
 
   - name: event_rule
     label: 生成事件规则候选
@@ -64,18 +68,42 @@ steps:
       contract: ${steps.observation_contract.result.proposal}
       change_policy: ${steps.change_policy.result.policy}
       intent: ${context.event_intent}
-
-  - name: event_rule_validation
-    label: 验证事件规则候选
-    skill: event-rule-validator
-    inputs:
-      mode: candidate
-      candidate_rule: ${steps.event_rule.result.rules.0}
       agent_loop: true
 
+  - name: event_rule_validation
+    label: 验证全部事件规则候选
+    skill: event-rule-validator
+    inputs:
+      mode: candidates
+      candidate_rules: ${steps.event_rule.result.rules}
+      agent_loop: true
+
+  - name: event_rule_replay
+    label: 历史回放事件规则候选
+    skill: event-rule-replay
+    inputs:
+      candidate_rules: ${steps.event_rule.result.rules}
+      limit: ${context.replay_limit}
+      include_active_collisions: true
+
+  - name: persist_assets
+    label: 持久化候选资产
+    skill: rule-asset-persister
+    inputs:
+      source_ref: ${context.source_ref}
+      command: ${context.command}
+      vendor: ${context.vendor}
+      model: ${context.model}
+      observation_type: ${context.observation_type}
+      contract_result: ${steps.observation_contract.result}
+      change_policy_result: ${steps.change_policy.result}
+      event_rule_result: ${steps.event_rule.result}
+      event_rule_validation: ${steps.event_rule_validation.result}
+      event_rule_replay: ${steps.event_rule_replay.result}
+
 on_complete:
-  message: 规则资产候选生成与验证已完成
+  message: 规则资产候选生成、验证、历史回放与持久化已完成
   notification:
     title: 规则资产生成完成
-    body: ObservationContract、ChangePolicy 与 EventRule 候选资产已完成确定性验证，可进入审批。
+    body: ObservationContract、ChangePolicy 和 EventRule 候选资产已保存；通过验证和回放的任务已进入待审批。
     level: success

@@ -53,6 +53,8 @@ class ObservationContractRepository:
         validation: dict[str, Any] | None = None,
         version: int | None = None,
         source_template_id: str | None = None,
+        source_job_id: str | None = None,
+        approval: dict[str, Any] | None = None,
         status: str = "active",
     ) -> ObservationContract:
         with get_db_session() as db:
@@ -65,6 +67,8 @@ class ObservationContractRepository:
                 validation=validation,
                 version=version,
                 source_template_id=source_template_id,
+                source_job_id=source_job_id,
+                approval=approval,
                 status=status,
             )
 
@@ -79,6 +83,8 @@ class ObservationContractRepository:
         validation: dict[str, Any] | None = None,
         version: int | None = None,
         source_template_id: str | None = None,
+        source_job_id: str | None = None,
+        approval: dict[str, Any] | None = None,
         status: str = "active",
     ) -> ObservationContract:
         payload = build_contract_payload(
@@ -139,6 +145,10 @@ class ObservationContractRepository:
             row.schema_ref = payload["schema_ref"]
         if row.source_template_id is None:
             row.source_template_id = payload["source_template_id"]
+        if row.source_job_id is None:
+            row.source_job_id = source_job_id
+        if approval is not None:
+            row.approval_json = approval
         if row.entity_type is None:
             row.entity_type = payload["entity_type"]
             row.primary_keys_json = list(payload["primary_keys"])
@@ -220,6 +230,26 @@ class ObservationContractRepository:
     ) -> dict[str, Any] | None:
         contract = self.get_active(source_type=source_type, schema_id=schema_id)
         return contract.to_validation_dict() if contract else None
+
+    def list_contracts(
+        self,
+        *,
+        source_type: str | None = None,
+        status: str | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        with get_db_session() as db:
+            query = db.query(ObservationContractRecord)
+            if source_type:
+                query = query.filter(ObservationContractRecord.source_type == source_type)
+            if status:
+                query = query.filter(ObservationContractRecord.status == status)
+            rows = (
+                query.order_by(ObservationContractRecord.updated_at.desc())
+                .limit(max(1, min(int(limit), 1000)))
+                .all()
+            )
+            return [row.to_dict() for row in rows]
 
     def backfill_from_parser_templates(self) -> int:
         count = 0

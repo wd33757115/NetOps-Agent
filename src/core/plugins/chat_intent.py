@@ -148,10 +148,17 @@ def _extract_context_from_query(query: str) -> dict[str, Any]:
         context[f"path_{index}"] = path
     if normalized_paths:
         context["file_path"] = normalized_paths[0]
+    job_match = re.search(
+        r"(?:job_id|任务编号|任务ID|任务|job\b)\s*[:：=#]?\s*"
+        r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|(?=[A-Za-z0-9_.:-]*\d)[A-Za-z0-9][A-Za-z0-9_.:-]{5,})",
+        query or "",
+    )
+    if job_match:
+        context["job_id"] = job_match.group(1).rstrip("，。；;,")
     return context
 
 
-QUERY_CONTEXT_FIELDS = frozenset({"ticket_id", "file_path", "path_0", "path_1"})
+QUERY_CONTEXT_FIELDS = frozenset({"ticket_id", "file_path", "path_0", "path_1", "job_id"})
 
 
 def _missing_required_context(context: dict[str, Any], required: list[str]) -> list[str]:

@@ -29,6 +29,77 @@ def _historical_values(params: dict[str, Any]) -> list[Any]:
     return values
 
 
+def _agent_loop(
+    *,
+    mode: str,
+    result: dict[str, Any],
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    policy = result.get("policy") if isinstance(result.get("policy"), dict) else {}
+    validation = result.get("validation") if isinstance(result.get("validation"), dict) else {}
+    stats = result.get("historical_stats") if isinstance(result.get("historical_stats"), dict) else {}
+    errors = [str(item) for item in validation.get("errors") or []]
+    success = result.get("success") is True
+    revision_request = None
+    if not success:
+        revision_request = {
+            "target_generator": "change-policy-generator",
+            "reason": errors or ["change policy validation failed"],
+            "required_fixes": [
+                "keep compare_mode compatible with semantic_type",
+                "avoid threshold policies for counter fields",
+                "set recovery_threshold below high threshold for gauges",
+                "derive thresholds from historical_stats instead of inventing values",
+            ],
+            "next_params_patch": {
+                "mode": "infer_and_validate",
+                "observation_type": params.get("observation_type") or params.get("field_name"),
+                "field_name": params.get("field_name"),
+                "field_semantics": params.get("field_semantics") or {},
+                "agent_loop": True,
+            },
+        }
+    return {
+        "ready_for_approval": success,
+        "next_action": "submit_for_approval" if success else "revise_change_policy",
+        "revision_request": revision_request,
+        "attempts": [
+            {
+                "attempt": 1,
+                "stage": "change_policy_generation",
+                "generator": "change-policy-generator",
+                "mode": mode,
+                "success": success,
+                "input_summary": {
+                    "observation_type": params.get("observation_type") or params.get("field_name"),
+                    "field_name": params.get("field_name"),
+                    "semantic_type": dict(params.get("field_semantics") or {}).get("semantic_type"),
+                    "historical_count": stats.get("count", 0),
+                    "numeric_count": stats.get("numeric_count", 0),
+                },
+                "output_summary": {
+                    "observation_type": policy.get("observation_type"),
+                    "semantic_type": policy.get("semantic_type"),
+                    "compare_mode": policy.get("compare_mode"),
+                    "thresholds": policy.get("thresholds") or {},
+                    "recovery_threshold": policy.get("recovery_threshold"),
+                    "deadband": policy.get("deadband"),
+                },
+                "validator_feedback": {
+                    "errors": errors,
+                    "stats": {
+                        "min": stats.get("min"),
+                        "max": stats.get("max"),
+                        "p95": stats.get("p95"),
+                        "p99": stats.get("p99"),
+                    },
+                },
+                "revision_request": revision_request,
+            }
+        ],
+    }
+
+
 def run_change_policy_generation(params: dict[str, Any]) -> dict[str, Any]:
     mode = str(params.get("mode") or "infer_and_validate").strip().lower()
     values = _historical_values(params)
@@ -42,24 +113,30 @@ def run_change_policy_generation(params: dict[str, Any]) -> dict[str, Any]:
             device_role=params.get("device_role"),
             policy_intent=params.get("policy_intent"),
         )
-        return {
+        result = {
             "success": True,
             "mode": mode,
             "policy": policy.to_dict(),
             "historical_stats": numeric_stats(values),
         }
+        if params.get("agent_loop"):
+            result["agent_loop"] = _agent_loop(mode=mode, result=result, params=params)
+        return result
     if mode == "validate":
         if not isinstance(proposal_payload, dict):
             raise ValueError("proposal is required in validate mode")
         policy = policy_from_dict(proposal_payload)
         validation = validate_change_policy(policy)
-        return {
+        result = {
             "success": validation["success"],
             "mode": mode,
             "policy": policy.to_dict(),
             "validation": validation,
             "historical_stats": numeric_stats(values),
         }
+        if params.get("agent_loop"):
+            result["agent_loop"] = _agent_loop(mode=mode, result=result, params=params)
+        return result
     if mode == "infer_and_validate":
         policy = (
             policy_from_dict(proposal_payload)
@@ -74,13 +151,16 @@ def run_change_policy_generation(params: dict[str, Any]) -> dict[str, Any]:
             )
         )
         validation = validate_change_policy(policy)
-        return {
+        result = {
             "success": validation["success"],
             "mode": mode,
             "policy": policy.to_dict(),
             "validation": validation,
             "historical_stats": numeric_stats(values),
         }
+        if params.get("agent_loop"):
+            result["agent_loop"] = _agent_loop(mode=mode, result=result, params=params)
+        return result
     raise ValueError("mode must be infer, validate, or infer_and_validate")
 
 

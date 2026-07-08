@@ -14,7 +14,10 @@ import {
   type ParserImportPreview, type ParserTemplateComparison, type ParserTemplatePreview,
   type ParserEventRule, type ParserCommandProfile, type ParserCommandProfileBinding,
   type ParserCommandProfileImpactPreview, type ParserEffectivePlanPreview,
-  type ParserEventRuleTestResult, type ParserRuleGenerationJob,
+  type ParserEventRuleReplayResult, type ParserEventRuleTestResult,
+  type ParserChangePolicy, type ParserObservationContract, type ParserRuleGenerationJob,
+  type ParserRuleGenerationJobPreview, type ParserReplayReport,
+  type ParserApprovalAudit, type ParserAgentLoopAttempt, type ParserRuntimeRuleAssetBundle,
 } from '../../services/api'
 import { useIsMobile } from '../../hooks/useBreakpoint'
 
@@ -68,12 +71,128 @@ const downloadBase64File = (filename: string, contentBase64: string, mimeType = 
   window.URL.revokeObjectURL(url)
 }
 
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+
+const nestedRecord = (
+  value: Record<string, unknown> | null | undefined,
+  key: string,
+): Record<string, unknown> | null => asRecord(value?.[key])
+
+const numberValue = (value: unknown): number | null => {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : null
+}
+
+const successTag = (success: unknown, okText = '通过', failText = '未通过') => {
+  if (success === true) return <Tag color="green">{okText}</Tag>
+  if (success === false) return <Tag color="red">{failText}</Tag>
+  return <Tag>无报告</Tag>
+}
+
+const shortDigest = (value?: string | null) => value ? value.slice(0, 12) : '-'
+
+const countMapText = (value?: Record<string, number> | null, emptyText = '-') => {
+  const entries = Object.entries(value || {})
+  if (!entries.length) return emptyText
+  return entries.map(([key, count]) => `${key}: ${count}`).join(' | ')
+}
+
+const extractObservationTypesFromContracts = (contracts: ParserObservationContract[]) => {
+  const values = new Set<string>()
+  contracts.forEach((contract) => {
+    const semantics = asRecord(contract.state_semantics_json)
+    Object.values(semantics || {}).forEach((item) => {
+      const observationType = asRecord(item)?.observation_type
+      if (typeof observationType === 'string' && observationType.trim()) {
+        values.add(observationType.trim())
+      }
+    })
+  })
+  return Array.from(values).sort()
+}
+
+const runtimeObservationSchemas = (contracts: ParserObservationContract[]) =>
+  contracts
+    .filter((item) => item.status === 'active' && item.source_type && item.schema_id)
+    .map((item) => [item.source_type, item.schema_id] as [string, string])
+
+const hasRevisionRequest = (report?: Record<string, unknown> | null) => {
+  const loop = asRecord(report?.agent_loop)
+  if (asRecord(loop?.revision_request)) return true
+  const attempts = Array.isArray(loop?.attempts) ? loop?.attempts : []
+  return attempts.some((item) => asRecord(item)?.revision_request)
+}
+
+const isAgentLoopRevisionJob = (row: ParserRuleGenerationJob) =>
+  Boolean(row.source_ref?.startsWith('agent_loop_revision:'))
+
+const canSubmitRuleCandidate = (row: ParserRuleGenerationJob) =>
+  row.status === 'validating'
+  && !row.asset_ref
+  && row.validation_report_json?.success === true
+
+const ruleJobNextAction = (row: ParserRuleGenerationJob) => {
+  if (canSubmitRuleCandidate(row)) return '提交审批'
+  if (row.status === 'pending_approval') return '审批激活或拒绝'
+  if (row.status === 'active') return '生产生效，可废弃'
+  if (row.status === 'rejected') return '已拒绝，可查看原因'
+  if (row.status === 'deprecated') return '已废弃，仅保留审计'
+  if (isAgentLoopRevisionJob(row) && ['draft', 'validating'].includes(row.status)) return '执行修订'
+  if (hasRevisionRequest(row.validation_report_json)) return '生成修订'
+  if (row.status === 'failed') return '查看失败并重新生成'
+  if (row.status === 'draft') return '等待验证'
+  if (row.status === 'validating') return '等待验证完成'
+  return '-'
+}
+
+const ruleJobActionKey = (row: ParserRuleGenerationJob) => {
+  if (canSubmitRuleCandidate(row)) return 'submit'
+  if (row.status === 'pending_approval') return 'approval'
+  if (row.status === 'active') return 'active'
+  if (row.status === 'rejected') return 'rejected'
+  if (row.status === 'deprecated') return 'deprecated'
+  if (isAgentLoopRevisionJob(row) && ['draft', 'validating'].includes(row.status)) return 'execute_revision'
+  if (hasRevisionRequest(row.validation_report_json)) return 'revise'
+  if (row.status === 'failed') return 'failed'
+  if (row.status === 'draft') return 'draft'
+  return 'wait'
+}
+
+const ruleJobLifecycleHint = (row: ParserRuleGenerationJob) => {
+  if (canSubmitRuleCandidate(row)) return '验证已通过但尚未形成审批资产。提交后会进入待审批队列，不会直接激活。'
+  if (row.status === 'pending_approval') return '审批会激活对应资产版本，并废弃同一资产的旧 active 版本。'
+  if (row.status === 'active') return '当前版本已经进入确定性运行时；废弃不会删除历史审计。'
+  if (row.status === 'rejected') return '拒绝后的候选不会进入生产，可通过详情查看验证和治理原因。'
+  if (row.status === 'deprecated') return '废弃版本不再参与运行时匹配，但保留版本、回放和审批证据。'
+  if (isAgentLoopRevisionJob(row)) return '这是 Agent Loop 修订任务；执行后仍需验证、提交和审批。'
+  if (hasRevisionRequest(row.validation_report_json)) return '验证器给出了修订反馈，可以生成新的候选版本。'
+  return '规则资产必须经过生成、验证、提交审批、审批激活后才会影响生产链路。'
+}
+
+const governanceStatusLabel = (status?: string) => {
+  const labels: Record<string, string> = {
+    active: '已激活',
+    deprecated: '已废弃',
+    draft: '草稿',
+    pending_approval: '待审批',
+    rejected: '已拒绝',
+    validating: '验证中',
+  }
+  return status ? labels[status] || status : '-'
+}
+
 const ParserControlTab: React.FC = () => {
   const queryClient = useQueryClient()
   const isMobile = useIsMobile()
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [preview, setPreview] = useState<ParserTemplatePreview | null>(null)
+  const [ruleJobPreviewOpen, setRuleJobPreviewOpen] = useState(false)
+  const [ruleJobPreviewLoading, setRuleJobPreviewLoading] = useState(false)
+  const [ruleJobPreview, setRuleJobPreview] = useState<ParserRuleGenerationJobPreview | null>(null)
   const [jobOpen, setJobOpen] = useState(false)
   const [jobId, setJobId] = useState<string | null>(null)
   const [templateStatus, setTemplateStatus] = useState<string>()
@@ -82,6 +201,10 @@ const ParserControlTab: React.FC = () => {
   const [jobType, setJobType] = useState<string>()
   const [jobSearch, setJobSearch] = useState('')
   const [selectedJobIds, setSelectedJobIds] = useState<React.Key[]>([])
+  const [ruleJobStatus, setRuleJobStatus] = useState<string>()
+  const [ruleJobAction, setRuleJobAction] = useState<string>()
+  const [ruleJobAssetType, setRuleJobAssetType] = useState<string>()
+  const [ruleJobSearch, setRuleJobSearch] = useState('')
   const [sourcePath, setSourcePath] = useState('')
   const [datasetId, setDatasetId] = useState('')
   const [importPreview, setImportPreview] = useState<ParserImportPreview | null>(null)
@@ -94,7 +217,10 @@ const ParserControlTab: React.FC = () => {
   const [ruleSeverity, setRuleSeverity] = useState('warning')
   const [ruleCondition, setRuleCondition] = useState('{\n  "kind": "threshold",\n  "fields": ["cpu_5s"],\n  "gte": 90\n}')
   const [ruleSamples, setRuleSamples] = useState('[\n  { "field": "cpu_5s", "new": 95 },\n  { "field": "cpu_5s", "new": 20 }\n]')
+  const [eventRuleStatus, setEventRuleStatus] = useState<string>()
+  const [eventRuleSearch, setEventRuleSearch] = useState('')
   const [ruleTest, setRuleTest] = useState<ParserEventRuleTestResult | null>(null)
+  const [ruleReplay, setRuleReplay] = useState<ParserEventRuleReplayResult | null>(null)
   const [profileName, setProfileName] = useState('')
   const [profileCommands, setProfileCommands] = useState('show version\nshow inventory')
   const [bindingProfileVersionId, setBindingProfileVersionId] = useState<string>()
@@ -119,6 +245,21 @@ const ParserControlTab: React.FC = () => {
   const { data: ruleGenerationJobs = [], isLoading: ruleGenerationJobsLoading } = useQuery(
     'parser-rule-generation-jobs', parserApi.ruleGenerationJobs, polling,
   )
+  const { data: observationContracts = [], isLoading: observationContractsLoading } = useQuery(
+    'parser-observation-contracts', parserApi.observationContracts, polling,
+  )
+  const { data: changePolicies = [], isLoading: changePoliciesLoading } = useQuery(
+    'parser-change-policies', parserApi.changePolicies, polling,
+  )
+  const { data: replayReports = [], isLoading: replayReportsLoading } = useQuery(
+    'parser-replay-reports', parserApi.replayReports, polling,
+  )
+  const { data: approvalAudit = [], isLoading: approvalAuditLoading } = useQuery(
+    'parser-approval-audit', parserApi.approvalAudit, polling,
+  )
+  const { data: agentLoopAttempts = [], isLoading: agentLoopAttemptsLoading } = useQuery(
+    'parser-agent-loop-attempts', parserApi.agentLoopAttempts, polling,
+  )
   const { data: dispatchControl } = useQuery(
     'parser-dispatch-control', parserApi.dispatchControl, polling,
   )
@@ -137,6 +278,30 @@ const ParserControlTab: React.FC = () => {
   const { data: commandProfileBindings = [] } = useQuery(
     'parser-command-profile-bindings', parserApi.commandProfileBindings, polling,
   )
+  const runtimeSchemas = useMemo(
+    () => runtimeObservationSchemas(observationContracts),
+    [observationContracts],
+  )
+  const runtimeObservationTypes = useMemo(() => {
+    const inferred = extractObservationTypesFromContracts(
+      observationContracts.filter((item) => item.status === 'active'),
+    )
+    if (inferred.length) return inferred
+    return Array.from(new Set(
+      changePolicies
+        .filter((item) => item.version_status === 'active' && item.observation_type)
+        .map((item) => item.observation_type),
+    )).sort()
+  }, [observationContracts, changePolicies])
+  const { data: runtimeAssets, isLoading: runtimeAssetsLoading } = useQuery<ParserRuntimeRuleAssetBundle>(
+    ['parser-runtime-assets', runtimeSchemas.map((item) => item.join(':')).join('|'), runtimeObservationTypes.join('|')],
+    () => parserApi.resolveRuntimeAssets({
+      observation_schemas: runtimeSchemas,
+      observation_types: runtimeObservationTypes,
+      include_event_rules: true,
+    }),
+    { ...polling, enabled: Boolean(runtimeSchemas.length || runtimeObservationTypes.length || eventRules.length) },
+  )
 
   const filteredTemplates = useMemo(() => templates.filter((item) => {
     const text = `${item.vendor} ${item.profile} ${item.canonical_command} ${item.category}`.toLowerCase()
@@ -151,11 +316,72 @@ const ParserControlTab: React.FC = () => {
       && (!jobSearch || text.includes(jobSearch.trim().toLowerCase()))
   }), [jobs, jobStatus, jobType, jobSearch])
 
+  const filteredEventRules = useMemo(() => eventRules.filter((item) => {
+    const text = `${item.rule_name} ${item.event_type} ${item.severity} ${item.version_status}`.toLowerCase()
+    return (!eventRuleStatus || item.version_status === eventRuleStatus)
+      && (!eventRuleSearch || text.includes(eventRuleSearch.trim().toLowerCase()))
+  }), [eventRules, eventRuleStatus, eventRuleSearch])
+
+  const eventRuleStatusCounts = useMemo(() => eventRules.reduce((acc, item) => {
+    const status = item.version_status || 'unknown'
+    acc[status] = (acc[status] || 0) + 1
+    return acc
+  }, {} as Record<string, number>), [eventRules])
+  const ruleJobStatusCounts = useMemo(() => ruleGenerationJobs.reduce((acc, item) => {
+    const status = item.status || 'unknown'
+    acc[status] = (acc[status] || 0) + 1
+    return acc
+  }, {} as Record<string, number>), [ruleGenerationJobs])
+  const ruleJobActionCounts = useMemo(() => ({
+    submit: ruleGenerationJobs.filter(canSubmitRuleCandidate).length,
+    approval: ruleGenerationJobs.filter((item) => item.status === 'pending_approval').length,
+    active: ruleGenerationJobs.filter((item) => item.status === 'active').length,
+    revision: ruleGenerationJobs.filter((item) =>
+      hasRevisionRequest(item.validation_report_json) || isAgentLoopRevisionJob(item),
+    ).length,
+  }), [ruleGenerationJobs])
+  const activeRuntimeCounts = useMemo(() => ({
+    contracts: observationContracts.filter((item) => item.status === 'active').length,
+    policies: changePolicies.filter((item) => item.version_status === 'active').length,
+    eventRules: eventRules.filter((item) => item.version_status === 'active').length,
+  }), [observationContracts, changePolicies, eventRules])
+  const ruleJobAssetTypeOptions = useMemo(() => {
+    const values = new Set<string>()
+    ruleGenerationJobs.forEach((item) => {
+      if (item.asset_type) values.add(item.asset_type)
+      if (item.job_type) values.add(item.job_type)
+    })
+    return Array.from(values).sort().map((value) => ({ value, label: value }))
+  }, [ruleGenerationJobs])
+  const filteredRuleGenerationJobs = useMemo(() => ruleGenerationJobs.filter((item) => {
+    const actionKey = ruleJobActionKey(item)
+    const assetType = item.asset_type || item.job_type || ''
+    const text = [
+      item.id,
+      item.job_type,
+      item.asset_type,
+      item.status,
+      item.source_ref,
+      item.asset_ref,
+      item.asset_id,
+      item.asset_version_id,
+      item.created_by,
+      ruleJobNextAction(item),
+    ].filter(Boolean).join(' ').toLowerCase()
+    return (!ruleJobStatus || item.status === ruleJobStatus)
+      && (!ruleJobAction || actionKey === ruleJobAction)
+      && (!ruleJobAssetType || assetType === ruleJobAssetType)
+      && (!ruleJobSearch || text.includes(ruleJobSearch.trim().toLowerCase()))
+  }), [ruleGenerationJobs, ruleJobStatus, ruleJobAction, ruleJobAssetType, ruleJobSearch])
+
   const refresh = () => {
     ;['parser-coverage', 'parser-templates', 'parser-jobs', 'parser-aliases',
       'parser-device-profiles', 'parser-identity-signatures', 'parser-datasets',
       'parser-event-rules', 'parser-command-profiles',
-      'parser-command-profile-bindings', 'parser-rule-generation-jobs'].forEach((key) =>
+      'parser-command-profile-bindings', 'parser-rule-generation-jobs',
+      'parser-observation-contracts', 'parser-change-policies',
+      'parser-replay-reports', 'parser-approval-audit',
+      'parser-agent-loop-attempts', 'parser-runtime-assets'].forEach((key) =>
       queryClient.invalidateQueries(key))
     queryClient.invalidateQueries('parser-dispatch-control')
     if (jobId) queryClient.invalidateQueries(['parser-job', jobId])
@@ -227,6 +453,12 @@ const ParserControlTab: React.FC = () => {
     try { setPreview(await parserApi.preview(id)) } catch {
       message.error('模板预览加载失败'); setPreviewOpen(false)
     } finally { setPreviewLoading(false) }
+  }
+  const showRuleJobPreview = async (id: string) => {
+    setRuleJobPreviewOpen(true); setRuleJobPreviewLoading(true); setRuleJobPreview(null)
+    try { setRuleJobPreview(await parserApi.previewRuleGenerationJob(id)) } catch {
+      message.error('规则资产预览加载失败'); setRuleJobPreviewOpen(false)
+    } finally { setRuleJobPreviewLoading(false) }
   }
   const showJob = (id: string) => { setJobId(id); setJobOpen(true) }
   const showComparison = async (template: ParserTemplateItem) => {
@@ -329,16 +561,93 @@ const ParserControlTab: React.FC = () => {
     },
   )
 
+  const replayRule = useMutation(
+    () => parserApi.replayEventRules({
+      candidate_rules: [{
+        name: ruleName.trim() || 'candidate-rule',
+        event_type: ruleEventType.trim(),
+        severity: ruleSeverity,
+        condition: JSON.parse(ruleCondition),
+      }],
+      limit: 1000,
+      include_active_collisions: true,
+    }),
+    {
+      onSuccess: setRuleReplay,
+      onError: (error: any) => message.error(error?.response?.data?.detail || error?.message || '历史回放失败'),
+    },
+  )
+
   const ruleGenerationLifecycle = useMutation(
-    ({ type, id }: { type: 'approve' | 'reject' | 'deprecate'; id: string }) => {
+    ({ type, id }: { type: 'approve' | 'reject' | 'deprecate' | 'revise' | 'execute_revision' | 'submit'; id: string }) => {
       if (type === 'approve') return parserApi.approveRuleGenerationJob(id, { actor: 'ui' })
       if (type === 'reject') return parserApi.rejectRuleGenerationJob(id, { actor: 'ui' })
+      if (type === 'revise') return parserApi.reviseRuleGenerationJob(id, { actor: 'ui' })
+      if (type === 'execute_revision') return parserApi.executeRuleGenerationRevisionJob(id, { actor: 'ui' })
+      if (type === 'submit') return parserApi.submitRuleGenerationJobCandidate(id, { actor: 'ui' })
       return parserApi.deprecateRuleGenerationJob(id, { actor: 'ui' })
     },
     {
       onSuccess: () => { message.success('规则资产任务已更新'); refresh() },
       onError: (error: any) => message.error(error?.response?.data?.detail || '规则资产任务操作失败'),
     },
+  )
+
+  const renderRuleGenerationActions = (row: ParserRuleGenerationJob) => (
+    <Space wrap>
+      <Button size="small" icon={<EyeOutlined />} loading={ruleJobPreviewLoading}
+        onClick={() => showRuleJobPreview(row.id)}>
+        预览
+      </Button>
+      {row.status === 'pending_approval' && (
+        <>
+          <Popconfirm title="确认审批并激活该规则资产版本？"
+            description="审批后该版本会进入生产运行时，同一资产的旧 active 版本会被废弃。"
+            okText="审批激活" cancelText="取消"
+            onConfirm={() => ruleGenerationLifecycle.mutate({ type: 'approve', id: row.id })}>
+            <Button size="small" icon={<CheckOutlined />} loading={ruleGenerationLifecycle.isLoading}>
+              审批激活
+            </Button>
+          </Popconfirm>
+          <Popconfirm title="确认拒绝该候选资产？"
+            description="拒绝不会删除验证证据和审计记录。"
+            okText="拒绝" cancelText="取消"
+            onConfirm={() => ruleGenerationLifecycle.mutate({ type: 'reject', id: row.id })}>
+            <Button size="small" icon={<CloseOutlined />} loading={ruleGenerationLifecycle.isLoading}>
+              拒绝
+            </Button>
+          </Popconfirm>
+        </>
+      )}
+      {row.status === 'active' && (
+        <Popconfirm title="确认废弃该 active 资产版本？"
+          description="废弃后该版本不再参与运行时匹配，但历史证据会保留。"
+          okText="废弃" cancelText="取消"
+          onConfirm={() => ruleGenerationLifecycle.mutate({ type: 'deprecate', id: row.id })}>
+          <Button size="small" icon={<StopOutlined />} loading={ruleGenerationLifecycle.isLoading}>
+            废弃
+          </Button>
+        </Popconfirm>
+      )}
+      {hasRevisionRequest(row.validation_report_json) && (
+        <Button size="small" icon={<PlayCircleOutlined />} loading={ruleGenerationLifecycle.isLoading}
+          onClick={() => ruleGenerationLifecycle.mutate({ type: 'revise', id: row.id })}>
+          生成修订
+        </Button>
+      )}
+      {isAgentLoopRevisionJob(row) && ['draft', 'validating'].includes(row.status) && (
+        <Button size="small" icon={<PlayCircleOutlined />} loading={ruleGenerationLifecycle.isLoading}
+          onClick={() => ruleGenerationLifecycle.mutate({ type: 'execute_revision', id: row.id })}>
+          执行修订
+        </Button>
+      )}
+      {canSubmitRuleCandidate(row) && (
+        <Button size="small" icon={<CheckOutlined />} loading={ruleGenerationLifecycle.isLoading}
+          onClick={() => ruleGenerationLifecycle.mutate({ type: 'submit', id: row.id })}>
+          提交审批
+        </Button>
+      )}
+    </Space>
   )
 
   const deleteProfile = useMutation(
@@ -536,9 +845,33 @@ const ParserControlTab: React.FC = () => {
     { title: '版本', dataIndex: 'version', width: 90 },
     { title: '状态', dataIndex: 'version_status', width: 110,
       render: (value: string) => <Tag color={statusColor(value)}>{statusLabel(value)}</Tag> },
+    { title: '静态校验', dataIndex: 'validation_report', width: 130,
+      render: (value: Record<string, unknown> | null) => {
+        const report = asRecord(value)
+        const synthetic = nestedRecord(report, 'synthetic_validation')
+        return successTag(synthetic?.success ?? report?.success)
+      } },
+    { title: '历史回放', dataIndex: 'validation_report', width: 180,
+      render: (value: Record<string, unknown> | null) => {
+        const replay = nestedRecord(asRecord(value), 'historical_replay')
+        if (!replay) return <Tag>未执行</Tag>
+        const collisionCount = numberValue(replay.collision_count) ?? 0
+        return (
+          <Space direction="vertical" size={0}>
+            {successTag(replay.success)}
+            <Typography.Text type={collisionCount ? 'danger' : 'secondary'}>
+              命中 {numberValue(replay.matched_change_count) ?? 0} / 碰撞 {collisionCount}
+            </Typography.Text>
+          </Space>
+        )
+      } },
     { title: '条件', dataIndex: 'condition',
       render: (value: Record<string, unknown>) =>
         <Typography.Text code>{JSON.stringify(value)}</Typography.Text> },
+    { title: '来源 Job', dataIndex: 'source_job_id', width: 220,
+      render: (value: string | null) => value || '-' },
+    { title: 'Digest', dataIndex: 'digest', width: 120,
+      render: (value: string | null) => <Typography.Text copyable={Boolean(value)}>{shortDigest(value)}</Typography.Text> },
     { title: '更新时间', dataIndex: 'updated_at', width: 190 },
     { title: '操作', width: 170, render: (_: unknown, row: ParserEventRule) => (
       <Space>
@@ -647,46 +980,283 @@ const ParserControlTab: React.FC = () => {
           : '-' },
   ]
 
-  const ruleGenerationColumns = [
-    { title: '资产类型', dataIndex: 'job_type', width: 170 },
+  const ruleGenerationGovernanceColumns = [
+    { title: '资产类型', dataIndex: 'job_type', width: 180,
+      render: (value: string, row: ParserRuleGenerationJob) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text strong>{row.asset_type || value}</Typography.Text>
+          <Typography.Text type="secondary">{value}</Typography.Text>
+        </Space>
+      ) },
     { title: '状态', dataIndex: 'status', width: 120,
-      render: (value: string) => <Tag color={statusColor(value)}>{statusLabel(value)}</Tag> },
+      render: (value: string) => <Tag color={statusColor(value)}>{governanceStatusLabel(value)}</Tag> },
+    { title: '静态验证', dataIndex: 'validation_report_json', width: 140,
+      render: (value: Record<string, unknown> | null) => {
+        const report = asRecord(value)
+        const synthetic = nestedRecord(report, 'synthetic_validation')
+        return successTag(synthetic?.success ?? report?.success)
+      } },
+    { title: '历史回放', dataIndex: 'validation_report_json', width: 220,
+      render: (value: Record<string, unknown> | null) => {
+        const replay = nestedRecord(asRecord(value), 'historical_replay')
+        if (!replay) return <Tag>未执行</Tag>
+        const collisionCount = numberValue(replay.collision_count) ?? 0
+        return (
+          <Space direction="vertical" size={0}>
+            {successTag(replay.success)}
+            <Typography.Text type={collisionCount ? 'danger' : 'secondary'}>
+              命中 {numberValue(replay.matched_change_count) ?? 0} / 冲突 {collisionCount}
+            </Typography.Text>
+          </Space>
+        )
+      } },
+    { title: '资产版本', dataIndex: 'asset_version_id', width: 260,
+      render: (value: string | null, row: ParserRuleGenerationJob) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text copyable={Boolean(value)}>{value || row.asset_ref || '-'}</Typography.Text>
+          <Typography.Text type="secondary">digest {shortDigest(row.asset_digest)}</Typography.Text>
+        </Space>
+      ) },
     { title: '来源', dataIndex: 'source_ref', width: 220,
       render: (value: string | null) => value || '-' },
-    { title: '资产引用', dataIndex: 'asset_ref', width: 260,
-      render: (value: string | null) => value || '-' },
-    { title: '验证', dataIndex: 'validation_report_json', width: 110,
-      render: (value: Record<string, unknown> | null) => {
-        if (!value) return <Tag>无报告</Tag>
-        const success = value.success
-        return <Tag color={success === false ? 'red' : 'green'}>{success === false ? '未通过' : '已验证'}</Tag>
-      } },
+    { title: '下一步', width: 180,
+      render: (_: unknown, row: ParserRuleGenerationJob) => (
+        <Typography.Text title={ruleJobLifecycleHint(row)}>{ruleJobNextAction(row)}</Typography.Text>
+      ) },
     { title: '创建人', dataIndex: 'created_by', width: 120,
       render: (value: string | null) => value || '-' },
     { title: '更新时间', dataIndex: 'updated_at', width: 190 },
-    { title: '操作', width: 190, render: (_: unknown, row: ParserRuleGenerationJob) => (
-      <Space>
-        {row.status === 'pending_approval' && (
-          <>
-            <Button size="small" icon={<CheckOutlined />} loading={ruleGenerationLifecycle.isLoading}
-              onClick={() => ruleGenerationLifecycle.mutate({ type: 'approve', id: row.id })}>
-              批准
-            </Button>
-            <Button size="small" icon={<CloseOutlined />} loading={ruleGenerationLifecycle.isLoading}
-              onClick={() => ruleGenerationLifecycle.mutate({ type: 'reject', id: row.id })}>
-              拒绝
-            </Button>
-          </>
-        )}
-        {row.status === 'active' && (
-          <Button size="small" icon={<StopOutlined />} loading={ruleGenerationLifecycle.isLoading}
-            onClick={() => ruleGenerationLifecycle.mutate({ type: 'deprecate', id: row.id })}>
-            废弃
-          </Button>
-        )}
-      </Space>
-    ) },
+    { title: '操作', width: 270, render: (_: unknown, row: ParserRuleGenerationJob) => renderRuleGenerationActions(row) },
   ]
+
+  const observationContractColumns = [
+    { title: 'Schema', dataIndex: 'schema_id', width: 280,
+      render: (value: string, row: ParserObservationContract) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text copyable>{value}</Typography.Text>
+          <Typography.Text type="secondary">{row.source_type} v{row.version}</Typography.Text>
+        </Space>
+      ) },
+    { title: '状态', dataIndex: 'status', width: 110,
+      render: (value: string) => <Tag color={statusColor(value)}>{governanceStatusLabel(value)}</Tag> },
+    { title: '实体类型', dataIndex: 'entity_type', width: 160 },
+    { title: '主键', dataIndex: 'primary_keys_json', width: 180,
+      render: (value: string[] | null) => (value || []).join(', ') || '-' },
+    { title: '必填字段', dataIndex: 'required_fields_json', width: 240,
+      render: (value: string[] | null) => (value || []).join(', ') || '-' },
+    { title: '语义字段', dataIndex: 'state_semantics_json', width: 220,
+      render: (value: Record<string, unknown> | null) => Object.keys(value || {}).join(', ') || '-' },
+    { title: '允许空结果', dataIndex: 'allow_empty', width: 110,
+      render: (value: boolean) => <Tag color={value ? 'blue' : 'default'}>{value ? '是' : '否'}</Tag> },
+    { title: '来源 Job', dataIndex: 'source_job_id', width: 220,
+      render: (value: string | null) => value || '-' },
+    { title: 'Digest', dataIndex: 'contract_sha256', width: 120,
+      render: (value: string | null) => <Typography.Text copyable={Boolean(value)}>{shortDigest(value)}</Typography.Text> },
+    { title: '更新时间', dataIndex: 'updated_at', width: 190 },
+  ]
+
+  const changePolicyColumns = [
+    { title: '策略', dataIndex: 'policy_name', width: 240,
+      render: (value: string, row: ParserChangePolicy) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text strong>{value}</Typography.Text>
+          <Typography.Text type="secondary">v{row.version} / {row.version_id}</Typography.Text>
+        </Space>
+      ) },
+    { title: '状态', dataIndex: 'version_status', width: 110,
+      render: (value: string) => <Tag color={statusColor(value)}>{governanceStatusLabel(value)}</Tag> },
+    { title: 'Observation Type', dataIndex: 'observation_type', width: 240 },
+    { title: '语义类型', dataIndex: 'semantic_type', width: 120 },
+    { title: '比较模式', dataIndex: 'compare_mode', width: 180 },
+    { title: '阈值/策略', dataIndex: 'policy', width: 260,
+      render: (value: Record<string, unknown>) => {
+        const thresholds = asRecord(value?.thresholds)
+        const parts = [
+          thresholds ? `thresholds=${JSON.stringify(thresholds)}` : null,
+          value?.deadband !== undefined ? `deadband=${String(value.deadband)}` : null,
+          value?.recovery_threshold !== undefined ? `recovery=${String(value.recovery_threshold)}` : null,
+        ].filter(Boolean)
+        return parts.length ? <Typography.Text code>{parts.join(' | ')}</Typography.Text> : '-'
+      } },
+    { title: '来源 Job', dataIndex: 'source_job_id', width: 220,
+      render: (value: string | null) => value || '-' },
+    { title: 'Digest', dataIndex: 'digest', width: 120,
+      render: (value: string | null) => <Typography.Text copyable={Boolean(value)}>{shortDigest(value)}</Typography.Text> },
+    { title: '激活时间', dataIndex: 'activated_at', width: 190,
+      render: (value: string | null) => value || '-' },
+  ]
+
+  const replayReportColumns = [
+    { title: '状态', dataIndex: 'success', width: 110,
+      render: (value: boolean | null) => successTag(value, '通过', '未通过') },
+    { title: '资产', dataIndex: 'asset_type', width: 170,
+      render: (value: string | null, row: ParserReplayReport) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text strong>{value || row.job_type}</Typography.Text>
+          <Typography.Text type="secondary">{governanceStatusLabel(row.job_status)}</Typography.Text>
+        </Space>
+      ) },
+    { title: '样本/命中', width: 130,
+      render: (_: unknown, row: ParserReplayReport) => `${row.matched_change_count}/${row.sampled_change_count}` },
+    { title: '预估日事件', dataIndex: 'estimated_daily_event_count', width: 120 },
+    { title: '碰撞', dataIndex: 'collision_count', width: 90,
+      render: (value: number) => <Tag color={value ? 'red' : 'green'}>{value || 0}</Tag> },
+    { title: '事件类型', dataIndex: 'event_types', width: 260,
+      render: (value: Record<string, number>) => <Typography.Text code>{countMapText(value)}</Typography.Text> },
+    { title: '实体类型', dataIndex: 'matched_entity_types', width: 260,
+      render: (value: Record<string, number>) => <Typography.Text code>{countMapText(value)}</Typography.Text> },
+    { title: 'Top Devices', dataIndex: 'top_devices', width: 260,
+      render: (value: Record<string, number>) => <Typography.Text code>{countMapText(value)}</Typography.Text> },
+    { title: '资产版本', dataIndex: 'asset_version_id', width: 260,
+      render: (value: string | null, row: ParserReplayReport) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text copyable={Boolean(value)}>{value || '-'}</Typography.Text>
+          <Typography.Text type="secondary">digest {shortDigest(row.asset_digest)}</Typography.Text>
+        </Space>
+      ) },
+    { title: '更新时间', dataIndex: 'updated_at', width: 190 },
+  ]
+
+  const approvalAuditColumns = [
+    { title: '动作', dataIndex: 'action', width: 110,
+      render: (value: string) => {
+        const color = value === 'approved' ? 'green' : value === 'rejected' ? 'red' : 'default'
+        const label = value === 'approved' ? '批准' : value === 'rejected' ? '拒绝' : value === 'deprecated' ? '废弃' : value
+        return <Tag color={color}>{label}</Tag>
+      } },
+    { title: '资产', dataIndex: 'asset_type', width: 180,
+      render: (value: string | null, row: ParserApprovalAudit) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text strong>{value || row.job_type}</Typography.Text>
+          <Typography.Text type="secondary">{governanceStatusLabel(row.job_status)}</Typography.Text>
+        </Space>
+      ) },
+    { title: '资产版本', dataIndex: 'asset_version_id', width: 260,
+      render: (value: string | null, row: ParserApprovalAudit) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text copyable={Boolean(value)}>{value || row.asset_ref || '-'}</Typography.Text>
+          <Typography.Text type="secondary">digest {shortDigest(row.asset_digest)}</Typography.Text>
+        </Space>
+      ) },
+    { title: '审批人', dataIndex: 'actor', width: 140,
+      render: (value: string | null) => value || '-' },
+    { title: '验证门槛', width: 220,
+      render: (_: unknown, row: ParserApprovalAudit) => (
+        <Space direction="vertical" size={0}>
+          <span>总体 {successTag(row.validation_success, '通过', '未通过')}</span>
+          <span>静态 {successTag(row.synthetic_success, '通过', '未通过')}</span>
+          <span>回放 {successTag(row.replay_success, '通过', '未通过')}</span>
+        </Space>
+      ) },
+    { title: '原因', dataIndex: 'reason', width: 240,
+      render: (value: string | null) => value || '-' },
+    { title: '来源 Job', dataIndex: 'job_id', width: 220,
+      render: (value: string) => <Typography.Text copyable>{value}</Typography.Text> },
+    { title: '发生时间', dataIndex: 'occurred_at', width: 210,
+      render: (value: string | null) => value || '-' },
+  ]
+
+  const agentLoopAttemptColumns = [
+    { title: '阶段', dataIndex: 'stage', width: 220,
+      render: (value: string, row: ParserAgentLoopAttempt) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text strong>{value || '-'}</Typography.Text>
+          <Typography.Text type="secondary">{row.generator || '-'}</Typography.Text>
+        </Space>
+      ) },
+    { title: '结果', dataIndex: 'success', width: 100,
+      render: (value: boolean | null) => successTag(value, '通过', '未通过') },
+    { title: '资产', dataIndex: 'asset_type', width: 180,
+      render: (value: string | null, row: ParserAgentLoopAttempt) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text strong>{value || row.job_type}</Typography.Text>
+          <Typography.Text type="secondary">{governanceStatusLabel(row.job_status)}</Typography.Text>
+        </Space>
+      ) },
+    { title: '尝试', dataIndex: 'attempt', width: 80 },
+    { title: '模式', dataIndex: 'mode', width: 160,
+      render: (value: string | null) => value || '-' },
+    { title: '下一步', dataIndex: 'next_action', width: 180,
+      render: (value: string | null) => value || '-' },
+    { title: '输出摘要', dataIndex: 'output_summary', width: 320,
+      render: (value: Record<string, unknown>) => (
+        <Typography.Text code>
+          {JSON.stringify(value || {}).slice(0, 180)}
+        </Typography.Text>
+      ) },
+    { title: '来源 Job', dataIndex: 'job_id', width: 220,
+      render: (value: string) => <Typography.Text copyable>{value}</Typography.Text> },
+    { title: '更新时间', dataIndex: 'updated_at', width: 190,
+      render: (value: string | null) => value || '-' },
+  ]
+
+  const renderRuleGenerationDetails = (row: ParserRuleGenerationJob) => {
+    const report = asRecord(row.validation_report_json)
+    const synthetic = nestedRecord(report, 'synthetic_validation')
+    const replay = nestedRecord(report, 'historical_replay')
+    const errors = Array.isArray(report?.errors) ? report?.errors : []
+    const unexpectedMatches = Array.isArray(replay?.unexpected_matches)
+      ? replay?.unexpected_matches
+      : []
+    return (
+      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        <Descriptions size="small" bordered column={isMobile ? 1 : 4}>
+          <Descriptions.Item label="资产类型">{row.asset_type || row.job_type}</Descriptions.Item>
+          <Descriptions.Item label="资产 ID">{row.asset_id || '-'}</Descriptions.Item>
+          <Descriptions.Item label="版本 ID" span={isMobile ? 1 : 2}>
+            <Typography.Text copyable={Boolean(row.asset_version_id)}>
+              {row.asset_version_id || row.asset_ref || '-'}
+            </Typography.Text>
+          </Descriptions.Item>
+          <Descriptions.Item label="资产摘要" span={isMobile ? 1 : 2}>
+            <Typography.Text copyable={Boolean(row.asset_digest)}>
+              {row.asset_digest || '-'}
+            </Typography.Text>
+          </Descriptions.Item>
+          <Descriptions.Item label="静态验证">
+            {successTag(synthetic?.success ?? report?.success)}
+          </Descriptions.Item>
+          <Descriptions.Item label="历史回放">
+            {replay ? successTag(replay.success) : <Tag>未执行</Tag>}
+          </Descriptions.Item>
+          <Descriptions.Item label="回放命中">{numberValue(replay?.matched_change_count) ?? '-'}</Descriptions.Item>
+          <Descriptions.Item label="回放冲突">{numberValue(replay?.collision_count) ?? '-'}</Descriptions.Item>
+        </Descriptions>
+        {errors.length > 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            message="治理门禁未通过"
+            description={errors.map((item) => String(item)).join('；')}
+          />
+        )}
+        {unexpectedMatches.length > 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            message="历史回放发现冲突样本"
+            description={<pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap' }}>
+              {JSON.stringify(unexpectedMatches.slice(0, 5), null, 2)}
+            </pre>}
+          />
+        )}
+        <Row gutter={[12, 12]}>
+          <Col span={isMobile ? 24 : 12}>
+            <Typography.Title level={5}>候选输入</Typography.Title>
+            <pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap', maxHeight: 360 }}>
+              {JSON.stringify(row.payload_json || {}, null, 2)}
+            </pre>
+          </Col>
+          <Col span={isMobile ? 24 : 12}>
+            <Typography.Title level={5}>验证与回放报告</Typography.Title>
+            <pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap', maxHeight: 360 }}>
+              {JSON.stringify(row.validation_report_json || {}, null, 2)}
+            </pre>
+          </Col>
+        </Row>
+      </Space>
+    )
+  }
 
   const activationReady = Boolean(
     activationImpact?.evidence_saved,
@@ -754,28 +1324,328 @@ const ParserControlTab: React.FC = () => {
           </Row>
           <Table rowKey="id" loading={jobsLoading} dataSource={filteredJobs} columns={jobColumns} pagination={{ pageSize: 20 }} size="small" scroll={{ x: 930 }} rowSelection={{ selectedRowKeys: selectedJobIds, onChange: setSelectedJobIds, getCheckboxProps: (row: ParserJobItem) => ({ disabled: ['collecting', 'pending', 'running', 'validating'].includes(row.status) }) }} />
         </Space> },
+      { key: 'runtime-assets', label: '运行时资产健康', children:
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Alert
+            type={runtimeAssets?.ready ? 'success' : 'warning'}
+            showIcon
+            message={runtimeAssets?.ready ? '运行时规则资产已就绪' : '运行时规则资产存在缺口'}
+            description="生产巡检、状态归一化、变化检测和事件构建只应读取 active 资产；这里展示当前 active 数据契约、变化策略、事件规则及缺失项。"
+          />
+          <Spin spinning={runtimeAssetsLoading}>
+            <Row gutter={[12, 12]}>
+              <Col xs={12} md={6}>
+                <Statistic title="Active 数据契约" value={runtimeAssets?.counts?.observation_contracts ?? activeRuntimeCounts.contracts} />
+              </Col>
+              <Col xs={12} md={6}>
+                <Statistic title="Active 变化策略" value={runtimeAssets?.counts?.change_policies ?? activeRuntimeCounts.policies} />
+              </Col>
+              <Col xs={12} md={6}>
+                <Statistic title="Active 事件规则" value={runtimeAssets?.counts?.event_rules ?? activeRuntimeCounts.eventRules} />
+              </Col>
+              <Col xs={12} md={6}>
+                <Statistic
+                  title="缺口数量"
+                  value={(runtimeAssets?.missing_observation_contracts?.length || 0) + (runtimeAssets?.missing_change_policies?.length || 0)}
+                />
+              </Col>
+            </Row>
+          </Spin>
+          <Descriptions bordered size="small" column={1}>
+            <Descriptions.Item label="检查的数据契约">
+              {runtimeSchemas.length
+                ? runtimeSchemas.map((item) => item.join(':')).join(' | ')
+                : '暂无 active 数据契约'}
+            </Descriptions.Item>
+            <Descriptions.Item label="检查的观察类型">
+              {runtimeObservationTypes.length ? runtimeObservationTypes.join(' | ') : '暂无可推导观察类型'}
+            </Descriptions.Item>
+          </Descriptions>
+          <Row gutter={[12, 12]}>
+            <Col span={isMobile ? 24 : 12}>
+              <Typography.Title level={5}>缺失数据契约</Typography.Title>
+              <Table
+                rowKey="id"
+                size="small"
+                pagination={false}
+                dataSource={(runtimeAssets?.missing_observation_contracts || []).map((id) => ({ id }))}
+                columns={[{ title: 'Schema', dataIndex: 'id' }]}
+                locale={{ emptyText: '无缺失数据契约' }}
+              />
+            </Col>
+            <Col span={isMobile ? 24 : 12}>
+              <Typography.Title level={5}>缺失变化策略</Typography.Title>
+              <Table
+                rowKey="id"
+                size="small"
+                pagination={false}
+                dataSource={(runtimeAssets?.missing_change_policies || []).map((id) => ({ id }))}
+                columns={[{ title: 'Observation Type', dataIndex: 'id' }]}
+                locale={{ emptyText: '无缺失变化策略' }}
+              />
+            </Col>
+          </Row>
+        </Space> },
       { key: 'rule-generation', label: `规则资产任务 (${ruleGenerationJobs.length})`, children:
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           <Alert type="info" showIcon
-            message="规则资产任务用于治理 TextFSM、ObservationContract、ChangePolicy 与 EventRule 候选资产；批准后才允许进入生产 active 资产。" />
+            message="规则资产任务用于治理 TextFSM、ObservationContract、ChangePolicy 与 EventRule 候选资产；只有审批激活后的版本才会进入生产运行时。" />
+          <Row gutter={[12, 12]}>
+            <Col xs={12} md={6}>
+              <Statistic title="待提交审批" value={ruleJobActionCounts.submit} />
+            </Col>
+            <Col xs={12} md={6}>
+              <Statistic title="待审批激活" value={ruleJobActionCounts.approval} />
+            </Col>
+            <Col xs={12} md={6}>
+              <Statistic title="已激活资产" value={ruleJobActionCounts.active} />
+            </Col>
+            <Col xs={12} md={6}>
+              <Statistic title="需修订线索" value={ruleJobActionCounts.revision} />
+            </Col>
+          </Row>
+          <Space wrap>
+            {['validating', 'pending_approval', 'active', 'rejected', 'deprecated', 'failed'].map((status) => (
+              <Tag key={status} color={statusColor(status)}>
+                {governanceStatusLabel(status)} {ruleJobStatusCounts[status] || 0}
+              </Tag>
+            ))}
+          </Space>
+          <Row gutter={[12, 12]} align="middle">
+            <Col flex="260px">
+              <Input.Search allowClear placeholder="搜索任务、来源、资产版本"
+                value={ruleJobSearch}
+                onChange={(event) => setRuleJobSearch(event.target.value)} />
+            </Col>
+            <Col flex="170px">
+              <Select allowClear placeholder="任务状态" style={{ width: '100%' }}
+                value={ruleJobStatus} onChange={setRuleJobStatus}
+                options={[
+                  'validating', 'pending_approval', 'active', 'rejected', 'deprecated', 'failed', 'draft',
+                ].map((value) => ({ value, label: governanceStatusLabel(value) }))} />
+            </Col>
+            <Col flex="190px">
+              <Select allowClear placeholder="下一步动作" style={{ width: '100%' }}
+                value={ruleJobAction} onChange={setRuleJobAction}
+                options={[
+                  { value: 'submit', label: '提交审批' },
+                  { value: 'approval', label: '审批激活或拒绝' },
+                  { value: 'active', label: '生产生效，可废弃' },
+                  { value: 'revise', label: '生成修订' },
+                  { value: 'execute_revision', label: '执行修订' },
+                  { value: 'failed', label: '查看失败并重新生成' },
+                  { value: 'rejected', label: '已拒绝，可查看原因' },
+                  { value: 'deprecated', label: '已废弃，仅保留审计' },
+                ]} />
+            </Col>
+            <Col flex="190px">
+              <Select allowClear placeholder="资产类型" style={{ width: '100%' }}
+                value={ruleJobAssetType} onChange={setRuleJobAssetType}
+                options={ruleJobAssetTypeOptions} />
+            </Col>
+            <Col>
+              <Button onClick={() => {
+                setRuleJobSearch('')
+                setRuleJobStatus(undefined)
+                setRuleJobAction(undefined)
+                setRuleJobAssetType(undefined)
+              }}>
+                清空筛选
+              </Button>
+            </Col>
+            <Col>
+              <Typography.Text type="secondary">
+                显示 {filteredRuleGenerationJobs.length}/{ruleGenerationJobs.length}
+              </Typography.Text>
+            </Col>
+          </Row>
           <Table<ParserRuleGenerationJob>
             rowKey="id"
             loading={ruleGenerationJobsLoading}
-            dataSource={ruleGenerationJobs}
-            columns={ruleGenerationColumns}
+            dataSource={filteredRuleGenerationJobs}
+            columns={ruleGenerationGovernanceColumns}
+            expandable={{
+              expandedRowRender: renderRuleGenerationDetails,
+            }}
+            pagination={{ pageSize: 20 }}
+            size="small"
+            scroll={{ x: 1260 }}
+          />
+        </Space> },
+      { key: 'observation-contracts', label: `数据契约 (${observationContracts.length})`, children:
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Alert type="info" showIcon
+            message="ObservationContract 固化结构化字段到标准观测语义的映射；生产状态链路只消费已治理的契约版本。" />
+          <Table<ParserObservationContract>
+            rowKey="id"
+            loading={observationContractsLoading}
+            dataSource={observationContracts}
+            columns={observationContractColumns}
             expandable={{
               expandedRowRender: (row) => (
-                <pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap' }}>
+                <pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap', maxHeight: 420 }}>
                   {JSON.stringify({
-                    payload: row.payload_json,
-                    validation_report: row.validation_report_json,
+                    primary_keys: row.primary_keys_json,
+                    required_fields: row.required_fields_json,
+                    optional_fields: row.optional_fields_json,
+                    validators: row.validators_json,
+                    ignore_fields: row.ignore_fields_json,
+                    allow_empty: row.allow_empty,
+                    empty_patterns: row.empty_patterns_json,
+                    state_semantics: row.state_semantics_json,
+                    approval: row.approval_json,
                   }, null, 2)}
                 </pre>
               ),
             }}
             pagination={{ pageSize: 20 }}
             size="small"
-            scroll={{ x: 1260 }}
+            scroll={{ x: 1500 }}
+          />
+        </Space> },
+      { key: 'change-policies', label: `变化策略 (${changePolicies.length})`, children:
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Alert type="info" showIcon
+            message="ChangePolicy 定义状态、数值、计数器和原文哈希如何比较；Change Detector 运行时只读取 active 策略。" />
+          <Table<ParserChangePolicy>
+            rowKey="version_id"
+            loading={changePoliciesLoading}
+            dataSource={changePolicies}
+            columns={changePolicyColumns}
+            expandable={{
+              expandedRowRender: (row) => (
+                <Row gutter={[12, 12]}>
+                  <Col span={isMobile ? 24 : 12}>
+                    <Typography.Title level={5}>策略内容</Typography.Title>
+                    <pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap', maxHeight: 360 }}>
+                      {JSON.stringify(row.policy || {}, null, 2)}
+                    </pre>
+                  </Col>
+                  <Col span={isMobile ? 24 : 12}>
+                    <Typography.Title level={5}>验证报告</Typography.Title>
+                    <pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap', maxHeight: 360 }}>
+                      {JSON.stringify(row.validation_report || {}, null, 2)}
+                    </pre>
+                  </Col>
+                </Row>
+              ),
+            }}
+            pagination={{ pageSize: 20 }}
+            size="small"
+            scroll={{ x: 1500 }}
+          />
+        </Space> },
+      { key: 'replay-reports', label: `历史回放报告 (${replayReports.length})`, children:
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Alert type="info" showIcon
+            message="历史回放报告用于评估候选 EventRule 在历史变化样本上的命中、碰撞和潜在误报；审批前应同时查看静态校验和历史回放结果。" />
+          <Table<ParserReplayReport>
+            rowKey="id"
+            loading={replayReportsLoading}
+            dataSource={replayReports}
+            columns={replayReportColumns}
+            expandable={{
+              expandedRowRender: (row) => (
+                <Row gutter={[12, 12]}>
+                  <Col span={isMobile ? 24 : 12}>
+                    <Typography.Title level={5}>异常命中</Typography.Title>
+                    <pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap', maxHeight: 360 }}>
+                      {JSON.stringify(row.unexpected_matches || [], null, 2)}
+                    </pre>
+                  </Col>
+                  <Col span={isMobile ? 24 : 12}>
+                    <Typography.Title level={5}>完整报告</Typography.Title>
+                    <pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap', maxHeight: 360 }}>
+                      {JSON.stringify(row.report_json || {}, null, 2)}
+                    </pre>
+                  </Col>
+                </Row>
+              ),
+            }}
+            pagination={{ pageSize: 20 }}
+            size="small"
+            scroll={{ x: 1780 }}
+          />
+        </Space> },
+      { key: 'agent-loop-attempts', label: `Agent Loop 尝试 (${agentLoopAttempts.length})`, children:
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Alert type="info" showIcon
+            message="Agent Loop 尝试记录展示 LLM 候选资产生成、确定性验证器反馈和下一步建议；这里只保存脱敏摘要，不展示原始 CLI 私有样本。" />
+          <Table<ParserAgentLoopAttempt>
+            rowKey="id"
+            loading={agentLoopAttemptsLoading}
+            dataSource={agentLoopAttempts}
+            columns={agentLoopAttemptColumns}
+            expandable={{
+              expandedRowRender: (row) => (
+                <Row gutter={[12, 12]}>
+                  <Col span={isMobile ? 24 : 12}>
+                    <Typography.Title level={5}>输入摘要</Typography.Title>
+                    <pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap', maxHeight: 360 }}>
+                      {JSON.stringify(row.input_summary || {}, null, 2)}
+                    </pre>
+                  </Col>
+                  <Col span={isMobile ? 24 : 12}>
+                    <Typography.Title level={5}>输出摘要</Typography.Title>
+                    <pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap', maxHeight: 360 }}>
+                      {JSON.stringify(row.output_summary || {}, null, 2)}
+                    </pre>
+                  </Col>
+                  <Col span={isMobile ? 24 : 12}>
+                    <Typography.Title level={5}>验证反馈</Typography.Title>
+                    <pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap', maxHeight: 360 }}>
+                      {JSON.stringify(row.validator_feedback || {}, null, 2)}
+                    </pre>
+                  </Col>
+                  <Col span={isMobile ? 24 : 12}>
+                    <Typography.Title level={5}>修订请求</Typography.Title>
+                    <pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap', maxHeight: 360 }}>
+                      {JSON.stringify(row.revision_request || {}, null, 2)}
+                    </pre>
+                  </Col>
+                </Row>
+              ),
+            }}
+            pagination={{ pageSize: 20 }}
+            size="small"
+            scroll={{ x: 1600 }}
+          />
+        </Space> },
+      { key: 'approval-audit', label: `审批审计 (${approvalAudit.length})`, children:
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Alert type="info" showIcon
+            message="审批审计记录规则资产从候选进入生产、被拒绝或被废弃的治理动作；每条记录都保留来源 Job、资产版本、验证结果和回放证据摘要。" />
+          <Table<ParserApprovalAudit>
+            rowKey="id"
+            loading={approvalAuditLoading}
+            dataSource={approvalAudit}
+            columns={approvalAuditColumns}
+            expandable={{
+              expandedRowRender: (row) => (
+                <Row gutter={[12, 12]}>
+                  <Col span={isMobile ? 24 : 12}>
+                    <Typography.Title level={5}>治理元数据</Typography.Title>
+                    <Descriptions bordered size="small" column={1}>
+                      <Descriptions.Item label="Source">{row.source_ref || '-'}</Descriptions.Item>
+                      <Descriptions.Item label="Asset ID">{row.asset_id || '-'}</Descriptions.Item>
+                      <Descriptions.Item label="Asset Ref">{row.asset_ref || '-'}</Descriptions.Item>
+                      <Descriptions.Item label="Created By">{row.created_by || '-'}</Descriptions.Item>
+                      <Descriptions.Item label="Created At">{row.created_at || '-'}</Descriptions.Item>
+                      <Descriptions.Item label="Updated At">{row.updated_at || '-'}</Descriptions.Item>
+                    </Descriptions>
+                  </Col>
+                  <Col span={isMobile ? 24 : 12}>
+                    <Typography.Title level={5}>Governance JSON</Typography.Title>
+                    <pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap', maxHeight: 360 }}>
+                      {JSON.stringify(row.governance || {}, null, 2)}
+                    </pre>
+                  </Col>
+                </Row>
+              ),
+            }}
+            pagination={{ pageSize: 20 }}
+            size="small"
+            scroll={{ x: 1560 }}
           />
         </Space> },
       { key: 'aliases', label: `命令别名 (${aliases.length})`, children:
@@ -817,6 +1687,9 @@ const ParserControlTab: React.FC = () => {
             <Col><Button icon={<PlayCircleOutlined />} loading={testRule.isLoading}
               disabled={!ruleCondition.trim() || !ruleSamples.trim()}
               onClick={() => testRule.mutate()}>测试规则</Button></Col>
+            <Col><Button icon={<PlayCircleOutlined />} loading={replayRule.isLoading}
+              disabled={!ruleCondition.trim() || !ruleEventType.trim()}
+              onClick={() => replayRule.mutate()}>历史回放</Button></Col>
           </Row>
           {ruleTest && (
             <Descriptions bordered size="small" column={isMobile ? 1 : 4}>
@@ -843,9 +1716,91 @@ const ParserControlTab: React.FC = () => {
               size="small"
             />
           )}
+          {ruleReplay && (
+            <Descriptions bordered size="small" column={isMobile ? 1 : 4}>
+              <Descriptions.Item label="回放状态">
+                <Tag color={ruleReplay.success ? 'green' : 'red'}>
+                  {ruleReplay.success ? '通过' : '存在冲突'}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="采样 Change">{ruleReplay.sampled_change_count}</Descriptions.Item>
+              <Descriptions.Item label="命中 Change">{ruleReplay.matched_change_count}</Descriptions.Item>
+              <Descriptions.Item label="冲突数">{ruleReplay.collision_count}</Descriptions.Item>
+              <Descriptions.Item label="事件类型" span={isMobile ? 1 : 2}>
+                <Typography.Text code>{JSON.stringify(ruleReplay.event_types)}</Typography.Text>
+              </Descriptions.Item>
+              <Descriptions.Item label="实体类型" span={isMobile ? 1 : 2}>
+                <Typography.Text code>{JSON.stringify(ruleReplay.matched_entity_types)}</Typography.Text>
+              </Descriptions.Item>
+            </Descriptions>
+          )}
+          {ruleReplay && ruleReplay.unexpected_matches?.length > 0 && (
+            <Alert
+              type="warning"
+              showIcon
+              message="历史回放发现规则冲突"
+              description={<pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap' }}>
+                {JSON.stringify(ruleReplay.unexpected_matches.slice(0, 5), null, 2)}
+              </pre>}
+            />
+          )}
+          <Row justify="space-between" align="middle" gutter={[12, 12]}>
+            <Col>
+              <Space wrap>
+                {['active', 'pending_approval', 'draft', 'rejected', 'deprecated'].map((status) => (
+                  <Tag key={status} color={statusColor(status)}>
+                    {governanceStatusLabel(status)} {eventRuleStatusCounts[status] || 0}
+                  </Tag>
+                ))}
+              </Space>
+            </Col>
+            <Col>
+              <Space wrap>
+                <Input.Search allowClear placeholder="搜索规则名、事件类型或级别" style={{ width: 280 }}
+                  value={eventRuleSearch} onChange={(event) => setEventRuleSearch(event.target.value)} />
+                <Select allowClear placeholder="规则版本状态" style={{ width: 170 }} value={eventRuleStatus}
+                  onChange={setEventRuleStatus} options={[
+                    'active', 'pending_approval', 'draft', 'rejected', 'deprecated',
+                  ].map((value) => ({ value, label: governanceStatusLabel(value) }))} />
+              </Space>
+            </Col>
+          </Row>
           <Table<ParserEventRule> rowKey={(row) => row.version_id || row.rule_id}
-            dataSource={eventRules} columns={eventRuleColumns}
-            pagination={{ pageSize: 20 }} size="small" scroll={{ x: 1100 }} />
+            dataSource={filteredEventRules} columns={eventRuleColumns}
+            expandable={{
+              expandedRowRender: (row) => {
+                const report = asRecord(row.validation_report)
+                const replay = nestedRecord(report, 'historical_replay')
+                return (
+                  <Row gutter={[12, 12]}>
+                    <Col span={isMobile ? 24 : 12}>
+                      <Typography.Title level={5}>规则条件</Typography.Title>
+                      <pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap', maxHeight: 360 }}>
+                        {JSON.stringify(row.condition || {}, null, 2)}
+                      </pre>
+                    </Col>
+                    <Col span={isMobile ? 24 : 12}>
+                      <Typography.Title level={5}>验证与回放证据</Typography.Title>
+                      <Descriptions bordered size="small" column={1} style={{ marginBottom: 12 }}>
+                        <Descriptions.Item label="来源 Job">{row.source_job_id || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="Digest">{row.digest || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="创建人">{row.created_by || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="激活时间">{row.activated_at || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="废弃时间">{row.deprecated_at || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="回放命中">
+                          {replay ? `${numberValue(replay.matched_change_count) ?? 0}/${numberValue(replay.sampled_change_count) ?? 0}` : '-'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="回放碰撞">{replay ? numberValue(replay.collision_count) ?? 0 : '-'}</Descriptions.Item>
+                      </Descriptions>
+                      <pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap', maxHeight: 260 }}>
+                        {JSON.stringify(row.validation_report || {}, null, 2)}
+                      </pre>
+                    </Col>
+                  </Row>
+                )
+              },
+            }}
+            pagination={{ pageSize: 20 }} size="small" scroll={{ x: 1680 }} />
         </Space> },
       { key: 'command-profiles', label: `采集命令集 (${commandProfiles.length})`, children:
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -1013,6 +1968,62 @@ const ParserControlTab: React.FC = () => {
           <Typography.Title level={5} style={{ margin: 0 }}>候选数据契约</Typography.Title>
           <Typography.Paragraph style={{ ...codePanelStyle, maxHeight: 260, whiteSpace: 'pre-wrap' }}>
             {JSON.stringify(comparison.candidate_contract, null, 2)}
+          </Typography.Paragraph>
+        </Space> : null}
+    </Drawer>
+
+    <Drawer title="规则资产审批前预览" open={ruleJobPreviewOpen}
+      onClose={() => { setRuleJobPreviewOpen(false); setRuleJobPreview(null) }}
+      width={isMobile ? '100vw' : 920} destroyOnClose>
+      {ruleJobPreviewLoading ? <div style={{ display: 'grid', minHeight: 240, placeItems: 'center' }}><Spin /></div>
+        : ruleJobPreview ? <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <Alert showIcon
+            type={ruleJobPreview.approval_readiness.can_approve ? 'success' : 'warning'}
+            message={ruleJobPreview.approval_readiness.can_approve ? '候选资产满足审批前置条件' : '候选资产仍有审批阻断'}
+            description={ruleJobPreview.approval_readiness.blockers.length
+              ? ruleJobPreview.approval_readiness.blockers.join('；')
+              : '静态验证、资产引用和历史回放摘要均可作为审批证据。'} />
+          <Descriptions size="small" column={isMobile ? 1 : 3} bordered>
+            <Descriptions.Item label="任务类型">{ruleJobPreview.job.job_type}</Descriptions.Item>
+            <Descriptions.Item label="任务状态">
+              <Tag color={statusColor(ruleJobPreview.job.status)}>{governanceStatusLabel(ruleJobPreview.job.status)}</Tag>
+            </Descriptions.Item>
+            <Descriptions.Item label="资产类型">{String(ruleJobPreview.asset_summary.asset_type || '-')}</Descriptions.Item>
+            <Descriptions.Item label="资产引用" span={isMobile ? 1 : 2}>
+              <Typography.Text copyable={Boolean(ruleJobPreview.asset_summary.asset_ref)}>
+                {String(ruleJobPreview.asset_summary.asset_ref || ruleJobPreview.asset_summary.asset_version_id || '-')}
+              </Typography.Text>
+            </Descriptions.Item>
+            <Descriptions.Item label="资产摘要">
+              <Typography.Text copyable={Boolean(ruleJobPreview.asset_summary.asset_digest)}>
+                {shortDigest(String(ruleJobPreview.asset_summary.asset_digest || ''))}
+              </Typography.Text>
+            </Descriptions.Item>
+            <Descriptions.Item label="验证">{successTag(ruleJobPreview.validation_summary.success as boolean | undefined)}</Descriptions.Item>
+            <Descriptions.Item label="生成器">{String(ruleJobPreview.validation_summary.generator || '-')}</Descriptions.Item>
+            <Descriptions.Item label="测试用例">{String(ruleJobPreview.validation_summary.case_count || '-')}</Descriptions.Item>
+            <Descriptions.Item label="历史回放">
+              {ruleJobPreview.historical_replay ? successTag(ruleJobPreview.historical_replay.success as boolean | undefined) : <Tag>未执行</Tag>}
+            </Descriptions.Item>
+            <Descriptions.Item label="回放命中">{String(ruleJobPreview.historical_replay?.matched_change_count ?? '-')}</Descriptions.Item>
+            <Descriptions.Item label="回放冲突">{String(ruleJobPreview.historical_replay?.collision_count ?? '-')}</Descriptions.Item>
+            <Descriptions.Item label="Agent Loop">
+              {ruleJobPreview.agent_loop
+                ? `${ruleJobPreview.agent_loop.attempt_count || 0} 轮 / ${ruleJobPreview.agent_loop.next_action || '-'}`
+                : '-'}
+            </Descriptions.Item>
+          </Descriptions>
+          <Typography.Title level={5} style={{ margin: 0 }}>候选资产摘要</Typography.Title>
+          <Typography.Paragraph copyable style={{ ...codePanelStyle, maxHeight: 320, whiteSpace: 'pre-wrap' }}>
+            {JSON.stringify(ruleJobPreview.candidate_preview || {}, null, 2)}
+          </Typography.Paragraph>
+          <Typography.Title level={5} style={{ margin: 0 }}>输入摘要</Typography.Title>
+          <Typography.Paragraph copyable style={{ ...codePanelStyle, maxHeight: 240, whiteSpace: 'pre-wrap' }}>
+            {JSON.stringify(ruleJobPreview.payload_summary || {}, null, 2)}
+          </Typography.Paragraph>
+          <Typography.Title level={5} style={{ margin: 0 }}>验证报告</Typography.Title>
+          <Typography.Paragraph copyable style={{ ...codePanelStyle, maxHeight: 360, whiteSpace: 'pre-wrap' }}>
+            {JSON.stringify(ruleJobPreview.validation_report || {}, null, 2)}
           </Typography.Paragraph>
         </Space> : null}
     </Drawer>

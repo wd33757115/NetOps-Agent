@@ -984,6 +984,9 @@ class EventRuleVersionRecord(Base):
     severity = Column(String(32), nullable=False, index=True)
     condition_json = Column(JSON, nullable=False)
     status = Column(String(32), nullable=False, default="draft", index=True)
+    source_job_id = Column(String(64), nullable=True, index=True)
+    validation_report_json = Column(JSON, nullable=True)
+    digest = Column(String(64), nullable=True, index=True)
     created_by = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     activated_at = Column(DateTime, nullable=True)
@@ -1217,6 +1220,8 @@ class ObservationContractRecord(Base):
     version = Column(Integer, nullable=False, default=1)
     contract_sha256 = Column(String(64), nullable=False, index=True)
     status = Column(String(32), nullable=False, default="active", index=True)
+    source_job_id = Column(String(64), nullable=True, index=True)
+    approval_json = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
         DateTime,
@@ -1240,6 +1245,75 @@ class ObservationContractRecord(Base):
             "schema_id",
             unique=True,
             postgresql_where=text("status = 'active'"),
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class ChangePolicyRecord(Base):
+    """Versioned change policy metadata."""
+
+    __tablename__ = "netops_change_policies"
+
+    id = Column(String(64), primary_key=True)
+    name = Column(String(128), nullable=False, unique=True, index=True)
+    observation_type = Column(String(256), nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    status = Column(String(32), nullable=False, default="draft", index=True)
+    current_version = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class ChangePolicyVersionRecord(Base):
+    """Immutable ChangePolicy proposal version consumed by Change Detector."""
+
+    __tablename__ = "netops_change_policy_versions"
+
+    id = Column(String(64), primary_key=True)
+    policy_id = Column(
+        String(64),
+        ForeignKey("netops_change_policies.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    version = Column(Integer, nullable=False)
+    observation_type = Column(String(256), nullable=False, index=True)
+    semantic_type = Column(String(64), nullable=False, index=True)
+    compare_mode = Column(String(64), nullable=False, index=True)
+    policy_json = Column(JSON, nullable=False)
+    validation_report_json = Column(JSON, nullable=True)
+    status = Column(String(32), nullable=False, default="draft", index=True)
+    source_job_id = Column(String(64), nullable=True, index=True)
+    digest = Column(String(64), nullable=False, index=True)
+    created_by = Column(String(128), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    activated_at = Column(DateTime, nullable=True)
+    deprecated_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("uq_change_policy_version", "policy_id", "version", unique=True),
+        Index(
+            "uq_change_policy_active_version",
+            "policy_id",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+        ),
+        Index(
+            "uq_change_policy_version_digest",
+            "policy_id",
+            "version",
+            "digest",
+            unique=True,
         ),
     )
 
@@ -1443,6 +1517,10 @@ class RuleGenerationJobRecord(Base):
     status = Column(String(32), nullable=False, default="draft", index=True)
     source_ref = Column(String(512), nullable=True, index=True)
     asset_ref = Column(String(512), nullable=True, index=True)
+    asset_type = Column(String(64), nullable=True, index=True)
+    asset_id = Column(String(64), nullable=True, index=True)
+    asset_version_id = Column(String(64), nullable=True, index=True)
+    asset_digest = Column(String(64), nullable=True, index=True)
     payload_json = Column(JSON, nullable=False, default=dict)
     validation_report_json = Column(JSON, nullable=True)
     approval_required = Column(Boolean, nullable=False, default=True)

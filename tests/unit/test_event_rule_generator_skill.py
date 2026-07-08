@@ -81,6 +81,31 @@ def test_event_rule_generator_builds_cpu_threshold_rules():
     }
 
 
+def test_event_rule_generator_does_not_classify_unknown_gauge_as_cpu():
+    result = generate_and_validate_event_rules(
+        contract={
+            "entity_type": "temperature_sensor",
+            "required_fields": ["sensor", "temperature"],
+            "primary_keys": ["sensor"],
+            "state_semantics": {
+                "sensor": {"semantic_type": "identity"},
+                "temperature": {"semantic_type": "gauge", "unit": "celsius"},
+            },
+        },
+        change_policy={
+            "observation_type": "environment.temperature",
+            "semantic_type": "gauge",
+            "compare_mode": "threshold_and_deadband",
+            "thresholds": {"high": 80},
+            "recovery_threshold": 70,
+        },
+    )
+
+    assert result["success"] is False
+    assert result["generated_rule_count"] == 0
+    assert result["rules"] == []
+
+
 def test_event_rule_generator_skill(tmp_path: Path):
     result = _run_skill(
         tmp_path,
@@ -99,9 +124,14 @@ def test_event_rule_generator_skill(tmp_path: Path):
                 "semantic_type": "state",
                 "compare_mode": "state_transition",
             },
+            "agent_loop": True,
         },
     )
 
     assert result["success"] is True
     assert result["rules"][0]["event_type"] == "FanFailed"
     assert result["reports"][0]["validation"]["success"] is True
+    assert result["agent_loop"]["ready_for_approval"] is True
+    attempt = result["agent_loop"]["attempts"][0]
+    assert attempt["stage"] == "event_rule_generation"
+    assert attempt["output_summary"]["generated_rule_count"] >= 1

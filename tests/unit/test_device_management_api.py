@@ -277,6 +277,83 @@ def test_list_devices_can_include_patrol_readiness(monkeypatch):
     assert readiness["violations"][0]["canonical_command"] == "show inventory"
 
 
+def test_list_devices_patrol_readiness_blocks_missing_runtime_rule_assets(monkeypatch):
+    class FakeRepository:
+        def get_devices_by_filter(self, **kwargs):
+            return [
+                {
+                    "device_id": "device-1",
+                    "device_name": "SW1",
+                    "ip": "10.0.0.1",
+                    "password": "secret",
+                    "vendor": "Cisco",
+                    "model": "WS-C2960XR-24TS-I",
+                    "command_file": "cisco-access",
+                    "attributes": {},
+                }
+            ]
+
+    class FakeBundle:
+        def to_dict(self):
+            return {
+                "ready": False,
+                "observation_contracts": {"cli:template-1": {"entity_type": "interface"}},
+                "change_policies": {},
+                "event_rules": [{"rule_id": "InterfaceDown"}],
+                "missing_observation_contracts": [],
+                "missing_change_policies": ["interface.oper_status"],
+                "counts": {
+                    "observation_contracts": 1,
+                    "change_policies": 0,
+                    "event_rules": 1,
+                },
+            }
+
+    class FakeRuntimeResolver:
+        def load_bundle(self, *, observation_schemas, include_event_rules):
+            assert observation_schemas == [("cli", "template-1")]
+            assert include_event_rules is True
+            return FakeBundle()
+
+    monkeypatch.setattr(devices_api, "DeviceRepository", FakeRepository)
+    monkeypatch.setattr(devices_api, "RuntimeRuleAssetResolver", FakeRuntimeResolver)
+    monkeypatch.setattr(
+        devices_api.CollectionPolicyResolver,
+        "_load_active_profile",
+        lambda self, profile_name, action: {
+            "profile_version_id": "profile-version-1",
+            "commands": ["show version"],
+        },
+    )
+    monkeypatch.setattr(
+        devices_api,
+        "_production_parser_coverage",
+        lambda device, commands: [
+            {
+                "canonical_command": "show version",
+                "policy_status": "eligible",
+                "coverage_status": "ready",
+                "template_id": "template-1",
+            },
+        ],
+    )
+
+    result = devices_api.list_devices(
+        include_patrol_readiness=True,
+        limit=100,
+        offset=0,
+    )
+
+    readiness = result["items"][0]["patrol_readiness"]
+    assert readiness["status"] == "blocked"
+    assert readiness["ready_count"] == 1
+    assert readiness["blocked_count"] == 0
+    assert readiness["runtime_asset_health"]["status"] == "blocked"
+    assert readiness["runtime_asset_health"]["missing_change_policies"] == [
+        "interface.oper_status"
+    ]
+
+
 def test_preview_device_plan_returns_execution_plan(monkeypatch):
     class FakeRepository:
         def get_devices_by_filter(self, **kwargs):
@@ -1302,6 +1379,96 @@ def test_preview_device_patrol_launch_blocks_production_without_parser_coverage(
     assert result["error_count"] == 1
     assert result["errors"][0]["failure_code"] == "parser_coverage_not_ready"
     assert result["errors"][0]["coverage_violations"][0]["canonical_command"] == "show inventory"
+
+
+def test_preview_device_patrol_launch_blocks_missing_runtime_rule_assets(monkeypatch):
+    class FakeRepository:
+        def get_devices_by_filter(self, **kwargs):
+            return [
+                {
+                    "device_id": "device-1",
+                    "device_name": "SW1",
+                    "ip": "10.0.0.1",
+                    "vendor": "Cisco",
+                    "model": "WS-C2960XR-24TS-I",
+                    "password": "secret",
+                }
+            ]
+
+    class FakePlan:
+        commands = ["show inventory"]
+        profile_version_id = "profile-version-1"
+        profile_name = "site-patrol"
+        policy_source = "profile_binding"
+
+        def to_metadata(self):
+            return {
+                "device_id": "device-1",
+                "action": "patrol",
+                "mode": "production",
+                "profile_version_id": self.profile_version_id,
+                "profile_name": self.profile_name,
+                "policy_source": self.policy_source,
+                "collection_items": [{"command": item} for item in self.commands],
+            }
+
+        def command_texts(self):
+            return self.commands
+
+    class FakeResolver:
+        def build_plan(self, *, device, action, mode):
+            return FakePlan()
+
+    class FakeBundle:
+        def to_dict(self):
+            return {
+                "ready": False,
+                "observation_contracts": {"cli:template-1": {"entity_type": "interface"}},
+                "change_policies": {},
+                "event_rules": [],
+                "missing_observation_contracts": [],
+                "missing_change_policies": ["interface.oper_status"],
+                "counts": {
+                    "observation_contracts": 1,
+                    "change_policies": 0,
+                    "event_rules": 0,
+                },
+            }
+
+    class FakeRuntimeResolver:
+        def load_bundle(self, *, observation_schemas, include_event_rules):
+            assert observation_schemas == [("cli", "template-1")]
+            assert include_event_rules is True
+            return FakeBundle()
+
+    monkeypatch.setattr(devices_api, "DeviceRepository", FakeRepository)
+    monkeypatch.setattr(devices_api, "CollectionPolicyResolver", FakeResolver)
+    monkeypatch.setattr(devices_api, "RuntimeRuleAssetResolver", FakeRuntimeResolver)
+    monkeypatch.setattr(
+        devices_api,
+        "_production_parser_coverage",
+        lambda device, commands: [
+            {
+                "canonical_command": "show inventory",
+                "policy_status": "eligible",
+                "coverage_status": "ready",
+                "template_id": "template-1",
+            }
+        ],
+    )
+
+    result = devices_api.preview_device_patrol_launch(
+        devices_api.DevicePatrolLaunchRequest(device_ids=["device-1"], mode="production")
+    )
+
+    assert result["success"] is False
+    assert result["ready_count"] == 0
+    assert result["error_count"] == 1
+    assert result["errors"][0]["failure_code"] == "runtime_rule_assets_not_ready"
+    assert result["errors"][0]["runtime_asset_health"]["status"] == "blocked"
+    assert result["errors"][0]["runtime_asset_health"]["missing_change_policies"] == [
+        "interface.oper_status"
+    ]
 
 
 def test_preview_device_patrol_launch_blocks_missing_credential(monkeypatch):

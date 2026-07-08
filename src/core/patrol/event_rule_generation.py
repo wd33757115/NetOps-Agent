@@ -179,7 +179,10 @@ def generate_event_rule_definitions(
         fields = _gauge_fields(contract) or [observation_type or "value"]
         high = float((policy.thresholds or {}).get("high") or 90)
         lowered = " ".join([observation_type, *fields]).lower()
-        is_memory = "memory" in lowered or "mem" in lowered
+        is_cpu = observation_type == "device.cpu.utilization" or "cpu" in lowered
+        is_memory = observation_type == "device.memory.utilization" or "memory" in lowered or "mem" in lowered
+        if not is_cpu and not is_memory:
+            return definitions
         definitions.append(
             EventRuleDefinition(
                 rule_id="memory-high" if is_memory else "cpu-high",

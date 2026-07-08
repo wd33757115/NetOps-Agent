@@ -50,6 +50,10 @@ def match_rule_set(change: dict[str, Any], rules: list[EventRule]) -> EventRule 
     return None
 
 
+def matched_rules(change: dict[str, Any], rules: list[EventRule]) -> list[EventRule]:
+    return [rule for rule in rules if rule.match(change)]
+
+
 def validate_event_rule_set(
     cases: list[EventRuleValidationCase],
     *,
@@ -86,6 +90,87 @@ def validate_event_rule_set(
         "failed_count": total - passed,
         "pass_rate": (passed / total) if total else 1.0,
         "rows": rows,
+    }
+
+
+def detect_rule_collisions(
+    cases: list[EventRuleValidationCase],
+    rules: list[EventRule],
+    *,
+    existing_rules: list[EventRule] | None = None,
+) -> dict[str, Any]:
+    collisions: list[dict[str, Any]] = []
+    for case in cases:
+        candidate_matches = matched_rules(case.change, rules)
+        if len(candidate_matches) > 1:
+            collisions.append(
+                {
+                    "name": case.name,
+                    "collision_type": "candidate_candidate",
+                    "rule_ids": [rule.rule_id for rule in candidate_matches],
+                    "event_types": [rule.event_type for rule in candidate_matches],
+                    "change": sanitize_change(case.change),
+                }
+            )
+        if existing_rules:
+            existing_matches = matched_rules(case.change, existing_rules)
+            if candidate_matches and existing_matches:
+                collisions.append(
+                    {
+                        "name": case.name,
+                        "collision_type": "candidate_active",
+                        "rule_ids": [
+                            *(rule.rule_id for rule in candidate_matches),
+                            *(rule.rule_id for rule in existing_matches),
+                        ],
+                        "event_types": [
+                            *(rule.event_type for rule in candidate_matches),
+                            *(rule.event_type for rule in existing_matches),
+                        ],
+                        "change": sanitize_change(case.change),
+                    }
+                )
+    return {
+        "success": not collisions,
+        "collision_count": len(collisions),
+        "collisions": collisions,
+    }
+
+
+def validate_event_rule_definitions(
+    definitions: list[EventRuleDefinition],
+    *,
+    existing_rules: list[EventRule] | None = None,
+) -> dict[str, Any]:
+    rules = [definition.to_rule() for definition in definitions]
+    generated_cases: list[EventRuleValidationCase] = []
+    rule_results: list[dict[str, Any]] = []
+    for definition in definitions:
+        cases = generate_validation_cases_for_rule(definition)
+        generated_cases.extend(cases)
+        rule_results.append(
+            {
+                "rule_id": definition.rule_id,
+                "event_type": definition.event_type,
+                **validate_event_rule_set(cases, rules=rules),
+            }
+        )
+    generated_result = validate_event_rule_set(generated_cases, rules=rules)
+    collision_result = detect_rule_collisions(
+        generated_cases,
+        rules,
+        existing_rules=existing_rules,
+    )
+    return {
+        "success": generated_result["success"] and collision_result["success"],
+        "rule_count": len(definitions),
+        "case_count": generated_result["case_count"],
+        "passed_count": generated_result["passed_count"],
+        "failed_count": generated_result["failed_count"],
+        "pass_rate": generated_result["pass_rate"],
+        "rule_results": rule_results,
+        "generated_result": generated_result,
+        "collision_result": collision_result,
     }
 
 
@@ -335,10 +420,7 @@ def generate_validation_cases_for_rule(
 
 
 def validate_event_rule_definition(definition: EventRuleDefinition) -> dict[str, Any]:
-    return validate_event_rule_set(
-        generate_validation_cases_for_rule(definition),
-        rules=[definition.to_rule()],
-    )
+    return validate_event_rule_definitions([definition])
 
 
 def validate_event_rule_pack(path: str | None = None) -> dict[str, Any]:

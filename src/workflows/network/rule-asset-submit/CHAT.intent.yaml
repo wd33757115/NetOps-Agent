@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
+# SPDX-License-Identifier: Apache-2.0
+
+workflow: rule-asset-submit
+priority: 96
+description: 聊天触发已验证规则资产候选提交审批
+
+match:
+  require_any:
+    - 提交审批
+    - 提交规则资产
+    - rule asset submit
+  require_any_secondary:
+    - 规则资产
+    - 候选资产
+    - job
+    - 任务
+
+required_context:
+  - job_id
+
+context_from_query:
+  job_id: job_id
+
+context_from_state:
+  job_id: selected_rule_generation_job_id
+
+context_defaults:
+  actor: chat
+
+response_template: |
+  [OK] 已启动规则资产提交审批 Workflow
+
+  - **流程 ID**: `{run_id}`
+  - **流程**: {workflow_description}
+
+  该流程只把已验证候选提交到审批队列，不会直接激活生产规则。

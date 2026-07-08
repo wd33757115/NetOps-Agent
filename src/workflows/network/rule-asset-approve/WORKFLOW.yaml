@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
+# SPDX-License-Identifier: Apache-2.0
+
+name: rule-asset-approve
+description: Approve and activate a pending rule asset candidate.
+version: "1.0"
+
+test:
+  context:
+    job_id: rule-generation-job-id
+    actor: workflow
+  required_context:
+    - job_id
+
+steps:
+  - name: approve_candidate
+    label: Approve and activate rule asset
+    skill: rule-asset-approver
+    inputs:
+      job_id: ${context.job_id}
+      actor: ${context.actor}
+
+on_complete:
+  message: Rule asset candidate has been approved and activated.
+  notification:
+    title: Rule Asset Activated
+    body: The approved asset version is now active in the deterministic runtime.
+    level: success

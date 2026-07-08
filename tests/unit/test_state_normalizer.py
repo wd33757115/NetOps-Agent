@@ -590,6 +590,161 @@ def test_observation_change_detector_accepts_explicit_previous_run(monkeypatch):
     assert result["changes"][0]["new"] == "new-model"
 
 
+def test_observation_change_detector_uses_active_change_policy(monkeypatch):
+    class FakePolicyRepository:
+        def get_active_policy(self, observation_type):
+            assert observation_type == "device.cpu.utilization"
+            return {
+                "policy_id": "policy-1",
+                "version_id": "policy-version-1",
+                "policy": {
+                    "observation_type": "device.cpu.utilization",
+                    "semantic_type": "gauge",
+                    "compare_mode": "threshold_and_deadband",
+                    "deadband": 5,
+                    "thresholds": {"high": 95},
+                    "recovery_threshold": 90,
+                },
+            }
+
+    class FakeRepository:
+        def list_run_observations(self, run_id):
+            return [
+                {
+                    "id": "obs-current",
+                    "run_id": run_id,
+                    "snapshot_id": "snapshot-current",
+                    "mode": "production",
+                    "device_id": "SW1",
+                    "canonical_command": "display cpu",
+                    "entity_type": "cpu",
+                    "entity_key": "__singleton__",
+                    "field_name": "cpu_5s",
+                    "value_json": 91,
+                    "value_number": 91.0,
+                    "observed_at": "2026-06-20T10:00:00+00:00",
+                    "confidence": 1.0,
+                    "metadata_json": {"observation_type": "device.cpu.utilization"},
+                }
+            ]
+
+        def list_prior_observations_for_run(self, run_id):
+            return [
+                {
+                    "id": "obs-previous",
+                    "run_id": "run-previous",
+                    "snapshot_id": "snapshot-previous",
+                    "mode": "production",
+                    "device_id": "SW1",
+                    "canonical_command": "display cpu",
+                    "entity_type": "cpu",
+                    "entity_key": "__singleton__",
+                    "field_name": "cpu_5s",
+                    "value_json": 89,
+                    "value_number": 89.0,
+                    "observed_at": "2026-06-20T09:00:00+00:00",
+                    "confidence": 1.0,
+                    "metadata_json": {"observation_type": "device.cpu.utilization"},
+                }
+            ]
+
+    monkeypatch.setattr(
+        "src.core.patrol.change_detector.StateRepository", FakeRepository
+    )
+    monkeypatch.setattr(
+        "src.core.patrol.change_detector.ChangePolicyRepository", FakePolicyRepository
+    )
+    monkeypatch.setattr(
+        "src.core.patrol.change_detector.save_changes",
+        lambda changes: len(changes),
+    )
+
+    result = detect_observation_changes_against_history(
+        current_run_id="run-current",
+        persist=True,
+    )
+
+    assert result["change_count"] == 0
+
+
+def test_observation_change_detector_emits_threshold_crossing_with_policy(monkeypatch):
+    class FakePolicyRepository:
+        def get_active_policy(self, observation_type):
+            return {
+                "policy_id": "policy-1",
+                "version_id": "policy-version-1",
+                "policy": {
+                    "observation_type": observation_type,
+                    "semantic_type": "gauge",
+                    "compare_mode": "threshold_and_deadband",
+                    "deadband": 5,
+                    "thresholds": {"high": 95},
+                    "recovery_threshold": 90,
+                },
+            }
+
+    class FakeRepository:
+        def list_run_observations(self, run_id):
+            return [
+                {
+                    "id": "obs-current",
+                    "run_id": run_id,
+                    "snapshot_id": "snapshot-current",
+                    "mode": "production",
+                    "device_id": "SW1",
+                    "canonical_command": "display cpu",
+                    "entity_type": "cpu",
+                    "entity_key": "__singleton__",
+                    "field_name": "cpu_5s",
+                    "value_json": 96,
+                    "value_number": 96.0,
+                    "observed_at": "2026-06-20T10:00:00+00:00",
+                    "confidence": 1.0,
+                    "metadata_json": {"observation_type": "device.cpu.utilization"},
+                }
+            ]
+
+        def list_prior_observations_for_run(self, run_id):
+            return [
+                {
+                    "id": "obs-previous",
+                    "run_id": "run-previous",
+                    "snapshot_id": "snapshot-previous",
+                    "mode": "production",
+                    "device_id": "SW1",
+                    "canonical_command": "display cpu",
+                    "entity_type": "cpu",
+                    "entity_key": "__singleton__",
+                    "field_name": "cpu_5s",
+                    "value_json": 89,
+                    "value_number": 89.0,
+                    "observed_at": "2026-06-20T09:00:00+00:00",
+                    "confidence": 1.0,
+                    "metadata_json": {"observation_type": "device.cpu.utilization"},
+                }
+            ]
+
+    monkeypatch.setattr(
+        "src.core.patrol.change_detector.StateRepository", FakeRepository
+    )
+    monkeypatch.setattr(
+        "src.core.patrol.change_detector.ChangePolicyRepository", FakePolicyRepository
+    )
+    monkeypatch.setattr(
+        "src.core.patrol.change_detector.save_changes",
+        lambda changes: len(changes),
+    )
+
+    result = detect_observation_changes_against_history(
+        current_run_id="run-current",
+        persist=True,
+    )
+
+    assert result["change_count"] == 1
+    assert result["changes"][0]["old"] == 89
+    assert result["changes"][0]["new"] == 96
+
+
 def test_observation_change_detector_filters_selected_devices(monkeypatch):
     calls = {}
 
