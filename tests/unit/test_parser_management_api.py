@@ -76,10 +76,7 @@ def test_event_rule_validation_endpoint_uses_builtin_generic_cases():
     assert result["failed_count"] == 0
     assert result["case_count"] >= 8
     assert result["rule_count"] >= 10
-    assert all(
-        "device_id" not in row["change"]
-        for row in result["invariant_result"]["rows"]
-    )
+    assert all("device_id" not in row["change"] for row in result["invariant_result"]["rows"])
 
 
 def test_event_rule_replay_endpoint(monkeypatch):
@@ -204,9 +201,7 @@ def test_change_policy_list_endpoint(monkeypatch):
         limit=50,
     )
 
-    assert result["items"] == [
-        {"version_id": "policy-version-1", "version_status": "draft"}
-    ]
+    assert result["items"] == [{"version_id": "policy-version-1", "version_status": "draft"}]
     assert captured == {
         "status": "draft",
         "observation_type": "device.cpu.utilization",
@@ -446,9 +441,7 @@ def test_rule_generation_job_validation_report_endpoint(monkeypatch):
 
     result = parser_api.attach_rule_generation_validation_report(
         "job-1",
-        parser_api.RuleGenerationJobValidationRequest(
-            validation_report={"success": True}
-        ),
+        parser_api.RuleGenerationJobValidationRequest(validation_report={"success": True}),
     )
 
     assert result["validation_report_json"] == {"success": True}
@@ -640,6 +633,54 @@ def test_rule_generation_job_submit_candidate_rejects_invalid_state(monkeypatch)
         assert exc.status_code == 409
     else:
         raise AssertionError("submit should reject invalid jobs")
+
+
+def test_rule_generation_job_generation_context_endpoint(monkeypatch):
+    class FakeService:
+        def build_generation_context(self, job_id, *, context_overrides):
+            assert job_id == "job-1"
+            assert context_overrides == {"records": [{"field": "value"}]}
+            return {
+                "success": True,
+                "ready": True,
+                "workflow": "rule-asset-generation",
+                "context": {"records": [{"field": "value"}]},
+                "missing_context": [],
+            }
+
+    monkeypatch.setattr(parser_api, "RuleAssetTemplateActivationService", FakeService)
+
+    result = parser_api.preview_rule_asset_generation_context(
+        "job-1",
+        parser_api.RuleAssetGenerationContextRequest(
+            context_overrides={"records": [{"field": "value"}]},
+        ),
+    )
+
+    assert result["ready"] is True
+    assert result["workflow"] == "rule-asset-generation"
+
+
+def test_rule_generation_job_start_generation_endpoint(monkeypatch):
+    class FakeService:
+        def start_generation_workflow(self, job_id, *, context_overrides, actor):
+            assert job_id == "job-1"
+            assert context_overrides == {"records": [{"field": "value"}]}
+            assert actor == "operator"
+            return {"success": True, "run_id": "workflow-1"}
+
+    monkeypatch.setattr(parser_api, "RuleAssetTemplateActivationService", FakeService)
+
+    result = parser_api.start_rule_asset_generation_workflow(
+        "job-1",
+        parser_api.RuleAssetGenerationContextRequest(
+            context_overrides={"records": [{"field": "value"}]},
+            actor="operator",
+        ),
+    )
+
+    assert result["success"] is True
+    assert result["run_id"] == "workflow-1"
 
 
 def test_rule_generation_job_reject_endpoint(monkeypatch):

@@ -18,6 +18,7 @@ import {
   type ParserChangePolicy, type ParserObservationContract, type ParserRuleGenerationJob,
   type ParserRuleGenerationJobPreview, type ParserReplayReport,
   type ParserApprovalAudit, type ParserAgentLoopAttempt, type ParserRuntimeRuleAssetBundle,
+  type ParserRuleGenerationContextPreview,
 } from '../../services/api'
 import { useIsMobile } from '../../hooks/useBreakpoint'
 
@@ -129,6 +130,11 @@ const hasRevisionRequest = (report?: Record<string, unknown> | null) => {
 const isAgentLoopRevisionJob = (row: ParserRuleGenerationJob) =>
   Boolean(row.source_ref?.startsWith('agent_loop_revision:'))
 
+const isParserTemplateSeedJob = (row: ParserRuleGenerationJob) =>
+  row.status === 'draft'
+  && row.source_ref?.startsWith('parser_template:')
+  && asRecord(row.payload_json)?.workflow === 'rule-asset-generation'
+
 const canSubmitRuleCandidate = (row: ParserRuleGenerationJob) =>
   row.status === 'validating'
   && !row.asset_ref
@@ -141,6 +147,7 @@ const ruleJobNextAction = (row: ParserRuleGenerationJob) => {
   if (row.status === 'rejected') return '已拒绝，可查看原因'
   if (row.status === 'deprecated') return '已废弃，仅保留审计'
   if (isAgentLoopRevisionJob(row) && ['draft', 'validating'].includes(row.status)) return '执行修订'
+  if (isParserTemplateSeedJob(row)) return '补充脱敏上下文并生成候选'
   if (hasRevisionRequest(row.validation_report_json)) return '生成修订'
   if (row.status === 'failed') return '查看失败并重新生成'
   if (row.status === 'draft') return '等待验证'
@@ -155,6 +162,7 @@ const ruleJobActionKey = (row: ParserRuleGenerationJob) => {
   if (row.status === 'rejected') return 'rejected'
   if (row.status === 'deprecated') return 'deprecated'
   if (isAgentLoopRevisionJob(row) && ['draft', 'validating'].includes(row.status)) return 'execute_revision'
+  if (isParserTemplateSeedJob(row)) return 'start_generation'
   if (hasRevisionRequest(row.validation_report_json)) return 'revise'
   if (row.status === 'failed') return 'failed'
   if (row.status === 'draft') return 'draft'
@@ -168,8 +176,23 @@ const ruleJobLifecycleHint = (row: ParserRuleGenerationJob) => {
   if (row.status === 'rejected') return '拒绝后的候选不会进入生产，可通过详情查看验证和治理原因。'
   if (row.status === 'deprecated') return '废弃版本不再参与运行时匹配，但保留版本、回放和审批证据。'
   if (isAgentLoopRevisionJob(row)) return '这是 Agent Loop 修订任务；执行后仍需验证、提交和审批。'
+  if (isParserTemplateSeedJob(row)) return '这是 Parser 模板激活后自动创建的种子任务；需要补充脱敏 records 或历史摘要后启动规则资产生成 Workflow。'
   if (hasRevisionRequest(row.validation_report_json)) return '验证器给出了修订反馈，可以生成新的候选版本。'
   return '规则资产必须经过生成、验证、提交审批、审批激活后才会影响生产链路。'
+}
+
+const defaultGenerationContextOverrides = (row: ParserRuleGenerationJob) => {
+  const payload = asRecord(row.payload_json)
+  const missing = Array.isArray(payload?.missing_context)
+    ? payload?.missing_context.map((item) => String(item))
+    : []
+  const value: Record<string, unknown> = {}
+  if (missing.includes('records')) value.records = []
+  if (missing.includes('historical_values')) value.historical_values = []
+  if (missing.includes('observation_type')) value.observation_type = ''
+  if (missing.includes('field_name')) value.field_name = ''
+  if (missing.includes('field_semantics')) value.field_semantics = {}
+  return JSON.stringify(Object.keys(value).length ? value : { records: [] }, null, 2)
 }
 
 const governanceStatusLabel = (status?: string) => {
@@ -193,6 +216,10 @@ const ParserControlTab: React.FC = () => {
   const [ruleJobPreviewOpen, setRuleJobPreviewOpen] = useState(false)
   const [ruleJobPreviewLoading, setRuleJobPreviewLoading] = useState(false)
   const [ruleJobPreview, setRuleJobPreview] = useState<ParserRuleGenerationJobPreview | null>(null)
+  const [generationContextOpen, setGenerationContextOpen] = useState(false)
+  const [generationContextJob, setGenerationContextJob] = useState<ParserRuleGenerationJob | null>(null)
+  const [generationContextOverrides, setGenerationContextOverrides] = useState('{\n  "records": []\n}')
+  const [generationContextPreview, setGenerationContextPreview] = useState<ParserRuleGenerationContextPreview | null>(null)
   const [jobOpen, setJobOpen] = useState(false)
   const [jobId, setJobId] = useState<string | null>(null)
   const [templateStatus, setTemplateStatus] = useState<string>()
@@ -593,6 +620,49 @@ const ParserControlTab: React.FC = () => {
     },
   )
 
+  const previewGenerationContext = useMutation(
+    ({ id, overrides }: { id: string; overrides: Record<string, unknown> }) =>
+      parserApi.previewRuleGenerationContext(id, { context_overrides: overrides }),
+    {
+      onSuccess: setGenerationContextPreview,
+      onError: (error: any) => message.error(error?.response?.data?.detail || '生成上下文预览失败'),
+    },
+  )
+
+  const startRuleAssetGeneration = useMutation(
+    ({ id, overrides }: { id: string; overrides: Record<string, unknown> }) =>
+      parserApi.startRuleAssetGeneration(id, { context_overrides: overrides, actor: 'ui' }),
+    {
+      onSuccess: (result: any) => {
+        message.success(`已启动规则资产生成 Workflow：${result?.run_id || ''}`)
+        setGenerationContextOpen(false)
+        setGenerationContextPreview(null)
+        refresh()
+      },
+      onError: (error: any) => message.error(error?.response?.data?.detail || '启动规则资产生成失败'),
+    },
+  )
+
+  const parseGenerationOverrides = () => {
+    try {
+      const parsed = JSON.parse(generationContextOverrides || '{}')
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('context overrides must be an object')
+      }
+      return parsed as Record<string, unknown>
+    } catch (error: any) {
+      message.error(error?.message || '上下文 JSON 格式错误')
+      return null
+    }
+  }
+
+  const openGenerationContext = (row: ParserRuleGenerationJob) => {
+    setGenerationContextJob(row)
+    setGenerationContextOverrides(defaultGenerationContextOverrides(row))
+    setGenerationContextPreview(null)
+    setGenerationContextOpen(true)
+  }
+
   const renderRuleGenerationActions = (row: ParserRuleGenerationJob) => (
     <Space wrap>
       <Button size="small" icon={<EyeOutlined />} loading={ruleJobPreviewLoading}
@@ -639,6 +709,12 @@ const ParserControlTab: React.FC = () => {
         <Button size="small" icon={<PlayCircleOutlined />} loading={ruleGenerationLifecycle.isLoading}
           onClick={() => ruleGenerationLifecycle.mutate({ type: 'execute_revision', id: row.id })}>
           执行修订
+        </Button>
+      )}
+      {isParserTemplateSeedJob(row) && (
+        <Button size="small" icon={<PlayCircleOutlined />}
+          onClick={() => openGenerationContext(row)}>
+          补上下文
         </Button>
       )}
       {canSubmitRuleCandidate(row) && (
@@ -2026,6 +2102,76 @@ const ParserControlTab: React.FC = () => {
             {JSON.stringify(ruleJobPreview.validation_report || {}, null, 2)}
           </Typography.Paragraph>
         </Space> : null}
+    </Drawer>
+
+    <Drawer title="补充规则资产生成上下文" open={generationContextOpen}
+      onClose={() => {
+        setGenerationContextOpen(false)
+        setGenerationContextJob(null)
+        setGenerationContextPreview(null)
+      }}
+      width={isMobile ? '100vw' : 920} destroyOnClose
+      extra={<Space>
+        <Button icon={<EyeOutlined />} loading={previewGenerationContext.isLoading}
+          disabled={!generationContextJob}
+          onClick={() => {
+            const overrides = parseGenerationOverrides()
+            if (generationContextJob && overrides) {
+              previewGenerationContext.mutate({ id: generationContextJob.id, overrides })
+            }
+          }}>
+          预览上下文
+        </Button>
+        <Button type="primary" icon={<PlayCircleOutlined />}
+          loading={startRuleAssetGeneration.isLoading}
+          disabled={!generationContextJob || !generationContextPreview?.ready}
+          onClick={() => {
+            const overrides = parseGenerationOverrides()
+            if (generationContextJob && overrides) {
+              startRuleAssetGeneration.mutate({ id: generationContextJob.id, overrides })
+            }
+          }}>
+          启动生成
+        </Button>
+      </Space>}>
+      {generationContextJob ? <Space direction="vertical" size={16} style={{ width: '100%' }}>
+        <Alert type="info" showIcon
+          message="只填写脱敏结构化 records 或统计摘要"
+          description="这里不会接收 raw CLI、密码、token 或客户私有文本。预览通过后才会启动 rule-asset-generation Workflow，运行时生产链路不会调用 LLM。" />
+        <Descriptions size="small" bordered column={isMobile ? 1 : 3}>
+          <Descriptions.Item label="种子任务">{generationContextJob.id}</Descriptions.Item>
+          <Descriptions.Item label="来源">{generationContextJob.source_ref || '-'}</Descriptions.Item>
+          <Descriptions.Item label="状态">
+            <Tag color={statusColor(generationContextJob.status)}>
+              {governanceStatusLabel(generationContextJob.status)}
+            </Tag>
+          </Descriptions.Item>
+          <Descriptions.Item label="缺失上下文" span={isMobile ? 1 : 3}>
+            {(asRecord(generationContextJob.payload_json)?.missing_context as unknown[] | undefined)?.length
+              ? (asRecord(generationContextJob.payload_json)?.missing_context as unknown[]).map((item) => (
+                <Tag key={String(item)} color="orange">{String(item)}</Tag>
+              ))
+              : <Tag color="green">无</Tag>}
+          </Descriptions.Item>
+        </Descriptions>
+        <Input.TextArea rows={10} value={generationContextOverrides}
+          onChange={(event) => {
+            setGenerationContextOverrides(event.target.value)
+            setGenerationContextPreview(null)
+          }}
+          style={{ fontFamily: 'Consolas, Monaco, monospace' }}
+          placeholder={'{\n  "records": [\n    { "interface": "GigabitEthernet1/0/1", "status": "up" }\n  ],\n  "historical_values": []\n}'} />
+        {generationContextPreview && <Alert showIcon
+          type={generationContextPreview.ready ? 'success' : 'warning'}
+          message={generationContextPreview.ready ? '上下文已就绪，可以启动生成' : '上下文仍不完整'}
+          description={generationContextPreview.missing_context.length
+            ? `缺失：${generationContextPreview.missing_context.join('、')}`
+            : 'rule-asset-generation 将使用当前上下文生成候选资产，结果仍需验证、提交和审批。'} />}
+        {generationContextPreview && <Typography.Paragraph copyable
+          style={{ ...codePanelStyle, maxHeight: 360, whiteSpace: 'pre-wrap' }}>
+          {JSON.stringify(generationContextPreview.context || {}, null, 2)}
+        </Typography.Paragraph>}
+      </Space> : null}
     </Drawer>
 
     <Drawer title="生成任务详情" open={jobOpen} onClose={() => { setJobOpen(false); setJobId(null) }}

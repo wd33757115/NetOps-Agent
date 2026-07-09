@@ -57,7 +57,32 @@ jobs:
           POSTGRES_HOST: localhost
           REDIS_HOST: localhost
           DEBUG: "false"
-        continue-on-error: true
+      - name: Rule control required gate
+        run: |
+          pytest \
+            tests/unit/test_rule_control_jobs.py \
+            tests/unit/test_runtime_rule_assets.py \
+            tests/unit/test_rule_asset_template_activation.py \
+            tests/unit/test_rule_asset_submitter_skill.py \
+            tests/unit/test_rule_asset_persister_skill.py \
+            tests/unit/test_rule_asset_approver_skill.py \
+            -v --timeout 30
+        env:
+          POSTGRES_HOST: localhost
+          REDIS_HOST: localhost
+          DEBUG: "false"
+      - name: Device management required gate
+        run: |
+          pytest \
+            tests/unit/test_device_management_api.py \
+            tests/unit/test_device_patrol_runner.py \
+            tests/unit/test_device_identity_discovery.py \
+            tests/unit/test_device_backup_runner.py \
+            -v --timeout 30
+        env:
+          POSTGRES_HOST: localhost
+          REDIS_HOST: localhost
+          DEBUG: "false"
 
   test-django:
     needs: lint

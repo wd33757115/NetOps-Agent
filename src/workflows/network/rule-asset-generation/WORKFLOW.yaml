@@ -46,6 +46,7 @@ steps:
       vendor: ${context.vendor}
       model: ${context.model}
       records: ${context.records}
+      proposal: ${context.proposal}
       agent_loop: true
 
   - name: change_policy

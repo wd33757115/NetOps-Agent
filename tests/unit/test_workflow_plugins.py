@@ -67,6 +67,7 @@ def test_load_rule_asset_generation_workflow():
         tpl.steps[3].inputs["candidate_rules"]
         == "${steps.event_rule.result.rules}"
     )
+    assert tpl.steps[0].inputs["proposal"] == "${context.proposal}"
     assert tpl.steps[3].inputs["mode"] == "candidates"
     assert (
         tpl.steps[4].inputs["candidate_rules"]

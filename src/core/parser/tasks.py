@@ -10,6 +10,7 @@ from src.core.events.bus import EventBus
 from src.core.events.domain_event import DomainEvent
 from src.core.events.streams import STREAM_PARSER
 from src.core.parser.repository import ParserRepository
+from src.core.rule_control import RuleAssetTemplateActivationService
 
 
 def dispatch_ready_parser_jobs(
@@ -70,6 +71,7 @@ def reconcile_parser_jobs():
 def publish_parser_outbox():
     repository = ParserRepository()
     published: list[str] = []
+    rule_asset_seeds: list[dict] = []
     for row in repository.list_pending_outbox():
         message_id = EventBus.publish(
             STREAM_PARSER,
@@ -81,6 +83,25 @@ def publish_parser_outbox():
             ),
         )
         if message_id:
+            if row.event_type == "parser.template.activated":
+                try:
+                    template_id = str((row.payload_json or {}).get("template_id") or "")
+                    if template_id:
+                        rule_asset_seeds.append(
+                            RuleAssetTemplateActivationService(
+                                parser_repository=repository,
+                            ).seed_from_template(template_id)
+                        )
+                except Exception as exc:
+                    rule_asset_seeds.append(
+                        {
+                            "success": False,
+                            "created": False,
+                            "event_id": row.id,
+                            "reason": "rule_asset_seed_failed",
+                            "error": str(exc),
+                        }
+                    )
             repository.mark_outbox_published(row.id)
             published.append(row.id)
-    return {"published": published}
+    return {"published": published, "rule_asset_seeds": rule_asset_seeds}

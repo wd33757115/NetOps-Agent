@@ -244,6 +244,23 @@ class RuleGenerationJobRepository:
             row = db.get(RuleGenerationJobRecord, job_id)
             return row.to_dict() if row else None
 
+    def find_job(
+        self,
+        *,
+        job_type: str,
+        source_ref: str,
+        status_not_in: set[str] | None = None,
+    ) -> dict[str, Any] | None:
+        with get_db_session() as db:
+            query = db.query(RuleGenerationJobRecord).filter(
+                RuleGenerationJobRecord.job_type == job_type,
+                RuleGenerationJobRecord.source_ref == source_ref,
+            )
+            if status_not_in:
+                query = query.filter(~RuleGenerationJobRecord.status.in_(status_not_in))
+            row = query.order_by(RuleGenerationJobRecord.created_at.desc()).first()
+            return row.to_dict() if row else None
+
     def preview_job(self, job_id: str) -> dict[str, Any]:
         job = self.get_job(job_id)
         if job is None:

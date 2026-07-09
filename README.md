@@ -348,3 +348,13 @@ copy .env.example .env
 Copyright 2026 [wangdong](mailto:wangdong5919@163.com)
 
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for the full text.
+
+## Current Platform Snapshot
+
+- Built-in Skills: 23.
+- Alembic head: `0023_rule_asset_model_fill.py`.
+- Device Management is part of the production control plane: inventory, command profiles, parser coverage preflight, patrol preview/launch, backup runner, identity discovery, and effective-plan APIs.
+- Rule Asset control plane is active for Parser templates, ObservationContract, ChangePolicy, and EventRule assets. Parser template activation now creates safe draft seeds for `rule-asset-generation`; the UI can add sanitized context and start the workflow.
+- Runtime rule assets can be initialized with `POST /api/v1/parser/runtime-assets/seed-builtin`, which activates built-in EventRule assets and baseline ChangePolicy assets without calling an LLM.
+- Parser bootstrap imports `manifest.json` entries and auto-discovers immutable TextFSM files under `src/skills/shared/textfsm-templates/<vendor>/<model>/`, raising effective template coverage for the validation Top missing commands.
+- CI gates include required `rule_control` and `device_management` paths, and `test-fastapi` no longer uses `continue-on-error`.

@@ -15,7 +15,9 @@ from src.core.rule_control.runtime_assets import (
     RuntimeRuleAssetBundle,
     RuntimeRuleAssetResolver,
 )
+from src.core.rule_control.runtime_seed import RuntimeRuleAssetSeedService
 from src.core.rule_control.submission import RuleAssetSubmissionService
+from src.core.rule_control.template_activation import RuleAssetTemplateActivationService
 
 __all__ = [
     "RULE_GENERATION_JOB_TYPES",
@@ -29,5 +31,7 @@ __all__ = [
     "RuleGenerationJobRepository",
     "RuntimeRuleAssetBundle",
     "RuntimeRuleAssetResolver",
+    "RuntimeRuleAssetSeedService",
+    "RuleAssetTemplateActivationService",
     "transition_job",
 ]

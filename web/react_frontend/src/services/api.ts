@@ -251,6 +251,16 @@ export interface ParserRuleGenerationJobPreview {
   validation_report: Record<string, unknown>
 }
 
+export interface ParserRuleGenerationContextPreview {
+  success: boolean
+  ready: boolean
+  job_id: string
+  workflow: string
+  context: Record<string, unknown>
+  missing_context: string[]
+  privacy?: Record<string, unknown>
+}
+
 export interface ParserReplayReport {
   id: string
   job_id: string
@@ -1464,6 +1474,22 @@ export const parserApi = {
   ).data,
   submitRuleGenerationJobCandidate: async (id: string, data: { actor?: string } = {}) => (
     await api.post(`/parser/rule-generation-jobs/${id}/submit/`, data)
+  ).data,
+  previewRuleGenerationContext: async (
+    id: string,
+    data: { context_overrides?: Record<string, unknown>; actor?: string } = {},
+  ): Promise<ParserRuleGenerationContextPreview> => {
+    const response = await api.post<ParserRuleGenerationContextPreview>(
+      `/parser/rule-generation-jobs/${id}/generation-context/`,
+      data,
+    )
+    return response.data
+  },
+  startRuleAssetGeneration: async (
+    id: string,
+    data: { context_overrides?: Record<string, unknown>; actor?: string } = {},
+  ) => (
+    await api.post(`/parser/rule-generation-jobs/${id}/start-generation/`, data)
   ).data,
   previewRuleGenerationJob: async (id: string) => {
     const response = await api.get<ParserRuleGenerationJobPreview>(`/parser/rule-generation-jobs/${id}/preview/`)

@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from src.auth.dependencies import require_role
+from src.core.celery_tasks.celery_app import celery
 from src.core.collection.policy import (
     CollectionItem,
     CollectionPolicyResolver,
@@ -23,43 +24,44 @@ from src.core.collection.policy import (
 )
 from src.core.device_ops.repository import DeviceRepository
 from src.core.device_ops.tools import PatrolTool
-from src.core.patrol.modes import PRODUCTION_MODE, normalize_patrol_mode
+from src.core.observation.repository import ObservationContractRepository
 from src.core.parser.assets import TemplateAssetStore
 from src.core.parser.bootstrap import bootstrap_shared_templates
 from src.core.parser.discovery_assets import bootstrap_discovery_assets
+from src.core.parser.identity import DeviceIdentity
 from src.core.parser.repository import (
     OPEN_JOB_STATUSES,
     ParserJobStateError,
     ParserRepository,
 )
-from src.core.parser.identity import DeviceIdentity
 from src.core.parser.runtime import ParserRuntime
-from src.core.patrol.raw_importer import import_raw_path, preview_raw_path
-from src.core.patrol.repository import PatrolRepository
 from src.core.parser.tasks import dispatch_ready_parser_jobs
-from src.core.observation.repository import ObservationContractRepository
 from src.core.patrol.change_policy_repository import ChangePolicyRepository
 from src.core.patrol.event_rules import (
     EventRuleDefinition,
     EventRuleRepository,
     condition_matches,
 )
+from src.core.patrol.modes import PRODUCTION_MODE, normalize_patrol_mode
+from src.core.patrol.raw_importer import import_raw_path, preview_raw_path
+from src.core.patrol.repository import PatrolRepository
+from src.core.patrol.rule_replay import replay_event_rule_definitions
 from src.core.patrol.rule_validation import (
     EventRuleValidationCase,
     validate_event_rule_pack,
     validate_event_rule_set,
 )
-from src.core.patrol.rule_replay import replay_event_rule_definitions
 from src.core.rule_control import (
     AgentLoopRevisionExecutor,
     AgentLoopRevisionService,
     RuleAssetApprovalService,
     RuleAssetSubmissionService,
+    RuleAssetTemplateActivationService,
     RuleGenerationJobRepository,
     RuleGenerationJobStateError,
     RuntimeRuleAssetResolver,
+    RuntimeRuleAssetSeedService,
 )
-from src.core.celery_tasks.celery_app import celery
 
 router = APIRouter(
     prefix="/api/v1/parser",
@@ -159,10 +161,19 @@ class RuleGenerationJobApprovalRequest(BaseModel):
     reason: str | None = None
 
 
+class RuleAssetGenerationContextRequest(BaseModel):
+    context_overrides: dict[str, Any] | None = None
+    actor: str | None = None
+
+
 class RuntimeRuleAssetResolveRequest(BaseModel):
     observation_schemas: list[tuple[str, str]] = []
     observation_types: list[str] = []
     include_event_rules: bool = True
+
+
+class RuntimeRuleAssetSeedRequest(BaseModel):
+    actor: str | None = None
 
 
 class CommandProfileUpsertRequest(BaseModel):
@@ -218,10 +229,7 @@ def export_templates(status: str | None = "active"):
                 continue
             content = target.read_bytes()
             actual_sha256 = hashlib.sha256(content).hexdigest()
-            export_path = (
-                f"templates/{item.get('vendor')}/{item.get('profile')}/"
-                f"{target.name}"
-            )
+            export_path = f"templates/{item.get('vendor')}/{item.get('profile')}/{target.name}"
             archive.writestr(export_path, content)
             validation = item.get("validation_json") or {}
             archive.writestr(
@@ -346,20 +354,15 @@ def compare_template(template_id: str, limit: int = 20):
     )
     snapshots = [
         item
-        for item in PatrolRepository().list_dataset_snapshots(
-            mode="parser_validation"
-        )
+        for item in PatrolRepository().list_dataset_snapshots(mode="parser_validation")
         if (item.vendor or "").lower() == candidate.vendor.lower()
-        and (item.model or "").lower()
-        == (candidate.model or candidate.profile).lower()
+        and (item.model or "").lower() == (candidate.model or candidate.profile).lower()
         and item.command_canonical == candidate.canonical_command
     ][: max(1, min(limit, 100))]
     rows = []
     for snapshot in snapshots:
         proposed = _parse_snapshot_with_template(candidate, snapshot)
-        current = (
-            _parse_snapshot_with_template(active, snapshot) if active else None
-        )
+        current = _parse_snapshot_with_template(active, snapshot) if active else None
         rows.append(
             {
                 "snapshot_id": snapshot.snapshot_id,
@@ -370,9 +373,7 @@ def compare_template(template_id: str, limit: int = 20):
                 "changed": current != proposed,
             }
         )
-    passed_samples = sum(
-        row["proposed"]["status"] in {"success", "empty"} for row in rows
-    )
+    passed_samples = sum(row["proposed"]["status"] in {"success", "empty"} for row in rows)
     repository.record_regression_validation(
         candidate.id,
         passed=bool(rows) and passed_samples == len(rows),
@@ -466,9 +467,7 @@ def dispatch_jobs():
 
 @router.get("/dispatch-control")
 def get_dispatch_control():
-    return {
-        "auto_dispatch_enabled": ParserRepository().get_auto_dispatch_enabled()
-    }
+    return {"auto_dispatch_enabled": ParserRepository().get_auto_dispatch_enabled()}
 
 
 @router.post("/dispatch-control")
@@ -574,22 +573,12 @@ def dataset_coverage():
                 "dataset_id": dataset["id"],
                 **counts,
                 "eligible_count": eligible,
-                "structured_coverage_rate": (
-                    successful / eligible if eligible else 1.0
-                ),
-                "parse_success_rate": (
-                    counts["parsed"] / eligible if eligible else 1.0
-                ),
+                "structured_coverage_rate": (successful / eligible if eligible else 1.0),
+                "parse_success_rate": (counts["parsed"] / eligible if eligible else 1.0),
                 "legal_empty_rate": counts["empty"] / eligible if eligible else 0.0,
-                "missing_template_rate": (
-                    counts["missing"] / eligible if eligible else 0.0
-                ),
-                "parse_failure_rate": (
-                    counts["failed"] / eligible if eligible else 0.0
-                ),
-                "primary_key_stability_rate": (
-                    successful / eligible if eligible else 1.0
-                ),
+                "missing_template_rate": (counts["missing"] / eligible if eligible else 0.0),
+                "parse_failure_rate": (counts["failed"] / eligible if eligible else 0.0),
+                "primary_key_stability_rate": (successful / eligible if eligible else 1.0),
             }
         )
     return {"items": output}
@@ -623,12 +612,8 @@ def parser_coverage():
         "templates_active": active,
         "jobs_total": len(jobs),
         "jobs_pending": len(open_jobs),
-        "missing_candidates": sum(
-            item["job_type"] == "CREATE_TEMPLATE" for item in open_jobs
-        ),
-        "repair_candidates": sum(
-            item["job_type"] == "REPAIR_TEMPLATE" for item in open_jobs
-        ),
+        "missing_candidates": sum(item["job_type"] == "CREATE_TEMPLATE" for item in open_jobs),
+        "repair_candidates": sum(item["job_type"] == "REPAIR_TEMPLATE" for item in open_jobs),
         "command_aliases": len(repository.list_command_aliases()),
         "device_profiles": len(repository.list_device_profiles()),
         "identity_signatures": len(repository.list_identity_signatures()),
@@ -735,11 +720,22 @@ def list_change_policies(
 
 @router.post("/runtime-assets/resolve")
 def resolve_runtime_rule_assets(payload: RuntimeRuleAssetResolveRequest):
-    return RuntimeRuleAssetResolver().load_bundle(
-        observation_schemas=payload.observation_schemas,
-        observation_types=payload.observation_types,
-        include_event_rules=payload.include_event_rules,
-    ).to_dict()
+    return (
+        RuntimeRuleAssetResolver()
+        .load_bundle(
+            observation_schemas=payload.observation_schemas,
+            observation_types=payload.observation_types,
+            include_event_rules=payload.include_event_rules,
+        )
+        .to_dict()
+    )
+
+
+@router.post("/runtime-assets/seed-builtin")
+def seed_builtin_runtime_rule_assets(payload: RuntimeRuleAssetSeedRequest | None = None):
+    return RuntimeRuleAssetSeedService().seed_builtin_assets(
+        actor=payload.actor if payload else None,
+    )
 
 
 @router.post("/rule-generation-jobs")
@@ -883,6 +879,39 @@ def submit_rule_generation_job_candidate(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+@router.post("/rule-generation-jobs/{job_id}/generation-context")
+def preview_rule_asset_generation_context(
+    job_id: str,
+    payload: RuleAssetGenerationContextRequest | None = None,
+):
+    try:
+        return RuleAssetTemplateActivationService().build_generation_context(
+            job_id,
+            context_overrides=payload.context_overrides if payload else None,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/rule-generation-jobs/{job_id}/start-generation")
+def start_rule_asset_generation_workflow(
+    job_id: str,
+    payload: RuleAssetGenerationContextRequest | None = None,
+):
+    try:
+        return RuleAssetTemplateActivationService().start_generation_workflow(
+            job_id,
+            context_overrides=payload.context_overrides if payload else None,
+            actor=payload.actor if payload else None,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.post("/rule-generation-jobs/{job_id}/reject")
 def reject_rule_generation_job(
     job_id: str,
@@ -1004,17 +1033,15 @@ def validate_event_rules(payload: EventRuleValidationRequest | None = None):
     case_payloads = payload.cases if payload and payload.cases is not None else None
     if case_payloads is None:
         return validate_event_rule_pack()
-    cases = (
-        [
-            EventRuleValidationCase(
-                name=item.name,
-                change=item.change,
-                expected_event_type=item.expected_event_type,
-                expected_rule_id=item.expected_rule_id,
-            )
-            for item in case_payloads
-        ]
-    )
+    cases = [
+        EventRuleValidationCase(
+            name=item.name,
+            change=item.change,
+            expected_event_type=item.expected_event_type,
+            expected_rule_id=item.expected_rule_id,
+        )
+        for item in case_payloads
+    ]
     return validate_event_rule_set(cases)
 
 
@@ -1164,7 +1191,9 @@ def disable_command_profile_binding(binding_id: str):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-def _profile_impact_commands(payload: CommandProfileImpactPreviewRequest) -> tuple[str, str | None, list[str]]:
+def _profile_impact_commands(
+    payload: CommandProfileImpactPreviewRequest,
+) -> tuple[str, str | None, list[str]]:
     if payload.commands:
         commands = [str(item).strip() for item in payload.commands if str(item).strip()]
         if not commands:
@@ -1212,8 +1241,7 @@ def preview_command_profile_impact(payload: CommandProfileImpactPreviewRequest):
                 profile_name=profile_name,
                 profile_version_id=profile_version_id,
                 commands=tuple(
-                    CollectionItem(command=command, action=payload.action)
-                    for command in commands
+                    CollectionItem(command=command, action=payload.action) for command in commands
                 ),
                 policy_source="impact_preview",
                 selector=selector,

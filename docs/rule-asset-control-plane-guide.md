@@ -183,6 +183,82 @@ POST /api/v1/parser/runtime-assets/resolve
 
 这个接口只读取 active 资产，不生成候选、不提交审批、不激活规则，也不会调用 LLM。
 
+### 内置运行时资产种子
+
+验收或新环境初始化时，可通过 Rule Asset 控制面补齐确定性的运行时资产：
+
+```http
+POST /api/v1/parser/runtime-assets/seed-builtin
+```
+
+请求体：
+
+```json
+{
+  "actor": "operator"
+}
+```
+
+该入口会幂等执行：
+
+- 确保内置 EventRule pack 激活，包括 CPU、内存、接口 up/down、风扇、电源、配置变化等事件规则；
+- 为 `interface.oper_status`、`device.cpu.utilization`、`device.memory.free_ratio`、`environment.fan.state`、`environment.power.state`、`environment.sensor.state`、`redundancy.vrrp.state`、`redundancy.state` 等 observation type 创建并激活 ChangePolicy；
+- 已存在 active ChangePolicy 时跳过，不重复制造新版本；
+- 全程不调用 LLM，适合解决新环境或验收环境 active EventRule / ChangePolicy 为 0 导致无事件的问题。
+
+## Parser 模板激活后的规则资产种子
+
+当 `parser.template.activated` 事件通过 Parser Outbox 发布成功后，平台会创建一个幂等的
+`OBSERVATION_CONTRACT` 草稿任务，`source_ref` 为：
+
+```text
+parser_template:<template_id>
+```
+
+这个草稿任务只保存模板元数据和数据契约摘要，例如：
+
+- `template_id`
+- `vendor`、`model`、`family`
+- `canonical_command`
+- `entity_type`
+- `primary_keys`
+- `required_fields`
+- `state_semantics`
+- `workflow_context_defaults`
+- `missing_context`
+
+它不会保存：
+
+- 原始 CLI 输出；
+- 结构化 records；
+- 历史数值明细；
+- 密码、真实设备私密信息或客户信息。
+
+如果缺少 `records`、`historical_values` 或 `observation_type`，任务会停留在 `draft`，由 UI、聊天或
+Workflow 在后续步骤补充脱敏样本摘要后再启动 `rule-asset-generation`。这保证模板激活可以自动留下
+“下一步该生成哪些规则资产”的治理线索，但不会在生产链路里直接调用 LLM。
+
+### Parser 模板覆盖率
+
+`bootstrap_shared_templates()` 现在以 `manifest.json` 为优先来源，同时自动发现
+`src/skills/shared/textfsm-templates/<vendor>/<model>/*.textfsm` 下尚未进入 manifest 的不可变模板。
+当前目录中 manifest 为 40 条，文件系统可发现导入候选为 133 条，新增覆盖集中在验收报告中的
+Top 缺口命令：
+
+- `show inventory`
+- `show interface status`
+- `show environment power`
+- `show environment fan`
+- `show environment temperature`
+- `show system resources`
+- `display fan`
+- `display power`
+- `display memory`
+- `display vrrp statistics`
+
+导入时会按命令推断 `entity_type`、`primary_keys`、`required_fields` 与 `state_semantics`，让
+state-normalizer 和 change-detector 能直接消费 active Parser 契约。
+
 ## 聊天触发
 
 聊天入口只负责启动 Workflow 或查询状态，不直接改写规则。
