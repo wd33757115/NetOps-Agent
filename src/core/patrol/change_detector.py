@@ -8,14 +8,14 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from src.core.parser.key_contract import EntityKeyError, index_records
-from src.core.patrol.command_splitter import canonicalize_command
-from src.core.patrol.change_policy import compare_with_policy, policy_from_dict
 from src.core.patrol.change_event_repository import ChangeEventRepository
+from src.core.patrol.change_policy import compare_with_policy, policy_from_dict
 from src.core.patrol.change_policy_repository import ChangePolicyRepository
+from src.core.patrol.command_splitter import canonicalize_command
 from src.core.patrol.domain import SnapshotRecord
 from src.core.patrol.repository import PatrolRepository
 from src.core.state.repository import StateRepository
@@ -60,6 +60,18 @@ class NetworkChange:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _observed_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def _stringify(value: Any) -> str:
@@ -459,8 +471,55 @@ def detect_versioned_changes(
     )
 
 
-def save_changes(changes: list[NetworkChange]) -> int:
-    return ChangeEventRepository().save_changes(changes)
+def save_changes(
+    changes: list[NetworkChange],
+    *,
+    derived_observations: list[Any] | None = None,
+    decisions: list[dict[str, Any]] | None = None,
+) -> int:
+    return ChangeEventRepository().save_changes(
+        changes,
+        derived_observations=derived_observations,
+        decisions=decisions,
+    )
+
+
+def _change_decision(
+    *,
+    run_id: str,
+    previous: dict[str, Any] | None,
+    current: dict[str, Any] | None,
+    decision: str,
+    reason: str,
+    policy_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    basis = current or previous or {}
+    return {
+        "run_id": run_id,
+        "device_id": basis.get("device_id"),
+        "canonical_command": basis.get("canonical_command"),
+        "entity_type": basis.get("entity_type"),
+        "entity_key": basis.get("entity_key"),
+        "field": basis.get("field_name"),
+        "observation_type": _observation_type(basis),
+        "previous_observation_id": previous.get("id") if previous else None,
+        "current_observation_id": current.get("id") if current else None,
+        "decision": decision,
+        "reason": reason,
+        "change_policy_id": (policy_result or {}).get("policy_id"),
+        "change_policy_version_id": (policy_result or {}).get("policy_version_id"),
+        "comparison_type": (policy_result or {}).get("comparison_type")
+        or "presence",
+        "old": previous.get("value_json") if previous else None,
+        "new": current.get("value_json") if current else None,
+        "observed_at": basis.get("observed_at"),
+        "expires_at": (
+            datetime.now(timezone.utc) + timedelta(days=7)
+        ).isoformat()
+        if decision == "suppressed"
+        else None,
+        "metadata": {"policy_snapshot": (policy_result or {}).get("policy_snapshot")},
+    }
 
 
 def detect_changes_from_params(params: dict[str, Any]) -> dict[str, Any]:
@@ -608,7 +667,37 @@ def detect_observation_changes_against_history(
             "run_purpose": "baseline",
             "changes": [],
         }
+    if persist and run_context:
+        persisted = ChangeEventRepository().list_changes(run_id=current_run_id)
+        persisted = [item for item in persisted if item.get("source") == "state_observation"]
+        if persisted:
+            return {
+                "success": True,
+                "current_run_id": current_run_id,
+                "previous_run_id": previous_run_id,
+                "device_ids": device_ids or [],
+                "compared_observations": 0,
+                "baseline_observations": 0,
+                "initial_observations": sum(item["change_type"] == "initial" for item in persisted),
+                "added_observations": sum(item["change_type"] == "added" for item in persisted),
+                "deleted_observations": sum(item["change_type"] == "deleted" for item in persisted),
+                "missing_observations": sum(item["change_type"] == "missing" for item in persisted),
+                "reappeared_observations": sum(
+                    item["change_type"] == "reappeared" for item in persisted
+                ),
+                "authoritative_collection_count": len(
+                    patrol_repository.list_authoritative_collection_keys(current_run_id)
+                ),
+                "change_count": len(persisted),
+                "persisted_change_count": 0,
+                "storage": "postgresql",
+                "source": "state_observation",
+                "reused_persisted_changes": True,
+                "changes": persisted,
+            }
     changes: list[NetworkChange] = []
+    derived_observations: list[Any] = []
+    decisions: list[dict[str, Any]] = []
     compared_observations = 0
     baseline_observations = 0
     detected_at = _now()
@@ -663,6 +752,11 @@ def detect_observation_changes_against_history(
         prior_by_key.setdefault(_state_key(prior), prior)
     for current in current_observations:
         previous = prior_by_key.get(_state_key(current))
+        if previous:
+            previous_at = _observed_datetime(previous.get("observed_at"))
+            current_at = _observed_datetime(current.get("observed_at"))
+            if previous_at and current_at and previous_at > current_at:
+                previous = None
         if previous is None:
             if _collection_key(current) in prior_collections:
                 changes.append(
@@ -709,6 +803,19 @@ def detect_observation_changes_against_history(
         )
         if policy_result is not None:
             if not policy_result.get("changed"):
+                decisions.append(
+                    _change_decision(
+                        run_id=current_run_id,
+                        previous=previous,
+                        current=current,
+                        decision="suppressed",
+                        reason=str(
+                            policy_result.get("decision_reason")
+                            or "change_policy_suppressed"
+                        ),
+                        policy_result=policy_result,
+                    )
+                )
                 continue
         elif _equivalent_values(str(current.get("field_name") or ""), old, new):
             continue
@@ -722,6 +829,17 @@ def detect_observation_changes_against_history(
                 policy_result=policy_result,
             )
         )
+        if policy_result is not None:
+            decisions.append(
+                _change_decision(
+                    run_id=current_run_id,
+                    previous=previous,
+                    current=current,
+                    decision="emitted",
+                    reason=str(policy_result.get("decision_reason") or "change_emitted"),
+                    policy_result=policy_result,
+                )
+            )
     for key, previous in prior_by_key.items():
         if key in current_by_key:
             continue
@@ -738,7 +856,7 @@ def detect_observation_changes_against_history(
         snapshot_id = str((collection.get("metadata_json") or {}).get("snapshot_id") or "")
         if not snapshot_id:
             continue
-        tombstone = repository.record_absence(
+        tombstone = repository.build_absence_observation(
             previous,
             run_id=current_run_id,
             snapshot_id=snapshot_id,
@@ -746,6 +864,7 @@ def detect_observation_changes_against_history(
             missing_count=missing_count,
             missing_confirmations=max(1, int(missing_confirmations)),
         )
+        derived_observations.append(tombstone)
         change_type = (
             "deleted"
             if missing_count >= max(1, int(missing_confirmations))
@@ -765,8 +884,29 @@ def detect_observation_changes_against_history(
                 ),
             )
         )
+        decisions.append(
+            _change_decision(
+                run_id=current_run_id,
+                previous=previous,
+                current=tombstone.to_dict(),
+                decision="emitted",
+                reason=(
+                    "confirmed_absent_after_complete_collections"
+                    if change_type == "deleted"
+                    else "missing_candidate_pending_confirmation"
+                ),
+            )
+        )
 
-    persisted_change_count = save_changes(changes) if persist else 0
+    persisted_change_count = (
+        save_changes(
+            changes,
+            derived_observations=derived_observations,
+            decisions=decisions,
+        )
+        if persist
+        else 0
+    )
     return {
         "success": True,
         "current_run_id": current_run_id,
@@ -790,6 +930,7 @@ def detect_observation_changes_against_history(
         "authoritative_collection_count": len(authoritative_collections),
         "change_count": len(changes),
         "persisted_change_count": persisted_change_count,
+        "change_decision_count": len(decisions),
         "storage": "postgresql",
         "source": "state_observation",
         "changes": [change.to_dict() for change in changes],

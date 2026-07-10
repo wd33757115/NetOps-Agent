@@ -9,6 +9,8 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
+from src.core.parser.identity import DeviceIdentityResolver
+from src.core.parser.runtime import ParserRuntime, ParserRuntimeResult
 from src.core.patrol.command_splitter import (
     infer_device_from_filename,
     inspect_raw_capture,
@@ -20,8 +22,6 @@ from src.core.patrol.modes import (
     normalize_patrol_mode,
 )
 from src.core.patrol.repository import PatrolRepository
-from src.core.parser.identity import DeviceIdentityResolver
-from src.core.parser.runtime import ParserRuntime, ParserRuntimeResult
 from src.infrastructure.db.postgres import require_postgres_connection
 
 
@@ -245,6 +245,7 @@ def import_raw_capture(
     metadata: dict[str, Any] | None = None,
     inventory_device_id: str | None = None,
     collector_complete: bool | None = None,
+    command_collection_statuses: dict[str, dict[str, Any]] | None = None,
     finalize_run: bool = True,
 ) -> dict[str, Any]:
     require_postgres_connection()
@@ -407,6 +408,10 @@ def import_raw_capture(
     snapshot_ids: list[str] = []
     duplicate_snapshot_ids: list[str] = []
     parser_results: list[dict[str, Any]] = []
+    per_command_status = {
+        " ".join(str(command).strip().lower().split()): dict(result or {})
+        for command, result in (command_collection_statuses or {}).items()
+    }
     for (block, parsed), fingerprint in zip(
         parsed_blocks, fingerprints, strict=True
     ):
@@ -508,8 +513,14 @@ def import_raw_capture(
             "parse_empty": "empty",
             "ignored": "ignored",
         }.get(parse_status, "failed")
+        command_collection = per_command_status.get(block.command_canonical, {})
+        command_complete = (
+            command_collection.get("status") == "complete"
+            if command_collection
+            else collector_complete is True
+        )
         authoritative = bool(
-            collector_complete is True
+            command_complete
             and parse_status in {"parsed", "parse_empty"}
         )
         repository.save_collection_result(
@@ -522,11 +533,15 @@ def import_raw_capture(
             baseline_eligible=authoritative,
             observed_entity_count=entity_count,
             failure_code=parsed.failure_code,
-            observed_at=observed_at or inspected.observed_at_text,
+            observed_at=(
+                command_collection.get("observed_at")
+                or observed_at
+                or inspected.observed_at_text
+            ),
             metadata={
                 "parse_status": parse_status,
                 "snapshot_id": snapshot_id,
-                "collector_complete": collector_complete,
+                "collector_complete": command_complete,
             },
         )
     if finalize_run:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from collections.abc import Callable
 from datetime import datetime
 from enum import Enum
 from typing import Any
@@ -15,12 +16,14 @@ from src.core.collection import CollectionPolicyResolver, ExecutionPlan
 from src.core.device_ops.manager import DeviceInventoryManager
 from src.core.ingestion.adapters.cli import (
     CLICommandCollector,
-    device_type_for,
     connect_cli_device,
+    device_type_for,
+    load_command_collection_manifest,
     test_cli_connectivity,
 )
 from src.core.parser.identity import DeviceIdentity, DeviceIdentityResolver
 from src.core.parser.runtime import ParserRuntime
+from src.core.patrol.concurrency import DistributedPatrolSemaphore
 from src.core.patrol.modes import PRODUCTION_MODE, normalize_patrol_mode
 
 
@@ -169,6 +172,11 @@ class ConfigBackupTool:
                 device=device,
                 execution_plan=plan,
             )
+            manifest = load_command_collection_manifest(output_file)
+            command_results = list(manifest.get("commands") or [])
+            collection_status = str(manifest.get("status") or "unknown")
+            if collection_status == "unknown" and not command_results:
+                collection_status = "complete"
             _record_connection_health(
                 self.db_manager,
                 device,
@@ -180,7 +188,7 @@ class ConfigBackupTool:
                 "ip": device.get("ip"),
                 "vendor": device.get("vendor"),
                 "model": device.get("model"),
-                "success": True,
+                "success": collection_status == "complete",
                 "output_file": str(output_file),
                 "commands_count": len(plan.commands),
                 "execution_plan": plan.to_metadata(),
@@ -239,13 +247,22 @@ class PatrolTool:
         db_manager: DeviceInventoryManager,
         *,
         cli_collector: CLICommandCollector | None = None,
+        result_callback: Callable[[dict[str, Any]], dict[str, Any] | None] | None = None,
     ):
         self.db_manager = db_manager
         self.policy_resolver = CollectionPolicyResolver()
         self.cli_collector = cli_collector or CLICommandCollector()
+        self.result_callback = result_callback
         from src.common.config import get_settings
 
         self.max_concurrency = max(1, int(get_settings().PATROL_MAX_CONCURRENCY))
+        settings = get_settings()
+        self.distributed_semaphore = DistributedPatrolSemaphore(
+            limit=self.max_concurrency,
+            lease_seconds=settings.PATROL_CONCURRENCY_LEASE_SECONDS,
+            wait_seconds=settings.PATROL_CONCURRENCY_WAIT_SECONDS,
+            enabled=settings.PATROL_DISTRIBUTED_CONCURRENCY_ENABLED,
+        )
 
     @staticmethod
     def _production_coverage(
@@ -306,6 +323,14 @@ class PatrolTool:
                 device=device,
                 execution_plan=plan,
             )
+            manifest = load_command_collection_manifest(output_file)
+            command_results = list(manifest.get("commands") or [])
+            collection_status = str(manifest.get("status") or "unknown")
+            if collection_status == "unknown" and not command_results:
+                collection_status = "complete"
+            completed_commands = sum(
+                item.get("status") == "complete" for item in command_results
+            )
             _record_connection_health(
                 self.db_manager,
                 device,
@@ -318,12 +343,14 @@ class PatrolTool:
                 "ip": device.get("ip"),
                 "vendor": device.get("vendor"),
                 "model": device.get("model"),
-                "success": True,
+                "success": collection_status == "complete",
                 "output_file": str(output_file),
                 "commands_count": len(plan.commands),
                 "execution_plan": plan.to_metadata(),
                 "baseline_saved": save_baseline,
-                "collection_status": "complete",
+                "collection_status": collection_status,
+                "completed_commands": completed_commands,
+                "command_collection_results": command_results,
             }
         except Exception as exc:
             _record_connection_health(
@@ -364,9 +391,18 @@ class PatrolTool:
 
         async def bounded_patrol(device):
             async with semaphore:
-                return await self.patrol_device(device, save_baseline, mode=mode)
+                lease = await asyncio.to_thread(self.distributed_semaphore.acquire)
+                with self.distributed_semaphore.maintain(lease):
+                    result = await self.patrol_device(device, save_baseline, mode=mode)
+                    result["concurrency_mode"] = lease.mode
+                    return result
 
-        results = await asyncio.gather(*(bounded_patrol(device) for device in devices))
+        tasks = [asyncio.create_task(bounded_patrol(device)) for device in devices]
+        results: list[dict[str, Any]] = []
+        for task in asyncio.as_completed(tasks):
+            result = await task
+            await self._notify_result(result)
+            results.append(result)
         return _task_result(ActionType.PATROL, devices, results, started_at)
 
     async def patrol_by_plan(
@@ -387,13 +423,38 @@ class PatrolTool:
                 action=ActionType.PATROL,
                 message=f"Execution plan device not found: {execution_plan.device_id}",
             )
-        result = await self.patrol_device(
-            device,
-            save_baseline,
-            mode=execution_plan.mode,
-            execution_plan=execution_plan,
-        )
+        lease = await asyncio.to_thread(self.distributed_semaphore.acquire)
+        with self.distributed_semaphore.maintain(lease):
+            result = await self.patrol_device(
+                device,
+                save_baseline,
+                mode=execution_plan.mode,
+                execution_plan=execution_plan,
+            )
+            result["concurrency_mode"] = lease.mode
+        await self._notify_result(result)
         return _task_result(ActionType.PATROL, [device], [result], started_at)
+
+    async def _notify_result(self, result: dict[str, Any]) -> None:
+        if self.result_callback is None:
+            return
+        try:
+            persisted = await asyncio.to_thread(self.result_callback, result)
+            if persisted is not None:
+                result["snapshot_persistence"] = persisted
+        except Exception as exc:
+            error = f"device result persistence failed: {exc}"
+            result["persistence_error"] = error
+            result["snapshot_persistence"] = {
+                "snapshot_devices": 0,
+                "snapshot_commands": 0,
+                "snapshot_errors": [error],
+                "snapshot_health": "failed",
+                "collection_status": "failed",
+                "coverage_violations": [],
+                "parse_violations": [],
+                "production_parser_ready": False,
+            }
 
 
 def _task_result(

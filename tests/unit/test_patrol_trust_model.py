@@ -68,6 +68,7 @@ def test_complete_empty_collection_creates_missing_then_confirmed_absence(monkey
         "metadata_json": {},
     }
     recorded = []
+    persisted_batches = []
 
     class FakeStateRepository:
         def list_run_observations(self, run_id, *, device_ids=None):
@@ -76,7 +77,7 @@ def test_complete_empty_collection_creates_missing_then_confirmed_absence(monkey
         def list_prior_observations_for_run(self, run_id):
             return [prior]
 
-        def record_absence(self, previous, **kwargs):
+        def build_absence_observation(self, previous, **kwargs):
             recorded.append(kwargs)
             presence = "absent" if kwargs["missing_count"] >= 2 else "missing_candidate"
             data = {
@@ -120,13 +121,15 @@ def test_complete_empty_collection_creates_missing_then_confirmed_absence(monkey
         "src.core.patrol.change_detector.PatrolRepository", FakePatrolRepository
     )
     monkeypatch.setattr(
-        "src.core.patrol.change_detector.save_changes", lambda changes: len(changes)
+        "src.core.patrol.change_detector.save_changes",
+        lambda changes, **kwargs: persisted_batches.append(kwargs) or len(changes),
     )
 
     first = detect_observation_changes_against_history(current_run_id="run-current")
     assert first["missing_observations"] == 1
     assert first["deleted_observations"] == 0
     assert recorded[0]["missing_count"] == 1
+    assert len(persisted_batches[0]["derived_observations"]) == 1
 
     prior["observation_kind"] = "tombstone"
     prior["metadata_json"] = {
@@ -137,6 +140,7 @@ def test_complete_empty_collection_creates_missing_then_confirmed_absence(monkey
     assert second["missing_observations"] == 0
     assert second["deleted_observations"] == 1
     assert recorded[1]["missing_count"] == 2
+    assert len(persisted_batches[1]["derived_observations"]) == 1
 
 
 def test_event_rules_support_multiple_matches_and_explicit_exclusivity(monkeypatch):

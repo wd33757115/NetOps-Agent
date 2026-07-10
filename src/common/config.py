@@ -127,6 +127,9 @@ class Settings(BaseSettings):
 
     # 巡检并发与规则运行时治理
     PATROL_MAX_CONCURRENCY: int = 50
+    PATROL_DISTRIBUTED_CONCURRENCY_ENABLED: bool = True
+    PATROL_CONCURRENCY_LEASE_SECONDS: int = 180
+    PATROL_CONCURRENCY_WAIT_SECONDS: int = 60
     EVENT_RULE_ALLOW_BUILTIN_FALLBACK: bool = False
 
     # 与 Django SIMPLE_JWT 共用（默认与 SECRET_KEY 一致，生产务必在 .env 中显式设置）

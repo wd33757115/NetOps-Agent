@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
-import uuid
+from typing import Any
 
+from src.core.parser.policy import load_yaml
 from src.infrastructure.db.models import EventRuleRecord, EventRuleVersionRecord
 from src.infrastructure.db.postgres import get_db_session
-from src.core.parser.policy import load_yaml
-
 
 SHARED_RULE_PACK_ROOT = (
     Path(__file__).resolve().parents[2] / "skills" / "shared" / "rule-packs"
@@ -780,10 +780,17 @@ def default_event_rules() -> list[EventRule]:
     return [definition.to_rule() for definition in default_event_rule_definitions()]
 
 
-def match_event_rules(change: dict[str, Any]) -> list[EventRule]:
+def match_event_rules(
+    change: dict[str, Any],
+    *,
+    rules: list[EventRule] | None = None,
+) -> list[EventRule]:
     matched: list[EventRule] = []
-    rules = sorted(load_event_rules(), key=lambda rule: (-rule.priority, rule.rule_id))
-    for rule in rules:
+    effective_rules = rules if rules is not None else load_event_rules()
+    ordered_rules = sorted(
+        effective_rules, key=lambda rule: (-rule.priority, rule.rule_id)
+    )
+    for rule in ordered_rules:
         if rule.match(change):
             matched.append(rule)
             if rule.exclusive:

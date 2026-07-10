@@ -1007,6 +1007,42 @@ class NetworkChangeRecord(Base):
         return {column.name: getattr(self, column.name) for column in self.__table__.columns}
 
 
+class NetworkChangeDecisionRecord(Base):
+    """Auditable emitted/suppressed/invalid ChangePolicy decision."""
+
+    __tablename__ = "netops_network_change_decisions"
+
+    id = Column(String(64), primary_key=True)
+    idempotency_key = Column(String(64), nullable=False)
+    run_id = Column(String(128), nullable=False, index=True)
+    device_id = Column(String(256), nullable=True, index=True)
+    canonical_command = Column(String(512), nullable=True, index=True)
+    entity_type = Column(String(128), nullable=False, index=True)
+    entity_key = Column(String(1024), nullable=False)
+    field = Column(String(256), nullable=False, index=True)
+    observation_type = Column(String(256), nullable=True, index=True)
+    previous_observation_id = Column(String(64), nullable=True, index=True)
+    current_observation_id = Column(String(64), nullable=True, index=True)
+    decision = Column(String(32), nullable=False, index=True)
+    reason = Column(String(256), nullable=True)
+    change_policy_id = Column(String(64), nullable=True, index=True)
+    change_policy_version_id = Column(String(64), nullable=True, index=True)
+    comparison_type = Column(String(64), nullable=True)
+    old_value_json = Column(JSON, nullable=True)
+    new_value_json = Column(JSON, nullable=True)
+    observed_at = Column(DateTime, nullable=True, index=True)
+    expires_at = Column(DateTime, nullable=True, index=True)
+    metadata_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("ix_netops_change_decisions_idempotency", "idempotency_key", unique=True),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
 class NetworkEventRecord(Base):
     """Operational event derived from one persisted network change."""
 
@@ -1019,6 +1055,7 @@ class NetworkEventRecord(Base):
     device_id = Column(String(256), nullable=True, index=True)
     entity_type = Column(String(128), nullable=False, index=True)
     entity_key = Column(String(1024), nullable=False)
+    correlation_key = Column(String(1024), nullable=False, index=True)
     source_change_id = Column(String(64), nullable=True, index=True)
     run_id = Column(String(128), nullable=True, index=True)
     occurred_at = Column(DateTime, nullable=False, index=True)
@@ -1031,6 +1068,12 @@ class NetworkEventRecord(Base):
             "ix_netops_network_events_idempotency_key",
             "idempotency_key",
             unique=True,
+        ),
+        Index(
+            "ix_netops_network_events_active_correlation",
+            "event_type",
+            "correlation_key",
+            "status",
         ),
     )
 
@@ -1055,9 +1098,12 @@ class NetworkEventOutboxRecord(Base):
         String(32), nullable=False, default="pending", server_default="pending", index=True
     )
     attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    claim_token = Column(String(64), nullable=True, index=True)
+    lease_until = Column(DateTime, nullable=True, index=True)
     last_error = Column(Text, nullable=True)
     available_at = Column(DateTime, nullable=False, index=True)
     published_at = Column(DateTime, nullable=True)
+    dead_letter_at = Column(DateTime, nullable=True)
     message_id = Column(String(256), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(

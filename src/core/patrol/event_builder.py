@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.core.patrol.change_event_repository import ChangeEventRepository
-from src.core.patrol.event_rules import match_event_rules
+from src.core.patrol.event_rules import load_event_rules, match_event_rules
 
 
 @dataclass(frozen=True)
@@ -37,9 +37,8 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _event_dedupe_key(
+def _event_correlation_key(
     *,
-    event_type: str,
     device_id: str | None,
     entity_type: str,
     entity_key: str,
@@ -52,21 +51,29 @@ def _event_dedupe_key(
         "entity_key": entity_key,
         **change,
     }
-    return "|".join([event_type, *(str(values.get(key) or "") for key in correlation_keys)])
+    return "|".join(str(values.get(key) or "") for key in correlation_keys)
 
 
 def build_events_from_changes(changes: list[dict[str, Any]]) -> list[NetworkEvent]:
     events: list[NetworkEvent] = []
     occurred_at = _now()
+    rules = load_event_rules()
     for change in changes:
-        rules = match_event_rules(change)
-        if not rules:
+        matched_rules = match_event_rules(change, rules=rules)
+        if not matched_rules:
             continue
         entity_type = str(change.get("entity_type") or "unknown")
         entity_key = str(change.get("entity_key") or "")
         device_id = change.get("device_id")
 
-        for rule in rules:
+        for rule in matched_rules:
+            correlation_key = _event_correlation_key(
+                device_id=device_id,
+                entity_type=entity_type,
+                entity_key=entity_key,
+                change=change,
+                correlation_keys=rule.correlation_keys,
+            )
             events.append(
                 NetworkEvent(
                 event_id=str(uuid.uuid4()),
@@ -94,14 +101,8 @@ def build_events_from_changes(changes: list[dict[str, Any]]) -> list[NetworkEven
                         "recovery": dict(rule.recovery or {}),
                         "correlation_keys": list(rule.correlation_keys),
                     },
-                    "dedupe_key": _event_dedupe_key(
-                        event_type=rule.event_type,
-                        device_id=device_id,
-                        entity_type=entity_type,
-                        entity_key=entity_key,
-                        change=change,
-                        correlation_keys=rule.correlation_keys,
-                    ),
+                    "correlation_key": correlation_key,
+                    "dedupe_key": f"{rule.event_type}|{correlation_key}",
                 },
             )
             )
@@ -177,7 +178,9 @@ def publish_events(events: list[NetworkEvent]) -> list[str]:
         msg_id = EventBus.publish(
             STREAM_NETWORK_EVENT,
             DomainEvent(
+                event_id=event.event_id,
                 event_type=f"network.{event.event_type}",
+                occurred_at=event.occurred_at,
                 source="patrol",
                 correlation_id=event.run_id or event.event_id,
                 payload=event.to_dict(),
@@ -195,13 +198,16 @@ def publish_event_outbox(*, limit: int = 100) -> list[str]:
 
     repository = ChangeEventRepository()
     message_ids: list[str] = []
-    for row in repository.list_pending_event_outbox(limit=limit):
+    claim_token, rows = repository.claim_event_outbox(limit=limit)
+    for row in rows:
         try:
             payload = dict(row.get("payload_json") or {})
             message_id = EventBus.publish(
                 STREAM_NETWORK_EVENT,
                 DomainEvent(
+                    event_id=str(payload.get("event_id") or row["event_id"]),
                     event_type=str(row.get("event_type") or "network.event"),
+                    occurred_at=payload.get("occurred_at") or _now(),
                     source="patrol",
                     correlation_id=str(
                         payload.get("run_id") or payload.get("event_id") or row["id"]
@@ -210,10 +216,22 @@ def publish_event_outbox(*, limit: int = 100) -> list[str]:
                 ),
             )
             if message_id:
-                repository.mark_event_outbox_published(str(row["id"]), str(message_id))
+                repository.mark_event_outbox_published(
+                    str(row["id"]),
+                    str(message_id),
+                    claim_token=claim_token,
+                )
                 message_ids.append(str(message_id))
+            else:
+                repository.mark_event_outbox_failed(
+                    str(row["id"]),
+                    "event_bus_publish_returned_none",
+                    claim_token=claim_token,
+                )
         except Exception as exc:
-            repository.mark_event_outbox_failed(str(row["id"]), str(exc))
+            repository.mark_event_outbox_failed(
+                str(row["id"]), str(exc), claim_token=claim_token
+            )
     return message_ids
 
 

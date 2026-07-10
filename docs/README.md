@@ -40,6 +40,7 @@
 | [observation-fabric-system-design.md](./observation-fabric-system-design.md) | Observation、CurrentState、Change、Event 事实层设计 |
 | [patrol-change-event-pipeline.md](./patrol-change-event-pipeline.md) | 巡检到变化检测、事件构建和事件流的链路说明 |
 | [patrol-chain-audit-and-remediation-plan-2026-07.md](./patrol-chain-audit-and-remediation-plan-2026-07.md) | 巡检链路 18 项问题审计、分阶段修复计划与实施状态 |
+| [patrol-chain-failure-semantics-remediation-2026-07.md](./patrol-chain-failure-semantics-remediation-2026-07.md) | 巡检链路第二轮失败重试、分布式幂等与容量修复计划 |
 | [rule-asset-control-plane-guide.md](./rule-asset-control-plane-guide.md) | 规则资产生成、提交审批、审批激活和聊天触发使用说明 |
 | [llm-rule-control-plane-implementation-plan.md](./llm-rule-control-plane-implementation-plan.md) | LLM 规则资产控制面完整改造计划与分阶段验收 |
 | [auth-rbac-plan.md](./auth-rbac-plan.md) | JWT、RBAC、BFF 可信头 |

@@ -486,8 +486,10 @@ def test_observation_change_detector_uses_observation_ids(monkeypatch):
             ]
 
     saved = {}
-    def fake_save_changes(changes):
+    def fake_save_changes(changes, **kwargs):
         saved["changes"] = changes
+        saved["derived_observations"] = kwargs.get("derived_observations")
+        saved["decisions"] = kwargs.get("decisions")
         return len(changes)
 
     monkeypatch.setattr(
@@ -574,7 +576,7 @@ def test_observation_change_detector_accepts_explicit_previous_run(monkeypatch):
     )
     monkeypatch.setattr(
         "src.core.patrol.change_detector.save_changes",
-        lambda changes: len(changes),
+        lambda changes, **_kwargs: len(changes),
     )
 
     result = detect_observation_changes_against_history(
@@ -591,6 +593,8 @@ def test_observation_change_detector_accepts_explicit_previous_run(monkeypatch):
 
 
 def test_observation_change_detector_uses_active_change_policy(monkeypatch):
+    saved = {}
+
     class FakePolicyRepository:
         def get_active_policy(self, observation_type):
             assert observation_type == "device.cpu.utilization"
@@ -656,7 +660,7 @@ def test_observation_change_detector_uses_active_change_policy(monkeypatch):
     )
     monkeypatch.setattr(
         "src.core.patrol.change_detector.save_changes",
-        lambda changes: len(changes),
+        lambda changes, **kwargs: saved.update(kwargs) or len(changes),
     )
 
     result = detect_observation_changes_against_history(
@@ -665,6 +669,8 @@ def test_observation_change_detector_uses_active_change_policy(monkeypatch):
     )
 
     assert result["change_count"] == 0
+    assert saved["decisions"][0]["decision"] == "suppressed"
+    assert saved["decisions"][0]["change_policy_id"] == "policy-1"
 
 
 def test_observation_change_detector_emits_threshold_crossing_with_policy(monkeypatch):
@@ -732,7 +738,7 @@ def test_observation_change_detector_emits_threshold_crossing_with_policy(monkey
     )
     monkeypatch.setattr(
         "src.core.patrol.change_detector.save_changes",
-        lambda changes: len(changes),
+        lambda changes, **_kwargs: len(changes),
     )
 
     result = detect_observation_changes_against_history(
@@ -781,7 +787,7 @@ def test_observation_change_detector_filters_selected_devices(monkeypatch):
     )
     monkeypatch.setattr(
         "src.core.patrol.change_detector.save_changes",
-        lambda changes: len(changes),
+        lambda changes, **_kwargs: len(changes),
     )
 
     result = detect_observation_changes_against_history(

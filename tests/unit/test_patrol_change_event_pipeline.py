@@ -243,7 +243,7 @@ def test_observation_change_detector_emits_initial_changes(monkeypatch):
     )
     monkeypatch.setattr(
         "src.core.patrol.change_detector.save_changes",
-        lambda changes: len(changes),
+        lambda changes, **_kwargs: len(changes),
     )
 
     result = detect_changes_from_params(

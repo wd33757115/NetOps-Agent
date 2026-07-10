@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import and_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from src.core.evidence import RawEvidenceRepository, evidence_id_for_command_snapshot
@@ -15,6 +16,7 @@ from src.core.state.domain import StateObservation
 from src.infrastructure.db.models import (
     CommandSnapshot,
     CurrentStateRecord,
+    PatrolCollectionResult,
     PatrolRun,
     StateObservationRecord,
 )
@@ -117,9 +119,18 @@ class StateRepository:
             if baseline_only:
                 query = query.join(
                     PatrolRun, PatrolRun.id == StateObservationRecord.run_id
+                ).join(
+                    PatrolCollectionResult,
+                    and_(
+                        PatrolCollectionResult.run_id == StateObservationRecord.run_id,
+                        PatrolCollectionResult.device_id == StateObservationRecord.device_id,
+                        PatrolCollectionResult.canonical_command
+                        == StateObservationRecord.canonical_command,
+                    ),
                 ).filter(
                     PatrolRun.baseline_eligible.is_(True),
                     PatrolRun.analysis_status == "completed",
+                    PatrolCollectionResult.baseline_eligible.is_(True),
                 )
             if device_ids:
                 query = query.filter(StateObservationRecord.device_id.in_(device_ids))
@@ -139,6 +150,15 @@ class StateRepository:
             row = (
                 db.query(StateObservationRecord)
                 .join(PatrolRun, PatrolRun.id == StateObservationRecord.run_id)
+                .join(
+                    PatrolCollectionResult,
+                    and_(
+                        PatrolCollectionResult.run_id == StateObservationRecord.run_id,
+                        PatrolCollectionResult.device_id == StateObservationRecord.device_id,
+                        PatrolCollectionResult.canonical_command
+                        == StateObservationRecord.canonical_command,
+                    ),
+                )
                 .filter(
                     StateObservationRecord.id != observation["id"],
                     StateObservationRecord.run_id != observation["run_id"],
@@ -150,6 +170,7 @@ class StateRepository:
                     StateObservationRecord.observed_at <= observed_at,
                     PatrolRun.baseline_eligible.is_(True),
                     PatrolRun.analysis_status == "completed",
+                    PatrolCollectionResult.baseline_eligible.is_(True),
                 )
                 .order_by(StateObservationRecord.observed_at.desc())
                 .first()
@@ -164,10 +185,20 @@ class StateRepository:
             rows = (
                 db.query(StateObservationRecord)
                 .join(PatrolRun, PatrolRun.id == StateObservationRecord.run_id)
+                .join(
+                    PatrolCollectionResult,
+                    and_(
+                        PatrolCollectionResult.run_id == StateObservationRecord.run_id,
+                        PatrolCollectionResult.device_id == StateObservationRecord.device_id,
+                        PatrolCollectionResult.canonical_command
+                        == StateObservationRecord.canonical_command,
+                    ),
+                )
                 .filter(StateObservationRecord.run_id != run_id)
                 .filter(StateObservationRecord.mode == current_run.mode)
                 .filter(PatrolRun.baseline_eligible.is_(True))
                 .filter(PatrolRun.analysis_status == "completed")
+                .filter(PatrolCollectionResult.baseline_eligible.is_(True))
                 .filter(PatrolRun.completed_at <= current_run.started_at)
                 .order_by(
                     PatrolRun.started_at.desc(),
@@ -183,16 +214,39 @@ class StateRepository:
         *,
         update_current_state: bool,
     ) -> tuple[int, int]:
+        with get_db_session() as db:
+            return self.save_observations_in_session(
+                db,
+                observations,
+                update_current_state=update_current_state,
+            )
+
+    def save_observations_in_session(
+        self,
+        db,
+        observations: list[StateObservation],
+        *,
+        update_current_state: bool,
+        chunk_size: int = 1000,
+    ) -> tuple[int, int]:
+        if not observations:
+            return 0, 0
         created = 0
         current_updates = 0
-        with get_db_session() as db:
-            for item in observations:
-                inserted = self._insert_observation(db, item)
-                if not inserted:
-                    continue
-                created += 1
-                if update_current_state:
-                    current_updates += self._upsert_current_state(db, item)
+        for offset in range(0, len(observations), max(1, int(chunk_size))):
+            chunk = observations[offset : offset + max(1, int(chunk_size))]
+            values = [self._observation_values(item) for item in chunk]
+            stmt = (
+                pg_insert(StateObservationRecord)
+                .values(values)
+                .on_conflict_do_nothing(index_elements=["idempotency_key"])
+                .returning(StateObservationRecord.id)
+            )
+            inserted_ids = {str(row[0]) for row in db.execute(stmt).all()}
+            created += len(inserted_ids)
+            if update_current_state and inserted_ids:
+                inserted = [item for item in chunk if item.observation_id in inserted_ids]
+                current_updates += self._bulk_upsert_current_state(db, inserted)
         return created, current_updates
 
     def _observation_values(self, item: StateObservation) -> dict[str, Any]:
@@ -240,9 +294,12 @@ class StateRepository:
         return db.execute(stmt).scalar_one_or_none() is not None
 
     def _upsert_current_state(self, db, item: StateObservation) -> int:
+        return self._bulk_upsert_current_state(db, [item])
+
+    def _current_state_values(self, item: StateObservation) -> dict[str, Any]:
         now = datetime.now(timezone.utc)
         incoming_observed_at = _datetime(item.observed_at)
-        values = {
+        return {
             "id": item.observation_id,
             "state_key": item.state_key,
             "device_id": item.device_id,
@@ -285,7 +342,25 @@ class StateRepository:
             "created_at": now,
             "updated_at": now,
         }
-        stmt = pg_insert(CurrentStateRecord).values(**values)
+
+    def _bulk_upsert_current_state(
+        self,
+        db,
+        observations: list[StateObservation],
+    ) -> int:
+        if not observations:
+            return 0
+        latest_by_state_key: dict[str, StateObservation] = {}
+        for item in observations:
+            existing = latest_by_state_key.get(item.state_key)
+            if existing is None or _datetime(item.observed_at) > _datetime(
+                existing.observed_at
+            ):
+                latest_by_state_key[item.state_key] = item
+        observations = list(latest_by_state_key.values())
+        stmt = pg_insert(CurrentStateRecord).values(
+            [self._current_state_values(item) for item in observations]
+        )
         excluded = stmt.excluded
         update_values = {
             "device_id": excluded.device_id,
@@ -325,9 +400,12 @@ class StateRepository:
             )
             .returning(CurrentStateRecord.id)
         )
-        return 1 if db.execute(stmt).scalar_one_or_none() is not None else 0
+        result = db.execute(stmt)
+        if hasattr(result, "all"):
+            return len(result.all())
+        return int(result.scalar_one_or_none() is not None)
 
-    def record_absence(
+    def build_absence_observation(
         self,
         previous: dict[str, Any],
         *,
@@ -360,7 +438,7 @@ class StateRepository:
             ).encode("utf-8")
         ).hexdigest()
         idempotency_key = hashlib.sha256(
-            f"{run_id}|{state_key}|{presence_state}|{missing_count}".encode("utf-8")
+            f"{run_id}|{state_key}|{presence_state}|{missing_count}".encode()
         ).hexdigest()
         metadata = {
             **dict(previous.get("metadata_json") or {}),
@@ -402,5 +480,9 @@ class StateRepository:
             confidence=float(previous.get("confidence") or 1.0),
             metadata=metadata,
         )
+        return item
+
+    def record_absence(self, previous: dict[str, Any], **kwargs) -> StateObservation:
+        item = self.build_absence_observation(previous, **kwargs)
         self.save_observations([item], update_current_state=True)
         return item

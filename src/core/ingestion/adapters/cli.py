@@ -7,11 +7,13 @@ capture path lives here so future collectors can share a consistent boundary.
 
 from __future__ import annotations
 
+import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from src.core.collection import ExecutionPlan
 from src.core.credentials import CredentialResolver
@@ -20,6 +22,22 @@ from src.core.ingestion.domain import IngestionResult
 
 BEIJING_TZ = timezone(timedelta(hours=8))
 OUTPUT_ROOT = Path(__file__).resolve().parents[3] / "skills" / "shared" / "outputs"
+
+
+def command_collection_manifest_path(output_file: str | Path) -> Path:
+    path = Path(output_file)
+    return path.with_suffix(path.suffix + ".collection.json")
+
+
+def load_command_collection_manifest(output_file: str | Path) -> dict[str, Any]:
+    path = command_collection_manifest_path(output_file)
+    if not path.is_file():
+        return {"status": "unknown", "commands": []}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else {"status": "unknown", "commands": []}
+    except (OSError, ValueError):
+        return {"status": "unknown", "commands": []}
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,14 +254,74 @@ class CLICommandCollector(IngestionAdapter):
             effective_device,
             connector=self.connector,
         )
-        sections: list[str] = []
+        commands = execution_plan.command_texts()
+        command_results: list[dict[str, Any]] = []
+        output_file.write_text("", encoding="utf-8")
         try:
-            for command in execution_plan.command_texts():
-                output = connection.send_command(command, read_timeout=read_timeout)
-                sections.append(
-                    f"Command: {command}\nOutput:\n{output}\n{'-' * 50}"
-                )
+            with output_file.open("a", encoding="utf-8", newline="\n") as report:
+                for index, command in enumerate(commands):
+                    observed_at = datetime.now(timezone.utc).isoformat()
+                    try:
+                        output = connection.send_command(command, read_timeout=read_timeout)
+                    except Exception as exc:
+                        failure = "timeout" if "timeout" in str(exc).lower() else "failed"
+                        command_results.append(
+                            {
+                                "command": command,
+                                "status": failure,
+                                "error": str(exc),
+                                "observed_at": observed_at,
+                            }
+                        )
+                        command_results.extend(
+                            {
+                                "command": pending,
+                                "status": "not_executed",
+                                "error": "previous command failed",
+                                "observed_at": None,
+                            }
+                            for pending in commands[index + 1 :]
+                        )
+                        break
+                    report.write(
+                        f"Command: {command}\nOutput:\n{output}\n{'-' * 50}\n"
+                    )
+                    report.flush()
+                    command_results.append(
+                        {
+                            "command": command,
+                            "status": "complete",
+                            "error": None,
+                            "observed_at": observed_at,
+                        }
+                    )
         finally:
-            connection.disconnect()
-        output_file.write_text("\n".join(sections), encoding="utf-8")
+            try:
+                connection.disconnect()
+            except Exception:
+                pass
+            completed = sum(item["status"] == "complete" for item in command_results)
+            status = (
+                "complete"
+                if completed == len(commands)
+                else "partial"
+                if completed > 0
+                else "failed"
+            )
+            command_collection_manifest_path(output_file).write_text(
+                json.dumps(
+                    {
+                        "status": status,
+                        "device_id": execution_plan.device_id,
+                        "started_at": command_results[0].get("observed_at")
+                        if command_results
+                        else None,
+                        "completed_at": datetime.now(timezone.utc).isoformat(),
+                        "commands": command_results,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
         return output_file
