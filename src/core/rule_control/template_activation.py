@@ -228,12 +228,48 @@ def _workflow_context_defaults(
         "field_name": field_name,
         "field_semantics": field_semantics,
         "device_role": None,
-        "policy_intent": None,
-        "event_intent": None,
+        "policy_intent": _policy_intent(
+            command=str(getattr(template, "canonical_command", None) or ""),
+            observation_type=observation_type,
+        ),
+        "event_intent": _event_intent(
+            command=str(getattr(template, "canonical_command", None) or ""),
+            observation_type=observation_type,
+        ),
+        "policy_targets": _policy_targets(validation),
     }
 
 
+def _policy_intent(*, command: str, observation_type: str) -> str | None:
+    lowered = " ".join([command, observation_type]).lower()
+    if "interface.oper_status" in lowered:
+        return (
+            "Track interface operational status transitions. Treat connected/up as healthy; "
+            "down/notconnect/err-disabled as fault transitions; suppress initial "
+            "disabled/admin-down/xcvrAbsent states unless recovering from a previous up state."
+        )
+    if "interface.optical" in lowered or "transceiver" in lowered:
+        return (
+            "Track optical Rx/Tx dBm values using device warning thresholds when present, "
+            "fallback low warning -17 dBm, critical -20 dBm, and 2 dB recovery hysteresis."
+        )
+    return None
+
+
+def _event_intent(*, command: str, observation_type: str) -> str | None:
+    lowered = " ".join([command, observation_type]).lower()
+    if "interface.oper_status" in lowered:
+        return "Generate InterfaceDown and InterfaceUp candidates with no-event reasons for admin-disabled states."
+    if "interface.optical" in lowered or "transceiver" in lowered:
+        return "Generate OpticalRxPowerLow, OpticalTxPowerLow, OpticalRecovered candidates; do not report N/A, DOM unsupported, or absent transceivers as low power."
+    return None
+
+
 def _first_semantic_field(validation: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
+    targets = _policy_targets(validation)
+    if targets:
+        first = targets[0]
+        return str(first["field_name"]), dict(first["field_semantics"])
     semantics = validation.get("state_semantics")
     if not isinstance(semantics, dict):
         return None
@@ -241,6 +277,38 @@ def _first_semantic_field(validation: dict[str, Any]) -> tuple[str, dict[str, An
         if isinstance(field_semantics, dict):
             return str(field_name), dict(field_semantics)
     return None
+
+
+def _policy_targets(validation: dict[str, Any]) -> list[dict[str, Any]]:
+    semantics = validation.get("state_semantics")
+    if not isinstance(semantics, dict):
+        return []
+    targets: list[dict[str, Any]] = []
+    for field_name, field_semantics in semantics.items():
+        if not isinstance(field_semantics, dict):
+            continue
+        observation_type = str(field_semantics.get("observation_type") or "").strip()
+        semantic_type = str(field_semantics.get("semantic_type") or "").strip()
+        if not observation_type or semantic_type in {"identity", ""}:
+            continue
+        targets.append(
+            {
+                "field_name": str(field_name),
+                "observation_type": observation_type,
+                "field_semantics": dict(field_semantics),
+                "requires_historical_values": semantic_type in {"gauge", "counter"},
+            }
+        )
+    targets.sort(
+        key=lambda item: (
+            0
+            if str(item["observation_type"]).startswith("interface.optical.")
+            and str(item["field_name"]) in {"rx_power_dbm", "tx_power_dbm"}
+            else 1,
+            str(item["field_name"]),
+        )
+    )
+    return targets
 
 
 def _missing_context(

@@ -42,6 +42,7 @@ class ObservationContract:
     contract_sha256: str | None = None
     status: str = "active"
     source_template_id: str | None = None
+    compatibility: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -65,6 +66,7 @@ class ObservationContract:
             "state_semantics": self.state_semantics or {},
             "contract_version": self.version,
             "contract_sha256": self.contract_sha256,
+            "compatibility": self.compatibility or {},
         }
 
 

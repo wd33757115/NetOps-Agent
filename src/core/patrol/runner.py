@@ -44,9 +44,24 @@ def persist_patrol_snapshots(
     ticket_id: str | None = None,
     mode: str = "production",
     execution_plan_id: str | None = None,
+    run_purpose: str = "scheduled_patrol",
 ) -> dict[str, Any]:
     """Import completed patrol raw-output files into the snapshot store."""
     from src.core.patrol.raw_importer import import_raw_capture
+    from src.core.patrol.repository import PatrolRepository
+
+    repository = PatrolRepository()
+    repository.create_run(
+        run_id=snapshot_run_id,
+        source="device-patrol",
+        mode=mode,
+        metadata={
+            "ticket_id": ticket_id,
+            "execution_plan_id": execution_plan_id,
+            "requested_device_count": len(details),
+        },
+        run_purpose=run_purpose,
+    )
 
     imported_commands = 0
     imported_devices = 0
@@ -59,6 +74,25 @@ def persist_patrol_snapshots(
     for detail in details:
         output_file = detail.get("output_file")
         if not output_file or not os.path.isfile(str(output_file)):
+            plan = detail.get("execution_plan") or {}
+            state_device_id = str(
+                detail.get("inventory_device_id")
+                or detail.get("device_name")
+                or detail.get("ip")
+                or "unknown"
+            )
+            for item in plan.get("collection_items") or []:
+                command = item.get("command") if isinstance(item, dict) else item
+                if command:
+                    repository.save_collection_result(
+                        run_id=snapshot_run_id,
+                        inventory_device_id=detail.get("inventory_device_id"),
+                        device_id=state_device_id,
+                        canonical_command=str(command),
+                        status="failed",
+                        failure_code="collection_failed",
+                        metadata={"error": detail.get("error")},
+                    )
             continue
         try:
             imported = import_raw_capture(
@@ -73,7 +107,11 @@ def persist_patrol_snapshots(
                     "ticket_id": ticket_id,
                     "source": "device-patrol",
                     "execution_plan_id": execution_plan_id,
+                    "run_purpose": run_purpose,
                 },
+                inventory_device_id=detail.get("inventory_device_id"),
+                collector_complete=detail.get("collection_status") == "complete",
+                finalize_run=False,
             )
             imported_commands += int(imported.get("command_count") or 0)
             imported_devices += 1
@@ -96,12 +134,32 @@ def persist_patrol_snapshots(
             import_errors.append(f"{output_file}: {exc}")
 
     snapshot_health = "ready"
-    if import_errors:
+    if import_errors and imported_devices == 0:
         snapshot_health = "failed"
+    elif import_errors:
+        snapshot_health = "partial"
     elif coverage_violations or parse_violations:
         snapshot_health = "partial"
         if imported_commands > 0 and parsed_commands == 0:
             snapshot_health = "failed_data_quality"
+
+    failed_devices = sum(not bool(detail.get("success")) for detail in details)
+    collection_status = "completed"
+    if imported_devices == 0:
+        collection_status = "failed"
+    elif failed_devices or import_errors or snapshot_health != "ready":
+        collection_status = "partial"
+    repository.finish_run(
+        snapshot_run_id,
+        collection_status=collection_status,
+        analysis_status="pending",
+        baseline_eligible=False,
+        metadata={
+            "successful_device_count": imported_devices,
+            "failed_device_count": failed_devices,
+            "snapshot_health": snapshot_health,
+        },
+    )
 
     return {
         "snapshot_run_id": snapshot_run_id,
@@ -111,6 +169,7 @@ def persist_patrol_snapshots(
         "snapshot_commands": imported_commands,
         "snapshot_errors": import_errors,
         "snapshot_health": snapshot_health,
+        "collection_status": collection_status,
         "parsed_commands": parsed_commands,
         "failed_parse_commands": failed_parse_commands,
         "coverage_violations": coverage_violations,
@@ -175,9 +234,6 @@ class DevicePatrolRunner:
             ),
         )
 
-        if not result.success:
-            raise RuntimeError(result.message or "device patrol failed")
-
         snapshot_run_id = f"patrol-{request.task_id or uuid.uuid4()}"
         snapshot_result = self._snapshot_persister(
             details=result.details or [],
@@ -185,18 +241,25 @@ class DevicePatrolRunner:
             ticket_id=request.ticket_id,
             mode=mode,
             execution_plan_id=request.execution_plan_id,
+            run_purpose=("baseline" if request.save_baseline else "scheduled_patrol"),
         )
         raw_outputs_url = self._archive_raw_outputs(
             output_files=result.output_files or [],
             ticket_id=request.ticket_id,
         )
-        if snapshot_result["snapshot_errors"]:
+        if int(result.success_devices or 0) == 0:
+            raise RuntimeError(result.message or "device patrol failed")
+        if snapshot_result["snapshot_errors"] and not snapshot_result.get(
+            "snapshot_devices"
+        ):
             raise RuntimeError("; ".join(snapshot_result["snapshot_errors"]))
 
         execution_time_ms = int((datetime.now() - execution_start).total_seconds() * 1000)
         status = "success"
         if snapshot_result.get("snapshot_health") in {"partial", "failed_data_quality"}:
             status = str(snapshot_result["snapshot_health"])
+        if not result.success:
+            status = "partial"
         return runner_success_payload(
             action="patrol",
             ticket_id=request.ticket_id,

@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
-from src.infrastructure.db.models import NetworkChangeRecord, NetworkEventRecord
+from src.infrastructure.db.models import (
+    NetworkChangeRecord,
+    NetworkEventOutboxRecord,
+    NetworkEventRecord,
+)
 from src.infrastructure.db.postgres import get_db_session
 
 
@@ -44,12 +49,9 @@ def _event_key(
     )
 
 
-RECOVERY_EVENT_TYPES = {
-    "CPURecovered",
-    "MemoryRecovered",
-    "InterfaceUp",
-    "BGPNeighborEstablished",
-}
+def _event_class(event: Any) -> str:
+    rule = dict((event.payload or {}).get("rule") or {})
+    return str(rule.get("event_class") or "fault")
 
 
 class ChangeEventRepository:
@@ -87,6 +89,7 @@ class ChangeEventRepository:
                         entity_type=change.entity_type,
                         entity_key=change.entity_key,
                         field=change.field,
+                        observation_type=getattr(change, "observation_type", None),
                         old_value_json=change.old_value,
                         new_value_json=change.new_value,
                         change_type=change.change_type,
@@ -102,7 +105,22 @@ class ChangeEventRepository:
                         old_number=getattr(change, "old_number", None),
                         new_number=getattr(change, "new_number", None),
                         event_status=getattr(change, "event_status", "pending"),
+                        change_policy_id=getattr(change, "change_policy_id", None),
+                        change_policy_version_id=getattr(
+                            change, "change_policy_version_id", None
+                        ),
+                        comparison_type=getattr(change, "comparison_type", None),
+                        decision_reason=getattr(change, "decision_reason", None),
+                        policy_snapshot_json=getattr(change, "policy_snapshot", None),
+                        observed_at=(
+                            _datetime(getattr(change, "observed_at", None))
+                            if getattr(change, "observed_at", None)
+                            else None
+                        ),
                         detected_at=_datetime(change.detected_at),
+                        processed_at=_datetime(
+                            getattr(change, "processed_at", None) or change.detected_at
+                        ),
                         confidence=change.confidence,
                         created_at=datetime.now(timezone.utc),
                     )
@@ -132,6 +150,7 @@ class ChangeEventRepository:
                     "entity_type": row.entity_type,
                     "entity_key": row.entity_key,
                     "field": row.field,
+                    "observation_type": row.observation_type,
                     "old": row.old_value_json,
                     "new": row.new_value_json,
                     "change_type": row.change_type,
@@ -143,7 +162,14 @@ class ChangeEventRepository:
                     "old_number": row.old_number,
                     "new_number": row.new_number,
                     "event_status": row.event_status,
+                    "change_policy_id": row.change_policy_id,
+                    "change_policy_version_id": row.change_policy_version_id,
+                    "comparison_type": row.comparison_type,
+                    "decision_reason": row.decision_reason,
+                    "policy_snapshot": row.policy_snapshot_json,
+                    "observed_at": row.observed_at.isoformat() if row.observed_at else None,
                     "detected_at": row.detected_at.isoformat(),
+                    "processed_at": row.processed_at.isoformat(),
                     "confidence": row.confidence,
                 }
                 for row in rows
@@ -221,7 +247,7 @@ class ChangeEventRepository:
                         occurred_at=_datetime(event.occurred_at),
                         status=(
                             "resolved"
-                            if event.event_type in RECOVERY_EVENT_TYPES
+                            if _event_class(event) == "recovery"
                             else event.status
                         ),
                         payload_json=self._event_payload(event),
@@ -229,6 +255,7 @@ class ChangeEventRepository:
                     )
                 )
                 db.flush()
+                self._enqueue_event(db, event)
                 if event.source_change_id:
                     change = db.get(NetworkChangeRecord, event.source_change_id)
                     if change is not None:
@@ -239,11 +266,32 @@ class ChangeEventRepository:
     @staticmethod
     def _event_payload(event: Any) -> dict[str, Any]:
         payload = dict(event.payload or {})
-        payload.setdefault(
-            "event_class",
-            "recovery" if event.event_type in RECOVERY_EVENT_TYPES else "fault",
-        )
+        payload.setdefault("event_class", _event_class(event))
         return payload
+
+    def _enqueue_event(self, db, event: Any) -> None:
+        if db.query(NetworkEventOutboxRecord.id).filter(
+            NetworkEventOutboxRecord.event_id == event.event_id
+        ).first():
+            return
+        now = datetime.now(timezone.utc)
+        payload = event.to_dict()
+        payload["status"] = (
+            "resolved" if _event_class(event) == "recovery" else event.status
+        )
+        db.add(
+            NetworkEventOutboxRecord(
+                id=str(uuid.uuid4()),
+                event_id=event.event_id,
+                event_type=f"network.{event.event_type}",
+                payload_json=payload,
+                status="pending",
+                attempts=0,
+                available_at=now,
+                created_at=now,
+                updated_at=now,
+            )
+        )
 
     def _find_active_event(self, db, event: Any) -> NetworkEventRecord | None:
         dedupe_key = (event.payload or {}).get("dedupe_key")
@@ -265,44 +313,76 @@ class ChangeEventRepository:
         return None
 
     def _resolve_recovered_event(self, db, event: Any) -> bool:
-        recovery_pairs = {
-            "CPURecovered": "CPUHigh",
-            "MemoryRecovered": "MemoryHigh",
-            "InterfaceUp": "InterfaceDown",
-            "BGPNeighborEstablished": "BGPNeighborLost",
-        }
-        target_type = recovery_pairs.get(event.event_type)
-        if not target_type:
+        rule = dict((event.payload or {}).get("rule") or {})
+        recovery = dict(rule.get("recovery") or {})
+        target_types = recovery.get("resolves")
+        if not target_types:
             return False
+        if isinstance(target_types, str):
+            target_types = [target_types]
         change = (event.payload or {}).get("change") or {}
-        target_key = _event_key(
-            event_type=target_type,
-            device_id=event.device_id,
-            entity_type=event.entity_type,
-            entity_key=event.entity_key,
-            field=change.get("field"),
-        )
-        rows = (
-            db.query(NetworkEventRecord)
-            .filter(NetworkEventRecord.event_type == target_type)
-            .filter(NetworkEventRecord.device_id == event.device_id)
-            .filter(NetworkEventRecord.entity_type == event.entity_type)
-            .filter(NetworkEventRecord.entity_key == event.entity_key)
-            .filter(NetworkEventRecord.status.in_(["open", "acknowledged", "recovering"]))
-            .all()
-        )
         resolved = False
-        for row in rows:
-            if (row.payload_json or {}).get("dedupe_key") != target_key:
-                continue
-            payload = dict(row.payload_json or {})
-            payload["recovery_change"] = change
-            payload["recovered_by_event_type"] = event.event_type
-            payload["resolved_at"] = event.occurred_at
-            row.payload_json = payload
-            row.status = "resolved"
-            resolved = True
+        for target_type in target_types:
+            target_key = _event_key(
+                event_type=target_type,
+                device_id=event.device_id,
+                entity_type=event.entity_type,
+                entity_key=event.entity_key,
+                field=change.get("field"),
+            )
+            rows = (
+                db.query(NetworkEventRecord)
+                .filter(NetworkEventRecord.event_type == target_type)
+                .filter(NetworkEventRecord.device_id == event.device_id)
+                .filter(NetworkEventRecord.entity_type == event.entity_type)
+                .filter(NetworkEventRecord.entity_key == event.entity_key)
+                .filter(NetworkEventRecord.status.in_(["open", "acknowledged", "recovering"]))
+                .all()
+            )
+            for row in rows:
+                if (row.payload_json or {}).get("dedupe_key") != target_key:
+                    continue
+                payload = dict(row.payload_json or {})
+                payload["recovery_change"] = change
+                payload["recovered_by_event_type"] = event.event_type
+                payload["resolved_at"] = event.occurred_at
+                row.payload_json = payload
+                row.status = "resolved"
+                resolved = True
         return resolved
+
+    def list_pending_event_outbox(self, limit: int = 100) -> list[dict[str, Any]]:
+        with get_db_session() as db:
+            rows = (
+                db.query(NetworkEventOutboxRecord)
+                .filter(
+                    NetworkEventOutboxRecord.status == "pending",
+                    NetworkEventOutboxRecord.available_at <= datetime.now(timezone.utc),
+                )
+                .order_by(NetworkEventOutboxRecord.created_at)
+                .limit(max(1, min(int(limit), 1000)))
+                .all()
+            )
+            return [row.to_dict() for row in rows]
+
+    def mark_event_outbox_published(self, outbox_id: str, message_id: str) -> None:
+        with get_db_session() as db:
+            row = db.get(NetworkEventOutboxRecord, outbox_id)
+            if row is None:
+                return
+            row.status = "published"
+            row.message_id = message_id
+            row.published_at = datetime.now(timezone.utc)
+            row.updated_at = datetime.now(timezone.utc)
+
+    def mark_event_outbox_failed(self, outbox_id: str, error: str) -> None:
+        with get_db_session() as db:
+            row = db.get(NetworkEventOutboxRecord, outbox_id)
+            if row is None:
+                return
+            row.attempts = int(row.attempts or 0) + 1
+            row.last_error = str(error)[:4000]
+            row.updated_at = datetime.now(timezone.utc)
 
     def list_events(
         self,

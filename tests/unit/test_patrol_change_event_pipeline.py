@@ -8,10 +8,17 @@ import uuid
 
 import pytest
 
+from src.common.config import get_settings
+
 from src.core.celery_tasks.tasks import _persist_patrol_snapshots
 from src.core.patrol.change_detector import (
     detect_changes_between_values,
     detect_changes_from_params,
+)
+from src.core.patrol.change_policy import (
+    ChangePolicyProposal,
+    compare_with_policy,
+    validate_change_policy,
 )
 from src.core.patrol.command_splitter import split_cli_capture
 from src.core.patrol.event_builder import build_events_from_changes
@@ -25,6 +32,7 @@ from src.core.patrol.raw_importer import (
 from src.infrastructure.db.models import (
     CommandSnapshot,
     NetworkChangeRecord,
+    NetworkEventOutboxRecord,
     NetworkEventRecord,
     ParserJobSample,
     ParserOutboxEvent,
@@ -36,6 +44,11 @@ from src.infrastructure.db.models import (
 from src.infrastructure.db.postgres import get_db_session
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture(autouse=True)
+def _enable_explicit_builtin_rule_test_interface(monkeypatch):
+    monkeypatch.setattr(get_settings(), "EVENT_RULE_ALLOW_BUILTIN_FALLBACK", True)
 
 
 def _cleanup_runs(*run_ids: str) -> None:
@@ -280,7 +293,9 @@ def test_event_builder_distinguishes_change_from_event():
     interface_event = build_events_from_changes(interface_down)[0]
 
     assert high_cpu_event.event_type == "CPUHigh"
-    assert high_cpu_event.payload["rule"] == {"rule_id": "cpu-high", "version": 1}
+    assert high_cpu_event.payload["rule"]["rule_id"] == "cpu-high"
+    assert high_cpu_event.payload["rule"]["version"] == 1
+    assert high_cpu_event.payload["rule"]["event_class"] == "fault"
     assert interface_event.event_type == "InterfaceDown"
     assert interface_event.payload["rule"]["rule_id"] == "interface-down"
 
@@ -315,6 +330,43 @@ def test_event_builder_handles_initial_abnormal_state():
     assert build_events_from_changes(initial_cpu_normal) == []
     assert build_events_from_changes(initial_cpu_high)[0].event_type == "CPUHigh"
     assert build_events_from_changes(initial_interface_down)[0].event_type == "InterfaceDown"
+
+
+def test_event_builder_suppresses_initial_admin_disabled_interface_state():
+    initial_disabled = [
+        {
+            "change_id": "initial-interface-disabled",
+            "device_id": "SW1",
+            "entity_type": "interface_l2",
+            "entity_key": "Gi1/0/2",
+            "field": "status",
+            "old": None,
+            "new": "disabled",
+            "change_type": "initial",
+        }
+    ]
+
+    assert build_events_from_changes(initial_disabled) == []
+
+
+def test_change_policy_detects_optical_low_crossing_and_recovery():
+    policy = ChangePolicyProposal(
+        observation_type="interface.optical.rx_power",
+        semantic_type="gauge",
+        compare_mode="threshold_low_and_deadband",
+        thresholds={"low": -17, "critical_low": -20},
+        recovery_threshold=-15,
+        deadband=2,
+    )
+
+    assert validate_change_policy(policy)["success"] is True
+    low = compare_with_policy(policy, old=-14.5, new=-18.1, field="rx_power_dbm")
+    recovered = compare_with_policy(policy, old=-18.1, new=-14.8, field="rx_power_dbm")
+
+    assert low["changed"] is True
+    assert low["crossed_low"] is True
+    assert recovered["changed"] is True
+    assert recovered["recovered_low"] is True
 
 
 def test_event_builder_does_not_emit_initial_recovery_events():
@@ -445,6 +497,13 @@ def test_event_repository_dedupes_active_event_and_resolves_recovery():
             assert high.payload_json["recovered_by_event_type"] == "CPURecovered"
             assert recovered.status == "resolved"
             assert recovered.payload_json["event_class"] == "recovery"
+            outbox_rows = (
+                db.query(NetworkEventOutboxRecord)
+                .filter(NetworkEventOutboxRecord.event_id.in_([high.id, recovered.id]))
+                .all()
+            )
+            assert len(outbox_rows) == 2
+            assert {row.status for row in outbox_rows} == {"pending"}
     finally:
         _cleanup_runs(run_id)
 
@@ -466,7 +525,8 @@ def test_event_builder_detects_memory_high():
     event = build_events_from_changes(memory_high)[0]
 
     assert event.event_type == "MemoryHigh"
-    assert event.payload["rule"] == {"rule_id": "memory-high", "version": 1}
+    assert event.payload["rule"]["rule_id"] == "memory-high"
+    assert event.payload["rule"]["version"] == 1
 
 
 def test_event_builder_marks_non_event_changes(monkeypatch):

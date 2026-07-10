@@ -157,7 +157,11 @@ def _contract_defaults(command: str) -> dict[str, Any]:
                 "status": {
                     "semantic_type": "state",
                     "observation_type": "interface.oper_status",
-                }
+                },
+                "protocol": {
+                    "semantic_type": "state",
+                    "observation_type": "interface.oper_status",
+                },
             },
         }
     if normalized == "show interface status":
@@ -172,6 +176,48 @@ def _contract_defaults(command: str) -> dict[str, Any]:
                     "semantic_type": "state",
                     "observation_type": "interface.oper_status",
                 }
+            },
+        }
+    if normalized in {
+        "show interface transceiver detail",
+        "display transceiver diagnosis interface",
+    }:
+        return {
+            "category": "interface_optical",
+            "entity_type": "interface_optical",
+            "primary_keys": ["interface"],
+            "required_fields": ["interface"],
+            "optional_fields": [
+                "transceiver_present",
+                "dom_supported",
+                "rx_power_dbm",
+                "tx_power_dbm",
+                "rx_low_warning_dbm",
+                "rx_high_warning_dbm",
+                "tx_low_warning_dbm",
+                "tx_high_warning_dbm",
+                "rx_low_alarm_dbm",
+                "tx_low_alarm_dbm",
+            ],
+            "state_semantics": {
+                "transceiver_present": {
+                    "semantic_type": "state",
+                    "observation_type": "interface.optical.presence",
+                },
+                "rx_power_dbm": {
+                    "semantic_type": "gauge",
+                    "observation_type": "interface.optical.rx_power",
+                    "unit": "dbm",
+                },
+                "tx_power_dbm": {
+                    "semantic_type": "gauge",
+                    "observation_type": "interface.optical.tx_power",
+                    "unit": "dbm",
+                },
+            },
+            "validators": {
+                "rx_power_dbm": {"type": "number"},
+                "tx_power_dbm": {"type": "number"},
             },
         }
     if normalized in {"display fan", "show environment fan"}:

@@ -119,3 +119,19 @@ def test_bootstrap_shared_templates_discovers_filesystem_assets_without_manifest
         "semantic_type": "state",
         "observation_type": "interface.oper_status",
     }
+
+
+def test_contract_defaults_define_optical_observation_contract():
+    defaults = parser_bootstrap._contract_defaults("show interface transceiver detail")
+
+    assert defaults["entity_type"] == "interface_optical"
+    assert defaults["primary_keys"] == ["interface"]
+    assert "rx_power_dbm" in defaults["optional_fields"]
+    assert defaults["state_semantics"]["rx_power_dbm"] == {
+        "semantic_type": "gauge",
+        "observation_type": "interface.optical.rx_power",
+        "unit": "dbm",
+    }
+    assert defaults["state_semantics"]["tx_power_dbm"]["observation_type"] == (
+        "interface.optical.tx_power"
+    )

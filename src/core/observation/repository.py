@@ -37,6 +37,7 @@ def _row_to_contract(row: ObservationContractRecord) -> ObservationContract:
         version=int(row.version or 1),
         contract_sha256=row.contract_sha256,
         status=row.status,
+        compatibility=dict(row.compatibility_json or {}),
     )
 
 
@@ -56,6 +57,7 @@ class ObservationContractRepository:
         source_job_id: str | None = None,
         approval: dict[str, Any] | None = None,
         status: str = "active",
+        compatibility: dict[str, Any] | None = None,
     ) -> ObservationContract:
         with get_db_session() as db:
             return self.upsert_contract_row(
@@ -70,6 +72,7 @@ class ObservationContractRepository:
                 source_job_id=source_job_id,
                 approval=approval,
                 status=status,
+                compatibility=compatibility,
             )
 
     def upsert_contract_row(
@@ -86,6 +89,7 @@ class ObservationContractRepository:
         source_job_id: str | None = None,
         approval: dict[str, Any] | None = None,
         status: str = "active",
+        compatibility: dict[str, Any] | None = None,
     ) -> ObservationContract:
         payload = build_contract_payload(
             source_type=source_type,
@@ -149,6 +153,8 @@ class ObservationContractRepository:
             row.source_job_id = source_job_id
         if approval is not None:
             row.approval_json = approval
+        if compatibility is not None:
+            row.compatibility_json = compatibility
         if row.entity_type is None:
             row.entity_type = payload["entity_type"]
             row.primary_keys_json = list(payload["primary_keys"])
@@ -191,6 +197,47 @@ class ObservationContractRepository:
         contract_status = status or (
             "active" if template.status == "active" else "draft"
         )
+        validation = dict(template.validation_json or {})
+        previous = (
+            db.query(ObservationContractRecord)
+            .join(
+                ParserTemplate,
+                ParserTemplate.id == ObservationContractRecord.source_template_id,
+            )
+            .filter(
+                ObservationContractRecord.source_type == "cli",
+                ObservationContractRecord.status == "active",
+                ObservationContractRecord.source_template_id != template.id,
+                ParserTemplate.vendor == template.vendor,
+                ParserTemplate.profile == template.profile,
+                ParserTemplate.canonical_command == template.canonical_command,
+            )
+            .order_by(ObservationContractRecord.version.desc())
+            .first()
+        )
+        next_identity = (
+            str(validation.get("entity_type") or template.category or "record"),
+            tuple(validation.get("primary_keys") or ()),
+        )
+        previous_identity = (
+            (str(previous.entity_type), tuple(previous.primary_keys_json or ()))
+            if previous is not None
+            else None
+        )
+        breaking = previous_identity is not None and previous_identity != next_identity
+        compatibility = {
+            "state_identity": "breaking" if breaking else "compatible",
+            "previous": previous_identity,
+            "current": next_identity,
+            "action": "rebaseline" if breaking else "none",
+        }
+        approval = dict(validation.get("compatibility_approval") or {})
+        if breaking and contract_status == "active" and not (
+            approval.get("approved") is True and approval.get("action") == "rebaseline"
+        ):
+            raise ValueError(
+                "breaking ObservationContract identity change requires approved rebaseline"
+            )
         return self.upsert_contract_row(
             db,
             source_type="cli",
@@ -198,9 +245,11 @@ class ObservationContractRepository:
             schema_ref=f"parser_template:{template.id}",
             source_template_id=template.id,
             category=template.category,
-            validation=dict(template.validation_json or {}),
+            validation=validation,
             version=int(template.contract_version or 1),
             status=contract_status,
+            compatibility=compatibility,
+            approval=approval or None,
         )
 
     def get_active(

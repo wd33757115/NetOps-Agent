@@ -1,0 +1,29 @@
+Value Filldown interface (\S+)
+Value transceiver_present (absent|present)
+Value rx_power_dbm (-?\d+(?:\.\d+)?)
+Value tx_power_dbm (-?\d+(?:\.\d+)?)
+Value rx_low_warning_dbm (-?\d+(?:\.\d+)?)
+Value rx_high_warning_dbm (-?\d+(?:\.\d+)?)
+Value tx_low_warning_dbm (-?\d+(?:\.\d+)?)
+Value tx_high_warning_dbm (-?\d+(?:\.\d+)?)
+Value rx_low_alarm_dbm (-?\d+(?:\.\d+)?)
+Value tx_low_alarm_dbm (-?\d+(?:\.\d+)?)
+
+Start
+  ^\s*${interface}\s+transceiver\s+diagnosis\s+information\s*: -> Present
+  ^\s*${interface}\s+transceiver\s+is\s+${transceiver_present}\s*$$ -> Record
+  ^.* -> Start
+
+Present
+  ^\s*(?:RX|Rx|Receive)\s+(?:power|Power).*?:\s*${rx_power_dbm}\s*dBm\s*$$
+  ^\s*(?:TX|Tx|Transmit)\s+(?:power|Power).*?:\s*${tx_power_dbm}\s*dBm\s*$$ -> Record Start
+  ^\s*Rx\s+low\s+warning.*?:\s*${rx_low_warning_dbm}\s*dBm\s*$$
+  ^\s*Rx\s+high\s+warning.*?:\s*${rx_high_warning_dbm}\s*dBm\s*$$
+  ^\s*Tx\s+low\s+warning.*?:\s*${tx_low_warning_dbm}\s*dBm\s*$$
+  ^\s*Tx\s+high\s+warning.*?:\s*${tx_high_warning_dbm}\s*dBm\s*$$
+  ^\s*Rx\s+low\s+alarm.*?:\s*${rx_low_alarm_dbm}\s*dBm\s*$$
+  ^\s*Tx\s+low\s+alarm.*?:\s*${tx_low_alarm_dbm}\s*dBm\s*$$
+  ^\s*${interface}\s+transceiver\s+diagnosis\s+information\s*: -> Record Present
+  ^.* -> Present
+
+EOF

@@ -111,7 +111,15 @@ def infer_change_policy(
         thresholds: dict[str, float] = {}
         recovery_threshold = None
         deadband = 0.0
-        if unit == "percent" or any(token in field.lower() for token in ("cpu", "memory", "usage")):
+        lowered = " ".join([field, observation_type, policy_intent or ""]).lower()
+        if unit.lower() == "dbm" or any(
+            token in lowered for token in ("optical", "rx_power", "tx_power", "dbm")
+        ):
+            thresholds["low"] = -17.0
+            thresholds["critical_low"] = -20.0
+            recovery_threshold = -15.0
+            deadband = 2.0
+        elif unit == "percent" or any(token in lowered for token in ("cpu", "memory", "usage")):
             p99 = stats.get("p99")
             high = max(90.0, float(p99 or 0))
             high = min(100.0, round(high, 2))
@@ -121,7 +129,13 @@ def infer_change_policy(
         return ChangePolicyProposal(
             observation_type=observation_type,
             semantic_type=semantic_type,
-            compare_mode="threshold_and_deadband" if thresholds else "numeric_delta",
+            compare_mode=(
+                "threshold_low_and_deadband"
+                if "low" in thresholds
+                else "threshold_and_deadband"
+                if thresholds
+                else "numeric_delta"
+            ),
             deadband=deadband,
             thresholds=thresholds,
             recovery_threshold=recovery_threshold,
@@ -197,6 +211,7 @@ def validate_change_policy(policy: ChangePolicyProposal) -> dict[str, Any]:
     allowed_modes = {
         "state_transition",
         "threshold_and_deadband",
+        "threshold_low_and_deadband",
         "numeric_delta",
         "counter_delta",
         "hash_diff",
@@ -216,6 +231,13 @@ def validate_change_policy(policy: ChangePolicyProposal) -> dict[str, Any]:
         if policy.recovery_threshold is not None and high is not None:
             if policy.recovery_threshold >= high:
                 errors.append("recovery_threshold must be lower than thresholds.high")
+    if policy.compare_mode == "threshold_low_and_deadband":
+        low = (policy.thresholds or {}).get("low")
+        if low is None:
+            errors.append("threshold_low_and_deadband requires thresholds.low")
+        if policy.recovery_threshold is not None and low is not None:
+            if policy.recovery_threshold <= low:
+                errors.append("recovery_threshold must be higher than thresholds.low")
     return {
         "success": not errors,
         "errors": errors,
@@ -247,20 +269,37 @@ def compare_with_policy(
             "delta": (new_num - old_num) if old_num is not None and new_num is not None else None,
             "reason": "counter_delta",
         }
-    if policy.compare_mode in {"numeric_delta", "threshold_and_deadband"}:
+    if policy.compare_mode in {
+        "numeric_delta",
+        "threshold_and_deadband",
+        "threshold_low_and_deadband",
+    }:
         old_num = _number(old)
         new_num = _number(new)
         if old_num is None or new_num is None:
             return {"changed": old != new, "reason": "non_numeric_fallback"}
         deadband = float(policy.deadband or 0)
         crossed_high = False
+        crossed_low = False
+        recovered_low = False
         high = (policy.thresholds or {}).get("high")
         if high is not None:
             crossed_high = old_num < high <= new_num
+        low = (policy.thresholds or {}).get("low")
+        recovery = policy.recovery_threshold
+        if low is not None:
+            crossed_low = old_num > low >= new_num
+            if recovery is not None:
+                recovered_low = old_num <= low and new_num >= float(recovery)
         return {
-            "changed": crossed_high or abs(new_num - old_num) > deadband,
+            "changed": crossed_high
+            or crossed_low
+            or recovered_low
+            or abs(new_num - old_num) > deadband,
             "delta": new_num - old_num,
             "crossed_high": crossed_high,
+            "crossed_low": crossed_low,
+            "recovered_low": recovered_low,
             "reason": policy.compare_mode,
         }
     return {"changed": old != new, "reason": "fallback"}

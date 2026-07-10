@@ -35,6 +35,9 @@ class StateObservation:
     parser_template_id: str | None
     parser_version: str | None
     contract_version: int | None
+    observation_type: str | None = None
+    semantic_type: str | None = None
+    unit: str | None = None
     confidence: float = 1.0
     metadata: dict[str, Any] | None = None
 

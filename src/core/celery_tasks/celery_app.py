@@ -49,6 +49,7 @@ celery = Celery(
         "src.core.celery_tasks.tasks",
         "src.core.workflows.tasks",
         "src.core.parser.tasks",
+        "src.core.patrol.tasks",
     ]
 )
 
@@ -98,6 +99,11 @@ celery.conf.beat_schedule = {
     "publish-parser-outbox": {
         "task": "publish_parser_outbox",
         "schedule": 10.0,
+        "options": {"queue": "netops.default"},
+    },
+    "publish-network-event-outbox": {
+        "task": "publish_network_event_outbox",
+        "schedule": 5.0,
         "options": {"queue": "netops.default"},
     },
     "reconcile-parser-jobs": {

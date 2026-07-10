@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from src.core.patrol.change_policy import ChangePolicyProposal, policy_from_dict
@@ -56,8 +57,23 @@ def _gauge_fields(contract: dict[str, Any]) -> list[str]:
     return [
         field
         for field in _fields(contract)
-        if any(token in field.lower() for token in ("cpu", "memory", "usage"))
+        if any(
+            token in field.lower()
+            for token in ("cpu", "memory", "usage", "rx_power", "tx_power", "dbm")
+        )
     ]
+
+
+def _policy_gauge_fields(contract: dict[str, Any], observation_type: str) -> list[str]:
+    semantics = dict(contract.get("state_semantics") or {})
+    matched = [
+        field
+        for field, metadata in semantics.items()
+        if isinstance(metadata, dict)
+        and metadata.get("semantic_type") == "gauge"
+        and str(metadata.get("observation_type") or "") == observation_type
+    ]
+    return matched or _gauge_fields(contract)
 
 
 def generate_event_rule_definitions(
@@ -213,6 +229,82 @@ def generate_event_rule_definitions(
                 },
             )
         )
+    elif policy.compare_mode == "threshold_low_and_deadband":
+        fields = _policy_gauge_fields(contract, observation_type) or [
+            observation_type or "value"
+        ]
+        lowered = " ".join([observation_type, *fields, entity_type]).lower()
+        if "optical" not in lowered and "rx_power" not in lowered and "tx_power" not in lowered:
+            return definitions
+        low = float((policy.thresholds or {}).get("low") or -17)
+        recovered = float(policy.recovery_threshold or (low + float(policy.deadband or 2)))
+        scoped_entity_types = [entity_type] if entity_type else ["interface_optical"]
+        for field in fields:
+            normalized_field = field.lower()
+            if "rx_power" in normalized_field:
+                definitions.append(
+                    EventRuleDefinition(
+                        rule_id="optical-rx-power-low",
+                        version=1,
+                        event_type="OpticalRxPowerLow",
+                        severity="warning",
+                        description="Generated optical Rx low-power rule candidate.",
+                        condition={
+                            "kind": "threshold_lte",
+                            "entity_types": scoped_entity_types,
+                            "fields": [field],
+                            "lte": low,
+                        },
+                    )
+                )
+                definitions.append(
+                    EventRuleDefinition(
+                        rule_id="optical-rx-power-recovered",
+                        version=1,
+                        event_type="OpticalRecovered",
+                        severity="info",
+                        description="Generated optical Rx recovery rule candidate.",
+                        condition={
+                            "kind": "threshold_low_recovery",
+                            "entity_types": scoped_entity_types,
+                            "fields": [field],
+                            "low": low,
+                            "gt": recovered,
+                        },
+                    )
+                )
+            if "tx_power" in normalized_field:
+                definitions.append(
+                    EventRuleDefinition(
+                        rule_id="optical-tx-power-low",
+                        version=1,
+                        event_type="OpticalTxPowerLow",
+                        severity="warning",
+                        description="Generated optical Tx low-power rule candidate.",
+                        condition={
+                            "kind": "threshold_lte",
+                            "entity_types": scoped_entity_types,
+                            "fields": [field],
+                            "lte": low,
+                        },
+                    )
+                )
+                definitions.append(
+                    EventRuleDefinition(
+                        rule_id="optical-tx-power-recovered",
+                        version=1,
+                        event_type="OpticalRecovered",
+                        severity="info",
+                        description="Generated optical Tx recovery rule candidate.",
+                        condition={
+                            "kind": "threshold_low_recovery",
+                            "entity_types": scoped_entity_types,
+                            "fields": [field],
+                            "low": low,
+                            "gt": recovered,
+                        },
+                    )
+                )
     elif policy.compare_mode == "hash_diff":
         definitions.append(
             EventRuleDefinition(
@@ -228,14 +320,27 @@ def generate_event_rule_definitions(
             )
         )
 
+    recovery_pairs = {
+        "CPURecovered": ["CPUHigh"],
+        "MemoryRecovered": ["MemoryHigh"],
+        "InterfaceUp": ["InterfaceDown"],
+        "BGPNeighborEstablished": ["BGPNeighborLost"],
+        "OpticalRecovered": ["OpticalRxPowerLow", "OpticalTxPowerLow"],
+    }
+    definitions = [
+        replace(
+            definition,
+            event_class="recovery",
+            recovery={"resolves": recovery_pairs[definition.event_type]},
+        )
+        if definition.event_type in recovery_pairs
+        else definition
+        for definition in definitions
+    ]
     if intent:
         definitions = [
-            EventRuleDefinition(
-                rule_id=definition.rule_id,
-                version=definition.version,
-                event_type=definition.event_type,
-                severity=definition.severity,
-                condition=definition.condition,
+            replace(
+                definition,
                 description=f"{definition.description or ''} Intent: {intent}".strip(),
             )
             for definition in definitions
@@ -263,6 +368,11 @@ def generate_and_validate_event_rules(
                 "severity": definition.severity,
                 "description": definition.description,
                 "condition": definition.condition,
+                "priority": definition.priority,
+                "exclusive": definition.exclusive,
+                "event_class": definition.event_class,
+                "recovery": definition.recovery or {},
+                "correlation_keys": list(definition.correlation_keys),
             },
             "validation": validate_event_rule_definition(definition),
         }

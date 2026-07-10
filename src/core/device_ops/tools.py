@@ -243,6 +243,9 @@ class PatrolTool:
         self.db_manager = db_manager
         self.policy_resolver = CollectionPolicyResolver()
         self.cli_collector = cli_collector or CLICommandCollector()
+        from src.common.config import get_settings
+
+        self.max_concurrency = max(1, int(get_settings().PATROL_MAX_CONCURRENCY))
 
     @staticmethod
     def _production_coverage(
@@ -287,6 +290,7 @@ class PatrolTool:
                 ]
                 if blocking:
                     return {
+                        "inventory_device_id": device.get("device_id"),
                         "device_name": device.get("device_name"),
                         "ip": device.get("ip"),
                         "vendor": device.get("vendor"),
@@ -294,6 +298,8 @@ class PatrolTool:
                         "success": False,
                         "error": "production patrol blocked by parser coverage preflight",
                         "coverage_violations": blocking,
+                        "collection_status": "failed",
+                        "execution_plan": plan.to_metadata(),
                     }
             output_file = await asyncio.to_thread(
                 self.cli_collector.collect_command_outputs,
@@ -307,6 +313,7 @@ class PatrolTool:
                 source="device-patrol",
             )
             return {
+                "inventory_device_id": device.get("device_id"),
                 "device_name": device.get("device_name"),
                 "ip": device.get("ip"),
                 "vendor": device.get("vendor"),
@@ -316,6 +323,7 @@ class PatrolTool:
                 "commands_count": len(plan.commands),
                 "execution_plan": plan.to_metadata(),
                 "baseline_saved": save_baseline,
+                "collection_status": "complete",
             }
         except Exception as exc:
             _record_connection_health(
@@ -327,10 +335,15 @@ class PatrolTool:
                 source="device-patrol",
             )
             return {
+                "inventory_device_id": device.get("device_id"),
                 "device_name": device.get("device_name"),
                 "ip": device.get("ip"),
                 "success": False,
                 "error": str(exc),
+                "collection_status": "failed",
+                "execution_plan": (
+                    plan.to_metadata() if "plan" in locals() else None
+                ),
             }
 
     async def patrol_by_filter(
@@ -347,12 +360,13 @@ class PatrolTool:
                 action=ActionType.PATROL,
                 message="No devices matched the requested filter.",
             )
-        results = await asyncio.gather(
-            *(
-                self.patrol_device(device, save_baseline, mode=mode)
-                for device in devices
-            )
-        )
+        semaphore = asyncio.Semaphore(self.max_concurrency)
+
+        async def bounded_patrol(device):
+            async with semaphore:
+                return await self.patrol_device(device, save_baseline, mode=mode)
+
+        results = await asyncio.gather(*(bounded_patrol(device) for device in devices))
         return _task_result(ActionType.PATROL, devices, results, started_at)
 
     async def patrol_by_plan(

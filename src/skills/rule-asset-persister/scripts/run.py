@@ -294,6 +294,13 @@ def _persist_event_rules(
             source_job_id=job["id"],
             validation_report=validation_report,
             status="draft",
+            priority=int(rule.get("priority") or 100),
+            exclusive=bool(rule.get("exclusive", False)),
+            event_class=str(rule.get("event_class") or "fault"),
+            recovery=dict(rule.get("recovery") or {}),
+            correlation_keys=(
+                rule.get("correlation_key") or rule.get("correlation_keys")
+            ),
         )
         with get_db_session() as db:
             version = db.get(EventRuleVersionRecord, version_id)

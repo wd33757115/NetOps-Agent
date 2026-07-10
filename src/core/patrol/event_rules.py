@@ -34,12 +34,14 @@ def event_rule_digest(
     event_type: str,
     severity: str,
     condition: dict[str, Any],
+    governance: dict[str, Any] | None = None,
 ) -> str:
     payload = {
         "name": name,
         "event_type": event_type,
         "severity": severity,
         "condition": condition,
+        "governance": governance or {},
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
@@ -60,6 +62,11 @@ def is_down(value: Any) -> bool:
         "down",
         "administratively down",
         "admin-down",
+        "disabled",
+        "disable",
+        "shutdown",
+        "err-disabled",
+        "errdisabled",
         "notconnec",
         "notconnect",
         "notconnected",
@@ -68,6 +75,24 @@ def is_down(value: Any) -> bool:
         "inactive",
         "failed",
         "fault",
+    }
+
+
+def is_suppressed_interface_state(value: Any) -> bool:
+    return norm(value) in {
+        "administratively down",
+        "admin down",
+        "admin-down",
+        "disabled",
+        "disable",
+        "shutdown",
+        "xcvrabsen",
+        "xcvrabsent",
+        "sfpabsent",
+        "transceiver absent",
+        "transceiver is not present",
+        "notpresent",
+        "not present",
     }
 
 
@@ -104,6 +129,16 @@ class EventRule:
     event_type: str
     severity: str
     predicate: Callable[[dict[str, Any]], bool]
+    priority: int = 100
+    exclusive: bool = False
+    event_class: str = "fault"
+    recovery: dict[str, Any] | None = None
+    correlation_keys: tuple[str, ...] = (
+        "device_id",
+        "entity_type",
+        "entity_key",
+        "field",
+    )
 
     def match(self, change: dict[str, Any]) -> bool:
         return self.predicate(change)
@@ -117,6 +152,16 @@ class EventRuleDefinition:
     severity: str
     condition: dict[str, Any]
     description: str | None = None
+    priority: int = 100
+    exclusive: bool = False
+    event_class: str = "fault"
+    recovery: dict[str, Any] | None = None
+    correlation_keys: tuple[str, ...] = (
+        "device_id",
+        "entity_type",
+        "entity_key",
+        "field",
+    )
 
     def to_rule(self) -> EventRule:
         return EventRule(
@@ -128,6 +173,11 @@ class EventRuleDefinition:
                 condition,
                 change,
             ),
+            priority=self.priority,
+            exclusive=self.exclusive,
+            event_class=self.event_class,
+            recovery=dict(self.recovery or {}),
+            correlation_keys=self.correlation_keys,
         )
 
 
@@ -166,6 +216,38 @@ def condition_matches(condition: dict[str, Any], change: dict[str, Any]) -> bool
             and float(old_value) >= threshold
             and float(new_value) < threshold
         )
+    if kind == "threshold_lte":
+        if not _entity_type_allowed(condition, change):
+            return False
+        fields = {norm_field(item) for item in condition.get("fields") or []}
+        threshold = float(condition.get("lte"))
+        old_value = to_float(change.get("old"))
+        new_value = to_float(change.get("new"))
+        return (
+            norm_field(change.get("field")) in fields
+            and new_value is not None
+            and float(new_value) <= threshold
+            and (
+                change.get("change_type") == "initial"
+                or old_value is None
+                or float(old_value) > threshold
+            )
+        )
+    if kind == "threshold_low_recovery":
+        if not _entity_type_allowed(condition, change):
+            return False
+        fields = {norm_field(item) for item in condition.get("fields") or []}
+        low = float(condition.get("low"))
+        gt = float(condition.get("gt", low + float(condition.get("hysteresis", 0))))
+        old_value = to_float(change.get("old"))
+        new_value = to_float(change.get("new"))
+        return (
+            norm_field(change.get("field")) in fields
+            and old_value is not None
+            and new_value is not None
+            and float(old_value) <= low
+            and float(new_value) >= gt
+        )
     if kind == "transition":
         fields = {norm_field(item) for item in condition.get("fields") or []}
         entity_types = {norm(item) for item in condition.get("entity_types") or []}
@@ -173,6 +255,8 @@ def condition_matches(condition: dict[str, Any], change: dict[str, Any]) -> bool
             return False
         new_group = _state_group(change.get("new"))
         if change.get("change_type") == "initial":
+            if is_suppressed_interface_state(change.get("new")):
+                return False
             return bool(condition.get("allow_initial_target")) and (
                 norm_field(change.get("field")) in fields
                 and new_group == str(condition.get("to_group"))
@@ -257,7 +341,11 @@ class EventRuleRepository:
             if event_type:
                 query = query.filter(EventRuleVersionRecord.event_type == event_type)
             rows = (
-                query.order_by(EventRuleRecord.name, EventRuleVersionRecord.version.desc())
+                query.order_by(
+                    EventRuleVersionRecord.priority.desc(),
+                    EventRuleRecord.name,
+                    EventRuleVersionRecord.version.desc(),
+                )
                 .limit(max(1, min(int(limit), 2000)))
                 .all()
             )
@@ -275,6 +363,11 @@ class EventRuleRepository:
                     "source_job_id": version.source_job_id,
                     "validation_report": version.validation_report_json,
                     "digest": version.digest,
+                    "priority": version.priority,
+                    "exclusive": version.exclusive,
+                    "event_class": version.event_class,
+                    "recovery": version.recovery_json,
+                    "correlation_keys": version.correlation_key_json,
                     "created_by": version.created_by,
                     "created_at": version.created_at,
                     "activated_at": version.activated_at,
@@ -293,7 +386,10 @@ class EventRuleRepository:
                 )
                 .filter(EventRuleRecord.status == "active")
                 .filter(EventRuleVersionRecord.status == "active")
-                .order_by(EventRuleRecord.name)
+                .order_by(
+                    EventRuleVersionRecord.priority.desc(),
+                    EventRuleRecord.name,
+                )
                 .all()
             )
             return [
@@ -308,6 +404,14 @@ class EventRuleRepository:
                     ): condition_matches(
                         condition,
                         change,
+                    ),
+                    priority=int(version.priority or 100),
+                    exclusive=bool(version.exclusive),
+                    event_class=str(version.event_class or "fault"),
+                    recovery=dict(version.recovery_json or {}),
+                    correlation_keys=tuple(
+                        version.correlation_key_json
+                        or ("device_id", "entity_type", "entity_key", "field")
                     ),
                 )
                 for rule, version in rows
@@ -351,12 +455,24 @@ class EventRuleRepository:
                             event_type=definition.event_type,
                             severity=definition.severity,
                             condition_json=definition.condition,
+                            priority=definition.priority,
+                            exclusive=definition.exclusive,
+                            event_class=definition.event_class,
+                            recovery_json=definition.recovery,
+                            correlation_key_json=list(definition.correlation_keys),
                             status="active",
                             digest=event_rule_digest(
                                 name=definition.rule_id,
                                 event_type=definition.event_type,
                                 severity=definition.severity,
                                 condition=definition.condition,
+                                governance={
+                                    "priority": definition.priority,
+                                    "exclusive": definition.exclusive,
+                                    "event_class": definition.event_class,
+                                    "recovery": definition.recovery,
+                                    "correlation_keys": definition.correlation_keys,
+                                },
                             ),
                         )
                     )
@@ -373,6 +489,11 @@ class EventRuleRepository:
         condition: dict[str, Any],
         description: str | None = None,
         created_by: str | None = None,
+        priority: int = 100,
+        exclusive: bool = False,
+        event_class: str = "fault",
+        recovery: dict[str, Any] | None = None,
+        correlation_keys: list[str] | tuple[str, ...] | None = None,
     ) -> str:
         with get_db_session() as db:
             rule = (
@@ -410,6 +531,14 @@ class EventRuleRepository:
                 event_type=event_type,
                 severity=severity,
                 condition_json=condition,
+                priority=priority,
+                exclusive=exclusive,
+                event_class=event_class,
+                recovery_json=recovery,
+                correlation_key_json=list(
+                    correlation_keys
+                    or ("device_id", "entity_type", "entity_key", "field")
+                ),
                 status="active",
                 created_by=created_by,
                 activated_at=datetime.now(timezone.utc),
@@ -418,6 +547,13 @@ class EventRuleRepository:
                     event_type=event_type,
                     severity=severity,
                     condition=condition,
+                    governance={
+                        "priority": priority,
+                        "exclusive": exclusive,
+                        "event_class": event_class,
+                        "recovery": recovery,
+                        "correlation_keys": correlation_keys,
+                    },
                 ),
             )
             db.add(version)
@@ -437,6 +573,11 @@ class EventRuleRepository:
         validation_report: dict[str, Any] | None = None,
         digest: str | None = None,
         status: str = "draft",
+        priority: int = 100,
+        exclusive: bool = False,
+        event_class: str = "fault",
+        recovery: dict[str, Any] | None = None,
+        correlation_keys: list[str] | tuple[str, ...] | None = None,
     ) -> str:
         if status not in {"draft", "pending_approval"}:
             raise ValueError("event rule version status must be draft or pending_approval")
@@ -471,6 +612,14 @@ class EventRuleRepository:
                 event_type=event_type,
                 severity=severity,
                 condition_json=condition,
+                priority=priority,
+                exclusive=exclusive,
+                event_class=event_class,
+                recovery_json=recovery,
+                correlation_key_json=list(
+                    correlation_keys
+                    or ("device_id", "entity_type", "entity_key", "field")
+                ),
                 status=status,
                 created_by=created_by,
                 source_job_id=source_job_id,
@@ -481,6 +630,13 @@ class EventRuleRepository:
                     event_type=event_type,
                     severity=severity,
                     condition=condition,
+                    governance={
+                        "priority": priority,
+                        "exclusive": exclusive,
+                        "event_class": event_class,
+                        "recovery": recovery,
+                        "correlation_keys": correlation_keys,
+                    },
                 ),
             )
             db.add(version)
@@ -525,6 +681,11 @@ class EventRuleRepository:
                 "event_type": version.event_type,
                 "severity": version.severity,
                 "condition": version.condition_json,
+                "priority": version.priority,
+                "exclusive": version.exclusive,
+                "event_class": version.event_class,
+                "recovery": version.recovery_json,
+                "correlation_keys": version.correlation_key_json,
                 "version_status": version.status,
                 "activated_at": version.activated_at,
                 "deprecated_at": version.deprecated_at,
@@ -597,6 +758,15 @@ def load_event_rule_pack(path: str | Path | None = None) -> list[EventRuleDefini
                 severity=str(item["severity"]),
                 condition=dict(condition),
                 description=item.get("description"),
+                priority=int(item.get("priority") or 100),
+                exclusive=bool(item.get("exclusive", False)),
+                event_class=str(item.get("event_class") or "fault"),
+                recovery=dict(item.get("recovery") or {}),
+                correlation_keys=tuple(
+                    item.get("correlation_key")
+                    or item.get("correlation_keys")
+                    or ("device_id", "entity_type", "entity_key", "field")
+                ),
             )
         )
     return definitions
@@ -610,26 +780,38 @@ def default_event_rules() -> list[EventRule]:
     return [definition.to_rule() for definition in default_event_rule_definitions()]
 
 
-def match_event_rule(change: dict[str, Any]) -> EventRule | None:
-    rules = load_event_rules()
+def match_event_rules(change: dict[str, Any]) -> list[EventRule]:
+    matched: list[EventRule] = []
+    rules = sorted(load_event_rules(), key=lambda rule: (-rule.priority, rule.rule_id))
     for rule in rules:
         if rule.match(change):
-            return rule
-    return None
+            matched.append(rule)
+            if rule.exclusive:
+                break
+    return matched
 
 
-def load_event_rules() -> list[EventRule]:
+def match_event_rule(change: dict[str, Any]) -> EventRule | None:
+    matched = match_event_rules(change)
+    return matched[0] if matched else None
+
+
+def load_event_rules(*, allow_builtin_fallback: bool | None = None) -> list[EventRule]:
+    if allow_builtin_fallback is None:
+        from src.common.config import get_settings
+
+        allow_builtin_fallback = bool(
+            get_settings().EVENT_RULE_ALLOW_BUILTIN_FALLBACK
+        )
     try:
         rules = EventRuleRepository().list_active_rules()
-        if not rules:
+        if rules:
+            return rules
+        return default_event_rules() if allow_builtin_fallback else []
+    except Exception as exc:
+        if allow_builtin_fallback:
             return default_event_rules()
-        existing = {rule.rule_id for rule in rules}
-        missing_defaults = [
-            rule for rule in default_event_rules() if rule.rule_id not in existing
-        ]
-        return rules + missing_defaults
-    except Exception:
-        return default_event_rules()
+        raise RuntimeError("active event rules are unavailable") from exc
 
 
 def _default_condition(rule_id: str) -> dict[str, Any]:

@@ -130,6 +130,7 @@ def observations_from_snapshot(
         str(field).strip().lower() for field in contract.get("ignore_fields") or []
     }
     ignore_fields.update(DEFAULT_IGNORE_FIELDS)
+    state_semantics = dict(contract.get("state_semantics") or {})
     observations: list[StateObservation] = []
     external_device_id = str(snapshot["device_id"])
     state_device_id = str(snapshot.get("inventory_device_id") or external_device_id)
@@ -146,6 +147,11 @@ def observations_from_snapshot(
             if normalized_field_name in ignore_fields or field_name in primary_keys:
                 continue
             value = _normalize_observation_value(str(field_name), record.get(field_name))
+            field_semantics = state_semantics.get(field_name) or state_semantics.get(
+                normalized_field_name
+            )
+            if not isinstance(field_semantics, dict):
+                field_semantics = {}
             value_text, value_number, value_type = _value_parts(value)
             state_key = _digest(
                 [
@@ -186,6 +192,21 @@ def observations_from_snapshot(
                     entity_type=entity_type,
                     entity_key=entity_key,
                     field_name=str(field_name),
+                    observation_type=(
+                        str(field_semantics.get("observation_type"))
+                        if field_semantics.get("observation_type")
+                        else None
+                    ),
+                    semantic_type=(
+                        str(field_semantics.get("semantic_type"))
+                        if field_semantics.get("semantic_type")
+                        else None
+                    ),
+                    unit=(
+                        str(field_semantics.get("unit"))
+                        if field_semantics.get("unit")
+                        else None
+                    ),
                     value=value,
                     value_text=value_text,
                     value_number=value_number,
@@ -209,6 +230,10 @@ def observations_from_snapshot(
                             if snapshot.get("inventory_device_id")
                             else "external_fallback"
                         ),
+                        "observation_type": field_semantics.get("observation_type"),
+                        "semantic_type": field_semantics.get("semantic_type"),
+                        "unit": field_semantics.get("unit"),
+                        "semantics": field_semantics,
                     },
                 )
             )
@@ -270,6 +295,16 @@ def normalize_run(
     device_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     repository = StateRepository()
+    from src.core.patrol.repository import PatrolRepository
+
+    try:
+        PatrolRepository().update_analysis_status(
+            run_id,
+            analysis_status="normalizing",
+            baseline_eligible=False,
+        )
+    except ValueError:
+        pass
     snapshot_ids = (
         repository.list_run_snapshot_ids(run_id, device_ids=device_ids)
         if device_ids
@@ -279,7 +314,7 @@ def normalize_run(
         normalize_snapshot(snapshot_id, update_current_state=update_current_state)
         for snapshot_id in snapshot_ids
     ]
-    return {
+    result = {
         "success": all(result.get("success") for result in results),
         "run_id": run_id,
         "device_ids": device_ids or [],
@@ -291,6 +326,17 @@ def normalize_run(
         ),
         "results": results,
     }
+    if not result["success"]:
+        try:
+            PatrolRepository().update_analysis_status(
+                run_id,
+                analysis_status="failed",
+                baseline_eligible=False,
+                metadata={"analysis_failure_stage": "normalizing"},
+            )
+        except ValueError:
+            pass
+    return result
 
 
 def normalize_state_from_params(params: dict[str, Any]) -> dict[str, Any]:

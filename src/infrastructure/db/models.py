@@ -606,6 +606,19 @@ class PatrolRun(Base):
         index=True,
     )
     status = Column(String(32), nullable=False, default="running", index=True)
+    collection_status = Column(
+        String(32), nullable=False, default="running", server_default="running", index=True
+    )
+    analysis_status = Column(
+        String(32), nullable=False, default="pending", server_default="pending", index=True
+    )
+    baseline_eligible = Column(
+        Boolean, nullable=False, default=False, server_default=text("false"), index=True
+    )
+    run_purpose = Column(
+        String(32), nullable=False, default="scheduled_patrol",
+        server_default="scheduled_patrol", index=True
+    )
     device_count = Column(Integer, nullable=False, default=0)
     command_count = Column(Integer, nullable=False, default=0)
     started_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
@@ -682,6 +695,60 @@ class CommandSnapshot(Base):
             "dataset_id",
             "device_id",
             "canonical_command",
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class PatrolCollectionResult(Base):
+    """Command-level collection completeness used for safe baseline decisions."""
+
+    __tablename__ = "netops_patrol_collection_results"
+
+    id = Column(String(64), primary_key=True)
+    run_id = Column(
+        String(128),
+        ForeignKey("netops_patrol_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    inventory_device_id = Column(
+        String(64),
+        ForeignKey("netops_devices.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    device_id = Column(String(256), nullable=False, index=True)
+    canonical_command = Column(String(512), nullable=False, index=True)
+    status = Column(
+        String(32), nullable=False, default="unknown", server_default="unknown", index=True
+    )
+    authoritative_for_deletion = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    baseline_eligible = Column(
+        Boolean, nullable=False, default=False, server_default=text("false"), index=True
+    )
+    observed_entity_count = Column(Integer, nullable=True)
+    failure_code = Column(String(128), nullable=True, index=True)
+    observed_at = Column(DateTime, nullable=True, index=True)
+    metadata_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_netops_patrol_collection_result",
+            "run_id",
+            "device_id",
+            "canonical_command",
+            unique=True,
         ),
     )
 
@@ -778,6 +845,9 @@ class StateObservationRecord(Base):
     entity_type = Column(String(128), nullable=False, index=True)
     entity_key = Column(String(1024), nullable=False)
     field_name = Column(String(256), nullable=False, index=True)
+    observation_type = Column(String(256), nullable=True, index=True)
+    semantic_type = Column(String(64), nullable=True, index=True)
+    unit = Column(String(64), nullable=True)
     value_json = Column(JSON, nullable=True)
     value_text = Column(Text, nullable=True)
     value_number = Column(Float, nullable=True)
@@ -829,6 +899,9 @@ class CurrentStateRecord(Base):
     entity_type = Column(String(128), nullable=False, index=True)
     entity_key = Column(String(1024), nullable=False)
     field_name = Column(String(256), nullable=False, index=True)
+    observation_type = Column(String(256), nullable=True, index=True)
+    semantic_type = Column(String(64), nullable=True, index=True)
+    unit = Column(String(64), nullable=True)
     value_json = Column(JSON, nullable=True)
     value_text = Column(Text, nullable=True)
     value_number = Column(Float, nullable=True)
@@ -851,6 +924,11 @@ class CurrentStateRecord(Base):
     )
     schema_id = Column(String(128), nullable=True, index=True)
     observed_at = Column(DateTime, nullable=False, index=True)
+    lifecycle_status = Column(
+        String(32), nullable=False, default="active", server_default="active", index=True
+    )
+    missing_since = Column(DateTime, nullable=True, index=True)
+    missing_count = Column(Integer, nullable=False, default=0, server_default="0")
     version = Column(Integer, nullable=False, default=1)
     confidence = Column(Float, nullable=False, default=1.0)
     metadata_json = Column(JSON, nullable=True)
@@ -888,6 +966,7 @@ class NetworkChangeRecord(Base):
     entity_type = Column(String(128), nullable=False, index=True)
     entity_key = Column(String(1024), nullable=False)
     field = Column(String(256), nullable=False, index=True)
+    observation_type = Column(String(256), nullable=True, index=True)
     old_value_json = Column(JSON, nullable=True)
     new_value_json = Column(JSON, nullable=True)
     change_type = Column(String(32), nullable=False, index=True)
@@ -899,7 +978,20 @@ class NetworkChangeRecord(Base):
     old_number = Column(Float, nullable=True)
     new_number = Column(Float, nullable=True)
     event_status = Column(String(32), nullable=False, default="pending", index=True)
+    change_policy_id = Column(String(64), nullable=True, index=True)
+    change_policy_version_id = Column(String(64), nullable=True, index=True)
+    comparison_type = Column(String(64), nullable=True)
+    decision_reason = Column(String(256), nullable=True)
+    policy_snapshot_json = Column(JSON, nullable=True)
+    observed_at = Column(DateTime, nullable=True, index=True)
     detected_at = Column(DateTime, nullable=False, index=True)
+    processed_at = Column(
+        DateTime,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=text("CURRENT_TIMESTAMP"),
+        index=True,
+    )
     confidence = Column(Float, nullable=False, default=1.0)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -946,6 +1038,42 @@ class NetworkEventRecord(Base):
         return {column.name: getattr(self, column.name) for column in self.__table__.columns}
 
 
+class NetworkEventOutboxRecord(Base):
+    """Durable publication record committed with the canonical NetworkEvent."""
+
+    __tablename__ = "netops_network_event_outbox"
+
+    id = Column(String(64), primary_key=True)
+    event_id = Column(
+        String(64),
+        ForeignKey("netops_network_events.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    event_type = Column(String(128), nullable=False, index=True)
+    payload_json = Column(JSON, nullable=False)
+    status = Column(
+        String(32), nullable=False, default="pending", server_default="pending", index=True
+    )
+    attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    last_error = Column(Text, nullable=True)
+    available_at = Column(DateTime, nullable=False, index=True)
+    published_at = Column(DateTime, nullable=True)
+    message_id = Column(String(256), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index("ix_netops_network_event_outbox_event_id", "event_id", unique=True),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
 class EventRuleRecord(Base):
     """Auditable event rule metadata."""
 
@@ -983,6 +1111,15 @@ class EventRuleVersionRecord(Base):
     event_type = Column(String(128), nullable=False, index=True)
     severity = Column(String(32), nullable=False, index=True)
     condition_json = Column(JSON, nullable=False)
+    priority = Column(Integer, nullable=False, default=100, server_default="100", index=True)
+    exclusive = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    event_class = Column(
+        String(32), nullable=False, default="fault", server_default="fault", index=True
+    )
+    recovery_json = Column(JSON, nullable=True)
+    correlation_key_json = Column(JSON, nullable=True)
     status = Column(String(32), nullable=False, default="draft", index=True)
     source_job_id = Column(String(64), nullable=True, index=True)
     validation_report_json = Column(JSON, nullable=True)
@@ -1222,6 +1359,7 @@ class ObservationContractRecord(Base):
     status = Column(String(32), nullable=False, default="active", index=True)
     source_job_id = Column(String(64), nullable=True, index=True)
     approval_json = Column(JSON, nullable=True)
+    compatibility_json = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
         DateTime,

@@ -16,6 +16,7 @@ from src.infrastructure.db.models import (
     CommandSnapshot,
     NetworkDevice,
     ParserTemplate,
+    PatrolCollectionResult,
     PatrolDataset,
     PatrolRun,
 )
@@ -88,6 +89,7 @@ class PatrolRepository:
         dataset_id: str | None = None,
         metadata: dict[str, Any] | None = None,
         started_at: str | datetime | None = None,
+        run_purpose: str | None = None,
     ) -> str:
         run_id = run_id or str(uuid.uuid4())
         with get_db_session() as db:
@@ -99,6 +101,14 @@ class PatrolRepository:
                     mode=mode,
                     dataset_id=dataset_id,
                     status="running",
+                    collection_status="running",
+                    analysis_status="pending",
+                    baseline_eligible=False,
+                    run_purpose=run_purpose or (
+                        "parser_validation"
+                        if mode == "parser_validation"
+                        else "scheduled_patrol"
+                    ),
                     started_at=_as_datetime(started_at),
                     metadata_json=metadata or {},
                     created_at=_utcnow(),
@@ -110,12 +120,25 @@ class PatrolRepository:
                 row.mode = mode
                 row.dataset_id = dataset_id or row.dataset_id
                 row.status = "running"
+                row.collection_status = "running"
+                row.analysis_status = "pending"
+                row.baseline_eligible = False
+                if run_purpose:
+                    row.run_purpose = run_purpose
                 row.completed_at = None
                 row.metadata_json = {**(row.metadata_json or {}), **(metadata or {})}
                 row.updated_at = _utcnow()
         return run_id
 
-    def finish_run(self, run_id: str) -> None:
+    def finish_run(
+        self,
+        run_id: str,
+        *,
+        collection_status: str = "completed",
+        analysis_status: str | None = None,
+        baseline_eligible: bool | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
         with get_db_session() as db:
             row = db.get(PatrolRun, run_id)
             if row is None:
@@ -130,7 +153,14 @@ class PatrolRepository:
             )
             row.command_count = int(counts[0] or 0)
             row.device_count = int(counts[1] or 0)
-            row.status = "completed"
+            row.status = collection_status
+            row.collection_status = collection_status
+            if analysis_status is not None:
+                row.analysis_status = analysis_status
+            if baseline_eligible is not None:
+                row.baseline_eligible = baseline_eligible
+            if metadata:
+                row.metadata_json = {**(row.metadata_json or {}), **metadata}
             row.completed_at = _utcnow()
             row.updated_at = _utcnow()
             if row.dataset_id:
@@ -138,6 +168,106 @@ class PatrolRepository:
                 if dataset is not None:
                     dataset.imported_at = _utcnow()
                     dataset.updated_at = _utcnow()
+
+    def update_analysis_status(
+        self,
+        run_id: str,
+        *,
+        analysis_status: str,
+        baseline_eligible: bool | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        with get_db_session() as db:
+            row = db.get(PatrolRun, run_id)
+            if row is None:
+                raise ValueError(f"patrol run not found: {run_id}")
+            row.analysis_status = analysis_status
+            if baseline_eligible is not None:
+                row.baseline_eligible = baseline_eligible
+            if metadata:
+                row.metadata_json = {**(row.metadata_json or {}), **metadata}
+            row.updated_at = _utcnow()
+
+    def get_run(self, run_id: str) -> dict[str, Any] | None:
+        with get_db_session() as db:
+            row = db.get(PatrolRun, run_id)
+            return row.to_dict() if row else None
+
+    def save_collection_result(
+        self,
+        *,
+        run_id: str,
+        device_id: str,
+        canonical_command: str,
+        status: str,
+        inventory_device_id: str | None = None,
+        authoritative_for_deletion: bool = False,
+        baseline_eligible: bool = False,
+        observed_entity_count: int | None = None,
+        failure_code: str | None = None,
+        observed_at: str | datetime | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        normalized_command = " ".join(str(canonical_command).strip().lower().split())
+        with get_db_session() as db:
+            row = (
+                db.query(PatrolCollectionResult)
+                .filter(
+                    PatrolCollectionResult.run_id == run_id,
+                    PatrolCollectionResult.device_id == device_id,
+                    PatrolCollectionResult.canonical_command == normalized_command,
+                )
+                .first()
+            )
+            now = _utcnow()
+            if row is None:
+                row = PatrolCollectionResult(
+                    id=str(uuid.uuid4()),
+                    run_id=run_id,
+                    device_id=device_id,
+                    canonical_command=normalized_command,
+                    created_at=now,
+                )
+                db.add(row)
+            row.inventory_device_id = inventory_device_id or row.inventory_device_id
+            row.status = status
+            row.authoritative_for_deletion = bool(authoritative_for_deletion)
+            row.baseline_eligible = bool(baseline_eligible)
+            row.observed_entity_count = observed_entity_count
+            row.failure_code = failure_code
+            row.observed_at = _as_datetime(observed_at) if observed_at else row.observed_at
+            row.metadata_json = {**(row.metadata_json or {}), **(metadata or {})}
+            row.updated_at = now
+            db.flush()
+            return row.id
+
+    def list_collection_results(self, run_id: str) -> list[dict[str, Any]]:
+        with get_db_session() as db:
+            rows = (
+                db.query(PatrolCollectionResult)
+                .filter(PatrolCollectionResult.run_id == run_id)
+                .order_by(
+                    PatrolCollectionResult.device_id,
+                    PatrolCollectionResult.canonical_command,
+                )
+                .all()
+            )
+            return [row.to_dict() for row in rows]
+
+    def list_authoritative_collection_keys(self, run_id: str) -> set[tuple[str, str]]:
+        with get_db_session() as db:
+            rows = (
+                db.query(
+                    PatrolCollectionResult.device_id,
+                    PatrolCollectionResult.canonical_command,
+                )
+                .filter(
+                    PatrolCollectionResult.run_id == run_id,
+                    PatrolCollectionResult.authoritative_for_deletion.is_(True),
+                )
+                .all()
+            )
+            return {(str(device_id), str(command)) for device_id, command in rows}
 
     def save_snapshot(
         self,
@@ -171,6 +301,7 @@ class PatrolRepository:
         snapshot_id: str | None = None,
         snapshot_kind: str = "full",
         metadata: dict[str, Any] | None = None,
+        inventory_device_id: str | None = None,
     ) -> tuple[str, bool]:
         raw_hash = hashlib.sha256((raw_text or "").encode("utf-8")).hexdigest()
         status = parse_status or ("parsed" if structured_json is not None else "raw_only")
@@ -197,15 +328,21 @@ class PatrolRepository:
                         )
                         return existing.id, False
                 inventory = (
-                    db.query(NetworkDevice)
-                    .filter(
-                        NetworkDevice.device_name == device_name,
-                        NetworkDevice.management_ip == (ip or ""),
-                    )
-                    .first()
-                    if ip
+                    db.get(NetworkDevice, inventory_device_id)
+                    if inventory_device_id
                     else None
                 )
+                if inventory is None:
+                    inventory = (
+                        db.query(NetworkDevice)
+                        .filter(
+                            NetworkDevice.device_name == device_name,
+                            NetworkDevice.management_ip == (ip or ""),
+                        )
+                        .first()
+                        if ip
+                        else None
+                    )
                 contract_version = None
                 if parser_name:
                     template = db.get(ParserTemplate, parser_name)
@@ -214,7 +351,7 @@ class PatrolRepository:
                     id=snapshot_id,
                     run_id=run_id,
                     dataset_id=dataset_id,
-                    inventory_device_id=inventory.id if inventory else None,
+                    inventory_device_id=inventory.id if inventory else inventory_device_id,
                     device_id=device_id,
                     device_name=device_name,
                     management_ip=ip,
@@ -424,7 +561,8 @@ class PatrolRepository:
                     CommandSnapshot.device_id == device_id,
                     CommandSnapshot.canonical_command == command_canonical,
                     PatrolRun.mode == current_run.mode,
-                    PatrolRun.started_at <= current_run.started_at,
+                    PatrolRun.collection_status.in_(["completed", "partial"]),
+                    PatrolRun.completed_at <= current_run.started_at,
                 )
                 .order_by(CommandSnapshot.observed_at.desc())
                 .first()

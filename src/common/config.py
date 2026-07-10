@@ -125,6 +125,10 @@ class Settings(BaseSettings):
     # 生产默认 true：EventBus 与 DB 通知双写，Consumer 未启动时用户仍能收到站内信
     EVENT_BUS_DIRECT_NOTIFY_FALLBACK: bool = True
 
+    # 巡检并发与规则运行时治理
+    PATROL_MAX_CONCURRENCY: int = 50
+    EVENT_RULE_ALLOW_BUILTIN_FALLBACK: bool = False
+
     # 与 Django SIMPLE_JWT 共用（默认与 SECRET_KEY 一致，生产务必在 .env 中显式设置）
     JWT_SECRET_KEY: str = "django-insecure-default-key-change-in-production"
     JWT_ALGORITHM: str = "HS256"

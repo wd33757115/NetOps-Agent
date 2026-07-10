@@ -168,6 +168,7 @@ def validate_event_rule_definitions(
         "passed_count": generated_result["passed_count"],
         "failed_count": generated_result["failed_count"],
         "pass_rate": generated_result["pass_rate"],
+        "rows": generated_result["rows"],
         "rule_results": rule_results,
         "generated_result": generated_result,
         "collision_result": collision_result,
@@ -255,6 +256,67 @@ def generate_validation_cases_for_rule(
                     "old": None,
                     "new": recovered_value,
                     "change_type": "initial",
+                },
+            )
+        )
+    elif kind == "threshold_lte":
+        threshold = float(condition.get("lte") or -17)
+        cases.append(
+            EventRuleValidationCase(
+                name=f"{definition.rule_id}-positive-low-threshold",
+                change={
+                    "entity_type": entity_type,
+                    "entity_key": "entity=1",
+                    "field": field,
+                    "old": threshold + 1,
+                    "new": threshold,
+                    "change_type": "modified",
+                },
+                expected_event_type=definition.event_type,
+                expected_rule_id=definition.rule_id,
+            )
+        )
+        cases.append(
+            EventRuleValidationCase(
+                name=f"{definition.rule_id}-negative-still-low",
+                change={
+                    "entity_type": entity_type,
+                    "entity_key": "entity=1",
+                    "field": field,
+                    "old": threshold - 1,
+                    "new": threshold - 2,
+                    "change_type": "modified",
+                },
+            )
+        )
+    elif kind == "threshold_low_recovery":
+        low = float(condition.get("low") or -17)
+        recovered = float(condition.get("gt") or low + 2)
+        cases.append(
+            EventRuleValidationCase(
+                name=f"{definition.rule_id}-positive-low-recovery",
+                change={
+                    "entity_type": entity_type,
+                    "entity_key": "entity=1",
+                    "field": field,
+                    "old": low,
+                    "new": recovered,
+                    "change_type": "modified",
+                },
+                expected_event_type=definition.event_type,
+                expected_rule_id=definition.rule_id,
+            )
+        )
+        cases.append(
+            EventRuleValidationCase(
+                name=f"{definition.rule_id}-negative-low-not-recovered",
+                change={
+                    "entity_type": entity_type,
+                    "entity_key": "entity=1",
+                    "field": field,
+                    "old": low,
+                    "new": recovered - 1,
+                    "change_type": "modified",
                 },
             )
         )
@@ -538,6 +600,17 @@ def builtin_event_rule_validation_cases() -> list[EventRuleValidationCase]:
             },
             expected_event_type="InterfaceUp",
             expected_rule_id="interface-up",
+        ),
+        EventRuleValidationCase(
+            name="initial-interface-admin-disabled",
+            change={
+                "entity_type": "interface_l2",
+                "entity_key": "interface=interface-2",
+                "field": "status",
+                "old": None,
+                "new": "disabled",
+                "change_type": "initial",
+            },
         ),
         EventRuleValidationCase(
             name="initial-bgp-established",

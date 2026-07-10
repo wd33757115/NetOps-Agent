@@ -503,10 +503,10 @@ def test_observation_change_detector_uses_observation_ids(monkeypatch):
         persist=True,
     )
 
-    assert result["change_count"] == 4
+    assert result["change_count"] == 3
     assert result["initial_observations"] == 1
     assert result["added_observations"] == 1
-    assert result["deleted_observations"] == 1
+    assert result["deleted_observations"] == 0
     assert all(
         change["previous_observation_id"] != "obs-command-not-collected"
         for change in result["changes"]

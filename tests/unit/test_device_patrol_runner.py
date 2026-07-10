@@ -207,6 +207,62 @@ def test_device_patrol_runner_surfaces_partial_parser_health():
     assert result["parse_violations"] == [{"canonical_command": "show version"}]
 
 
+def test_device_patrol_runner_persists_successful_devices_from_partial_batch():
+    captured = {}
+
+    class FakeDBManager:
+        pass
+
+    class FakeDeviceFilter:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class FakePatrolTool:
+        def __init__(self, db_manager):
+            self.db_manager = db_manager
+
+        async def patrol_by_filter(self, filter_params, save_baseline, mode):
+            return TaskResult(
+                success=False,
+                action=ActionType.PATROL,
+                total_devices=2,
+                success_devices=1,
+                failed_devices=1,
+                details=[
+                    {"success": True, "output_file": "sw1.txt"},
+                    {"success": False, "error": "ssh timeout"},
+                ],
+                output_files=["sw1.txt"],
+            )
+
+    def persist(**kwargs):
+        captured["details"] = kwargs["details"]
+        return {
+            "snapshot_run_id": kwargs["snapshot_run_id"],
+            "snapshot_storage": "postgresql",
+            "snapshot_devices": 1,
+            "snapshot_commands": 2,
+            "snapshot_errors": [],
+            "snapshot_health": "ready",
+            "collection_status": "partial",
+        }
+
+    runner = DevicePatrolRunner(
+        tools_loader=lambda: SimpleNamespace(
+            DBManager=FakeDBManager,
+            DeviceFilter=FakeDeviceFilter,
+            PatrolTool=FakePatrolTool,
+        ),
+        minio_storage_factory=lambda: None,
+        snapshot_persister=persist,
+    )
+    result = runner.run(DevicePatrolRunRequest(filter_params={"site": "dc-a"}))
+
+    assert result["status"] == "partial"
+    assert len(captured["details"]) == 2
+    assert result["snapshot_devices"] == 1
+
+
 def test_device_patrol_runner_can_replay_execution_plan_by_id(monkeypatch):
     captured: dict[str, object] = {}
 

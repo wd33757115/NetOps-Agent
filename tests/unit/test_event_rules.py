@@ -186,6 +186,55 @@ def test_threshold_recovery_condition_matches_cpu_recovered():
     )
 
 
+def test_low_threshold_condition_matches_optical_power_drop_and_recovery():
+    assert condition_matches(
+        {
+            "kind": "threshold_lte",
+            "entity_types": ["interface_optical"],
+            "fields": ["rx_power_dbm"],
+            "lte": -17,
+        },
+        {
+            "entity_type": "interface_optical",
+            "field": "rx_power_dbm",
+            "old": -14.2,
+            "new": -18.1,
+            "change_type": "modified",
+        },
+    )
+    assert not condition_matches(
+        {
+            "kind": "threshold_lte",
+            "entity_types": ["interface_optical"],
+            "fields": ["rx_power_dbm"],
+            "lte": -17,
+        },
+        {
+            "entity_type": "interface_optical",
+            "field": "rx_power_dbm",
+            "old": -18.1,
+            "new": -18.3,
+            "change_type": "modified",
+        },
+    )
+    assert condition_matches(
+        {
+            "kind": "threshold_low_recovery",
+            "entity_types": ["interface_optical"],
+            "fields": ["rx_power_dbm"],
+            "low": -17,
+            "gt": -15,
+        },
+        {
+            "entity_type": "interface_optical",
+            "field": "rx_power_dbm",
+            "old": -18.1,
+            "new": -14.8,
+            "change_type": "modified",
+        },
+    )
+
+
 def test_transition_condition_matches_cisco_interface_status_down():
     assert condition_matches(
         {
@@ -200,6 +249,48 @@ def test_transition_condition_matches_cisco_interface_status_down():
             "field": "status",
             "old": "connected",
             "new": "notconnec",
+        },
+    )
+
+
+def test_transition_condition_suppresses_initial_admin_and_absent_states():
+    condition = {
+        "kind": "transition",
+        "entity_types": ["interface_l2"],
+        "fields": ["status"],
+        "from_group": "up",
+        "to_group": "down",
+        "allow_initial_target": True,
+    }
+
+    assert not condition_matches(
+        condition,
+        {
+            "entity_type": "interface_l2",
+            "field": "status",
+            "old": None,
+            "new": "disabled",
+            "change_type": "initial",
+        },
+    )
+    assert condition_matches(
+        condition,
+        {
+            "entity_type": "interface_l2",
+            "field": "status",
+            "old": "connected",
+            "new": "disabled",
+            "change_type": "modified",
+        },
+    )
+    assert not condition_matches(
+        condition,
+        {
+            "entity_type": "interface_l2",
+            "field": "status",
+            "old": None,
+            "new": "xcvrAbsen",
+            "change_type": "initial",
         },
     )
 
@@ -236,7 +327,7 @@ def test_raw_config_hash_condition_matches_config_command():
     )
 
 
-def test_load_event_rules_merges_new_builtin_defaults(monkeypatch):
+def test_load_event_rules_does_not_resurrect_missing_builtins(monkeypatch):
     class FakeRepository:
         def list_active_rules(self):
             return [
@@ -255,7 +346,7 @@ def test_load_event_rules_merges_new_builtin_defaults(monkeypatch):
     by_id = {rule.rule_id: rule for rule in rules}
 
     assert by_id["cpu-high"].version == 99
-    assert by_id["memory-high"].event_type == "MemoryHigh"
+    assert "memory-high" not in by_id
 
 
 def test_builtin_event_rules_are_loaded_from_rule_pack():

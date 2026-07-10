@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -12,6 +15,7 @@ from src.core.state.domain import StateObservation
 from src.infrastructure.db.models import (
     CommandSnapshot,
     CurrentStateRecord,
+    PatrolRun,
     StateObservationRecord,
 )
 from src.infrastructure.db.postgres import get_db_session
@@ -102,6 +106,7 @@ class StateRepository:
         run_ids: list[str],
         *,
         device_ids: list[str] | None = None,
+        baseline_only: bool = False,
     ) -> list[dict[str, Any]]:
         if not run_ids:
             return []
@@ -109,6 +114,13 @@ class StateRepository:
             query = db.query(StateObservationRecord).filter(
                 StateObservationRecord.run_id.in_(run_ids)
             )
+            if baseline_only:
+                query = query.join(
+                    PatrolRun, PatrolRun.id == StateObservationRecord.run_id
+                ).filter(
+                    PatrolRun.baseline_eligible.is_(True),
+                    PatrolRun.analysis_status == "completed",
+                )
             if device_ids:
                 query = query.filter(StateObservationRecord.device_id.in_(device_ids))
             rows = query.order_by(
@@ -126,6 +138,7 @@ class StateRepository:
         with get_db_session() as db:
             row = (
                 db.query(StateObservationRecord)
+                .join(PatrolRun, PatrolRun.id == StateObservationRecord.run_id)
                 .filter(
                     StateObservationRecord.id != observation["id"],
                     StateObservationRecord.run_id != observation["run_id"],
@@ -135,6 +148,8 @@ class StateRepository:
                     StateObservationRecord.entity_key == observation["entity_key"],
                     StateObservationRecord.field_name == observation["field_name"],
                     StateObservationRecord.observed_at <= observed_at,
+                    PatrolRun.baseline_eligible.is_(True),
+                    PatrolRun.analysis_status == "completed",
                 )
                 .order_by(StateObservationRecord.observed_at.desc())
                 .first()
@@ -142,8 +157,6 @@ class StateRepository:
             return row.to_dict() if row else None
 
     def list_prior_observations_for_run(self, run_id: str) -> list[dict[str, Any]]:
-        from src.infrastructure.db.models import PatrolRun
-
         with get_db_session() as db:
             current_run = db.get(PatrolRun, run_id)
             if current_run is None:
@@ -153,7 +166,9 @@ class StateRepository:
                 .join(PatrolRun, PatrolRun.id == StateObservationRecord.run_id)
                 .filter(StateObservationRecord.run_id != run_id)
                 .filter(StateObservationRecord.mode == current_run.mode)
-                .filter(PatrolRun.started_at <= current_run.started_at)
+                .filter(PatrolRun.baseline_eligible.is_(True))
+                .filter(PatrolRun.analysis_status == "completed")
+                .filter(PatrolRun.completed_at <= current_run.started_at)
                 .order_by(
                     PatrolRun.started_at.desc(),
                     StateObservationRecord.observed_at.desc(),
@@ -199,6 +214,9 @@ class StateRepository:
             "entity_type": item.entity_type,
             "entity_key": item.entity_key,
             "field_name": item.field_name,
+            "observation_type": item.observation_type,
+            "semantic_type": item.semantic_type,
+            "unit": item.unit,
             "value_json": item.value,
             "value_text": item.value_text,
             "value_number": item.value_number,
@@ -233,6 +251,9 @@ class StateRepository:
             "entity_type": item.entity_type,
             "entity_key": item.entity_key,
             "field_name": item.field_name,
+            "observation_type": item.observation_type,
+            "semantic_type": item.semantic_type,
+            "unit": item.unit,
             "value_json": item.value,
             "value_text": item.value_text,
             "value_number": item.value_number,
@@ -245,6 +266,19 @@ class StateRepository:
             "source_evidence_id": item.evidence_id,
             "schema_id": item.schema_id,
             "observed_at": incoming_observed_at,
+            "lifecycle_status": (
+                "deleted"
+                if (item.metadata or {}).get("presence_state") == "absent"
+                else "stale"
+                if item.observation_kind == "tombstone"
+                else "active"
+            ),
+            "missing_since": (
+                _datetime((item.metadata or {}).get("missing_since"))
+                if item.observation_kind == "tombstone"
+                else None
+            ),
+            "missing_count": int((item.metadata or {}).get("missing_count") or 0),
             "version": 1,
             "confidence": item.confidence,
             "metadata_json": item.metadata or {},
@@ -260,6 +294,9 @@ class StateRepository:
             "entity_type": excluded.entity_type,
             "entity_key": excluded.entity_key,
             "field_name": excluded.field_name,
+            "observation_type": excluded.observation_type,
+            "semantic_type": excluded.semantic_type,
+            "unit": excluded.unit,
             "value_json": excluded.value_json,
             "value_text": excluded.value_text,
             "value_number": excluded.value_number,
@@ -272,6 +309,9 @@ class StateRepository:
             "source_evidence_id": excluded.source_evidence_id,
             "schema_id": excluded.schema_id,
             "observed_at": excluded.observed_at,
+            "lifecycle_status": excluded.lifecycle_status,
+            "missing_since": excluded.missing_since,
+            "missing_count": excluded.missing_count,
             "version": CurrentStateRecord.version + 1,
             "confidence": excluded.confidence,
             "metadata_json": excluded.metadata_json,
@@ -286,3 +326,81 @@ class StateRepository:
             .returning(CurrentStateRecord.id)
         )
         return 1 if db.execute(stmt).scalar_one_or_none() is not None else 0
+
+    def record_absence(
+        self,
+        previous: dict[str, Any],
+        *,
+        run_id: str,
+        snapshot_id: str,
+        observed_at: str | datetime | None,
+        missing_count: int,
+        missing_confirmations: int,
+    ) -> StateObservation:
+        presence_state = (
+            "absent" if missing_count >= missing_confirmations else "missing_candidate"
+        )
+        missing_since = (
+            (previous.get("metadata_json") or {}).get("missing_since")
+            or str(observed_at or datetime.now(timezone.utc).isoformat())
+        )
+        state_parts = [
+            previous.get("device_id"),
+            previous.get("entity_type"),
+            previous.get("entity_key"),
+            previous.get("field_name"),
+        ]
+        state_key = hashlib.sha256(
+            json.dumps(
+                state_parts,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ).encode("utf-8")
+        ).hexdigest()
+        idempotency_key = hashlib.sha256(
+            f"{run_id}|{state_key}|{presence_state}|{missing_count}".encode("utf-8")
+        ).hexdigest()
+        metadata = {
+            **dict(previous.get("metadata_json") or {}),
+            "presence_state": presence_state,
+            "missing_since": missing_since,
+            "missing_count": missing_count,
+        }
+        item = StateObservation(
+            observation_id=str(uuid.uuid4()),
+            idempotency_key=idempotency_key,
+            state_key=state_key,
+            run_id=run_id,
+            snapshot_id=snapshot_id,
+            dataset_id=previous.get("dataset_id"),
+            mode=str(previous.get("mode") or "production"),
+            source=str(previous.get("source") or "patrol"),
+            source_type=str(previous.get("source_type") or "cli"),
+            evidence_id=evidence_id_for_command_snapshot(snapshot_id),
+            schema_id=previous.get("schema_id"),
+            device_id=str(previous.get("device_id") or ""),
+            vendor=previous.get("vendor"),
+            model=previous.get("model"),
+            canonical_command=str(previous.get("canonical_command") or ""),
+            entity_type=str(previous.get("entity_type") or "record"),
+            entity_key=str(previous.get("entity_key") or ""),
+            field_name=str(previous.get("field_name") or ""),
+            observation_type=previous.get("observation_type"),
+            semantic_type=previous.get("semantic_type"),
+            unit=previous.get("unit"),
+            value=None,
+            value_text=None,
+            value_number=None,
+            value_type="null",
+            observation_kind="tombstone",
+            observed_at=str(observed_at or datetime.now(timezone.utc).isoformat()),
+            parser_template_id=previous.get("parser_template_id"),
+            parser_version=previous.get("parser_version"),
+            contract_version=previous.get("contract_version"),
+            confidence=float(previous.get("confidence") or 1.0),
+            metadata=metadata,
+        )
+        self.save_observations([item], update_current_state=True)
+        return item

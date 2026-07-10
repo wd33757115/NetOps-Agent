@@ -243,6 +243,9 @@ def import_raw_capture(
     model: str | None = None,
     observed_at: str | None = None,
     metadata: dict[str, Any] | None = None,
+    inventory_device_id: str | None = None,
+    collector_complete: bool | None = None,
+    finalize_run: bool = True,
 ) -> dict[str, Any]:
     require_postgres_connection()
     mode = normalize_patrol_mode(mode)
@@ -374,11 +377,12 @@ def import_raw_capture(
                 for snapshot in existing_snapshots
             ],
         }
+    import_source = str((metadata or {}).get("source") or "imported_file")
     repository.ensure_dataset(
         dataset_id=dataset_id,
         name=str((metadata or {}).get("dataset_name") or dataset_id),
         mode=mode,
-        source="imported_file",
+        source=import_source,
         metadata={
             "source_path": str(path.parent),
             **(metadata or {}),
@@ -386,7 +390,7 @@ def import_raw_capture(
     )
     rid = repository.create_run(
         run_id=run_id,
-        source="imported_file",
+        source=import_source,
         mode=mode,
         dataset_id=dataset_id,
         metadata={
@@ -397,6 +401,7 @@ def import_raw_capture(
             **(metadata or {}),
         },
         started_at=observed_at,
+        run_purpose=str((metadata or {}).get("run_purpose") or "scheduled_patrol"),
     )
 
     snapshot_ids: list[str] = []
@@ -448,7 +453,9 @@ def import_raw_capture(
             metadata={
                 "patrol_mode": mode,
                 "source_path": str(path),
+                "collector_complete": collector_complete,
             },
+            inventory_device_id=inventory_device_id,
         )
         snapshot_ids.append(snapshot_id)
         if not snapshot_created:
@@ -490,7 +497,49 @@ def import_raw_capture(
                 "candidate_job_id": candidate_job_id,
             }
         )
-    repository.finish_run(rid)
+        if isinstance(structured, list):
+            entity_count = len(structured)
+        elif isinstance(structured, dict):
+            entity_count = 1
+        else:
+            entity_count = None
+        collection_status = {
+            "parsed": "complete",
+            "parse_empty": "empty",
+            "ignored": "ignored",
+        }.get(parse_status, "failed")
+        authoritative = bool(
+            collector_complete is True
+            and parse_status in {"parsed", "parse_empty"}
+        )
+        repository.save_collection_result(
+            run_id=rid,
+            inventory_device_id=inventory_device_id,
+            device_id=str(inventory_device_id or device_id),
+            canonical_command=block.command_canonical,
+            status=collection_status,
+            authoritative_for_deletion=authoritative,
+            baseline_eligible=authoritative,
+            observed_entity_count=entity_count,
+            failure_code=parsed.failure_code,
+            observed_at=observed_at or inspected.observed_at_text,
+            metadata={
+                "parse_status": parse_status,
+                "snapshot_id": snapshot_id,
+                "collector_complete": collector_complete,
+            },
+        )
+    if finalize_run:
+        repository.finish_run(
+            rid,
+            collection_status=(
+                "completed"
+                if not blocking and not parse_violations
+                else "partial"
+            ),
+            analysis_status="pending",
+            baseline_eligible=False,
+        )
     return {
         "success": True,
         "run_id": rid,

@@ -34,6 +34,40 @@ def _active_template():
     )
 
 
+def _active_optical_template():
+    return SimpleNamespace(
+        id="template-optical-1",
+        status="active",
+        version="1.0.0",
+        vendor="Cisco",
+        model="LAB-SW",
+        family="IOS-LAB",
+        category="interface_optical",
+        canonical_command="show interface transceiver detail",
+        contract_sha256="digest-optical-1",
+        validation_json={
+            "entity_type": "interface_optical",
+            "primary_keys": ["interface"],
+            "required_fields": ["interface"],
+            "optional_fields": ["rx_power_dbm", "tx_power_dbm"],
+            "state_semantics": {
+                "rx_power_dbm": {
+                    "semantic_type": "gauge",
+                    "observation_type": "interface.optical.rx_power",
+                    "unit": "dbm",
+                },
+                "tx_power_dbm": {
+                    "semantic_type": "gauge",
+                    "observation_type": "interface.optical.tx_power",
+                    "unit": "dbm",
+                },
+            },
+            "contract_version": 1,
+            "contract_sha256": "digest-optical-1",
+        },
+    )
+
+
 def test_template_activation_seed_is_safe_and_idempotent():
     class FakeParserRepository:
         def get_template(self, template_id):
@@ -75,7 +109,39 @@ def test_template_activation_seed_is_safe_and_idempotent():
     assert "records" not in payload
     assert "raw_text" not in payload
     assert payload["workflow_context_defaults"]["observation_type"] == "interface.oper_status"
+    assert "InterfaceDown" in payload["workflow_context_defaults"]["event_intent"]
     assert payload["missing_context"] == ["records"]
+
+
+def test_template_activation_seed_adds_optical_generation_intent():
+    class FakeParserRepository:
+        def get_template(self, template_id):
+            assert template_id == "template-optical-1"
+            return _active_optical_template()
+
+    class FakeJobRepository:
+        def find_job(self, **_kwargs):
+            return None
+
+        def create_job(self, **kwargs):
+            return {"id": "job-optical-1", **kwargs}
+
+    service = RuleAssetTemplateActivationService(
+        parser_repository=FakeParserRepository(),
+        job_repository=FakeJobRepository(),
+    )
+
+    result = service.seed_from_template("template-optical-1")
+
+    defaults = result["job"]["payload"]["workflow_context_defaults"]
+    assert "raw_cli_included" in result["job"]["payload"]["privacy"]
+    assert "OpticalRxPowerLow" in defaults["event_intent"]
+    assert "-17 dBm" in defaults["policy_intent"]
+    assert [target["observation_type"] for target in defaults["policy_targets"]] == [
+        "interface.optical.rx_power",
+        "interface.optical.tx_power",
+    ]
+    assert result["missing_context"] == ["records", "historical_values"]
 
 
 def test_publish_parser_outbox_seeds_rule_asset_generation(monkeypatch):

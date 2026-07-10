@@ -13,6 +13,8 @@ commands:
   display ip interface brief: {enabled: true}
   show ip interface brief: {enabled: true}
   show interface status: {enabled: true}
+  show interface transceiver detail: {enabled: true}
+  display transceiver diagnosis interface: {enabled: true}
   display fan: {enabled: true}
   show environment fan: {enabled: true}
   display power: {enabled: true}

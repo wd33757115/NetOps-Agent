@@ -21,9 +21,13 @@ DEFAULT_COMMAND_ALIASES = {
     "show env fan": "show environment fan",
     "show env temperature": "show environment temperature",
     "show int status": "show interface status",
+    "show int transceiver detail": "show interface transceiver detail",
+    "show interfaces transceiver detail": "show interface transceiver detail",
     "show ip int brief": "show ip interface brief",
     "show proc cpu": "show processes cpu",
     "show proc memory": "show processes memory",
+    "display transceiver diagnosis": "display transceiver diagnosis interface",
+    "display transceiver diagnosis int": "display transceiver diagnosis interface",
 }
 
 

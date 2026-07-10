@@ -81,6 +81,67 @@ def test_event_rule_generator_builds_cpu_threshold_rules():
     }
 
 
+def test_event_rule_generator_builds_optical_low_threshold_candidates():
+    contract = {
+        "entity_type": "interface_optical",
+        "required_fields": ["interface"],
+        "optional_fields": ["rx_power_dbm", "tx_power_dbm"],
+        "primary_keys": ["interface"],
+        "state_semantics": {
+            "interface": {"semantic_type": "identity"},
+            "rx_power_dbm": {
+                "semantic_type": "gauge",
+                "observation_type": "interface.optical.rx_power",
+                "unit": "dbm",
+            },
+            "tx_power_dbm": {
+                "semantic_type": "gauge",
+                "observation_type": "interface.optical.tx_power",
+                "unit": "dbm",
+            },
+        },
+    }
+    rx_result = generate_and_validate_event_rules(
+        contract={
+            **contract,
+        },
+        change_policy={
+            "observation_type": "interface.optical.rx_power",
+            "semantic_type": "gauge",
+            "compare_mode": "threshold_low_and_deadband",
+            "thresholds": {"low": -17, "critical_low": -20},
+            "recovery_threshold": -15,
+            "deadband": 2,
+        },
+    )
+    tx_result = generate_and_validate_event_rules(
+        contract=contract,
+        change_policy={
+            "observation_type": "interface.optical.tx_power",
+            "semantic_type": "gauge",
+            "compare_mode": "threshold_low_and_deadband",
+            "thresholds": {"low": -17, "critical_low": -20},
+            "recovery_threshold": -15,
+            "deadband": 2,
+        },
+    )
+
+    assert rx_result["success"] is True
+    assert tx_result["success"] is True
+    assert {rule["event_type"] for rule in rx_result["rules"]} == {
+        "OpticalRxPowerLow",
+        "OpticalRecovered",
+    }
+    assert {rule["event_type"] for rule in tx_result["rules"]} == {
+        "OpticalTxPowerLow",
+        "OpticalRecovered",
+    }
+    assert {rule["condition"]["kind"] for rule in [*rx_result["rules"], *tx_result["rules"]]} == {
+        "threshold_lte",
+        "threshold_low_recovery",
+    }
+
+
 def test_event_rule_generator_does_not_classify_unknown_gauge_as_cpu():
     result = generate_and_validate_event_rules(
         contract={

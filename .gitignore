@@ -164,6 +164,16 @@ src/skills/textfsm-generator/reports/*.json
 src/skills/textfsm-generator/reports/rejected/
 src/skills/shared/textfsm-templates/*
 !src/skills/shared/textfsm-templates/.gitkeep
+!src/skills/shared/textfsm-templates/Cisco/
+src/skills/shared/textfsm-templates/Cisco/*
+!src/skills/shared/textfsm-templates/Cisco/IOS-C2960/
+src/skills/shared/textfsm-templates/Cisco/IOS-C2960/*
+!src/skills/shared/textfsm-templates/Cisco/IOS-C2960/show_interface_transceiver_detail__1.0.0.textfsm
+!src/skills/shared/textfsm-templates/H3C/
+src/skills/shared/textfsm-templates/H3C/*
+!src/skills/shared/textfsm-templates/H3C/Comware7/
+src/skills/shared/textfsm-templates/H3C/Comware7/*
+!src/skills/shared/textfsm-templates/H3C/Comware7/display_transceiver_diagnosis_interface__1.0.0.textfsm
 src/skills/shared/outputs/*
 !src/skills/shared/outputs/.gitkeep
 templates/**/*.textfsm
