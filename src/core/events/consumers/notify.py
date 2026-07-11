@@ -42,6 +42,7 @@ class NotifyConsumer(StreamConsumer):
                 thread_id=payload.get("thread_id"),
                 payload=notification_download_payload(artifacts=artifacts),
                 level="success",
+                idempotency_key=event.idempotency_key,
             )
             return
 
@@ -54,6 +55,7 @@ class NotifyConsumer(StreamConsumer):
                 body=str(payload.get("message") or "执行失败"),
                 thread_id=payload.get("thread_id"),
                 level="error",
+                idempotency_key=event.idempotency_key,
             )
             return
 
@@ -70,6 +72,7 @@ class NotifyConsumer(StreamConsumer):
                 thread_id=payload.get("thread_id"),
                 payload=notification_download_payload(result=result),
                 level="info",
+                idempotency_key=event.idempotency_key,
             )
             return
 
@@ -83,6 +86,7 @@ class NotifyConsumer(StreamConsumer):
                 thread_id=payload.get("thread_id"),
                 payload=notification_download_payload(artifacts=payload.get("artifacts")),
                 level=str(payload.get("level") or "success"),
+                idempotency_key=event.idempotency_key,
             )
             return
 
@@ -98,4 +102,5 @@ class NotifyConsumer(StreamConsumer):
                 workflow_run_id=run_id,
                 thread_id=payload.get("thread_id"),
                 level="error",
+                idempotency_key=event.idempotency_key,
             )

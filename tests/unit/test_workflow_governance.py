@@ -112,6 +112,7 @@ def test_delete_plugin_removes_directory(mock_reload, mock_delete_meta):
     try:
         _save_dsl_to_disk(dsl)
         assert plugin_dir.exists()
+        mock_reload.reset_mock()
 
         result = delete_plugin(name, user_id="test-user")
         assert result.get("success") is True

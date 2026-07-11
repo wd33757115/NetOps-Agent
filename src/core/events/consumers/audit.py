@@ -36,6 +36,8 @@ class AuditConsumer(StreamConsumer):
                     "summary": payload.get("summary"),
                 },
                 status="success" if event.event_type == "skill.executed" else "failed",
+                idempotency_key=event.idempotency_key,
+                raise_on_error=True,
             )
             return
 
@@ -53,4 +55,6 @@ class AuditConsumer(StreamConsumer):
                     "skill_name": payload.get("skill_name"),
                 },
                 status="failed" if "failed" in event.event_type else "success",
+                idempotency_key=event.idempotency_key,
+                raise_on_error=True,
             )

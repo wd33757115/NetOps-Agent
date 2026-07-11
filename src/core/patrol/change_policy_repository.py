@@ -124,11 +124,23 @@ class ChangePolicyRepository:
                 raise ValueError("change policy not found")
             (
                 db.query(ChangePolicyVersionRecord)
-                .filter(ChangePolicyVersionRecord.policy_id == policy.id)
+                .filter(
+                    ChangePolicyVersionRecord.observation_type
+                    == version.observation_type
+                )
                 .filter(ChangePolicyVersionRecord.status == "active")
                 .filter(ChangePolicyVersionRecord.id != version.id)
                 .update(
                     {"status": "deprecated", "deprecated_at": now},
+                    synchronize_session=False,
+                )
+            )
+            (
+                db.query(ChangePolicyRecord)
+                .filter(ChangePolicyRecord.observation_type == version.observation_type)
+                .filter(ChangePolicyRecord.id != policy.id)
+                .update(
+                    {"status": "deprecated", "updated_at": now},
                     synchronize_session=False,
                 )
             )
@@ -183,6 +195,34 @@ class ChangePolicyRepository:
                 .all()
             )
             return [self._to_payload(policy, version) for policy, version in rows]
+
+    def list_active_policies(self) -> list[dict[str, Any]]:
+        with get_db_session() as db:
+            rows = (
+                db.query(ChangePolicyRecord, ChangePolicyVersionRecord)
+                .join(
+                    ChangePolicyVersionRecord,
+                    ChangePolicyVersionRecord.policy_id == ChangePolicyRecord.id,
+                )
+                .filter(ChangePolicyVersionRecord.status == "active")
+                .order_by(
+                    ChangePolicyVersionRecord.observation_type,
+                    ChangePolicyVersionRecord.activated_at.desc(),
+                    ChangePolicyVersionRecord.id,
+                )
+                .all()
+            )
+            seen: set[str] = set()
+            payloads: list[dict[str, Any]] = []
+            for policy, version in rows:
+                if version.observation_type in seen:
+                    raise RuntimeError(
+                        "multiple active ChangePolicies for observation_type "
+                        f"{version.observation_type}"
+                    )
+                seen.add(version.observation_type)
+                payloads.append(self._to_payload(policy, version))
+            return payloads
 
     @staticmethod
     def _to_payload(

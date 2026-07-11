@@ -17,7 +17,7 @@ from sqlalchemy import (
     Text,
     text,
 )
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
 
@@ -130,6 +130,7 @@ class AuditLogRecord(Base):
     __tablename__ = "netops_audit_logs"
 
     id = Column(String(64), primary_key=True, index=True)
+    idempotency_key = Column(String(256), nullable=True)
     user_id = Column(String(64), index=True, nullable=True)
     username = Column(String(128), nullable=True)
     action = Column(String(64), index=True, comment="login / logout / chat / skill_execute / ...")
@@ -139,6 +140,14 @@ class AuditLogRecord(Base):
     ip_address = Column(String(64), nullable=True)
     status = Column(String(32), default="success")
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index(
+            "uq_netops_audit_logs_idempotency_key",
+            "idempotency_key",
+            unique=True,
+        ),
+    )
 
 
 class Message(Base):
@@ -290,6 +299,7 @@ class Notification(Base):
     __tablename__ = "netops_notifications"
 
     id = Column(String(64), primary_key=True, index=True)
+    idempotency_key = Column(String(256), nullable=True)
     user_id = Column(String(64), index=True, nullable=False)
     title = Column(String(256), nullable=False)
     body = Column(Text, nullable=True)
@@ -299,6 +309,14 @@ class Notification(Base):
     thread_id = Column(String(64), index=True, nullable=True)
     read_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index(
+            "uq_netops_notifications_idempotency_key",
+            "idempotency_key",
+            unique=True,
+        ),
+    )
 
 
 class TeamMember(Base):
@@ -661,17 +679,19 @@ class PatrolRun(Base):
     logical_run_id = Column(String(128), nullable=False, index=True)
     attempt_number = Column(Integer, nullable=False, default=0, server_default="0")
     worker_id = Column(String(256), nullable=True, index=True)
-    heartbeat_at = Column(DateTime, nullable=True, index=True)
-    lease_until = Column(DateTime, nullable=True, index=True)
-    last_progress_at = Column(DateTime, nullable=True, index=True)
+    heartbeat_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    lease_until = Column(DateTime(timezone=True), nullable=True, index=True)
+    last_progress_at = Column(DateTime(timezone=True), nullable=True, index=True)
     device_count = Column(Integer, nullable=False, default=0)
     command_count = Column(Integer, nullable=False, default=0)
-    started_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
-    completed_at = Column(DateTime, nullable=True)
+    started_at = Column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    completed_at = Column(DateTime(timezone=True), nullable=True)
     metadata_json = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime,
+        DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
@@ -708,14 +728,16 @@ class PatrolAnalysisAttemptRecord(Base):
     rule_bundle_json = Column(JSON, nullable=False)
     status = Column(String(32), nullable=False, default="running", index=True)
     attempt_number = Column(Integer, nullable=False, default=1, server_default="1")
-    heartbeat_at = Column(DateTime, nullable=False)
-    lease_until = Column(DateTime, nullable=False, index=True)
+    owner_token = Column(String(64), nullable=False, index=True)
+    heartbeat_at = Column(DateTime(timezone=True), nullable=False)
+    lease_until = Column(DateTime(timezone=True), nullable=False, index=True)
     result_json = Column(JSON, nullable=True)
+    result_digest = Column(String(64), nullable=True, index=True)
     error = Column(Text, nullable=True)
-    started_at = Column(DateTime, nullable=False)
-    completed_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, nullable=False)
-    updated_at = Column(DateTime, nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
 
     __table_args__ = (
         Index(
@@ -1074,6 +1096,10 @@ class NetworkChangeRecord(Base):
     previous_observation_id = Column(String(64), nullable=True, index=True)
     current_observation_id = Column(String(64), nullable=True, index=True)
     source = Column(String(64), nullable=False, default="patrol", index=True)
+    analysis_revision = Column(
+        String(128), nullable=False, default="original", server_default="original", index=True
+    )
+    rule_bundle_digest = Column(String(64), nullable=True, index=True)
     old_number = Column(Float, nullable=True)
     new_number = Column(Float, nullable=True)
     event_status = Column(String(32), nullable=False, default="pending", index=True)
@@ -1160,13 +1186,13 @@ class NetworkEventRecord(Base):
     run_id = Column(String(128), nullable=True, index=True)
     latest_change_id = Column(String(64), nullable=True, index=True)
     last_seen_run_id = Column(String(128), nullable=True, index=True)
-    occurred_at = Column(DateTime, nullable=False, index=True)
-    first_seen_at = Column(DateTime, nullable=False, index=True)
-    last_seen_at = Column(DateTime, nullable=False, index=True)
+    occurred_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    first_seen_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    last_seen_at = Column(DateTime(timezone=True), nullable=False, index=True)
     occurrence_count = Column(Integer, nullable=False, default=1, server_default="1")
     status = Column(String(32), nullable=False, default="open", index=True)
     payload_json = Column(JSON, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index(
@@ -1210,11 +1236,11 @@ class NetworkEventOccurrenceRecord(Base):
     )
     run_id = Column(String(128), nullable=True, index=True)
     source_change_id = Column(String(64), nullable=True, index=True)
-    observed_at = Column(DateTime, nullable=False, index=True)
+    observed_at = Column(DateTime(timezone=True), nullable=False, index=True)
     severity = Column(String(32), nullable=False, index=True)
     occurrence_kind = Column(String(32), nullable=False, default="observed", index=True)
     payload_json = Column(JSON, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index(
@@ -1657,6 +1683,12 @@ class ChangePolicyVersionRecord(Base):
         Index(
             "uq_change_policy_active_version",
             "policy_id",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+        ),
+        Index(
+            "uq_change_policy_active_observation_type",
+            "observation_type",
             unique=True,
             postgresql_where=text("status = 'active'"),
         ),

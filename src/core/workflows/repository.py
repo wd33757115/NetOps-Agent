@@ -9,6 +9,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
 from src.infrastructure.db.models import Notification, WorkflowRun, WorkflowStepRecord
 from src.infrastructure.db.postgres import get_db_session
 
@@ -166,21 +168,33 @@ def create_notification(
     workflow_run_id: str | None = None,
     thread_id: str | None = None,
     level: str = "info",
+    idempotency_key: str | None = None,
 ) -> str:
-    nid = str(uuid.uuid4())
+    nid = (
+        str(uuid.uuid5(uuid.NAMESPACE_URL, idempotency_key))
+        if idempotency_key
+        else str(uuid.uuid4())
+    )
     with get_db_session() as db:
-        db.add(
-            Notification(
-                id=nid,
-                user_id=str(user_id),
-                title=title,
-                body=body,
-                level=level,
-                payload=payload,
-                workflow_run_id=workflow_run_id,
-                thread_id=thread_id,
+        values = {
+            "id": nid,
+            "idempotency_key": idempotency_key,
+            "user_id": str(user_id),
+            "title": title,
+            "body": body,
+            "level": level,
+            "payload": payload,
+            "workflow_run_id": workflow_run_id,
+            "thread_id": thread_id,
+        }
+        if idempotency_key:
+            db.execute(
+                pg_insert(Notification)
+                .values(**values)
+                .on_conflict_do_nothing(index_elements=["idempotency_key"])
             )
-        )
+        else:
+            db.add(Notification(**values))
     return nid
 
 

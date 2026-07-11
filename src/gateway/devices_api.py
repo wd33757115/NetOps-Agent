@@ -980,7 +980,7 @@ def _parser_control_evidence(db: Any) -> list[dict[str, Any]]:
                 title="最近激活模板",
                 object_id=active_template.id,
                 occurred_at=active_template.activated_at or active_template.updated_at,
-                summary=f"{active_template.vendor}/{active_template.profile} 路 {active_template.canonical_command}",
+                summary=f"{active_template.vendor}/{active_template.profile} · {active_template.canonical_command}",
                 detail={
                     "version": active_template.version,
                     "asset_path": active_template.asset_path,
@@ -1002,7 +1002,7 @@ def _parser_control_evidence(db: Any) -> list[dict[str, Any]]:
                 title="最近失败模板任务",
                 object_id=failed_job.id,
                 occurred_at=failed_job.completed_at or failed_job.updated_at,
-                summary=f"{failed_job.vendor}/{failed_job.model or failed_job.family or failed_job.profile} 路 {failed_job.canonical_command}",
+                summary=f"{failed_job.vendor}/{failed_job.model or failed_job.family or failed_job.profile} · {failed_job.canonical_command}",
                 detail={
                     "failure_code": failed_job.failure_code,
                     "last_error": failed_job.last_error,
@@ -1024,7 +1024,7 @@ def _parser_control_evidence(db: Any) -> list[dict[str, Any]]:
                 title="最近开放模板任务",
                 object_id=open_job.id,
                 occurred_at=open_job.updated_at,
-                summary=f"{open_job.status} 路 {open_job.vendor}/{open_job.model or open_job.family or open_job.profile} 路 {open_job.canonical_command}",
+                summary=f"{open_job.status} · {open_job.vendor}/{open_job.model or open_job.family or open_job.profile} · {open_job.canonical_command}",
                 detail={"sample_count": open_job.sample_count, "attempts": open_job.attempts},
                 target_url="/devices?tab=parser",
             )
@@ -1045,7 +1045,7 @@ def _state_normalizer_evidence(db: Any) -> list[dict[str, Any]]:
                 title="最近状态观测",
                 object_id=observation.id,
                 occurred_at=observation.observed_at,
-                summary=f"{observation.device_id} 路 {observation.entity_type}/{observation.field_name}",
+                summary=f"{observation.device_id} · {observation.entity_type}/{observation.field_name}",
                 detail={"run_id": observation.run_id, "snapshot_id": observation.snapshot_id},
                 target_url="/devices?tab=overview",
             )
@@ -1059,7 +1059,7 @@ def _state_normalizer_evidence(db: Any) -> list[dict[str, Any]]:
                 title="最近 CurrentState 更新",
                 object_id=current_state.id,
                 occurred_at=current_state.updated_at,
-                summary=f"{current_state.device_id} 路 {current_state.entity_type}/{current_state.field_name}",
+                summary=f"{current_state.device_id} · {current_state.entity_type}/{current_state.field_name}",
                 detail={"source": current_state.source, "version": current_state.version},
                 target_url="/devices?tab=overview",
             )
@@ -1078,7 +1078,7 @@ def _state_normalizer_evidence(db: Any) -> list[dict[str, Any]]:
                 title="验证数据污染证据",
                 object_id=polluted.id,
                 occurred_at=polluted.updated_at,
-                summary=f"{polluted.device_id} 路 {polluted.entity_type}/{polluted.field_name}",
+                summary=f"{polluted.device_id} · {polluted.entity_type}/{polluted.field_name}",
                 detail={
                     "source_run_id": polluted.source_run_id,
                     "source_snapshot_id": polluted.source_snapshot_id,
@@ -1100,7 +1100,7 @@ def _change_detector_evidence(db: Any) -> list[dict[str, Any]]:
                 title="最近网络变化",
                 object_id=change.id,
                 occurred_at=change.detected_at,
-                summary=f"{change.device_id or '-'} 路 {change.entity_type}/{change.entity_key} 路 {change.field}",
+                summary=f"{change.device_id or '-'} · {change.entity_type}/{change.entity_key} · {change.field}",
                 detail={"run_id": change.run_id, "event_status": change.event_status},
                 target_url="/devices?tab=overview",
             )
@@ -1119,7 +1119,7 @@ def _change_detector_evidence(db: Any) -> list[dict[str, Any]]:
                 title="最近待事件处理变化",
                 object_id=pending.id,
                 occurred_at=pending.detected_at,
-                summary=f"{pending.device_id or '-'} 路 {pending.entity_type}/{pending.entity_key} 路 {pending.field}",
+                summary=f"{pending.device_id or '-'} · {pending.entity_type}/{pending.entity_key} · {pending.field}",
                 detail={"run_id": pending.run_id, "canonical_command": pending.canonical_command},
                 target_url="/devices?tab=overview",
             )
@@ -1152,7 +1152,7 @@ def _event_builder_evidence(db: Any) -> list[dict[str, Any]]:
                 title="最近网络事件",
                 object_id=event.id,
                 occurred_at=event.occurred_at,
-                summary=f"{event.event_type} 路 {event.severity} 路 {event.device_id or '-'}",
+                summary=f"{event.event_type} · {event.severity} · {event.device_id or '-'}",
                 detail={"run_id": event.run_id, "source_change_id": event.source_change_id},
                 target_url="/devices?tab=overview",
             )
@@ -1171,7 +1171,7 @@ def _event_builder_evidence(db: Any) -> list[dict[str, Any]]:
                 title="最近激活事件规则",
                 object_id=rule.id,
                 occurred_at=rule.activated_at or rule.created_at,
-                summary=f"{rule.event_type} 路 {rule.severity} 路 v{rule.version}",
+                summary=f"{rule.event_type} · {rule.severity} · v{rule.version}",
                 detail={"rule_id": rule.rule_id},
                 target_url="/devices?tab=parser",
             )
@@ -1204,7 +1204,7 @@ def _device_management_evidence(db: Any) -> list[dict[str, Any]]:
                 title="最近设备资产更新",
                 object_id=device.id,
                 occurred_at=device.updated_at,
-                summary=f"{device.device_name} 路 {device.management_ip}",
+                summary=f"{device.device_name} · {device.management_ip}",
                 detail={"vendor": device.vendor, "model": device.model, "status": device.status},
                 target_url="/devices?tab=overview",
             )
@@ -1223,7 +1223,7 @@ def _device_management_evidence(db: Any) -> list[dict[str, Any]]:
                 title="最近连接异常",
                 object_id=failed_device.id,
                 occurred_at=failed_device.last_connection_checked_at,
-                summary=f"{failed_device.device_name} 路 {failed_device.last_connection_failure_code or failed_device.last_connection_status}",
+                summary=f"{failed_device.device_name} · {failed_device.last_connection_failure_code or failed_device.last_connection_status}",
                 detail={"error": failed_device.last_connection_error},
                 target_url="/devices?tab=overview",
             )
@@ -1247,7 +1247,7 @@ def _collection_profile_evidence(db: Any) -> list[dict[str, Any]]:
                 title="最近激活采集命令集版本",
                 object_id=profile.id,
                 occurred_at=profile.activated_at or profile.created_at,
-                summary=f"profile={profile.profile_id} 路 v{profile.version}",
+                summary=f"profile={profile.profile_id} · v{profile.version}",
                 detail={"item_count": len(profile.items_json or [])},
                 target_url="/devices?tab=parser",
             )
@@ -1266,7 +1266,7 @@ def _collection_profile_evidence(db: Any) -> list[dict[str, Any]]:
                 title="最近采集命令集绑定",
                 object_id=binding.id,
                 occurred_at=binding.updated_at,
-                summary=f"profile_version={binding.profile_version_id} 路 priority={binding.priority}",
+                summary=f"profile_version={binding.profile_version_id} · priority={binding.priority}",
                 detail={"selector": binding.selector_json},
                 target_url="/devices?tab=parser",
             )
@@ -1295,7 +1295,7 @@ def _report_diff_evidence(db: Any) -> list[dict[str, Any]]:
                 title="最近巡检 Workflow",
                 object_id=run.id,
                 occurred_at=run.completed_at or run.created_at,
-                summary=f"{run.status} 路 {context.get('device_name') or context.get('device_id') or '-'}",
+                summary=f"{run.status} · {context.get('device_name') or context.get('device_id') or '-'}",
                 detail={
                     "patrol_batch_id": context.get("patrol_batch_id"),
                     "error_message": run.error_message,

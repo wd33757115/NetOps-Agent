@@ -123,6 +123,7 @@ class Settings(BaseSettings):
     EVENT_BUS_CONSUMER_BLOCK_MS: int = 500
     EVENT_BUS_PENDING_MIN_IDLE_MS: int = 60_000
     EVENT_BUS_RECLAIM_BATCH_SIZE: int = 20
+    EVENT_BUS_PROCESSING_LEASE_MS: int = 120_000
     EVENT_BUS_POLL_IDLE_SEC: float = 1.0
     # 生产默认 true：EventBus 与 DB 通知双写，Consumer 未启动时用户仍能收到站内信
     EVENT_BUS_DIRECT_NOTIFY_FALLBACK: bool = True

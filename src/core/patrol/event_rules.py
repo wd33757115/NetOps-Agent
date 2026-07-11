@@ -335,7 +335,7 @@ class EventRuleRepository:
         *,
         status: str | None = None,
         event_type: str | None = None,
-        limit: int = 500,
+        limit: int | None = 500,
     ) -> list[dict[str, Any]]:
         with get_db_session() as db:
             query = db.query(EventRuleRecord, EventRuleVersionRecord).join(
@@ -346,15 +346,14 @@ class EventRuleRepository:
                 query = query.filter(EventRuleVersionRecord.status == status)
             if event_type:
                 query = query.filter(EventRuleVersionRecord.event_type == event_type)
-            rows = (
-                query.order_by(
-                    EventRuleVersionRecord.priority.desc(),
-                    EventRuleRecord.name,
-                    EventRuleVersionRecord.version.desc(),
-                )
-                .limit(max(1, min(int(limit), 2000)))
-                .all()
+            query = query.order_by(
+                EventRuleVersionRecord.priority.desc(),
+                EventRuleRecord.name,
+                EventRuleVersionRecord.version.desc(),
             )
+            if limit is not None:
+                query = query.limit(max(1, int(limit)))
+            rows = query.all()
             return [
                 {
                     **rule.to_dict(),
@@ -404,7 +403,9 @@ class EventRuleRepository:
                     version=int(version.version),
                     event_type=version.event_type,
                     severity=version.severity,
-                    predicate=lambda change, condition=_effective_condition(str(rule.name), dict(version.condition_json or {})): (
+                    predicate=lambda change, condition=_effective_condition(
+                        str(rule.name), dict(version.condition_json or {})
+                    ): (
                         condition_matches(
                             condition,
                             change,
@@ -421,6 +422,40 @@ class EventRuleRepository:
                 )
                 for rule, version in rows
             ]
+
+    def snapshot_active_rules(self) -> list[dict[str, Any]]:
+        rows = self.list_versions(status="active", limit=None)
+        if not rows:
+            from src.common.config import get_settings
+
+            if get_settings().EVENT_RULE_ALLOW_BUILTIN_FALLBACK:
+                rows = [
+                    {
+                        "rule_id": definition.rule_id,
+                        "rule_name": definition.rule_id,
+                        "version": definition.version,
+                        "event_type": definition.event_type,
+                        "severity": definition.severity,
+                        "condition": dict(definition.condition),
+                        "priority": definition.priority,
+                        "exclusive": definition.exclusive,
+                        "event_class": definition.event_class,
+                        "recovery": dict(definition.recovery or {}),
+                        "correlation_keys": list(definition.correlation_keys),
+                        "source": "builtin_fallback",
+                    }
+                    for definition in default_event_rule_definitions()
+                ]
+        return [
+            {
+                **row,
+                "effective_condition": _effective_condition(
+                    str(row.get("rule_name") or row.get("rule_id") or ""),
+                    dict(row.get("condition") or {}),
+                ),
+            }
+            for row in rows
+        ]
 
     def ensure_default_rules(self) -> int:
         created = 0
@@ -840,10 +875,7 @@ def event_rules_from_snapshot(rows: list[dict[str, Any]]) -> list[EventRule]:
             version=int(row.get("version") or 1),
             event_type=str(row.get("event_type") or ""),
             severity=str(row.get("severity") or "warning"),
-            condition=_effective_condition(
-                str(row.get("rule_name") or row.get("rule_id") or ""),
-                dict(row.get("condition") or {}),
-            ),
+            condition=dict(row.get("effective_condition") or row.get("condition") or {}),
             priority=int(row.get("priority") or 100),
             exclusive=bool(row.get("exclusive")),
             event_class=str(row.get("event_class") or "fault"),

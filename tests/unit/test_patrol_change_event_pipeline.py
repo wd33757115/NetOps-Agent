@@ -13,6 +13,7 @@ import pytest
 from src.common.config import get_settings
 from src.core.celery_tasks.tasks import _persist_patrol_snapshots
 from src.core.patrol.change_detector import (
+    _aggregate_collection_results,
     detect_changes_between_values,
     detect_changes_from_params,
 )
@@ -30,6 +31,7 @@ from src.core.patrol.raw_importer import (
     import_raw_capture,
     import_raw_path,
 )
+from src.core.patrol.repository import PatrolRepository
 from src.infrastructure.db.models import (
     CommandSnapshot,
     NetworkChangeRecord,
@@ -207,6 +209,47 @@ def test_change_detector_ignores_status_case_noise():
     assert changes == []
 
 
+def test_duplicate_collection_items_have_distinct_fact_identity_and_safe_authority():
+    common = {
+        "mode": "production",
+        "dataset_id": "dataset-1",
+        "source_file_hash": "source-hash",
+        "device_id": "SW1",
+        "canonical_command": "show interface transceiver detail",
+        "raw_text": "same output",
+        "run_id": "run-1",
+        "inventory_device_id": "device-1",
+        "command_observed_at": "2026-07-11T01:00:00+00:00",
+        "command_ordinal": 1,
+    }
+    before = _import_fingerprint(**common, execution_item_id="optical-before")
+    after = _import_fingerprint(**common, execution_item_id="optical-after")
+
+    assert before != after
+
+    aggregated = _aggregate_collection_results(
+        [
+            {
+                "device_id": "device-1",
+                "canonical_command": common["canonical_command"],
+                "execution_item_id": "optical-before",
+                "authoritative_for_deletion": True,
+                "observed_at": "2026-07-11T01:00:00+00:00",
+            },
+            {
+                "device_id": "device-1",
+                "canonical_command": common["canonical_command"],
+                "execution_item_id": "optical-after",
+                "authoritative_for_deletion": False,
+                "observed_at": "2026-07-11T01:01:00+00:00",
+            },
+        ]
+    )
+    item = next(iter(aggregated.values()))
+    assert item["authoritative_for_deletion"] is False
+    assert item["execution_item_ids"] == ["optical-before", "optical-after"]
+
+
 def test_observation_change_detector_emits_initial_changes(monkeypatch):
     current = [
         {
@@ -240,13 +283,17 @@ def test_observation_change_detector_emits_initial_changes(monkeypatch):
         lambda changes, **_kwargs: len(changes),
     )
 
-    result = detect_changes_from_params(
-        {
-            "current_run_id": "run-current",
-            "use_state_observations": True,
-            "persist": True,
-        }
-    )
+    PatrolRepository().create_run(run_id="run-current", source="test", mode="production")
+    try:
+        result = detect_changes_from_params(
+            {
+                "current_run_id": "run-current",
+                "use_state_observations": True,
+                "persist": True,
+            }
+        )
+    finally:
+        _cleanup_runs("run-current")
 
     assert result["baseline_observations"] == 1
     assert result["initial_observations"] == 1
@@ -570,7 +617,11 @@ def test_event_builder_marks_non_event_changes(monkeypatch):
         FakeRepository,
     )
 
-    result = build_events_from_params({"run_id": "run-1", "persist": True})
+    PatrolRepository().create_run(run_id="run-1", source="test", mode="production")
+    try:
+        result = build_events_from_params({"run_id": "run-1", "persist": True})
+    finally:
+        _cleanup_runs("run-1")
 
     assert result["event_count"] == 1
     assert result["persisted_event_count"] == 1

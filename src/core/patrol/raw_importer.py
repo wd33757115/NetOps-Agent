@@ -105,15 +105,22 @@ def _import_fingerprint(
     inventory_device_id: str | None = None,
     command_observed_at: str | None = None,
     command_ordinal: int | None = None,
+    execution_item_id: str | None = None,
+    fact_version: str = "v2",
 ) -> str:
     raw_hash = hashlib.sha256((raw_text or "").encode("utf-8")).hexdigest()
     if run_id:
         encoded = json.dumps(
             [
-                "command-fact-v1",
+                f"command-fact-{fact_version}",
                 mode,
                 run_id,
                 inventory_device_id or device_id,
+                *(
+                    [execution_item_id or {"missing": True, "ordinal": command_ordinal}]
+                    if fact_version == "v2"
+                    else []
+                ),
                 canonical_command.strip().lower(),
                 command_observed_at or {"missing": True, "ordinal": command_ordinal},
                 raw_hash,
@@ -383,10 +390,40 @@ def import_raw_capture(
             inventory_device_id=inventory_device_id,
             command_observed_at=command_observed_at,
             command_ordinal=block.start_line,
+            execution_item_id=command_collection.get("execution_item_id"),
         )
-        for (block, _), command_observed_at in zip(parsed_blocks, command_observed_ats, strict=True)
+        for (block, _), command_observed_at, command_collection in zip(
+            parsed_blocks,
+            command_observed_ats,
+            block_collection_statuses,
+            strict=True,
+        )
     ]
-    existing = repository.find_snapshots_by_import_fingerprints(set(fingerprints))
+    legacy_fingerprints = [
+        _import_fingerprint(
+            mode=mode,
+            dataset_id=dataset_id,
+            source_file_hash=source_file_hash,
+            device_id=device_id,
+            canonical_command=block.command_canonical,
+            raw_text=block.raw_output,
+            run_id=run_id,
+            inventory_device_id=inventory_device_id,
+            command_observed_at=command_observed_at,
+            command_ordinal=block.start_line,
+            fact_version="v1",
+        )
+        for (block, _), command_observed_at in zip(
+            parsed_blocks, command_observed_ats, strict=True
+        )
+    ]
+    existing = repository.find_snapshots_by_import_fingerprints(
+        {*fingerprints, *legacy_fingerprints}
+    )
+    fingerprints = [
+        legacy if legacy in existing else current
+        for current, legacy in zip(fingerprints, legacy_fingerprints, strict=True)
+    ]
     if fingerprints and all(fingerprint in existing for fingerprint in fingerprints):
         existing_snapshots = [existing[fingerprint] for fingerprint in fingerprints]
         return {

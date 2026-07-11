@@ -6,6 +6,8 @@ import sys
 from datetime import datetime
 from typing import Any
 
+from celery.exceptions import Reject
+
 from src.core.celery_tasks.celery_app import celery
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
@@ -168,7 +170,7 @@ def execute_device_patrol_task(
 
     try:
         redelivery = _patrol_redelivery_decision(self.request, mode=mode)
-        if redelivery["action"] in {"already_completed", "reuse_running"}:
+        if redelivery["action"] == "already_completed":
             return {
                 "success": True,
                 "status": redelivery["action"],
@@ -176,6 +178,8 @@ def execute_device_patrol_task(
                 "redelivery_skipped": True,
                 "reason": redelivery.get("reason"),
             }
+        if redelivery["action"] == "attempt_in_progress":
+            raise Reject(str(redelivery.get("reason") or "attempt in progress"), requeue=True)
         result = DevicePatrolRunner().run(
             DevicePatrolRunRequest(
                 filter_params=filter_params,

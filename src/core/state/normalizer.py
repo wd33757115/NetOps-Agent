@@ -254,6 +254,13 @@ def observations_from_snapshot(
                         "source_type": str(snapshot.get("source_type") or "cli"),
                         "external_device_id": external_device_id,
                         "inventory_device_id": snapshot.get("inventory_device_id"),
+                        "execution_item_id": snapshot.get("execution_item_id"),
+                        "collection_item_id": (
+                            (snapshot.get("metadata_json") or {}).get("collection_item_id")
+                        ),
+                        "command_ordinal": (
+                            (snapshot.get("metadata_json") or {}).get("command_ordinal")
+                        ),
                         "identity_status": (
                             "inventory_bound"
                             if snapshot.get("inventory_device_id")
@@ -355,26 +362,116 @@ def normalize_run(
     device_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     repository = StateRepository()
-    from src.core.patrol.repository import PatrolRepository
+    from src.core.patrol.repository import (
+        AnalysisAttemptFencedError,
+        AnalysisAttemptInProgressError,
+        PatrolRepository,
+    )
 
-    try:
-        PatrolRepository().update_analysis_status(
-            run_id,
-            analysis_status="normalizing",
-            baseline_eligible=False,
-        )
-    except ValueError:
-        pass
     snapshot_ids = (
         repository.list_run_snapshot_ids(run_id, device_ids=device_ids)
         if device_ids
         else repository.list_run_snapshot_ids(run_id)
     )
+    input_revision_digest = _digest(
+        ["normalization-input-v1", run_id, sorted(snapshot_ids)]
+    )
+    updates_run_status = not bool(device_ids)
+    patrol_repository = PatrolRepository()
+    attempt = patrol_repository.begin_analysis_attempt(
+        run_id=run_id,
+        stage="normalizing",
+        scope={
+            "device_ids": sorted({str(item) for item in device_ids or []}),
+            "full_run": not bool(device_ids),
+            "update_current_state": update_current_state,
+            "input_revision_digest": input_revision_digest,
+        },
+        rule_bundle={"observation_contracts": "snapshot_bound"},
+    )
+    if attempt["reused"]:
+        return {
+            **dict(attempt["result"] or {}),
+            "results": [],
+            "reused_analysis_attempt": True,
+        }
+    if attempt["in_progress"]:
+        raise AnalysisAttemptInProgressError(f"normalization already running for {run_id}")
+
+    if updates_run_status:
+        try:
+            patrol_repository.update_analysis_status(
+                run_id,
+                analysis_status="normalizing",
+                baseline_eligible=False,
+            )
+        except ValueError:
+            pass
+    try:
+        result = _normalize_run_impl(
+            run_id,
+            snapshot_ids=snapshot_ids,
+            update_current_state=update_current_state,
+            device_ids=device_ids,
+            update_run_status=updates_run_status,
+            heartbeat=lambda: patrol_repository.touch_analysis_attempt(
+                str(attempt["attempt_id"]),
+                attempt_number=int(attempt["attempt_number"]),
+                owner_token=str(attempt["owner_token"]),
+            ),
+        )
+        patrol_repository.complete_analysis_attempt(
+            str(attempt["attempt_id"]),
+            attempt_number=int(attempt["attempt_number"]),
+            owner_token=str(attempt["owner_token"]),
+            result=result,
+        )
+        return result
+    except Exception as exc:
+        try:
+            patrol_repository.fail_analysis_attempt(
+                str(attempt["attempt_id"]),
+                attempt_number=int(attempt["attempt_number"]),
+                owner_token=str(attempt["owner_token"]),
+                error=str(exc),
+            )
+        except AnalysisAttemptFencedError:
+            raise
+        if updates_run_status:
+            try:
+                patrol_repository.update_analysis_status(
+                    run_id,
+                    analysis_status="failed",
+                    baseline_eligible=False,
+                    metadata={
+                        "analysis_failure_stage": "normalizing",
+                        "analysis_failure": str(exc),
+                    },
+                )
+            except ValueError:
+                pass
+        raise
+
+
+def _normalize_run_impl(
+    run_id: str,
+    *,
+    snapshot_ids: list[str],
+    update_current_state: bool | None,
+    device_ids: list[str] | None,
+    update_run_status: bool = True,
+    heartbeat: Any | None = None,
+) -> dict[str, Any]:
+    repository = StateRepository()
+    from src.core.patrol.repository import PatrolRepository
+
     results: list[dict[str, Any]] = []
     valid_observations: list[StateObservation] = []
     should_update_current = False
     patrol_repository = PatrolRepository()
-    for snapshot_id in snapshot_ids:
+    for index, snapshot_id in enumerate(snapshot_ids):
+        if heartbeat is not None and index % 100 == 0:
+            heartbeat()
         snapshot_result, observations, update_current = _build_snapshot_normalization(
             repository,
             snapshot_id,
@@ -423,7 +520,7 @@ def normalize_run(
         "failed_snapshot_count": failed_count,
         "results": results,
     }
-    if not result["success"]:
+    if update_run_status and not result["success"]:
         try:
             PatrolRepository().update_analysis_status(
                 run_id,
@@ -433,7 +530,7 @@ def normalize_run(
             )
         except ValueError:
             pass
-    elif result["partial"]:
+    elif update_run_status and result["partial"]:
         try:
             PatrolRepository().update_analysis_status(
                 run_id,

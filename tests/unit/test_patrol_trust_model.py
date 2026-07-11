@@ -97,6 +97,26 @@ def test_complete_empty_collection_creates_missing_then_confirmed_absence(monkey
             return SimpleNamespace(to_dict=lambda: data)
 
     class FakePatrolRepository:
+        def begin_analysis_attempt(self, *, rule_bundle, **_kwargs):
+            return {
+                "reused": False,
+                "in_progress": False,
+                "attempt_id": "analysis-attempt-1",
+                "attempt_number": 1,
+                "owner_token": "owner-1",
+                "rule_bundle": rule_bundle,
+                "rule_bundle_digest": "bundle-digest-1",
+            }
+
+        def touch_analysis_attempt(self, *_args, **_kwargs):
+            return None
+
+        def complete_analysis_attempt(self, *_args, **_kwargs):
+            return None
+
+        def fail_analysis_attempt(self, *_args, **_kwargs):
+            return None
+
         def update_analysis_status(self, *args, **kwargs):
             return None
 

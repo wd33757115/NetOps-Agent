@@ -205,6 +205,8 @@ def list_plugins_enriched() -> list[dict[str, Any]]:
 def delete_plugin(plugin_name: str, *, user_id: str | None = None) -> dict[str, Any]:
     """物理删除 Workflow 插件目录及元数据，并热重载注册表。"""
     _ = user_id  # 审计预留
+    # Another process may have written the plugin since this registry loaded.
+    load_workflows(force=True)
     tpl = get_template(plugin_name)
     meta = get_plugin_metadata(plugin_name)
 

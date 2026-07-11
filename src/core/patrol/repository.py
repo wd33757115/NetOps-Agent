@@ -79,6 +79,19 @@ class RedeliveryDecision:
         return asdict(self)
 
 
+class AnalysisAttemptFencedError(RuntimeError):
+    """Raised when a stale analysis generation attempts to mutate state."""
+
+
+class AnalysisAttemptInProgressError(RuntimeError):
+    """Raised when another owner still holds a live analysis lease."""
+
+
+def _compact_analysis_result(result: dict[str, Any]) -> dict[str, Any]:
+    omitted = {"changes", "events", "results"}
+    return {key: value for key, value in result.items() if key not in omitted}
+
+
 class PatrolRepository:
     """Authoritative PostgreSQL patrol data-plane repository."""
 
@@ -281,26 +294,26 @@ class PatrolRepository:
                 .all()
             )
             latest = rows[-1] if rows else None
-            if latest is not None and (latest.metadata_json or {}).get(
-                "celery_task_completed"
+            if (
+                latest is not None
+                and latest.status in {"completed", "partial"}
+                and latest.collection_status in {"completed", "partial"}
+                and latest.completed_at is not None
             ):
                 return RedeliveryDecision(
                     action="already_completed",
                     attempt_number=int(latest.attempt_number or 0),
                     run_id=latest.id,
-                    reason="broker_redelivered_after_task_completion",
+                    reason="broker_redelivered_after_terminal_collection_commit",
                 )
             if latest is not None and latest.status in {"reserved", "running"}:
                 lease_is_live = _lease_is_live(latest.lease_until, now)
-                if lease_is_live and (
-                    (latest.metadata_json or {}).get("attempt_reserved")
-                    or (latest.worker_id and latest.worker_id != worker_id)
-                ):
+                if lease_is_live and (latest.metadata_json or {}).get("attempt_reserved"):
                     return RedeliveryDecision(
-                        action="reuse_running",
+                        action="attempt_in_progress",
                         attempt_number=int(latest.attempt_number or 0),
                         run_id=latest.id,
-                        reason="another_worker_owns_live_attempt",
+                        reason="a_redelivery_attempt_already_owns_execution",
                     )
             next_attempt = (
                 max(
@@ -479,11 +492,28 @@ class PatrolRepository:
             if row is not None and row.status == "completed":
                 return {
                     "reused": True,
+                    "in_progress": False,
                     "attempt_id": row.id,
+                    "attempt_number": int(row.attempt_number),
+                    "owner_token": row.owner_token,
                     "rule_bundle": dict(row.rule_bundle_json or {}),
                     "rule_bundle_digest": row.rule_bundle_digest,
                     "result": dict(row.result_json or {}),
                 }
+            if row is not None and row.status == "running" and _lease_is_live(
+                row.lease_until, now
+            ):
+                return {
+                    "reused": False,
+                    "in_progress": True,
+                    "attempt_id": row.id,
+                    "attempt_number": int(row.attempt_number),
+                    "owner_token": None,
+                    "rule_bundle": dict(row.rule_bundle_json or {}),
+                    "rule_bundle_digest": row.rule_bundle_digest,
+                    "result": None,
+                }
+            owner_token = uuid.uuid4().hex
             if row is None:
                 row = PatrolAnalysisAttemptRecord(
                     id=str(uuid.uuid4()),
@@ -495,6 +525,7 @@ class PatrolRepository:
                     rule_bundle_json=rule_bundle,
                     status="running",
                     attempt_number=1,
+                    owner_token=owner_token,
                     heartbeat_at=now,
                     lease_until=now + timedelta(seconds=max(30, int(lease_seconds))),
                     started_at=now,
@@ -505,6 +536,7 @@ class PatrolRepository:
             else:
                 row.status = "running"
                 row.attempt_number = int(row.attempt_number or 0) + 1
+                row.owner_token = owner_token
                 row.heartbeat_at = now
                 row.lease_until = now + timedelta(seconds=max(30, int(lease_seconds)))
                 row.error = None
@@ -513,7 +545,10 @@ class PatrolRepository:
             db.flush()
             return {
                 "reused": False,
+                "in_progress": False,
                 "attempt_id": row.id,
+                "attempt_number": int(row.attempt_number),
+                "owner_token": owner_token,
                 "rule_bundle": dict(row.rule_bundle_json or {}),
                 "rule_bundle_digest": row.rule_bundle_digest,
                 "result": None,
@@ -523,33 +558,110 @@ class PatrolRepository:
         self,
         attempt_id: str,
         *,
+        attempt_number: int,
+        owner_token: str,
         result: dict[str, Any],
     ) -> None:
+        compact_result = _compact_analysis_result(result)
+        result_digest = hashlib.sha256(
+            json.dumps(result, sort_keys=True, separators=(",", ":"), default=str).encode()
+        ).hexdigest()
         with get_db_session() as db:
-            row = db.get(PatrolAnalysisAttemptRecord, attempt_id)
-            if row is None:
-                raise ValueError(f"patrol analysis attempt not found: {attempt_id}")
             now = _utcnow()
-            row.status = "completed"
-            row.result_json = result
-            row.error = None
-            row.completed_at = now
-            row.heartbeat_at = now
-            row.lease_until = now
-            row.updated_at = now
+            updated = (
+                db.query(PatrolAnalysisAttemptRecord)
+                .filter(
+                    PatrolAnalysisAttemptRecord.id == attempt_id,
+                    PatrolAnalysisAttemptRecord.attempt_number == int(attempt_number),
+                    PatrolAnalysisAttemptRecord.owner_token == owner_token,
+                    PatrolAnalysisAttemptRecord.status == "running",
+                )
+                .update(
+                    {
+                        "status": "completed",
+                        "result_json": compact_result,
+                        "result_digest": result_digest,
+                        "error": None,
+                        "completed_at": now,
+                        "heartbeat_at": now,
+                        "lease_until": now,
+                        "updated_at": now,
+                    },
+                    synchronize_session=False,
+                )
+            )
+            if updated != 1:
+                raise AnalysisAttemptFencedError(
+                    f"analysis attempt generation no longer owns completion: {attempt_id}"
+                )
 
-    def fail_analysis_attempt(self, attempt_id: str, *, error: str) -> None:
+    def touch_analysis_attempt(
+        self,
+        attempt_id: str,
+        *,
+        attempt_number: int,
+        owner_token: str,
+        lease_seconds: int = 900,
+    ) -> None:
+        now = _utcnow()
         with get_db_session() as db:
-            row = db.get(PatrolAnalysisAttemptRecord, attempt_id)
-            if row is None:
-                return
+            updated = (
+                db.query(PatrolAnalysisAttemptRecord)
+                .filter(
+                    PatrolAnalysisAttemptRecord.id == attempt_id,
+                    PatrolAnalysisAttemptRecord.attempt_number == int(attempt_number),
+                    PatrolAnalysisAttemptRecord.owner_token == owner_token,
+                    PatrolAnalysisAttemptRecord.status == "running",
+                )
+                .update(
+                    {
+                        "heartbeat_at": now,
+                        "lease_until": now
+                        + timedelta(seconds=max(30, int(lease_seconds))),
+                        "updated_at": now,
+                    },
+                    synchronize_session=False,
+                )
+            )
+            if updated != 1:
+                raise AnalysisAttemptFencedError(
+                    f"analysis attempt generation no longer owns heartbeat: {attempt_id}"
+                )
+
+    def fail_analysis_attempt(
+        self,
+        attempt_id: str,
+        *,
+        attempt_number: int,
+        owner_token: str,
+        error: str,
+    ) -> None:
+        with get_db_session() as db:
             now = _utcnow()
-            row.status = "failed"
-            row.error = str(error)[:4000]
-            row.completed_at = now
-            row.heartbeat_at = now
-            row.lease_until = now
-            row.updated_at = now
+            updated = (
+                db.query(PatrolAnalysisAttemptRecord)
+                .filter(
+                    PatrolAnalysisAttemptRecord.id == attempt_id,
+                    PatrolAnalysisAttemptRecord.attempt_number == int(attempt_number),
+                    PatrolAnalysisAttemptRecord.owner_token == owner_token,
+                    PatrolAnalysisAttemptRecord.status == "running",
+                )
+                .update(
+                    {
+                        "status": "failed",
+                        "error": str(error)[:4000],
+                        "completed_at": now,
+                        "heartbeat_at": now,
+                        "lease_until": now,
+                        "updated_at": now,
+                    },
+                    synchronize_session=False,
+                )
+            )
+            if updated != 1:
+                raise AnalysisAttemptFencedError(
+                    f"analysis attempt generation no longer owns failure: {attempt_id}"
+                )
 
     def reconcile_stale_analysis_attempts(self, *, limit: int = 100) -> dict[str, Any]:
         now = _utcnow()
@@ -572,7 +684,8 @@ class PatrolRepository:
                 row.completed_at = now
                 row.updated_at = now
                 run = db.get(PatrolRun, row.run_id)
-                if run is not None and run.analysis_status in {
+                updates_run_status = bool((row.scope_json or {}).get("full_run", True))
+                if run is not None and updates_run_status and run.analysis_status in {
                     "normalizing",
                     "detecting",
                     "building_events",

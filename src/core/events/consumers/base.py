@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import socket
+import uuid
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -16,8 +17,10 @@ from src.core.events.bus import EventBus
 from src.core.events.domain_event import DomainEvent
 from src.core.events.idempotency import (
     IdempotencyStoreUnavailableError,
+    claim_processing,
     is_processed,
     mark_processed,
+    release_processing,
 )
 
 logger = logging.getLogger(__name__)
@@ -98,13 +101,32 @@ class StreamConsumer(ABC):
         processed = 0
         for msg_id, fields in messages:
             event: DomainEvent | None = None
+            processing_owner: str | None = None
             try:
                 event = DomainEvent.from_stream_fields(fields)
                 if is_processed(self.group, event.idempotency_key):
                     client.xack(stream, self.group, msg_id)
                     continue
+                processing_owner = uuid.uuid4().hex
+                claim_state = claim_processing(
+                    self.group,
+                    event.idempotency_key,
+                    owner_token=processing_owner,
+                    lease_ms=int(
+                        getattr(get_settings(), "EVENT_BUS_PROCESSING_LEASE_MS", 120_000)
+                    ),
+                )
+                if claim_state == "completed":
+                    client.xack(stream, self.group, msg_id)
+                    continue
+                if claim_state != "claimed":
+                    continue
                 self.handle(event)
-                mark_processed(self.group, event.idempotency_key)
+                mark_processed(
+                    self.group,
+                    event.idempotency_key,
+                    owner_token=processing_owner,
+                )
                 client.xack(stream, self.group, msg_id)
                 processed += 1
             except IdempotencyStoreUnavailableError as exc:
@@ -124,6 +146,12 @@ class StreamConsumer(ABC):
                     exc,
                 )
                 dlq_message_id = None
+                if event is not None and processing_owner is not None:
+                    release_processing(
+                        self.group,
+                        event.idempotency_key,
+                        owner_token=processing_owner,
+                    )
                 dlq_event = event or DomainEvent(
                     event_type="event.invalid_envelope",
                     source="system",

@@ -5,9 +5,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -17,7 +18,11 @@ from src.core.patrol.change_policy import compare_with_policy, policy_from_dict
 from src.core.patrol.change_policy_repository import ChangePolicyRepository
 from src.core.patrol.command_splitter import canonicalize_command
 from src.core.patrol.domain import SnapshotRecord
-from src.core.patrol.repository import PatrolRepository
+from src.core.patrol.repository import (
+    AnalysisAttemptFencedError,
+    AnalysisAttemptInProgressError,
+    PatrolRepository,
+)
 from src.core.state.repository import StateRepository
 
 
@@ -39,6 +44,8 @@ class NetworkChange:
     previous_observation_id: str | None = None
     current_observation_id: str | None = None
     source: str = "patrol"
+    analysis_revision: str = "original"
+    rule_bundle_digest: str | None = None
     old_number: float | None = None
     new_number: float | None = None
     detected_at: str = ""
@@ -212,6 +219,38 @@ def _collection_identity(observation: dict[str, Any]) -> tuple[str, str]:
         str(observation.get("device_id") or ""),
         canonicalize_command(str(observation.get("canonical_command") or "")),
     )
+
+
+def _aggregate_collection_results(
+    results: list[dict[str, Any]],
+) -> dict[tuple[str, str], dict[str, Any]]:
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for item in results:
+        key = (
+            str(item.get("device_id") or ""),
+            canonicalize_command(str(item.get("canonical_command") or "")),
+        )
+        grouped.setdefault(key, []).append(item)
+    aggregated: dict[tuple[str, str], dict[str, Any]] = {}
+    for key, items in grouped.items():
+        ordered = sorted(
+            items,
+            key=lambda item: (
+                _observed_datetime(item.get("observed_at"))
+                or datetime.min.replace(tzinfo=timezone.utc),
+                str(item.get("execution_item_id") or ""),
+            ),
+        )
+        representative = dict(ordered[-1])
+        representative["authoritative_for_deletion"] = bool(ordered) and all(
+            item.get("authoritative_for_deletion") is True for item in ordered
+        )
+        representative["execution_item_ids"] = [
+            str(item.get("execution_item_id") or "") for item in ordered
+        ]
+        representative["sample_count"] = len(ordered)
+        aggregated[key] = representative
+    return aggregated
 
 
 def _entity_dimensions(
@@ -582,6 +621,10 @@ def detect_changes_from_params(params: dict[str, Any]) -> dict[str, Any]:
             kwargs["device_ids"] = device_ids
         if "missing_confirmations" in params:
             kwargs["missing_confirmations"] = int(params["missing_confirmations"])
+        if "analysis_revision" in params:
+            kwargs["analysis_revision"] = str(
+                params.get("analysis_revision") or "original"
+            )
         return detect_observation_changes_against_history(
             current_run_id=str(params["current_run_id"]),
             previous_run_id=(
@@ -672,9 +715,41 @@ def detect_observation_changes_against_history(
     device_ids: list[str] | None = None,
     persist: bool = True,
     missing_confirmations: int = 2,
+    analysis_revision: str = "original",
 ) -> dict[str, Any]:
     patrol_repository = PatrolRepository()
-    frozen_policies = ChangePolicyRepository().list_versions(status="active", limit=1000)
+    if device_ids:
+        input_observations = StateRepository().list_run_observations(
+            current_run_id, device_ids=device_ids
+        )
+    else:
+        input_observations = StateRepository().list_run_observations(current_run_id)
+    input_revision_digest = hashlib.sha256(
+        json.dumps(
+            [
+            [
+                item.get("id"),
+                item.get("snapshot_id"),
+                item.get("observed_at"),
+            ]
+            for item in sorted(input_observations, key=lambda row: str(row.get("id") or ""))
+            ],
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode()
+    ).hexdigest()
+    if not persist:
+        return _detect_observation_changes_against_history_impl(
+            current_run_id=current_run_id,
+            previous_run_id=previous_run_id,
+            device_ids=device_ids,
+            persist=False,
+            missing_confirmations=missing_confirmations,
+            current_observations=input_observations,
+            analysis_revision=analysis_revision,
+        )
+    frozen_policies = ChangePolicyRepository().list_active_policies()
     frozen_policies = json.loads(json.dumps(frozen_policies, default=str))
     scope = {
         "device_ids": sorted({str(item) for item in device_ids or []}),
@@ -682,6 +757,8 @@ def detect_observation_changes_against_history(
         "previous_run_id": previous_run_id,
         "missing_confirmations": max(1, int(missing_confirmations)),
         "persist": bool(persist),
+        "input_revision_digest": input_revision_digest,
+        "analysis_revision": analysis_revision,
     }
     attempt = patrol_repository.begin_analysis_attempt(
         run_id=current_run_id,
@@ -690,16 +767,44 @@ def detect_observation_changes_against_history(
         rule_bundle={"change_policies": frozen_policies},
     )
     if attempt["reused"]:
-        return dict(attempt["result"] or {})
-    try:
-        patrol_repository.update_analysis_status(
-            current_run_id,
-            analysis_status="detecting",
-            baseline_eligible=False,
-            metadata={"change_policy_bundle_digest": attempt["rule_bundle_digest"]},
+        persisted = ChangeEventRepository().list_changes(run_id=current_run_id)
+        persisted = [
+            item
+            for item in persisted
+            if str(item.get("analysis_revision") or "original") == analysis_revision
+            and str(item.get("rule_bundle_digest") or "")
+            == str(attempt["rule_bundle_digest"] or "")
+        ]
+        if device_ids:
+            allowed = {str(item) for item in device_ids}
+            persisted = [item for item in persisted if str(item.get("device_id")) in allowed]
+        return {
+            **dict(attempt["result"] or {}),
+            "changes": persisted,
+            "change_count": len(persisted),
+            "reused_analysis_attempt": True,
+        }
+    if attempt["in_progress"]:
+        raise AnalysisAttemptInProgressError(
+            f"change detection already running for {current_run_id}"
         )
-    except ValueError:
-        pass
+    def heartbeat() -> None:
+        patrol_repository.touch_analysis_attempt(
+            str(attempt["attempt_id"]),
+            attempt_number=int(attempt["attempt_number"]),
+            owner_token=str(attempt["owner_token"]),
+        )
+    updates_run_status = not bool(device_ids)
+    if updates_run_status:
+        try:
+            patrol_repository.update_analysis_status(
+                current_run_id,
+                analysis_status="detecting",
+                baseline_eligible=False,
+                metadata={"change_policy_bundle_digest": attempt["rule_bundle_digest"]},
+            )
+        except ValueError:
+            pass
     try:
         result = _detect_observation_changes_against_history_impl(
             current_run_id=current_run_id,
@@ -708,26 +813,41 @@ def detect_observation_changes_against_history(
             persist=persist,
             missing_confirmations=missing_confirmations,
             policy_bundle=list(attempt["rule_bundle"].get("change_policies") or []),
+            current_observations=input_observations,
+            heartbeat=heartbeat,
+            analysis_revision=analysis_revision,
+            rule_bundle_digest=str(attempt["rule_bundle_digest"]),
         )
         patrol_repository.complete_analysis_attempt(
             str(attempt["attempt_id"]),
+            attempt_number=int(attempt["attempt_number"]),
+            owner_token=str(attempt["owner_token"]),
             result=result,
         )
         return result
     except Exception as exc:
-        patrol_repository.fail_analysis_attempt(str(attempt["attempt_id"]), error=str(exc))
         try:
-            patrol_repository.update_analysis_status(
-                current_run_id,
-                analysis_status="failed",
-                baseline_eligible=False,
-                metadata={
-                    "analysis_failure_stage": "change_detection",
-                    "analysis_failure": str(exc),
-                },
+            patrol_repository.fail_analysis_attempt(
+                str(attempt["attempt_id"]),
+                attempt_number=int(attempt["attempt_number"]),
+                owner_token=str(attempt["owner_token"]),
+                error=str(exc),
             )
-        except ValueError:
-            pass
+        except AnalysisAttemptFencedError:
+            raise
+        if updates_run_status:
+            try:
+                patrol_repository.update_analysis_status(
+                    current_run_id,
+                    analysis_status="failed",
+                    baseline_eligible=False,
+                    metadata={
+                        "analysis_failure_stage": "change_detection",
+                        "analysis_failure": str(exc),
+                    },
+                )
+            except ValueError:
+                pass
         raise
 
 
@@ -739,6 +859,10 @@ def _detect_observation_changes_against_history_impl(
     persist: bool = True,
     missing_confirmations: int = 2,
     policy_bundle: list[dict[str, Any]] | None = None,
+    current_observations: list[dict[str, Any]] | None = None,
+    heartbeat: Any | None = None,
+    analysis_revision: str = "original",
+    rule_bundle_digest: str | None = None,
 ) -> dict[str, Any]:
     repository = StateRepository()
     patrol_repository = PatrolRepository()
@@ -772,22 +896,17 @@ def _detect_observation_changes_against_history_impl(
     compared_observations = 0
     baseline_observations = 0
     detected_at = _now()
-    if device_ids:
-        current_observations = repository.list_run_observations(
-            current_run_id,
-            device_ids=device_ids,
-        )
-    else:
-        current_observations = repository.list_run_observations(current_run_id)
+    if current_observations is None:
+        if device_ids:
+            current_observations = repository.list_run_observations(
+                current_run_id,
+                device_ids=device_ids,
+            )
+        else:
+            current_observations = repository.list_run_observations(current_run_id)
     current_by_key = {_state_key(item): item for item in current_observations}
     collection_results = patrol_repository.list_collection_results(current_run_id)
-    current_collection_results = {
-        (
-            str(item.get("device_id") or ""),
-            canonicalize_command(str(item.get("canonical_command") or "")),
-        ): item
-        for item in collection_results
-    }
+    current_collection_results = _aggregate_collection_results(collection_results)
     authoritative_collections = {
         key
         for key, item in current_collection_results.items()
@@ -821,7 +940,9 @@ def _detect_observation_changes_against_history_impl(
     prior_collections = {_collection_key(item) for item in prior_observations}
     for prior in prior_observations:
         prior_by_key.setdefault(_state_key(prior), prior)
-    for current in current_observations:
+    for index, current in enumerate(current_observations):
+        if heartbeat is not None and index and index % 500 == 0:
+            heartbeat()
         previous = prior_by_key.get(_state_key(current))
         if previous:
             previous_at = _observed_datetime(previous.get("observed_at"))
@@ -911,7 +1032,9 @@ def _detect_observation_changes_against_history_impl(
                     policy_result=policy_result,
                 )
             )
-    for key, previous in prior_by_key.items():
+    for index, (key, previous) in enumerate(prior_by_key.items()):
+        if heartbeat is not None and index and index % 500 == 0:
+            heartbeat()
         if key in current_by_key:
             continue
         collection_identity = _collection_identity(previous)
@@ -969,6 +1092,17 @@ def _detect_observation_changes_against_history_impl(
             )
         )
 
+    changes = [
+        replace(
+            change,
+            analysis_revision=analysis_revision,
+            rule_bundle_digest=rule_bundle_digest,
+        )
+        for change in changes
+    ]
+    for decision in decisions:
+        decision["analysis_revision"] = analysis_revision
+        decision["rule_bundle_digest"] = rule_bundle_digest
     persisted_change_count = (
         save_changes(
             changes,

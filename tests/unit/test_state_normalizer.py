@@ -16,6 +16,48 @@ from src.core.state.normalizer import (
 from src.core.state.repository import StateRepository
 
 
+class _AnalysisPatrolRepository:
+    def begin_analysis_attempt(self, *, rule_bundle, **_kwargs):
+        return {
+            "reused": False,
+            "in_progress": False,
+            "attempt_id": "analysis-attempt-1",
+            "attempt_number": 1,
+            "owner_token": "owner-1",
+            "rule_bundle": rule_bundle,
+            "rule_bundle_digest": "bundle-digest-1",
+        }
+
+    def touch_analysis_attempt(self, *_args, **_kwargs):
+        return None
+
+    def complete_analysis_attempt(self, *_args, **_kwargs):
+        return None
+
+    def fail_analysis_attempt(self, *_args, **_kwargs):
+        return None
+
+    def update_analysis_status(self, *_args, **_kwargs):
+        return None
+
+    def get_run(self, _run_id):
+        return {"run_purpose": "scheduled_patrol"}
+
+    def list_collection_results(self, _run_id):
+        return []
+
+
+def _install_analysis_runtime(monkeypatch):
+    monkeypatch.setattr(
+        "src.core.patrol.repository.PatrolRepository",
+        _AnalysisPatrolRepository,
+    )
+    monkeypatch.setattr(
+        "src.core.patrol.change_detector.PatrolRepository",
+        _AnalysisPatrolRepository,
+    )
+
+
 def _state_observation(observed_at: str, value: str = "up") -> StateObservation:
     return StateObservation(
         observation_id=f"obs-{observed_at}",
@@ -401,6 +443,7 @@ def test_normalize_snapshot_rejects_validation_current_state(monkeypatch):
 
 
 def test_normalize_run_can_limit_to_selected_devices(monkeypatch):
+    _install_analysis_runtime(monkeypatch)
     calls = {}
 
     class FakeRepository:
@@ -448,6 +491,7 @@ def test_normalize_run_can_limit_to_selected_devices(monkeypatch):
 
 
 def test_observation_change_detector_uses_observation_ids(monkeypatch):
+    _install_analysis_runtime(monkeypatch)
     class FakeRepository:
         def list_run_observations(self, run_id):
             return [
@@ -589,6 +633,7 @@ def test_observation_change_detector_uses_observation_ids(monkeypatch):
 
 
 def test_observation_change_detector_accepts_explicit_previous_run(monkeypatch):
+    _install_analysis_runtime(monkeypatch)
     calls = {}
 
     class FakeRepository:
@@ -654,6 +699,7 @@ def test_observation_change_detector_accepts_explicit_previous_run(monkeypatch):
 
 
 def test_observation_change_detector_uses_active_change_policy(monkeypatch):
+    _install_analysis_runtime(monkeypatch)
     saved = {}
 
     class FakePolicyRepository:
@@ -671,6 +717,14 @@ def test_observation_change_detector_uses_active_change_policy(monkeypatch):
                     "recovery_threshold": 90,
                 },
             }
+
+        def list_active_policies(self):
+            return [
+                {
+                    **self.get_active_policy("device.cpu.utilization"),
+                    "observation_type": "device.cpu.utilization",
+                }
+            ]
 
     class FakeRepository:
         def list_run_observations(self, run_id):
@@ -733,6 +787,7 @@ def test_observation_change_detector_uses_active_change_policy(monkeypatch):
 
 
 def test_observation_change_detector_emits_threshold_crossing_with_policy(monkeypatch):
+    _install_analysis_runtime(monkeypatch)
     class FakePolicyRepository:
         def get_active_policy(self, observation_type):
             return {
@@ -747,6 +802,14 @@ def test_observation_change_detector_emits_threshold_crossing_with_policy(monkey
                     "recovery_threshold": 90,
                 },
             }
+
+        def list_active_policies(self):
+            return [
+                {
+                    **self.get_active_policy("device.cpu.utilization"),
+                    "observation_type": "device.cpu.utilization",
+                }
+            ]
 
     class FakeRepository:
         def list_run_observations(self, run_id):
@@ -809,6 +872,7 @@ def test_observation_change_detector_emits_threshold_crossing_with_policy(monkey
 
 
 def test_observation_change_detector_filters_selected_devices(monkeypatch):
+    _install_analysis_runtime(monkeypatch)
     calls = {}
 
     class FakeRepository:

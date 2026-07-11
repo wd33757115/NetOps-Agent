@@ -3,6 +3,8 @@
 
 """EventBus 与 Consumer 单元测试。"""
 
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event, Lock
 from unittest.mock import patch
 
 from src.core.events.bus import EventBus
@@ -20,6 +22,7 @@ class FakeRedis:
         self._id_counter = 0
         self.pending: dict[tuple[str, str], dict[str, tuple[str, dict]]] = {}
         self.acked: list[tuple[str, str, str]] = []
+        self._lock = Lock()
 
     def xadd(self, stream, fields, maxlen=None, approximate=True):
         self._id_counter += 1
@@ -79,8 +82,39 @@ class FakeRedis:
             messages.append((msg_id, fields))
         return ("0-0", messages, [])
 
-    def set(self, key, value, ex=None):
-        self.kv[key] = value
+    def set(self, key, value, ex=None, nx=False, px=None):
+        del ex, px
+        with self._lock:
+            if nx and key in self.kv:
+                return False
+            self.kv[key] = value
+            return True
+
+    def eval(self, script, numkeys, *args):
+        keys = args[:numkeys]
+        argv = args[numkeys:]
+        with self._lock:
+            if numkeys == 2:
+                processing_key, done_key = keys
+                owner_token, _ttl = argv
+                if "'NX'" in script:
+                    if done_key in self.kv:
+                        return 2
+                    if processing_key in self.kv:
+                        return 0
+                    self.kv[processing_key] = owner_token
+                    return 1
+                if self.kv.get(processing_key) != owner_token:
+                    return 0
+                self.kv[done_key] = "1"
+                self.kv.pop(processing_key, None)
+                return 1
+            processing_key = keys[0]
+            owner_token = argv[0]
+            if self.kv.get(processing_key) == owner_token:
+                self.kv.pop(processing_key, None)
+                return 1
+            return 0
 
     def exists(self, key):
         return 1 if key in self.kv else 0
@@ -245,3 +279,53 @@ def test_consumer_keeps_original_pending_when_dlq_publish_fails():
 
     assert len(fake.pending[(STREAM_SKILL_EXECUTION, RecordingConsumer.group)]) == 1
     assert fake.acked == []
+
+
+def test_concurrent_duplicate_messages_have_one_processing_owner():
+    fake = FakeRedis()
+    event = DomainEvent(
+        event_id="aggregate-concurrent",
+        event_type="network.interface_down",
+        payload={"occurrence_id": "occ-concurrent"},
+    )
+    first_started = Event()
+    release_first = Event()
+    first = RecordingConsumer()
+    second = RecordingConsumer()
+
+    def slow_handle(domain_event):
+        first.handled.append(domain_event.idempotency_key)
+        first_started.set()
+        release_first.wait(timeout=2)
+
+    first._handle = slow_handle
+    messages = [
+        ("1-0", event.to_stream_fields()),
+        ("2-0", event.to_stream_fields()),
+    ]
+    with (
+        patch("src.core.events.consumers.base.get_redis", return_value=fake),
+        patch("src.core.events.idempotency.get_redis", return_value=fake),
+        patch("src.core.events.consumers.base.get_settings", return_value=_consumer_settings()),
+    ):
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            first_future = executor.submit(
+                first.delegate._process_messages,
+                fake,
+                STREAM_SKILL_EXECUTION,
+                [messages[0]],
+            )
+            assert first_started.wait(timeout=1)
+            second_future = executor.submit(
+                second.delegate._process_messages,
+                fake,
+                STREAM_SKILL_EXECUTION,
+                [messages[1]],
+            )
+            assert second_future.result(timeout=1) == 0
+            release_first.set()
+            assert first_future.result(timeout=1) == 1
+
+    assert first.handled == ["occ-concurrent"]
+    assert second.handled == []
+    assert len(fake.acked) == 1
