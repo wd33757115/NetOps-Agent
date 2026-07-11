@@ -161,6 +161,11 @@ class RuleGenerationJobApprovalRequest(BaseModel):
     reason: str | None = None
 
 
+class EventRuleForceActivationRequest(BaseModel):
+    actor: str
+    reason: str
+
+
 class RuleAssetGenerationContextRequest(BaseModel):
     context_overrides: dict[str, Any] | None = None
     actor: str | None = None
@@ -986,6 +991,21 @@ def upsert_event_rule(payload: EventRuleUpsertRequest):
 def activate_event_rule(version_id: str):
     try:
         return EventRuleRepository().activate_rule_version(version_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/event-rules/{version_id}/force-activate")
+def force_activate_event_rule(
+    version_id: str,
+    payload: EventRuleForceActivationRequest,
+):
+    try:
+        return EventRuleRepository().force_activate_rule_version(
+            version_id,
+            actor=payload.actor,
+            reason=payload.reason,
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

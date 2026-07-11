@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 from collections import Counter
 from dataclasses import asdict, dataclass
@@ -37,21 +39,36 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _event_correlation_key(
+def _event_correlation_identity(
     *,
     device_id: str | None,
     entity_type: str,
     entity_key: str,
     change: dict[str, Any],
     correlation_keys: tuple[str, ...],
-) -> str:
+) -> tuple[str, dict[str, Any], str]:
+    dimensions = dict(change.get("dimensions") or {})
     values = {
         "device_id": device_id,
         "entity_type": entity_type,
         "entity_key": entity_key,
         **change,
+        **dimensions,
     }
-    return "|".join(str(values.get(key) or "") for key in correlation_keys)
+    resolved: dict[str, Any] = {}
+    for key in correlation_keys:
+        value = values.get(key)
+        if value is None or value == "":
+            value = {"missing": True, "entity_key": entity_key}
+        resolved[str(key)] = value
+    canonical = json.dumps(
+        [[key, resolved[str(key)]] for key in correlation_keys],
+        ensure_ascii=False,
+        separators=(",", ":"),
+        default=str,
+    )
+    legacy = "|".join(str(values.get(key) or "") for key in correlation_keys)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest(), resolved, legacy
 
 
 def build_events_from_changes(changes: list[dict[str, Any]]) -> list[NetworkEvent]:
@@ -59,7 +76,7 @@ def build_events_from_changes(changes: list[dict[str, Any]]) -> list[NetworkEven
     occurred_at = _now()
     rules = load_event_rules()
     for change in changes:
-        matched_rules = match_event_rules(change, rules=rules)
+        matched_rules = match_event_rules(change, rules=rules, preordered=True)
         if not matched_rules:
             continue
         entity_type = str(change.get("entity_type") or "unknown")
@@ -67,44 +84,46 @@ def build_events_from_changes(changes: list[dict[str, Any]]) -> list[NetworkEven
         device_id = change.get("device_id")
 
         for rule in matched_rules:
-            correlation_key = _event_correlation_key(
-                device_id=device_id,
-                entity_type=entity_type,
-                entity_key=entity_key,
-                change=change,
-                correlation_keys=rule.correlation_keys,
+            correlation_key, correlation_dimensions, legacy_correlation_key = (
+                _event_correlation_identity(
+                    device_id=device_id,
+                    entity_type=entity_type,
+                    entity_key=entity_key,
+                    change=change,
+                    correlation_keys=rule.correlation_keys,
+                )
             )
             events.append(
                 NetworkEvent(
-                event_id=str(uuid.uuid4()),
-                event_type=rule.event_type,
-                severity=rule.severity,
-                device_id=device_id,
-                entity_type=entity_type,
-                entity_key=entity_key,
-                source_change_id=change.get("change_id"),
-                run_id=change.get("run_id"),
-                occurred_at=(
-                    change.get("observed_at")
-                    or change.get("detected_at")
-                    or occurred_at
-                ),
-                status="open",
-                payload={
-                    "change": change,
-                    "rule": {
-                        "rule_id": rule.rule_id,
-                        "version": rule.version,
-                        "priority": rule.priority,
-                        "exclusive": rule.exclusive,
-                        "event_class": rule.event_class,
-                        "recovery": dict(rule.recovery or {}),
-                        "correlation_keys": list(rule.correlation_keys),
+                    event_id=str(uuid.uuid4()),
+                    event_type=rule.event_type,
+                    severity=rule.severity,
+                    device_id=device_id,
+                    entity_type=entity_type,
+                    entity_key=entity_key,
+                    source_change_id=change.get("change_id"),
+                    run_id=change.get("run_id"),
+                    occurred_at=(
+                        change.get("observed_at") or change.get("detected_at") or occurred_at
+                    ),
+                    status="open",
+                    payload={
+                        "change": change,
+                        "rule": {
+                            "rule_id": rule.rule_id,
+                            "version": rule.version,
+                            "priority": rule.priority,
+                            "exclusive": rule.exclusive,
+                            "event_class": rule.event_class,
+                            "recovery": dict(rule.recovery or {}),
+                            "correlation_keys": list(rule.correlation_keys),
+                        },
+                        "correlation_key": correlation_key,
+                        "correlation_dimensions": correlation_dimensions,
+                        "legacy_correlation_key": legacy_correlation_key,
+                        "dedupe_key": f"{rule.event_type}|{correlation_key}",
                     },
-                    "correlation_key": correlation_key,
-                    "dedupe_key": f"{rule.event_type}|{correlation_key}",
-                },
-            )
+                )
             )
     return events
 
@@ -124,12 +143,11 @@ def summarize_no_event_changes(
     by_entity_type = Counter(
         str(change.get("entity_type") or "unknown") for change in no_event_changes
     )
-    by_command = Counter(
-        str(change.get("command") or "unknown") for change in no_event_changes
-    )
+    by_command = Counter(str(change.get("command") or "unknown") for change in no_event_changes)
     by_change_type = Counter(
         str(change.get("change_type") or "unknown") for change in no_event_changes
     )
+
     def reason(change: dict[str, Any]) -> str:
         if change.get("change_type") == "missing":
             return "presence_confirmation_pending"
@@ -191,7 +209,7 @@ def publish_events(events: list[NetworkEvent]) -> list[str]:
     return message_ids
 
 
-def publish_event_outbox(*, limit: int = 100) -> list[str]:
+def publish_event_outbox(*, limit: int = 10) -> list[str]:
     from src.core.events.bus import EventBus
     from src.core.events.domain_event import DomainEvent
     from src.core.events.streams import STREAM_NETWORK_EVENT
@@ -201,6 +219,8 @@ def publish_event_outbox(*, limit: int = 100) -> list[str]:
     claim_token, rows = repository.claim_event_outbox(limit=limit)
     for row in rows:
         try:
+            if not repository.renew_event_outbox_claim(str(row["id"]), claim_token=claim_token):
+                continue
             payload = dict(row.get("payload_json") or {})
             message_id = EventBus.publish(
                 STREAM_NETWORK_EVENT,
@@ -229,9 +249,7 @@ def publish_event_outbox(*, limit: int = 100) -> list[str]:
                     claim_token=claim_token,
                 )
         except Exception as exc:
-            repository.mark_event_outbox_failed(
-                str(row["id"]), str(exc), claim_token=claim_token
-            )
+            repository.mark_event_outbox_failed(str(row["id"]), str(exc), claim_token=claim_token)
     return message_ids
 
 
@@ -284,9 +302,7 @@ def build_events_from_params(params: dict[str, Any]) -> dict[str, Any]:
         raise
     persist = params.get("persist", True)
     persisted_event_count = save_events(events) if persist else 0
-    event_change_ids = {
-        event.source_change_id for event in events if event.source_change_id
-    }
+    event_change_ids = {event.source_change_id for event in events if event.source_change_id}
     event_change_ids = {str(change_id) for change_id in event_change_ids}
     no_event_count = 0
     if persist:

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import csv
 import base64
 import binascii
+import csv
 import io
 import json
 import uuid
@@ -37,15 +37,16 @@ from src.core.rule_control import RuntimeRuleAssetResolver
 from src.gateway.audit_service import write_audit_log
 from src.infrastructure.db.models import (
     AgentModuleControlRecord,
-    CommandSnapshot,
-    CollectionProfileBindingRecord,
     CollectionExecutionPlanRecord,
+    CollectionProfileBindingRecord,
     CommandProfileVersionRecord,
+    CommandSnapshot,
     CurrentStateRecord,
     EventRuleVersionRecord,
     NetworkChangeRecord,
     NetworkDevice,
     NetworkDeviceDynamicGroup,
+    NetworkEventOccurrenceRecord,
     NetworkEventRecord,
     ParserDeviceProfile,
     ParserIdentitySignature,
@@ -1785,7 +1786,10 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                     db.query(CommandSnapshot)
                     .filter(
                         CommandSnapshot.run_id == snapshot_run_id,
-                        CommandSnapshot.device_id == device_id,
+                        or_(
+                            CommandSnapshot.inventory_device_id == device_id,
+                            CommandSnapshot.device_id == device_id,
+                        ),
                     )
                     .order_by(CommandSnapshot.observed_at.asc(), CommandSnapshot.canonical_command.asc())
                     .all()
@@ -1811,12 +1815,19 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                     NetworkChangeRecord.run_id == snapshot_run_id,
                     NetworkChangeRecord.device_id == device_id,
                 )
-                event_filter = (
-                    NetworkEventRecord.run_id == snapshot_run_id,
-                    NetworkEventRecord.device_id == device_id,
-                )
                 change_count = db.query(NetworkChangeRecord.id).filter(*change_filter).count()
-                event_count = db.query(NetworkEventRecord.id).filter(*event_filter).count()
+                event_query = (
+                    db.query(NetworkEventRecord)
+                    .join(
+                        NetworkEventOccurrenceRecord,
+                        NetworkEventOccurrenceRecord.event_id == NetworkEventRecord.id,
+                    )
+                    .filter(
+                        NetworkEventOccurrenceRecord.run_id == snapshot_run_id,
+                        NetworkEventRecord.device_id == device_id,
+                    )
+                )
+                event_count = event_query.distinct().count()
                 changes = (
                     db.query(NetworkChangeRecord)
                     .filter(*change_filter)
@@ -1825,8 +1836,8 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                     .all()
                 )
                 events = (
-                    db.query(NetworkEventRecord)
-                    .filter(*event_filter)
+                    event_query
+                    .distinct()
                     .order_by(NetworkEventRecord.occurred_at.desc())
                     .limit(20)
                     .all()
@@ -1909,6 +1920,8 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                             "entity_key": row.entity_key,
                             "status": row.status,
                             "occurred_at": _iso(row.occurred_at),
+                            "last_seen_at": _iso(row.last_seen_at),
+                            "occurrence_count": row.occurrence_count,
                         }
                         for row in events[:10]
                     ],

@@ -14,6 +14,7 @@ from src.common.config import get_settings
 def _reset_redis_cache():
     token_store._redis_client = None
     token_store._redis_checked = False
+    token_store._redis_next_retry_at = 0.0
 
 
 def test_is_auth_token_revoked_blacklisted_jti():
@@ -54,7 +55,9 @@ def test_blacklist_token_writes_jti():
     with patch.object(token_store, "get_redis", return_value=mock_client):
         assert token_store.blacklist_token(token, "refresh") is True
 
-    mock_client.setex.assert_any_call("jwt:blacklist:refresh-jti-1", mock_client.setex.call_args_list[0][0][1], "refresh")
+    mock_client.setex.assert_any_call(
+        "jwt:blacklist:refresh-jti-1", mock_client.setex.call_args_list[0][0][1], "refresh"
+    )
     mock_client.setex.assert_any_call("jwt:session:revoked:sess-99", 7 * 86400, "1")
 
 
@@ -92,3 +95,21 @@ def test_degraded_when_redis_unavailable():
         blocked, retry = token_store.check_login_blocked("1.1.1.1", "u")
         assert blocked is False
         assert retry == 0
+
+
+def test_get_redis_retries_after_initial_connection_failure():
+    _reset_redis_cache()
+    unavailable = MagicMock()
+    unavailable.ping.side_effect = ConnectionError("redis starting")
+    available = MagicMock()
+
+    with (
+        patch("redis.Redis", side_effect=[unavailable, available]) as redis_factory,
+        patch.object(token_store.time, "monotonic", side_effect=[100.0, 102.0, 106.0]),
+    ):
+        assert token_store.get_redis() is None
+        assert token_store.get_redis() is None
+        assert token_store.get_redis() is available
+
+    assert redis_factory.call_count == 2
+    available.ping.assert_called_once_with()

@@ -33,6 +33,7 @@ class NetworkChange:
     old_value: Any
     new_value: Any
     change_type: str
+    dimensions: dict[str, Any] | None = None
     previous_snapshot_id: str | None = None
     current_snapshot_id: str | None = None
     previous_observation_id: str | None = None
@@ -208,6 +209,35 @@ def _collection_identity(observation: dict[str, Any]) -> tuple[str, str]:
     )
 
 
+def _entity_dimensions(
+    entity_key: str,
+    primary_keys: list[str] | tuple[str, ...],
+) -> dict[str, Any]:
+    if not primary_keys or entity_key == "__singleton__":
+        return {}
+    try:
+        values = json.loads(entity_key)
+    except (TypeError, ValueError):
+        values = []
+    if not isinstance(values, list):
+        values = [values]
+    return {
+        str(key): values[index] if index < len(values) else None
+        for index, key in enumerate(primary_keys)
+    }
+
+
+def _observation_dimensions(observation: dict[str, Any]) -> dict[str, Any]:
+    metadata = dict(observation.get("metadata_json") or {})
+    explicit = metadata.get("dimensions")
+    if isinstance(explicit, dict):
+        return dict(explicit)
+    return _entity_dimensions(
+        str(observation.get("entity_key") or ""),
+        tuple(str(key) for key in metadata.get("primary_keys") or ()),
+    )
+
+
 def _observation_to_change(
     *,
     previous: dict[str, Any] | None,
@@ -228,6 +258,7 @@ def _observation_to_change(
         command=basis.get("canonical_command"),
         entity_type=str(basis.get("entity_type") or "record"),
         entity_key=str(basis.get("entity_key") or ""),
+        dimensions=_observation_dimensions(basis),
         field=str(basis.get("field_name") or ""),
         old_value=old,
         new_value=new,
@@ -294,6 +325,7 @@ def detect_changes_between_values(
                 command=command,
                 entity_type=entity_type,
                 entity_key=key,
+                dimensions=_entity_dimensions(key, primary_keys),
                 field="__record__",
                 old_value=prev_map[key],
                 new_value=None,
@@ -313,6 +345,7 @@ def detect_changes_between_values(
                 command=command,
                 entity_type=entity_type,
                 entity_key=key,
+                dimensions=_entity_dimensions(key, primary_keys),
                 field="__record__",
                 old_value=None,
                 new_value=curr_map[key],
@@ -341,6 +374,7 @@ def detect_changes_between_values(
                     command=command,
                     entity_type=entity_type,
                     entity_key=key,
+                    dimensions=_entity_dimensions(key, primary_keys),
                     field=str(field),
                     old_value=old,
                     new_value=new,
@@ -371,6 +405,7 @@ def detect_changes_between_snapshots(
                 command=current.command_canonical,
                 entity_type="raw_command_output",
                 entity_key=current.command_canonical,
+                dimensions={"command": current.command_canonical},
                 field="raw_text_hash",
                 old_value=previous.raw_text_hash,
                 new_value=current.raw_text_hash,
@@ -667,7 +702,7 @@ def detect_observation_changes_against_history(
             "run_purpose": "baseline",
             "changes": [],
         }
-    if persist and run_context:
+    if persist and run_context and not device_ids:
         persisted = ChangeEventRepository().list_changes(run_id=current_run_id)
         persisted = [item for item in persisted if item.get("source") == "state_observation"]
         if persisted:

@@ -8,6 +8,7 @@ capture path lives here so future collectors can share a consistent boundary.
 from __future__ import annotations
 
 import json
+import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -40,6 +41,15 @@ def load_command_collection_manifest(output_file: str | Path) -> dict[str, Any]:
         return {"status": "unknown", "commands": []}
 
 
+def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
+
+
 @dataclass(frozen=True, slots=True)
 class CLICollectionPlan:
     device: dict[str, Any]
@@ -67,9 +77,7 @@ def _safe_float(value: Any, default: float) -> float:
 def device_type_for(device: dict[str, Any]) -> str:
     attributes = dict(device.get("attributes") or {})
     explicit = str(
-        attributes.get("netmiko_device_type")
-        or attributes.get("device_type")
-        or ""
+        attributes.get("netmiko_device_type") or attributes.get("device_type") or ""
     ).strip()
     if explicit:
         return explicit
@@ -110,9 +118,7 @@ def connect_cli_device(
     from netmiko import ConnectHandler
 
     resolver = credential_resolver or CredentialResolver()
-    password = device.get("password") or resolver.resolve_password(
-        device.get("credential_ref")
-    )
+    password = device.get("password") or resolver.resolve_password(device.get("credential_ref"))
     if not password:
         raise ValueError(
             "device credential is unavailable; configure credential_ref as env:VARIABLE"
@@ -215,9 +221,11 @@ class CLICommandCollector(IngestionAdapter):
         *,
         output_root: Path = OUTPUT_ROOT,
         connector: Callable[[dict[str, Any]], Any] = connect_cli_device,
+        progress_callback: Callable[..., Any] | None = None,
     ) -> None:
         self.output_root = output_root
         self.connector = connector
+        self.progress_callback = progress_callback
 
     def collect(self, plan: CLICollectionPlan) -> IngestionResult:
         effective_device = device_with_plan_context(plan.device, plan.execution_plan)
@@ -257,6 +265,20 @@ class CLICommandCollector(IngestionAdapter):
         commands = execution_plan.command_texts()
         command_results: list[dict[str, Any]] = []
         output_file.write_text("", encoding="utf-8")
+        started_at = datetime.now(timezone.utc).isoformat()
+
+        def write_manifest(status: str, *, completed: bool = False) -> dict[str, Any]:
+            payload = {
+                "status": status,
+                "device_id": execution_plan.device_id,
+                "started_at": started_at,
+                "completed_at": (datetime.now(timezone.utc).isoformat() if completed else None),
+                "commands": list(command_results),
+            }
+            _atomic_write_json(command_collection_manifest_path(output_file), payload)
+            return payload
+
+        write_manifest("running")
         try:
             with output_file.open("a", encoding="utf-8", newline="\n") as report:
                 for index, command in enumerate(commands):
@@ -283,10 +305,9 @@ class CLICommandCollector(IngestionAdapter):
                             for pending in commands[index + 1 :]
                         )
                         break
-                    report.write(
-                        f"Command: {command}\nOutput:\n{output}\n{'-' * 50}\n"
-                    )
+                    report.write(f"Command: {command}\nOutput:\n{output}\n{'-' * 50}\n")
                     report.flush()
+                    os.fsync(report.fileno())
                     command_results.append(
                         {
                             "command": command,
@@ -295,6 +316,14 @@ class CLICommandCollector(IngestionAdapter):
                             "observed_at": observed_at,
                         }
                     )
+                    manifest = write_manifest("running")
+                    if self.progress_callback is not None:
+                        self.progress_callback(
+                            output_file=output_file,
+                            manifest=manifest,
+                            device=device,
+                            execution_plan=execution_plan,
+                        )
         finally:
             try:
                 connection.disconnect()
@@ -308,20 +337,5 @@ class CLICommandCollector(IngestionAdapter):
                 if completed > 0
                 else "failed"
             )
-            command_collection_manifest_path(output_file).write_text(
-                json.dumps(
-                    {
-                        "status": status,
-                        "device_id": execution_plan.device_id,
-                        "started_at": command_results[0].get("observed_at")
-                        if command_results
-                        else None,
-                        "completed_at": datetime.now(timezone.utc).isoformat(),
-                        "commands": command_results,
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-                encoding="utf-8",
-            )
+            write_manifest(status, completed=True)
         return output_file

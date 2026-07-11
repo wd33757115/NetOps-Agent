@@ -18,7 +18,10 @@ from src.core.logging import get_logger
 from src.core.patrol.runner import (
     DevicePatrolRunner,
     DevicePatrolRunRequest,
-    persist_patrol_snapshots as _persist_patrol_snapshots,
+    PatrolPlatformError,
+)
+from src.core.patrol.runner import (
+    persist_patrol_snapshots as _persist_patrol_snapshots,  # noqa: F401
 )
 
 settings = get_settings()
@@ -59,7 +62,7 @@ def execute_config_backup_task(
     filter_params: dict[str, Any] | None = None,
     ticket_id: str | None = None,
     execution_plan: dict[str, Any] | None = None,
-    **kwargs
+    **kwargs,
 ):
     """执行配置备份任务"""
     execution_start = datetime.now()
@@ -112,7 +115,7 @@ def execute_device_patrol_task(
     mode: str = "production",
     execution_plan: dict[str, Any] | None = None,
     execution_plan_id: str | None = None,
-    **kwargs
+    **kwargs,
 ):
     """执行设备巡检任务"""
     execution_start = datetime.now()
@@ -136,6 +139,8 @@ def execute_device_patrol_task(
                 execution_plan=execution_plan,
                 execution_plan_id=execution_plan_id,
                 task_id=getattr(self.request, "id", None),
+                attempt_number=int(getattr(self.request, "retries", 0) or 0),
+                worker_id=getattr(self.request, "hostname", None),
             )
         )
         execution_time_ms = int((datetime.now() - execution_start).total_seconds() * 1000)
@@ -154,7 +159,7 @@ def execute_device_patrol_task(
 
         return result
 
-    except Exception as e:
+    except PatrolPlatformError as e:
         execution_time_ms = int((datetime.now() - execution_start).total_seconds() * 1000)
         log.error(
             "device_patrol_task_failed",
@@ -165,7 +170,19 @@ def execute_device_patrol_task(
             error=str(e),
             exc_info=e,
         )
-        raise e
+        countdown = min(60, 2 ** (int(getattr(self.request, "retries", 0)) + 1))
+        raise self.retry(exc=e, countdown=countdown)
+    except Exception as e:
+        execution_time_ms = int((datetime.now() - execution_start).total_seconds() * 1000)
+        log.error(
+            "device_patrol_task_failed_non_retryable",
+            ticket_id=ticket_id,
+            execution_plan_id=execution_plan_id,
+            duration_ms=execution_time_ms,
+            error=str(e),
+            exc_info=e,
+        )
+        raise
 
 
 @celery.task(bind=True, max_retries=1)
@@ -174,5 +191,8 @@ def archive_skill_executions_task(self, before_days: int | None = None):
     from src.core.skills.archive import archive_skill_executions
 
     result = archive_skill_executions(before_days=before_days)
-    log.info("archive_skill_executions_task_done", **{k: v for k, v in result.items() if k != "error"})
+    log.info(
+        "archive_skill_executions_task_done",
+        **{key: value for key, value in result.items() if key != "error"},
+    )
     return result

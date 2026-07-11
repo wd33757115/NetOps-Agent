@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from collections.abc import Iterator
@@ -9,7 +10,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from threading import Event, Thread
 
-from src.auth.token_store import get_redis
+from src.auth.token_store import get_redis, invalidate_redis_client
+
+logger = logging.getLogger(__name__)
 
 _ACQUIRE_SCRIPT = """
 local key = KEYS[1]
@@ -40,11 +43,17 @@ return 1
 """
 
 
-@dataclass(frozen=True)
+@dataclass
 class ConcurrencyLease:
     key: str
     token: str | None
     mode: str
+    lost: bool = False
+    last_error: str | None = None
+
+    @property
+    def effective_mode(self) -> str:
+        return "degraded_lease_lost" if self.lost else self.mode
 
 
 class DistributedPatrolSemaphore:
@@ -74,15 +83,21 @@ class DistributedPatrolSemaphore:
         while time.monotonic() < deadline:
             now_ms = int(time.time() * 1000)
             expires_ms = now_ms + self.lease_seconds * 1000
-            acquired = client.eval(
-                _ACQUIRE_SCRIPT,
-                1,
-                self.key,
-                now_ms,
-                expires_ms,
-                self.limit,
-                token,
-            )
+            try:
+                acquired = client.eval(
+                    _ACQUIRE_SCRIPT,
+                    1,
+                    self.key,
+                    now_ms,
+                    expires_ms,
+                    self.limit,
+                    token,
+                )
+            except Exception as exc:
+                invalidate_redis_client(exc)
+                return ConcurrencyLease(
+                    self.key, None, "degraded_local_fallback", last_error=str(exc)
+                )
             if int(acquired or 0) == 1:
                 return ConcurrencyLease(self.key, token, "distributed")
             time.sleep(0.1)
@@ -95,14 +110,19 @@ class DistributedPatrolSemaphore:
         if client is None:
             return False
         expires_ms = int(time.time() * 1000) + self.lease_seconds * 1000
-        renewed = client.eval(
-            _RENEW_SCRIPT,
-            1,
-            lease.key,
-            lease.token,
-            expires_ms,
-            self.lease_seconds,
-        )
+        try:
+            renewed = client.eval(
+                _RENEW_SCRIPT,
+                1,
+                lease.key,
+                lease.token,
+                expires_ms,
+                self.lease_seconds,
+            )
+        except Exception as exc:
+            invalidate_redis_client(exc)
+            lease.last_error = str(exc)
+            return False
         return int(renewed or 0) == 1
 
     @contextmanager
@@ -122,8 +142,15 @@ class DistributedPatrolSemaphore:
             while not stopped.wait(interval):
                 try:
                     if not self.renew(lease):
+                        lease.lost = True
+                        logger.error(
+                            "patrol distributed concurrency lease lost key=%s token=%s",
+                            lease.key,
+                            lease.token,
+                        )
                         return
                 except Exception:
+                    lease.lost = True
                     return
 
         thread = Thread(target=heartbeat, name="patrol-concurrency-lease", daemon=True)

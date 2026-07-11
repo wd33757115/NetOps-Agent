@@ -137,9 +137,7 @@ def _validate_plan_for_device(
         raise ValueError(f"execution plan mode mismatch: {plan.mode} != {mode}")
     device_id = str(device.get("device_id") or "")
     if plan.device_id and plan.device_id != device_id:
-        raise ValueError(
-            f"execution plan device mismatch: {plan.device_id} != {device_id}"
-        )
+        raise ValueError(f"execution plan device mismatch: {plan.device_id} != {device_id}")
     if not plan.commands:
         raise ValueError("execution plan has no commands")
 
@@ -218,9 +216,7 @@ class ConfigBackupTool:
                 action=ActionType.BACKUP,
                 message="No devices matched the requested filter.",
             )
-        results = await asyncio.gather(
-            *(self.backup_device(device) for device in devices)
-        )
+        results = await asyncio.gather(*(self.backup_device(device) for device in devices))
         return _task_result(ActionType.BACKUP, devices, results, started_at)
 
     async def backup_by_plan(self, execution_plan: ExecutionPlan) -> TaskResult:
@@ -265,9 +261,7 @@ class PatrolTool:
         )
 
     @staticmethod
-    def _production_coverage(
-        device: dict[str, Any], commands: list[str]
-    ) -> list[dict[str, Any]]:
+    def _production_coverage(device: dict[str, Any], commands: list[str]) -> list[dict[str, Any]]:
         vendor = str(device.get("vendor") or "").strip()
         model = str(device.get("model") or "").strip()
         resolver = DeviceIdentityResolver()
@@ -280,10 +274,7 @@ class PatrolTool:
             source="inventory",
         )
         runtime = ParserRuntime()
-        return [
-            runtime.check_coverage(identity=identity, command=command)
-            for command in commands
-        ]
+        return [runtime.check_coverage(identity=identity, command=command) for command in commands]
 
     async def patrol_device(
         self,
@@ -302,8 +293,7 @@ class PatrolTool:
                 blocking = [
                     item
                     for item in self._production_coverage(device, plan.command_texts())
-                    if item["policy_status"] == "eligible"
-                    and item["coverage_status"] != "ready"
+                    if item["policy_status"] == "eligible" and item["coverage_status"] != "ready"
                 ]
                 if blocking:
                     return {
@@ -328,9 +318,7 @@ class PatrolTool:
             collection_status = str(manifest.get("status") or "unknown")
             if collection_status == "unknown" and not command_results:
                 collection_status = "complete"
-            completed_commands = sum(
-                item.get("status") == "complete" for item in command_results
-            )
+            completed_commands = sum(item.get("status") == "complete" for item in command_results)
             _record_connection_health(
                 self.db_manager,
                 device,
@@ -368,9 +356,7 @@ class PatrolTool:
                 "success": False,
                 "error": str(exc),
                 "collection_status": "failed",
-                "execution_plan": (
-                    plan.to_metadata() if "plan" in locals() else None
-                ),
+                "execution_plan": (plan.to_metadata() if "plan" in locals() else None),
             }
 
     async def patrol_by_filter(
@@ -387,22 +373,47 @@ class PatrolTool:
                 action=ActionType.PATROL,
                 message="No devices matched the requested filter.",
             )
-        semaphore = asyncio.Semaphore(self.max_concurrency)
+        queue: asyncio.Queue[tuple[int, dict[str, Any]]] = asyncio.Queue()
+        for index, device in enumerate(devices):
+            queue.put_nowait((index, device))
+        indexed_results: list[dict[str, Any] | None] = [None] * len(devices)
 
-        async def bounded_patrol(device):
-            async with semaphore:
-                lease = await asyncio.to_thread(self.distributed_semaphore.acquire)
-                with self.distributed_semaphore.maintain(lease):
-                    result = await self.patrol_device(device, save_baseline, mode=mode)
-                    result["concurrency_mode"] = lease.mode
-                    return result
+        async def worker() -> None:
+            while True:
+                try:
+                    index, device = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    return
+                try:
+                    try:
+                        lease = await asyncio.to_thread(self.distributed_semaphore.acquire)
+                        with self.distributed_semaphore.maintain(lease):
+                            result = await self.patrol_device(device, save_baseline, mode=mode)
+                        result["concurrency_mode"] = lease.effective_mode
+                    except Exception as exc:
+                        result = {
+                            "inventory_device_id": device.get("device_id"),
+                            "device_name": device.get("device_name"),
+                            "ip": device.get("ip") or device.get("management_ip"),
+                            "success": False,
+                            "failure_code": (
+                                "concurrency_lease_timeout"
+                                if isinstance(exc, TimeoutError)
+                                else "device_task_failed"
+                            ),
+                            "error": str(exc),
+                            "collection_status": "failed",
+                        }
+                    await self._notify_result(result)
+                    indexed_results[index] = result
+                finally:
+                    queue.task_done()
 
-        tasks = [asyncio.create_task(bounded_patrol(device)) for device in devices]
-        results: list[dict[str, Any]] = []
-        for task in asyncio.as_completed(tasks):
-            result = await task
-            await self._notify_result(result)
-            results.append(result)
+        workers = [
+            asyncio.create_task(worker()) for _ in range(min(self.max_concurrency, len(devices)))
+        ]
+        await asyncio.gather(*workers)
+        results = [result for result in indexed_results if result is not None]
         return _task_result(ActionType.PATROL, devices, results, started_at)
 
     async def patrol_by_plan(
@@ -423,15 +434,31 @@ class PatrolTool:
                 action=ActionType.PATROL,
                 message=f"Execution plan device not found: {execution_plan.device_id}",
             )
-        lease = await asyncio.to_thread(self.distributed_semaphore.acquire)
-        with self.distributed_semaphore.maintain(lease):
-            result = await self.patrol_device(
-                device,
-                save_baseline,
-                mode=execution_plan.mode,
-                execution_plan=execution_plan,
-            )
-            result["concurrency_mode"] = lease.mode
+        try:
+            lease = await asyncio.to_thread(self.distributed_semaphore.acquire)
+            with self.distributed_semaphore.maintain(lease):
+                result = await self.patrol_device(
+                    device,
+                    save_baseline,
+                    mode=execution_plan.mode,
+                    execution_plan=execution_plan,
+                )
+            result["concurrency_mode"] = lease.effective_mode
+        except Exception as exc:
+            result = {
+                "inventory_device_id": device.get("device_id"),
+                "device_name": device.get("device_name"),
+                "ip": device.get("ip") or device.get("management_ip"),
+                "success": False,
+                "failure_code": (
+                    "concurrency_lease_timeout"
+                    if isinstance(exc, TimeoutError)
+                    else "device_task_failed"
+                ),
+                "error": str(exc),
+                "collection_status": "failed",
+                "execution_plan": execution_plan.to_metadata(),
+            }
         await self._notify_result(result)
         return _task_result(ActionType.PATROL, [device], [result], started_at)
 
@@ -472,9 +499,7 @@ def _task_result(
         failed_devices=len(devices) - success_count,
         message=f"{action.value} completed: {success_count}/{len(devices)}",
         details=results,
-        output_files=[
-            str(item["output_file"]) for item in results if item.get("output_file")
-        ],
+        output_files=[str(item["output_file"]) for item in results if item.get("output_file")],
         execution_time=(datetime.now() - started_at).total_seconds(),
         errors=[str(item["error"]) for item in results if item.get("error")],
     )

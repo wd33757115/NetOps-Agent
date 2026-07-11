@@ -358,18 +358,30 @@ def test_normalize_run_can_limit_to_selected_devices(monkeypatch):
             calls["device_ids"] = device_ids
             return ["snapshot-1"]
 
-    def fake_normalize_snapshot(snapshot_id, *, update_current_state=None):
+        def save_observations(self, observations, *, update_current_state):
+            calls["saved"] = (observations, update_current_state)
+            return len(observations), 0
+
+    def fake_build(repository, snapshot_id, *, update_current_state=None):
         assert snapshot_id == "snapshot-1"
         assert update_current_state is False
-        return {
-            "success": True,
-            "observation_count": 2,
-            "created_count": 2,
-            "current_state_updates": 0,
-        }
+        observations = [
+            _state_observation("2026-06-20T10:00:00+00:00", value="up"),
+            _state_observation("2026-06-20T10:01:00+00:00", value="down"),
+        ]
+        return (
+            {
+                "success": True,
+                "observation_count": 2,
+                "created_count": 0,
+                "current_state_updates": 0,
+            },
+            observations,
+            False,
+        )
 
     monkeypatch.setattr(normalizer, "StateRepository", FakeRepository)
-    monkeypatch.setattr(normalizer, "normalize_snapshot", fake_normalize_snapshot)
+    monkeypatch.setattr(normalizer, "_build_snapshot_normalization", fake_build)
 
     result = normalize_run(
         "run-1",
@@ -377,7 +389,9 @@ def test_normalize_run_can_limit_to_selected_devices(monkeypatch):
         device_ids=["SW1", "SW2"],
     )
 
-    assert calls == {"run_id": "run-1", "device_ids": ["SW1", "SW2"]}
+    assert calls["run_id"] == "run-1"
+    assert calls["device_ids"] == ["SW1", "SW2"]
+    assert calls["saved"][1] is False
     assert result["device_ids"] == ["SW1", "SW2"]
     assert result["observation_count"] == 2
 

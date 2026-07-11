@@ -111,14 +111,19 @@ celery.conf.beat_schedule = {
         "schedule": 60.0,
         "options": {"queue": "netops.default"},
     },
+    "reconcile-patrol-runs": {
+        "task": "reconcile_patrol_runs",
+        "schedule": 60.0,
+        "options": {"queue": "netops.default"},
+    },
 }
 
 
 @worker_ready.connect
 def _on_worker_ready(**kwargs):
     """Celery Worker 启动后订阅 Workflow 热重载广播与 EventBus Consumers。"""
-    from src.core.workflows.reload_bus import start_reload_listener
     from src.core.events.worker import start_event_consumers
+    from src.core.workflows.reload_bus import start_reload_listener
 
     start_reload_listener()
     start_event_consumers()

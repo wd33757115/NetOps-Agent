@@ -619,6 +619,12 @@ class PatrolRun(Base):
         String(32), nullable=False, default="scheduled_patrol",
         server_default="scheduled_patrol", index=True
     )
+    logical_run_id = Column(String(128), nullable=True, index=True)
+    attempt_number = Column(Integer, nullable=False, default=0, server_default="0")
+    worker_id = Column(String(256), nullable=True, index=True)
+    heartbeat_at = Column(DateTime, nullable=True, index=True)
+    lease_until = Column(DateTime, nullable=True, index=True)
+    last_progress_at = Column(DateTime, nullable=True, index=True)
     device_count = Column(Integer, nullable=False, default=0)
     command_count = Column(Integer, nullable=False, default=0)
     started_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
@@ -965,6 +971,7 @@ class NetworkChangeRecord(Base):
     canonical_command = Column(String(512), nullable=True, index=True)
     entity_type = Column(String(128), nullable=False, index=True)
     entity_key = Column(String(1024), nullable=False)
+    dimensions_json = Column(JSON, nullable=True)
     field = Column(String(256), nullable=False, index=True)
     observation_type = Column(String(256), nullable=True, index=True)
     old_value_json = Column(JSON, nullable=True)
@@ -1056,9 +1063,15 @@ class NetworkEventRecord(Base):
     entity_type = Column(String(128), nullable=False, index=True)
     entity_key = Column(String(1024), nullable=False)
     correlation_key = Column(String(1024), nullable=False, index=True)
+    correlation_dimensions_json = Column(JSON, nullable=True)
     source_change_id = Column(String(64), nullable=True, index=True)
     run_id = Column(String(128), nullable=True, index=True)
+    latest_change_id = Column(String(64), nullable=True, index=True)
+    last_seen_run_id = Column(String(128), nullable=True, index=True)
     occurred_at = Column(DateTime, nullable=False, index=True)
+    first_seen_at = Column(DateTime, nullable=False, index=True)
+    last_seen_at = Column(DateTime, nullable=False, index=True)
+    occurrence_count = Column(Integer, nullable=False, default=1, server_default="1")
     status = Column(String(32), nullable=False, default="open", index=True)
     payload_json = Column(JSON, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -1074,6 +1087,45 @@ class NetworkEventRecord(Base):
             "event_type",
             "correlation_key",
             "status",
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class NetworkEventOccurrenceRecord(Base):
+    """Append-only observation of an operational event lifecycle."""
+
+    __tablename__ = "netops_network_event_occurrences"
+
+    id = Column(String(64), primary_key=True)
+    idempotency_key = Column(String(64), nullable=False)
+    event_id = Column(
+        String(64),
+        ForeignKey("netops_network_events.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    run_id = Column(String(128), nullable=True, index=True)
+    source_change_id = Column(String(64), nullable=True, index=True)
+    observed_at = Column(DateTime, nullable=False, index=True)
+    severity = Column(String(32), nullable=False, index=True)
+    occurrence_kind = Column(String(32), nullable=False, default="observed", index=True)
+    payload_json = Column(JSON, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index(
+            "ix_netops_event_occurrence_idempotency",
+            "idempotency_key",
+            unique=True,
+        ),
+        Index(
+            "ix_netops_event_occurrence_run_event",
+            "run_id",
+            "event_id",
+            "observed_at",
         ),
     )
 

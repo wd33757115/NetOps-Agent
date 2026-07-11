@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from datetime import datetime
 from typing import Any
 
 from src.core.observation import ObservationContractRepository
@@ -13,7 +12,6 @@ from src.core.parser.key_contract import EntityKeyError, build_entity_key
 from src.core.parser.repository import ParserRepository
 from src.core.state.domain import StateObservation
 from src.core.state.repository import StateRepository
-
 
 DEFAULT_IGNORE_FIELDS = {"uptime"}
 EMPTY_PLACEHOLDERS = {"", "-", "--", "n/a", "na", "none", "null"}
@@ -109,7 +107,6 @@ def _looks_like_header_artifact(
     if interface in {"interface", "port", "name", "interface name", "port name"}:
         return True
     status = str(record.get("status") or "").strip().lower()
-    protocol = str(record.get("protocol") or "").strip().lower()
     return interface in {"ifname", "intf"} and status in {"status", "link"}
 
 
@@ -126,9 +123,7 @@ def observations_from_snapshot(
     contract = _template_contract(snapshot.get("parser_template_id"))
     entity_type = str(contract.get("entity_type") or "record")
     primary_keys = [str(key) for key in contract.get("primary_keys") or []]
-    ignore_fields = {
-        str(field).strip().lower() for field in contract.get("ignore_fields") or []
-    }
+    ignore_fields = {str(field).strip().lower() for field in contract.get("ignore_fields") or []}
     ignore_fields.update(DEFAULT_IGNORE_FIELDS)
     state_semantics = dict(contract.get("state_semantics") or {})
     observations: list[StateObservation] = []
@@ -183,8 +178,7 @@ def observations_from_snapshot(
                     source=source,
                     source_type=str(snapshot.get("source_type") or "cli"),
                     evidence_id=snapshot.get("evidence_id"),
-                    schema_id=snapshot.get("schema_id")
-                    or snapshot.get("parser_template_id"),
+                    schema_id=snapshot.get("schema_id") or snapshot.get("parser_template_id"),
                     device_id=state_device_id,
                     vendor=snapshot.get("vendor"),
                     model=snapshot.get("model"),
@@ -203,16 +197,14 @@ def observations_from_snapshot(
                         else None
                     ),
                     unit=(
-                        str(field_semantics.get("unit"))
-                        if field_semantics.get("unit")
-                        else None
+                        str(field_semantics.get("unit")) if field_semantics.get("unit") else None
                     ),
                     value=value,
                     value_text=value_text,
                     value_number=value_number,
                     value_type=value_type,
                     observation_kind="state",
-                    observed_at=str(snapshot.get("observed_at") or datetime.utcnow()),
+                    observed_at=str(snapshot["observed_at"]),
                     parser_template_id=snapshot.get("parser_template_id"),
                     parser_version=snapshot.get("parser_version"),
                     contract_version=contract.get("contract_version")
@@ -240,12 +232,12 @@ def observations_from_snapshot(
     return observations
 
 
-def normalize_snapshot(
+def _build_snapshot_normalization(
+    repository: StateRepository,
     snapshot_id: str,
     *,
-    update_current_state: bool | None = None,
-) -> dict[str, Any]:
-    repository = StateRepository()
+    update_current_state: bool | None,
+) -> tuple[dict[str, Any], list[StateObservation], bool]:
     context = repository.get_snapshot_context(snapshot_id)
     if context is None:
         raise ValueError(f"snapshot not found: {snapshot_id}")
@@ -263,29 +255,55 @@ def normalize_snapshot(
             dataset_id=context["dataset_id"],
         )
     except EntityKeyError as exc:
-        return {
-            "success": False,
+        return (
+            {
+                "success": False,
+                "snapshot_id": snapshot_id,
+                "error": str(exc),
+                "failure_code": "entity_key_invalid",
+                "observation_count": 0,
+                "created_count": 0,
+                "current_state_updates": 0,
+            },
+            [],
+            should_update_current,
+        )
+    return (
+        {
+            "success": True,
             "snapshot_id": snapshot_id,
-            "error": str(exc),
-            "failure_code": "entity_key_invalid",
-            "observation_count": 0,
+            "mode": mode,
+            "observation_count": len(observations),
             "created_count": 0,
             "current_state_updates": 0,
-        }
+            "updated_current_state": should_update_current,
+            "observations": [item.to_dict() for item in observations],
+        },
+        observations,
+        should_update_current,
+    )
+
+
+def normalize_snapshot(
+    snapshot_id: str,
+    *,
+    update_current_state: bool | None = None,
+) -> dict[str, Any]:
+    repository = StateRepository()
+    result, observations, should_update_current = _build_snapshot_normalization(
+        repository,
+        snapshot_id,
+        update_current_state=update_current_state,
+    )
+    if not result["success"]:
+        return result
     created, current_updates = repository.save_observations(
         observations,
         update_current_state=should_update_current,
     )
-    return {
-        "success": True,
-        "snapshot_id": snapshot_id,
-        "mode": mode,
-        "observation_count": len(observations),
-        "created_count": created,
-        "current_state_updates": current_updates,
-        "updated_current_state": should_update_current,
-        "observations": [item.to_dict() for item in observations],
-    }
+    result["created_count"] = created
+    result["current_state_updates"] = current_updates
+    return result
 
 
 def normalize_run(
@@ -310,20 +328,57 @@ def normalize_run(
         if device_ids
         else repository.list_run_snapshot_ids(run_id)
     )
-    results = [
-        normalize_snapshot(snapshot_id, update_current_state=update_current_state)
-        for snapshot_id in snapshot_ids
-    ]
+    results: list[dict[str, Any]] = []
+    valid_observations: list[StateObservation] = []
+    should_update_current = False
+    patrol_repository = PatrolRepository()
+    for snapshot_id in snapshot_ids:
+        snapshot_result, observations, update_current = _build_snapshot_normalization(
+            repository,
+            snapshot_id,
+            update_current_state=update_current_state,
+        )
+        results.append(snapshot_result)
+        if snapshot_result["success"]:
+            valid_observations.extend(observations)
+            should_update_current = should_update_current or update_current
+        else:
+            patrol_repository.mark_collection_analysis_failed(
+                run_id=run_id,
+                snapshot_id=snapshot_id,
+                failure_code=str(snapshot_result.get("failure_code") or "normalize_failed"),
+                error=str(snapshot_result.get("error") or "normalization failed"),
+            )
+    created = 0
+    current_updates = 0
+    if valid_observations:
+        created, current_updates = repository.save_observations(
+            valid_observations,
+            update_current_state=should_update_current,
+        )
+        remaining_created = created
+        remaining_updates = current_updates
+        for snapshot_result in results:
+            if not snapshot_result["success"]:
+                continue
+            count = int(snapshot_result["observation_count"])
+            snapshot_result["created_count"] = min(count, remaining_created)
+            remaining_created -= snapshot_result["created_count"]
+            snapshot_result["current_state_updates"] = min(count, remaining_updates)
+            remaining_updates -= snapshot_result["current_state_updates"]
+    failed_count = sum(not item.get("success") for item in results)
+    successful_count = len(results) - failed_count
     result = {
-        "success": all(result.get("success") for result in results),
+        "success": successful_count > 0 or not results,
+        "partial": failed_count > 0 and successful_count > 0,
         "run_id": run_id,
         "device_ids": device_ids or [],
         "snapshot_count": len(results),
         "observation_count": sum(int(r.get("observation_count") or 0) for r in results),
-        "created_count": sum(int(r.get("created_count") or 0) for r in results),
-        "current_state_updates": sum(
-            int(r.get("current_state_updates") or 0) for r in results
-        ),
+        "created_count": created,
+        "current_state_updates": current_updates,
+        "successful_snapshot_count": successful_count,
+        "failed_snapshot_count": failed_count,
         "results": results,
     }
     if not result["success"]:
@@ -333,6 +388,19 @@ def normalize_run(
                 analysis_status="failed",
                 baseline_eligible=False,
                 metadata={"analysis_failure_stage": "normalizing"},
+            )
+        except ValueError:
+            pass
+    elif result["partial"]:
+        try:
+            PatrolRepository().update_analysis_status(
+                run_id,
+                analysis_status="normalized_partial",
+                baseline_eligible=False,
+                metadata={
+                    "normalization_failed_snapshot_count": failed_count,
+                    "normalization_successful_snapshot_count": successful_count,
+                },
             )
         except ValueError:
             pass

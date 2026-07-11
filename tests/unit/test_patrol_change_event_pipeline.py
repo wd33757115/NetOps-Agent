@@ -3,27 +3,27 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import uuid
+from datetime import datetime
+from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from src.common.config import get_settings
-
 from src.core.celery_tasks.tasks import _persist_patrol_snapshots
 from src.core.patrol.change_detector import (
     detect_changes_between_values,
     detect_changes_from_params,
 )
+from src.core.patrol.change_event_repository import ChangeEventRepository
 from src.core.patrol.change_policy import (
     ChangePolicyProposal,
     compare_with_policy,
     validate_change_policy,
 )
 from src.core.patrol.command_splitter import split_cli_capture
-from src.core.patrol.event_builder import build_events_from_changes
-from src.core.patrol.event_builder import build_events_from_params
-from src.core.patrol.change_event_repository import ChangeEventRepository
+from src.core.patrol.event_builder import build_events_from_changes, build_events_from_params
 from src.core.patrol.raw_importer import (
     _resolve_capture_device,
     import_raw_capture,
@@ -621,6 +621,51 @@ def test_import_and_raw_hash_change_roundtrip(tmp_path: Path):
         assert result["changes"][0]["field"] == "raw_text_hash"
     finally:
         _cleanup_runs(run1, run2)
+
+
+def test_command_observed_at_propagates_to_snapshot_and_evidence(tmp_path: Path):
+    source = tmp_path / "SW2-10.0.0.2.log"
+    source.write_text(CISCO_SAMPLE, encoding="utf-8")
+    run_id = f"test-{uuid.uuid4()}"
+    observed = {
+        "show version": "2026-07-11T01:00:01+00:00",
+        "show interface status": "2026-07-11T01:00:02+00:00",
+        "show processes cpu": "2026-07-11T01:00:03+00:00",
+    }
+    try:
+        import_raw_capture(
+            file_path=source,
+            mode="parser_validation",
+            run_id=run_id,
+            vendor="Cisco",
+            command_collection_statuses={
+                command: {
+                    "status": "complete",
+                    "observed_at": timestamp,
+                }
+                for command, timestamp in observed.items()
+            },
+        )
+        with get_db_session() as db:
+            snapshots = (
+                db.query(CommandSnapshot)
+                .filter(CommandSnapshot.run_id == run_id)
+                .all()
+            )
+            for snapshot in snapshots:
+                expected = datetime.fromisoformat(observed[snapshot.canonical_command])
+                evidence = (
+                    db.query(RawEvidenceRecord)
+                    .filter(RawEvidenceRecord.source_snapshot_id == snapshot.id)
+                    .one()
+                )
+                assert evidence.observed_at == snapshot.observed_at
+                actual = snapshot.observed_at.replace(
+                    tzinfo=ZoneInfo("Asia/Shanghai")
+                ).astimezone(expected.tzinfo)
+                assert actual == expected
+    finally:
+        _cleanup_runs(run_id)
 
 
 def test_offline_import_prefers_asset_name_from_filename_over_prompt_alias(tmp_path: Path):

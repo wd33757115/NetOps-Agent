@@ -37,6 +37,10 @@ PATROL_ARCHIVE_SPEC = ArchiveSpec(
 )
 
 
+class PatrolPlatformError(RuntimeError):
+    """Retryable platform failure outside an individual device collection."""
+
+
 def persist_patrol_snapshots(
     *,
     details: list[dict[str, Any]],
@@ -91,16 +95,12 @@ def persist_patrol_snapshots(
                 or detail.get("ip")
                 or "unknown"
             )
-            items = detail.get("command_collection_results") or plan.get(
-                "collection_items"
-            ) or []
+            items = detail.get("command_collection_results") or plan.get("collection_items") or []
             for item in items:
                 command = item.get("command") if isinstance(item, dict) else item
                 if command:
                     item_status = (
-                        str(item.get("status") or "failed")
-                        if isinstance(item, dict)
-                        else "failed"
+                        str(item.get("status") or "failed") if isinstance(item, dict) else "failed"
                     )
                     repository.save_collection_result(
                         run_id=snapshot_run_id,
@@ -109,14 +109,10 @@ def persist_patrol_snapshots(
                         canonical_command=str(command),
                         status=item_status,
                         failure_code=item_status,
-                        observed_at=(
-                            item.get("observed_at") if isinstance(item, dict) else None
-                        ),
+                        observed_at=(item.get("observed_at") if isinstance(item, dict) else None),
                         metadata={
                             "error": (
-                                item.get("error")
-                                if isinstance(item, dict)
-                                else detail.get("error")
+                                item.get("error") if isinstance(item, dict) else detail.get("error")
                             )
                         },
                     )
@@ -253,11 +249,7 @@ def _combine_snapshot_results(
     elif errors or coverage or parse or failed_devices:
         health = "partial"
     collection_status = (
-        "failed"
-        if imported_devices == 0
-        else "partial"
-        if health != "ready"
-        else "completed"
+        "failed" if imported_devices == 0 else "partial" if health != "ready" else "completed"
     )
     return {
         "snapshot_run_id": snapshot_run_id,
@@ -269,9 +261,7 @@ def _combine_snapshot_results(
         "snapshot_health": health,
         "collection_status": collection_status,
         "parsed_commands": sum(int(row.get("parsed_commands") or 0) for row in rows),
-        "failed_parse_commands": sum(
-            int(row.get("failed_parse_commands") or 0) for row in rows
-        ),
+        "failed_parse_commands": sum(int(row.get("failed_parse_commands") or 0) for row in rows),
         "coverage_violations": coverage,
         "parse_violations": parse,
         "production_parser_ready": all(
@@ -290,6 +280,8 @@ class DevicePatrolRunRequest:
     execution_plan: dict[str, Any] | None = None
     execution_plan_id: str | None = None
     task_id: str | None = None
+    attempt_number: int = 0
+    worker_id: str | None = None
 
 
 class DevicePatrolRunner:
@@ -325,7 +317,14 @@ class DevicePatrolRunner:
             context.execution_plan.mode if context.execution_plan else request.mode
         )
         collection_started_at = datetime.now(timezone.utc)
-        snapshot_run_id = f"patrol-{request.task_id or uuid.uuid4()}"
+        from src.common.config import get_settings
+
+        settings = get_settings()
+        logical_run_id = f"patrol-{request.task_id or uuid.uuid4()}"
+        attempt_number = max(0, int(request.attempt_number or 0))
+        snapshot_run_id = (
+            logical_run_id if attempt_number == 0 else f"{logical_run_id}-attempt-{attempt_number}"
+        )
         run_purpose = "baseline" if request.save_baseline else "scheduled_patrol"
         streaming_persistence = self._snapshot_persister is persist_patrol_snapshots
         if streaming_persistence:
@@ -341,10 +340,14 @@ class DevicePatrolRunner:
                 },
                 run_purpose=run_purpose,
                 started_at=collection_started_at,
+                logical_run_id=logical_run_id,
+                attempt_number=attempt_number,
+                worker_id=request.worker_id,
+                lease_seconds=settings.PATROL_RUN_LEASE_SECONDS,
             )
 
             def persist_device_result(detail: dict[str, Any]) -> dict[str, Any]:
-                return self._snapshot_persister(
+                persisted = self._snapshot_persister(
                     details=[detail],
                     snapshot_run_id=snapshot_run_id,
                     ticket_id=request.ticket_id,
@@ -354,8 +357,53 @@ class DevicePatrolRunner:
                     create_run=False,
                     finalize_run=False,
                 )
+                PatrolRepository().touch_run(
+                    snapshot_run_id,
+                    lease_seconds=settings.PATROL_RUN_LEASE_SECONDS,
+                    worker_id=request.worker_id,
+                    metadata={"last_persisted_device": detail.get("device_name")},
+                )
+                return persisted
+
+            def persist_command_progress(*, output_file, manifest, device, execution_plan) -> None:
+                self._snapshot_persister(
+                    details=[
+                        {
+                            "inventory_device_id": device.get("device_id"),
+                            "device_name": device.get("device_name"),
+                            "ip": device.get("ip") or device.get("management_ip"),
+                            "vendor": device.get("vendor"),
+                            "model": device.get("model"),
+                            "success": False,
+                            "output_file": str(output_file),
+                            "collection_status": str(manifest.get("status") or "running"),
+                            "command_collection_results": list(manifest.get("commands") or []),
+                            "execution_plan": execution_plan.to_metadata(),
+                        }
+                    ],
+                    snapshot_run_id=snapshot_run_id,
+                    ticket_id=request.ticket_id,
+                    mode=mode,
+                    execution_plan_id=request.execution_plan_id,
+                    run_purpose=run_purpose,
+                    create_run=False,
+                    finalize_run=False,
+                )
+                PatrolRepository().touch_run(
+                    snapshot_run_id,
+                    lease_seconds=settings.PATROL_RUN_LEASE_SECONDS,
+                    worker_id=request.worker_id,
+                    metadata={
+                        "last_persisted_command": (
+                            (manifest.get("commands") or [{}])[-1].get("command")
+                        )
+                    },
+                )
 
             context.tool.result_callback = persist_device_result
+            collector = getattr(context.tool, "cli_collector", None)
+            if collector is not None and hasattr(collector, "progress_callback"):
+                collector.progress_callback = persist_command_progress
         try:
             result = run_plan_or_filter(
                 context=context,
@@ -392,7 +440,9 @@ class DevicePatrolRunner:
             PatrolRepository().finish_run(
                 snapshot_run_id,
                 collection_status=str(snapshot_result["collection_status"]),
-                analysis_status="pending",
+                analysis_status=(
+                    "failed" if snapshot_result["collection_status"] == "failed" else "pending"
+                ),
                 baseline_eligible=False,
                 metadata={
                     "successful_device_count": snapshot_result["snapshot_devices"],
@@ -414,14 +464,10 @@ class DevicePatrolRunner:
             output_files=result.output_files or [],
             ticket_id=request.ticket_id,
         )
-        if int(result.success_devices or 0) == 0 and not snapshot_result.get(
-            "snapshot_devices"
-        ):
-            raise RuntimeError(result.message or "device patrol failed")
-        if snapshot_result["snapshot_errors"] and not snapshot_result.get(
-            "snapshot_devices"
-        ):
-            raise RuntimeError("; ".join(snapshot_result["snapshot_errors"]))
+        if int(result.success_devices or 0) == 0 and not snapshot_result.get("snapshot_devices"):
+            raise PatrolPlatformError(result.message or "device patrol failed")
+        if snapshot_result["snapshot_errors"] and not snapshot_result.get("snapshot_devices"):
+            raise PatrolPlatformError("; ".join(snapshot_result["snapshot_errors"]))
 
         execution_time_ms = int(
             (datetime.now(timezone.utc) - execution_start).total_seconds() * 1000

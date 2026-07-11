@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 _redis_client = None
 _redis_checked = False
+_redis_next_retry_at = 0.0
 
 # 登录失败限流
 LOGIN_FAIL_WINDOW_SEC = 900  # 15 分钟
@@ -26,9 +27,11 @@ LOGIN_BLOCK_MESSAGE = "登录尝试过多，请稍后再试"
 
 def get_redis():
     """获取 Redis 客户端；不可用时返回 None（限流降级为内存，黑名单跳过）。"""
-    global _redis_client, _redis_checked
-    if _redis_checked:
+    global _redis_client, _redis_checked, _redis_next_retry_at
+    if _redis_client is not None:
         return _redis_client
+    if _redis_checked and time.monotonic() < _redis_next_retry_at:
+        return None
     _redis_checked = True
     try:
         import redis
@@ -45,11 +48,26 @@ def get_redis():
         )
         client.ping()
         _redis_client = client
+        _redis_next_retry_at = 0.0
         logger.info("Redis token store connected: %s:%s", settings.REDIS_HOST, settings.REDIS_PORT)
     except Exception as exc:
         logger.warning("Redis unavailable, auth store degraded: %s", exc)
         _redis_client = None
+        _redis_next_retry_at = time.monotonic() + max(
+            1, int(get_settings().REDIS_RECONNECT_BACKOFF_SECONDS)
+        )
     return _redis_client
+
+
+def invalidate_redis_client(error: Exception | str | None = None) -> None:
+    global _redis_client, _redis_checked, _redis_next_retry_at
+    _redis_client = None
+    _redis_checked = True
+    _redis_next_retry_at = time.monotonic() + max(
+        1, int(get_settings().REDIS_RECONNECT_BACKOFF_SECONDS)
+    )
+    if error:
+        logger.warning("Redis client invalidated; reconnect scheduled: %s", error)
 
 
 def _blacklist_key(jti: str) -> str:

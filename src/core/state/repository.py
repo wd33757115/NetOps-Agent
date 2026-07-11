@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from src.core.evidence import RawEvidenceRepository, evidence_id_for_command_snapshot
@@ -73,7 +73,12 @@ class StateRepository:
         with get_db_session() as db:
             query = db.query(CommandSnapshot.id).filter(CommandSnapshot.run_id == run_id)
             if device_ids:
-                query = query.filter(CommandSnapshot.device_id.in_(device_ids))
+                query = query.filter(
+                    or_(
+                        CommandSnapshot.inventory_device_id.in_(device_ids),
+                        CommandSnapshot.device_id.in_(device_ids),
+                    )
+                )
             return [
                 row[0]
                 for row in query.order_by(
@@ -447,7 +452,7 @@ class StateRepository:
             "missing_count": missing_count,
         }
         item = StateObservation(
-            observation_id=str(uuid.uuid4()),
+            observation_id=str(uuid.uuid5(uuid.NAMESPACE_URL, idempotency_key)),
             idempotency_key=idempotency_key,
             state_key=state_key,
             run_id=run_id,

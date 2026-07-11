@@ -415,6 +415,12 @@ def import_raw_capture(
     for (block, parsed), fingerprint in zip(
         parsed_blocks, fingerprints, strict=True
     ):
+        command_collection = per_command_status.get(block.command_canonical, {})
+        command_observed_at = (
+            command_collection.get("observed_at")
+            or observed_at
+            or inspected.observed_at_text
+        )
         parse_status = "raw_only"
         structured = None
         parser_name = None
@@ -445,7 +451,7 @@ def import_raw_capture(
             command=block.command,
             command_canonical=block.command_canonical,
             raw_text=block.raw_output,
-            observed_at=observed_at or inspected.observed_at_text,
+            observed_at=command_observed_at,
             structured_json=structured,
             parser_name=parser_name,
             parser_version=parser_version,
@@ -513,7 +519,6 @@ def import_raw_capture(
             "parse_empty": "empty",
             "ignored": "ignored",
         }.get(parse_status, "failed")
-        command_collection = per_command_status.get(block.command_canonical, {})
         command_complete = (
             command_collection.get("status") == "complete"
             if command_collection
@@ -533,11 +538,7 @@ def import_raw_capture(
             baseline_eligible=authoritative,
             observed_entity_count=entity_count,
             failure_code=parsed.failure_code,
-            observed_at=(
-                command_collection.get("observed_at")
-                or observed_at
-                or inspected.observed_at_text
-            ),
+            observed_at=command_observed_at,
             metadata={
                 "parse_status": parse_status,
                 "snapshot_id": snapshot_id,

@@ -18,8 +18,10 @@ from pydantic import BaseModel, Field
 
 from src.auth.dependencies import get_optional_user, require_role
 from src.auth.models import CurrentUser
-
+from src.core.workflows.dsl import GenerateOptions, WorkflowDSL
 from src.core.workflows.engine import WorkflowEngine
+from src.core.workflows.events import get_workflow_timeline
+from src.core.workflows.generator import generate_and_persist, preview_workflow
 from src.core.workflows.manager import (
     get_plugin_detail,
     preview_chat_intent,
@@ -28,9 +30,7 @@ from src.core.workflows.manager import (
     validate_plugin_files,
     validate_workflow_yaml,
 )
-from src.core.workflows.generator import generate_and_persist, preview_workflow
 from src.core.workflows.mapping import build_mapping_suggestions
-from src.core.workflows.dsl import GenerateOptions, WorkflowDSL
 from src.core.workflows.registry import (
     WORKFLOWS_ROOT,
     get_template,
@@ -45,10 +45,19 @@ from src.core.workflows.repository import (
     list_workflow_steps,
     update_run_context,
 )
-from src.core.workflows.events import get_workflow_timeline
 from src.core.workflows.stream import stream_workflow_events
-from src.gateway.schemas import WorkflowChildRunSummary, WorkflowRunResponse, WorkflowStepResponse, WorkflowTimelineEvent
-from src.infrastructure.db.models import NetworkChangeRecord, NetworkEventRecord, WorkflowStepRecord
+from src.gateway.schemas import (
+    WorkflowChildRunSummary,
+    WorkflowRunResponse,
+    WorkflowStepResponse,
+    WorkflowTimelineEvent,
+)
+from src.infrastructure.db.models import (
+    NetworkChangeRecord,
+    NetworkEventOccurrenceRecord,
+    NetworkEventRecord,
+    WorkflowStepRecord,
+)
 from src.infrastructure.db.postgres import get_db_session
 from src.observability.langfuse import get_trace_url
 
@@ -284,12 +293,28 @@ def _build_patrol_batch_summary(patrol_batch_id: str, runs: list[Any]) -> dict[s
                     .order_by(NetworkChangeRecord.detected_at.desc())
                     .all()
                 )
-                events = (
-                    db.query(NetworkEventRecord)
-                    .filter(NetworkEventRecord.run_id == str(snapshot_run_id))
-                    .order_by(NetworkEventRecord.occurred_at.desc())
-                    .all()
-                )
+                event_query = db.query(NetworkEventRecord)
+                try:
+                    event_query = (
+                        event_query.join(
+                            NetworkEventOccurrenceRecord,
+                            NetworkEventOccurrenceRecord.event_id
+                            == NetworkEventRecord.id,
+                        )
+                        .filter(
+                            NetworkEventOccurrenceRecord.run_id
+                            == str(snapshot_run_id)
+                        )
+                        .distinct()
+                    )
+                except AttributeError:
+                    # Lightweight repository test doubles and pre-0027 readers.
+                    event_query = event_query.filter(
+                        NetworkEventRecord.run_id == str(snapshot_run_id)
+                    )
+                events = event_query.order_by(
+                    NetworkEventRecord.occurred_at.desc()
+                ).all()
             for event in events:
                 event_types[str(event.event_type or "unknown")] += 1
                 severities[str(event.severity or "unknown")] += 1

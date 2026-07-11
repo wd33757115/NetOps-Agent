@@ -4,7 +4,11 @@
 from __future__ import annotations
 
 from src.core.collection import CollectionItem, ExecutionPlan
-from src.core.ingestion.adapters.cli import CLICollectionPlan, CLICommandCollector
+from src.core.ingestion.adapters.cli import (
+    CLICollectionPlan,
+    CLICommandCollector,
+    load_command_collection_manifest,
+)
 
 
 def test_cli_command_collector_writes_command_report(tmp_path):
@@ -98,3 +102,44 @@ def test_cli_command_collector_retries_transient_connection_failure(tmp_path):
     assert calls["connects"] == 2
     assert calls["commands"] == ["display version"]
     assert output_file.exists()
+
+
+def test_cli_collector_publishes_atomic_incremental_manifest(tmp_path):
+    progress = []
+
+    class FakeConnection:
+        def send_command(self, command, read_timeout=60):
+            return f"output for {command}"
+
+        def disconnect(self):
+            pass
+
+    def on_progress(**kwargs):
+        manifest = load_command_collection_manifest(kwargs["output_file"])
+        progress.append(manifest)
+
+    collector = CLICommandCollector(
+        output_root=tmp_path,
+        connector=lambda _device: FakeConnection(),
+        progress_callback=on_progress,
+    )
+    output_file = collector.collect_command_outputs(
+        device={"device_name": "SW1", "ip": "10.0.0.1"},
+        execution_plan=ExecutionPlan(
+            device_id="device-1",
+            action="patrol",
+            mode="parser_validation",
+            profile_name="test",
+            profile_version_id=None,
+            commands=(
+                CollectionItem(command="show version", action="patrol"),
+                CollectionItem(command="show clock", action="patrol"),
+            ),
+        ),
+    )
+
+    assert [len(item["commands"]) for item in progress] == [1, 2]
+    assert all(item["status"] == "running" for item in progress)
+    final = load_command_collection_manifest(output_file)
+    assert final["status"] == "complete"
+    assert final["completed_at"]

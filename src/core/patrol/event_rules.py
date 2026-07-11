@@ -12,13 +12,16 @@ from pathlib import Path
 from typing import Any
 
 from src.core.parser.policy import load_yaml
-from src.infrastructure.db.models import EventRuleRecord, EventRuleVersionRecord
+from src.infrastructure.db.models import (
+    AuditLogRecord,
+    EventRuleRecord,
+    EventRuleVersionRecord,
+)
 from src.infrastructure.db.postgres import get_db_session
 
-SHARED_RULE_PACK_ROOT = (
-    Path(__file__).resolve().parents[2] / "skills" / "shared" / "rule-packs"
-)
+SHARED_RULE_PACK_ROOT = Path(__file__).resolve().parents[2] / "skills" / "shared" / "rule-packs"
 BUILTIN_EVENT_RULE_PACK = SHARED_RULE_PACK_ROOT / "event_rules.builtin.yaml"
+
 
 def norm(value: Any) -> str:
     return str(value or "").strip().lower()
@@ -195,12 +198,15 @@ def condition_matches(condition: dict[str, Any], change: dict[str, Any]) -> bool
         threshold = float(condition.get("gte"))
         old_value = to_float(change.get("old"))
         new_value = to_float(change.get("new"))
-        return norm_field(change.get("field")) in fields and (
-            new_value is not None
-        ) and float(new_value or 0) >= threshold and (
-            change.get("change_type") == "initial"
-            or old_value is None
-            or float(old_value) < threshold
+        return (
+            norm_field(change.get("field")) in fields
+            and (new_value is not None)
+            and float(new_value or 0) >= threshold
+            and (
+                change.get("change_type") == "initial"
+                or old_value is None
+                or float(old_value) < threshold
+            )
         )
     if kind == "threshold_recovery":
         if not _entity_type_allowed(condition, change):
@@ -398,12 +404,11 @@ class EventRuleRepository:
                     version=int(version.version),
                     event_type=version.event_type,
                     severity=version.severity,
-                    predicate=lambda change, condition=_effective_condition(
-                        str(rule.name),
-                        dict(version.condition_json or {}),
-                    ): condition_matches(
-                        condition,
-                        change,
+                    predicate=lambda change, condition=_effective_condition(str(rule.name), dict(version.condition_json or {})): (
+                        condition_matches(
+                            condition,
+                            change,
+                        )
                     ),
                     priority=int(version.priority or 100),
                     exclusive=bool(version.exclusive),
@@ -496,11 +501,7 @@ class EventRuleRepository:
         correlation_keys: list[str] | tuple[str, ...] | None = None,
     ) -> str:
         with get_db_session() as db:
-            rule = (
-                db.query(EventRuleRecord)
-                .filter(EventRuleRecord.name == name)
-                .first()
-            )
+            rule = db.query(EventRuleRecord).filter(EventRuleRecord.name == name).first()
             if rule is None:
                 rule = EventRuleRecord(
                     id=str(uuid.uuid4()),
@@ -536,8 +537,7 @@ class EventRuleRepository:
                 event_class=event_class,
                 recovery_json=recovery,
                 correlation_key_json=list(
-                    correlation_keys
-                    or ("device_id", "entity_type", "entity_key", "field")
+                    correlation_keys or ("device_id", "entity_type", "entity_key", "field")
                 ),
                 status="active",
                 created_by=created_by,
@@ -582,11 +582,7 @@ class EventRuleRepository:
         if status not in {"draft", "pending_approval"}:
             raise ValueError("event rule version status must be draft or pending_approval")
         with get_db_session() as db:
-            rule = (
-                db.query(EventRuleRecord)
-                .filter(EventRuleRecord.name == name)
-                .first()
-            )
+            rule = db.query(EventRuleRecord).filter(EventRuleRecord.name == name).first()
             if rule is None:
                 rule = EventRuleRecord(
                     id=str(uuid.uuid4()),
@@ -617,8 +613,7 @@ class EventRuleRepository:
                 event_class=event_class,
                 recovery_json=recovery,
                 correlation_key_json=list(
-                    correlation_keys
-                    or ("device_id", "entity_type", "entity_key", "field")
+                    correlation_keys or ("device_id", "entity_type", "entity_key", "field")
                 ),
                 status=status,
                 created_by=created_by,
@@ -644,6 +639,31 @@ class EventRuleRepository:
 
     def activate_rule_version(self, version_id: str) -> dict[str, Any]:
         with get_db_session() as db:
+            version = db.get(EventRuleVersionRecord, version_id)
+            if version is None:
+                raise ValueError("event rule version not found")
+            if version.status == "active":
+                return {
+                    "success": True,
+                    "version_id": version.id,
+                    "version_status": version.status,
+                    "idempotent": True,
+                }
+        raise ValueError(
+            "direct event rule activation is disabled; approve the associated "
+            "RuleGenerationJob or use the audited force-activate endpoint"
+        )
+
+    def force_activate_rule_version(
+        self,
+        version_id: str,
+        *,
+        actor: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        if not str(actor or "").strip() or not str(reason or "").strip():
+            raise ValueError("force activation requires actor and reason")
+        with get_db_session() as db:
             version = (
                 db.query(EventRuleVersionRecord)
                 .filter(EventRuleVersionRecord.id == version_id)
@@ -651,11 +671,7 @@ class EventRuleRepository:
             )
             if version is None:
                 raise ValueError("event rule version not found")
-            rule = (
-                db.query(EventRuleRecord)
-                .filter(EventRuleRecord.id == version.rule_id)
-                .first()
-            )
+            rule = db.query(EventRuleRecord).filter(EventRuleRecord.id == version.rule_id).first()
             if rule is None:
                 raise ValueError("event rule not found")
             now = datetime.now(timezone.utc)
@@ -671,6 +687,24 @@ class EventRuleRepository:
             version.deprecated_at = None
             rule.status = "active"
             rule.current_version = int(version.version)
+            db.add(
+                AuditLogRecord(
+                    id=str(uuid.uuid4()),
+                    user_id=actor,
+                    username=actor,
+                    action="event_rule_force_activate",
+                    resource_type="event_rule_version",
+                    resource_id=version.id,
+                    detail={
+                        "reason": reason,
+                        "rule_id": rule.id,
+                        "rule_name": rule.name,
+                        "emergency_override": True,
+                    },
+                    status="success",
+                    created_at=now,
+                )
+            )
             db.flush()
             return {
                 **rule.to_dict(),
@@ -700,11 +734,7 @@ class EventRuleRepository:
             )
             if version is None:
                 raise ValueError("event rule version not found")
-            rule = (
-                db.query(EventRuleRecord)
-                .filter(EventRuleRecord.id == version.rule_id)
-                .first()
-            )
+            rule = db.query(EventRuleRecord).filter(EventRuleRecord.id == version.rule_id).first()
             if rule is None:
                 raise ValueError("event rule not found")
             version.status = "deprecated"
@@ -784,13 +814,13 @@ def match_event_rules(
     change: dict[str, Any],
     *,
     rules: list[EventRule] | None = None,
+    preordered: bool = False,
 ) -> list[EventRule]:
     matched: list[EventRule] = []
     effective_rules = rules if rules is not None else load_event_rules()
-    ordered_rules = sorted(
-        effective_rules, key=lambda rule: (-rule.priority, rule.rule_id)
-    )
-    for rule in ordered_rules:
+    if rules is not None and not preordered:
+        effective_rules = sorted(effective_rules, key=lambda rule: (-rule.priority, rule.rule_id))
+    for rule in effective_rules:
         if rule.match(change):
             matched.append(rule)
             if rule.exclusive:
@@ -807,17 +837,16 @@ def load_event_rules(*, allow_builtin_fallback: bool | None = None) -> list[Even
     if allow_builtin_fallback is None:
         from src.common.config import get_settings
 
-        allow_builtin_fallback = bool(
-            get_settings().EVENT_RULE_ALLOW_BUILTIN_FALLBACK
-        )
+        allow_builtin_fallback = bool(get_settings().EVENT_RULE_ALLOW_BUILTIN_FALLBACK)
     try:
         rules = EventRuleRepository().list_active_rules()
         if rules:
-            return rules
-        return default_event_rules() if allow_builtin_fallback else []
+            return sorted(rules, key=lambda rule: (-rule.priority, rule.rule_id))
+        fallback = default_event_rules() if allow_builtin_fallback else []
+        return sorted(fallback, key=lambda rule: (-rule.priority, rule.rule_id))
     except Exception as exc:
         if allow_builtin_fallback:
-            return default_event_rules()
+            return sorted(default_event_rules(), key=lambda rule: (-rule.priority, rule.rule_id))
         raise RuntimeError("active event rules are unavailable") from exc
 
 

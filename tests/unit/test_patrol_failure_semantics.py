@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from src.core.collection import CollectionItem, ExecutionPlan
-from src.core.device_ops.tools import PatrolTool
+from src.core.device_ops.tools import DeviceFilter, PatrolTool
 from src.core.ingestion.adapters.cli import (
     CLICommandCollector,
     command_collection_manifest_path,
@@ -37,9 +39,7 @@ def _plan(*commands: str) -> ExecutionPlan:
         mode="parser_validation",
         profile_name="failure-semantics",
         profile_version_id=None,
-        commands=tuple(
-            CollectionItem(command=command, action="patrol") for command in commands
-        ),
+        commands=tuple(CollectionItem(command=command, action="patrol") for command in commands),
     )
 
 
@@ -160,9 +160,11 @@ def test_outbox_publisher_reuses_canonical_event_identity(monkeypatch):
                 }
             ]
 
-        def mark_event_outbox_published(
-            self, outbox_id, message_id, *, claim_token
-        ):
+        def renew_event_outbox_claim(self, outbox_id, *, claim_token):
+            assert (outbox_id, claim_token) == ("outbox-1", "claim-1")
+            return True
+
+        def mark_event_outbox_published(self, outbox_id, message_id, *, claim_token):
             captured["published"] = (outbox_id, message_id, claim_token)
 
         def mark_event_outbox_failed(self, *_args, **_kwargs):
@@ -172,9 +174,7 @@ def test_outbox_publisher_reuses_canonical_event_identity(monkeypatch):
         captured["event"] = event
         return "redis-1-0"
 
-    monkeypatch.setattr(
-        "src.core.patrol.event_builder.ChangeEventRepository", FakeRepository
-    )
+    monkeypatch.setattr("src.core.patrol.event_builder.ChangeEventRepository", FakeRepository)
     monkeypatch.setattr("src.core.events.bus.EventBus.publish", publish)
 
     assert publish_event_outbox(limit=10) == ["redis-1-0"]
@@ -208,6 +208,55 @@ def test_distributed_patrol_lease_can_be_renewed(monkeypatch):
     assert semaphore.renew(lease) is True
     semaphore.release(lease)
     assert calls[-1] == ("zrem", lease.key, lease.token)
+
+
+def test_patrol_batch_is_bounded_and_isolates_device_lease_failure():
+    devices = [{"device_id": f"device-{index}", "device_name": f"SW{index}"} for index in range(4)]
+
+    class FakeManager:
+        def get_devices_by_filter(self, _filter):
+            return devices
+
+    class FakeSemaphore:
+        def __init__(self):
+            self.acquire_count = 0
+
+        def acquire(self):
+            self.acquire_count += 1
+            if self.acquire_count == 1:
+                raise TimeoutError("lease unavailable")
+            return SimpleNamespace(effective_mode="distributed")
+
+        @contextmanager
+        def maintain(self, lease):
+            yield lease
+
+    tool = PatrolTool(FakeManager())
+    tool.max_concurrency = 2
+    tool.distributed_semaphore = FakeSemaphore()
+    active = 0
+    peak_active = 0
+
+    async def patrol_device(device, *_args, **_kwargs):
+        nonlocal active, peak_active
+        active += 1
+        peak_active = max(peak_active, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return {
+            "inventory_device_id": device["device_id"],
+            "success": True,
+            "collection_status": "complete",
+        }
+
+    tool.patrol_device = patrol_device
+    result = asyncio.run(tool.patrol_by_filter(DeviceFilter(), mode="production"))
+
+    assert result.total_devices == 4
+    assert result.success_devices == 3
+    assert result.failed_devices == 1
+    assert peak_active <= 2
+    assert result.details[0]["failure_code"] == "concurrency_lease_timeout"
 
 
 def test_observation_baseline_requires_collection_level_eligibility():
@@ -286,9 +335,7 @@ def test_observation_baseline_requires_collection_level_eligibility():
 
     try:
         repository = StateRepository()
-        assert repository.list_observations_for_runs(
-            [run_id], baseline_only=True
-        ) == []
+        assert repository.list_observations_for_runs([run_id], baseline_only=True) == []
         with get_db_session() as db:
             row = (
                 db.query(PatrolCollectionResult)
@@ -300,9 +347,7 @@ def test_observation_baseline_requires_collection_level_eligibility():
         assert [row["id"] for row in rows] == [observation_id]
     finally:
         with get_db_session() as db:
-            db.query(StateObservationRecord).filter(
-                StateObservationRecord.run_id == run_id
-            ).delete(synchronize_session=False)
-            db.query(PatrolRun).filter(PatrolRun.id == run_id).delete(
+            db.query(StateObservationRecord).filter(StateObservationRecord.run_id == run_id).delete(
                 synchronize_session=False
             )
+            db.query(PatrolRun).filter(PatrolRun.id == run_id).delete(synchronize_session=False)

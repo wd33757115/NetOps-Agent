@@ -9,9 +9,12 @@ from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
 from src.infrastructure.db.models import (
     NetworkChangeDecisionRecord,
     NetworkChangeRecord,
+    NetworkEventOccurrenceRecord,
     NetworkEventOutboxRecord,
     NetworkEventRecord,
 )
@@ -61,14 +64,9 @@ class ChangeEventRepository:
                     list(derived_observations),
                     update_current_state=True,
                 )
-            if decisions:
-                db.query(NetworkChangeDecisionRecord).filter(
-                    NetworkChangeDecisionRecord.expires_at.is_not(None),
-                    NetworkChangeDecisionRecord.expires_at
-                    < datetime.now(timezone.utc),
-                ).delete(synchronize_session=False)
             for decision in decisions or []:
                 self._save_decision_row(db, decision)
+            change_values: list[dict[str, Any]] = []
             for change in changes:
                 key = _digest(
                     (
@@ -84,59 +82,57 @@ class ChangeEventRepository:
                         change.new_value,
                     )
                 )
-                if (
-                    db.query(NetworkChangeRecord.id)
-                    .filter(NetworkChangeRecord.idempotency_key == key)
-                    .first()
-                ):
-                    continue
-                db.add(
-                    NetworkChangeRecord(
-                        id=change.change_id,
-                        idempotency_key=key,
-                        run_id=change.run_id,
-                        device_id=change.device_id,
-                        canonical_command=change.command,
-                        entity_type=change.entity_type,
-                        entity_key=change.entity_key,
-                        field=change.field,
-                        observation_type=getattr(change, "observation_type", None),
-                        old_value_json=change.old_value,
-                        new_value_json=change.new_value,
-                        change_type=change.change_type,
-                        previous_snapshot_id=change.previous_snapshot_id,
-                        current_snapshot_id=change.current_snapshot_id,
-                        previous_observation_id=getattr(
-                            change, "previous_observation_id", None
-                        ),
-                        current_observation_id=getattr(
-                            change, "current_observation_id", None
-                        ),
-                        source=getattr(change, "source", "patrol"),
-                        old_number=getattr(change, "old_number", None),
-                        new_number=getattr(change, "new_number", None),
-                        event_status=getattr(change, "event_status", "pending"),
-                        change_policy_id=getattr(change, "change_policy_id", None),
-                        change_policy_version_id=getattr(
+                change_values.append(
+                    {
+                        "id": change.change_id,
+                        "idempotency_key": key,
+                        "run_id": change.run_id,
+                        "device_id": change.device_id,
+                        "canonical_command": change.command,
+                        "entity_type": change.entity_type,
+                        "entity_key": change.entity_key,
+                        "dimensions_json": getattr(change, "dimensions", None),
+                        "field": change.field,
+                        "observation_type": getattr(change, "observation_type", None),
+                        "old_value_json": change.old_value,
+                        "new_value_json": change.new_value,
+                        "change_type": change.change_type,
+                        "previous_snapshot_id": change.previous_snapshot_id,
+                        "current_snapshot_id": change.current_snapshot_id,
+                        "previous_observation_id": getattr(change, "previous_observation_id", None),
+                        "current_observation_id": getattr(change, "current_observation_id", None),
+                        "source": getattr(change, "source", "patrol"),
+                        "old_number": getattr(change, "old_number", None),
+                        "new_number": getattr(change, "new_number", None),
+                        "event_status": getattr(change, "event_status", "pending"),
+                        "change_policy_id": getattr(change, "change_policy_id", None),
+                        "change_policy_version_id": getattr(
                             change, "change_policy_version_id", None
                         ),
-                        comparison_type=getattr(change, "comparison_type", None),
-                        decision_reason=getattr(change, "decision_reason", None),
-                        policy_snapshot_json=getattr(change, "policy_snapshot", None),
-                        observed_at=(
+                        "comparison_type": getattr(change, "comparison_type", None),
+                        "decision_reason": getattr(change, "decision_reason", None),
+                        "policy_snapshot_json": getattr(change, "policy_snapshot", None),
+                        "observed_at": (
                             _datetime(getattr(change, "observed_at", None))
                             if getattr(change, "observed_at", None)
                             else None
                         ),
-                        detected_at=_datetime(change.detected_at),
-                        processed_at=_datetime(
+                        "detected_at": _datetime(change.detected_at),
+                        "processed_at": _datetime(
                             getattr(change, "processed_at", None) or change.detected_at
                         ),
-                        confidence=change.confidence,
-                        created_at=datetime.now(timezone.utc),
-                    )
+                        "confidence": change.confidence,
+                        "created_at": datetime.now(timezone.utc),
+                    }
                 )
-                created += 1
+            if change_values:
+                stmt = (
+                    pg_insert(NetworkChangeRecord)
+                    .values(change_values)
+                    .on_conflict_do_nothing(index_elements=["idempotency_key"])
+                    .returning(NetworkChangeRecord.id)
+                )
+                created = len(db.execute(stmt).all())
         return created
 
     def list_changes(
@@ -160,6 +156,7 @@ class ChangeEventRepository:
                     "command": row.canonical_command,
                     "entity_type": row.entity_type,
                     "entity_key": row.entity_key,
+                    "dimensions": row.dimensions_json or {},
                     "field": row.field,
                     "observation_type": row.observation_type,
                     "old": row.old_value_json,
@@ -196,9 +193,7 @@ class ChangeEventRepository:
         if not change_ids:
             return 0
         with get_db_session() as db:
-            query = db.query(NetworkChangeRecord).filter(
-                NetworkChangeRecord.id.in_(change_ids)
-            )
+            query = db.query(NetworkChangeRecord).filter(NetworkChangeRecord.id.in_(change_ids))
             if only_pending:
                 query = query.filter(NetworkChangeRecord.event_status == "pending")
             rows = query.all()
@@ -233,12 +228,24 @@ class ChangeEventRepository:
                     continue
                 active = self._find_active_event(db, event)
                 if active is not None:
+                    occurrence_created = self._record_event_occurrence(db, active.id, event)
+                    if not occurrence_created:
+                        continue
                     payload = dict(active.payload_json or {})
                     payload["latest_change"] = event.payload.get("change")
                     payload["latest_source_change_id"] = event.source_change_id
                     payload["latest_observed_at"] = event.occurred_at
                     active.payload_json = payload
-                    active.run_id = event.run_id or active.run_id
+                    active.correlation_key = str(
+                        (event.payload or {}).get("correlation_key") or active.correlation_key
+                    )
+                    active.correlation_dimensions_json = dict(
+                        (event.payload or {}).get("correlation_dimensions") or {}
+                    )
+                    active.latest_change_id = event.source_change_id
+                    active.last_seen_run_id = event.run_id
+                    active.last_seen_at = _datetime(event.occurred_at)
+                    active.occurrence_count = int(active.occurrence_count or 1) + 1
                     if event.source_change_id:
                         change = db.get(NetworkChangeRecord, event.source_change_id)
                         if change is not None:
@@ -253,22 +260,25 @@ class ChangeEventRepository:
                         device_id=event.device_id,
                         entity_type=event.entity_type,
                         entity_key=event.entity_key,
-                        correlation_key=str(
-                            (event.payload or {}).get("correlation_key") or ""
+                        correlation_key=str((event.payload or {}).get("correlation_key") or ""),
+                        correlation_dimensions_json=dict(
+                            (event.payload or {}).get("correlation_dimensions") or {}
                         ),
                         source_change_id=event.source_change_id,
                         run_id=event.run_id,
+                        latest_change_id=event.source_change_id,
+                        last_seen_run_id=event.run_id,
                         occurred_at=_datetime(event.occurred_at),
-                        status=(
-                            "resolved"
-                            if _event_class(event) == "recovery"
-                            else event.status
-                        ),
+                        first_seen_at=_datetime(event.occurred_at),
+                        last_seen_at=_datetime(event.occurred_at),
+                        occurrence_count=1,
+                        status=("resolved" if _event_class(event) == "recovery" else event.status),
                         payload_json=self._event_payload(event),
                         created_at=datetime.now(timezone.utc),
                     )
                 )
                 db.flush()
+                self._record_event_occurrence(db, event.event_id, event)
                 self._enqueue_event(db, event)
                 if event.source_change_id:
                     change = db.get(NetworkChangeRecord, event.source_change_id)
@@ -276,6 +286,35 @@ class ChangeEventRepository:
                         change.event_status = "event_created"
                 created += 1
         return created
+
+    def _record_event_occurrence(self, db, event_id: str, event: Any) -> bool:
+        key = _digest(
+            (
+                event_id,
+                event.source_change_id,
+                event.run_id,
+                event.event_type,
+                event.occurred_at,
+            )
+        )
+        stmt = (
+            pg_insert(NetworkEventOccurrenceRecord)
+            .values(
+                id=str(uuid.uuid5(uuid.NAMESPACE_URL, key)),
+                idempotency_key=key,
+                event_id=event_id,
+                run_id=event.run_id,
+                source_change_id=event.source_change_id,
+                observed_at=_datetime(event.occurred_at),
+                severity=event.severity,
+                occurrence_kind=("recovery" if _event_class(event) == "recovery" else "observed"),
+                payload_json=self._event_payload(event),
+                created_at=datetime.now(timezone.utc),
+            )
+            .on_conflict_do_nothing(index_elements=["idempotency_key"])
+            .returning(NetworkEventOccurrenceRecord.id)
+        )
+        return db.execute(stmt).scalar_one_or_none() is not None
 
     def _save_decision_row(self, db, decision: dict[str, Any]) -> None:
         key = _digest(
@@ -288,9 +327,11 @@ class ChangeEventRepository:
                 decision.get("change_policy_version_id"),
             )
         )
-        if db.query(NetworkChangeDecisionRecord.id).filter(
-            NetworkChangeDecisionRecord.idempotency_key == key
-        ).first():
+        if (
+            db.query(NetworkChangeDecisionRecord.id)
+            .filter(NetworkChangeDecisionRecord.idempotency_key == key)
+            .first()
+        ):
             return
         db.add(
             NetworkChangeDecisionRecord(
@@ -313,14 +354,10 @@ class ChangeEventRepository:
                 old_value_json=decision.get("old"),
                 new_value_json=decision.get("new"),
                 observed_at=(
-                    _datetime(decision.get("observed_at"))
-                    if decision.get("observed_at")
-                    else None
+                    _datetime(decision.get("observed_at")) if decision.get("observed_at") else None
                 ),
                 expires_at=(
-                    _datetime(decision.get("expires_at"))
-                    if decision.get("expires_at")
-                    else None
+                    _datetime(decision.get("expires_at")) if decision.get("expires_at") else None
                 ),
                 metadata_json=dict(decision.get("metadata") or {}),
                 created_at=datetime.now(timezone.utc),
@@ -337,6 +374,28 @@ class ChangeEventRepository:
             )
             return [row.to_dict() for row in rows]
 
+    def purge_expired_change_decisions(self, *, limit: int = 5000) -> int:
+        now = datetime.now(timezone.utc)
+        with get_db_session() as db:
+            ids = [
+                row[0]
+                for row in db.query(NetworkChangeDecisionRecord.id)
+                .filter(
+                    NetworkChangeDecisionRecord.expires_at.is_not(None),
+                    NetworkChangeDecisionRecord.expires_at < now,
+                )
+                .order_by(NetworkChangeDecisionRecord.expires_at)
+                .limit(max(1, min(int(limit), 10000)))
+                .all()
+            ]
+            if not ids:
+                return 0
+            return (
+                db.query(NetworkChangeDecisionRecord)
+                .filter(NetworkChangeDecisionRecord.id.in_(ids))
+                .delete(synchronize_session=False)
+            )
+
     @staticmethod
     def _event_payload(event: Any) -> dict[str, Any]:
         payload = dict(event.payload or {})
@@ -344,15 +403,15 @@ class ChangeEventRepository:
         return payload
 
     def _enqueue_event(self, db, event: Any) -> None:
-        if db.query(NetworkEventOutboxRecord.id).filter(
-            NetworkEventOutboxRecord.event_id == event.event_id
-        ).first():
+        if (
+            db.query(NetworkEventOutboxRecord.id)
+            .filter(NetworkEventOutboxRecord.event_id == event.event_id)
+            .first()
+        ):
             return
         now = datetime.now(timezone.utc)
         payload = event.to_dict()
-        payload["status"] = (
-            "resolved" if _event_class(event) == "recovery" else event.status
-        )
+        payload["status"] = "resolved" if _event_class(event) == "recovery" else event.status
         db.add(
             NetworkEventOutboxRecord(
                 id=str(uuid.uuid4()),
@@ -371,10 +430,14 @@ class ChangeEventRepository:
         correlation_key = str((event.payload or {}).get("correlation_key") or "")
         if not correlation_key:
             return None
+        correlation_keys = [correlation_key]
+        legacy = str((event.payload or {}).get("legacy_correlation_key") or "")
+        if legacy and legacy not in correlation_keys:
+            correlation_keys.append(legacy)
         return (
             db.query(NetworkEventRecord)
             .filter(NetworkEventRecord.event_type == event.event_type)
-            .filter(NetworkEventRecord.correlation_key == correlation_key)
+            .filter(NetworkEventRecord.correlation_key.in_(correlation_keys))
             .filter(NetworkEventRecord.status.in_(["open", "acknowledged", "recovering"]))
             .order_by(NetworkEventRecord.occurred_at.desc())
             .first()
@@ -392,12 +455,16 @@ class ChangeEventRepository:
         correlation_key = str((event.payload or {}).get("correlation_key") or "")
         if not correlation_key:
             return False
+        correlation_keys = [correlation_key]
+        legacy = str((event.payload or {}).get("legacy_correlation_key") or "")
+        if legacy and legacy not in correlation_keys:
+            correlation_keys.append(legacy)
         resolved = False
         for target_type in target_types:
             rows = (
                 db.query(NetworkEventRecord)
                 .filter(NetworkEventRecord.event_type == target_type)
-                .filter(NetworkEventRecord.correlation_key == correlation_key)
+                .filter(NetworkEventRecord.correlation_key.in_(correlation_keys))
                 .filter(NetworkEventRecord.status.in_(["open", "acknowledged", "recovering"]))
                 .all()
             )
@@ -414,7 +481,7 @@ class ChangeEventRepository:
     def claim_event_outbox(
         self,
         *,
-        limit: int = 100,
+        limit: int = 10,
         lease_seconds: int = 60,
     ) -> tuple[str, list[dict[str, Any]]]:
         claim_token = str(uuid.uuid4())
@@ -424,9 +491,7 @@ class ChangeEventRepository:
                 db.query(NetworkEventOutboxRecord)
                 .filter(
                     NetworkEventOutboxRecord.available_at <= datetime.now(timezone.utc),
-                    (
-                        NetworkEventOutboxRecord.status.in_(["pending", "retry_wait"])
-                    )
+                    (NetworkEventOutboxRecord.status.in_(["pending", "retry_wait"]))
                     | (
                         (NetworkEventOutboxRecord.status == "publishing")
                         & (NetworkEventOutboxRecord.lease_until < now)
@@ -445,6 +510,32 @@ class ChangeEventRepository:
                 row.updated_at = now
             db.flush()
             return claim_token, [row.to_dict() for row in rows]
+
+    def renew_event_outbox_claim(
+        self,
+        outbox_id: str,
+        *,
+        claim_token: str,
+        lease_seconds: int = 60,
+    ) -> bool:
+        now = datetime.now(timezone.utc)
+        with get_db_session() as db:
+            updated = (
+                db.query(NetworkEventOutboxRecord)
+                .filter(
+                    NetworkEventOutboxRecord.id == outbox_id,
+                    NetworkEventOutboxRecord.status == "publishing",
+                    NetworkEventOutboxRecord.claim_token == claim_token,
+                )
+                .update(
+                    {
+                        "lease_until": now + timedelta(seconds=max(5, int(lease_seconds))),
+                        "updated_at": now,
+                    },
+                    synchronize_session=False,
+                )
+            )
+            return updated == 1
 
     def mark_event_outbox_published(
         self,
@@ -516,11 +607,32 @@ class ChangeEventRepository:
                     "entity_type": row.entity_type,
                     "entity_key": row.entity_key,
                     "correlation_key": row.correlation_key,
+                    "correlation_dimensions": row.correlation_dimensions_json or {},
                     "source_change_id": row.source_change_id,
                     "run_id": row.run_id,
+                    "latest_change_id": row.latest_change_id,
+                    "last_seen_run_id": row.last_seen_run_id,
+                    "first_seen_at": row.first_seen_at.isoformat(),
+                    "last_seen_at": row.last_seen_at.isoformat(),
+                    "occurrence_count": row.occurrence_count,
                     "occurred_at": row.occurred_at.isoformat(),
                     "status": row.status,
                     "payload": row.payload_json,
                 }
                 for row in rows
             ]
+
+    def list_event_occurrences(
+        self,
+        *,
+        run_id: str | None = None,
+        event_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        with get_db_session() as db:
+            query = db.query(NetworkEventOccurrenceRecord)
+            if run_id:
+                query = query.filter(NetworkEventOccurrenceRecord.run_id == run_id)
+            if event_id:
+                query = query.filter(NetworkEventOccurrenceRecord.event_id == event_id)
+            rows = query.order_by(NetworkEventOccurrenceRecord.observed_at).all()
+            return [row.to_dict() for row in rows]
