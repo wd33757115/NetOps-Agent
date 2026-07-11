@@ -18,6 +18,7 @@ from src.infrastructure.db.models import (
     EventRuleRecord,
     EventRuleVersionRecord,
     NetworkEventOccurrenceRecord,
+    NetworkEventOutboxRecord,
     NetworkEventRecord,
     PatrolRun,
 )
@@ -189,6 +190,18 @@ def test_active_event_keeps_opening_run_and_appends_occurrence():
                 .all()
             )
             assert [item.run_id for item in occurrences] == ["run-A", "run-B"]
+            outbox_rows = (
+                db.query(NetworkEventOutboxRecord)
+                .filter(NetworkEventOutboxRecord.event_id == first_id)
+                .order_by(NetworkEventOutboxRecord.created_at)
+                .all()
+            )
+            assert len(outbox_rows) == 2
+            assert len({item.occurrence_id for item in outbox_rows}) == 2
+            assert [item.payload_json["publication_kind"] for item in outbox_rows] == [
+                "opening",
+                "recurrence",
+            ]
     finally:
         with get_db_session() as db:
             db.query(NetworkEventRecord).filter(NetworkEventRecord.id == first_id).delete(
@@ -230,6 +243,34 @@ def test_create_run_is_idempotent_and_stale_run_is_reconciled():
     finally:
         with get_db_session() as db:
             db.query(PatrolRun).filter(PatrolRun.id == run_id).delete(synchronize_session=False)
+
+
+def test_worker_redelivery_abandons_running_attempt_and_allocates_next():
+    logical_run_id = f"patrol-{uuid.uuid4()}"
+    repository = PatrolRepository()
+    try:
+        repository.create_run(
+            run_id=logical_run_id,
+            source="device-patrol",
+            mode="production",
+            logical_run_id=logical_run_id,
+            attempt_number=0,
+            lease_seconds=900,
+        )
+
+        next_attempt = repository.prepare_redelivery_attempt(logical_run_id)
+
+        assert next_attempt == 1
+        abandoned = repository.get_run(logical_run_id)
+        assert abandoned["status"] == "abandoned"
+        assert abandoned["collection_status"] == "failed"
+        assert abandoned["analysis_status"] == "failed"
+        assert abandoned["metadata_json"]["abandoned_reason"] == "celery_worker_lost_redelivery"
+    finally:
+        with get_db_session() as db:
+            db.query(PatrolRun).filter(PatrolRun.logical_run_id == logical_run_id).delete(
+                synchronize_session=False
+            )
 
 
 def test_invalid_fact_timestamp_is_rejected():

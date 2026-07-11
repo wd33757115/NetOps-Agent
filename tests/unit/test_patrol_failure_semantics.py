@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+from src.core.celery_tasks import tasks as celery_tasks
 from src.core.collection import CollectionItem, ExecutionPlan
 from src.core.device_ops.tools import DeviceFilter, PatrolTool
 from src.core.ingestion.adapters.cli import (
@@ -16,6 +17,7 @@ from src.core.ingestion.adapters.cli import (
     command_collection_manifest_path,
     load_command_collection_manifest,
 )
+from src.core.patrol.change_event_repository import ChangeEventRepository
 from src.core.patrol.concurrency import DistributedPatrolSemaphore
 from src.core.patrol.event_builder import (
     build_events_from_changes,
@@ -257,6 +259,60 @@ def test_patrol_batch_is_bounded_and_isolates_device_lease_failure():
     assert result.failed_devices == 1
     assert peak_active <= 2
     assert result.details[0]["failure_code"] == "concurrency_lease_timeout"
+
+
+def test_patrol_worker_redelivery_allocates_new_attempt(monkeypatch):
+    calls = []
+
+    class FakeRepository:
+        def prepare_redelivery_attempt(self, logical_run_id):
+            calls.append(logical_run_id)
+            return 4
+
+    monkeypatch.setattr(celery_tasks, "PatrolRepository", FakeRepository)
+    request = SimpleNamespace(
+        id="task-1",
+        retries=0,
+        delivery_info={"redelivered": True},
+    )
+
+    assert celery_tasks._patrol_attempt_number(request) == 4
+    assert calls == ["patrol-task-1"]
+    assert celery_tasks.execute_device_patrol_task.acks_late is True
+    assert celery_tasks.execute_device_patrol_task.reject_on_worker_lost is True
+
+
+def test_change_decisions_are_persisted_with_one_bulk_statement(monkeypatch):
+    statements = []
+
+    class FakeDb:
+        def execute(self, statement):
+            statements.append(statement)
+
+    @contextmanager
+    def fake_session():
+        yield FakeDb()
+
+    monkeypatch.setattr(
+        "src.core.patrol.change_event_repository.get_db_session",
+        fake_session,
+    )
+    decisions = [
+        {
+            "run_id": "run-1",
+            "current_observation_id": f"observation-{index}",
+            "decision": "suppressed",
+            "reason": "deadband",
+            "entity_type": "interface_l2",
+            "entity_key": f"Gi1/0/{index}",
+            "field": "status",
+        }
+        for index in range(100)
+    ]
+
+    assert ChangeEventRepository().save_changes([], decisions=decisions) == 0
+    assert len(statements) == 1
+    assert "netops_network_change_decisions" in str(statements[0])
 
 
 def test_observation_baseline_requires_collection_level_eligibility():

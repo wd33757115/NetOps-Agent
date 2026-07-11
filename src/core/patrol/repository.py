@@ -203,6 +203,44 @@ class PatrolRepository:
                 reconciled.append(row.id)
         return {"reconciled_count": len(reconciled), "run_ids": reconciled}
 
+    def prepare_redelivery_attempt(self, logical_run_id: str) -> int:
+        """Abandon a worker-lost attempt and allocate the next attempt number."""
+        now = _utcnow()
+        with get_db_session() as db:
+            rows = (
+                db.query(PatrolRun)
+                .filter(PatrolRun.logical_run_id == logical_run_id)
+                .order_by(PatrolRun.attempt_number)
+                .with_for_update()
+                .all()
+            )
+            next_attempt = (
+                max(
+                    [int(row.attempt_number or 0) for row in rows],
+                    default=0,
+                )
+                + 1
+            )
+            for row in rows:
+                if row.status != "running":
+                    continue
+                snapshot_count = (
+                    db.query(CommandSnapshot.id).filter(CommandSnapshot.run_id == row.id).count()
+                )
+                row.status = "abandoned"
+                row.collection_status = "partial" if snapshot_count else "failed"
+                row.analysis_status = "failed"
+                row.baseline_eligible = False
+                row.completed_at = now
+                row.lease_until = None
+                row.metadata_json = {
+                    **(row.metadata_json or {}),
+                    "abandoned_reason": "celery_worker_lost_redelivery",
+                    "redelivered_at": now.isoformat(),
+                }
+                row.updated_at = now
+            return next_attempt
+
     def finish_run(
         self,
         run_id: str,

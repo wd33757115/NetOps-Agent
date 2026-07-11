@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -99,8 +101,28 @@ def _import_fingerprint(
     device_id: str,
     canonical_command: str,
     raw_text: str,
+    run_id: str | None = None,
+    inventory_device_id: str | None = None,
+    command_observed_at: str | None = None,
+    command_ordinal: int | None = None,
 ) -> str:
     raw_hash = hashlib.sha256((raw_text or "").encode("utf-8")).hexdigest()
+    if run_id:
+        encoded = json.dumps(
+            [
+                "command-fact-v1",
+                mode,
+                run_id,
+                inventory_device_id or device_id,
+                canonical_command.strip().lower(),
+                command_observed_at or {"missing": True, "ordinal": command_ordinal},
+                raw_hash,
+            ],
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
+        )
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
     value = "|".join(
         [
             "v2",
@@ -281,8 +303,7 @@ def import_raw_capture(
     blocking = [
         item
         for item in coverage
-        if item["policy_status"] == "eligible"
-        and item["coverage_status"] != "ready"
+        if item["policy_status"] == "eligible" and item["coverage_status"] != "ready"
     ]
 
     parsed_blocks = []
@@ -318,12 +339,23 @@ def import_raw_capture(
             "template_version": parsed.template_version,
         }
         for _, parsed in parsed_blocks
-        if parsed.policy_status == "eligible"
-        and parsed.parser_status not in {"success", "empty"}
+        if parsed.policy_status == "eligible" and parsed.parser_status not in {"success", "empty"}
     ]
 
     repository = PatrolRepository()
     dataset_id = _dataset_id(path, metadata)
+    per_command_status = {
+        " ".join(str(command).strip().lower().split()): dict(result or {})
+        for command, result in (command_collection_statuses or {}).items()
+    }
+    command_observed_ats = [
+        (
+            per_command_status.get(block.command_canonical, {}).get("observed_at")
+            or observed_at
+            or inspected.observed_at_text
+        )
+        for block, _ in parsed_blocks
+    ]
     fingerprints = [
         _import_fingerprint(
             mode=mode,
@@ -332,8 +364,12 @@ def import_raw_capture(
             device_id=device_id,
             canonical_command=block.command_canonical,
             raw_text=block.raw_output,
+            run_id=run_id,
+            inventory_device_id=inventory_device_id,
+            command_observed_at=command_observed_at,
+            command_ordinal=block.start_line,
         )
-        for block, _ in parsed_blocks
+        for (block, _), command_observed_at in zip(parsed_blocks, command_observed_ats, strict=True)
     ]
     existing = repository.find_snapshots_by_import_fingerprints(set(fingerprints))
     if fingerprints and all(fingerprint in existing for fingerprint in fingerprints):
@@ -345,14 +381,10 @@ def import_raw_capture(
             "device_name": device_name,
             "ip": ip,
             "command_count": len(blocks),
-            "snapshot_ids": [
-                snapshot.snapshot_id for snapshot in existing_snapshots
-            ],
+            "snapshot_ids": [snapshot.snapshot_id for snapshot in existing_snapshots],
             "new_snapshot_count": 0,
             "duplicate_snapshot_count": len(existing_snapshots),
-            "duplicate_snapshot_ids": [
-                snapshot.snapshot_id for snapshot in existing_snapshots
-            ],
+            "duplicate_snapshot_ids": [snapshot.snapshot_id for snapshot in existing_snapshots],
             "commands": [block.command_canonical for block in blocks],
             "vendor": vendor,
             "model": model,
@@ -408,19 +440,10 @@ def import_raw_capture(
     snapshot_ids: list[str] = []
     duplicate_snapshot_ids: list[str] = []
     parser_results: list[dict[str, Any]] = []
-    per_command_status = {
-        " ".join(str(command).strip().lower().split()): dict(result or {})
-        for command, result in (command_collection_statuses or {}).items()
-    }
-    for (block, parsed), fingerprint in zip(
-        parsed_blocks, fingerprints, strict=True
+    for (block, parsed), fingerprint, command_observed_at in zip(
+        parsed_blocks, fingerprints, command_observed_ats, strict=True
     ):
         command_collection = per_command_status.get(block.command_canonical, {})
-        command_observed_at = (
-            command_collection.get("observed_at")
-            or observed_at
-            or inspected.observed_at_text
-        )
         parse_status = "raw_only"
         structured = None
         parser_name = None
@@ -441,6 +464,9 @@ def import_raw_capture(
             parse_status = "parse_failed"
         parser_name = parsed.template_id
         parser_version = parsed.template_version
+        deterministic_snapshot_id = (
+            str(uuid.uuid5(uuid.NAMESPACE_URL, fingerprint)) if run_id else None
+        )
         snapshot_id, snapshot_created = repository.save_snapshot_idempotent(
             run_id=rid,
             device_id=device_id,
@@ -459,6 +485,7 @@ def import_raw_capture(
             dataset_id=dataset_id,
             source_file_hash=source_file_hash,
             import_fingerprint=fingerprint,
+            snapshot_id=deterministic_snapshot_id,
             start_line=block.start_line,
             end_line=block.end_line,
             metadata={
@@ -472,16 +499,22 @@ def import_raw_capture(
         if not snapshot_created:
             duplicate_snapshot_ids.append(snapshot_id)
         candidate_job_id = None
-        if snapshot_created and mode == PARSER_VALIDATION_MODE and parsed.failure_code in {
-            "template_missing",
-            "template_parse_error",
-            "unexpected_empty",
-            "required_fields_missing",
-            "field_validation_failed",
-            "primary_key_invalid",
-            "primary_key_duplicate",
-            "asset_hash_mismatch",
-        } and not _non_repairable_output(block.raw_output):
+        if (
+            snapshot_created
+            and mode == PARSER_VALIDATION_MODE
+            and parsed.failure_code
+            in {
+                "template_missing",
+                "template_parse_error",
+                "unexpected_empty",
+                "required_fields_missing",
+                "field_validation_failed",
+                "primary_key_invalid",
+                "primary_key_duplicate",
+                "asset_hash_mismatch",
+            }
+            and not _non_repairable_output(block.raw_output)
+        ):
             from src.core.parser.repository import ParserRepository
 
             candidate_job_id = ParserRepository().create_candidate(
@@ -524,10 +557,7 @@ def import_raw_capture(
             if command_collection
             else collector_complete is True
         )
-        authoritative = bool(
-            command_complete
-            and parse_status in {"parsed", "parse_empty"}
-        )
+        authoritative = bool(command_complete and parse_status in {"parsed", "parse_empty"})
         repository.save_collection_result(
             run_id=rid,
             inventory_device_id=inventory_device_id,
@@ -548,11 +578,7 @@ def import_raw_capture(
     if finalize_run:
         repository.finish_run(
             rid,
-            collection_status=(
-                "completed"
-                if not blocking and not parse_violations
-                else "partial"
-            ),
+            collection_status=("completed" if not blocking and not parse_violations else "partial"),
             analysis_status="pending",
             baseline_eligible=False,
         )
@@ -579,9 +605,7 @@ def import_raw_capture(
         "coverage": coverage,
         "coverage_violations": blocking,
         "parse_violations": parse_violations,
-        "production_parser_ready": not (
-            mode == PRODUCTION_MODE and (blocking or parse_violations)
-        ),
+        "production_parser_ready": not (mode == PRODUCTION_MODE and (blocking or parse_violations)),
         "parser_results": parser_results,
     }
 
@@ -653,15 +677,9 @@ def import_raw_path(
         "file_count": len(imported),
         "device_count": len({item["device_id"] for item in imported}),
         "command_count": sum(item["command_count"] for item in imported),
-        "snapshot_ids": [
-            snapshot_id
-            for item in imported
-            for snapshot_id in item["snapshot_ids"]
-        ],
+        "snapshot_ids": [snapshot_id for item in imported for snapshot_id in item["snapshot_ids"]],
         "new_snapshot_count": sum(item["new_snapshot_count"] for item in imported),
-        "duplicate_snapshot_count": sum(
-            item["duplicate_snapshot_count"] for item in imported
-        ),
+        "duplicate_snapshot_count": sum(item["duplicate_snapshot_count"] for item in imported),
         "files": [
             {
                 "file_path": str(candidate),

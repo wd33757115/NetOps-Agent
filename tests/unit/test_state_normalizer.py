@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from src.core.patrol.change_detector import detect_observation_changes_against_history
-from src.core.patrol.change_detector import detect_changes_from_params
-from src.core.state.domain import StateObservation
+from src.core.patrol.change_detector import (
+    detect_changes_from_params,
+    detect_observation_changes_against_history,
+)
 from src.core.state import normalizer
+from src.core.state.domain import StateObservation
 from src.core.state.normalizer import (
     normalize_run,
     normalize_snapshot,
@@ -145,11 +147,66 @@ def test_template_contract_prefers_observation_contract(monkeypatch):
     assert contract["primary_keys"] == ["interface"]
 
 
+def test_template_contract_resolves_exact_snapshot_version(monkeypatch):
+    class FakeContractRepository:
+        def get_validation_dict(self, *, source_type, schema_id, version):
+            assert (source_type, schema_id, version) == ("cli", "template-1", 3)
+            return {
+                "contract_id": "contract-v3",
+                "entity_type": "interface_l3",
+                "primary_keys": ["interface"],
+                "contract_version": 3,
+            }
+
+    class ParserRepositoryShouldNotBeUsed:
+        def get_template(self, template_id):
+            raise AssertionError("exact ObservationContract should be resolved first")
+
+    monkeypatch.setattr(
+        normalizer,
+        "ObservationContractRepository",
+        FakeContractRepository,
+    )
+    monkeypatch.setattr(
+        normalizer,
+        "ParserRepository",
+        ParserRepositoryShouldNotBeUsed,
+    )
+
+    contract = normalizer._template_contract("template-1", contract_version=3)
+
+    assert contract["contract_id"] == "contract-v3"
+    assert contract["contract_version"] == 3
+
+
+def test_template_contract_fails_closed_when_snapshot_version_is_missing(monkeypatch):
+    class FakeContractRepository:
+        def get_validation_dict(self, **_kwargs):
+            return None
+
+    class FakeParserRepository:
+        def get_template(self, _template_id):
+            return None
+
+    monkeypatch.setattr(
+        normalizer,
+        "ObservationContractRepository",
+        FakeContractRepository,
+    )
+    monkeypatch.setattr(normalizer, "ParserRepository", FakeParserRepository)
+
+    with pytest.raises(
+        normalizer.ObservationContractVersionError,
+        match="cli:template-1 v3",
+    ):
+        normalizer._template_contract("template-1", contract_version=3)
+
+
 def test_observations_from_snapshot_uses_template_contract(monkeypatch):
     monkeypatch.setattr(
         normalizer,
         "_template_contract",
-        lambda template_id: {
+        lambda template_id, **_kwargs: {
             "entity_type": "interface_l3",
             "primary_keys": ["interface"],
             "ignore_fields": ["description"],
@@ -200,7 +257,7 @@ def test_observations_from_snapshot_prefers_inventory_device_id(monkeypatch):
     monkeypatch.setattr(
         normalizer,
         "_template_contract",
-        lambda template_id: {
+        lambda template_id, **_kwargs: {
             "entity_type": "interface_l3",
             "primary_keys": ["interface"],
             "contract_version": 3,
@@ -219,9 +276,7 @@ def test_observations_from_snapshot_prefers_inventory_device_id(monkeypatch):
             "parser_template_id": "template-1",
             "parser_version": "v1",
             "observed_at": "2026-06-20T10:00:00+00:00",
-            "structured_json": [
-                {"interface": "Eth1/1", "status": "up", "protocol": "up"}
-            ],
+            "structured_json": [{"interface": "Eth1/1", "status": "up", "protocol": "up"}],
         },
         mode="production",
         source="test",
@@ -229,19 +284,15 @@ def test_observations_from_snapshot_prefers_inventory_device_id(monkeypatch):
     )
 
     assert {item.device_id for item in observations} == {"inventory-device-1"}
-    assert {item.metadata["external_device_id"] for item in observations} == {
-        "SW1-10.0.0.1"
-    }
-    assert {item.metadata["identity_status"] for item in observations} == {
-        "inventory_bound"
-    }
+    assert {item.metadata["external_device_id"] for item in observations} == {"SW1-10.0.0.1"}
+    assert {item.metadata["identity_status"] for item in observations} == {"inventory_bound"}
 
 
 def test_observations_from_snapshot_skips_interface_header_artifact(monkeypatch):
     monkeypatch.setattr(
         normalizer,
         "_template_contract",
-        lambda template_id: {
+        lambda template_id, **_kwargs: {
             "entity_type": "interface_l3",
             "primary_keys": ["interface"],
             "contract_version": 3,
@@ -286,7 +337,7 @@ def test_observations_from_snapshot_applies_default_state_normalization(monkeypa
     monkeypatch.setattr(
         normalizer,
         "_template_contract",
-        lambda template_id: {
+        lambda template_id, **_kwargs: {
             "entity_type": "device",
             "primary_keys": [],
             "contract_version": 1,
@@ -500,15 +551,14 @@ def test_observation_change_detector_uses_observation_ids(monkeypatch):
             ]
 
     saved = {}
+
     def fake_save_changes(changes, **kwargs):
         saved["changes"] = changes
         saved["derived_observations"] = kwargs.get("derived_observations")
         saved["decisions"] = kwargs.get("decisions")
         return len(changes)
 
-    monkeypatch.setattr(
-        "src.core.patrol.change_detector.StateRepository", FakeRepository
-    )
+    monkeypatch.setattr("src.core.patrol.change_detector.StateRepository", FakeRepository)
     monkeypatch.setattr(
         "src.core.patrol.change_detector.save_changes",
         fake_save_changes,
@@ -528,8 +578,7 @@ def test_observation_change_detector_uses_observation_ids(monkeypatch):
         for change in result["changes"]
     )
     assert any(
-        change["current_observation_id"] == "obs-new-command"
-        and change["change_type"] == "initial"
+        change["current_observation_id"] == "obs-new-command" and change["change_type"] == "initial"
         for change in result["changes"]
     )
     change = result["changes"][0]
@@ -585,9 +634,7 @@ def test_observation_change_detector_accepts_explicit_previous_run(monkeypatch):
         def list_prior_observations_for_run(self, run_id):
             raise AssertionError("explicit previous_run_id should not scan all history")
 
-    monkeypatch.setattr(
-        "src.core.patrol.change_detector.StateRepository", FakeRepository
-    )
+    monkeypatch.setattr("src.core.patrol.change_detector.StateRepository", FakeRepository)
     monkeypatch.setattr(
         "src.core.patrol.change_detector.save_changes",
         lambda changes, **_kwargs: len(changes),
@@ -666,9 +713,7 @@ def test_observation_change_detector_uses_active_change_policy(monkeypatch):
                 }
             ]
 
-    monkeypatch.setattr(
-        "src.core.patrol.change_detector.StateRepository", FakeRepository
-    )
+    monkeypatch.setattr("src.core.patrol.change_detector.StateRepository", FakeRepository)
     monkeypatch.setattr(
         "src.core.patrol.change_detector.ChangePolicyRepository", FakePolicyRepository
     )
@@ -744,9 +789,7 @@ def test_observation_change_detector_emits_threshold_crossing_with_policy(monkey
                 }
             ]
 
-    monkeypatch.setattr(
-        "src.core.patrol.change_detector.StateRepository", FakeRepository
-    )
+    monkeypatch.setattr("src.core.patrol.change_detector.StateRepository", FakeRepository)
     monkeypatch.setattr(
         "src.core.patrol.change_detector.ChangePolicyRepository", FakePolicyRepository
     )
@@ -796,9 +839,7 @@ def test_observation_change_detector_filters_selected_devices(monkeypatch):
         def list_prior_observations_for_run(self, run_id):
             raise AssertionError("explicit previous_run_id should be used")
 
-    monkeypatch.setattr(
-        "src.core.patrol.change_detector.StateRepository", FakeRepository
-    )
+    monkeypatch.setattr("src.core.patrol.change_detector.StateRepository", FakeRepository)
     monkeypatch.setattr(
         "src.core.patrol.change_detector.save_changes",
         lambda changes, **_kwargs: len(changes),

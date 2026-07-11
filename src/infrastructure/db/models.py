@@ -40,7 +40,11 @@ class TaskStatus(Base):
     itsm_callback_url = Column(String(512), nullable=True)
     itsm_callback_status = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
     is_deleted = Column(Boolean, default=False)
 
 
@@ -74,7 +78,11 @@ class KnowledgeBaseIndex(Base):
     vector_ids = Column(JSON, comment="关联向量库ID列表")
     is_indexed = Column(Boolean, default=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
 
 class Conversation(Base):
@@ -87,12 +95,14 @@ class Conversation(Base):
     status = Column(String(32), default="active", comment="active / archived")
     summary = Column(Text, nullable=True, comment="对话总结")
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
     is_deleted = Column(Boolean, default=False)
 
-    __table_args__ = (
-        {'comment': '对话会话表 - 存储用户与Agent的对话历史'},
-    )
+    __table_args__ = ({"comment": "对话会话表 - 存储用户与Agent的对话历史"},)
 
 
 class UserSession(Base):
@@ -145,9 +155,7 @@ class Message(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, default=False)
 
-    __table_args__ = (
-        {'comment': '消息表 - 存储单条对话消息'},
-    )
+    __table_args__ = ({"comment": "消息表 - 存储单条对话消息"},)
 
 
 class Team(Base):
@@ -160,7 +168,11 @@ class Team(Base):
     description = Column(Text, nullable=True)
     created_by = Column(String(64), index=True, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
     is_deleted = Column(Boolean, default=False)
 
 
@@ -180,7 +192,11 @@ class WorkflowRun(Base):
     current_step_index = Column(Integer, default=0)
     error_message = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
     completed_at = Column(DateTime, nullable=True)
 
 
@@ -203,7 +219,11 @@ class WorkflowPluginMetadata(Base):
     created_by = Column(String(64), index=True, nullable=True)
     updated_by = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
     published_at = Column(DateTime, nullable=True)
 
 
@@ -221,9 +241,7 @@ class WorkflowPluginVersion(Base):
     created_by = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    __table_args__ = (
-        Index("uq_workflow_plugin_version", "plugin_name", "version", unique=True),
-    )
+    __table_args__ = (Index("uq_workflow_plugin_version", "plugin_name", "version", unique=True),)
 
 
 class WorkflowMarketTemplate(Base):
@@ -310,7 +328,11 @@ class StorageFolder(Base):
     path_cache = Column(String(1024), nullable=True, comment="物化路径缓存")
     created_by = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
     is_deleted = Column(Boolean, default=False)
 
     __table_args__ = (
@@ -318,13 +340,17 @@ class StorageFolder(Base):
             "uq_storage_folder_private_root",
             "owner_id",
             unique=True,
-            postgresql_where=text("parent_id IS NULL AND visibility = 'private' AND is_deleted = false"),
+            postgresql_where=text(
+                "parent_id IS NULL AND visibility = 'private' AND is_deleted = false"
+            ),
         ),
         Index(
             "uq_storage_folder_shared_root",
             "team_id",
             unique=True,
-            postgresql_where=text("parent_id IS NULL AND visibility = 'shared' AND is_deleted = false"),
+            postgresql_where=text(
+                "parent_id IS NULL AND visibility = 'shared' AND is_deleted = false"
+            ),
         ),
     )
 
@@ -347,7 +373,11 @@ class FileMetadata(Base):
     status = Column(String(32), default="active", comment="pending / active")
     created_by = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
     is_deleted = Column(Boolean, default=False)
 
 
@@ -373,10 +403,16 @@ class SkillCatalogRecord(Base):
     embedding_model = Column(String(128), nullable=True)
     embedding_vector = Column(JSON, nullable=True)
     indexed_at = Column(DateTime, nullable=True)
-    rollout_status = Column(String(32), default="stable", index=True, comment="draft/canary/stable/deprecated")
+    rollout_status = Column(
+        String(32), default="stable", index=True, comment="draft/canary/stable/deprecated"
+    )
     enabled_ratio = Column(Integer, default=100, comment="灰度比例 0-100")
     min_platform_version = Column(String(32), nullable=True)
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
@@ -616,8 +652,11 @@ class PatrolRun(Base):
         Boolean, nullable=False, default=False, server_default=text("false"), index=True
     )
     run_purpose = Column(
-        String(32), nullable=False, default="scheduled_patrol",
-        server_default="scheduled_patrol", index=True
+        String(32),
+        nullable=False,
+        default="scheduled_patrol",
+        server_default="scheduled_patrol",
+        index=True,
     )
     logical_run_id = Column(String(128), nullable=True, index=True)
     attempt_number = Column(Integer, nullable=False, default=0, server_default="0")
@@ -1144,6 +1183,12 @@ class NetworkEventOutboxRecord(Base):
         ForeignKey("netops_network_events.id", ondelete="CASCADE"),
         nullable=False,
     )
+    occurrence_id = Column(
+        String(64),
+        ForeignKey("netops_network_event_occurrences.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     event_type = Column(String(128), nullable=False, index=True)
     payload_json = Column(JSON, nullable=False)
     status = Column(
@@ -1165,7 +1210,13 @@ class NetworkEventOutboxRecord(Base):
     )
 
     __table_args__ = (
-        Index("ix_netops_network_event_outbox_event_id", "event_id", unique=True),
+        Index("ix_netops_network_event_outbox_event_id", "event_id"),
+        Index(
+            "uq_netops_network_event_outbox_occurrence_id",
+            "occurrence_id",
+            unique=True,
+            postgresql_where=text("occurrence_id IS NOT NULL"),
+        ),
     )
 
     def to_dict(self):
@@ -1210,9 +1261,7 @@ class EventRuleVersionRecord(Base):
     severity = Column(String(32), nullable=False, index=True)
     condition_json = Column(JSON, nullable=False)
     priority = Column(Integer, nullable=False, default=100, server_default="100", index=True)
-    exclusive = Column(
-        Boolean, nullable=False, default=False, server_default=text("false")
-    )
+    exclusive = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     event_class = Column(
         String(32), nullable=False, default="fault", server_default="fault", index=True
     )
@@ -1413,12 +1462,17 @@ class ParserTemplate(Base):
     __table_args__ = (
         Index(
             "uq_parser_template_version",
-            "vendor", "profile", "canonical_command", "version",
+            "vendor",
+            "profile",
+            "canonical_command",
+            "version",
             unique=True,
         ),
         Index(
             "uq_parser_template_active",
-            "vendor", "profile", "canonical_command",
+            "vendor",
+            "profile",
+            "canonical_command",
             unique=True,
             postgresql_where=text("status = 'active'"),
         ),
@@ -1587,9 +1641,7 @@ class ParserDeviceProfile(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    __table_args__ = (
-        Index("uq_parser_device_profile", "vendor", "model", unique=True),
-    )
+    __table_args__ = (Index("uq_parser_device_profile", "vendor", "model", unique=True),)
 
     def to_dict(self):
         return {column.name: getattr(self, column.name) for column in self.__table__.columns}
@@ -1613,7 +1665,10 @@ class ParserIdentitySignature(Base):
     __table_args__ = (
         Index(
             "uq_parser_identity_signature",
-            "vendor", "model", "evidence_command", "pattern",
+            "vendor",
+            "model",
+            "evidence_command",
+            "pattern",
             unique=True,
         ),
     )
@@ -1657,9 +1712,7 @@ class ParserTemplateJob(Base):
             "uq_parser_job_open_key",
             "idempotency_key",
             unique=True,
-            postgresql_where=text(
-                "status IN ('pending','collecting','running','validating')"
-            ),
+            postgresql_where=text("status IN ('pending','collecting','running','validating')"),
         ),
     )
 
@@ -1769,9 +1822,7 @@ class RuleGenerationJobRecord(Base):
     )
     completed_at = Column(DateTime, nullable=True)
 
-    __table_args__ = (
-        Index("ix_rule_generation_jobs_type_status", "job_type", "status"),
-    )
+    __table_args__ = (Index("ix_rule_generation_jobs_type_status", "job_type", "status"),)
 
     def to_dict(self):
         return {column.name: getattr(self, column.name) for column in self.__table__.columns}

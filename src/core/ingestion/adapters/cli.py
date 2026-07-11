@@ -8,6 +8,7 @@ capture path lives here so future collectors can share a consistent boundary.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from collections.abc import Callable
@@ -20,6 +21,8 @@ from src.core.collection import ExecutionPlan
 from src.core.credentials import CredentialResolver
 from src.core.ingestion.adapter import IngestionAdapter
 from src.core.ingestion.domain import IngestionResult
+
+logger = logging.getLogger(__name__)
 
 BEIJING_TZ = timezone(timedelta(hours=8))
 OUTPUT_ROOT = Path(__file__).resolve().parents[3] / "skills" / "shared" / "outputs"
@@ -318,12 +321,27 @@ class CLICommandCollector(IngestionAdapter):
                     )
                     manifest = write_manifest("running")
                     if self.progress_callback is not None:
-                        self.progress_callback(
-                            output_file=output_file,
-                            manifest=manifest,
-                            device=device,
-                            execution_plan=execution_plan,
-                        )
+                        try:
+                            self.progress_callback(
+                                output_file=output_file,
+                                manifest=manifest,
+                                device=device,
+                                execution_plan=execution_plan,
+                            )
+                        except Exception as exc:
+                            command_results[-1]["persistence_status"] = "failed"
+                            command_results[-1]["persistence_error"] = str(exc)
+                            logger.exception(
+                                "command progress persistence failed; collection continues",
+                                extra={
+                                    "device_id": execution_plan.device_id,
+                                    "command": command,
+                                },
+                            )
+                        else:
+                            command_results[-1]["persistence_status"] = "persisted"
+                            command_results[-1]["persistence_error"] = None
+                        write_manifest("running")
         finally:
             try:
                 connection.disconnect()

@@ -194,9 +194,7 @@ class ObservationContractRepository:
         *,
         status: str | None = None,
     ) -> ObservationContract:
-        contract_status = status or (
-            "active" if template.status == "active" else "draft"
-        )
+        contract_status = status or ("active" if template.status == "active" else "draft")
         validation = dict(template.validation_json or {})
         previous = (
             db.query(ObservationContractRecord)
@@ -232,8 +230,10 @@ class ObservationContractRepository:
             "action": "rebaseline" if breaking else "none",
         }
         approval = dict(validation.get("compatibility_approval") or {})
-        if breaking and contract_status == "active" and not (
-            approval.get("approved") is True and approval.get("action") == "rebaseline"
+        if (
+            breaking
+            and contract_status == "active"
+            and not (approval.get("approved") is True and approval.get("action") == "rebaseline")
         ):
             raise ValueError(
                 "breaking ObservationContract identity change requires approved rebaseline"
@@ -270,6 +270,39 @@ class ObservationContractRepository:
                 .first()
             )
             return _row_to_contract(row) if row else None
+
+    def get_version(
+        self,
+        *,
+        source_type: str,
+        schema_id: str,
+        version: int,
+    ) -> ObservationContract | None:
+        with get_db_session() as db:
+            row = (
+                db.query(ObservationContractRecord)
+                .filter(
+                    ObservationContractRecord.source_type == source_type,
+                    ObservationContractRecord.schema_id == schema_id,
+                    ObservationContractRecord.version == int(version),
+                )
+                .first()
+            )
+            return _row_to_contract(row) if row else None
+
+    def get_validation_dict(
+        self,
+        *,
+        source_type: str,
+        schema_id: str,
+        version: int,
+    ) -> dict[str, Any] | None:
+        contract = self.get_version(
+            source_type=source_type,
+            schema_id=schema_id,
+            version=version,
+        )
+        return contract.to_validation_dict() if contract else None
 
     def get_active_validation_dict(
         self,

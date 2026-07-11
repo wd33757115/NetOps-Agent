@@ -15,6 +15,7 @@ sys.path.insert(0, BASE_DIR)
 from src.common.config import get_settings
 from src.core.backup.runner import DeviceBackupRunner, DeviceBackupRunRequest
 from src.core.logging import get_logger
+from src.core.patrol.repository import PatrolRepository
 from src.core.patrol.runner import (
     DevicePatrolRunner,
     DevicePatrolRunRequest,
@@ -106,7 +107,24 @@ def execute_config_backup_task(
         raise e
 
 
-@celery.task(bind=True, max_retries=3, retry_backoff=2)
+def _patrol_attempt_number(request: Any) -> int:
+    retries = int(getattr(request, "retries", 0) or 0)
+    delivery_info = dict(getattr(request, "delivery_info", None) or {})
+    if not delivery_info.get("redelivered"):
+        return retries
+    task_id = str(getattr(request, "id", "") or "")
+    if not task_id:
+        return max(1, retries)
+    return PatrolRepository().prepare_redelivery_attempt(f"patrol-{task_id}")
+
+
+@celery.task(
+    bind=True,
+    max_retries=3,
+    retry_backoff=2,
+    acks_late=True,
+    reject_on_worker_lost=True,
+)
 def execute_device_patrol_task(
     self,
     filter_params: dict[str, Any] | None = None,
@@ -139,7 +157,7 @@ def execute_device_patrol_task(
                 execution_plan=execution_plan,
                 execution_plan_id=execution_plan_id,
                 task_id=getattr(self.request, "id", None),
-                attempt_number=int(getattr(self.request, "retries", 0) or 0),
+                attempt_number=_patrol_attempt_number(self.request),
                 worker_id=getattr(self.request, "hostname", None),
             )
         )

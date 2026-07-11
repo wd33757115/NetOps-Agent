@@ -143,3 +143,49 @@ def test_cli_collector_publishes_atomic_incremental_manifest(tmp_path):
     final = load_command_collection_manifest(output_file)
     assert final["status"] == "complete"
     assert final["completed_at"]
+
+
+def test_cli_collector_continues_after_progress_persistence_failure(tmp_path):
+    commands = []
+    callback_calls = 0
+
+    class FakeConnection:
+        def send_command(self, command, read_timeout=60):
+            commands.append(command)
+            return f"output for {command}"
+
+        def disconnect(self):
+            pass
+
+    def fail_first_progress(**_kwargs):
+        nonlocal callback_calls
+        callback_calls += 1
+        if callback_calls == 1:
+            raise ConnectionError("postgres unavailable")
+
+    collector = CLICommandCollector(
+        output_root=tmp_path,
+        connector=lambda _device: FakeConnection(),
+        progress_callback=fail_first_progress,
+    )
+    output_file = collector.collect_command_outputs(
+        device={"device_name": "SW1", "ip": "10.0.0.1"},
+        execution_plan=ExecutionPlan(
+            device_id="device-1",
+            action="patrol",
+            mode="parser_validation",
+            profile_name="test",
+            profile_version_id=None,
+            commands=(
+                CollectionItem(command="show version", action="patrol"),
+                CollectionItem(command="show clock", action="patrol"),
+            ),
+        ),
+    )
+
+    manifest = load_command_collection_manifest(output_file)
+    assert commands == ["show version", "show clock"]
+    assert callback_calls == 2
+    assert manifest["status"] == "complete"
+    assert manifest["commands"][0]["persistence_status"] == "failed"
+    assert manifest["commands"][1]["persistence_status"] == "persisted"

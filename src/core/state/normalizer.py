@@ -18,6 +18,10 @@ EMPTY_PLACEHOLDERS = {"", "-", "--", "n/a", "na", "none", "null"}
 PLACEHOLDER_NORMALIZED_FIELDS = {"description"}
 
 
+class ObservationContractVersionError(ValueError):
+    """Raised when replay cannot resolve the immutable contract version."""
+
+
 def _records(value: Any) -> list[dict[str, Any]]:
     if value is None:
         return []
@@ -66,17 +70,34 @@ def _digest(parts: list[Any]) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def _template_contract(template_id: str | None) -> dict[str, Any]:
+def _template_contract(
+    template_id: str | None,
+    *,
+    contract_version: int | None = None,
+) -> dict[str, Any]:
     if not template_id:
         return {}
-    contract = ObservationContractRepository().get_active_validation_dict(
-        source_type="cli",
-        schema_id=template_id,
+    contract_repository = ObservationContractRepository()
+    contract = (
+        contract_repository.get_validation_dict(
+            source_type="cli",
+            schema_id=template_id,
+            version=int(contract_version),
+        )
+        if contract_version is not None
+        else contract_repository.get_active_validation_dict(
+            source_type="cli",
+            schema_id=template_id,
+        )
     )
     if contract:
         return contract
     template = ParserRepository().get_template(template_id)
     if not template:
+        if contract_version is not None:
+            raise ObservationContractVersionError(
+                f"ObservationContract not found: cli:{template_id} v{contract_version}"
+            )
         return {}
     if template.status == "active":
         synced = ObservationContractRepository().upsert_from_parser_template(
@@ -84,7 +105,15 @@ def _template_contract(template_id: str | None) -> dict[str, Any]:
             status="active",
         )
         if synced:
-            return synced.to_validation_dict()
+            synced_validation = synced.to_validation_dict()
+            if contract_version is None or int(
+                synced_validation.get("contract_version") or 0
+            ) == int(contract_version):
+                return synced_validation
+    if contract_version is not None:
+        raise ObservationContractVersionError(
+            f"ObservationContract not found: cli:{template_id} v{contract_version}"
+        )
     validation = dict(template.validation_json or {})
     validation.setdefault("entity_type", template.category)
     validation.setdefault("contract_version", template.contract_version)
@@ -120,7 +149,15 @@ def observations_from_snapshot(
     structured = snapshot.get("structured_json")
     if structured is None:
         return []
-    contract = _template_contract(snapshot.get("parser_template_id"))
+    snapshot_contract_version = snapshot.get("contract_version")
+    contract = (
+        _template_contract(
+            snapshot.get("parser_template_id"),
+            contract_version=int(snapshot_contract_version),
+        )
+        if snapshot_contract_version is not None
+        else _template_contract(snapshot.get("parser_template_id"))
+    )
     entity_type = str(contract.get("entity_type") or "record")
     primary_keys = [str(key) for key in contract.get("primary_keys") or []]
     ignore_fields = {str(field).strip().lower() for field in contract.get("ignore_fields") or []}
@@ -254,13 +291,18 @@ def _build_snapshot_normalization(
             source=str(context["source"]),
             dataset_id=context["dataset_id"],
         )
-    except EntityKeyError as exc:
+    except (EntityKeyError, ObservationContractVersionError) as exc:
+        failure_code = (
+            "contract_version_unavailable"
+            if isinstance(exc, ObservationContractVersionError)
+            else "entity_key_invalid"
+        )
         return (
             {
                 "success": False,
                 "snapshot_id": snapshot_id,
                 "error": str(exc),
-                "failure_code": "entity_key_invalid",
+                "failure_code": failure_code,
                 "observation_count": 0,
                 "created_count": 0,
                 "current_state_updates": 0,

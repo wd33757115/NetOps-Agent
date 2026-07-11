@@ -15,6 +15,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import or_
 
 from src.auth.dependencies import get_optional_user, require_role
 from src.auth.models import CurrentUser
@@ -63,7 +64,14 @@ from src.observability.langfuse import get_trace_url
 
 router = APIRouter(prefix="/api/v1/workflows", tags=["Workflows"])
 
-ACTIVE_PATROL_RUN_STATUSES = {"pending", "queued", "running", "in_progress", "collecting", "dispatching"}
+ACTIVE_PATROL_RUN_STATUSES = {
+    "pending",
+    "queued",
+    "running",
+    "in_progress",
+    "collecting",
+    "dispatching",
+}
 
 
 class ValidateWorkflowRequest(BaseModel):
@@ -146,7 +154,9 @@ def _is_patrol_batch_archived(runs: list[Any]) -> bool:
 
 def _assert_patrol_batch_not_archived(runs: list[Any]) -> None:
     if _is_patrol_batch_archived(runs):
-        raise HTTPException(status_code=409, detail="patrol batch is archived; restore it before retry or rerun")
+        raise HTTPException(
+            status_code=409, detail="patrol batch is archived; restore it before retry or rerun"
+        )
 
 
 def _find_nested_value(payload: Any, key: str) -> Any:
@@ -260,7 +270,9 @@ def _build_patrol_batch_report(patrol_batch_id: str, runs: list[Any]) -> str:
 def _build_patrol_batch_summary(patrol_batch_id: str, runs: list[Any]) -> dict[str, Any]:
     status_counts = Counter(str(run.status or "unknown") for run in runs)
     device_ids = {
-        str((run.context or {}).get("device_id") or (run.context or {}).get("device_name") or run.id)
+        str(
+            (run.context or {}).get("device_id") or (run.context or {}).get("device_name") or run.id
+        )
         for run in runs
     }
     run_rows: list[dict[str, Any]] = []
@@ -295,26 +307,21 @@ def _build_patrol_batch_summary(patrol_batch_id: str, runs: list[Any]) -> dict[s
                 )
                 event_query = db.query(NetworkEventRecord)
                 try:
-                    event_query = (
-                        event_query.join(
-                            NetworkEventOccurrenceRecord,
-                            NetworkEventOccurrenceRecord.event_id
-                            == NetworkEventRecord.id,
+                    occurrence_event_ids = db.query(NetworkEventOccurrenceRecord.event_id).filter(
+                        NetworkEventOccurrenceRecord.run_id == str(snapshot_run_id)
+                    )
+                    event_query = event_query.filter(
+                        or_(
+                            NetworkEventRecord.run_id == str(snapshot_run_id),
+                            NetworkEventRecord.id.in_(occurrence_event_ids),
                         )
-                        .filter(
-                            NetworkEventOccurrenceRecord.run_id
-                            == str(snapshot_run_id)
-                        )
-                        .distinct()
                     )
                 except AttributeError:
                     # Lightweight repository test doubles and pre-0027 readers.
                     event_query = event_query.filter(
                         NetworkEventRecord.run_id == str(snapshot_run_id)
                     )
-                events = event_query.order_by(
-                    NetworkEventRecord.occurred_at.desc()
-                ).all()
+                events = event_query.order_by(NetworkEventRecord.occurred_at.desc()).all()
             for event in events:
                 event_types[str(event.event_type or "unknown")] += 1
                 severities[str(event.severity or "unknown")] += 1
@@ -635,11 +642,7 @@ async def list_workflow_categories():
     """列出 workflows/ 下已有分类目录。"""
     load_workflows(force=True)
     categories = sorted(
-        {
-            p.name
-            for p in WORKFLOWS_ROOT.iterdir()
-            if p.is_dir() and not p.name.startswith(".")
-        }
+        {p.name for p in WORKFLOWS_ROOT.iterdir() if p.is_dir() and not p.name.startswith(".")}
     )
     return {"categories": categories or ["itsm", "custom"]}
 
@@ -967,9 +970,13 @@ async def list_patrol_batches(limit: int = 20, include_archived: bool = False):
         if context.get("patrol_batch_archived"):
             item["archived_count"] += 1
             archived_at = context.get("patrol_batch_archived_at")
-            if archived_at and (not item["archived_at"] or str(archived_at) > str(item["archived_at"])):
+            if archived_at and (
+                not item["archived_at"] or str(archived_at) > str(item["archived_at"])
+            ):
                 item["archived_at"] = archived_at
-            item["archive_reason"] = item["archive_reason"] or context.get("patrol_batch_archive_reason")
+            item["archive_reason"] = item["archive_reason"] or context.get(
+                "patrol_batch_archive_reason"
+            )
             item["archived_by"] = item["archived_by"] or context.get("patrol_batch_archived_by")
         else:
             item["archived"] = False
@@ -979,15 +986,19 @@ async def list_patrol_batches(limit: int = 20, include_archived: bool = False):
             item[f"{run.status}_count"] += 1
         if run.created_at and (not item["created_at"] or run.created_at < item["created_at"]):
             item["created_at"] = run.created_at
-        if run.completed_at and (not item["completed_at"] or run.completed_at > item["completed_at"]):
+        if run.completed_at and (
+            not item["completed_at"] or run.completed_at > item["completed_at"]
+        ):
             item["completed_at"] = run.completed_at
         device_name = context.get("device_name") or context.get("device_id")
-        if device_name and device_name not in item["sample_devices"] and len(item["sample_devices"]) < 5:
+        if (
+            device_name
+            and device_name not in item["sample_devices"]
+            and len(item["sample_devices"]) < 5
+        ):
             item["sample_devices"].append(device_name)
     visible_batches = [
-        item
-        for item in batches.values()
-        if include_archived or not item.get("archived")
+        item for item in batches.values() if include_archived or not item.get("archived")
     ]
     ordered = sorted(
         visible_batches,
@@ -1304,7 +1315,9 @@ async def retry_workflow_run(
     if not run:
         raise HTTPException(status_code=404, detail="Workflow 不存在")
     if run.status not in {"failed", "cancelled"}:
-        raise HTTPException(status_code=400, detail="only failed or cancelled workflow runs can be retried")
+        raise HTTPException(
+            status_code=400, detail="only failed or cancelled workflow runs can be retried"
+        )
     try:
         new_run_id = _retry_existing_run(run, request, user)
     except ValueError as exc:

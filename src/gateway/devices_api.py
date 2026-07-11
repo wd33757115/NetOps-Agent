@@ -13,7 +13,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 
 from src.auth.dependencies import require_role
 from src.auth.models import CurrentUser
@@ -214,10 +214,34 @@ DEVICE_IMPORT_COLUMNS: list[dict[str, Any]] = [
         "description": "管理地址，用于连接设备和幂等匹配。",
         "example": "10.0.0.1",
     },
-    {"name": "vendor", "required": False, "aliases": [], "description": "厂商，例如 Cisco、H3C。", "example": "Cisco"},
-    {"name": "model", "required": False, "aliases": [], "description": "精确型号。", "example": "WS-C2960XR-24TS-I"},
-    {"name": "family", "required": False, "aliases": [], "description": "设备族。", "example": "IOS-C2960"},
-    {"name": "platform", "required": False, "aliases": [], "description": "采集平台类型。", "example": "ios"},
+    {
+        "name": "vendor",
+        "required": False,
+        "aliases": [],
+        "description": "厂商，例如 Cisco、H3C。",
+        "example": "Cisco",
+    },
+    {
+        "name": "model",
+        "required": False,
+        "aliases": [],
+        "description": "精确型号。",
+        "example": "WS-C2960XR-24TS-I",
+    },
+    {
+        "name": "family",
+        "required": False,
+        "aliases": [],
+        "description": "设备族。",
+        "example": "IOS-C2960",
+    },
+    {
+        "name": "platform",
+        "required": False,
+        "aliases": [],
+        "description": "采集平台类型。",
+        "example": "ios",
+    },
     {
         "name": "device_type",
         "required": False,
@@ -225,10 +249,34 @@ DEVICE_IMPORT_COLUMNS: list[dict[str, Any]] = [
         "description": "设备类型，例如 router、access_switch、firewall。",
         "example": "access_switch",
     },
-    {"name": "os_version", "required": False, "aliases": [], "description": "系统版本。", "example": "15.2(7)E10"},
-    {"name": "serial_number", "required": False, "aliases": ["serial"], "description": "序列号。", "example": "FOC1234"},
-    {"name": "site", "required": False, "aliases": [], "description": "站点或机房。", "example": "xian"},
-    {"name": "role", "required": False, "aliases": [], "description": "设备角色。", "example": "access"},
+    {
+        "name": "os_version",
+        "required": False,
+        "aliases": [],
+        "description": "系统版本。",
+        "example": "15.2(7)E10",
+    },
+    {
+        "name": "serial_number",
+        "required": False,
+        "aliases": ["serial"],
+        "description": "序列号。",
+        "example": "FOC1234",
+    },
+    {
+        "name": "site",
+        "required": False,
+        "aliases": [],
+        "description": "站点或机房。",
+        "example": "xian",
+    },
+    {
+        "name": "role",
+        "required": False,
+        "aliases": [],
+        "description": "设备角色。",
+        "example": "access",
+    },
     {
         "name": "status",
         "required": False,
@@ -257,7 +305,13 @@ DEVICE_IMPORT_COLUMNS: list[dict[str, Any]] = [
         "description": "设备原始巡检输出目录，留空使用系统默认位置。",
         "example": "",
     },
-    {"name": "groups", "required": False, "aliases": [], "description": "逗号分隔的设备分组。", "example": "core,xian"},
+    {
+        "name": "groups",
+        "required": False,
+        "aliases": [],
+        "description": "逗号分隔的设备分组。",
+        "example": "core,xian",
+    },
     {
         "name": "attributes_json",
         "required": False,
@@ -309,7 +363,9 @@ def _split_csv_list(value: str | None) -> list[str]:
     return [item.strip() for item in (value or "").split(",") if item.strip()]
 
 
-def _parse_json_field(value: str | None, *, row_number: int, errors: list[str]) -> dict[str, Any] | None:
+def _parse_json_field(
+    value: str | None, *, row_number: int, errors: list[str]
+) -> dict[str, Any] | None:
     text = (value or "").strip()
     if not text:
         return None
@@ -344,7 +400,9 @@ def _build_import_row(
     except ValueError:
         status = normalized.get("status") or "active"
         errors.append(f"第 {row_number} 行 status 只能是 active 或 disabled")
-    attributes = _parse_json_field(normalized.get("attributes_json"), row_number=row_number, errors=errors)
+    attributes = _parse_json_field(
+        normalized.get("attributes_json"), row_number=row_number, errors=errors
+    )
     payload = {
         "device_name": device_name,
         "management_ip": management_ip,
@@ -429,8 +487,9 @@ def _parse_csv_import_rows(content: str) -> list[dict[str, Any]]:
         if raw.get(None):
             row_errors.append(f"第 {index} 行列数超过表头，请检查逗号或引号")
         normalized = {
-            DEVICE_IMPORT_HEADER_ALIASES.get(str(key or "").strip().lower(), str(key or "").strip().lower()):
-                (value.strip() if isinstance(value, str) else value)
+            DEVICE_IMPORT_HEADER_ALIASES.get(
+                str(key or "").strip().lower(), str(key or "").strip().lower()
+            ): (value.strip() if isinstance(value, str) else value)
             for key, value in raw.items()
             if key is not None
         }
@@ -470,7 +529,9 @@ def _parse_xlsx_import_rows(content: str) -> list[dict[str, Any]]:
             continue
         normalized: dict[str, Any] = {}
         row_errors: list[str] = []
-        if len(values) > len(headers) and any(value is not None and str(value).strip() for value in values[len(headers):]):
+        if len(values) > len(headers) and any(
+            value is not None and str(value).strip() for value in values[len(headers) :]
+        ):
             row_errors.append(f"第 {index} 行列数超过表头，请检查多余单元格")
         for header, value in zip(headers, values):
             canonical = DEVICE_IMPORT_HEADER_ALIASES.get(str(header or "").strip().lower())
@@ -569,16 +630,23 @@ def _resolve_bulk_devices(
             filters["status"] = "active"
         for device in repository.get_devices_by_filter(**filters):
             devices_by_id[device["device_id"]] = device
-    return sorted(devices_by_id.values(), key=lambda item: (item.get("device_name") or "", item.get("ip") or ""))
+    return sorted(
+        devices_by_id.values(),
+        key=lambda item: (item.get("device_name") or "", item.get("ip") or ""),
+    )
 
 
-def _production_parser_coverage(device: dict[str, Any], commands: list[str]) -> list[dict[str, Any]]:
+def _production_parser_coverage(
+    device: dict[str, Any], commands: list[str]
+) -> list[dict[str, Any]]:
     from src.core.device_ops.tools import PatrolTool
 
     return PatrolTool._production_coverage(device, commands)
 
 
-def _blocking_parser_coverage(device: dict[str, Any], commands: list[str], mode: str) -> list[dict[str, Any]]:
+def _blocking_parser_coverage(
+    device: dict[str, Any], commands: list[str], mode: str
+) -> list[dict[str, Any]]:
     if normalize_patrol_mode(mode) != PRODUCTION_MODE:
         return []
     return [
@@ -611,10 +679,14 @@ def _runtime_rule_asset_health(
             "reason": "no ready parser templates require runtime rule asset checks",
         }
     try:
-        bundle = RuntimeRuleAssetResolver().load_bundle(
-            observation_schemas=schemas,
-            include_event_rules=True,
-        ).to_dict()
+        bundle = (
+            RuntimeRuleAssetResolver()
+            .load_bundle(
+                observation_schemas=schemas,
+                include_event_rules=True,
+            )
+            .to_dict()
+        )
     except Exception as exc:
         return {
             "status": "error",
@@ -704,8 +776,7 @@ def _coverage_summary(
         "violations": blocking,
         "plan_violations": plan_violations,
         "connection_issues": connection_issues,
-        "runtime_asset_health": runtime_asset_health
-        or {"status": "not_checked", "ready": False},
+        "runtime_asset_health": runtime_asset_health or {"status": "not_checked", "ready": False},
     }
 
 
@@ -909,7 +980,10 @@ def _parser_control_evidence(db: Any) -> list[dict[str, Any]]:
                 object_id=active_template.id,
                 occurred_at=active_template.activated_at or active_template.updated_at,
                 summary=f"{active_template.vendor}/{active_template.profile} 路 {active_template.canonical_command}",
-                detail={"version": active_template.version, "asset_path": active_template.asset_path},
+                detail={
+                    "version": active_template.version,
+                    "asset_path": active_template.asset_path,
+                },
                 target_url="/devices?tab=parser",
             )
         )
@@ -928,7 +1002,10 @@ def _parser_control_evidence(db: Any) -> list[dict[str, Any]]:
                 object_id=failed_job.id,
                 occurred_at=failed_job.completed_at or failed_job.updated_at,
                 summary=f"{failed_job.vendor}/{failed_job.model or failed_job.family or failed_job.profile} 路 {failed_job.canonical_command}",
-                detail={"failure_code": failed_job.failure_code, "last_error": failed_job.last_error},
+                detail={
+                    "failure_code": failed_job.failure_code,
+                    "last_error": failed_job.last_error,
+                },
                 target_url="/devices?tab=parser",
             )
         )
@@ -956,7 +1033,9 @@ def _parser_control_evidence(db: Any) -> list[dict[str, Any]]:
 
 def _state_normalizer_evidence(db: Any) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
-    observation = _latest_row(db, StateObservationRecord, order_by=StateObservationRecord.observed_at)
+    observation = _latest_row(
+        db, StateObservationRecord, order_by=StateObservationRecord.observed_at
+    )
     if observation:
         items.append(
             _evidence(
@@ -976,7 +1055,7 @@ def _state_normalizer_evidence(db: Any) -> list[dict[str, Any]]:
             _evidence(
                 kind="current_state",
                 status="ok",
-                title="鏈€杩?CurrentState 鏇存柊",
+                title="最近 CurrentState 更新",
                 object_id=current_state.id,
                 occurred_at=current_state.updated_at,
                 summary=f"{current_state.device_id} 路 {current_state.entity_type}/{current_state.field_name}",
@@ -995,11 +1074,14 @@ def _state_normalizer_evidence(db: Any) -> list[dict[str, Any]]:
             _evidence(
                 kind="current_state",
                 status="blocked",
-                title="楠岃瘉鏁版嵁姹℃煋璇佹嵁",
+                title="验证数据污染证据",
                 object_id=polluted.id,
                 occurred_at=polluted.updated_at,
                 summary=f"{polluted.device_id} 路 {polluted.entity_type}/{polluted.field_name}",
-                detail={"source_run_id": polluted.source_run_id, "source_snapshot_id": polluted.source_snapshot_id},
+                detail={
+                    "source_run_id": polluted.source_run_id,
+                    "source_snapshot_id": polluted.source_snapshot_id,
+                },
                 target_url="/devices?tab=overview",
             )
         )
@@ -1204,12 +1286,19 @@ def _report_diff_evidence(db: Any) -> list[dict[str, Any]]:
         items.append(
             _evidence(
                 kind="workflow_run",
-                status="ok" if run.status == "completed" else "warning" if run.status in {"running", "pending"} else "failed",
+                status="ok"
+                if run.status == "completed"
+                else "warning"
+                if run.status in {"running", "pending"}
+                else "failed",
                 title="最近巡检 Workflow",
                 object_id=run.id,
                 occurred_at=run.completed_at or run.created_at,
                 summary=f"{run.status} 路 {context.get('device_name') or context.get('device_id') or '-'}",
-                detail={"patrol_batch_id": context.get("patrol_batch_id"), "error_message": run.error_message},
+                detail={
+                    "patrol_batch_id": context.get("patrol_batch_id"),
+                    "error_message": run.error_message,
+                },
                 target_url="/devices?tab=overview",
             )
         )
@@ -1219,7 +1308,7 @@ def _report_diff_evidence(db: Any) -> list[dict[str, Any]]:
             _evidence(
                 kind="workflow_step",
                 status="failed",
-                title="鏈€杩戞姤鍛?宸紓澶辫触",
+                title="最近报告/差异失败",
                 object_id=failed_step.id,
                 occurred_at=failed_step.completed_at or failed_step.created_at,
                 summary=failed_step.error_message or "Workflow step failed",
@@ -1250,7 +1339,9 @@ def _build_agent_module_health(db: Any) -> list[dict[str, Any]]:
         CommandSnapshot,
         CommandSnapshot.parse_status == "parse_failed",
     )
-    parser_profiles = _count_rows(db, ParserDeviceProfile, ParserDeviceProfile.status == "confirmed")
+    parser_profiles = _count_rows(
+        db, ParserDeviceProfile, ParserDeviceProfile.status == "confirmed"
+    )
     identity_signatures = _count_rows(
         db,
         ParserIdentitySignature,
@@ -1369,17 +1460,19 @@ def _build_agent_module_health(db: Any) -> list[dict[str, Any]]:
                 _metric("已激活模板", active_templates),
                 _metric("妯℃澘鎬绘暟", total_templates),
                 _metric("开放任务", open_jobs, "warning" if open_jobs else "ok"),
-                _metric("澶辫触浠诲姟", failed_jobs, "warning" if failed_jobs else "ok"),
+                _metric("失败任务", failed_jobs, "warning" if failed_jobs else "ok"),
                 _metric("缺模板快照", template_missing, "warning" if template_missing else "ok"),
-                _metric("瑙ｆ瀽澶辫触蹇収", parse_failed, "warning" if parse_failed else "ok"),
+                _metric("解析失败快照", parse_failed, "warning" if parse_failed else "ok"),
             ],
             checks=[
                 _module_check(
-                    name="妯℃澘璧勪骇",
+                    name="模板资产",
                     status="ok" if active_templates else "blocked",
                     value=active_templates,
                     target="鑷冲皯 1 涓?active 妯℃澘",
-                    message="存在已激活模板" if active_templates else "没有 active 模板，生产巡检会缺少结构化资产",
+                    message="存在已激活模板"
+                    if active_templates
+                    else "没有 active 模板，生产巡检会缺少结构化资产",
                 ),
                 _module_check(
                     name="浠诲姟闃熷垪",
@@ -1393,7 +1486,9 @@ def _build_agent_module_health(db: Any) -> list[dict[str, Any]]:
                     status="ok" if parser_profiles or identity_signatures else "warning",
                     value=parser_profiles + identity_signatures,
                     target="已确认设备身份规则",
-                    message="身份资产已登记" if parser_profiles or identity_signatures else "尚无确认的设备身份资产",
+                    message="身份资产已登记"
+                    if parser_profiles or identity_signatures
+                    else "尚无确认的设备身份资产",
                 ),
             ],
         ),
@@ -1406,7 +1501,11 @@ def _build_agent_module_health(db: Any) -> list[dict[str, Any]]:
                 _metric("状态观测", observations),
                 _metric("鐢熶骇瑙傛祴", production_observations),
                 _metric("当前状态", current_states),
-                _metric("楠岃瘉鏁版嵁姹℃煋", validation_current_states, "blocked" if validation_current_states else "ok"),
+                _metric(
+                    "验证数据污染",
+                    validation_current_states,
+                    "blocked" if validation_current_states else "ok",
+                ),
             ],
             checks=[
                 _module_check(
@@ -1428,7 +1527,9 @@ def _build_agent_module_health(db: Any) -> list[dict[str, Any]]:
                     status="ok" if validation_current_states == 0 else "blocked",
                     value=validation_current_states,
                     target="parser_validation 涓嶆洿鏂?CurrentState",
-                    message="楠岃瘉鏁版嵁鏈薄鏌?CurrentState" if validation_current_states == 0 else "鍙戠幇楠岃瘉鏁版嵁鍐欏叆 CurrentState",
+                    message="验证数据未污染 CurrentState"
+                    if validation_current_states == 0
+                    else "发现验证数据写入 CurrentState",
                 ),
             ],
         ),
@@ -1439,30 +1540,34 @@ def _build_agent_module_health(db: Any) -> list[dict[str, Any]]:
             evidence=_change_detector_evidence(db),
             metrics=[
                 _metric("变化数", changes),
-                _metric("瑙傛祴璇佹嵁鍙樺寲", observation_backed_changes),
+                _metric("观测证据变化", observation_backed_changes),
                 _metric("待事件处理", pending_changes, "warning" if pending_changes else "ok"),
             ],
             checks=[
                 _module_check(
-                    name="鍙樺寲鐢熸垚",
+                    name="变化生成",
                     status="ok" if changes else "warning",
                     value=changes,
-                    target="StateObservation 鍙敓鎴?NetworkChange",
-                    message="宸叉湁鍙樺寲璁板綍" if changes else "灏氭湭鐪嬪埌 NetworkChange 鏁版嵁",
+                    target="StateObservation 可生成 NetworkChange",
+                    message="已有变化记录" if changes else "尚未看到 NetworkChange 数据",
                 ),
                 _module_check(
                     name="证据引用",
                     status="ok" if not changes or observation_backed_changes else "warning",
                     value=observation_backed_changes,
                     target="变化可追溯到 observation",
-                    message="变化包含 observation 证据" if observation_backed_changes else "变化证据仍需补强",
+                    message="变化包含 observation 证据"
+                    if observation_backed_changes
+                    else "变化证据仍需补强",
                 ),
                 _module_check(
                     name="事件交接",
                     status="ok" if pending_changes == 0 else "warning",
                     value=pending_changes,
                     target="Change 进入 Event Builder 后不长期 pending",
-                    message="没有待事件处理变化" if pending_changes == 0 else f"{pending_changes} 条变化仍待事件处理",
+                    message="没有待事件处理变化"
+                    if pending_changes == 0
+                    else f"{pending_changes} 条变化仍待事件处理",
                 ),
             ],
         ),
@@ -1482,21 +1587,23 @@ def _build_agent_module_health(db: Any) -> list[dict[str, Any]]:
                     status="ok" if active_event_rules else "blocked",
                     value=active_event_rules,
                     target="鑷冲皯 1 涓?active 浜嬩欢瑙勫垯",
-                    message="宸叉湁 active 浜嬩欢瑙勫垯" if active_event_rules else "娌℃湁 active 浜嬩欢瑙勫垯",
+                    message="已有 active 事件规则"
+                    if active_event_rules
+                    else "没有 active 事件规则",
                 ),
                 _module_check(
                     name="浜嬩欢鐢熸垚",
                     status="ok" if events else "warning",
                     value=events,
-                    target="NetworkChange 鍙敓鎴?NetworkEvent",
-                    message="宸叉湁缃戠粶浜嬩欢" if events else "灏氭湭鐪嬪埌 NetworkEvent 鏁版嵁",
+                    target="NetworkChange 可生成 NetworkEvent",
+                    message="已有网络事件" if events else "尚未看到 NetworkEvent 数据",
                 ),
                 _module_check(
-                    name="灏忓箙鍙樺寲鎶戝埗",
+                    name="小幅变化抑制",
                     status="ok" if no_event_changes or not changes else "warning",
                     value=no_event_changes,
-                    target="鏃犱簨浠跺彉鍖栧簲琚爣璁颁负 no_event",
-                    message="宸叉湁 no_event 鍙樺寲" if no_event_changes else "灏氭湭鐪嬪埌 no_event 鏍囪",
+                    target="无事件变化应被标记为 no_event",
+                    message="已有 no_event 变化" if no_event_changes else "尚未看到 no_event 标记",
                 ),
             ],
         ),
@@ -1506,34 +1613,42 @@ def _build_agent_module_health(db: Any) -> list[dict[str, Any]]:
             control=controls.get("device-management"),
             evidence=_device_management_evidence(db),
             metrics=[
-                _metric("璁惧鎬绘暟", devices),
-                _metric("鍚敤璁惧", active_devices),
+                _metric("设备总数", devices),
+                _metric("启用设备", active_devices),
                 _metric("已配置凭据", credential_devices),
                 _metric("已连接", connected_devices),
-                _metric("杩炴帴寮傚父", connection_failed, "warning" if connection_failed else "ok"),
+                _metric(
+                    "杩炴帴寮傚父", connection_failed, "warning" if connection_failed else "ok"
+                ),
                 _metric("动态分组", dynamic_groups),
             ],
             checks=[
                 _module_check(
-                    name="璧勪骇鍙",
+                    name="资产可见",
                     status="ok" if devices else "warning",
                     value=devices,
                     target="设备列表、筛选、详情稳定可用",
-                    message="宸叉湁璁惧璧勪骇" if devices else "灏氭湭娣诲姞璁惧璧勪骇",
+                    message="已有设备资产" if devices else "尚未添加设备资产",
                 ),
                 _module_check(
                     name="鍑嵁寮曠敤",
-                    status="ok" if active_devices == 0 or credential_devices == active_devices else "warning",
+                    status="ok"
+                    if active_devices == 0 or credential_devices == active_devices
+                    else "warning",
                     value=f"{credential_devices}/{active_devices}",
-                    target="鍚敤璁惧閮藉叿澶?credential_ref",
-                    message="鍚敤璁惧鍑嵁寮曠敤瀹屾暣" if active_devices == 0 or credential_devices == active_devices else "閮ㄥ垎鍚敤璁惧缂哄皯鍑嵁寮曠敤",
+                    target="启用设备都具备 credential_ref",
+                    message="启用设备凭据引用完整"
+                    if active_devices == 0 or credential_devices == active_devices
+                    else "部分启用设备缺少凭据引用",
                 ),
                 _module_check(
                     name="杩炴帴鍋ュ悍",
                     status="ok" if connection_failed == 0 else "warning",
                     value=connection_failed,
                     target="连接失败可定位且不阻塞资产查询",
-                    message="没有连接异常记录" if connection_failed == 0 else f"{connection_failed} 台设备连接异常",
+                    message="没有连接异常记录"
+                    if connection_failed == 0
+                    else f"{connection_failed} 台设备连接异常",
                 ),
             ],
         ),
@@ -1545,7 +1660,7 @@ def _build_agent_module_health(db: Any) -> list[dict[str, Any]]:
             metrics=[
                 _metric("宸叉縺娲?Profile", active_profiles),
                 _metric("已激活绑定", active_bindings),
-                _metric("甯︾瓥鐣ュ厓鏁版嵁蹇収", profiled_snapshots),
+                _metric("带策略元数据快照", profiled_snapshots),
             ],
             checks=[
                 _module_check(
@@ -1553,21 +1668,27 @@ def _build_agent_module_health(db: Any) -> list[dict[str, Any]]:
                     status="ok" if active_profiles else "blocked",
                     value=active_profiles,
                     target="鑷冲皯 1 涓?active Command Profile",
-                    message="已有 active 采集命令集" if active_profiles else "没有 active 采集命令集",
+                    message="已有 active 采集命令集"
+                    if active_profiles
+                    else "没有 active 采集命令集",
                 ),
                 _module_check(
                     name="绑定策略",
                     status="ok" if active_bindings else "warning",
                     value=active_bindings,
                     target="采集命令集可绑定到设备集合",
-                    message="已有 active 采集命令集绑定" if active_bindings else "尚未配置采集命令集绑定",
+                    message="已有 active 采集命令集绑定"
+                    if active_bindings
+                    else "尚未配置采集命令集绑定",
                 ),
                 _module_check(
                     name="策略追踪",
                     status="ok" if profiled_snapshots else "warning",
                     value=profiled_snapshots,
                     target="快照携带采集策略元数据",
-                    message="已有带策略元数据的快照" if profiled_snapshots else "尚未看到带策略元数据的快照",
+                    message="已有带策略元数据的快照"
+                    if profiled_snapshots
+                    else "尚未看到带策略元数据的快照",
                 ),
             ],
         ),
@@ -1579,8 +1700,10 @@ def _build_agent_module_health(db: Any) -> list[dict[str, Any]]:
             metrics=[
                 _metric("鐢熶骇宸℃杩愯", patrol_runs),
                 _metric("宸℃ Workflow", patrol_workflows),
-                _metric("鎶ュ憡/宸紓姝ラ", report_steps),
-                _metric("澶辫触鎶ュ憡姝ラ", failed_report_steps, "warning" if failed_report_steps else "ok"),
+                _metric("报告/差异步骤", report_steps),
+                _metric(
+                    "失败报告步骤", failed_report_steps, "warning" if failed_report_steps else "ok"
+                ),
             ],
             checks=[
                 _module_check(
@@ -1588,21 +1711,25 @@ def _build_agent_module_health(db: Any) -> list[dict[str, Any]]:
                     status="ok" if patrol_runs or patrol_workflows else "warning",
                     value=patrol_runs + patrol_workflows,
                     target="历史巡检可作为报告输入",
-                    message="宸叉湁宸℃杩愯璇佹嵁" if patrol_runs or patrol_workflows else "灏氭湭鐪嬪埌鐢熶骇宸℃杩愯",
+                    message="已有巡检运行证据"
+                    if patrol_runs or patrol_workflows
+                    else "尚未看到生产巡检运行",
                 ),
                 _module_check(
                     name="报告解析",
                     status="ok" if report_steps else "warning",
                     value=report_steps,
-                    target="鎶ュ憡鐢?patrol-diff/report-generator 鐙珛鐢熸垚",
-                    message="宸叉湁鎶ュ憡/宸紓姝ラ璁板綍" if report_steps else "灏氭湭鐪嬪埌鐙珛鎶ュ憡姝ラ",
+                    target="报告由 patrol-diff/report-generator 独立生成",
+                    message="已有报告/差异步骤记录" if report_steps else "尚未看到独立报告步骤",
                 ),
                 _module_check(
-                    name="鎶ュ憡澶辫触",
+                    name="报告失败",
                     status="ok" if failed_report_steps == 0 else "warning",
                     value=failed_report_steps,
-                    target="鎶ュ憡澶辫触鍙畾浣嶄笖涓嶅奖鍝嶅贰妫€鍏ュ簱",
-                    message="没有失败报告步骤" if failed_report_steps == 0 else f"{failed_report_steps} 个报告步骤失败",
+                    target="报告失败可定位且不影响巡检入库",
+                    message="没有失败报告步骤"
+                    if failed_report_steps == 0
+                    else f"{failed_report_steps} 个报告步骤失败",
                 ),
             ],
         ),
@@ -1620,14 +1747,21 @@ def _set_agent_module_control(
         raise HTTPException(status_code=404, detail="agent module not found")
     status = payload.status.strip().lower()
     if status not in AGENT_MODULE_CONTROL_STATUSES:
-        raise HTTPException(status_code=400, detail="status must be enabled, disabled or maintenance")
+        raise HTTPException(
+            status_code=400, detail="status must be enabled, disabled or maintenance"
+        )
     reason = (payload.maintenance_reason or "").strip() or None
     if status in {"disabled", "maintenance"} and not reason:
-        raise HTTPException(status_code=400, detail="maintenance_reason is required when disabling or entering maintenance")
+        raise HTTPException(
+            status_code=400,
+            detail="maintenance_reason is required when disabling or entering maintenance",
+        )
     starts_at = payload.maintenance_starts_at
     ends_at = payload.maintenance_ends_at
     if starts_at and ends_at and ends_at <= starts_at:
-        raise HTTPException(status_code=400, detail="maintenance_ends_at must be after maintenance_starts_at")
+        raise HTTPException(
+            status_code=400, detail="maintenance_ends_at must be after maintenance_starts_at"
+        )
     if status == "enabled":
         reason = None
         starts_at = None
@@ -1731,27 +1865,89 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
     device_id = str(device.get("device_id") or "")
     limit = max(1, min(int(limit or 10), 50))
     with get_db_session() as db:
-        runs = (
+        workflow_runs = (
             db.query(WorkflowRun)
-            .filter(WorkflowRun.template_name == "patrol-change-event")
+            .filter(
+                WorkflowRun.template_name == "patrol-change-event",
+                WorkflowRun.context["device_id"].as_string() == device_id,
+            )
             .order_by(WorkflowRun.created_at.desc())
-            .limit(500)
+            .limit(limit)
             .all()
         )
-        runs = [
-            run
-            for run in runs
-            if str((run.context or {}).get("device_id") or "") == device_id
-        ][:limit]
+        run_entries: list[tuple[WorkflowRun | None, list[WorkflowStepRecord], str, datetime]] = []
+        seen_snapshot_runs: set[str] = set()
+        for workflow_run in workflow_runs:
+            workflow_steps = (
+                db.query(WorkflowStepRecord)
+                .filter(WorkflowStepRecord.run_id == workflow_run.id)
+                .order_by(WorkflowStepRecord.step_index.asc())
+                .all()
+            )
+            workflow_snapshot_run_id = next(
+                (
+                    str(value)
+                    for step in workflow_steps
+                    if (value := _find_nested_value(step.result or {}, "snapshot_run_id"))
+                ),
+                "",
+            )
+            if workflow_snapshot_run_id:
+                seen_snapshot_runs.add(workflow_snapshot_run_id)
+                run_entries.append(
+                    (
+                        workflow_run,
+                        workflow_steps,
+                        workflow_snapshot_run_id,
+                        workflow_run.created_at,
+                    )
+                )
+        patrol_run_ids = [
+            row[0]
+            for row in db.query(
+                CommandSnapshot.run_id,
+                func.max(CommandSnapshot.observed_at).label("latest_observed_at"),
+            )
+            .filter(
+                or_(
+                    CommandSnapshot.inventory_device_id == device_id,
+                    CommandSnapshot.device_id == device_id,
+                )
+            )
+            .group_by(CommandSnapshot.run_id)
+            .order_by(func.max(CommandSnapshot.observed_at).desc())
+            .limit(limit)
+            .all()
+        ]
+        patrol_run_rows = (
+            db.query(PatrolRun).filter(PatrolRun.id.in_(patrol_run_ids)).all()
+            if patrol_run_ids
+            else []
+        )
+        patrol_runs_by_id = {row.id: row for row in patrol_run_rows}
+        patrol_runs = [
+            patrol_runs_by_id[run_id] for run_id in patrol_run_ids if run_id in patrol_runs_by_id
+        ]
+        for patrol_run in patrol_runs:
+            if patrol_run.id in seen_snapshot_runs:
+                continue
+            run_entries.append((None, [], patrol_run.id, patrol_run.started_at))
+        run_entries.sort(key=lambda entry: entry[3], reverse=True)
         items: list[dict[str, Any]] = []
-        for run in runs:
-            execution_plan_id = str((run.context or {}).get("execution_plan_id") or "")
+        for run, steps, snapshot_run_id, _created_at in run_entries[:limit]:
+            patrol_run = db.get(PatrolRun, snapshot_run_id)
+            run_context = dict((run.context if run is not None else {}) or {})
+            execution_plan_id = str(
+                run_context.get("execution_plan_id")
+                or ((patrol_run.metadata_json or {}).get("execution_plan_id") if patrol_run else "")
+                or ""
+            )
             execution_plan = None
             if execution_plan_id:
                 plan_row = db.get(CollectionExecutionPlanRecord, execution_plan_id)
                 if plan_row is not None:
                     execution_plan = _execution_plan_record_dict(plan_row)
-            if execution_plan is None:
+            if execution_plan is None and run is not None:
                 plan_row = (
                     db.query(CollectionExecutionPlanRecord)
                     .filter(CollectionExecutionPlanRecord.workflow_run_id == run.id)
@@ -1761,18 +1957,6 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                 if plan_row is not None:
                     execution_plan = _execution_plan_record_dict(plan_row)
                     execution_plan_id = plan_row.id
-            steps = (
-                db.query(WorkflowStepRecord)
-                .filter(WorkflowStepRecord.run_id == run.id)
-                .order_by(WorkflowStepRecord.step_index.asc())
-                .all()
-            )
-            snapshot_run_id = None
-            for step in steps:
-                snapshot_run_id = _find_nested_value(step.result or {}, "snapshot_run_id")
-                if snapshot_run_id:
-                    snapshot_run_id = str(snapshot_run_id)
-                    break
             snapshots: list[CommandSnapshot] = []
             changes: list[NetworkChangeRecord] = []
             events: list[NetworkEventRecord] = []
@@ -1791,7 +1975,9 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                             CommandSnapshot.device_id == device_id,
                         ),
                     )
-                    .order_by(CommandSnapshot.observed_at.asc(), CommandSnapshot.canonical_command.asc())
+                    .order_by(
+                        CommandSnapshot.observed_at.asc(), CommandSnapshot.canonical_command.asc()
+                    )
                     .all()
                 )
                 snapshot_ids = [row.id for row in snapshots]
@@ -1816,18 +2002,17 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                     NetworkChangeRecord.device_id == device_id,
                 )
                 change_count = db.query(NetworkChangeRecord.id).filter(*change_filter).count()
-                event_query = (
-                    db.query(NetworkEventRecord)
-                    .join(
-                        NetworkEventOccurrenceRecord,
-                        NetworkEventOccurrenceRecord.event_id == NetworkEventRecord.id,
-                    )
-                    .filter(
-                        NetworkEventOccurrenceRecord.run_id == snapshot_run_id,
-                        NetworkEventRecord.device_id == device_id,
-                    )
+                occurrence_event_ids = db.query(NetworkEventOccurrenceRecord.event_id).filter(
+                    NetworkEventOccurrenceRecord.run_id == snapshot_run_id
                 )
-                event_count = event_query.distinct().count()
+                event_query = db.query(NetworkEventRecord).filter(
+                    or_(
+                        NetworkEventRecord.run_id == snapshot_run_id,
+                        NetworkEventRecord.id.in_(occurrence_event_ids),
+                    ),
+                    NetworkEventRecord.device_id == device_id,
+                )
+                event_count = event_query.count()
                 changes = (
                     db.query(NetworkChangeRecord)
                     .filter(*change_filter)
@@ -1835,22 +2020,30 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                     .limit(20)
                     .all()
                 )
-                events = (
-                    event_query
-                    .distinct()
-                    .order_by(NetworkEventRecord.occurred_at.desc())
-                    .limit(20)
-                    .all()
-                )
+                events = event_query.order_by(NetworkEventRecord.occurred_at.desc()).limit(20).all()
             items.append(
                 {
-                    "workflow_run_id": run.id,
-                    "workflow_status": run.status,
-                    "workflow_created_at": _iso(run.created_at),
-                    "workflow_completed_at": _iso(run.completed_at),
+                    "workflow_run_id": run.id if run is not None else None,
+                    "workflow_status": (
+                        run.status if run is not None else patrol_run.status if patrol_run else None
+                    ),
+                    "workflow_created_at": _iso(
+                        run.created_at
+                        if run is not None
+                        else patrol_run.started_at
+                        if patrol_run
+                        else None
+                    ),
+                    "workflow_completed_at": _iso(
+                        run.completed_at
+                        if run is not None
+                        else patrol_run.completed_at
+                        if patrol_run
+                        else None
+                    ),
                     "execution_plan_id": execution_plan_id or None,
                     "execution_plan": execution_plan,
-                    "patrol_batch_id": (run.context or {}).get("patrol_batch_id"),
+                    "patrol_batch_id": run_context.get("patrol_batch_id"),
                     "snapshot_run_id": snapshot_run_id,
                     "snapshot_count": len(snapshots),
                     "observation_count": observation_count,
@@ -1985,7 +2178,9 @@ def _patrol_readiness(device: dict[str, Any], mode: str = PRODUCTION_MODE) -> di
         }
 
 
-def _bulk_update_preview(payload: DeviceBulkRequest, repository: DeviceRepository) -> dict[str, Any]:
+def _bulk_update_preview(
+    payload: DeviceBulkRequest, repository: DeviceRepository
+) -> dict[str, Any]:
     devices = _resolve_bulk_devices(payload, repository)
     update = payload.update
     if update.status is not None:
@@ -2048,7 +2243,9 @@ def _bulk_update_preview(payload: DeviceBulkRequest, repository: DeviceRepositor
     }
 
 
-def _patrol_launch_preview(payload: DevicePatrolLaunchRequest, repository: DeviceRepository) -> dict[str, Any]:
+def _patrol_launch_preview(
+    payload: DevicePatrolLaunchRequest, repository: DeviceRepository
+) -> dict[str, Any]:
     devices = _resolve_bulk_devices(
         DeviceBulkRequest(
             device_ids=payload.device_ids,
@@ -2059,7 +2256,9 @@ def _patrol_launch_preview(payload: DevicePatrolLaunchRequest, repository: Devic
         repository,
         active_only=True,
     )
-    module_violations = _agent_module_control_violations(_required_agent_modules_for_patrol(payload))
+    module_violations = _agent_module_control_violations(
+        _required_agent_modules_for_patrol(payload)
+    )
     if module_violations:
         errors = [
             {
@@ -2480,7 +2679,9 @@ def upsert_device_dynamic_group(payload: DeviceDynamicGroupRequest, request: Req
 
 
 @router.patch("/dynamic-groups/{group_id}")
-def update_device_dynamic_group(group_id: str, payload: DeviceDynamicGroupRequest, request: Request):
+def update_device_dynamic_group(
+    group_id: str, payload: DeviceDynamicGroupRequest, request: Request
+):
     try:
         group = DeviceRepository().upsert_dynamic_group(group_id=group_id, **payload.model_dump())
         _audit_device_action(
@@ -2496,7 +2697,9 @@ def update_device_dynamic_group(group_id: str, payload: DeviceDynamicGroupReques
 
 
 @router.post("/dynamic-groups/{group_id}/status")
-def update_device_dynamic_group_status(group_id: str, payload: DeviceStatusRequest, request: Request):
+def update_device_dynamic_group_status(
+    group_id: str, payload: DeviceStatusRequest, request: Request
+):
     try:
         group = DeviceRepository().set_dynamic_group_status(group_id, payload.status)
     except ValueError as exc:
@@ -2538,7 +2741,9 @@ def get_agent_module_health():
 
 
 @router.patch("/agent-modules/{module_id}/control")
-def update_agent_module_control(module_id: str, payload: AgentModuleControlRequest, request: Request):
+def update_agent_module_control(
+    module_id: str, payload: AgentModuleControlRequest, request: Request
+):
     user = getattr(getattr(request, "state", None), "current_user", None)
     if user is not None and not isinstance(user, CurrentUser):
         user = None
@@ -2725,12 +2930,12 @@ def launch_device_patrol(payload: DevicePatrolLaunchRequest, request: Request):
         "ticket_id": payload.ticket_id,
         "patrol_batch_id": patrol_batch_id,
         "launch_mode": payload.launch_mode,
-            "workflow_name": payload.workflow_name,
-            "runs": [],
-            "tasks": launched,
-            "skipped_count": preview["error_count"],
-            "skipped_errors": preview["errors"],
-        }
+        "workflow_name": payload.workflow_name,
+        "runs": [],
+        "tasks": launched,
+        "skipped_count": preview["error_count"],
+        "skipped_errors": preview["errors"],
+    }
     _audit_device_action(
         request,
         "device_patrol_launch",
@@ -2782,7 +2987,9 @@ def update_device(device_id: str, payload: DeviceUpdateRequest, request: Request
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if values["status"] == "deleted":
-            raise HTTPException(status_code=400, detail="use DELETE /devices/{device_id} to delete a device")
+            raise HTTPException(
+                status_code=400, detail="use DELETE /devices/{device_id} to delete a device"
+            )
     device = DeviceRepository().update_device(device_id, **values)
     if not device:
         raise HTTPException(status_code=404, detail="device not found")
@@ -2843,9 +3050,7 @@ def preview_device_plan(device_id: str, payload: DevicePlanPreviewRequest):
     )
     commands = plan.command_texts()
     parser_coverage = (
-        _production_parser_coverage(device, commands)
-        if normalized_mode == PRODUCTION_MODE
-        else []
+        _production_parser_coverage(device, commands) if normalized_mode == PRODUCTION_MODE else []
     )
     connection_issues = _connection_preflight(device)
     plan_violations = _execution_plan_violations(plan, normalized_mode)

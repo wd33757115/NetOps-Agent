@@ -64,8 +64,13 @@ class ChangeEventRepository:
                     list(derived_observations),
                     update_current_state=True,
                 )
-            for decision in decisions or []:
-                self._save_decision_row(db, decision)
+            decision_values = [self._decision_values(decision) for decision in decisions or []]
+            if decision_values:
+                db.execute(
+                    pg_insert(NetworkChangeDecisionRecord)
+                    .values(decision_values)
+                    .on_conflict_do_nothing(index_elements=["idempotency_key"])
+                )
             change_values: list[dict[str, Any]] = []
             for change in changes:
                 key = _digest(
@@ -228,8 +233,8 @@ class ChangeEventRepository:
                     continue
                 active = self._find_active_event(db, event)
                 if active is not None:
-                    occurrence_created = self._record_event_occurrence(db, active.id, event)
-                    if not occurrence_created:
+                    occurrence_id = self._record_event_occurrence(db, active.id, event)
+                    if occurrence_id is None:
                         continue
                     payload = dict(active.payload_json or {})
                     payload["latest_change"] = event.payload.get("change")
@@ -250,6 +255,13 @@ class ChangeEventRepository:
                         change = db.get(NetworkChangeRecord, event.source_change_id)
                         if change is not None:
                             change.event_status = "event_created"
+                    self._enqueue_event(
+                        db,
+                        event,
+                        event_id=active.id,
+                        occurrence_id=occurrence_id,
+                        publication_kind="recurrence",
+                    )
                     continue
                 db.add(
                     NetworkEventRecord(
@@ -278,8 +290,16 @@ class ChangeEventRepository:
                     )
                 )
                 db.flush()
-                self._record_event_occurrence(db, event.event_id, event)
-                self._enqueue_event(db, event)
+                occurrence_id = self._record_event_occurrence(db, event.event_id, event)
+                if occurrence_id is None:
+                    raise RuntimeError("opening event occurrence was not persisted")
+                self._enqueue_event(
+                    db,
+                    event,
+                    event_id=event.event_id,
+                    occurrence_id=occurrence_id,
+                    publication_kind="opening",
+                )
                 if event.source_change_id:
                     change = db.get(NetworkChangeRecord, event.source_change_id)
                     if change is not None:
@@ -287,7 +307,7 @@ class ChangeEventRepository:
                 created += 1
         return created
 
-    def _record_event_occurrence(self, db, event_id: str, event: Any) -> bool:
+    def _record_event_occurrence(self, db, event_id: str, event: Any) -> str | None:
         key = _digest(
             (
                 event_id,
@@ -314,9 +334,9 @@ class ChangeEventRepository:
             .on_conflict_do_nothing(index_elements=["idempotency_key"])
             .returning(NetworkEventOccurrenceRecord.id)
         )
-        return db.execute(stmt).scalar_one_or_none() is not None
+        return db.execute(stmt).scalar_one_or_none()
 
-    def _save_decision_row(self, db, decision: dict[str, Any]) -> None:
+    def _decision_values(self, decision: dict[str, Any]) -> dict[str, Any]:
         key = _digest(
             (
                 decision.get("run_id"),
@@ -327,42 +347,34 @@ class ChangeEventRepository:
                 decision.get("change_policy_version_id"),
             )
         )
-        if (
-            db.query(NetworkChangeDecisionRecord.id)
-            .filter(NetworkChangeDecisionRecord.idempotency_key == key)
-            .first()
-        ):
-            return
-        db.add(
-            NetworkChangeDecisionRecord(
-                id=str(uuid.uuid4()),
-                idempotency_key=key,
-                run_id=str(decision.get("run_id") or ""),
-                device_id=decision.get("device_id"),
-                canonical_command=decision.get("canonical_command"),
-                entity_type=str(decision.get("entity_type") or "record"),
-                entity_key=str(decision.get("entity_key") or ""),
-                field=str(decision.get("field") or ""),
-                observation_type=decision.get("observation_type"),
-                previous_observation_id=decision.get("previous_observation_id"),
-                current_observation_id=decision.get("current_observation_id"),
-                decision=str(decision.get("decision") or "invalid"),
-                reason=decision.get("reason"),
-                change_policy_id=decision.get("change_policy_id"),
-                change_policy_version_id=decision.get("change_policy_version_id"),
-                comparison_type=decision.get("comparison_type"),
-                old_value_json=decision.get("old"),
-                new_value_json=decision.get("new"),
-                observed_at=(
-                    _datetime(decision.get("observed_at")) if decision.get("observed_at") else None
-                ),
-                expires_at=(
-                    _datetime(decision.get("expires_at")) if decision.get("expires_at") else None
-                ),
-                metadata_json=dict(decision.get("metadata") or {}),
-                created_at=datetime.now(timezone.utc),
-            )
-        )
+        return {
+            "id": str(uuid.uuid5(uuid.NAMESPACE_URL, key)),
+            "idempotency_key": key,
+            "run_id": str(decision.get("run_id") or ""),
+            "device_id": decision.get("device_id"),
+            "canonical_command": decision.get("canonical_command"),
+            "entity_type": str(decision.get("entity_type") or "record"),
+            "entity_key": str(decision.get("entity_key") or ""),
+            "field": str(decision.get("field") or ""),
+            "observation_type": decision.get("observation_type"),
+            "previous_observation_id": decision.get("previous_observation_id"),
+            "current_observation_id": decision.get("current_observation_id"),
+            "decision": str(decision.get("decision") or "invalid"),
+            "reason": decision.get("reason"),
+            "change_policy_id": decision.get("change_policy_id"),
+            "change_policy_version_id": decision.get("change_policy_version_id"),
+            "comparison_type": decision.get("comparison_type"),
+            "old_value_json": decision.get("old"),
+            "new_value_json": decision.get("new"),
+            "observed_at": (
+                _datetime(decision.get("observed_at")) if decision.get("observed_at") else None
+            ),
+            "expires_at": (
+                _datetime(decision.get("expires_at")) if decision.get("expires_at") else None
+            ),
+            "metadata_json": dict(decision.get("metadata") or {}),
+            "created_at": datetime.now(timezone.utc),
+        }
 
     def list_change_decisions(self, *, run_id: str) -> list[dict[str, Any]]:
         with get_db_session() as db:
@@ -402,20 +414,32 @@ class ChangeEventRepository:
         payload.setdefault("event_class", _event_class(event))
         return payload
 
-    def _enqueue_event(self, db, event: Any) -> None:
+    def _enqueue_event(
+        self,
+        db,
+        event: Any,
+        *,
+        event_id: str,
+        occurrence_id: str,
+        publication_kind: str,
+    ) -> None:
         if (
             db.query(NetworkEventOutboxRecord.id)
-            .filter(NetworkEventOutboxRecord.event_id == event.event_id)
+            .filter(NetworkEventOutboxRecord.occurrence_id == occurrence_id)
             .first()
         ):
             return
         now = datetime.now(timezone.utc)
         payload = event.to_dict()
+        payload["event_id"] = event_id
+        payload["occurrence_id"] = occurrence_id
+        payload["publication_kind"] = publication_kind
         payload["status"] = "resolved" if _event_class(event) == "recovery" else event.status
         db.add(
             NetworkEventOutboxRecord(
                 id=str(uuid.uuid4()),
-                event_id=event.event_id,
+                event_id=event_id,
+                occurrence_id=occurrence_id,
                 event_type=f"network.{event.event_type}",
                 payload_json=payload,
                 status="pending",

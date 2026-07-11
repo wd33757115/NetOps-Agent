@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 import base64
+import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from io import BytesIO
+from pathlib import Path
 
 import pytest
 
 from src.gateway import devices_api
+from src.infrastructure.db.models import (
+    CommandSnapshot,
+    NetworkEventRecord,
+    PatrolRun,
+)
+from src.infrastructure.db.postgres import get_db_session
 
 
 @pytest.fixture(autouse=True)
@@ -349,9 +357,7 @@ def test_list_devices_patrol_readiness_blocks_missing_runtime_rule_assets(monkey
     assert readiness["ready_count"] == 1
     assert readiness["blocked_count"] == 0
     assert readiness["runtime_asset_health"]["status"] == "blocked"
-    assert readiness["runtime_asset_health"]["missing_change_policies"] == [
-        "interface.oper_status"
-    ]
+    assert readiness["runtime_asset_health"]["missing_change_policies"] == ["interface.oper_status"]
 
 
 def test_preview_device_plan_returns_execution_plan(monkeypatch):
@@ -414,7 +420,9 @@ def test_preview_device_plan_returns_execution_plan(monkeypatch):
     assert result["parser_coverage"][0]["template_id"] == "template-1"
     assert result["coverage_summary"]["status"] == "blocked"
     assert result["coverage_summary"]["ready_count"] == 1
-    assert result["coverage_summary"]["connection_issues"][0]["failure_code"] == "missing_credential"
+    assert (
+        result["coverage_summary"]["connection_issues"][0]["failure_code"] == "missing_credential"
+    )
 
 
 def test_device_connectivity_test_blocks_preflight_issue(monkeypatch):
@@ -708,14 +716,12 @@ def test_preview_device_import_marks_create_update_and_invalid(monkeypatch):
     csv_text = "\n".join(
         [
             "device_name,management_ip,vendor,model,platform,device_type,os_version,serial_number,groups",
-            "SW1,10.0.0.1,Cisco,WS-C2960XR-24TS-I,ios,access_switch,15.2,FOC1234,\"core,xian\"",
+            'SW1,10.0.0.1,Cisco,WS-C2960XR-24TS-I,ios,access_switch,15.2,FOC1234,"core,xian"',
             "SW2,10.0.0.2,H3C,edge",
             "BROKEN,,Cisco,core",
         ]
     )
-    result = devices_api.preview_device_import(
-        devices_api.DeviceImportRequest(content=csv_text)
-    )
+    result = devices_api.preview_device_import(devices_api.DeviceImportRequest(content=csv_text))
 
     assert result["total"] == 3
     assert result["create_count"] == 1
@@ -746,22 +752,26 @@ def test_preview_device_import_accepts_xlsx(monkeypatch):
 
     workbook = Workbook()
     sheet = workbook.active
-    sheet.append([
-        "device_name",
-        "management_ip",
-        "vendor",
-        "model",
-        "groups",
-        "attributes_json",
-    ])
-    sheet.append([
-        "SW-XLSX-1",
-        "10.0.0.11",
-        "Cisco",
-        "WS-C2960XR-24TS-I",
-        "core,xian",
-        '{"collector_options":{"read_timeout":60}}',
-    ])
+    sheet.append(
+        [
+            "device_name",
+            "management_ip",
+            "vendor",
+            "model",
+            "groups",
+            "attributes_json",
+        ]
+    )
+    sheet.append(
+        [
+            "SW-XLSX-1",
+            "10.0.0.11",
+            "Cisco",
+            "WS-C2960XR-24TS-I",
+            "core,xian",
+            '{"collector_options":{"read_timeout":60}}',
+        ]
+    )
     buffer = BytesIO()
     workbook.save(buffer)
 
@@ -790,7 +800,9 @@ def test_apply_device_import_upserts_valid_rows(monkeypatch):
 
         def get_devices_by_filter(self, **kwargs):
             if "device_id" in kwargs:
-                return [{"device_id": kwargs["device_id"], "device_name": "SW1", "password": "secret"}]
+                return [
+                    {"device_id": kwargs["device_id"], "device_name": "SW1", "password": "secret"}
+                ]
             return []
 
         def upsert_device(self, **kwargs):
@@ -802,7 +814,7 @@ def test_apply_device_import_upserts_valid_rows(monkeypatch):
     csv_text = "\n".join(
         [
             "device_name,management_ip,vendor,attributes_json",
-            "SW1,10.0.0.1,Cisco,\"{\"\"collector_options\"\": {\"\"read_timeout\"\": 60}}\"",
+            'SW1,10.0.0.1,Cisco,"{""collector_options"": {""read_timeout"": 60}}"',
             "BROKEN,,Cisco,{}",
         ]
     )
@@ -1043,7 +1055,14 @@ def test_device_dynamic_group_crud_and_preview(monkeypatch):
     class FakeRepository:
         def list_dynamic_groups(self, *, status=None):
             assert status == "active"
-            return [{"id": "group-1", "name": "XiAn Access", "status": "active", "selector": {"site": "xian"}}]
+            return [
+                {
+                    "id": "group-1",
+                    "name": "XiAn Access",
+                    "status": "active",
+                    "selector": {"site": "xian"},
+                }
+            ]
 
         def upsert_dynamic_group(self, **kwargs):
             calls.append(kwargs)
@@ -1058,12 +1077,22 @@ def test_device_dynamic_group_crud_and_preview(monkeypatch):
         def set_dynamic_group_status(self, group_id, status):
             assert group_id == "group-1"
             assert status == "disabled"
-            return {"id": group_id, "name": "XiAn Access", "status": status, "selector": {"site": "xian"}}
+            return {
+                "id": group_id,
+                "name": "XiAn Access",
+                "status": status,
+                "selector": {"site": "xian"},
+            }
 
         def resolve_dynamic_group_devices(self, group_id):
             assert group_id == "group-1"
             return (
-                {"id": "group-1", "name": "XiAn Access", "status": "active", "selector": {"site": "xian"}},
+                {
+                    "id": "group-1",
+                    "name": "XiAn Access",
+                    "status": "active",
+                    "selector": {"site": "xian"},
+                },
                 [{"device_id": "device-1", "device_name": "SW1", "password": "secret"}],
             )
 
@@ -1114,7 +1143,9 @@ def test_device_credentials_api_lists_and_inspects_refs(monkeypatch):
         devices_api.CredentialInspectRequest(credential_ref="plain:secret")
     )
 
-    assert any(item["ref"] == "env:NETOPS_PASSWORD" and item["available"] for item in listed["items"])
+    assert any(
+        item["ref"] == "env:NETOPS_PASSWORD" and item["available"] for item in listed["items"]
+    )
     assert all("secret" not in str(item) for item in listed["items"])
     assert inspected["supported"] is True
     assert inspected["available"] is True
@@ -1265,7 +1296,10 @@ def test_preview_device_patrol_launch_blocks_production_without_active_profile(m
     assert result["ready_count"] == 0
     assert result["error_count"] == 1
     assert result["errors"][0]["failure_code"] == "command_profile_not_ready"
-    assert result["errors"][0]["plan_violations"][0]["failure_code"] == "active_command_profile_required"
+    assert (
+        result["errors"][0]["plan_violations"][0]["failure_code"]
+        == "active_command_profile_required"
+    )
 
 
 def test_preview_device_patrol_launch_blocks_empty_plan_in_validation_mode(monkeypatch):
@@ -1315,7 +1349,9 @@ def test_preview_device_patrol_launch_blocks_empty_plan_in_validation_mode(monke
     assert result["ready_count"] == 0
     assert result["error_count"] == 1
     assert result["errors"][0]["failure_code"] == "command_profile_not_ready"
-    assert result["errors"][0]["plan_violations"][0]["failure_code"] == "collection_commands_required"
+    assert (
+        result["errors"][0]["plan_violations"][0]["failure_code"] == "collection_commands_required"
+    )
 
 
 def test_preview_device_patrol_launch_blocks_production_without_parser_coverage(monkeypatch):
@@ -1664,6 +1700,102 @@ def test_list_device_evidence_timeline_redacts_device(monkeypatch):
     assert result["items"][0]["snapshot_run_id"] == "patrol-1"
 
 
+def test_device_api_has_no_known_mojibake_tokens():
+    source = Path(devices_api.__file__).read_text(encoding="utf-8")
+    suspicious = (
+        "鏈€",
+        "楠岃瘉",
+        "澶辫触",
+        "鍙樺寲",
+        "璁惧",
+        "鎶ュ憡",
+        "灏氭湭",
+    )
+
+    assert not [token for token in suspicious if token in source]
+
+
+def test_device_timeline_includes_direct_patrol_and_legacy_opening_event():
+    run_id = f"timeline-{uuid.uuid4()}"
+    snapshot_id = str(uuid.uuid4())
+    event_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    device_id = f"device-{uuid.uuid4()}"
+    with get_db_session() as db:
+        db.add(
+            PatrolRun(
+                id=run_id,
+                logical_run_id=run_id,
+                mode="production",
+                source="device-patrol",
+                status="completed",
+                collection_status="completed",
+                analysis_status="completed",
+                baseline_eligible=False,
+                run_purpose="scheduled_patrol",
+                started_at=now,
+                completed_at=now,
+            )
+        )
+        db.flush()
+        db.add(
+            CommandSnapshot(
+                id=snapshot_id,
+                run_id=run_id,
+                device_id=device_id,
+                device_name="SW1",
+                command="show interface status",
+                canonical_command="show interface status",
+                observed_at=now,
+                raw_text="Gi1/0/1 connected",
+                raw_text_hash="a" * 64,
+                parse_status="parsed",
+                snapshot_kind="full",
+            )
+        )
+        db.add(
+            NetworkEventRecord(
+                id=event_id,
+                idempotency_key=uuid.uuid4().hex,
+                event_type="InterfaceDown",
+                severity="major",
+                device_id=device_id,
+                entity_type="interface_l2",
+                entity_key='["Gi1/0/1"]',
+                correlation_key=uuid.uuid4().hex,
+                source_change_id=None,
+                run_id=run_id,
+                latest_change_id=None,
+                last_seen_run_id=run_id,
+                occurred_at=now,
+                first_seen_at=now,
+                last_seen_at=now,
+                occurrence_count=1,
+                status="open",
+                payload_json={},
+                created_at=now,
+            )
+        )
+
+    try:
+        result = devices_api._device_evidence_timeline(
+            {"device_id": device_id, "device_name": "SW1"},
+            limit=5,
+        )
+
+        assert result["items"][0]["snapshot_run_id"] == run_id
+        assert result["items"][0]["workflow_run_id"] is None
+        assert result["items"][0]["snapshot_count"] == 1
+        assert result["items"][0]["event_count"] == 1
+        assert result["items"][0]["events"][0]["event_id"] == event_id
+    finally:
+        with get_db_session() as db:
+            db.query(NetworkEventRecord).filter(NetworkEventRecord.id == event_id).delete(
+                synchronize_session=False
+            )
+            db.query(PatrolRun).filter(PatrolRun.id == run_id).delete(synchronize_session=False)
+
+
 def test_launch_device_patrol_submits_one_task_per_plan(monkeypatch):
     submitted = []
 
@@ -1717,7 +1849,9 @@ def test_launch_device_patrol_submits_one_task_per_plan(monkeypatch):
                 "profile_version_id": self.profile_version_id,
                 "profile_name": self.profile_name,
                 "policy_source": self.policy_source,
-                "collection_items": [{"command": item, "action": "patrol"} for item in self.commands],
+                "collection_items": [
+                    {"command": item, "action": "patrol"} for item in self.commands
+                ],
             }
 
         def command_texts(self):

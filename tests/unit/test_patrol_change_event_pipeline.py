@@ -25,6 +25,7 @@ from src.core.patrol.change_policy import (
 from src.core.patrol.command_splitter import split_cli_capture
 from src.core.patrol.event_builder import build_events_from_changes, build_events_from_params
 from src.core.patrol.raw_importer import (
+    _import_fingerprint,
     _resolve_capture_device,
     import_raw_capture,
     import_raw_path,
@@ -53,11 +54,7 @@ def _enable_explicit_builtin_rule_test_interface(monkeypatch):
 
 def _cleanup_runs(*run_ids: str) -> None:
     with get_db_session() as db:
-        snapshots = (
-            db.query(CommandSnapshot)
-            .filter(CommandSnapshot.run_id.in_(run_ids))
-            .all()
-        )
+        snapshots = db.query(CommandSnapshot).filter(CommandSnapshot.run_id.in_(run_ids)).all()
         snapshot_ids = [row.id for row in snapshots]
         dataset_ids = {row.dataset_id for row in snapshots if row.dataset_id}
         job_ids = {
@@ -67,43 +64,40 @@ def _cleanup_runs(*run_ids: str) -> None:
             .all()
         }
         if snapshot_ids:
-            db.query(ParserJobSample).filter(
-                ParserJobSample.snapshot_id.in_(snapshot_ids)
-            ).delete(synchronize_session=False)
+            db.query(ParserJobSample).filter(ParserJobSample.snapshot_id.in_(snapshot_ids)).delete(
+                synchronize_session=False
+            )
         for job_id in job_ids:
             job = db.get(ParserTemplateJob, job_id)
             if job is None:
                 continue
-            remaining = (
-                db.query(ParserJobSample)
-                .filter(ParserJobSample.job_id == job_id)
-                .count()
-            )
+            remaining = db.query(ParserJobSample).filter(ParserJobSample.job_id == job_id).count()
             job.sample_count = remaining
             if remaining == 0:
-                db.query(ParserOutboxEvent).filter(
-                    ParserOutboxEvent.aggregate_id == job_id
-                ).delete(synchronize_session=False)
+                db.query(ParserOutboxEvent).filter(ParserOutboxEvent.aggregate_id == job_id).delete(
+                    synchronize_session=False
+                )
                 db.delete(job)
-        db.query(NetworkEventRecord).filter(
-            NetworkEventRecord.run_id.in_(run_ids)
-        ).delete(synchronize_session=False)
-        db.query(NetworkChangeRecord).filter(
-            NetworkChangeRecord.run_id.in_(run_ids)
-        ).delete(synchronize_session=False)
-        db.query(CommandSnapshot).filter(
-            CommandSnapshot.run_id.in_(run_ids)
-        ).delete(synchronize_session=False)
-        db.query(PatrolRun).filter(PatrolRun.id.in_(run_ids)).delete(
+        db.query(NetworkEventRecord).filter(NetworkEventRecord.run_id.in_(run_ids)).delete(
             synchronize_session=False
         )
+        db.query(NetworkChangeRecord).filter(NetworkChangeRecord.run_id.in_(run_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(CommandSnapshot).filter(CommandSnapshot.run_id.in_(run_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(PatrolRun).filter(PatrolRun.id.in_(run_ids)).delete(synchronize_session=False)
         for dataset_id in dataset_ids:
-            if not db.query(CommandSnapshot.id).filter(
-                CommandSnapshot.dataset_id == dataset_id
-            ).first():
-                db.query(PatrolDataset).filter(
-                    PatrolDataset.id == dataset_id
-                ).delete(synchronize_session=False)
+            if (
+                not db.query(CommandSnapshot.id)
+                .filter(CommandSnapshot.dataset_id == dataset_id)
+                .first()
+            ):
+                db.query(PatrolDataset).filter(PatrolDataset.id == dataset_id).delete(
+                    synchronize_session=False
+                )
+
 
 H3C_SAMPLE = """[BEGIN] 2025/12/24 14:46:42
 <SW1>
@@ -502,8 +496,11 @@ def test_event_repository_dedupes_active_event_and_resolves_recovery():
                 .filter(NetworkEventOutboxRecord.event_id.in_([high.id, recovered.id]))
                 .all()
             )
-            assert len(outbox_rows) == 2
+            assert len(outbox_rows) == 3
             assert {row.status for row in outbox_rows} == {"pending"}
+            publication_kinds = [row.payload_json["publication_kind"] for row in outbox_rows]
+            assert publication_kinds.count("opening") == 2
+            assert publication_kinds.count("recurrence") == 1
     finally:
         _cleanup_runs(run_id)
 
@@ -647,11 +644,7 @@ def test_command_observed_at_propagates_to_snapshot_and_evidence(tmp_path: Path)
             },
         )
         with get_db_session() as db:
-            snapshots = (
-                db.query(CommandSnapshot)
-                .filter(CommandSnapshot.run_id == run_id)
-                .all()
-            )
+            snapshots = db.query(CommandSnapshot).filter(CommandSnapshot.run_id == run_id).all()
             for snapshot in snapshots:
                 expected = datetime.fromisoformat(observed[snapshot.canonical_command])
                 evidence = (
@@ -660,12 +653,95 @@ def test_command_observed_at_propagates_to_snapshot_and_evidence(tmp_path: Path)
                     .one()
                 )
                 assert evidence.observed_at == snapshot.observed_at
-                actual = snapshot.observed_at.replace(
-                    tzinfo=ZoneInfo("Asia/Shanghai")
-                ).astimezone(expected.tzinfo)
+                actual = snapshot.observed_at.replace(tzinfo=ZoneInfo("Asia/Shanghai")).astimezone(
+                    expected.tzinfo
+                )
                 assert actual == expected
     finally:
         _cleanup_runs(run_id)
+
+
+def test_incremental_command_replay_creates_one_snapshot_per_fact(tmp_path: Path):
+    source = tmp_path / "SW2-10.0.0.2.log"
+    blocks = split_cli_capture(CISCO_SAMPLE, device_name="SW2")
+    run_id = f"test-{uuid.uuid4()}"
+    dataset_id = f"test-{uuid.uuid4()}"
+    observed = {
+        block.command_canonical: f"2026-07-11T01:00:0{index}+00:00"
+        for index, block in enumerate(blocks, start=1)
+    }
+
+    def report(block_count: int) -> str:
+        return "".join(
+            f"Command: {block.command}\nOutput:\n{block.raw_output}\n{'-' * 50}\n"
+            for block in blocks[:block_count]
+        )
+
+    try:
+        for block_count in range(1, len(blocks) + 1):
+            source.write_text(report(block_count), encoding="utf-8")
+            import_raw_capture(
+                file_path=source,
+                mode="parser_validation",
+                run_id=run_id,
+                vendor="Cisco",
+                metadata={"dataset_id": dataset_id},
+                command_collection_statuses={
+                    command: {"status": "complete", "observed_at": timestamp}
+                    for command, timestamp in observed.items()
+                },
+                finalize_run=False,
+            )
+        import_raw_capture(
+            file_path=source,
+            mode="parser_validation",
+            run_id=run_id,
+            vendor="Cisco",
+            metadata={"dataset_id": dataset_id},
+            command_collection_statuses={
+                command: {"status": "complete", "observed_at": timestamp}
+                for command, timestamp in observed.items()
+            },
+            finalize_run=False,
+        )
+
+        with get_db_session() as db:
+            snapshots = db.query(CommandSnapshot).filter(CommandSnapshot.run_id == run_id).all()
+            evidence_count = (
+                db.query(RawEvidenceRecord)
+                .filter(
+                    RawEvidenceRecord.source_snapshot_id.in_(
+                        [snapshot.id for snapshot in snapshots]
+                    )
+                )
+                .count()
+            )
+            snapshot_count = len(snapshots)
+            fingerprints = {snapshot.import_fingerprint for snapshot in snapshots}
+        assert snapshot_count == len(blocks)
+        assert evidence_count == len(blocks)
+        assert len(fingerprints) == len(blocks)
+    finally:
+        _cleanup_runs(run_id)
+
+
+def test_online_command_fingerprint_ignores_mutable_report_hash():
+    common = {
+        "mode": "production",
+        "dataset_id": "dataset-1",
+        "device_id": "SW1-10.0.0.1",
+        "canonical_command": "show interface status",
+        "raw_text": "Gi1/0/1 connected",
+        "run_id": "run-1",
+        "inventory_device_id": "device-1",
+        "command_observed_at": "2026-07-11T01:00:01+00:00",
+        "command_ordinal": 1,
+    }
+
+    first = _import_fingerprint(source_file_hash="a" * 64, **common)
+    cumulative_replay = _import_fingerprint(source_file_hash="b" * 64, **common)
+
+    assert first == cumulative_replay
 
 
 def test_offline_import_prefers_asset_name_from_filename_over_prompt_alias(tmp_path: Path):
@@ -703,9 +779,7 @@ def test_import_raw_path_batches_directory_into_one_run(tmp_path: Path):
         _cleanup_runs(run_id)
 
 
-def test_raw_import_fails_before_writing_when_postgres_is_unavailable(
-    tmp_path: Path, monkeypatch
-):
+def test_raw_import_fails_before_writing_when_postgres_is_unavailable(tmp_path: Path, monkeypatch):
     source = tmp_path / "SW1-10.0.0.1.log"
     source.write_text(CISCO_SAMPLE, encoding="utf-8")
     db = tmp_path / "patrol.db"
@@ -724,9 +798,7 @@ def test_raw_import_fails_before_writing_when_postgres_is_unavailable(
     assert not db.exists()
 
 
-def test_production_import_preserves_evidence_when_parser_fails(
-    tmp_path: Path, monkeypatch
-):
+def test_production_import_preserves_evidence_when_parser_fails(tmp_path: Path, monkeypatch):
     source = tmp_path / "SW1-10.0.0.1.log"
     source.write_text(CISCO_SAMPLE, encoding="utf-8")
     run_id = f"test-{uuid.uuid4()}"
@@ -768,20 +840,12 @@ def test_production_import_preserves_evidence_when_parser_fails(
         assert result["production_parser_ready"] is False
         assert result["parse_violations"]
         with get_db_session() as db:
-            snapshots = (
-                db.query(CommandSnapshot)
-                .filter(CommandSnapshot.run_id == run_id)
-                .all()
-            )
+            snapshots = db.query(CommandSnapshot).filter(CommandSnapshot.run_id == run_id).all()
             assert snapshots
             assert {row.parse_status for row in snapshots} == {"parse_failed"}
             evidence_count = (
                 db.query(RawEvidenceRecord)
-                .filter(
-                    RawEvidenceRecord.source_snapshot_id.in_(
-                        [row.id for row in snapshots]
-                    )
-                )
+                .filter(RawEvidenceRecord.source_snapshot_id.in_([row.id for row in snapshots]))
                 .count()
             )
             assert evidence_count == len(snapshots)
