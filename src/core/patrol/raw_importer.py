@@ -267,7 +267,9 @@ def import_raw_capture(
     metadata: dict[str, Any] | None = None,
     inventory_device_id: str | None = None,
     collector_complete: bool | None = None,
-    command_collection_statuses: dict[str, dict[str, Any]] | None = None,
+    command_collection_statuses: (
+        dict[str, dict[str, Any]] | list[dict[str, Any]] | None
+    ) = None,
     finalize_run: bool = True,
 ) -> dict[str, Any]:
     require_postgres_connection()
@@ -344,17 +346,30 @@ def import_raw_capture(
 
     repository = PatrolRepository()
     dataset_id = _dataset_id(path, metadata)
-    per_command_status = {
-        " ".join(str(command).strip().lower().split()): dict(result or {})
-        for command, result in (command_collection_statuses or {}).items()
-    }
+    if isinstance(command_collection_statuses, dict):
+        status_items = [
+            {"command": command, **dict(result or {})}
+            for command, result in command_collection_statuses.items()
+        ]
+    else:
+        status_items = [dict(item) for item in command_collection_statuses or []]
+    status_queues: dict[str, list[dict[str, Any]]] = {}
+    for item in status_items:
+        canonical = " ".join(str(item.get("command") or "").strip().lower().split())
+        status_queues.setdefault(canonical, []).append(item)
+    block_collection_statuses = [
+        (status_queues.get(block.command_canonical) or [{}]).pop(0)
+        for block, _ in parsed_blocks
+    ]
     command_observed_ats = [
         (
-            per_command_status.get(block.command_canonical, {}).get("observed_at")
+            command_collection.get("observed_at")
             or observed_at
             or inspected.observed_at_text
         )
-        for block, _ in parsed_blocks
+        for (block, _), command_collection in zip(
+            parsed_blocks, block_collection_statuses, strict=True
+        )
     ]
     fingerprints = [
         _import_fingerprint(
@@ -440,10 +455,13 @@ def import_raw_capture(
     snapshot_ids: list[str] = []
     duplicate_snapshot_ids: list[str] = []
     parser_results: list[dict[str, Any]] = []
-    for (block, parsed), fingerprint, command_observed_at in zip(
-        parsed_blocks, fingerprints, command_observed_ats, strict=True
+    for (block, parsed), fingerprint, command_observed_at, command_collection in zip(
+        parsed_blocks,
+        fingerprints,
+        command_observed_ats,
+        block_collection_statuses,
+        strict=True,
     ):
-        command_collection = per_command_status.get(block.command_canonical, {})
         parse_status = "raw_only"
         structured = None
         parser_name = None
@@ -492,8 +510,12 @@ def import_raw_capture(
                 "patrol_mode": mode,
                 "source_path": str(path),
                 "collector_complete": collector_complete,
+                "execution_item_id": command_collection.get("execution_item_id"),
+                "collection_item_id": command_collection.get("collection_item_id"),
+                "command_ordinal": command_collection.get("command_ordinal"),
             },
             inventory_device_id=inventory_device_id,
+            execution_item_id=command_collection.get("execution_item_id"),
         )
         snapshot_ids.append(snapshot_id)
         if not snapshot_created:
@@ -569,10 +591,13 @@ def import_raw_capture(
             observed_entity_count=entity_count,
             failure_code=parsed.failure_code,
             observed_at=command_observed_at,
+            execution_item_id=command_collection.get("execution_item_id"),
             metadata={
                 "parse_status": parse_status,
                 "snapshot_id": snapshot_id,
                 "collector_complete": command_complete,
+                "collection_item_id": command_collection.get("collection_item_id"),
+                "command_ordinal": command_collection.get("command_ordinal"),
             },
         )
     if finalize_run:

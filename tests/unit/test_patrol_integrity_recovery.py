@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -190,6 +191,10 @@ def test_active_event_keeps_opening_run_and_appends_occurrence():
                 .all()
             )
             assert [item.run_id for item in occurrences] == ["run-A", "run-B"]
+            assert [item.occurrence_kind for item in occurrences] == [
+                "opening",
+                "recurrence",
+            ]
             outbox_rows = (
                 db.query(NetworkEventOutboxRecord)
                 .filter(NetworkEventOutboxRecord.event_id == first_id)
@@ -258,9 +263,11 @@ def test_worker_redelivery_abandons_running_attempt_and_allocates_next():
             lease_seconds=900,
         )
 
-        next_attempt = repository.prepare_redelivery_attempt(logical_run_id)
+        decision = repository.prepare_redelivery_attempt(logical_run_id)
 
-        assert next_attempt == 1
+        assert decision.action == "allocate_new_attempt"
+        assert decision.attempt_number == 1
+        assert repository.get_run(decision.run_id)["status"] == "reserved"
         abandoned = repository.get_run(logical_run_id)
         assert abandoned["status"] == "abandoned"
         assert abandoned["collection_status"] == "failed"
@@ -271,6 +278,94 @@ def test_worker_redelivery_abandons_running_attempt_and_allocates_next():
             db.query(PatrolRun).filter(PatrolRun.logical_run_id == logical_run_id).delete(
                 synchronize_session=False
             )
+
+
+def test_completed_patrol_redelivery_does_not_allocate_another_attempt():
+    logical_run_id = f"patrol-{uuid.uuid4()}"
+    repository = PatrolRepository()
+    try:
+        repository.create_run(
+            run_id=logical_run_id,
+            source="device-patrol",
+            mode="production",
+            logical_run_id=logical_run_id,
+        )
+        repository.finish_run(
+            logical_run_id,
+            collection_status="completed",
+            analysis_status="completed",
+        )
+        repository.mark_celery_task_completed(logical_run_id)
+
+        decision = repository.prepare_redelivery_attempt(logical_run_id)
+
+        assert decision.action == "already_completed"
+        assert decision.run_id == logical_run_id
+        with get_db_session() as db:
+            assert (
+                db.query(PatrolRun)
+                .filter(PatrolRun.logical_run_id == logical_run_id)
+                .count()
+                == 1
+            )
+    finally:
+        with get_db_session() as db:
+            db.query(PatrolRun).filter(PatrolRun.logical_run_id == logical_run_id).delete(
+                synchronize_session=False
+            )
+
+
+def test_concurrent_event_writers_share_one_active_aggregate():
+    correlation_key = uuid.uuid4().hex
+    event_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
+
+    def save(index: int) -> int:
+        event = NetworkEvent(
+            event_id=event_ids[index],
+            event_type="InterfaceDown",
+            severity="major",
+            device_id="SW1",
+            entity_type="interface_l2",
+            entity_key='["Gi1/0/9"]',
+            source_change_id=f"change-{event_ids[index]}",
+            run_id=f"run-{index}",
+            occurred_at=f"2026-07-11T01:0{index}:00+00:00",
+            status="open",
+            payload={
+                "change": {"change_id": f"change-{event_ids[index]}"},
+                "rule": {"event_class": "fault"},
+                "correlation_key": correlation_key,
+                "correlation_dimensions": {"device_id": "SW1"},
+            },
+        )
+        return ChangeEventRepository().save_events([event])
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(save, range(2)))
+        assert sorted(results) == [0, 1]
+        with get_db_session() as db:
+            active = (
+                db.query(NetworkEventRecord)
+                .filter(
+                    NetworkEventRecord.event_type == "InterfaceDown",
+                    NetworkEventRecord.correlation_key == correlation_key,
+                    NetworkEventRecord.status == "open",
+                )
+                .one()
+            )
+            assert active.occurrence_count == 2
+            assert (
+                db.query(NetworkEventOccurrenceRecord)
+                .filter(NetworkEventOccurrenceRecord.event_id == active.id)
+                .count()
+                == 2
+            )
+    finally:
+        with get_db_session() as db:
+            db.query(NetworkEventRecord).filter(
+                NetworkEventRecord.correlation_key == correlation_key
+            ).delete(synchronize_session=False)
 
 
 def test_invalid_fact_timestamp_is_rejected():

@@ -7,6 +7,7 @@ capture path lives here so future collectors can share a consistent boundary.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -265,6 +266,7 @@ class CLICommandCollector(IngestionAdapter):
             effective_device,
             connector=self.connector,
         )
+        collection_items = list(execution_plan.commands)
         commands = execution_plan.command_texts()
         command_results: list[dict[str, Any]] = []
         output_file.write_text("", encoding="utf-8")
@@ -284,7 +286,14 @@ class CLICommandCollector(IngestionAdapter):
         write_manifest("running")
         try:
             with output_file.open("a", encoding="utf-8", newline="\n") as report:
-                for index, command in enumerate(commands):
+                for index, item in enumerate(collection_items):
+                    command = item.command
+                    execution_item_id = item.collection_item_id or hashlib.sha256(
+                        (
+                            f"collection-item-v1|{execution_plan.device_id}|"
+                            f"{index}|{command}"
+                        ).encode()
+                    ).hexdigest()
                     observed_at = datetime.now(timezone.utc).isoformat()
                     try:
                         output = connection.send_command(command, read_timeout=read_timeout)
@@ -293,6 +302,9 @@ class CLICommandCollector(IngestionAdapter):
                         command_results.append(
                             {
                                 "command": command,
+                                "execution_item_id": execution_item_id,
+                                "collection_item_id": item.collection_item_id,
+                                "command_ordinal": index,
                                 "status": failure,
                                 "error": str(exc),
                                 "observed_at": observed_at,
@@ -300,12 +312,24 @@ class CLICommandCollector(IngestionAdapter):
                         )
                         command_results.extend(
                             {
-                                "command": pending,
+                                "command": pending_item.command,
+                                "execution_item_id": pending_item.collection_item_id
+                                or hashlib.sha256(
+                                    (
+                                        f"collection-item-v1|{execution_plan.device_id}|"
+                                        f"{pending_index}|{pending_item.command}"
+                                ).encode()
+                                ).hexdigest(),
+                                "collection_item_id": pending_item.collection_item_id,
+                                "command_ordinal": pending_index,
                                 "status": "not_executed",
                                 "error": "previous command failed",
                                 "observed_at": None,
                             }
-                            for pending in commands[index + 1 :]
+                            for pending_index, pending_item in enumerate(
+                                collection_items[index + 1 :],
+                                start=index + 1,
+                            )
                         )
                         break
                     report.write(f"Command: {command}\nOutput:\n{output}\n{'-' * 50}\n")
@@ -314,6 +338,9 @@ class CLICommandCollector(IngestionAdapter):
                     command_results.append(
                         {
                             "command": command,
+                            "execution_item_id": execution_item_id,
+                            "collection_item_id": item.collection_item_id,
+                            "command_ordinal": index,
                             "status": "complete",
                             "error": None,
                             "observed_at": observed_at,

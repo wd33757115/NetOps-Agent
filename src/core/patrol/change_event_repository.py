@@ -9,6 +9,7 @@ from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from src.infrastructure.db.models import (
@@ -46,6 +47,14 @@ def _event_class(event: Any) -> str:
     return str(rule.get("event_class") or "fault")
 
 
+def _not_older(candidate: datetime, current: datetime) -> bool:
+    if candidate.tzinfo is None:
+        candidate = candidate.replace(tzinfo=timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    return candidate >= current
+
+
 class ChangeEventRepository:
     def save_changes(
         self,
@@ -65,10 +74,10 @@ class ChangeEventRepository:
                     update_current_state=True,
                 )
             decision_values = [self._decision_values(decision) for decision in decisions or []]
-            if decision_values:
+            for offset in range(0, len(decision_values), 500):
                 db.execute(
                     pg_insert(NetworkChangeDecisionRecord)
-                    .values(decision_values)
+                    .values(decision_values[offset : offset + 500])
                     .on_conflict_do_nothing(index_elements=["idempotency_key"])
                 )
             change_values: list[dict[str, Any]] = []
@@ -215,6 +224,7 @@ class ChangeEventRepository:
                         change = db.get(NetworkChangeRecord, event.source_change_id)
                         if change is not None:
                             change.event_status = "event_created"
+                self._lock_event_correlation(db, event.event_type, event)
                 key = _digest(
                     (
                         event.source_change_id,
@@ -233,23 +243,28 @@ class ChangeEventRepository:
                     continue
                 active = self._find_active_event(db, event)
                 if active is not None:
-                    occurrence_id = self._record_event_occurrence(db, active.id, event)
+                    occurrence_id = self._record_event_occurrence(
+                        db, active.id, event, occurrence_kind="recurrence"
+                    )
                     if occurrence_id is None:
                         continue
-                    payload = dict(active.payload_json or {})
-                    payload["latest_change"] = event.payload.get("change")
-                    payload["latest_source_change_id"] = event.source_change_id
-                    payload["latest_observed_at"] = event.occurred_at
-                    active.payload_json = payload
-                    active.correlation_key = str(
-                        (event.payload or {}).get("correlation_key") or active.correlation_key
-                    )
-                    active.correlation_dimensions_json = dict(
-                        (event.payload or {}).get("correlation_dimensions") or {}
-                    )
-                    active.latest_change_id = event.source_change_id
-                    active.last_seen_run_id = event.run_id
-                    active.last_seen_at = _datetime(event.occurred_at)
+                    observed_at = _datetime(event.occurred_at)
+                    if _not_older(observed_at, active.last_seen_at):
+                        payload = dict(active.payload_json or {})
+                        payload["latest_change"] = event.payload.get("change")
+                        payload["latest_source_change_id"] = event.source_change_id
+                        payload["latest_observed_at"] = event.occurred_at
+                        active.payload_json = payload
+                        active.correlation_key = str(
+                            (event.payload or {}).get("correlation_key")
+                            or active.correlation_key
+                        )
+                        active.correlation_dimensions_json = dict(
+                            (event.payload or {}).get("correlation_dimensions") or {}
+                        )
+                        active.latest_change_id = event.source_change_id
+                        active.last_seen_run_id = event.run_id
+                        active.last_seen_at = observed_at
                     active.occurrence_count = int(active.occurrence_count or 1) + 1
                     if event.source_change_id:
                         change = db.get(NetworkChangeRecord, event.source_change_id)
@@ -290,7 +305,9 @@ class ChangeEventRepository:
                     )
                 )
                 db.flush()
-                occurrence_id = self._record_event_occurrence(db, event.event_id, event)
+                occurrence_id = self._record_event_occurrence(
+                    db, event.event_id, event, occurrence_kind="opening"
+                )
                 if occurrence_id is None:
                     raise RuntimeError("opening event occurrence was not persisted")
                 self._enqueue_event(
@@ -307,7 +324,16 @@ class ChangeEventRepository:
                 created += 1
         return created
 
-    def _record_event_occurrence(self, db, event_id: str, event: Any) -> str | None:
+    def _record_event_occurrence(
+        self,
+        db,
+        event_id: str,
+        event: Any,
+        *,
+        occurrence_kind: str,
+    ) -> str | None:
+        if occurrence_kind not in {"opening", "recurrence", "recovery"}:
+            raise ValueError(f"unsupported event occurrence kind: {occurrence_kind}")
         key = _digest(
             (
                 event_id,
@@ -315,6 +341,7 @@ class ChangeEventRepository:
                 event.run_id,
                 event.event_type,
                 event.occurred_at,
+                occurrence_kind,
             )
         )
         stmt = (
@@ -327,7 +354,7 @@ class ChangeEventRepository:
                 source_change_id=event.source_change_id,
                 observed_at=_datetime(event.occurred_at),
                 severity=event.severity,
-                occurrence_kind=("recovery" if _event_class(event) == "recovery" else "observed"),
+                occurrence_kind=occurrence_kind,
                 payload_json=self._event_payload(event),
                 created_at=datetime.now(timezone.utc),
             )
@@ -464,8 +491,30 @@ class ChangeEventRepository:
             .filter(NetworkEventRecord.correlation_key.in_(correlation_keys))
             .filter(NetworkEventRecord.status.in_(["open", "acknowledged", "recovering"]))
             .order_by(NetworkEventRecord.occurred_at.desc())
+            .with_for_update()
             .first()
         )
+
+    @staticmethod
+    def _lock_event_correlation(db, event_type: str, event: Any) -> None:
+        payload = event.payload or {}
+        keys = {
+            str(value)
+            for value in (
+                payload.get("correlation_key"),
+                payload.get("legacy_correlation_key"),
+            )
+            if value
+        }
+        for correlation_key in sorted(keys):
+            digest = hashlib.sha256(
+                f"network-event-v1|{event_type}|{correlation_key}".encode()
+            ).digest()
+            lock_id = int.from_bytes(digest[:8], byteorder="big", signed=True)
+            db.execute(
+                text("SELECT pg_advisory_xact_lock(:lock_id)"),
+                {"lock_id": lock_id},
+            )
 
     def _resolve_recovered_event(self, db, event: Any) -> bool:
         rule = dict((event.payload or {}).get("rule") or {})
@@ -485,14 +534,36 @@ class ChangeEventRepository:
             correlation_keys.append(legacy)
         resolved = False
         for target_type in target_types:
+            self._lock_event_correlation(db, str(target_type), event)
             rows = (
                 db.query(NetworkEventRecord)
                 .filter(NetworkEventRecord.event_type == target_type)
                 .filter(NetworkEventRecord.correlation_key.in_(correlation_keys))
                 .filter(NetworkEventRecord.status.in_(["open", "acknowledged", "recovering"]))
+                .with_for_update()
                 .all()
             )
             for row in rows:
+                occurrence_id = self._record_event_occurrence(
+                    db,
+                    row.id,
+                    event,
+                    occurrence_kind="recovery",
+                )
+                if occurrence_id is not None:
+                    self._enqueue_event(
+                        db,
+                        event,
+                        event_id=row.id,
+                        occurrence_id=occurrence_id,
+                        publication_kind="recovery",
+                    )
+                    recovered_at = _datetime(event.occurred_at)
+                    row.occurrence_count = int(row.occurrence_count or 1) + 1
+                    if _not_older(recovered_at, row.last_seen_at):
+                        row.latest_change_id = event.source_change_id
+                        row.last_seen_run_id = event.run_id
+                        row.last_seen_at = recovered_at
                 payload = dict(row.payload_json or {})
                 payload["recovery_change"] = change
                 payload["recovered_by_event_type"] = event.event_type

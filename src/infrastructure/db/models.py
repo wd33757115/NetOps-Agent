@@ -658,7 +658,7 @@ class PatrolRun(Base):
         server_default="scheduled_patrol",
         index=True,
     )
-    logical_run_id = Column(String(128), nullable=True, index=True)
+    logical_run_id = Column(String(128), nullable=False, index=True)
     attempt_number = Column(Integer, nullable=False, default=0, server_default="0")
     worker_id = Column(String(256), nullable=True, index=True)
     heartbeat_at = Column(DateTime, nullable=True, index=True)
@@ -674,6 +674,57 @@ class PatrolRun(Base):
         DateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_netops_patrol_runs_logical_attempt",
+            "logical_run_id",
+            "attempt_number",
+            unique=True,
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class PatrolAnalysisAttemptRecord(Base):
+    """Durable completion and immutable rule scope for one analysis stage."""
+
+    __tablename__ = "netops_patrol_analysis_attempts"
+
+    id = Column(String(64), primary_key=True)
+    run_id = Column(
+        String(128),
+        ForeignKey("netops_patrol_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    stage = Column(String(64), nullable=False, index=True)
+    scope_hash = Column(String(64), nullable=False)
+    scope_json = Column(JSON, nullable=False)
+    rule_bundle_digest = Column(String(64), nullable=False, index=True)
+    rule_bundle_json = Column(JSON, nullable=False)
+    status = Column(String(32), nullable=False, default="running", index=True)
+    attempt_number = Column(Integer, nullable=False, default=1, server_default="1")
+    heartbeat_at = Column(DateTime, nullable=False)
+    lease_until = Column(DateTime, nullable=False, index=True)
+    result_json = Column(JSON, nullable=True)
+    error = Column(Text, nullable=True)
+    started_at = Column(DateTime, nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+    updated_at = Column(DateTime, nullable=False)
+
+    __table_args__ = (
+        Index(
+            "uq_netops_patrol_analysis_scope",
+            "run_id",
+            "stage",
+            "scope_hash",
+            unique=True,
+        ),
     )
 
     def to_dict(self):
@@ -700,6 +751,7 @@ class CommandSnapshot(Base):
         index=True,
     )
     device_id = Column(String(256), nullable=False, index=True)
+    execution_item_id = Column(String(128), nullable=False, index=True)
     device_name = Column(String(256), nullable=False)
     management_ip = Column(String(64), nullable=True)
     vendor = Column(String(64), nullable=True, index=True)
@@ -766,6 +818,7 @@ class PatrolCollectionResult(Base):
         index=True,
     )
     device_id = Column(String(256), nullable=False, index=True)
+    execution_item_id = Column(String(128), nullable=False, index=True)
     canonical_command = Column(String(512), nullable=False, index=True)
     status = Column(
         String(32), nullable=False, default="unknown", server_default="unknown", index=True
@@ -792,7 +845,7 @@ class PatrolCollectionResult(Base):
             "uq_netops_patrol_collection_result",
             "run_id",
             "device_id",
-            "canonical_command",
+            "execution_item_id",
             unique=True,
         ),
     )
@@ -1127,6 +1180,15 @@ class NetworkEventRecord(Base):
             "correlation_key",
             "status",
         ),
+        Index(
+            "uq_netops_network_events_active_correlation",
+            "event_type",
+            "correlation_key",
+            unique=True,
+            postgresql_where=text(
+                "status IN ('open', 'acknowledged', 'recovering') AND correlation_key <> ''"
+            ),
+        ),
     )
 
     def to_dict(self):
@@ -1186,7 +1248,7 @@ class NetworkEventOutboxRecord(Base):
     occurrence_id = Column(
         String(64),
         ForeignKey("netops_network_event_occurrences.id", ondelete="CASCADE"),
-        nullable=True,
+        nullable=False,
         index=True,
     )
     event_type = Column(String(128), nullable=False, index=True)

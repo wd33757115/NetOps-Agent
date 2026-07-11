@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from src.core.patrol.event_rules import EventRule
-from src.core.patrol.event_rules import condition_matches
-from src.core.patrol.event_rules import default_event_rule_definitions
-from src.core.patrol.event_rules import load_event_rules
+from src.core.patrol.event_rules import (
+    EventRule,
+    condition_matches,
+    default_event_rule_definitions,
+    event_rules_from_snapshot,
+    load_event_rules,
+)
 from src.core.patrol.rule_validation import (
     builtin_event_rule_validation_cases,
     sanitize_change,
@@ -11,6 +14,30 @@ from src.core.patrol.rule_validation import (
     validate_event_rule_definition,
     validate_event_rule_pack,
 )
+
+
+def test_event_rules_can_be_rebuilt_from_immutable_snapshot():
+    rules = event_rules_from_snapshot(
+        [
+            {
+                "rule_name": "optical-rx-low-v7",
+                "version": 7,
+                "event_type": "OpticalRxPowerLow",
+                "severity": "major",
+                "condition": {
+                    "kind": "threshold_lte",
+                    "fields": ["rx_power_dbm"],
+                    "lte": -17,
+                },
+                "priority": 200,
+                "correlation_keys": ["device_id", "entity_key", "field"],
+            }
+        ]
+    )
+
+    assert rules[0].rule_id == "optical-rx-low-v7"
+    assert rules[0].version == 7
+    assert rules[0].match({"field": "rx_power_dbm", "new": -18.5}) is True
 
 
 def test_threshold_condition_matches_cpu_high():

@@ -833,6 +833,31 @@ def match_event_rule(change: dict[str, Any]) -> EventRule | None:
     return matched[0] if matched else None
 
 
+def event_rules_from_snapshot(rows: list[dict[str, Any]]) -> list[EventRule]:
+    rules = [
+        EventRuleDefinition(
+            rule_id=str(row.get("rule_name") or row.get("rule_id") or ""),
+            version=int(row.get("version") or 1),
+            event_type=str(row.get("event_type") or ""),
+            severity=str(row.get("severity") or "warning"),
+            condition=_effective_condition(
+                str(row.get("rule_name") or row.get("rule_id") or ""),
+                dict(row.get("condition") or {}),
+            ),
+            priority=int(row.get("priority") or 100),
+            exclusive=bool(row.get("exclusive")),
+            event_class=str(row.get("event_class") or "fault"),
+            recovery=dict(row.get("recovery") or {}),
+            correlation_keys=tuple(
+                row.get("correlation_keys")
+                or ("device_id", "entity_type", "entity_key", "field")
+            ),
+        ).to_rule()
+        for row in rows
+    ]
+    return sorted(rules, key=lambda rule: (-rule.priority, rule.rule_id))
+
+
 def load_event_rules(*, allow_builtin_fallback: bool | None = None) -> list[EventRule]:
     if allow_builtin_fallback is None:
         from src.common.config import get_settings

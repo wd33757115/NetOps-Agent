@@ -496,11 +496,12 @@ def test_event_repository_dedupes_active_event_and_resolves_recovery():
                 .filter(NetworkEventOutboxRecord.event_id.in_([high.id, recovered.id]))
                 .all()
             )
-            assert len(outbox_rows) == 3
+            assert len(outbox_rows) == 4
             assert {row.status for row in outbox_rows} == {"pending"}
             publication_kinds = [row.payload_json["publication_kind"] for row in outbox_rows]
             assert publication_kinds.count("opening") == 2
             assert publication_kinds.count("recurrence") == 1
+            assert publication_kinds.count("recovery") == 1
     finally:
         _cleanup_runs(run_id)
 

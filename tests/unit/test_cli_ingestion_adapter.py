@@ -189,3 +189,46 @@ def test_cli_collector_continues_after_progress_persistence_failure(tmp_path):
     assert manifest["status"] == "complete"
     assert manifest["commands"][0]["persistence_status"] == "failed"
     assert manifest["commands"][1]["persistence_status"] == "persisted"
+
+
+def test_cli_manifest_preserves_duplicate_command_item_identity(tmp_path):
+    class FakeConnection:
+        def send_command(self, command, read_timeout=60):
+            return f"output for {command}"
+
+        def disconnect(self):
+            pass
+
+    collector = CLICommandCollector(
+        output_root=tmp_path,
+        connector=lambda _device: FakeConnection(),
+    )
+    output_file = collector.collect_command_outputs(
+        device={"device_name": "SW1", "ip": "10.0.0.1"},
+        execution_plan=ExecutionPlan(
+            device_id="device-1",
+            action="patrol",
+            mode="parser_validation",
+            profile_name="repeat-sampling",
+            profile_version_id=None,
+            commands=(
+                CollectionItem(
+                    command="show interface transceiver detail",
+                    action="patrol",
+                    collection_item_id="optical-before",
+                ),
+                CollectionItem(
+                    command="show interface transceiver detail",
+                    action="patrol",
+                    collection_item_id="optical-after",
+                ),
+            ),
+        ),
+    )
+
+    commands = load_command_collection_manifest(output_file)["commands"]
+    assert [item["execution_item_id"] for item in commands] == [
+        "optical-before",
+        "optical-after",
+    ]
+    assert [item["command_ordinal"] for item in commands] == [0, 1]

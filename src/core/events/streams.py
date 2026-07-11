@@ -14,4 +14,4 @@ GROUP_NOTIFY = "netops-notify"
 GROUP_METRICS = "netops-metrics"
 
 IDEMPOTENCY_PREFIX = "netops:event:done:"
-IDEMPOTENCY_TTL_SEC = 7 * 24 * 3600
+IDEMPOTENCY_TTL_SEC = 90 * 24 * 3600

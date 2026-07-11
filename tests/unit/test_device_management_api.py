@@ -1703,6 +1703,11 @@ def test_list_device_evidence_timeline_redacts_device(monkeypatch):
 def test_device_api_has_no_known_mojibake_tokens():
     source = Path(devices_api.__file__).read_text(encoding="utf-8")
     suspicious = (
+        "\ufffd",
+        "锛",
+        "銆",
+        "鈫",
+        "缁撴",
         "鏈€",
         "楠岃瘉",
         "澶辫触",
@@ -1742,6 +1747,7 @@ def test_device_timeline_includes_direct_patrol_and_legacy_opening_event():
             CommandSnapshot(
                 id=snapshot_id,
                 run_id=run_id,
+                execution_item_id=f"item-{snapshot_id}",
                 device_id=device_id,
                 device_name="SW1",
                 command="show interface status",

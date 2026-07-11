@@ -15,6 +15,13 @@ def reconcile_patrol_runs():
     from src.core.patrol.change_event_repository import ChangeEventRepository
     from src.core.patrol.repository import PatrolRepository
 
-    runs = PatrolRepository().reconcile_stale_runs(limit=200)
+    repository = PatrolRepository()
+    runs = repository.reconcile_stale_runs(limit=200)
+    analysis = repository.reconcile_stale_analysis_attempts(limit=200)
     decisions = ChangeEventRepository().purge_expired_change_decisions(limit=5000)
-    return {**runs, "purged_change_decisions": decisions}
+    return {
+        **runs,
+        "analysis_reconciled_count": analysis["reconciled_count"],
+        "analysis_run_ids": analysis["run_ids"],
+        "purged_change_decisions": decisions,
+    }

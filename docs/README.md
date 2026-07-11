@@ -1,6 +1,8 @@
 <!-- SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com> -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
+Latest remediation plan: [patrol-runtime-concurrency-remediation-2026-07-11.md](./patrol-runtime-concurrency-remediation-2026-07-11.md)
+
 # NetOps Agent 文档中心
 
 > 版本：2026-05-24

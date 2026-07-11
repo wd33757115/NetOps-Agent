@@ -110,6 +110,9 @@ def persist_patrol_snapshots(
                         status=item_status,
                         failure_code=item_status,
                         observed_at=(item.get("observed_at") if isinstance(item, dict) else None),
+                        execution_item_id=(
+                            item.get("execution_item_id") if isinstance(item, dict) else None
+                        ),
                         metadata={
                             "error": (
                                 item.get("error") if isinstance(item, dict) else detail.get("error")
@@ -118,11 +121,11 @@ def persist_patrol_snapshots(
                     )
             continue
         try:
-            command_statuses = {
-                " ".join(str(item.get("command") or "").strip().lower().split()): item
+            command_statuses = [
+                item
                 for item in detail.get("command_collection_results") or []
                 if isinstance(item, dict) and item.get("command")
-            }
+            ]
             imported = import_raw_capture(
                 file_path=str(output_file),
                 mode=mode,
@@ -165,7 +168,8 @@ def persist_patrol_snapshots(
                 or detail.get("device_name")
                 or "unknown"
             )
-            for command, command_result in command_statuses.items():
+            for command_result in command_statuses:
+                command = str(command_result.get("command") or "")
                 if command_result.get("status") == "complete":
                     continue
                 repository.save_collection_result(
@@ -176,6 +180,7 @@ def persist_patrol_snapshots(
                     status=str(command_result.get("status") or "failed"),
                     failure_code=str(command_result.get("status") or "collection_failed"),
                     observed_at=command_result.get("observed_at"),
+                    execution_item_id=command_result.get("execution_item_id"),
                     metadata={"error": command_result.get("error")},
                 )
         except Exception as exc:

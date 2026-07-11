@@ -325,6 +325,7 @@ def test_observation_baseline_requires_collection_level_eligibility():
         db.add(
             PatrolRun(
                 id=run_id,
+                logical_run_id=run_id,
                 mode="production",
                 source="test",
                 status="completed",
@@ -341,6 +342,7 @@ def test_observation_baseline_requires_collection_level_eligibility():
             CommandSnapshot(
                 id=snapshot_id,
                 run_id=run_id,
+                execution_item_id=f"item-{snapshot_id}",
                 device_id="SW1",
                 device_name="SW1",
                 command="show interface status",
@@ -357,6 +359,7 @@ def test_observation_baseline_requires_collection_level_eligibility():
             PatrolCollectionResult(
                 id=str(uuid.uuid4()),
                 run_id=run_id,
+                execution_item_id=f"item-{snapshot_id}",
                 device_id="SW1",
                 canonical_command="show interface status",
                 status="parsed",

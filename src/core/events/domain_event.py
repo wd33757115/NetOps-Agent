@@ -22,6 +22,11 @@ class DomainEvent(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     trace_id: str | None = None
 
+    @property
+    def idempotency_key(self) -> str:
+        """Return the independently consumable fact identity."""
+        return str(self.payload.get("occurrence_id") or self.event_id)
+
     @classmethod
     def from_stream_fields(cls, fields: dict[str, str]) -> DomainEvent:
         import json

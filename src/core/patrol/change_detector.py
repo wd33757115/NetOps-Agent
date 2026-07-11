@@ -106,16 +106,21 @@ def _observation_type(observation: dict[str, Any]) -> str:
 
 
 class ChangePolicyResolver:
-    def __init__(self) -> None:
+    def __init__(self, policies: list[dict[str, Any]] | None = None) -> None:
         self._repo = ChangePolicyRepository()
-        self._cache: dict[str, dict[str, Any] | None] = {}
+        self._frozen = policies is not None
+        self._cache: dict[str, dict[str, Any] | None] = {
+            str(policy.get("observation_type") or ""): policy
+            for policy in policies or []
+            if policy.get("observation_type")
+        }
 
     def resolve(self, observation_type: str) -> dict[str, Any] | None:
         if not observation_type:
             return None
-        if observation_type not in self._cache:
+        if observation_type not in self._cache and not self._frozen:
             self._cache[observation_type] = self._repo.get_active_policy(observation_type)
-        return self._cache[observation_type]
+        return self._cache.get(observation_type)
 
 
 def _policy_compare_result(
@@ -668,16 +673,75 @@ def detect_observation_changes_against_history(
     persist: bool = True,
     missing_confirmations: int = 2,
 ) -> dict[str, Any]:
-    repository = StateRepository()
     patrol_repository = PatrolRepository()
+    frozen_policies = ChangePolicyRepository().list_versions(status="active", limit=1000)
+    frozen_policies = json.loads(json.dumps(frozen_policies, default=str))
+    scope = {
+        "device_ids": sorted({str(item) for item in device_ids or []}),
+        "full_run": not bool(device_ids),
+        "previous_run_id": previous_run_id,
+        "missing_confirmations": max(1, int(missing_confirmations)),
+        "persist": bool(persist),
+    }
+    attempt = patrol_repository.begin_analysis_attempt(
+        run_id=current_run_id,
+        stage="change_detection",
+        scope=scope,
+        rule_bundle={"change_policies": frozen_policies},
+    )
+    if attempt["reused"]:
+        return dict(attempt["result"] or {})
     try:
         patrol_repository.update_analysis_status(
             current_run_id,
             analysis_status="detecting",
             baseline_eligible=False,
+            metadata={"change_policy_bundle_digest": attempt["rule_bundle_digest"]},
         )
     except ValueError:
         pass
+    try:
+        result = _detect_observation_changes_against_history_impl(
+            current_run_id=current_run_id,
+            previous_run_id=previous_run_id,
+            device_ids=device_ids,
+            persist=persist,
+            missing_confirmations=missing_confirmations,
+            policy_bundle=list(attempt["rule_bundle"].get("change_policies") or []),
+        )
+        patrol_repository.complete_analysis_attempt(
+            str(attempt["attempt_id"]),
+            result=result,
+        )
+        return result
+    except Exception as exc:
+        patrol_repository.fail_analysis_attempt(str(attempt["attempt_id"]), error=str(exc))
+        try:
+            patrol_repository.update_analysis_status(
+                current_run_id,
+                analysis_status="failed",
+                baseline_eligible=False,
+                metadata={
+                    "analysis_failure_stage": "change_detection",
+                    "analysis_failure": str(exc),
+                },
+            )
+        except ValueError:
+            pass
+        raise
+
+
+def _detect_observation_changes_against_history_impl(
+    *,
+    current_run_id: str,
+    previous_run_id: str | None = None,
+    device_ids: list[str] | None = None,
+    persist: bool = True,
+    missing_confirmations: int = 2,
+    policy_bundle: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    repository = StateRepository()
+    patrol_repository = PatrolRepository()
     run_context = patrol_repository.get_run(current_run_id)
     if run_context and run_context.get("run_purpose") == "baseline":
         return {
@@ -702,34 +766,6 @@ def detect_observation_changes_against_history(
             "run_purpose": "baseline",
             "changes": [],
         }
-    if persist and run_context and not device_ids:
-        persisted = ChangeEventRepository().list_changes(run_id=current_run_id)
-        persisted = [item for item in persisted if item.get("source") == "state_observation"]
-        if persisted:
-            return {
-                "success": True,
-                "current_run_id": current_run_id,
-                "previous_run_id": previous_run_id,
-                "device_ids": device_ids or [],
-                "compared_observations": 0,
-                "baseline_observations": 0,
-                "initial_observations": sum(item["change_type"] == "initial" for item in persisted),
-                "added_observations": sum(item["change_type"] == "added" for item in persisted),
-                "deleted_observations": sum(item["change_type"] == "deleted" for item in persisted),
-                "missing_observations": sum(item["change_type"] == "missing" for item in persisted),
-                "reappeared_observations": sum(
-                    item["change_type"] == "reappeared" for item in persisted
-                ),
-                "authoritative_collection_count": len(
-                    patrol_repository.list_authoritative_collection_keys(current_run_id)
-                ),
-                "change_count": len(persisted),
-                "persisted_change_count": 0,
-                "storage": "postgresql",
-                "source": "state_observation",
-                "reused_persisted_changes": True,
-                "changes": persisted,
-            }
     changes: list[NetworkChange] = []
     derived_observations: list[Any] = []
     decisions: list[dict[str, Any]] = []
@@ -758,7 +794,7 @@ def detect_observation_changes_against_history(
         if item.get("authoritative_for_deletion") is True
     }
     prior_by_key: dict[str, dict[str, Any]] = {}
-    policy_resolver = ChangePolicyResolver()
+    policy_resolver = ChangePolicyResolver(policy_bundle)
     if previous_run_id:
         try:
             prior_observations = (

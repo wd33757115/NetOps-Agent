@@ -52,6 +52,7 @@ from src.infrastructure.db.models import (
     ParserIdentitySignature,
     ParserTemplate,
     ParserTemplateJob,
+    PatrolCollectionResult,
     PatrolRun,
     RawEvidenceRecord,
     StateObservationRecord,
@@ -1512,7 +1513,7 @@ def _build_agent_module_health(db: Any) -> list[dict[str, Any]]:
                     name="Observation 鍐欏叆",
                     status="ok" if observations else "warning",
                     value=observations,
-                    target="缁撴瀯鍖栧揩鐓у彲鐢熸垚 StateObservation",
+                    target="结构化快照可生成 StateObservation",
                     message="已有状态观测" if observations else "尚未看到 StateObservation 数据",
                 ),
                 _module_check(
@@ -1902,8 +1903,8 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                         workflow_run.created_at,
                     )
                 )
-        patrol_run_ids = [
-            row[0]
+        patrol_run_times = {
+            str(row[0]): row[1]
             for row in db.query(
                 CommandSnapshot.run_id,
                 func.max(CommandSnapshot.observed_at).label("latest_observed_at"),
@@ -1918,6 +1919,36 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
             .order_by(func.max(CommandSnapshot.observed_at).desc())
             .limit(limit)
             .all()
+        }
+        for run_id, latest_observed_at in (
+            db.query(
+                PatrolCollectionResult.run_id,
+                func.max(
+                    func.coalesce(
+                        PatrolCollectionResult.observed_at,
+                        PatrolCollectionResult.updated_at,
+                    )
+                ).label("latest_observed_at"),
+            )
+            .filter(
+                or_(
+                    PatrolCollectionResult.inventory_device_id == device_id,
+                    PatrolCollectionResult.device_id == device_id,
+                )
+            )
+            .group_by(PatrolCollectionResult.run_id)
+            .all()
+        ):
+            current = patrol_run_times.get(str(run_id))
+            if current is None or (latest_observed_at and latest_observed_at > current):
+                patrol_run_times[str(run_id)] = latest_observed_at
+        patrol_run_ids = [
+            run_id
+            for run_id, _observed_at in sorted(
+                patrol_run_times.items(),
+                key=lambda item: item[1].timestamp() if item[1] else 0.0,
+                reverse=True,
+            )[:limit]
         ]
         patrol_run_rows = (
             db.query(PatrolRun).filter(PatrolRun.id.in_(patrol_run_ids)).all()
@@ -1960,11 +1991,13 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
             snapshots: list[CommandSnapshot] = []
             changes: list[NetworkChangeRecord] = []
             events: list[NetworkEventRecord] = []
+            occurrences: list[tuple[NetworkEventOccurrenceRecord, NetworkEventRecord]] = []
             parse_counts: dict[str, int] = {}
             evidence_by_snapshot: dict[str, RawEvidenceRecord] = {}
             observation_count = 0
             change_count = 0
             event_count = 0
+            event_occurrence_count = 0
             if snapshot_run_id:
                 snapshots = (
                     db.query(CommandSnapshot)
@@ -2013,6 +2046,18 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                     NetworkEventRecord.device_id == device_id,
                 )
                 event_count = event_query.count()
+                event_occurrence_count = (
+                    db.query(NetworkEventOccurrenceRecord.id)
+                    .join(
+                        NetworkEventRecord,
+                        NetworkEventRecord.id == NetworkEventOccurrenceRecord.event_id,
+                    )
+                    .filter(
+                        NetworkEventOccurrenceRecord.run_id == snapshot_run_id,
+                        NetworkEventRecord.device_id == device_id,
+                    )
+                    .count()
+                )
                 changes = (
                     db.query(NetworkChangeRecord)
                     .filter(*change_filter)
@@ -2021,6 +2066,20 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                     .all()
                 )
                 events = event_query.order_by(NetworkEventRecord.occurred_at.desc()).limit(20).all()
+                occurrences = (
+                    db.query(NetworkEventOccurrenceRecord, NetworkEventRecord)
+                    .join(
+                        NetworkEventRecord,
+                        NetworkEventRecord.id == NetworkEventOccurrenceRecord.event_id,
+                    )
+                    .filter(
+                        NetworkEventOccurrenceRecord.run_id == snapshot_run_id,
+                        NetworkEventRecord.device_id == device_id,
+                    )
+                    .order_by(NetworkEventOccurrenceRecord.observed_at.desc())
+                    .limit(20)
+                    .all()
+                )
             items.append(
                 {
                     "workflow_run_id": run.id if run is not None else None,
@@ -2049,6 +2108,7 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                     "observation_count": observation_count,
                     "change_count": change_count,
                     "event_count": event_count,
+                    "event_occurrence_count": event_occurrence_count,
                     "parse_counts": parse_counts,
                     "steps": [
                         {
@@ -2117,6 +2177,29 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                             "occurrence_count": row.occurrence_count,
                         }
                         for row in events[:10]
+                    ],
+                    "event_occurrences": [
+                        {
+                            "occurrence_id": occurrence.id,
+                            "event_id": event.id,
+                            "event_type": event.event_type,
+                            "occurrence_kind": occurrence.occurrence_kind,
+                            "source_change_id": occurrence.source_change_id,
+                            "run_id": occurrence.run_id,
+                            "severity": occurrence.severity,
+                            "observed_at": _iso(occurrence.observed_at),
+                            "event_rule_id": (
+                                ((occurrence.payload_json or {}).get("rule") or {}).get(
+                                    "rule_id"
+                                )
+                            ),
+                            "event_rule_version": (
+                                ((occurrence.payload_json or {}).get("rule") or {}).get(
+                                    "version"
+                                )
+                            ),
+                        }
+                        for occurrence, event in occurrences[:20]
                     ],
                 }
             )

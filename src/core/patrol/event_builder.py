@@ -14,7 +14,13 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.core.patrol.change_event_repository import ChangeEventRepository
-from src.core.patrol.event_rules import load_event_rules, match_event_rules
+from src.core.patrol.event_rules import (
+    EventRule,
+    EventRuleRepository,
+    event_rules_from_snapshot,
+    load_event_rules,
+    match_event_rules,
+)
 
 
 @dataclass(frozen=True)
@@ -71,10 +77,14 @@ def _event_correlation_identity(
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest(), resolved, legacy
 
 
-def build_events_from_changes(changes: list[dict[str, Any]]) -> list[NetworkEvent]:
+def build_events_from_changes(
+    changes: list[dict[str, Any]],
+    *,
+    rules: list[EventRule] | None = None,
+) -> list[NetworkEvent]:
     events: list[NetworkEvent] = []
     occurred_at = _now()
-    rules = load_event_rules()
+    rules = load_event_rules() if rules is None else rules
     for change in changes:
         matched_rules = match_event_rules(change, rules=rules, preordered=True)
         if not matched_rules:
@@ -268,16 +278,80 @@ def build_events_from_params(params: dict[str, Any]) -> dict[str, Any]:
     from src.core.patrol.repository import PatrolRepository
 
     run_id = params.get("run_id")
+    if not run_id:
+        return _build_events_from_params_impl(params, rules=None)
     patrol_repository = PatrolRepository()
-    if run_id:
+    frozen_rules = EventRuleRepository().list_versions(status="active", limit=2000)
+    frozen_rules = json.loads(json.dumps(frozen_rules, default=str))
+    supplied_changes = (
+        list(params.get("changes") or [])
+        if params.get("changes") is not None
+        else []
+    )
+    scope = {
+        "device_id": params.get("device_id"),
+        "full_run": params.get("changes") is None and not params.get("device_id"),
+        "persist": bool(params.get("persist", True)),
+        "publish": bool(params.get("publish", False)),
+        "change_ids": sorted(
+            str(change.get("change_id"))
+            for change in supplied_changes
+            if change.get("change_id")
+        ),
+    }
+    attempt = patrol_repository.begin_analysis_attempt(
+        run_id=str(run_id),
+        stage="event_building",
+        scope=scope,
+        rule_bundle={"event_rules": frozen_rules},
+    )
+    if attempt["reused"]:
+        return dict(attempt["result"] or {})
+    try:
+        patrol_repository.update_analysis_status(
+            str(run_id),
+            analysis_status="building_events",
+            baseline_eligible=False,
+            metadata={"event_rule_bundle_digest": attempt["rule_bundle_digest"]},
+        )
+    except ValueError:
+        pass
+    try:
+        rules = event_rules_from_snapshot(
+            list(attempt["rule_bundle"].get("event_rules") or [])
+        )
+        result = _build_events_from_params_impl(params, rules=rules)
+        patrol_repository.complete_analysis_attempt(
+            str(attempt["attempt_id"]),
+            result=result,
+        )
+        return result
+    except Exception as exc:
+        patrol_repository.fail_analysis_attempt(str(attempt["attempt_id"]), error=str(exc))
         try:
             patrol_repository.update_analysis_status(
                 str(run_id),
-                analysis_status="building_events",
+                analysis_status="failed",
                 baseline_eligible=False,
+                metadata={
+                    "analysis_failure_stage": "building_events",
+                    "analysis_failure": str(exc),
+                },
             )
         except ValueError:
             pass
+        raise
+
+
+def _build_events_from_params_impl(
+    params: dict[str, Any],
+    *,
+    rules: list[EventRule] | None,
+) -> dict[str, Any]:
+    from src.core.patrol.repository import PatrolRepository
+
+    run_id = params.get("run_id")
+    patrol_repository = PatrolRepository()
     changes = params.get("changes")
     if changes is None:
         if not params.get("run_id") and not params.get("device_id"):
@@ -286,20 +360,7 @@ def build_events_from_params(params: dict[str, Any]) -> dict[str, Any]:
             run_id=params.get("run_id"),
             device_id=params.get("device_id"),
         )
-    try:
-        events = build_events_from_changes(list(changes or []))
-    except Exception:
-        if run_id:
-            try:
-                patrol_repository.update_analysis_status(
-                    str(run_id),
-                    analysis_status="failed",
-                    baseline_eligible=False,
-                    metadata={"analysis_failure_stage": "building_events"},
-                )
-            except ValueError:
-                pass
-        raise
+    events = build_events_from_changes(list(changes or []), rules=rules)
     persist = params.get("persist", True)
     persisted_event_count = save_events(events) if persist else 0
     event_change_ids = {event.source_change_id for event in events if event.source_change_id}
