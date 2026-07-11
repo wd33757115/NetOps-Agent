@@ -23,12 +23,13 @@ def test_production_parser_backlog_deduplicates_and_requires_sanitization():
     job_id = ""
     try:
         for index in range(2):
+            model = "S6860-54HF" if index == 0 else "S6850-56HF"
             snapshot_id, created = patrol.save_snapshot_idempotent(
                 run_id=run_id,
                 device_id=f"SW{index + 1}",
                 device_name=f"SW{index + 1}",
                 vendor="H3C",
-                model="S6860-54HF",
+                model=model,
                 command="display interface brief",
                 command_canonical="display interface brief",
                 raw_text=(
@@ -45,8 +46,9 @@ def test_production_parser_backlog_deduplicates_and_requires_sanitization():
             current_job_id = parser.create_candidate(
                 job_type="CREATE_TEMPLATE",
                 vendor="H3C",
-                model="S6860-54HF",
+                model=model,
                 family="Comware7",
+                profile="Comware7",
                 command="display interface brief",
                 snapshot_id=snapshot_id,
                 device_id=f"SW{index + 1}",
@@ -58,6 +60,7 @@ def test_production_parser_backlog_deduplicates_and_requires_sanitization():
         job = parser.get_job(job_id, include_sanitized_payload=True)
         assert job is not None
         assert job["source_mode"] == "production"
+        assert job["profile"] == "Comware7"
         assert job["sample_count"] == 2
         assert {sample["sanitization_status"] for sample in job["samples"]} == {
             "pending_sanitization"

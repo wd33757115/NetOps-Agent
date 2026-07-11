@@ -511,11 +511,6 @@ class DevicePatrolRunner:
         execution_time_ms = int(
             (datetime.now(timezone.utc) - execution_start).total_seconds() * 1000
         )
-        status = "success"
-        if snapshot_result.get("snapshot_health") in {"partial", "failed_data_quality"}:
-            status = str(snapshot_result["snapshot_health"])
-        if not result.success:
-            status = "partial"
         return runner_success_payload(
             action="patrol",
             ticket_id=request.ticket_id,
@@ -525,7 +520,10 @@ class DevicePatrolRunner:
             extra={
                 "save_baseline": request.save_baseline,
                 "mode": mode,
-                "status": status,
+                # Execution succeeded once at least one collected snapshot was
+                # persisted. Parser/data-quality degradation is reported
+                # independently so downstream workflow steps can still run.
+                "status": "success",
                 "data_quality_status": snapshot_result.get("snapshot_health", "ready"),
                 "execution_plan_id": request.execution_plan_id,
                 "raw_outputs_url": raw_outputs_url,

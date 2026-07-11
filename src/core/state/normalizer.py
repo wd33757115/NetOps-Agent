@@ -158,6 +158,17 @@ def observations_from_snapshot(
         if snapshot_contract_version is not None
         else _template_contract(snapshot.get("parser_template_id"))
     )
+    if (snapshot.get("metadata_json") or {}).get("handling") == "raw_hash_diff":
+        contract = {
+            "entity_type": "raw_command_output",
+            "primary_keys": [],
+            "state_semantics": {
+                "raw_text_hash": {
+                    "observation_type": "raw.command.hash",
+                    "semantic_type": "sha256",
+                }
+            },
+        }
     entity_type = str(contract.get("entity_type") or "record")
     primary_keys = [str(key) for key in contract.get("primary_keys") or []]
     ignore_fields = {str(field).strip().lower() for field in contract.get("ignore_fields") or []}
@@ -315,6 +326,9 @@ def _build_snapshot_normalization(
         "parse_failed": ("blocked", "blocked_by_parser", "blocked_by_parser"),
         "identity_unknown": ("blocked", "blocked_by_identity", "blocked_by_identity"),
         "ignored": ("skipped", "ignored_by_policy", "ignored"),
+        "not_applicable": ("skipped", "not_applicable", "not_applicable"),
+        "empty_unverified": ("blocked", "empty_unverified", "blocked_by_output"),
+        "command_error": ("blocked", "command_error", "blocked_by_output"),
     }.get(parse_status)
     if gated is not None:
         normalization_status, reason, fact_status = gated

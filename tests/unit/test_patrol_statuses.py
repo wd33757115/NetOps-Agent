@@ -15,6 +15,22 @@ from src.core.patrol.statuses import (
         ("complete", "parsed", ("complete", "parsed", "ready", "pending")),
         ("complete", "parse_empty", ("complete", "parse_empty", "empty", "empty")),
         ("complete", "ignored", ("complete", "ignored", "ignored", "skipped")),
+        ("complete", "raw_hashed", ("complete", "raw_hashed", "ready", "pending")),
+        (
+            "complete",
+            "not_applicable",
+            ("complete", "not_applicable", "not_applicable", "skipped"),
+        ),
+        (
+            "complete",
+            "empty_unverified",
+            ("complete", "empty_unverified", "blocked_by_output", "blocked"),
+        ),
+        (
+            "complete",
+            "command_error",
+            ("complete", "command_error", "blocked_by_output", "blocked"),
+        ),
         (
             "complete",
             "template_missing",

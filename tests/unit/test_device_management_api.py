@@ -276,7 +276,7 @@ def test_list_devices_can_include_patrol_readiness(monkeypatch):
     device = result["items"][0]
     readiness = device["patrol_readiness"]
     assert "password" not in device
-    assert readiness["status"] == "blocked"
+    assert readiness["status"] == "degraded"
     assert readiness["command_count"] == 2
     assert readiness["eligible_count"] == 2
     assert readiness["ready_count"] == 1
@@ -1354,7 +1354,7 @@ def test_preview_device_patrol_launch_blocks_empty_plan_in_validation_mode(monke
     )
 
 
-def test_preview_device_patrol_launch_blocks_production_without_parser_coverage(monkeypatch):
+def test_preview_device_patrol_launch_warns_without_blocking_missing_parser_coverage(monkeypatch):
     class FakeRepository:
         def get_devices_by_filter(self, **kwargs):
             return [
@@ -1410,11 +1410,11 @@ def test_preview_device_patrol_launch_blocks_production_without_parser_coverage(
         devices_api.DevicePatrolLaunchRequest(device_ids=["device-1"], mode="production")
     )
 
-    assert result["success"] is False
-    assert result["ready_count"] == 0
-    assert result["error_count"] == 1
-    assert result["errors"][0]["failure_code"] == "parser_coverage_not_ready"
-    assert result["errors"][0]["coverage_violations"][0]["canonical_command"] == "show inventory"
+    assert result["success"] is True
+    assert result["ready_count"] == 1
+    assert result["error_count"] == 0
+    assert result["errors"] == []
+    assert result["rows"][0]["coverage_violations"][0]["canonical_command"] == "show inventory"
 
 
 def test_preview_device_patrol_launch_blocks_missing_runtime_rule_assets(monkeypatch):

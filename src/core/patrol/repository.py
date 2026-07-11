@@ -22,6 +22,7 @@ from src.core.patrol.statuses import (
     readiness_status,
     validate_command_status,
 )
+from src.core.parser.output_classifier import OUTPUT_STATUSES
 from src.infrastructure.db.models import (
     CommandSnapshot,
     NetworkDevice,
@@ -508,11 +509,11 @@ class PatrolRepository:
             )
             row.parser_readiness_status = parser_readiness_status or readiness_status(
                 [item.parse_status for item in collection_rows],
-                ready={"parsed", "parse_empty", "ignored"},
+                ready={"parsed", "parse_empty", "ignored", "raw_hashed", "not_applicable"},
             )
             row.fact_readiness_status = fact_readiness_status or readiness_status(
                 [item.fact_status for item in collection_rows],
-                ready={"ready", "empty", "ignored"},
+                ready={"ready", "empty", "ignored", "not_applicable"},
             )
             if analysis_status is not None:
                 row.analysis_status = analysis_status
@@ -826,6 +827,7 @@ class PatrolRepository:
         status: str | None = None,
         execution_status: str | None = None,
         parse_status: str | None = None,
+        output_status: str = "not_classified",
         fact_status: str | None = None,
         normalization_status: str | None = None,
         parser_candidate_id: str | None = None,
@@ -839,6 +841,8 @@ class PatrolRepository:
         metadata: dict[str, Any] | None = None,
         owner_token: str | None = None,
     ) -> str:
+        if output_status not in OUTPUT_STATUSES:
+            raise ValueError(f"unsupported output_status: {output_status}")
         normalized_command = " ".join(str(canonical_command).strip().lower().split())
         legacy_status = str(status or "").strip().lower()
         if execution_status is None:
@@ -904,6 +908,7 @@ class PatrolRepository:
             row.status = command_status.execution_status
             row.execution_status = command_status.execution_status
             row.parse_status = command_status.parse_status
+            row.output_status = output_status
             row.fact_status = command_status.fact_status
             row.normalization_status = command_status.normalization_status
             row.parser_candidate_id = parser_candidate_id or row.parser_candidate_id
@@ -1055,6 +1060,7 @@ class PatrolRepository:
         parser_name: str | None = None,
         parser_version: str | None = None,
         parse_status: str | None = None,
+        output_status: str = "not_classified",
         start_line: int | None = None,
         end_line: int | None = None,
         dataset_id: str | None = None,
@@ -1067,6 +1073,8 @@ class PatrolRepository:
         execution_item_id: str | None = None,
         owner_token: str | None = None,
     ) -> tuple[str, bool]:
+        if output_status not in OUTPUT_STATUSES:
+            raise ValueError(f"unsupported output_status: {output_status}")
         raw_hash = hashlib.sha256((raw_text or "").encode("utf-8")).hexdigest()
         status = parse_status or ("parsed" if structured_json is not None else "raw_only")
         snapshot_id = snapshot_id or str(uuid.uuid4())
@@ -1140,6 +1148,7 @@ class PatrolRepository:
                     raw_text=raw_text or "",
                     raw_text_hash=raw_hash,
                     parse_status=status,
+                    output_status=output_status,
                     snapshot_kind=snapshot_kind,
                     source_file_hash=source_file_hash,
                     import_fingerprint=import_fingerprint,

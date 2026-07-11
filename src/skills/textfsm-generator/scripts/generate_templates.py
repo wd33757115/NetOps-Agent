@@ -263,15 +263,27 @@ def _is_non_template_sample(raw_text: str) -> bool:
     )
 
 
-def _regression_samples(candidate: Candidate) -> tuple[TemplateSample, ...]:
+def _regression_samples(
+    candidate: Candidate,
+    *,
+    target_profile: str | None = None,
+) -> tuple[TemplateSample, ...]:
     existing_hashes = {
         hashlib.sha256(sample.output.encode("utf-8")).hexdigest() for sample in candidate.samples
     }
     output: list[TemplateSample] = []
+    allowed_models = {candidate.model.casefold()}
+    if target_profile and candidate.family and target_profile.casefold() == candidate.family.casefold():
+        allowed_models.update(
+            str(item.get("model") or "").casefold()
+            for item in ParserRepository().list_device_profiles()
+            if str(item.get("vendor") or "").casefold() == candidate.vendor.casefold()
+            and str(item.get("family") or "").casefold() == candidate.family.casefold()
+        )
     for snapshot in PatrolRepository().list_dataset_snapshots(mode="parser_validation"):
         if (
             (snapshot.vendor or "").lower() != candidate.vendor.lower()
-            or (snapshot.model or "").lower() != candidate.model.lower()
+            or (snapshot.model or "").casefold() not in allowed_models
             or snapshot.command_canonical != candidate.command
         ):
             continue
@@ -336,8 +348,15 @@ def _process_candidate(
     mode: str,
     source_job_id: str | None = None,
 ) -> GenerationReport:
+    target_profile = candidate.model
+    if source_job_id:
+        source_job = ParserRepository().get_job(source_job_id)
+        if source_job:
+            target_profile = str(source_job.get("profile") or target_profile)
     trigger_sample_count = len(candidate.samples)
-    regression_samples = _regression_samples(candidate) if source_job_id else ()
+    regression_samples = (
+        _regression_samples(candidate, target_profile=target_profile) if source_job_id else ()
+    )
     validation_candidate = Candidate(
         vendor=candidate.vendor,
         model=candidate.model,
@@ -424,7 +443,7 @@ def _process_candidate(
         version = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
         target, digest = TemplateAssetStore(templates_dir).write_immutable(
             vendor=candidate.vendor,
-            profile=candidate.model,
+            profile=target_profile,
             command=candidate.command,
             version=version,
             content=template_text,
@@ -467,7 +486,7 @@ def _process_candidate(
             vendor=candidate.vendor,
             model=candidate.model,
             family=candidate.family,
-            profile=candidate.model,
+            profile=target_profile,
             command=candidate.command,
             category=category,
             version=version,

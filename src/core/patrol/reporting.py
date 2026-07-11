@@ -17,15 +17,23 @@ def build_run_quality_summary(run_id: str) -> dict[str, Any]:
     repository = PatrolRepository()
     run = repository.get_run(run_id) or {}
     results = repository.list_collection_results(run_id)
-    eligible = [item for item in results if item.get("parse_status") != "ignored"]
+    eligible = [
+        item
+        for item in results
+        if item.get("parse_status") not in {"ignored", "not_applicable"}
+    ]
+    parser_eligible = [item for item in eligible if item.get("parse_status") != "raw_hashed"]
     parser_ready = [
-        item for item in eligible if item.get("parse_status") in {"parsed", "parse_empty"}
+        item
+        for item in parser_eligible
+        if item.get("parse_status") in {"parsed", "parse_empty"}
     ]
     fact_ready = [item for item in eligible if item.get("fact_status") in {"ready", "empty"}]
     normalized = [
         item for item in eligible if item.get("normalization_status") in {"normalized", "empty"}
     ]
     denominator = len(eligible)
+    parser_denominator = len(parser_eligible)
     return {
         "collection_status": run.get("collection_status") or "unknown",
         "parser_readiness_status": run.get("parser_readiness_status") or "unknown",
@@ -35,7 +43,9 @@ def build_run_quality_summary(run_id: str) -> dict[str, Any]:
         "execution_success_count": sum(
             item.get("execution_status") == "complete" for item in results
         ),
-        "parser_ready_rate": len(parser_ready) / denominator if denominator else 1.0,
+        "parser_ready_rate": (
+            len(parser_ready) / parser_denominator if parser_denominator else 1.0
+        ),
         "fact_ready_rate": len(fact_ready) / denominator if denominator else 1.0,
         "normalization_ready_rate": len(normalized) / denominator if denominator else 1.0,
         "template_missing_count": sum(
@@ -49,6 +59,21 @@ def build_run_quality_summary(run_id: str) -> dict[str, Any]:
         ),
         "blocked_by_parser_count": sum(
             item.get("fact_status") == "blocked_by_parser" for item in results
+        ),
+        "valid_empty_count": sum(
+            item.get("output_status") == "valid_empty" for item in results
+        ),
+        "empty_unverified_count": sum(
+            item.get("output_status") == "empty_unverified" for item in results
+        ),
+        "unsupported_command_count": sum(
+            item.get("output_status") == "unsupported_command" for item in results
+        ),
+        "command_error_count": sum(
+            item.get("output_status") == "command_error" for item in results
+        ),
+        "raw_hash_diff_count": sum(
+            item.get("parse_status") == "raw_hashed" for item in results
         ),
     }
 
@@ -90,6 +115,10 @@ def render_run_report(
         f"- Normalization ready: {quality['normalization_ready_rate']:.1%}",
         f"- Missing templates: {quality['template_missing_count']}",
         f"- Parser backlog: {quality['parser_backlog_count']}",
+        f"- Valid empty outputs: {quality['valid_empty_count']}",
+        f"- Unverified empty outputs: {quality['empty_unverified_count']}",
+        f"- Unsupported commands: {quality['unsupported_command_count']}",
+        f"- Raw hash comparisons: {quality['raw_hash_diff_count']}",
     ]
     if event_counter:
         lines.extend(["", "## Events By Type", ""])
@@ -191,6 +220,10 @@ def _render_html(
   Normalization ready: {quality["normalization_ready_rate"]:.1%}<br>
   Missing templates: {quality["template_missing_count"]}<br>
   Parser backlog: {quality["parser_backlog_count"]}</p>
+  <p>Valid empty outputs: {quality["valid_empty_count"]}<br>
+  Unverified empty outputs: {quality["empty_unverified_count"]}<br>
+  Unsupported commands: {quality["unsupported_command_count"]}<br>
+  Raw hash comparisons: {quality["raw_hash_diff_count"]}</p>
   <h2>Events By Type</h2>
   <ul>{"".join(f"<li>{escape(k)}: {v}</li>" for k, v in sorted(event_counter.items()))}</ul>
   <h2>Events By Severity</h2>
@@ -222,6 +255,10 @@ def _write_xlsx(
         ["Normalization ready", f"{quality['normalization_ready_rate']:.1%}"],
         ["Missing templates", str(quality["template_missing_count"])],
         ["Parser backlog", str(quality["parser_backlog_count"])],
+        ["Valid empty outputs", str(quality["valid_empty_count"])],
+        ["Unverified empty outputs", str(quality["empty_unverified_count"])],
+        ["Unsupported commands", str(quality["unsupported_command_count"])],
+        ["Raw hash comparisons", str(quality["raw_hash_diff_count"])],
         [],
         ["Time", "Severity", "Event Type", "Device", "Entity"],
     ]

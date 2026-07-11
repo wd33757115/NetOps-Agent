@@ -13,6 +13,10 @@ PARSE_STATUSES = {
     "template_missing",
     "parse_failed",
     "identity_unknown",
+    "raw_hashed",
+    "not_applicable",
+    "empty_unverified",
+    "command_error",
 }
 FACT_STATUSES = {
     "ready",
@@ -23,6 +27,8 @@ FACT_STATUSES = {
     "blocked_by_identity",
     "blocked_by_contract",
     "normalization_failed",
+    "not_applicable",
+    "blocked_by_output",
 }
 NORMALIZATION_STATUSES = {
     "pending",
@@ -72,6 +78,10 @@ def derive_command_status(
         "parse_failed": ("blocked_by_parser", "blocked"),
         "identity_unknown": ("blocked_by_identity", "blocked"),
         "not_attempted": ("blocked_by_parser", "blocked"),
+        "raw_hashed": ("ready", "pending"),
+        "not_applicable": ("not_applicable", "skipped"),
+        "empty_unverified": ("blocked_by_output", "blocked"),
+        "command_error": ("blocked_by_output", "blocked"),
     }
     fact_status, normalization_status = mapping[parsed]
     return PatrolCommandStatus(execution, parsed, fact_status, normalization_status)

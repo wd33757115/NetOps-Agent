@@ -297,6 +297,7 @@ class ParserRepository:
         snapshot_id: str,
         device_id: str,
         raw_text: str | None = None,
+        profile: str | None = None,
         failure_code: str | None = None,
         dataset_id: str | None = None,
     ) -> str:
@@ -314,7 +315,10 @@ class ParserRepository:
         raw_text = snapshot.raw_text
         dataset_id = context["dataset_id"] or dataset_id
         signature = output_signature(raw_text)
-        profile = model or family or "Generic"
+        profile = str(profile or model or family or "Generic")
+        allowed_profiles = {str(item) for item in (model, family, "Generic") if item}
+        if profile not in allowed_profiles:
+            raise ValueError("parser candidate profile must match the device model or family")
         key_parts = [source_mode, job_type, vendor, profile, command]
         if source_mode == "parser_validation":
             key_parts.append(signature)

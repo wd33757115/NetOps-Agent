@@ -762,11 +762,12 @@ def _coverage_summary(
         status = "blocked" if connection_issues else "not_required"
     elif (
         plan_violations
-        or blocking
         or connection_issues
         or (runtime_asset_health or {}).get("status") in {"blocked", "error"}
     ):
         status = "blocked"
+    elif blocking:
+        status = "degraded"
     return {
         "status": status,
         "mode": normalized_mode,
@@ -2036,7 +2037,7 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                     contract_rows = (
                         db.query(ObservationContractRecord)
                         .filter(ObservationContractRecord.source_template_id.in_(template_ids))
-                        .order_by(ObservationContractRecord.contract_version.desc())
+                        .order_by(ObservationContractRecord.version.desc())
                         .all()
                     )
                     for contract_row in contract_rows:
@@ -2191,6 +2192,7 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                             ),
                             "command": row.canonical_command,
                             "parse_status": row.parse_status,
+                            "output_status": row.output_status,
                             "parser_template_id": row.parser_template_id,
                             "observation_contract_id": (
                                 contract_by_template[row.parser_template_id].id
@@ -2513,14 +2515,14 @@ def _patrol_launch_preview(
             )
             connection_issues = _connection_preflight(device)
             runtime_asset_blocked = runtime_asset_health.get("status") in {"blocked", "error"}
-            if plan_violations or coverage_violations or connection_issues or runtime_asset_blocked:
+            # Parser coverage is a data-quality warning, not a collection precondition.
+            # Preserve the diagnostics without losing the raw CLI snapshot.
+            if plan_violations or connection_issues or runtime_asset_blocked:
                 failure_code = (
                     "collector_preflight_failed"
                     if connection_issues
                     else "command_profile_not_ready"
                     if plan_violations
-                    else "parser_coverage_not_ready"
-                    if coverage_violations
                     else "runtime_rule_assets_not_ready"
                 )
                 if connection_issues and device.get("device_id"):
@@ -2555,7 +2557,7 @@ def _patrol_launch_preview(
                     "commands": commands,
                     "command_count": len(plan.commands),
                     "plan_violations": [],
-                    "coverage_violations": [],
+                    "coverage_violations": coverage_violations,
                     "connection_issues": [],
                     "runtime_asset_health": runtime_asset_health,
                 }

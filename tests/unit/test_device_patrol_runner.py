@@ -3,13 +3,78 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
 
-from src.core.device_ops.tools import ActionType, TaskResult
+from src.core.collection.policy import execution_plan_from_metadata
+from src.core.device_ops.tools import ActionType, PatrolTool, TaskResult
 from src.core.patrol import runner as patrol_runner
 from src.core.patrol.runner import DevicePatrolRunner, DevicePatrolRunRequest
+
+
+def test_production_parser_preflight_does_not_block_cli_collection(monkeypatch, tmp_path):
+    output = tmp_path / "patrol.txt"
+    output.write_text("Command: show version\nOutput:\nVersion 1\n", encoding="utf-8")
+
+    class FakeCollector:
+        def collect_command_outputs(self, *, device, execution_plan):
+            return output
+
+    tool = PatrolTool.__new__(PatrolTool)
+    tool.policy_resolver = None
+    tool.cli_collector = FakeCollector()
+    tool.db_manager = SimpleNamespace()
+    monkeypatch.setattr(
+        tool,
+        "_production_coverage",
+        lambda _device, _commands: [
+            {
+                "canonical_command": "show version",
+                "policy_status": "eligible",
+                "coverage_status": "template_missing",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "src.core.device_ops.tools.load_command_collection_manifest",
+        lambda _path: {
+            "status": "complete",
+            "commands": [{"command": "show version", "status": "complete"}],
+        },
+    )
+    monkeypatch.setattr(
+        "src.core.device_ops.tools._record_connection_health",
+        lambda *a, **k: None,
+    )
+    plan = execution_plan_from_metadata(
+        {
+            "device_id": "device-1",
+            "action": "patrol",
+            "mode": "production",
+            "profile_name": "test",
+            "policy_source": "test",
+            "collection_items": [{"command": "show version", "action": "patrol"}],
+        }
+    )
+
+    result = asyncio.run(
+        tool.patrol_device(
+            {
+                "device_id": "device-1",
+                "device_name": "SW1",
+                "ip": "10.0.0.1",
+                "vendor": "Cisco",
+                "model": "C2960",
+            },
+            execution_plan=plan,
+        )
+    )
+
+    assert result["success"] is True
+    assert result["output_file"] == str(output)
+    assert result["coverage_preflight"][0]["coverage_status"] == "template_missing"
 
 
 def test_device_patrol_runner_executes_explicit_plan_and_persists_snapshots():
@@ -200,7 +265,8 @@ def test_device_patrol_runner_surfaces_partial_parser_health():
 
     result = runner.run(DevicePatrolRunRequest(filter_params={"vendor": "Cisco"}))
 
-    assert result["status"] == "partial"
+    assert result["success"] is True
+    assert result["status"] == "success"
     assert result["data_quality_status"] == "partial"
     assert result["production_parser_ready"] is False
     assert result["failed_parse_commands"] == 1
@@ -258,7 +324,7 @@ def test_device_patrol_runner_persists_successful_devices_from_partial_batch():
     )
     result = runner.run(DevicePatrolRunRequest(filter_params={"site": "dc-a"}))
 
-    assert result["status"] == "partial"
+    assert result["status"] == "success"
     assert len(captured["details"]) == 2
     assert result["snapshot_devices"] == 1
 

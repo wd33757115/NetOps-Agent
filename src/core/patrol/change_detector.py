@@ -444,7 +444,12 @@ def detect_changes_between_snapshots(
     entity_type: str = "record",
     primary_keys: list[str] | None = None,
 ) -> list[NetworkChange]:
-    if previous.structured_json is None or current.structured_json is None:
+    if (
+        previous.parse_status == "raw_hashed"
+        or current.parse_status == "raw_hashed"
+        or previous.structured_json is None
+        or current.structured_json is None
+    ):
         if previous.raw_text_hash == current.raw_text_hash:
             return []
         return [

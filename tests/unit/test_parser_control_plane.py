@@ -49,8 +49,57 @@ def test_ignored_command_never_resolves_template():
         command="display current-configuration",
         raw_text="configuration",
     )
-    assert result.policy_status == "ignored"
+    assert result.policy_status == "raw"
     assert result.handling == "raw_hash_diff"
+    assert result.parser_status == "not_required"
+    assert result.structured_data[0]["raw_text_hash"]
+    assert "configuration" not in str(result.structured_data)
+    assert registry.calls == []
+
+
+def test_verified_blank_capability_is_legal_empty_without_template():
+    registry = FakeRegistry()
+    result = ParserRuntime(registry=registry).parse(
+        identity=known_h3c_identity(),
+        command="display vrf",
+        raw_text="\r\n",
+    )
+    assert result.output_status == "valid_empty"
+    assert result.parser_status == "empty"
+    assert result.structured_data == []
+    assert result.capability == "vrf.inventory"
+    assert result.template_profile == "Comware7"
+    assert registry.calls == []
+
+
+def test_blank_output_without_verified_capability_is_blocked():
+    registry = FakeRegistry()
+    result = ParserRuntime(registry=registry).parse(
+        identity=DeviceIdentity(
+            vendor="H3C",
+            model="UnknownModel",
+            family="UnknownFamily",
+            confidence=1.0,
+            source="test",
+        ),
+        command="display vrf",
+        raw_text="",
+    )
+    assert result.output_status == "empty_unverified"
+    assert result.failure_code == "empty_unverified"
+    assert result.structured_data is None
+    assert registry.calls == []
+
+
+def test_unsupported_command_is_not_sent_to_template_resolver():
+    registry = FakeRegistry()
+    result = ParserRuntime(registry=registry).parse(
+        identity=known_h3c_identity(),
+        command="display vrf",
+        raw_text="% Unrecognized command found at '^' position.",
+    )
+    assert result.output_status == "unsupported_command"
+    assert result.failure_code == "unsupported_command"
     assert registry.calls == []
 
 

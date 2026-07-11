@@ -63,6 +63,11 @@ urlpatterns = [
         workflows.proxy_patrol_batch_export,
         name="bff_patrol_batch_export",
     ),
+    path(
+        "workflows/runs/patrol-batches/<str:patrol_batch_id>/report.md",
+        workflows.proxy_patrol_batch_report,
+        name="bff_patrol_batch_report",
+    ),
     path("workflows/runs/test/", workflows.proxy_workflow_test_run, name="bff_workflow_test_run"),
     path("workflows/<str:run_id>/timeline/", workflows.proxy_workflow_timeline, name="bff_workflow_timeline"),
     path("workflows/<str:run_id>/events/stream/", workflows.proxy_workflow_events_stream, name="bff_workflow_events_stream"),

@@ -289,25 +289,13 @@ class PatrolTool:
                 device=device, action="patrol", mode=mode
             )
             _validate_plan_for_device(device=device, plan=plan, action="patrol", mode=mode)
+            coverage_preflight: list[dict[str, Any]] = []
             if mode == PRODUCTION_MODE:
-                blocking = [
+                coverage_preflight = [
                     item
                     for item in self._production_coverage(device, plan.command_texts())
                     if item["policy_status"] == "eligible" and item["coverage_status"] != "ready"
                 ]
-                if blocking:
-                    return {
-                        "inventory_device_id": device.get("device_id"),
-                        "device_name": device.get("device_name"),
-                        "ip": device.get("ip"),
-                        "vendor": device.get("vendor"),
-                        "model": device.get("model"),
-                        "success": False,
-                        "error": "production patrol blocked by parser coverage preflight",
-                        "coverage_violations": blocking,
-                        "collection_status": "failed",
-                        "execution_plan": plan.to_metadata(),
-                    }
             output_file = await asyncio.to_thread(
                 self.cli_collector.collect_command_outputs,
                 device=device,
@@ -339,6 +327,7 @@ class PatrolTool:
                 "collection_status": collection_status,
                 "completed_commands": completed_commands,
                 "command_collection_results": command_results,
+                "coverage_preflight": coverage_preflight,
             }
         except Exception as exc:
             _record_connection_health(

@@ -32,6 +32,7 @@ from src.core.patrol.raw_importer import (
     import_raw_path,
 )
 from src.core.patrol.repository import PatrolRepository
+from src.core.state.normalizer import normalize_run
 from src.infrastructure.db.models import (
     CommandSnapshot,
     NetworkChangeRecord,
@@ -179,6 +180,14 @@ def test_split_ascii_command_report_format():
     assert len(blocks) == 1
     assert blocks[0].command_canonical == "show version"
     assert blocks[0].raw_output == "Cisco IOS Software"
+
+
+def test_split_command_report_preserves_executed_empty_output():
+    blocks = split_cli_capture("命令: display vrf\n输出:\n", device_name="SW3")
+
+    assert len(blocks) == 1
+    assert blocks[0].command_canonical == "display vrf"
+    assert blocks[0].raw_output == ""
 
 
 def test_change_detector_field_changes():
@@ -1009,3 +1018,95 @@ interface Gi1/0/1
         assert [event.event_type for event in event_result] == ["ConfigChanged"]
     finally:
         _cleanup_runs(run1, run2)
+
+
+def test_raw_hash_diff_flows_through_observation_change_event_chain(tmp_path: Path):
+    first_report = tmp_path / "sw1-config-first.txt"
+    second_report = tmp_path / "sw1-config-second.txt"
+    first_report.write_text(
+        "命令: show running-config\n输出:\nhostname SW1\ninterface Gi1/0/1\n description server\n",
+        encoding="utf-8",
+    )
+    second_report.write_text(
+        "命令: show running-config\n输出:\nhostname SW1\ninterface Gi1/0/1\n shutdown\n",
+        encoding="utf-8",
+    )
+    run1 = f"raw-hash-{uuid.uuid4()}"
+    run2 = f"raw-hash-{uuid.uuid4()}"
+    try:
+        _persist_patrol_snapshots(
+            details=[{"device_name": "SW1", "ip": "10.0.0.1", "output_file": str(first_report)}],
+            snapshot_run_id=run1,
+            mode="parser_validation",
+        )
+        _persist_patrol_snapshots(
+            details=[{"device_name": "SW1", "ip": "10.0.0.1", "output_file": str(second_report)}],
+            snapshot_run_id=run2,
+            mode="parser_validation",
+        )
+        first_normalized = normalize_run(run1)
+        second_normalized = normalize_run(run2)
+        assert first_normalized["observation_count"] == 1
+        assert second_normalized["observation_count"] == 1
+        assert first_normalized["results"][0]["observations"][0]["field_name"] == "raw_text_hash"
+
+        change_result = detect_changes_from_params(
+            {
+                "current_run_id": run2,
+                "previous_run_id": run1,
+                "use_state_observations": True,
+                "persist": True,
+            }
+        )
+        events = build_events_from_changes(change_result["changes"])
+        assert change_result["change_count"] == 1
+        assert [event.event_type for event in events] == ["ConfigChanged"]
+    finally:
+        _cleanup_runs(run1, run2)
+
+
+@pytest.mark.parametrize(
+    ("raw_output", "parse_status", "output_status", "fact_status", "baseline"),
+    [
+        ("", "parse_empty", "valid_empty", "empty", True),
+        (
+            "% Unrecognized command found at '^' position.",
+            "not_applicable",
+            "unsupported_command",
+            "not_applicable",
+            False,
+        ),
+    ],
+)
+def test_vrf_empty_and_unsupported_outputs_do_not_create_parser_jobs(
+    tmp_path: Path,
+    raw_output: str,
+    parse_status: str,
+    output_status: str,
+    fact_status: str,
+    baseline: bool,
+):
+    report = tmp_path / f"vrf-{parse_status}.txt"
+    report.write_text(f"命令: display vrf\n输出:\n{raw_output}\n", encoding="utf-8")
+    run_id = f"vrf-output-{uuid.uuid4()}"
+    try:
+        result = import_raw_capture(
+            file_path=report,
+            mode="production",
+            vendor="H3C",
+            model="S5130S-54S-HI-G",
+            run_id=run_id,
+            collector_complete=True,
+        )
+        assert result["production_parser_ready"] is True
+        with get_db_session() as db:
+            snapshot = db.query(CommandSnapshot).filter_by(run_id=run_id).one()
+            collection = db.query(PatrolCollectionResult).filter_by(run_id=run_id).one()
+            assert snapshot.parse_status == parse_status
+            assert snapshot.output_status == output_status
+            assert collection.output_status == output_status
+            assert collection.fact_status == fact_status
+            assert collection.baseline_eligible is baseline
+            assert collection.parser_candidate_id is None
+    finally:
+        _cleanup_runs(run_id)

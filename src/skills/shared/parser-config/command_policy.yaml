@@ -1,3 +1,12 @@
+capabilities:
+  vrf.inventory:
+    template_scope: family
+    empty_semantics:
+      blank: valid_empty
+      valid_empty_patterns:
+        - '(?i)(?:no|zero)\s+(?:vrf|vpn[- ]instance)'
+        - '(?i)(?:vrf|vpn[- ]instance).*not configured'
+
 commands:
   display version: {enabled: true}
   show version: {enabled: true}
@@ -27,6 +36,25 @@ commands:
   display irf: {enabled: true}
   display m-lag system: {enabled: true}
   show vpc: {enabled: true}
+  display vrf:
+    enabled: true
+    capability: vrf.inventory
+    supported_on:
+      - {vendor: H3C, families: [Comware7]}
+      - {vendor: H3C, model_patterns: ['^S[0-9]']}
+    template_scope: family
+  display ip vpn-instance:
+    enabled: true
+    capability: vrf.inventory
+    supported_on:
+      - {vendor: Huawei, families: [VRP]}
+    template_scope: family
+  show vrf:
+    enabled: true
+    capability: vrf.inventory
+    supported_on:
+      - {vendor: Cisco, families: [NXOS9K, IOS, IOS-XE]}
+    template_scope: family
 
   display current-configuration: {enabled: false, handling: raw_hash_diff}
   display saved-configuration: {enabled: false, handling: raw_hash_diff}

@@ -803,6 +803,9 @@ class CommandSnapshot(Base):
     raw_text = Column(Text, nullable=False, default="")
     raw_text_hash = Column(String(64), nullable=False, index=True)
     parse_status = Column(String(32), nullable=False, index=True)
+    output_status = Column(
+        String(32), nullable=False, default="not_classified", server_default="not_classified", index=True
+    )
     snapshot_kind = Column(String(32), nullable=False, default="full")
     source_file_hash = Column(String(64), nullable=True)
     import_fingerprint = Column(String(64), nullable=True)
@@ -869,6 +872,9 @@ class PatrolCollectionResult(Base):
         default="not_attempted",
         server_default="not_attempted",
         index=True,
+    )
+    output_status = Column(
+        String(32), nullable=False, default="not_classified", server_default="not_classified", index=True
     )
     fact_status = Column(
         String(32),

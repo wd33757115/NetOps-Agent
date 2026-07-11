@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import ipaddress
 import re
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ from typing import Any
 from .assets import TemplateAssetStore
 from .identity import DeviceIdentity
 from .key_contract import validate_entity_keys
+from .output_classifier import OutputClassifier
 from .policy import CategorySpec, ParserPolicy
 
 try:
@@ -35,10 +37,14 @@ class ParserRuntimeResult:
     category: str | None = None
     entity_type: str | None = None
     primary_keys: tuple[str, ...] = ()
+    output_status: str = "data"
+    capability: str | None = None
+    capability_status: str = "unknown"
+    template_profile: str | None = None
 
 
 class ParserRuntime:
-    def __init__(self, *, policy=None, registry=None, asset_store=None):
+    def __init__(self, *, policy=None, registry=None, asset_store=None, output_classifier=None):
         self.policy = policy or ParserPolicy()
         if registry is None:
             from .repository import ParserRepository
@@ -46,6 +52,7 @@ class ParserRuntime:
             registry = ParserRepository()
         self.registry = registry
         self.asset_store = asset_store or TemplateAssetStore()
+        self.output_classifier = output_classifier or OutputClassifier()
 
     def check_coverage(
         self,
@@ -62,7 +69,11 @@ class ParserRuntime:
         )
         result = {
             "canonical_command": decision.canonical_command,
-            "policy_status": "eligible" if decision.enabled else "ignored",
+            "policy_status": (
+                "eligible" if decision.enabled else (
+                    "raw" if decision.handling == "raw_hash_diff" else "ignored"
+                )
+            ),
             "identity_status": identity.status,
             "coverage_status": "ignored",
             "template_id": None,
@@ -70,6 +81,12 @@ class ParserRuntime:
             "failure_code": None,
         }
         if not decision.enabled:
+            if decision.handling == "raw_hash_diff":
+                return {
+                    **result,
+                    "coverage_status": "ready",
+                    "failure_code": None,
+                }
             return result
         if identity.status != "known":
             return {
@@ -124,6 +141,26 @@ class ParserRuntime:
             "text": identity.evidence_text,
         }
         if not decision.enabled:
+            if decision.handling == "raw_hash_diff":
+                return ParserRuntimeResult(
+                    policy_status="raw",
+                    identity_status=identity.status,
+                    parser_status="not_required",
+                    canonical_command=decision.canonical_command,
+                    handling=decision.handling,
+                    structured_data=[
+                        {
+                            "raw_text_hash": hashlib.sha256(
+                                str(raw_text or "").encode("utf-8")
+                            ).hexdigest()
+                        }
+                    ],
+                    identity_evidence=evidence,
+                    output_status="data",
+                    capability=decision.capability,
+                    capability_status=decision.capability_status,
+                    template_profile=decision.template_profile,
+                )
             return ParserRuntimeResult(
                 policy_status="ignored",
                 identity_status=identity.status,
@@ -131,6 +168,42 @@ class ParserRuntime:
                 canonical_command=decision.canonical_command,
                 handling=decision.handling,
                 identity_evidence=evidence,
+                output_status="data",
+            )
+        classification = self.output_classifier.classify(raw_text, decision=decision)
+        common = {
+            "capability": decision.capability,
+            "capability_status": decision.capability_status,
+            "template_profile": decision.template_profile,
+            "output_status": classification.status,
+        }
+        if classification.status == "valid_empty":
+            return ParserRuntimeResult(
+                policy_status="eligible",
+                identity_status=identity.status,
+                parser_status="empty",
+                canonical_command=decision.canonical_command,
+                handling=decision.handling,
+                structured_data=[],
+                identity_evidence=evidence,
+                category=decision.capability,
+                **common,
+            )
+        if classification.status in {
+            "empty_unverified",
+            "unsupported_command",
+            "command_error",
+        }:
+            return ParserRuntimeResult(
+                policy_status="eligible",
+                identity_status=identity.status,
+                parser_status="unavailable",
+                canonical_command=decision.canonical_command,
+                handling=decision.handling,
+                failure_code=classification.status,
+                identity_evidence={**evidence, "output_reason": classification.reason},
+                category=decision.capability,
+                **common,
             )
         if identity.status != "known":
             return ParserRuntimeResult(
@@ -142,6 +215,7 @@ class ParserRuntime:
                 failure_code="identity_unknown",
                 identity_evidence=evidence,
                 category=decision.category,
+                **common,
             )
         template = self.registry.resolve_active(
             vendor=identity.vendor or "",
@@ -159,6 +233,7 @@ class ParserRuntime:
                 failure_code="template_missing",
                 identity_evidence=evidence,
                 category=decision.category,
+                **common,
             )
         if not self.asset_store.verify(template.asset_path, template.sha256):
             return self._failed(decision, identity, template, "asset_hash_mismatch", evidence)
@@ -193,6 +268,10 @@ class ParserRuntime:
                     category=spec.name,
                     entity_type=spec.entity_type if spec else None,
                     primary_keys=spec.primary_keys if spec else (),
+                    output_status="valid_empty",
+                    capability=decision.capability,
+                    capability_status=decision.capability_status,
+                    template_profile=decision.template_profile,
                 )
             return self._failed(decision, identity, template, "unexpected_empty", evidence)
         required = set(spec.required_fields if spec else ())
@@ -270,6 +349,10 @@ class ParserRuntime:
             category=spec.name,
             entity_type=spec.entity_type if spec else None,
             primary_keys=spec.primary_keys if spec else (),
+            output_status="data",
+            capability=decision.capability,
+            capability_status=decision.capability_status,
+            template_profile=decision.template_profile,
         )
 
     @staticmethod
@@ -306,6 +389,10 @@ class ParserRuntime:
             category=spec.name,
             entity_type=spec.entity_type,
             primary_keys=spec.primary_keys,
+            output_status="data",
+            capability=decision.capability,
+            capability_status=decision.capability_status,
+            template_profile=decision.template_profile,
         )
 
 

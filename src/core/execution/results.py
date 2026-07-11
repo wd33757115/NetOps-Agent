@@ -19,6 +19,7 @@ def runner_success_payload(
 ) -> dict[str, Any]:
     """Build the stable legacy-compatible payload returned by execution runners."""
     payload = {
+        "success": True,
         "status": "success",
         "action": action,
         "ticket_id": ticket_id,

@@ -310,12 +310,6 @@ def import_raw_capture(
         )
         for block in blocks
     ]
-    blocking = [
-        item
-        for item in coverage
-        if item["policy_status"] == "eligible" and item["coverage_status"] != "ready"
-    ]
-
     parsed_blocks = []
     for block in blocks:
         try:
@@ -340,6 +334,22 @@ def import_raw_capture(
                 },
             )
         parsed_blocks.append((block, parsed))
+    for coverage_item, (_, parsed) in zip(coverage, parsed_blocks, strict=True):
+        if parsed.parser_status == "empty":
+            coverage_item["coverage_status"] = "not_required_for_empty"
+            coverage_item["failure_code"] = None
+        elif parsed.failure_code == "unsupported_command":
+            coverage_item["coverage_status"] = "not_applicable"
+            coverage_item["failure_code"] = "unsupported_command"
+        elif parsed.policy_status == "raw":
+            coverage_item["coverage_status"] = "ready"
+            coverage_item["failure_code"] = None
+    blocking = [
+        item
+        for item in coverage
+        if item["policy_status"] == "eligible"
+        and item["coverage_status"] not in {"ready", "not_required_for_empty", "not_applicable"}
+    ]
     parse_violations = [
         {
             "canonical_command": parsed.canonical_command,
@@ -349,7 +359,9 @@ def import_raw_capture(
             "template_version": parsed.template_version,
         }
         for _, parsed in parsed_blocks
-        if parsed.policy_status == "eligible" and parsed.parser_status not in {"success", "empty"}
+        if parsed.policy_status == "eligible"
+        and parsed.parser_status not in {"success", "empty"}
+        and parsed.failure_code != "unsupported_command"
     ]
 
     repository = PatrolRepository()
@@ -507,8 +519,17 @@ def import_raw_capture(
         structured = None
         parser_name = None
         parser_version = None
-        if parsed.policy_status == "ignored":
+        if parsed.handling == "raw_hash_diff" and parsed.parser_status == "not_required":
+            parse_status = "raw_hashed"
+            structured = parsed.structured_data
+        elif parsed.policy_status == "ignored":
             parse_status = "ignored"
+        elif parsed.failure_code == "unsupported_command":
+            parse_status = "not_applicable"
+        elif parsed.failure_code == "empty_unverified":
+            parse_status = "empty_unverified"
+        elif parsed.failure_code == "command_error":
+            parse_status = "command_error"
         elif parsed.identity_status != "known":
             parse_status = "identity_unknown"
         elif parsed.parser_status == "unavailable":
@@ -541,6 +562,7 @@ def import_raw_capture(
             parser_name=parser_name,
             parser_version=parser_version,
             parse_status=parse_status,
+            output_status=parsed.output_status,
             dataset_id=dataset_id,
             source_file_hash=source_file_hash,
             import_fingerprint=fingerprint,
@@ -554,6 +576,10 @@ def import_raw_capture(
                 "execution_item_id": command_collection.get("execution_item_id"),
                 "collection_item_id": command_collection.get("collection_item_id"),
                 "command_ordinal": command_collection.get("command_ordinal"),
+                "handling": parsed.handling,
+                "output_status": parsed.output_status,
+                "capability": parsed.capability,
+                "capability_status": parsed.capability_status,
             },
             inventory_device_id=inventory_device_id,
             execution_item_id=command_collection.get("execution_item_id"),
@@ -602,6 +628,7 @@ def import_raw_capture(
                     vendor=identity.vendor or "",
                     model=identity.model or "",
                     family=identity.family,
+                    profile=parsed.template_profile,
                     command=parsed.canonical_command,
                     snapshot_id=snapshot_id,
                     device_id=device_id,
@@ -640,7 +667,9 @@ def import_raw_capture(
             if command_collection
             else collector_complete is True
         )
-        authoritative = bool(command_complete and parse_status in {"parsed", "parse_empty"})
+        authoritative = bool(
+            command_complete and parse_status in {"parsed", "parse_empty", "raw_hashed"}
+        )
         repository.save_collection_result(
             run_id=rid,
             inventory_device_id=inventory_device_id,
@@ -649,6 +678,7 @@ def import_raw_capture(
             status=command_status.execution_status,
             execution_status=command_status.execution_status,
             parse_status=command_status.parse_status,
+            output_status=parsed.output_status,
             fact_status=command_status.fact_status,
             normalization_status=command_status.normalization_status,
             parser_candidate_id=candidate_job_id,

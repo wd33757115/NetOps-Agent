@@ -409,6 +409,19 @@ async def proxy_patrol_batch_export(request: HttpRequest, patrol_batch_id: str):
 
 @csrf_exempt
 @require_jwt
+@sync_bff_view
+async def proxy_patrol_batch_report(request: HttpRequest, patrol_batch_id: str):
+    return await proxy_binary_to_fastapi(
+        method="GET",
+        fastapi_path=f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/report.md",
+        request_id=request.bff_request_id,
+        timeout=TASK_TIMEOUT,
+        extra_headers=forward_client_headers(request),
+    )
+
+
+@csrf_exempt
+@require_jwt
 @require_role("admin")
 @sync_bff_view
 async def proxy_workflow_test_run(request: HttpRequest) -> JsonResponse:

@@ -106,9 +106,9 @@ The four-dimensional status schema is additive and always written; the deprecate
 
 ## Verification Evidence
 
-- Empty PostgreSQL database upgraded through migrations `0001` to `0034`; `alembic
+- Empty PostgreSQL database upgraded through migrations `0001` to `0035`; `alembic
   check` reported no schema drift.
-- All 538 unit tests pass, including legacy CPU, memory, environmental, power, fan,
+- All 553 unit tests pass, including legacy CPU, memory, environmental, power, fan,
   parser-validation, rule, report, and API paths.
 - Eleven real PostgreSQL/Redis fault-injection tests pass, including concurrent
   production candidate deduplication and single-owner outbox publication.
@@ -117,6 +117,10 @@ The four-dimensional status schema is additive and always written; the deprecate
 - Parser rollback rehearsal proves that the previous template and its ObservationContract
   become the sole active version and that the action is audited as `rollback`.
 - Ruff checks, Python bytecode compilation, and the frontend production build pass.
+
+Output classification and capability-scoped template reuse are documented in
+`docs/patrol-output-capability-and-raw-handling-2026-07-12.md`. Migration `0035`
+persists output status, while raw configuration handling emits hash-only facts.
 
 ## Operational Acceptance
 

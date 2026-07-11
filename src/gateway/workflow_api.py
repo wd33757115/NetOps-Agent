@@ -280,8 +280,8 @@ def _build_patrol_batch_summary(patrol_batch_id: str, runs: list[Any]) -> dict[s
     severities: Counter[str] = Counter()
     total_change_count = 0
     total_event_count = 0
-    sample_events: list[NetworkEventRecord] = []
-    sample_changes: list[NetworkChangeRecord] = []
+    sample_events: list[dict[str, Any]] = []
+    sample_changes: list[dict[str, Any]] = []
 
     with get_db_session() as db:
         for run in runs:
@@ -327,8 +327,31 @@ def _build_patrol_batch_summary(patrol_batch_id: str, runs: list[Any]) -> dict[s
                 severities[str(event.severity or "unknown")] += 1
             total_change_count += len(changes)
             total_event_count += len(events)
-            sample_changes.extend(changes[:3])
-            sample_events.extend(events[:3])
+            sample_changes.extend(
+                {
+                    "id": getattr(change, "id", None),
+                    "device_id": change.device_id,
+                    "entity_type": change.entity_type,
+                    "entity_key": change.entity_key,
+                    "field": change.field,
+                    "old_value": change.old_value_json,
+                    "new_value": change.new_value_json,
+                    "detected_at": getattr(change, "detected_at", None),
+                }
+                for change in changes[:3]
+            )
+            sample_events.extend(
+                {
+                    "id": getattr(event, "id", None),
+                    "device_id": event.device_id,
+                    "event_type": event.event_type,
+                    "severity": event.severity,
+                    "entity_type": event.entity_type,
+                    "entity_key": event.entity_key,
+                    "occurred_at": getattr(event, "occurred_at", None),
+                }
+                for event in events[:3]
+            )
             context = run.context or {}
             run_rows.append(
                 {
@@ -352,31 +375,8 @@ def _build_patrol_batch_summary(patrol_batch_id: str, runs: list[Any]) -> dict[s
         "event_types": dict(event_types),
         "severities": dict(severities),
         "runs": run_rows,
-        "sample_events": [
-            {
-                "id": getattr(event, "id", None),
-                "device_id": event.device_id,
-                "event_type": event.event_type,
-                "severity": event.severity,
-                "entity_type": event.entity_type,
-                "entity_key": event.entity_key,
-                "occurred_at": getattr(event, "occurred_at", None),
-            }
-            for event in sample_events[:20]
-        ],
-        "sample_changes": [
-            {
-                "id": getattr(change, "id", None),
-                "device_id": change.device_id,
-                "entity_type": change.entity_type,
-                "entity_key": change.entity_key,
-                "field": change.field,
-                "old_value": change.old_value_json,
-                "new_value": change.new_value_json,
-                "detected_at": getattr(change, "detected_at", None),
-            }
-            for change in sample_changes[:20]
-        ],
+        "sample_events": sample_events[:20],
+        "sample_changes": sample_changes[:20],
         "deliverables": {
             "csv_url": f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/export.csv",
             "report_url": f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/report.md",

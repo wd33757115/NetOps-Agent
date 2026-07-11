@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from typing import Any
 
 import yaml
@@ -52,6 +53,11 @@ class PolicyDecision:
     category: str | None = None
     family: str | None = None
     spec: CategorySpec | None = None
+    capability: str | None = None
+    capability_status: str = "unknown"
+    template_scope: str = "model"
+    template_profile: str | None = None
+    empty_semantics: dict[str, Any] | None = None
 
 
 def load_yaml(path: str | Path) -> dict[str, Any]:
@@ -119,23 +125,88 @@ class ParserPolicy:
         commands = self.policy.get("commands") or self.policy.get("_global") or {}
         global_metadata = commands.get(canonical)
         if isinstance(global_metadata, dict):
+            enabled = bool(global_metadata.get("enabled", True))
+            capability = str(global_metadata.get("capability") or "").strip() or None
+            capability_metadata = dict(
+                (self.policy.get("capabilities") or {}).get(capability) or {}
+            )
+            template_scope = str(
+                global_metadata.get("template_scope")
+                or capability_metadata.get("template_scope")
+                or "model"
+            )
+            if template_scope not in {"model", "family"}:
+                raise ValueError(f"unsupported template_scope for {canonical}: {template_scope}")
+            support_selectors = global_metadata.get("supported_on") or ()
+            capability_status = self._capability_status(
+                vendor=vendor,
+                model=model,
+                family=family,
+                selectors=support_selectors,
+            )
+            empty_semantics = {
+                **dict(capability_metadata.get("empty_semantics") or {}),
+                **dict(global_metadata.get("empty_semantics") or {}),
+            }
             return PolicyDecision(
-                enabled=bool(global_metadata.get("enabled", True)),
+                enabled=enabled,
                 canonical_command=canonical,
                 handling=str(
                     global_metadata.get("handling")
                     or (
                         "structured"
-                        if global_metadata.get("enabled", True)
+                        if enabled
                         else "raw_only"
                     )
                 ),
+                capability=capability,
+                capability_status=capability_status,
+                template_scope=template_scope,
+                template_profile=(
+                    family
+                    if template_scope == "family"
+                    and family
+                    and family.casefold() not in {"auto-discovered", "unknown", "generic"}
+                    else model
+                ),
+                empty_semantics=empty_semantics,
             )
         return PolicyDecision(
             enabled=False,
             canonical_command=canonical,
             handling="raw_only",
         )
+
+    @staticmethod
+    def _capability_status(
+        *,
+        vendor: str | None,
+        model: str | None,
+        family: str | None,
+        selectors: Any,
+    ) -> str:
+        if not selectors:
+            return "unknown"
+        for selector in selectors:
+            if not isinstance(selector, dict):
+                continue
+            expected_vendor = str(selector.get("vendor") or "").casefold()
+            families = {str(item).casefold() for item in selector.get("families") or ()}
+            models = {str(item).casefold() for item in selector.get("models") or ()}
+            model_patterns = [str(item) for item in selector.get("model_patterns") or ()]
+            if expected_vendor and expected_vendor != str(vendor or "").casefold():
+                continue
+            if families and str(family or "").casefold() not in families:
+                continue
+            if models and str(model or "").casefold() not in models:
+                continue
+            if model_patterns and not any(
+                re.search(pattern, str(model or ""), re.IGNORECASE)
+                for pattern in model_patterns
+            ):
+                continue
+            return "supported"
+        return "unknown"
 
     def is_enabled(
         self,

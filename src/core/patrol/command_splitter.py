@@ -70,6 +70,10 @@ def _looks_like_command(command: str) -> bool:
     return cmd.startswith(("display", "dis ", "show", "terminal", "screen-length"))
 
 
+def _is_session_setup_command(command: str) -> bool:
+    return command.strip().lower().startswith(("terminal", "screen-length"))
+
+
 def _clean_body(lines: list[str]) -> str:
     cleaned: list[str] = []
     for line in lines:
@@ -130,7 +134,11 @@ def _split_command_report(text: str, device_name: str | None) -> list[CommandBlo
         ):
             body_lines.pop()
         body = "\n".join(body_lines).strip()
-        if not body or not _looks_like_command(command):
+        # Report markers prove the command was executed; preserve a zero-line body so
+        # OutputClassifier can distinguish valid empty from unsupported or uncertain.
+        if not _looks_like_command(command) or (
+            not body and _is_session_setup_command(command)
+        ):
             continue
         blocks.append(
             CommandBlock(

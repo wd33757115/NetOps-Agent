@@ -89,6 +89,7 @@ def test_runner_success_payload_preserves_legacy_fields():
     )
 
     assert payload == {
+        "success": True,
         "status": "success",
         "action": "patrol",
         "ticket_id": "T-1",

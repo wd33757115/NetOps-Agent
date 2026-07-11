@@ -134,6 +134,7 @@ const statusLabel = (status?: string) => {
     completed: '已完成',
     connected: '已连接',
     create: '新增',
+    degraded: '降级',
     disabled: '停用',
     eligible: '需结构化',
     error: '异常',
@@ -1253,7 +1254,9 @@ const DevicesPage: React.FC = () => {
     const connectionFailed = devices.filter((item) =>
       ['failed', 'preflight_failed'].includes(String(item.last_connection_status || '')),
     ).length
-    const patrolReady = devices.filter((item) => item.patrol_readiness?.status === 'ready').length
+    const patrolReady = devices.filter((item) =>
+      ['ready', 'degraded'].includes(String(item.patrol_readiness?.status || '')),
+    ).length
     const patrolBlocked = devices.filter((item) =>
       ['blocked', 'error'].includes(String(item.patrol_readiness?.status || '')),
     ).length
@@ -1357,13 +1360,13 @@ const DevicesPage: React.FC = () => {
         const planIssues = value.plan_violations?.length || 0
         const assetIssues = runtimeAssetIssues(value)
         const assetIssueText = runtimeAssetIssueText(value)
-        const blockerCount = parserIssues + connectionIssues + planIssues + assetIssues
+        const blockerCount = connectionIssues + planIssues + assetIssues
         const title = value.error
           || [
             readinessSourceText(value),
             `${value.ready_count}/${value.eligible_count} 个结构化命令已就绪`,
             `计划阻断 ${planIssues}`,
-            `Parser 阻断 ${parserIssues}`,
+            `Parser 缺口 ${parserIssues}`,
             `规则资产阻断 ${assetIssues}`,
             `连接阻断 ${connectionIssues}`,
             assetIssueText,
@@ -1372,7 +1375,7 @@ const DevicesPage: React.FC = () => {
           <Space direction="vertical" size={2}>
             <Tag color={readinessColor(value.status)}>{statusLabel(value.status)}</Tag>
             <Typography.Text type={blockerCount ? 'danger' : 'secondary'} title={title}>
-              {value.command_count} 命令 / {blockerCount} 阻断
+              {value.command_count} 命令 / {blockerCount} 阻断 / {parserIssues} Parser 缺口
             </Typography.Text>
             <Typography.Text type="secondary" title={title}>
               {readinessSourceText(value)}
@@ -1477,11 +1480,11 @@ const DevicesPage: React.FC = () => {
       render: (_: unknown, row: DevicePatrolPreview['rows'][number]) => {
         const coverageCount = recordList(row.coverage_violations).length
         const connectionCount = recordList(row.connection_issues).length
-        const blocked = coverageCount + connectionCount > 0
+        const blocked = connectionCount > 0
         return (
           <Space wrap size={4}>
             <Tag color={blocked ? 'red' : 'green'}>{blocked ? '阻断' : '就绪'}</Tag>
-            {coverageCount > 0 && <Tag color="red">Parser {coverageCount}</Tag>}
+            {coverageCount > 0 && <Tag color="orange">Parser 告警 {coverageCount}</Tag>}
             {connectionCount > 0 && <Tag color="orange">杩炴帴 {connectionCount}</Tag>}
           </Space>
         )
@@ -1925,7 +1928,7 @@ const DevicesPage: React.FC = () => {
           <Descriptions.Item label="阻断设备">{patrolPreview?.error_count || 0}</Descriptions.Item>
           <Descriptions.Item label="启动方式">{patrolPreview?.launch_mode || '-'}</Descriptions.Item>
           <Descriptions.Item label="模块治理阻断">{counts.module}</Descriptions.Item>
-          <Descriptions.Item label="Parser 覆盖阻断">{counts.coverage}</Descriptions.Item>
+          <Descriptions.Item label="Parser 覆盖告警">{counts.coverage}</Descriptions.Item>
           <Descriptions.Item label="采集器预检问题">{counts.connection}</Descriptions.Item>
           <Descriptions.Item label="Workflow">{patrolPreview?.workflow_name || '-'}</Descriptions.Item>
         </Descriptions>

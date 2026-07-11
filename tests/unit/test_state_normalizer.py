@@ -67,6 +67,9 @@ def _install_analysis_runtime(monkeypatch):
         ("parse_failed", "blocked", "blocked_by_parser", "blocked_by_parser"),
         ("identity_unknown", "blocked", "blocked_by_identity", "blocked_by_identity"),
         ("ignored", "skipped", "ignored", "ignored_by_policy"),
+        ("not_applicable", "skipped", "not_applicable", "not_applicable"),
+        ("empty_unverified", "blocked", "blocked_by_output", "empty_unverified"),
+        ("command_error", "blocked", "blocked_by_output", "command_error"),
         ("parse_empty", "empty", "empty", "legitimate_empty"),
     ],
 )
@@ -101,6 +104,33 @@ def test_normalizer_classifies_zero_observation_snapshots(
     assert result["fact_status"] == fact_status
     assert result["no_observation_reason"] == reason
     assert observations == []
+
+
+def test_raw_hash_diff_normalizes_only_the_digest():
+    observations = observations_from_snapshot(
+        {
+            "id": "snapshot-raw-hash",
+            "run_id": "run-1",
+            "device_id": "SW1",
+            "inventory_device_id": None,
+            "vendor": "H3C",
+            "model": "S6860",
+            "canonical_command": "display current-configuration",
+            "observed_at": "2026-07-12T00:00:00+00:00",
+            "structured_json": [{"raw_text_hash": "a" * 64}],
+            "parser_template_id": None,
+            "parser_version": None,
+            "metadata_json": {"handling": "raw_hash_diff"},
+        },
+        mode="production",
+        source="test",
+        dataset_id=None,
+    )
+
+    assert len(observations) == 1
+    assert observations[0].field_name == "raw_text_hash"
+    assert observations[0].value == "a" * 64
+    assert observations[0].parser_template_id is None
 
 
 def _state_observation(observed_at: str, value: str = "up") -> StateObservation:
