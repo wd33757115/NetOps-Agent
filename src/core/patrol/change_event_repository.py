@@ -132,12 +132,8 @@ class ChangeEventRepository:
                         "previous_observation_id": getattr(change, "previous_observation_id", None),
                         "current_observation_id": getattr(change, "current_observation_id", None),
                         "source": getattr(change, "source", "patrol"),
-                        "analysis_revision": getattr(
-                            change, "analysis_revision", "original"
-                        ),
-                        "rule_bundle_digest": getattr(
-                            change, "rule_bundle_digest", None
-                        ),
+                        "analysis_revision": getattr(change, "analysis_revision", "original"),
+                        "rule_bundle_digest": getattr(change, "rule_bundle_digest", None),
                         "old_number": getattr(change, "old_number", None),
                         "new_number": getattr(change, "new_number", None),
                         "event_status": getattr(change, "event_status", "pending"),
@@ -185,9 +181,7 @@ class ChangeEventRepository:
                         NetworkChangeRecord.id,
                     )
                     .filter(
-                        NetworkChangeRecord.idempotency_key.in_(
-                            ordered[offset : offset + 1000]
-                        )
+                        NetworkChangeRecord.idempotency_key.in_(ordered[offset : offset + 1000])
                     )
                     .all()
                 )
@@ -271,11 +265,7 @@ class ChangeEventRepository:
         created = 0
         with get_db_session() as db:
             required_locks = sorted(
-                {
-                    lock
-                    for event in events
-                    for lock in self._required_event_correlations(event)
-                }
+                {lock for event in events for lock in self._required_event_correlations(event)}
             )
             for event_type, correlation_key in required_locks:
                 self._lock_correlation_identity(db, event_type, correlation_key)
@@ -286,9 +276,7 @@ class ChangeEventRepository:
                         if change is not None:
                             change.event_status = "event_created"
                     continue
-                correlation_key = str(
-                    (event.payload or {}).get("correlation_key") or ""
-                )
+                correlation_key = str((event.payload or {}).get("correlation_key") or "")
                 rule = dict((event.payload or {}).get("rule") or {})
                 key = _digest(
                     (
@@ -324,8 +312,7 @@ class ChangeEventRepository:
                         payload["latest_observed_at"] = event.occurred_at
                         active.payload_json = payload
                         active.correlation_key = str(
-                            (event.payload or {}).get("correlation_key")
-                            or active.correlation_key
+                            (event.payload or {}).get("correlation_key") or active.correlation_key
                         )
                         active.correlation_dimensions_json = dict(
                             (event.payload or {}).get("correlation_dimensions") or {}
@@ -568,6 +555,8 @@ class ChangeEventRepository:
         publication_kind: str,
         publication_metadata: dict[str, Any] | None = None,
     ) -> None:
+        if bool((event.payload or {}).get("historical_backfill")):
+            return
         if (
             db.query(NetworkEventOutboxRecord.id)
             .filter(NetworkEventOutboxRecord.occurrence_id == occurrence_id)
@@ -670,9 +659,7 @@ class ChangeEventRepository:
             target_types = [target_types]
         event_types = {str(event.event_type), *(str(item) for item in target_types)}
         return {
-            (event_type, correlation_key)
-            for event_type in event_types
-            for correlation_key in keys
+            (event_type, correlation_key) for event_type in event_types for correlation_key in keys
         }
 
     @staticmethod
@@ -687,9 +674,7 @@ class ChangeEventRepository:
 
     @classmethod
     def _lock_required_event_correlations(cls, db, event: Any) -> None:
-        for event_type, correlation_key in sorted(
-            cls._required_event_correlations(event)
-        ):
+        for event_type, correlation_key in sorted(cls._required_event_correlations(event)):
             cls._lock_correlation_identity(db, event_type, correlation_key)
 
     def _resolve_recovered_event(self, db, event: Any) -> bool:
@@ -746,9 +731,7 @@ class ChangeEventRepository:
                         publication_metadata={
                             "projection_applied": projection_applied,
                             "superseded": not projection_applied,
-                            "aggregate_status": (
-                                "resolved" if projection_applied else row.status
-                            ),
+                            "aggregate_status": ("resolved" if projection_applied else row.status),
                         },
                     )
                     row.occurrence_count = int(row.occurrence_count or 1) + 1

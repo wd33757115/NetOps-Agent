@@ -1,23 +1,25 @@
 from __future__ import annotations
 
-import hashlib
 import uuid
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from src.core.parser.assets import TemplateAssetStore
 from src.core.parser.identity import DeviceIdentity
-from src.core.parser.policy import ParserPolicy
+from src.core.parser.repository import ParserRepository, contract_digest
 from src.core.parser.runtime import ParserRuntime
-from src.core.parser.repository import ParserRepository
-from src.core.parser.repository import contract_digest
 from src.core.patrol.modes import normalize_patrol_mode
 from src.core.patrol.repository import PatrolRepository
 from src.core.state.repository import StateRepository
-from src.infrastructure.db.models import CommandSnapshot, PatrolDataset, PatrolRun
-from src.infrastructure.db.models import RawEvidenceRecord
+from src.infrastructure.db.models import (
+    CommandSnapshot,
+    PatrolDataset,
+    PatrolRun,
+    RawEvidenceRecord,
+)
 from src.infrastructure.db.postgres import get_db_session
-import pytest
 
 
 class FakeRegistry:
@@ -200,18 +202,18 @@ def test_patrol_modes_are_normalized_without_storage_paths():
     assert normalize_patrol_mode("test") == "parser_validation"
 
 
-def test_candidate_rejects_production_snapshot():
+def test_candidate_rejects_unsupported_snapshot_mode():
     snapshot = SimpleNamespace(device_id="SW1", raw_text="version output")
     context = {
         "snapshot": snapshot,
-        "mode": "production",
+        "mode": "historical_backfill",
         "dataset_id": "production-dataset",
     }
     with patch(
         "src.core.parser.repository.PatrolRepository.get_snapshot_context",
         return_value=context,
     ):
-        with pytest.raises(ValueError, match="parser_validation"):
+        with pytest.raises(ValueError, match="parser_validation or production"):
             ParserRepository().create_candidate(
                 job_type="CREATE_TEMPLATE",
                 vendor="H3C",

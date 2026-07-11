@@ -53,6 +53,8 @@ def test_normalize_run_commits_valid_collections_and_quarantines_invalid(monkeyp
                     "device_id": "SW1",
                     "canonical_command": snapshot_id,
                     "observed_at": "2026-07-11T01:00:00+00:00",
+                    "parse_status": "parsed",
+                    "structured_json": [{"interface": "GigabitEthernet1/0/1"}],
                 },
             }
 

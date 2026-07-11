@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import uuid
 
+from src.common.config import get_settings
 from src.core.celery_tasks.celery_app import celery
 from src.core.events.bus import EventBus
 from src.core.events.domain_event import DomainEvent
@@ -19,6 +20,7 @@ def dispatch_ready_parser_jobs(
     limit: int | None = None,
     repository: ParserRepository | None = None,
     celery_app=None,
+    allow_production: bool = False,
 ) -> dict:
     repository = repository or ParserRepository()
     celery_app = celery_app or celery
@@ -26,6 +28,10 @@ def dispatch_ready_parser_jobs(
     dispatched: list[str] = []
     failed: list[dict[str, str]] = []
     for job in repository.list_dispatchable_jobs(limit=batch_limit, job_id=job_id):
+        if job.get("source_mode") == "production" and not (
+            get_settings().PARSER_LLM_GENERATION_ENABLED or allow_production
+        ):
+            continue
         task_id = str(uuid.uuid4())
         repository.mark_job_dispatched(job["id"], task_id)
         try:
@@ -67,6 +73,17 @@ def reconcile_parser_jobs():
     return {"failed": ParserRepository().fail_stale_jobs()}
 
 
+@celery.task(name="sanitize_parser_samples")
+def sanitize_parser_samples(job_id: str | None = None, limit: int = 100):
+    samples = ParserRepository().sanitize_pending_samples(job_id=job_id, limit=limit)
+    return {
+        "processed_count": len(samples),
+        "succeeded_count": sum(bool(item.get("success")) for item in samples),
+        "failed_count": sum(not bool(item.get("success")) for item in samples),
+        "samples": samples,
+    }
+
+
 @celery.task(name="publish_parser_outbox")
 def publish_parser_outbox():
     repository = ParserRepository()
@@ -86,30 +103,40 @@ def publish_parser_outbox():
                 ),
             )
         except Exception as exc:
-            repository.release_outbox_claim(
-                row.id, claim_token=claim_token, error=str(exc)
-            )
+            repository.release_outbox_claim(row.id, claim_token=claim_token, error=str(exc))
             continue
         if message_id:
-            if row.event_type == "parser.template.activated":
+            if (
+                row.event_type == "parser.template.activated"
+                and get_settings().RULE_ASSET_AUTO_SEED_ENABLED
+            ):
                 try:
                     template_id = str((row.payload_json or {}).get("template_id") or "")
                     if template_id:
-                        rule_asset_seeds.append(
-                            RuleAssetTemplateActivationService(
-                                parser_repository=repository,
-                            ).seed_from_template(template_id)
-                        )
+                        seed_result = RuleAssetTemplateActivationService(
+                            parser_repository=repository,
+                        ).seed_from_template(template_id)
+                        rule_asset_seeds.append(seed_result)
+                        if not seed_result.get("success"):
+                            raise RuntimeError(
+                                str(seed_result.get("reason") or "rule asset seed failed")
+                            )
                 except Exception as exc:
-                    rule_asset_seeds.append(
-                        {
-                            "success": False,
-                            "created": False,
-                            "event_id": row.id,
-                            "reason": "rule_asset_seed_failed",
-                            "error": str(exc),
-                        }
+                    failure = {
+                        "success": False,
+                        "created": False,
+                        "event_id": row.id,
+                        "reason": "rule_asset_seed_failed",
+                        "error": str(exc),
+                    }
+                    if not rule_asset_seeds or rule_asset_seeds[-1].get("success"):
+                        rule_asset_seeds.append(failure)
+                    repository.release_outbox_claim(
+                        row.id,
+                        claim_token=claim_token,
+                        error=str(exc),
                     )
+                    continue
             repository.mark_outbox_published(row.id, claim_token=claim_token)
             published.append(row.id)
         else:

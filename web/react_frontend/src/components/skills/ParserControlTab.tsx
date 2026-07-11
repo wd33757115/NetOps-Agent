@@ -5,7 +5,7 @@ import {
 } from 'antd'
 import {
   CheckOutlined, CloseOutlined, DeleteOutlined, DownloadOutlined, EyeOutlined,
-  PlayCircleOutlined, ReloadOutlined, StopOutlined,
+  HistoryOutlined, PlayCircleOutlined, ReloadOutlined, StopOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from 'react-query'
 import {
@@ -18,13 +18,13 @@ import {
   type ParserChangePolicy, type ParserObservationContract, type ParserRuleGenerationJob,
   type ParserRuleGenerationJobPreview, type ParserReplayReport,
   type ParserApprovalAudit, type ParserAgentLoopAttempt, type ParserRuntimeRuleAssetBundle,
-  type ParserRuleGenerationContextPreview,
+  type ParserRuleGenerationContextPreview, type ParserBackfillJob,
 } from '../../services/api'
 import { useIsMobile } from '../../hooks/useBreakpoint'
 
 const statusColor = (status: string) => {
   if (status === 'active' || status === 'succeeded') return 'green'
-  if (status === 'failed' || status === 'rejected') return 'red'
+  if (status === 'failed' || status === 'validation_failed' || status === 'rejected') return 'red'
   if (status === 'deprecated' || status === 'cancelled' || status === 'superseded') return 'default'
   return 'blue'
 }
@@ -203,6 +203,9 @@ const governanceStatusLabel = (status?: string) => {
     pending_approval: '待审批',
     rejected: '已拒绝',
     validating: '验证中',
+    validation_failed: '验证失败',
+    committing: '提交中',
+    completed: '已完成',
   }
   return status ? labels[status] || status : '-'
 }
@@ -238,6 +241,7 @@ const ParserControlTab: React.FC = () => {
   const [comparisonOpen, setComparisonOpen] = useState(false)
   const [comparisonTemplate, setComparisonTemplate] = useState<ParserTemplateItem | null>(null)
   const [comparison, setComparison] = useState<ParserTemplateComparison | null>(null)
+  const [backfillTemplateId, setBackfillTemplateId] = useState<string>()
   const [comparisonLoading, setComparisonLoading] = useState(false)
   const [ruleName, setRuleName] = useState('')
   const [ruleEventType, setRuleEventType] = useState('')
@@ -268,6 +272,9 @@ const ParserControlTab: React.FC = () => {
   )
   const { data: jobs = [], isLoading: jobsLoading } = useQuery(
     'parser-jobs', parserApi.jobs, polling,
+  )
+  const { data: backfills = [], isLoading: backfillsLoading } = useQuery(
+    'parser-backfills', parserApi.backfills, polling,
   )
   const { data: ruleGenerationJobs = [], isLoading: ruleGenerationJobsLoading } = useQuery(
     'parser-rule-generation-jobs', parserApi.ruleGenerationJobs, polling,
@@ -408,7 +415,7 @@ const ParserControlTab: React.FC = () => {
       'parser-command-profile-bindings', 'parser-rule-generation-jobs',
       'parser-observation-contracts', 'parser-change-policies',
       'parser-replay-reports', 'parser-approval-audit',
-      'parser-agent-loop-attempts', 'parser-runtime-assets'].forEach((key) =>
+      'parser-agent-loop-attempts', 'parser-runtime-assets', 'parser-backfills'].forEach((key) =>
       queryClient.invalidateQueries(key))
     queryClient.invalidateQueries('parser-dispatch-control')
     if (jobId) queryClient.invalidateQueries(['parser-job', jobId])
@@ -421,11 +428,29 @@ const ParserControlTab: React.FC = () => {
       if (type === 'deprecate') return parserApi.deprecate(id)
       if (type === 'retry') return parserApi.retryJob(id)
       if (type === 'dispatch') return parserApi.dispatchJob(id)
+      if (type === 'sanitize') return parserApi.sanitizeJob(id)
       return parserApi.cancelJob(id)
     },
     {
       onSuccess: () => { message.success('操作已提交'); refresh() },
       onError: (error: any) => message.error(error?.response?.data?.detail || '操作失败'),
+    },
+  )
+
+  const backfillAction = useMutation(
+    ({ type, id }: { type: 'create' | 'dry-run' | 'commit'; id: string }) => {
+      if (type === 'create') {
+        return parserApi.createBackfill({ template_id: id, requested_by: 'admin-ui' })
+      }
+      if (type === 'dry-run') return parserApi.dryRunBackfill(id)
+      return parserApi.commitBackfill(id, {
+        actor: 'admin-ui',
+        reason: 'Approved in Parser Control UI after dry-run review',
+      })
+    },
+    {
+      onSuccess: () => { message.success('Backfill 操作已提交'); refresh() },
+      onError: (error: any) => message.error(error?.response?.data?.detail || 'Backfill 操作失败'),
     },
   )
 
@@ -877,6 +902,38 @@ const ParserControlTab: React.FC = () => {
           <Button icon={<StopOutlined />} size="small" title="取消" onClick={() => action.mutate({ type: 'cancel', id: row.id })} />}
         {!['collecting', 'pending', 'running', 'validating'].includes(row.status) &&
           <Button danger icon={<DeleteOutlined />} size="small" title="删除" onClick={() => deleteJob.mutate(row.id)} />}
+      </Space>
+    )},
+  ]
+
+  jobColumns.splice(1, 0, {
+    title: '来源', dataIndex: 'source_mode', width: 130,
+    render: (value: string) => <Tag>{value || 'parser_validation'}</Tag>,
+  })
+
+  const backfillColumns = [
+    { title: '模板', dataIndex: 'template_id' },
+    { title: '申请人', dataIndex: 'requested_by', width: 120 },
+    { title: '状态', dataIndex: 'status', width: 140,
+      render: (value: string) => <Tag color={statusColor(value)}>{statusLabel(value)}</Tag> },
+    { title: '快照', width: 80,
+      render: (_: unknown, row: ParserBackfillJob) => row.summary_json?.snapshot_count || 0 },
+    { title: 'Observation', width: 110,
+      render: (_: unknown, row: ParserBackfillJob) => row.summary_json?.observation_count || 0 },
+    { title: 'Change', width: 80,
+      render: (_: unknown, row: ParserBackfillJob) => row.summary_json?.change_count || 0 },
+    { title: 'Event', width: 80,
+      render: (_: unknown, row: ParserBackfillJob) => row.summary_json?.event_count || 0 },
+    { title: '操作', width: 130, render: (_: unknown, row: ParserBackfillJob) => (
+      <Space>
+        {['draft', 'validation_failed'].includes(row.status) &&
+          <Button icon={<PlayCircleOutlined />} size="small" title="执行 Dry Run"
+            onClick={() => backfillAction.mutate({ type: 'dry-run', id: row.id })} />}
+        {row.status === 'pending_approval' &&
+          <Popconfirm title="确认提交历史事实？"
+            onConfirm={() => backfillAction.mutate({ type: 'commit', id: row.id })}>
+            <Button icon={<CheckOutlined />} size="small" title="审批并提交" />
+          </Popconfirm>}
       </Space>
     )},
   ]
@@ -1354,6 +1411,22 @@ const ParserControlTab: React.FC = () => {
       <Col span={4}><Statistic title="待修复候选" value={coverage?.repair_candidates || 0} /></Col>
       <Col span={4}><Button icon={<ReloadOutlined />} title="刷新" onClick={refresh} /></Col>
     </Row>
+    <Row gutter={16} style={{ marginBottom: 16 }}>
+      <Col span={4}><Statistic title="生产待办" value={coverage?.production_open_jobs || 0} /></Col>
+      <Col span={4}><Statistic title="待脱敏样本" value={coverage?.pending_sanitization_samples || 0} /></Col>
+      <Col span={4}><Statistic title="已脱敏样本" value={coverage?.sanitized_samples || 0} /></Col>
+      <Col span={4}><Statistic title="待审批回填" value={coverage?.backfills_pending_approval || 0} /></Col>
+      <Col span={4}><Statistic title="失败回填" value={coverage?.backfills_failed || 0} /></Col>
+    </Row>
+    {(coverage?.alerts || []).map((item) => (
+      <Alert
+        key={item.code}
+        type={item.severity}
+        showIcon
+        message={`${item.message} (${item.count})`}
+        style={{ marginBottom: 8 }}
+      />
+    ))}
     <Tabs items={[
       { key: 'templates', label: '模板资产', children:
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -1399,6 +1472,24 @@ const ParserControlTab: React.FC = () => {
             </Col>
           </Row>
           <Table rowKey="id" loading={jobsLoading} dataSource={filteredJobs} columns={jobColumns} pagination={{ pageSize: 20 }} size="small" scroll={{ x: 930 }} rowSelection={{ selectedRowKeys: selectedJobIds, onChange: setSelectedJobIds, getCheckboxProps: (row: ParserJobItem) => ({ disabled: ['collecting', 'pending', 'running', 'validating'].includes(row.status) }) }} />
+        </Space> },
+      { key: 'backfills', label: '历史回填', children:
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Space wrap>
+            <Select placeholder="选择 Active 模板" style={{ width: 420 }}
+              value={backfillTemplateId} onChange={setBackfillTemplateId}
+              options={templates.filter((item) => item.status === 'active').map((item) => ({
+                value: item.id,
+                label: `${item.vendor} ${item.profile} / ${item.canonical_command}`,
+              }))} />
+            <Button icon={<HistoryOutlined />} disabled={!backfillTemplateId}
+              loading={backfillAction.isLoading}
+              onClick={() => backfillTemplateId && backfillAction.mutate({ type: 'create', id: backfillTemplateId })}>
+              创建回填
+            </Button>
+          </Space>
+          <Table rowKey="id" loading={backfillsLoading} dataSource={backfills}
+            columns={backfillColumns} pagination={{ pageSize: 20 }} size="small" scroll={{ x: 980 }} />
         </Space> },
       { key: 'runtime-assets', label: '运行时资产健康', children:
         <Space direction="vertical" size={12} style={{ width: '100%' }}>

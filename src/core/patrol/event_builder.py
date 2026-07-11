@@ -106,6 +106,15 @@ def build_events_from_changes(
                     correlation_keys=rule.correlation_keys,
                 )
             )
+            analysis_revision = str(change.get("analysis_revision") or "original")
+            historical_backfill = analysis_revision.startswith("historical_backfill:")
+            if historical_backfill:
+                correlation_key = f"{correlation_key}|{analysis_revision}"
+                correlation_dimensions = {
+                    **correlation_dimensions,
+                    "historical_revision": analysis_revision,
+                }
+                legacy_correlation_key = ""
             events.append(
                 NetworkEvent(
                     event_id=str(
@@ -133,7 +142,7 @@ def build_events_from_changes(
                     occurred_at=(
                         change.get("observed_at") or change.get("detected_at") or occurred_at
                     ),
-                    status="open",
+                    status="historical" if historical_backfill else "open",
                     payload={
                         "change": change,
                         "rule": {
@@ -149,6 +158,8 @@ def build_events_from_changes(
                         "correlation_dimensions": correlation_dimensions,
                         "legacy_correlation_key": legacy_correlation_key,
                         "dedupe_key": f"{rule.event_type}|{correlation_key}",
+                        "historical_backfill": historical_backfill,
+                        "analysis_revision": analysis_revision,
                     },
                 )
             )
@@ -295,8 +306,8 @@ def build_events_from_params(params: dict[str, Any]) -> dict[str, Any]:
     from src.core.patrol.repository import (
         AnalysisAttemptFencedError,
         AnalysisAttemptInProgressError,
-        PatrolRepository,
         AnalysisLeaseHeartbeat,
+        PatrolRepository,
     )
 
     run_id = params.get("run_id")
@@ -313,13 +324,10 @@ def build_events_from_params(params: dict[str, Any]) -> dict[str, Any]:
         supplied_changes = [
             change
             for change in supplied_changes
-            if str(change.get("analysis_revision") or "original")
-            == requested_revision
+            if str(change.get("analysis_revision") or "original") == requested_revision
         ]
     if not params.get("persist", True):
-        return _build_events_from_params_impl(
-            {**params, "changes": supplied_changes}, rules=None
-        )
+        return _build_events_from_params_impl({**params, "changes": supplied_changes}, rules=None)
     frozen_rules = EventRuleRepository().snapshot_active_rules()
     frozen_rules = json.loads(json.dumps(frozen_rules, default=str))
     input_revision_digest = hashlib.sha256(
@@ -342,9 +350,7 @@ def build_events_from_params(params: dict[str, Any]) -> dict[str, Any]:
         "persist": bool(params.get("persist", True)),
         "publish": bool(params.get("publish", False)),
         "change_ids": sorted(
-            str(change.get("change_id"))
-            for change in supplied_changes
-            if change.get("change_id")
+            str(change.get("change_id")) for change in supplied_changes if change.get("change_id")
         ),
         "input_revision_digest": input_revision_digest,
         "analysis_revision": str(params.get("analysis_revision") or "original"),
@@ -359,14 +365,10 @@ def build_events_from_params(params: dict[str, Any]) -> dict[str, Any]:
     if attempt["reused"]:
         occurrences = ChangeEventRepository().list_event_occurrences(run_id=str(run_id))
         change_ids = {
-            str(change.get("change_id"))
-            for change in supplied_changes
-            if change.get("change_id")
+            str(change.get("change_id")) for change in supplied_changes if change.get("change_id")
         }
         occurrences = [
-            item
-            for item in occurrences
-            if str(item.get("source_change_id") or "") in change_ids
+            item for item in occurrences if str(item.get("source_change_id") or "") in change_ids
         ]
         return {
             **dict(attempt["result"] or {}),
@@ -388,9 +390,7 @@ def build_events_from_params(params: dict[str, Any]) -> dict[str, Any]:
             pass
     heartbeat.start()
     try:
-        rules = event_rules_from_snapshot(
-            list(attempt["rule_bundle"].get("event_rules") or [])
-        )
+        rules = event_rules_from_snapshot(list(attempt["rule_bundle"].get("event_rules") or []))
         heartbeat(force=True)
         result = _build_events_from_params_impl(
             {
@@ -454,9 +454,7 @@ def _build_events_from_params_impl(
             run_id=params.get("run_id"),
             device_id=params.get("device_id"),
         )
-    events = build_events_from_changes(
-        list(changes or []), rules=rules, heartbeat=heartbeat
-    )
+    events = build_events_from_changes(list(changes or []), rules=rules, heartbeat=heartbeat)
     persist = params.get("persist", True)
     persisted_event_count = save_events(events) if persist else 0
     event_change_ids = {event.source_change_id for event in events if event.source_change_id}

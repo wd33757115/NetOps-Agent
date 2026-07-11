@@ -71,25 +71,37 @@ def _job_candidate(params: dict[str, Any]) -> Candidate | None:
     job_id = str(params.get("job_id") or "").strip()
     if not job_id:
         return None
-    job = ParserRepository().get_job(job_id)
+    job = ParserRepository().get_job(job_id, include_sanitized_payload=True)
     if not job:
         raise ValueError(f"parser template job does not exist: {job_id}")
     samples: list[TemplateSample] = []
     patrol_repository = PatrolRepository()
+    source_mode = str(job.get("source_mode") or "parser_validation")
     for item in job.get("samples") or []:
         if item.get("snapshot_source") != "postgresql":
-            raise ValueError(
-                "parser job contains a legacy SQLite sample; re-import the dataset"
+            raise ValueError("parser job contains a legacy SQLite sample; re-import the dataset")
+        if source_mode == "production":
+            if item.get("sanitization_status") != "sanitized":
+                raise ValueError("production parser sample is not sanitized")
+            sample_output = str(item.get("sanitized_text") or "")
+            if not sample_output:
+                raise ValueError("production parser sample has no sanitized payload")
+            samples.append(
+                TemplateSample(
+                    file_path=f"sanitized-snapshot:{item['snapshot_id']}",
+                    device_id=str(item["device_id"]),
+                    command=str(job["canonical_command"]),
+                    output=sample_output,
+                )
             )
+            continue
         context = patrol_repository.get_snapshot_context(item["snapshot_id"])
         if not context:
             raise ValueError(
                 f"parser job sample is unavailable in PostgreSQL: {item['snapshot_id']}"
             )
         if context["mode"] != "parser_validation":
-            raise ValueError(
-                "parser job contains a sample outside parser_validation mode"
-            )
+            raise ValueError("parser job sample mode does not match its job")
         snapshot = context["snapshot"]
         if snapshot:
             samples.append(
@@ -183,8 +195,7 @@ def _directory_candidates(items: tuple[DirectoryCandidate, ...]) -> list[Candida
 def _prompt_samples(samples: tuple[TemplateSample, ...], limit: int) -> str:
     selected = samples[: max(1, limit)]
     parts = [
-        f"===== sample {index + 1}: {sample.device_id} / {sample.file_path} =====\n"
-        f"{sample.output}"
+        f"===== sample {index + 1}: {sample.device_id} / {sample.file_path} =====\n{sample.output}"
         for index, sample in enumerate(selected)
     ]
     return "\n\n".join(parts)
@@ -254,13 +265,10 @@ def _is_non_template_sample(raw_text: str) -> bool:
 
 def _regression_samples(candidate: Candidate) -> tuple[TemplateSample, ...]:
     existing_hashes = {
-        hashlib.sha256(sample.output.encode("utf-8")).hexdigest()
-        for sample in candidate.samples
+        hashlib.sha256(sample.output.encode("utf-8")).hexdigest() for sample in candidate.samples
     }
     output: list[TemplateSample] = []
-    for snapshot in PatrolRepository().list_dataset_snapshots(
-        mode="parser_validation"
-    ):
+    for snapshot in PatrolRepository().list_dataset_snapshots(mode="parser_validation"):
         if (
             (snapshot.vendor or "").lower() != candidate.vendor.lower()
             or (snapshot.model or "").lower() != candidate.model.lower()
@@ -405,16 +413,13 @@ def _process_candidate(
             break
         failed = [result for result in validations if not result.is_valid]
         previous_errors = [error for result in failed for error in result.errors][:30]
-        missing_fields = sorted(
-            {field for result in failed for field in result.missing_fields}
-        )
+        missing_fields = sorted({field for result in failed for field in result.missing_fields})
         value_errors = [error for result in failed for error in result.value_errors][:30]
 
     passed_samples = sum(result.is_valid for result in validations)
     pass_rate = passed_samples / len(validations) if validations else 0.0
     accepted = bool(validations) and pass_rate >= minimum_pass_rate
     generated = False
-    template_id = None
     if accepted and publish and not dry_run:
         version = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
         target, digest = TemplateAssetStore(templates_dir).write_immutable(
@@ -446,14 +451,9 @@ def _process_candidate(
             "contract_approval_status": "pending",
             "regression_validation": {
                 "passed": pass_rate >= minimum_pass_rate,
-                "sample_count": len(regression_samples),
-                "passed_samples": sum(
-                    result.is_valid
-                    for result, detail in zip(
-                        validations, sample_results, strict=True
-                    )
-                    if str(detail["file_path"]).startswith("regression:")
-                ),
+                "sample_count": len(validation_candidate.samples),
+                "passed_samples": passed_samples,
+                "historical_sample_count": len(regression_samples),
                 "minimum_pass_rate": minimum_pass_rate,
             },
             "identity_evidence": {
@@ -463,7 +463,7 @@ def _process_candidate(
             },
         }
         repository = ParserRepository()
-        template_id = repository.register_template(
+        repository.register_template(
             vendor=candidate.vendor,
             model=candidate.model,
             family=candidate.family,
@@ -477,27 +477,10 @@ def _process_candidate(
             source_job_id=source_job_id,
             status="pending_approval",
         )
-        source_job = repository.get_job(source_job_id) if source_job_id else None
-        if (
-            source_job
-            and source_job.get("job_type") == "CREATE_TEMPLATE"
-            and candidate.family
-            and len(validation_candidate.samples) >= 2
-            and pass_rate >= 1.0
-            and repository.has_trusted_family(
-                vendor=candidate.vendor,
-                family=candidate.family,
-            )
-        ):
-            repository.activate_template(template_id)
         generated = True
 
-    all_records = [
-        record for result in validations if result.is_valid for record in result.records
-    ]
-    errors = [
-        error for result in validations if not result.is_valid for error in result.errors
-    ]
+    all_records = [record for result in validations if result.is_valid for record in result.records]
+    errors = [error for result in validations if not result.is_valid for error in result.errors]
     report = GenerationReport(
         vendor=candidate.vendor,
         model=candidate.model,
@@ -509,12 +492,8 @@ def _process_candidate(
         template_generated=generated,
         compile_success=all(result.compile_success for result in validations),
         record_count=sum(result.record_count for result in validations),
-        field_coverage=min(
-            (result.field_coverage for result in validations), default=0
-        ),
-        validation_score=min(
-            (result.validation_score for result in validations), default=0
-        ),
+        field_coverage=min((result.field_coverage for result in validations), default=0),
+        validation_score=min((result.validation_score for result in validations), default=0),
         retry_count=retry_count,
         template_path=str(target) if accepted else None,
         skipped_reason=(
@@ -544,9 +523,7 @@ def _process_candidate(
 def generate_templates(params: dict[str, Any]) -> dict[str, Any]:
     templates_dir = Path(params.get("templates_dir") or SHARED_TEXTFSM_ROOT)
     reports_dir = Path(params.get("reports_dir") or DEFAULT_REPORTS)
-    mappings = load_command_mapping(
-        Path(params.get("mapping_config") or DEFAULT_MAPPING)
-    )
+    mappings = load_command_mapping(Path(params.get("mapping_config") or DEFAULT_MAPPING))
     reports: list[GenerationReport] = []
     discovery_metadata: dict[str, Any] = {}
 
@@ -604,9 +581,7 @@ def generate_templates(params: dict[str, Any]) -> dict[str, Any]:
                 max_retries=int(params.get("max_retries", 3)),
                 dry_run=bool(params.get("dry_run", False)),
                 publish=publish,
-                force_overwrite=bool(
-                    params.get("force_generate", mode == "direct")
-                ),
+                force_overwrite=bool(params.get("force_generate", mode == "direct")),
                 minimum_pass_rate=float(params.get("minimum_sample_pass_rate", 1.0)),
                 max_samples_per_prompt=int(params.get("max_samples_per_prompt", 3)),
                 mode=mode,
@@ -626,19 +601,14 @@ def generate_templates(params: dict[str, Any]) -> dict[str, Any]:
         "success": (
             not discovery_metadata.get("unresolved_files")
             and all(
-                report.validation_pass_rate
-                >= float(params.get("minimum_sample_pass_rate", 1.0))
+                report.validation_pass_rate >= float(params.get("minimum_sample_pass_rate", 1.0))
                 for report in reports
             )
         ),
         "message": (
             f"{mode} mode processed {len(reports)} candidate groups; "
             f"published {len(generated)} templates"
-            + (
-                f"; commands: {', '.join(report.command for report in reports)}"
-                if reports
-                else ""
-            )
+            + (f"; commands: {', '.join(report.command for report in reports)}" if reports else "")
         ),
         "mode": mode,
         "total_candidates": len(candidates),

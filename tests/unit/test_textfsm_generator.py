@@ -28,7 +28,6 @@ from db_reader import (  # noqa: E402
 )
 from device_detector import detect_device_identity  # noqa: E402
 from directory_reader import discover_directory_candidates  # noqa: E402
-from llm_generator import build_generation_prompt  # noqa: E402
 from generate_templates import (  # noqa: E402
     Candidate,
     _deterministic_template,
@@ -36,6 +35,7 @@ from generate_templates import (  # noqa: E402
     cmd_to_template_filename,
     resolve_template_path,
 )
+from llm_generator import build_generation_prompt  # noqa: E402
 from template_synthesizer import expected_min_records, synthesize_template  # noqa: E402
 from template_validator import (  # noqa: E402
     check_required_fields,
@@ -44,14 +44,14 @@ from template_validator import (  # noqa: E402
     validate_template,
 )
 
-from src.core.patrol.command_splitter import split_cli_capture  # noqa: E402
-from src.core.patrol.raw_importer import _read_text_best_effort  # noqa: E402
 from src.core.parser.assets import TemplateAssetStore, safe_slug  # noqa: E402
 from src.core.parser.contract_inference import infer_contract  # noqa: E402
 from src.core.parser.policy import (  # noqa: E402
     SHARED_PARSER_CONFIG_ROOT,
     ParserPolicy,
 )
+from src.core.patrol.command_splitter import split_cli_capture  # noqa: E402
+from src.core.patrol.raw_importer import _read_text_best_effort  # noqa: E402
 
 try:
     import textfsm  # noqa: F401
@@ -1507,32 +1507,51 @@ class TestParserJobSamples(unittest.TestCase):
         self.assertIsNotNone(candidate)
         self.assertEqual(len(candidate.samples), 2)
 
-    def test_job_candidate_rejects_production_mode_sample(self):
+    def test_job_candidate_uses_only_sanitized_production_sample(self):
         job = {
+            "source_mode": "production",
             "vendor": "H3C",
             "model": "S6860-54HF",
             "profile": "S6860-54HF",
             "family": "Comware7",
             "canonical_command": "display fan",
             "samples": [
-                {"snapshot_id": "sample-production", "snapshot_source": "postgresql"}
+                {
+                    "snapshot_id": "sample-production",
+                    "snapshot_source": "postgresql",
+                    "device_id": "device-1",
+                    "sanitization_status": "sanitized",
+                    "sanitized_text": "Slot 1 Fan 1 Normal",
+                }
             ],
-        }
-        context = {
-            "mode": "production",
-            "snapshot": SimpleNamespace(
-                snapshot_id="sample-production",
-                device_id="device-1",
-                command_canonical="display fan",
-                raw_text="Slot 1 Fan 1 Normal",
-            ),
         }
         with patch("generate_templates.ParserRepository") as repository:
             repository.return_value.get_job.return_value = job
             with patch("generate_templates.PatrolRepository") as patrol_repository:
-                patrol_repository.return_value.get_snapshot_context.return_value = context
-                with self.assertRaisesRegex(ValueError, "outside parser_validation mode"):
-                    _job_candidate({"job_id": "job-1"})
+                candidate = _job_candidate({"job_id": "job-1"})
+        self.assertEqual(candidate.samples[0].output, "Slot 1 Fan 1 Normal")
+        patrol_repository.return_value.get_snapshot_context.assert_not_called()
+
+    def test_job_candidate_rejects_unsanitized_production_sample(self):
+        job = {
+            "source_mode": "production",
+            "vendor": "H3C",
+            "model": "S6860-54HF",
+            "profile": "S6860-54HF",
+            "canonical_command": "display fan",
+            "samples": [
+                {
+                    "snapshot_id": "sample-production",
+                    "snapshot_source": "postgresql",
+                    "device_id": "device-1",
+                    "sanitization_status": "pending_sanitization",
+                }
+            ],
+        }
+        with patch("generate_templates.ParserRepository") as repository:
+            repository.return_value.get_job.return_value = job
+            with self.assertRaisesRegex(ValueError, "not sanitized"):
+                _job_candidate({"job_id": "job-1"})
 
 
 if __name__ == "__main__":

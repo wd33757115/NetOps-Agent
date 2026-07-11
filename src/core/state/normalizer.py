@@ -211,12 +211,8 @@ def observations_from_snapshot(
             )
             observation_id = str(uuid.uuid5(uuid.NAMESPACE_URL, observation_key))
             execution_item_id = str(snapshot.get("execution_item_id") or "")
-            command_ordinal = int(
-                (snapshot.get("metadata_json") or {}).get("command_ordinal") or 0
-            )
-            fact_order_key = (
-                f"{command_ordinal:020d}|{execution_item_id}|{observation_id}"
-            )
+            command_ordinal = int((snapshot.get("metadata_json") or {}).get("command_ordinal") or 0)
+            fact_order_key = f"{command_ordinal:020d}|{execution_item_id}|{observation_id}"
             observations.append(
                 StateObservation(
                     observation_id=observation_id,
@@ -273,6 +269,12 @@ def observations_from_snapshot(
                         "command_ordinal": (
                             (snapshot.get("metadata_json") or {}).get("command_ordinal")
                         ),
+                        "historical_backfill": bool(
+                            (snapshot.get("metadata_json") or {}).get("historical_backfill")
+                        ),
+                        "backfill_job_id": (
+                            (snapshot.get("metadata_json") or {}).get("backfill_job_id")
+                        ),
                         "identity_status": (
                             "inventory_bound"
                             if snapshot.get("inventory_device_id")
@@ -303,6 +305,76 @@ def _build_snapshot_normalization(
     )
     if mode == "parser_validation" and should_update_current:
         raise ValueError("parser_validation snapshots cannot update CurrentState")
+    snapshot = context["snapshot"]
+    parse_status = str(
+        snapshot.get("parse_status")
+        or ("parsed" if snapshot.get("structured_json") is not None else "parse_failed")
+    )
+    gated = {
+        "template_missing": ("blocked", "blocked_by_parser", "blocked_by_parser"),
+        "parse_failed": ("blocked", "blocked_by_parser", "blocked_by_parser"),
+        "identity_unknown": ("blocked", "blocked_by_identity", "blocked_by_identity"),
+        "ignored": ("skipped", "ignored_by_policy", "ignored"),
+    }.get(parse_status)
+    if gated is not None:
+        normalization_status, reason, fact_status = gated
+        return (
+            {
+                "success": True,
+                "snapshot_id": snapshot_id,
+                "mode": mode,
+                "parse_status": parse_status,
+                "normalization_status": normalization_status,
+                "fact_status": fact_status,
+                "failure_code": reason,
+                "no_observation_reason": reason,
+                "observation_count": 0,
+                "created_count": 0,
+                "current_state_updates": 0,
+                "updated_current_state": False,
+                "observations": [],
+            },
+            [],
+            False,
+        )
+    if parse_status == "parse_empty":
+        return (
+            {
+                "success": True,
+                "snapshot_id": snapshot_id,
+                "mode": mode,
+                "parse_status": parse_status,
+                "normalization_status": "empty",
+                "fact_status": "empty",
+                "no_observation_reason": "legitimate_empty",
+                "observation_count": 0,
+                "created_count": 0,
+                "current_state_updates": 0,
+                "updated_current_state": should_update_current,
+                "observations": [],
+            },
+            [],
+            should_update_current,
+        )
+    if snapshot.get("structured_json") is None:
+        return (
+            {
+                "success": False,
+                "snapshot_id": snapshot_id,
+                "mode": mode,
+                "parse_status": parse_status,
+                "normalization_status": "failed",
+                "fact_status": "normalization_failed",
+                "failure_code": "structured_payload_missing",
+                "error": "parsed snapshot has no structured payload",
+                "no_observation_reason": "normalization_failed",
+                "observation_count": 0,
+                "created_count": 0,
+                "current_state_updates": 0,
+            },
+            [],
+            should_update_current,
+        )
     try:
         observations = observations_from_snapshot(
             context["snapshot"],
@@ -322,6 +394,9 @@ def _build_snapshot_normalization(
                 "snapshot_id": snapshot_id,
                 "error": str(exc),
                 "failure_code": failure_code,
+                "normalization_status": "failed",
+                "fact_status": "blocked_by_contract",
+                "no_observation_reason": "blocked_by_contract",
                 "observation_count": 0,
                 "created_count": 0,
                 "current_state_updates": 0,
@@ -329,11 +404,16 @@ def _build_snapshot_normalization(
             [],
             should_update_current,
         )
+    normalization_status = "normalized" if observations else "empty"
     return (
         {
             "success": True,
             "snapshot_id": snapshot_id,
             "mode": mode,
+            "parse_status": parse_status,
+            "normalization_status": normalization_status,
+            "fact_status": "ready" if observations else "empty",
+            **({"no_observation_reason": "legitimate_empty"} if not observations else {}),
             "observation_count": len(observations),
             "created_count": 0,
             "current_state_updates": 0,
@@ -356,6 +436,17 @@ def normalize_snapshot(
         snapshot_id,
         update_current_state=update_current_state,
     )
+    context = repository.get_snapshot_context(snapshot_id)
+    if context is not None:
+        from src.core.patrol.repository import PatrolRepository
+
+        PatrolRepository().update_collection_normalization_status(
+            run_id=str(context["snapshot"]["run_id"]),
+            snapshot_id=snapshot_id,
+            normalization_status=str(result["normalization_status"]),
+            fact_status=str(result["fact_status"]),
+            failure_code=result.get("failure_code"),
+        )
     if not result["success"]:
         return result
     created, current_updates = repository.save_observations(
@@ -377,8 +468,8 @@ def normalize_run(
     from src.core.patrol.repository import (
         AnalysisAttemptFencedError,
         AnalysisAttemptInProgressError,
-        PatrolRepository,
         AnalysisLeaseHeartbeat,
+        PatrolRepository,
     )
 
     snapshot_ids = (
@@ -386,9 +477,7 @@ def normalize_run(
         if device_ids
         else repository.list_run_snapshot_ids(run_id)
     )
-    input_revision_digest = _digest(
-        ["normalization-input-v1", run_id, sorted(snapshot_ids)]
-    )
+    input_revision_digest = _digest(["normalization-input-v1", run_id, sorted(snapshot_ids)])
     updates_run_status = not bool(device_ids)
     patrol_repository = PatrolRepository()
     attempt = patrol_repository.begin_analysis_attempt(
@@ -491,6 +580,19 @@ def _normalize_run_impl(
             update_current_state=update_current_state,
         )
         results.append(snapshot_result)
+        update_status = getattr(
+            patrol_repository,
+            "update_collection_normalization_status",
+            None,
+        )
+        if callable(update_status):
+            update_status(
+                run_id=run_id,
+                snapshot_id=snapshot_id,
+                normalization_status=str(snapshot_result["normalization_status"]),
+                fact_status=str(snapshot_result["fact_status"]),
+                failure_code=snapshot_result.get("failure_code"),
+            )
         if snapshot_result["success"]:
             valid_observations.extend(observations)
             should_update_current = should_update_current or update_current
@@ -531,6 +633,24 @@ def _normalize_run_impl(
         "current_state_updates": current_updates,
         "successful_snapshot_count": successful_count,
         "failed_snapshot_count": failed_count,
+        "normalized_snapshot_count": sum(
+            item.get("normalization_status") == "normalized" for item in results
+        ),
+        "empty_snapshot_count": sum(
+            item.get("normalization_status") == "empty" for item in results
+        ),
+        "ignored_snapshot_count": sum(
+            item.get("normalization_status") == "skipped" for item in results
+        ),
+        "blocked_snapshot_count": sum(
+            item.get("normalization_status") == "blocked" for item in results
+        ),
+        "blocked_by_parser_count": sum(
+            item.get("no_observation_reason") == "blocked_by_parser" for item in results
+        ),
+        "blocked_by_contract_count": sum(
+            item.get("no_observation_reason") == "blocked_by_contract" for item in results
+        ),
         "results": results,
     }
     if update_run_status and not result["success"]:

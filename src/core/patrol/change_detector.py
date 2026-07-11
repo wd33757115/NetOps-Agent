@@ -24,8 +24,8 @@ from src.core.patrol.domain import SnapshotRecord
 from src.core.patrol.repository import (
     AnalysisAttemptFencedError,
     AnalysisAttemptInProgressError,
-    PatrolRepository,
     AnalysisLeaseHeartbeat,
+    PatrolRepository,
 )
 from src.core.state.repository import StateRepository
 
@@ -468,9 +468,7 @@ def detect_changes_between_snapshots(
     resolved_entity_type = entity_type
     resolved_primary_keys = primary_keys
     if primary_keys is None:
-        resolved_entity_type, resolved_primary_keys = _snapshot_key_contract(
-            previous, current
-        )
+        resolved_entity_type, resolved_primary_keys = _snapshot_key_contract(previous, current)
     return detect_changes_between_values(
         previous.structured_json,
         current.structured_json,
@@ -592,14 +590,11 @@ def _change_decision(
         "reason": reason,
         "change_policy_id": (policy_result or {}).get("policy_id"),
         "change_policy_version_id": (policy_result or {}).get("policy_version_id"),
-        "comparison_type": (policy_result or {}).get("comparison_type")
-        or "presence",
+        "comparison_type": (policy_result or {}).get("comparison_type") or "presence",
         "old": previous.get("value_json") if previous else None,
         "new": current.get("value_json") if current else None,
         "observed_at": basis.get("observed_at"),
-        "expires_at": (
-            datetime.now(timezone.utc) + timedelta(days=7)
-        ).isoformat()
+        "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
         if decision == "suppressed"
         else None,
         "metadata": {"policy_snapshot": (policy_result or {}).get("policy_snapshot")},
@@ -608,11 +603,7 @@ def _change_decision(
 
 def detect_changes_from_params(params: dict[str, Any]) -> dict[str, Any]:
     entity_type = params.get("entity_type") or "record"
-    primary_keys = (
-        list(params.get("primary_keys") or [])
-        if "primary_keys" in params
-        else None
-    )
+    primary_keys = list(params.get("primary_keys") or []) if "primary_keys" in params else None
     persist = bool(params.get("persist", True))
     use_versioned = bool(params.get("use_versioned_parser_results", False))
     use_state_observations = bool(params.get("use_state_observations", False))
@@ -627,15 +618,11 @@ def detect_changes_from_params(params: dict[str, Any]) -> dict[str, Any]:
         if "missing_confirmations" in params:
             kwargs["missing_confirmations"] = int(params["missing_confirmations"])
         if "analysis_revision" in params:
-            kwargs["analysis_revision"] = str(
-                params.get("analysis_revision") or "original"
-            )
+            kwargs["analysis_revision"] = str(params.get("analysis_revision") or "original")
         return detect_observation_changes_against_history(
             current_run_id=str(params["current_run_id"]),
             previous_run_id=(
-                str(params["previous_run_id"])
-                if params.get("previous_run_id")
-                else None
+                str(params["previous_run_id"]) if params.get("previous_run_id") else None
             ),
             persist=persist,
             **kwargs,
@@ -675,11 +662,7 @@ def detect_changes_from_params(params: dict[str, Any]) -> dict[str, Any]:
                 command_canonical=canonicalize_command(current.command_canonical),
             )
             if previous:
-                versioned = (
-                    detect_versioned_changes(previous, current)
-                    if use_versioned
-                    else None
-                )
+                versioned = detect_versioned_changes(previous, current) if use_versioned else None
                 changes.extend(
                     versioned
                     if versioned is not None
@@ -710,9 +693,7 @@ def detect_changes_from_params(params: dict[str, Any]) -> dict[str, Any]:
         changes = [
             replace(
                 change,
-                change_id=canonical_ids.get(
-                    change_idempotency_key(change), change.change_id
-                ),
+                change_id=canonical_ids.get(change_idempotency_key(change), change.change_id),
             )
             for change in changes
         ]
@@ -762,23 +743,17 @@ def detect_observation_changes_against_history(
                 else state_repository.list_observations_for_runs([previous_run_id])
             )
     else:
-        prior_observations = state_repository.list_prior_observations_for_run(
-            current_run_id
-        )
+        prior_observations = state_repository.list_prior_observations_for_run(current_run_id)
     input_revision_digest = hashlib.sha256(
         json.dumps(
             {
                 "current": [
                     [item.get("id"), item.get("snapshot_id"), item.get("observed_at")]
-                    for item in sorted(
-                        input_observations, key=lambda row: str(row.get("id") or "")
-                    )
+                    for item in sorted(input_observations, key=lambda row: str(row.get("id") or ""))
                 ],
                 "prior": [
                     [item.get("id"), item.get("snapshot_id"), item.get("observed_at")]
-                    for item in sorted(
-                        prior_observations, key=lambda row: str(row.get("id") or "")
-                    )
+                    for item in sorted(prior_observations, key=lambda row: str(row.get("id") or ""))
                 ],
             },
             sort_keys=True,
@@ -898,6 +873,40 @@ def detect_observation_changes_against_history(
         raise
 
 
+def detect_historical_backfill_changes(
+    *,
+    run_id: str,
+    backfill_job_id: str,
+) -> dict[str, Any]:
+    """Derive only facts introduced by one approved historical backfill."""
+    state_repository = StateRepository()
+    current = [
+        item
+        for item in state_repository.list_run_observations(run_id)
+        if (item.get("metadata_json") or {}).get("backfill_job_id") == backfill_job_id
+    ]
+    state_keys = {str(item.get("state_key") or "") for item in current}
+    prior = [
+        item
+        for item in state_repository.list_prior_observations_for_run(run_id)
+        if str(item.get("state_key") or "") in state_keys
+    ]
+    policies = ChangePolicyRepository().list_active_policies()
+    bundle_digest = hashlib.sha256(
+        json.dumps(policies, sort_keys=True, separators=(",", ":"), default=str).encode()
+    ).hexdigest()
+    return _detect_observation_changes_against_history_impl(
+        current_run_id=run_id,
+        persist=True,
+        missing_confirmations=2,
+        policy_bundle=policies,
+        current_observations=current,
+        prior_observations=prior,
+        analysis_revision=f"historical_backfill:{backfill_job_id}",
+        rule_bundle_digest=bundle_digest,
+    )
+
+
 def _detect_observation_changes_against_history_impl(
     *,
     current_run_id: str,
@@ -973,15 +982,11 @@ def _detect_observation_changes_against_history_impl(
                     baseline_only=True,
                 )
                 if device_ids
-                else repository.list_observations_for_runs(
-                    [previous_run_id], baseline_only=True
-                )
+                else repository.list_observations_for_runs([previous_run_id], baseline_only=True)
             )
         except TypeError:
             prior_observations = (
-                repository.list_observations_for_runs(
-                    [previous_run_id], device_ids=device_ids
-                )
+                repository.list_observations_for_runs([previous_run_id], device_ids=device_ids)
                 if device_ids
                 else repository.list_observations_for_runs([previous_run_id])
             )
@@ -1052,8 +1057,7 @@ def _detect_observation_changes_against_history_impl(
                         current=current,
                         decision="suppressed",
                         reason=str(
-                            policy_result.get("decision_reason")
-                            or "change_policy_suppressed"
+                            policy_result.get("decision_reason") or "change_policy_suppressed"
                         ),
                         policy_result=policy_result,
                     )
@@ -1110,9 +1114,7 @@ def _detect_observation_changes_against_history_impl(
         )
         derived_observations.append(tombstone)
         change_type = (
-            "deleted"
-            if missing_count >= max(1, int(missing_confirmations))
-            else "missing"
+            "deleted" if missing_count >= max(1, int(missing_confirmations)) else "missing"
         )
         changes.append(
             _observation_to_change(
@@ -1168,9 +1170,7 @@ def _detect_observation_changes_against_history_impl(
         changes = [
             replace(
                 change,
-                change_id=canonical_ids.get(
-                    change_idempotency_key(change), change.change_id
-                ),
+                change_id=canonical_ids.get(change_idempotency_key(change), change.change_id),
             )
             for change in changes
         ]
@@ -1181,16 +1181,10 @@ def _detect_observation_changes_against_history_impl(
         "device_ids": device_ids or [],
         "compared_observations": compared_observations,
         "baseline_observations": baseline_observations,
-        "initial_observations": sum(
-            1 for change in changes if change.change_type == "initial"
-        ),
+        "initial_observations": sum(1 for change in changes if change.change_type == "initial"),
         "added_observations": sum(1 for change in changes if change.change_type == "added"),
-        "deleted_observations": sum(
-            1 for change in changes if change.change_type == "deleted"
-        ),
-        "missing_observations": sum(
-            1 for change in changes if change.change_type == "missing"
-        ),
+        "deleted_observations": sum(1 for change in changes if change.change_type == "deleted"),
+        "missing_observations": sum(1 for change in changes if change.change_type == "missing"),
         "reappeared_observations": sum(
             1 for change in changes if change.change_type == "reappeared"
         ),
@@ -1229,9 +1223,7 @@ def detect_changes_against_history(
             continue
         compared_snapshots += 1
         versioned = (
-            detect_versioned_changes(previous, current)
-            if use_versioned_parser_results
-            else None
+            detect_versioned_changes(previous, current) if use_versioned_parser_results else None
         )
         changes.extend(
             versioned
@@ -1246,9 +1238,7 @@ def detect_changes_against_history(
         changes = [
             replace(
                 change,
-                change_id=canonical_ids.get(
-                    change_idempotency_key(change), change.change_id
-                ),
+                change_id=canonical_ids.get(change_idempotency_key(change), change.change_id),
             )
             for change in changes
         ]

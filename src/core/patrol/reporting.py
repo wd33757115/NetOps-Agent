@@ -10,6 +10,47 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from src.core.patrol.change_detector import detect_changes_from_params
 from src.core.patrol.change_event_repository import ChangeEventRepository
+from src.core.patrol.repository import PatrolRepository
+
+
+def build_run_quality_summary(run_id: str) -> dict[str, Any]:
+    repository = PatrolRepository()
+    run = repository.get_run(run_id) or {}
+    results = repository.list_collection_results(run_id)
+    eligible = [item for item in results if item.get("parse_status") != "ignored"]
+    parser_ready = [
+        item for item in eligible if item.get("parse_status") in {"parsed", "parse_empty"}
+    ]
+    fact_ready = [item for item in eligible if item.get("fact_status") in {"ready", "empty"}]
+    normalized = [
+        item for item in eligible if item.get("normalization_status") in {"normalized", "empty"}
+    ]
+    denominator = len(eligible)
+    return {
+        "collection_status": run.get("collection_status") or "unknown",
+        "parser_readiness_status": run.get("parser_readiness_status") or "unknown",
+        "fact_readiness_status": run.get("fact_readiness_status") or "unknown",
+        "analysis_status": run.get("analysis_status") or "unknown",
+        "command_count": len(results),
+        "execution_success_count": sum(
+            item.get("execution_status") == "complete" for item in results
+        ),
+        "parser_ready_rate": len(parser_ready) / denominator if denominator else 1.0,
+        "fact_ready_rate": len(fact_ready) / denominator if denominator else 1.0,
+        "normalization_ready_rate": len(normalized) / denominator if denominator else 1.0,
+        "template_missing_count": sum(
+            item.get("parse_status") == "template_missing" for item in results
+        ),
+        "parser_backlog_count": len(
+            {item.get("parser_candidate_id") for item in results if item.get("parser_candidate_id")}
+        ),
+        "blocked_by_contract_count": sum(
+            item.get("fact_status") == "blocked_by_contract" for item in results
+        ),
+        "blocked_by_parser_count": sum(
+            item.get("fact_status") == "blocked_by_parser" for item in results
+        ),
+    }
 
 
 def build_human_diff(params: dict[str, Any]) -> dict[str, Any]:
@@ -35,6 +76,7 @@ def render_run_report(
     events = repository.list_events(run_id=run_id, device_id=device_id)
     event_counter = Counter(event["event_type"] for event in events)
     severity_counter = Counter(event["severity"] for event in events)
+    quality = build_run_quality_summary(run_id)
     lines = [
         f"# Patrol Report: {run_id}",
         "",
@@ -42,18 +84,22 @@ def render_run_report(
         "",
         f"- Changes: {len(changes)}",
         f"- Events: {len(events)}",
+        f"- Collection status: {quality['collection_status']}",
+        f"- Parser ready: {quality['parser_ready_rate']:.1%}",
+        f"- Fact ready: {quality['fact_ready_rate']:.1%}",
+        f"- Normalization ready: {quality['normalization_ready_rate']:.1%}",
+        f"- Missing templates: {quality['template_missing_count']}",
+        f"- Parser backlog: {quality['parser_backlog_count']}",
     ]
     if event_counter:
         lines.extend(["", "## Events By Type", ""])
         lines.extend(
-            f"- {event_type}: {count}"
-            for event_type, count in sorted(event_counter.items())
+            f"- {event_type}: {count}" for event_type, count in sorted(event_counter.items())
         )
     if severity_counter:
         lines.extend(["", "## Events By Severity", ""])
         lines.extend(
-            f"- {severity}: {count}"
-            for severity, count in sorted(severity_counter.items())
+            f"- {severity}: {count}" for severity, count in sorted(severity_counter.items())
         )
     if events:
         lines.extend(["", "## Event Details", ""])
@@ -70,13 +116,20 @@ def render_run_report(
     output_format = str(output_format or "markdown").lower()
     rendered = markdown
     if output_format == "html":
-        rendered = _render_html(run_id, changes, events, event_counter, severity_counter)
+        rendered = _render_html(
+            run_id,
+            changes,
+            events,
+            event_counter,
+            severity_counter,
+            quality,
+        )
     written_path = None
     if output_path:
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         if output_format == "xlsx":
-            _write_xlsx(path, run_id, changes, events)
+            _write_xlsx(path, run_id, changes, events, quality)
             rendered = ""
         elif output_format == "html":
             path.write_text(rendered, encoding="utf-8")
@@ -91,6 +144,7 @@ def render_run_report(
         "event_count": len(events),
         "event_types": dict(event_counter),
         "severities": dict(severity_counter),
+        "quality": quality,
         "markdown": markdown,
         "content": rendered,
         "output_path": written_path,
@@ -103,6 +157,7 @@ def _render_html(
     events: list[dict[str, Any]],
     event_counter: Counter,
     severity_counter: Counter,
+    quality: dict[str, Any],
 ) -> str:
     rows = "\n".join(
         "<tr>"
@@ -129,11 +184,17 @@ def _render_html(
 <body>
   <h1>Patrol Report: {escape(run_id)}</h1>
   <h2>Summary</h2>
-  <p>Changes: {len(changes)}<br>Events: {len(events)}</p>
+  <p>Changes: {len(changes)}<br>Events: {len(events)}<br>
+  Collection: {escape(str(quality["collection_status"]))}<br>
+  Parser ready: {quality["parser_ready_rate"]:.1%}<br>
+  Fact ready: {quality["fact_ready_rate"]:.1%}<br>
+  Normalization ready: {quality["normalization_ready_rate"]:.1%}<br>
+  Missing templates: {quality["template_missing_count"]}<br>
+  Parser backlog: {quality["parser_backlog_count"]}</p>
   <h2>Events By Type</h2>
-  <ul>{''.join(f'<li>{escape(k)}: {v}</li>' for k, v in sorted(event_counter.items()))}</ul>
+  <ul>{"".join(f"<li>{escape(k)}: {v}</li>" for k, v in sorted(event_counter.items()))}</ul>
   <h2>Events By Severity</h2>
-  <ul>{''.join(f'<li>{escape(k)}: {v}</li>' for k, v in sorted(severity_counter.items()))}</ul>
+  <ul>{"".join(f"<li>{escape(k)}: {v}</li>" for k, v in sorted(severity_counter.items()))}</ul>
   <h2>Event Details</h2>
   <table>
     <thead><tr><th>Time</th><th>Severity</th><th>Type</th><th>Device</th><th>Entity</th></tr></thead>
@@ -149,11 +210,18 @@ def _write_xlsx(
     run_id: str,
     changes: list[dict[str, Any]],
     events: list[dict[str, Any]],
+    quality: dict[str, Any],
 ) -> None:
     rows = [
         ["Run ID", run_id],
         ["Changes", str(len(changes))],
         ["Events", str(len(events))],
+        ["Collection status", str(quality["collection_status"])],
+        ["Parser ready", f"{quality['parser_ready_rate']:.1%}"],
+        ["Fact ready", f"{quality['fact_ready_rate']:.1%}"],
+        ["Normalization ready", f"{quality['normalization_ready_rate']:.1%}"],
+        ["Missing templates", str(quality["template_missing_count"])],
+        ["Parser backlog", str(quality["parser_backlog_count"])],
         [],
         ["Time", "Severity", "Event Type", "Device", "Entity"],
     ]
@@ -172,14 +240,12 @@ def _write_xlsx(
         cells = []
         for col_index, value in enumerate(row, start=1):
             ref = f"{_xlsx_col(col_index)}{index}"
-            cells.append(
-                f'<c r="{ref}" t="inlineStr"><is><t>{escape(value)}</t></is></c>'
-            )
+            cells.append(f'<c r="{ref}" t="inlineStr"><is><t>{escape(value)}</t></is></c>')
         sheet_rows.append(f'<row r="{index}">{"".join(cells)}</row>')
     sheet_xml = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-        f'<sheetData>{"".join(sheet_rows)}</sheetData></worksheet>'
+        f"<sheetData>{''.join(sheet_rows)}</sheetData></worksheet>"
     )
     with ZipFile(path, "w", ZIP_DEFLATED) as archive:
         archive.writestr(

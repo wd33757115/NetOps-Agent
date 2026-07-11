@@ -137,6 +137,13 @@ class Settings(BaseSettings):
     PATROL_RUN_LEASE_SECONDS: int = 900
     REDIS_RECONNECT_BACKOFF_SECONDS: int = 5
     EVENT_RULE_ALLOW_BUILTIN_FALLBACK: bool = False
+    PRODUCTION_PARSER_BACKLOG_ENABLED: bool = True
+    PARSER_LLM_GENERATION_ENABLED: bool = False
+    RULE_ASSET_AUTO_SEED_ENABLED: bool = True
+    PARSER_BACKFILL_ENABLED: bool = False
+    PARSER_BACKLOG_ALERT_THRESHOLD: int = 20
+    PARSER_CANDIDATE_STALE_MINUTES: int = 60
+    PARSER_BLOCKED_RATIO_ALERT_THRESHOLD: float = 0.2
 
     # 与 Django SIMPLE_JWT 共用（默认与 SECRET_KEY 一致，生产务必在 .env 中显式设置）
     JWT_SECRET_KEY: str = "django-insecure-default-key-change-in-production"

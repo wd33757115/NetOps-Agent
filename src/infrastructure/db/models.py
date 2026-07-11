@@ -670,6 +670,12 @@ class PatrolRun(Base):
     collection_status = Column(
         String(32), nullable=False, default="running", server_default="running", index=True
     )
+    parser_readiness_status = Column(
+        String(32), nullable=False, default="unknown", server_default="unknown", index=True
+    )
+    fact_readiness_status = Column(
+        String(32), nullable=False, default="unknown", server_default="unknown", index=True
+    )
     analysis_status = Column(
         String(32), nullable=False, default="pending", server_default="pending", index=True
     )
@@ -854,6 +860,27 @@ class PatrolCollectionResult(Base):
     status = Column(
         String(32), nullable=False, default="unknown", server_default="unknown", index=True
     )
+    execution_status = Column(
+        String(32), nullable=False, default="failed", server_default="failed", index=True
+    )
+    parse_status = Column(
+        String(32),
+        nullable=False,
+        default="not_attempted",
+        server_default="not_attempted",
+        index=True,
+    )
+    fact_status = Column(
+        String(32),
+        nullable=False,
+        default="blocked_by_collection",
+        server_default="blocked_by_collection",
+        index=True,
+    )
+    normalization_status = Column(
+        String(32), nullable=False, default="blocked", server_default="blocked", index=True
+    )
+    parser_candidate_id = Column(String(64), nullable=True, index=True)
     authoritative_for_deletion = Column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
@@ -1808,6 +1835,13 @@ class ParserTemplateJob(Base):
 
     id = Column(String(64), primary_key=True)
     job_type = Column(String(32), nullable=False, index=True)
+    source_mode = Column(
+        String(32),
+        nullable=False,
+        default="parser_validation",
+        server_default="parser_validation",
+        index=True,
+    )
     vendor = Column(String(64), nullable=False)
     model = Column(String(128), nullable=True)
     family = Column(String(128), nullable=True)
@@ -1867,6 +1901,18 @@ class ParserJobSample(Base):
     device_id = Column(String(256), nullable=False, index=True)
     output_signature = Column(String(64), nullable=False)
     dataset_id = Column(String(256), nullable=True, index=True)
+    sanitization_status = Column(
+        String(32),
+        nullable=False,
+        default="pending_sanitization",
+        server_default="pending_sanitization",
+        index=True,
+    )
+    sanitization_version = Column(String(32), nullable=True)
+    sanitized_text = Column(Text, nullable=True)
+    sanitized_hash = Column(String(64), nullable=True, index=True)
+    redaction_summary_json = Column(JSON, nullable=True)
+    sanitized_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
@@ -1920,6 +1966,70 @@ class ParserControlSetting(Base):
     key = Column(String(128), primary_key=True)
     value_json = Column(JSON, nullable=False)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class ParserBackfillJobRecord(Base):
+    __tablename__ = "parser_backfill_jobs"
+
+    id = Column(String(64), primary_key=True)
+    idempotency_key = Column(String(64), nullable=False, unique=True, index=True)
+    template_id = Column(
+        String(64),
+        ForeignKey("parser_templates.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    status = Column(String(32), nullable=False, default="draft", index=True)
+    dry_run = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    filters_json = Column(JSON, nullable=False, default=dict)
+    summary_json = Column(JSON, nullable=True)
+    requested_by = Column(String(128), nullable=False)
+    approved_by = Column(String(128), nullable=True)
+    approval_reason = Column(Text, nullable=True)
+    last_error = Column(Text, nullable=True)
+    owner_token = Column(String(64), nullable=True, index=True)
+    lease_until = Column(DateTime(timezone=True), nullable=True, index=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class ParserBackfillResultRecord(Base):
+    __tablename__ = "parser_backfill_results"
+
+    id = Column(String(64), primary_key=True)
+    job_id = Column(
+        String(64),
+        ForeignKey("parser_backfill_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    snapshot_id = Column(
+        String(64),
+        ForeignKey("netops_command_snapshots.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    parse_status = Column(String(32), nullable=False, index=True)
+    structured_json = Column(JSON, nullable=True)
+    failure_code = Column(String(128), nullable=True)
+    observation_count = Column(Integer, nullable=False, default=0, server_default="0")
+    existing_observation_count = Column(Integer, nullable=False, default=0, server_default="0")
+    committed_observation_count = Column(Integer, nullable=False, default=0, server_default="0")
+    committed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("uq_parser_backfill_job_snapshot", "job_id", "snapshot_id", unique=True),
+    )
 
     def to_dict(self):
         return {column.name: getattr(self, column.name) for column in self.__table__.columns}

@@ -9,9 +9,11 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func, or_, text
 
+from src.common.config import get_settings
 from src.core.observation import ObservationContractRepository
+from src.core.parser.sanitization import sanitize_parser_sample
 from src.core.patrol.repository import PatrolRepository
 from src.infrastructure.db.models import (
     CommandSnapshot,
@@ -23,6 +25,8 @@ from src.infrastructure.db.models import (
     ParserOutboxEvent,
     ParserTemplate,
     ParserTemplateJob,
+    PatrolCollectionResult,
+    RuleGenerationJobRecord,
     SnapshotParseResult,
 )
 from src.infrastructure.db.postgres import get_db_session
@@ -71,9 +75,7 @@ def contract_digest(validation: dict[str, Any]) -> str:
             "state_semantics",
         )
     }
-    encoded = json.dumps(
-        contract, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    )
+    encoded = json.dumps(contract, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
@@ -81,14 +83,10 @@ class ParserRepository:
     def backfill_contract_metadata(self) -> int:
         count = 0
         with get_db_session() as db:
-            rows = db.query(ParserTemplate).filter(
-                ParserTemplate.contract_sha256.is_(None)
-            ).all()
+            rows = db.query(ParserTemplate).filter(ParserTemplate.contract_sha256.is_(None)).all()
             for row in rows:
                 validation = dict(row.validation_json or {})
-                row.contract_version = int(
-                    validation.get("contract_version") or 1
-                )
+                row.contract_version = int(validation.get("contract_version") or 1)
                 row.contract_sha256 = contract_digest(validation)
                 validation["contract_version"] = row.contract_version
                 validation["contract_sha256"] = row.contract_sha256
@@ -149,11 +147,7 @@ class ParserRepository:
         status: str = "confirmed",
     ) -> str:
         with get_db_session() as db:
-            row = (
-                db.query(ParserCommandAlias)
-                .filter(ParserCommandAlias.alias == alias)
-                .first()
-            )
+            row = db.query(ParserCommandAlias).filter(ParserCommandAlias.alias == alias).first()
             if row is None:
                 row = ParserCommandAlias(id=str(uuid.uuid4()), alias=alias)
                 db.add(row)
@@ -302,16 +296,17 @@ class ParserRepository:
         command: str,
         snapshot_id: str,
         device_id: str,
-        raw_text: str,
+        raw_text: str | None = None,
         failure_code: str | None = None,
         dataset_id: str | None = None,
     ) -> str:
         context = PatrolRepository().get_snapshot_context(snapshot_id)
         if context is None:
             raise ValueError(f"parser candidate snapshot does not exist: {snapshot_id}")
-        if context["mode"] != "parser_validation":
+        source_mode = str(context["mode"])
+        if source_mode not in {"parser_validation", "production"}:
             raise ValueError(
-                "parser template candidates must reference parser_validation snapshots"
+                "parser template candidates require parser_validation or production snapshots"
             )
         snapshot = context["snapshot"]
         if snapshot.device_id != device_id:
@@ -320,11 +315,18 @@ class ParserRepository:
         dataset_id = context["dataset_id"] or dataset_id
         signature = output_signature(raw_text)
         profile = model or family or "Generic"
-        key_text = "|".join(
-            ["parser_validation", job_type, vendor, profile, command, signature]
-        )
+        key_parts = [source_mode, job_type, vendor, profile, command]
+        if source_mode == "parser_validation":
+            key_parts.append(signature)
+        else:
+            key_parts.append(str(failure_code or "parser_failure"))
+        key_text = "|".join(key_parts)
         key = hashlib.sha256(key_text.encode("utf-8")).hexdigest()
         with get_db_session() as db:
+            db.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+                {"key": key},
+            )
             job = (
                 db.query(ParserTemplateJob)
                 .filter(
@@ -355,6 +357,7 @@ class ParserRepository:
                 job = ParserTemplateJob(
                     id=str(uuid.uuid4()),
                     job_type=job_type,
+                    source_mode=source_mode,
                     vendor=vendor,
                     model=model,
                     family=family,
@@ -405,6 +408,15 @@ class ParserRepository:
                         device_id=device_id,
                         output_signature=signature,
                         dataset_id=dataset_id,
+                        sanitization_status=(
+                            "sanitized"
+                            if source_mode == "parser_validation"
+                            else "pending_sanitization"
+                        ),
+                        sanitization_version=(
+                            "trusted-validation-v1" if source_mode == "parser_validation" else None
+                        ),
+                        sanitized_at=(utcnow() if source_mode == "parser_validation" else None),
                         created_at=utcnow(),
                     )
                 )
@@ -417,6 +429,59 @@ class ParserRepository:
                 payload={"job_id": job.id, "job_type": job_type},
             )
             return job.id
+
+    def sanitize_pending_samples(
+        self,
+        *,
+        job_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        with get_db_session() as db:
+            query = (
+                db.query(ParserJobSample)
+                .join(ParserTemplateJob, ParserTemplateJob.id == ParserJobSample.job_id)
+                .filter(
+                    ParserTemplateJob.source_mode == "production",
+                    ParserJobSample.sanitization_status == "pending_sanitization",
+                )
+            )
+            if job_id:
+                query = query.filter(ParserJobSample.job_id == job_id)
+            samples = (
+                query.order_by(ParserJobSample.created_at)
+                .limit(max(1, int(limit)))
+                .with_for_update(skip_locked=True)
+                .all()
+            )
+            for sample in samples:
+                snapshot = db.get(CommandSnapshot, sample.snapshot_id)
+                if snapshot is None:
+                    sample.sanitization_status = "failed"
+                    results.append(
+                        {
+                            "sample_id": sample.id,
+                            "success": False,
+                            "failure_code": "snapshot_missing",
+                        }
+                    )
+                    continue
+                sanitized = sanitize_parser_sample(snapshot.raw_text)
+                sample.sanitized_text = sanitized.text
+                sample.sanitized_hash = sanitized.sha256
+                sample.sanitization_version = sanitized.version
+                sample.redaction_summary_json = sanitized.redaction_summary
+                sample.sanitization_status = "sanitized"
+                sample.sanitized_at = utcnow()
+                results.append(
+                    {
+                        "sample_id": sample.id,
+                        "success": True,
+                        "sanitized_hash": sanitized.sha256,
+                        "redaction_summary": sanitized.redaction_summary,
+                    }
+                )
+        return results
 
     def register_template(
         self,
@@ -489,14 +554,38 @@ class ParserRepository:
             )
         return template_id
 
-    def activate_template(self, template_id: str) -> ParserTemplate:
+    def activate_template(
+        self,
+        template_id: str,
+        *,
+        approved_by: str = "manual-api",
+        reason: str = "approved after parser validation",
+        force: bool = False,
+        approval_kind: str = "approval",
+    ) -> ParserTemplate:
+        if not str(approved_by).strip() or not str(reason).strip():
+            raise ValueError("template activation requires an actor and reason")
         with get_db_session() as db:
-            template = db.query(ParserTemplate).filter(ParserTemplate.id == template_id).one()
+            template = (
+                db.query(ParserTemplate)
+                .filter(ParserTemplate.id == template_id)
+                .with_for_update()
+                .one()
+            )
+            if template.status == "active":
+                db.expunge(template)
+                return template
             validation = dict(template.validation_json or {})
             regression = dict(validation.get("regression_validation") or {})
-            if template.status != "active" and not regression.get("passed"):
+            sample_count = int(regression.get("sample_count") or 0)
+            passed_samples = int(regression.get("passed_samples") or 0)
+            if template.status not in {"draft", "pending_approval", "deprecated"}:
+                raise ValueError(f"template cannot be activated from status {template.status}")
+            if not force and (
+                not regression.get("passed") or sample_count <= 0 or passed_samples != sample_count
+            ):
                 raise ValueError(
-                    "template activation requires a passing regression validation set"
+                    "template activation requires a non-empty, fully passing regression set"
                 )
             old_active_templates = (
                 db.query(ParserTemplate)
@@ -507,6 +596,8 @@ class ParserRepository:
                     ParserTemplate.status == "active",
                     ParserTemplate.id != template.id,
                 )
+                .order_by(ParserTemplate.id)
+                .with_for_update()
                 .all()
             )
             for old_template in old_active_templates:
@@ -522,6 +613,19 @@ class ParserRepository:
             template.status = "active"
             validation["contract_approval_status"] = "approved"
             validation["contract_approved_at"] = utcnow().isoformat()
+            validation["contract_approved_by"] = str(approved_by).strip()
+            validation["contract_approval_reason"] = str(reason).strip()
+            validation["contract_approval_kind"] = approval_kind
+            validation["contract_force_activated"] = bool(force)
+            validation["approval_audit"] = [
+                *list(validation.get("approval_audit") or []),
+                {
+                    "action": approval_kind,
+                    "actor": str(approved_by).strip(),
+                    "reason": str(reason).strip(),
+                    "occurred_at": utcnow().isoformat(),
+                },
+            ]
             template.validation_json = validation
             template.activated_at = utcnow()
             template.updated_at = utcnow()
@@ -596,19 +700,30 @@ class ParserRepository:
             db.expunge(template)
             return template
 
+    def rollback_template(
+        self,
+        template_id: str,
+        *,
+        actor: str,
+        reason: str,
+    ) -> ParserTemplate:
+        return self.activate_template(
+            template_id,
+            approved_by=actor,
+            reason=reason,
+            force=True,
+            approval_kind="rollback",
+        )
+
     def supersede_legacy_jobs(self) -> int:
         """Retire jobs whose samples cannot be resolved from PostgreSQL."""
         count = 0
         with get_db_session() as db:
-            jobs = db.query(ParserTemplateJob).filter(
-                ParserTemplateJob.status != "superseded"
-            ).all()
+            jobs = (
+                db.query(ParserTemplateJob).filter(ParserTemplateJob.status != "superseded").all()
+            )
             for job in jobs:
-                samples = (
-                    db.query(ParserJobSample)
-                    .filter(ParserJobSample.job_id == job.id)
-                    .all()
-                )
+                samples = db.query(ParserJobSample).filter(ParserJobSample.job_id == job.id).all()
                 if not samples or not any(
                     sample.snapshot_source != "postgresql"
                     or db.get(CommandSnapshot, sample.snapshot_id) is None
@@ -667,16 +782,111 @@ class ParserRepository:
                 is not None
             )
 
-    def set_template_status(self, template_id: str, status: str) -> None:
+    def set_template_status(
+        self,
+        template_id: str,
+        status: str,
+        *,
+        actor: str | None = None,
+        reason: str | None = None,
+    ) -> None:
         with get_db_session() as db:
             row = db.query(ParserTemplate).filter(ParserTemplate.id == template_id).one()
+            if actor is not None and (not actor.strip() or not str(reason or "").strip()):
+                raise ValueError("template status transition requires actor and reason")
+            previous_status = row.status
             row.status = status
+            if status == "deprecated":
+                row.deprecated_at = utcnow()
+            validation = dict(row.validation_json or {})
+            if actor is not None:
+                validation["status_audit"] = [
+                    *list(validation.get("status_audit") or []),
+                    {
+                        "actor": actor.strip(),
+                        "reason": str(reason).strip(),
+                        "from_status": previous_status,
+                        "to_status": status,
+                        "at": utcnow().isoformat(),
+                    },
+                ]
+                row.validation_json = validation
             row.updated_at = utcnow()
             ObservationContractRepository().upsert_from_parser_template_row(
                 db,
                 row,
                 status="active" if status == "active" else "deprecated",
             )
+
+    def governance_alert_summary(self) -> dict[str, Any]:
+        settings = get_settings()
+        now = utcnow()
+        stale_before = now - timedelta(minutes=max(1, settings.PARSER_CANDIDATE_STALE_MINUTES))
+        recent_before = now - timedelta(hours=24)
+        alerts: list[dict[str, Any]] = []
+        with get_db_session() as db:
+            production_open = db.query(func.count(ParserTemplateJob.id)).filter(
+                ParserTemplateJob.source_mode == "production",
+                ParserTemplateJob.status.in_(OPEN_JOB_STATUSES),
+            ).scalar() or 0
+            stale_candidates = db.query(func.count(ParserTemplateJob.id)).filter(
+                ParserTemplateJob.source_mode == "production",
+                ParserTemplateJob.status.in_(OPEN_JOB_STATUSES),
+                ParserTemplateJob.updated_at < stale_before,
+            ).scalar() or 0
+            failed_generation = db.query(func.count(ParserTemplateJob.id)).filter(
+                ParserTemplateJob.source_mode == "production",
+                ParserTemplateJob.status == "failed",
+                ParserTemplateJob.updated_at >= recent_before,
+            ).scalar() or 0
+            activation_publish_failures = db.query(func.count(ParserOutboxEvent.id)).filter(
+                ParserOutboxEvent.event_type == "parser.template.activated",
+                ParserOutboxEvent.status == "pending",
+                ParserOutboxEvent.attempts > 0,
+            ).scalar() or 0
+            stale_approvals = db.query(func.count(ParserTemplate.id)).filter(
+                ParserTemplate.status == "pending_approval",
+                ParserTemplate.updated_at < stale_before,
+            ).scalar() or 0
+            recent_results = db.query(func.count(PatrolCollectionResult.id)).filter(
+                PatrolCollectionResult.updated_at >= recent_before,
+            ).scalar() or 0
+            blocked_results = db.query(func.count(PatrolCollectionResult.id)).filter(
+                PatrolCollectionResult.updated_at >= recent_before,
+                PatrolCollectionResult.fact_status == "blocked_by_parser",
+            ).scalar() or 0
+            rule_jobs = db.query(RuleGenerationJobRecord).filter(
+                RuleGenerationJobRecord.updated_at >= recent_before,
+            ).all()
+
+        blocked_ratio = float(blocked_results) / float(recent_results) if recent_results else 0.0
+        rule_generation_failures = sum(
+            item.status in {"failed", "validation_failed", "rejected"} for item in rule_jobs
+        )
+        replay_collisions = sum(
+            int(((item.validation_report_json or {}).get("replay") or {}).get("collision_count") or 0)
+            for item in rule_jobs
+        )
+
+        def add(code: str, count: int | float, severity: str, message: str) -> None:
+            if count:
+                alerts.append({"code": code, "count": count, "severity": severity, "message": message})
+
+        if production_open >= max(1, settings.PARSER_BACKLOG_ALERT_THRESHOLD):
+            add("parser_backlog_high", production_open, "warning", "Production Parser backlog exceeded its configured threshold.")
+        add("parser_candidate_stale", stale_candidates, "warning", "Production Parser candidates exceeded the generation SLA.")
+        add("parser_approval_stale", stale_approvals, "warning", "Generated Parser templates are waiting too long for approval.")
+        add("parser_generation_failed", failed_generation, "error", "Production Parser generation failed in the last 24 hours.")
+        add("template_activation_publish_failed", activation_publish_failures, "error", "Template activation outbox delivery is retrying.")
+        if blocked_ratio >= settings.PARSER_BLOCKED_RATIO_ALERT_THRESHOLD and recent_results:
+            add("blocked_by_parser_ratio_high", round(blocked_ratio, 4), "warning", "The 24-hour blocked-by-parser ratio exceeded its configured threshold.")
+        add("rule_generation_failed", rule_generation_failures, "error", "Rule asset generation or validation failed in the last 24 hours.")
+        add("rule_replay_collision", replay_collisions, "error", "Rule replay detected collisions; approval must remain blocked.")
+        return {
+            "alerts": alerts,
+            "alert_count": len(alerts),
+            "blocked_by_parser_ratio_24h": round(blocked_ratio, 4),
+        }
 
     def record_regression_validation(
         self,
@@ -687,9 +897,7 @@ class ParserRepository:
         passed_samples: int,
     ) -> None:
         with get_db_session() as db:
-            row = db.query(ParserTemplate).filter(
-                ParserTemplate.id == template_id
-            ).one()
+            row = db.query(ParserTemplate).filter(ParserTemplate.id == template_id).one()
             validation = dict(row.validation_json or {})
             validation["regression_validation"] = {
                 "passed": bool(passed),
@@ -726,9 +934,7 @@ class ParserRepository:
             if job is None:
                 raise ParserJobStateError(f"parser job {job_id} not found")
             if job.status in OPEN_JOB_STATUSES:
-                raise ParserJobStateError(
-                    f"parser job {job_id} must be cancelled before deletion"
-                )
+                raise ParserJobStateError(f"parser job {job_id} must be cancelled before deletion")
             item = job.to_dict()
             sample_count = (
                 db.query(ParserJobSample)
@@ -768,22 +974,24 @@ class ParserRepository:
             jobs = query.order_by(ParserTemplateJob.created_at).all()
             output: list[dict[str, Any]] = []
             for job in jobs:
-                samples = (
-                    db.query(ParserJobSample)
-                    .filter(ParserJobSample.job_id == job.id)
-                    .all()
-                )
+                samples = db.query(ParserJobSample).filter(ParserJobSample.job_id == job.id).all()
+                if job.source_mode == "production" and (
+                    not samples
+                    or any(sample.sanitization_status != "sanitized" for sample in samples)
+                ):
+                    continue
                 recent_samples = [
                     sample
                     for sample in samples
                     if sample.created_at >= (now - timedelta(hours=24)).replace(tzinfo=None)
                 ]
-                age_seconds = (now - job.created_at.replace(tzinfo=timezone.utc)
-                               if job.created_at.tzinfo is None
-                               else now - job.created_at).total_seconds()
+                age_seconds = (
+                    now - job.created_at.replace(tzinfo=timezone.utc)
+                    if job.created_at.tzinfo is None
+                    else now - job.created_at
+                ).total_seconds()
                 ready = (
-                    job.job_type == "CREATE_TEMPLATE"
-                    and (len(samples) >= 2 or age_seconds >= 1800)
+                    job.job_type == "CREATE_TEMPLATE" and (len(samples) >= 2 or age_seconds >= 1800)
                 ) or (
                     job.job_type == "REPAIR_TEMPLATE"
                     and (
@@ -853,9 +1061,7 @@ class ParserRepository:
             if updated != 1:
                 raise ParserJobStateError(f"parser outbox claim was fenced: {event_id}")
 
-    def release_outbox_claim(
-        self, event_id: str, *, claim_token: str, error: str
-    ) -> None:
+    def release_outbox_claim(self, event_id: str, *, claim_token: str, error: str) -> None:
         with get_db_session() as db:
             db.query(ParserOutboxEvent).filter(
                 ParserOutboxEvent.id == event_id,
@@ -878,6 +1084,36 @@ class ParserRepository:
                 query = query.filter(ParserTemplateJob.status == status)
             rows = query.order_by(ParserTemplateJob.updated_at.desc()).all()
             return [row.to_dict() for row in rows]
+
+    def backlog_summary(self) -> dict[str, int]:
+        with get_db_session() as db:
+            production_open = (
+                db.query(func.count(ParserTemplateJob.id))
+                .filter(
+                    ParserTemplateJob.source_mode == "production",
+                    ParserTemplateJob.status.in_(OPEN_JOB_STATUSES),
+                )
+                .scalar()
+            )
+            sample_counts = dict(
+                db.query(
+                    ParserJobSample.sanitization_status,
+                    func.count(ParserJobSample.id),
+                )
+                .join(ParserTemplateJob, ParserTemplateJob.id == ParserJobSample.job_id)
+                .filter(
+                    ParserTemplateJob.source_mode == "production",
+                    ParserTemplateJob.status.in_(OPEN_JOB_STATUSES),
+                )
+                .group_by(ParserJobSample.sanitization_status)
+                .all()
+            )
+            return {
+                "production_open_jobs": int(production_open or 0),
+                "pending_sanitization_samples": int(sample_counts.get("pending_sanitization") or 0),
+                "sanitized_samples": int(sample_counts.get("sanitized") or 0),
+                "sanitization_failed_samples": int(sample_counts.get("failed") or 0),
+            }
 
     def transition_job_status(
         self,
@@ -989,19 +1225,28 @@ class ParserRepository:
                 failed.append(job.id)
         return failed
 
-    def get_job(self, job_id: str) -> dict[str, Any] | None:
+    def get_job(
+        self,
+        job_id: str,
+        *,
+        include_sanitized_payload: bool = False,
+    ) -> dict[str, Any] | None:
         with get_db_session() as db:
             job = db.query(ParserTemplateJob).filter(ParserTemplateJob.id == job_id).first()
             if not job:
                 return None
             result = job.to_dict()
-            result["samples"] = [
+            samples = [
                 sample.to_dict()
                 for sample in db.query(ParserJobSample)
                 .filter(ParserJobSample.job_id == job_id)
                 .order_by(ParserJobSample.created_at)
                 .all()
             ]
+            if not include_sanitized_payload:
+                for sample in samples:
+                    sample.pop("sanitized_text", None)
+            result["samples"] = samples
             return result
 
     def save_parse_result(

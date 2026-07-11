@@ -48,6 +48,7 @@ from src.infrastructure.db.models import (
     NetworkDeviceDynamicGroup,
     NetworkEventOccurrenceRecord,
     NetworkEventRecord,
+    ObservationContractRecord,
     ParserDeviceProfile,
     ParserIdentitySignature,
     ParserTemplate,
@@ -1994,6 +1995,9 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
             occurrences: list[tuple[NetworkEventOccurrenceRecord, NetworkEventRecord]] = []
             parse_counts: dict[str, int] = {}
             evidence_by_snapshot: dict[str, RawEvidenceRecord] = {}
+            collection_by_execution_item: dict[str, PatrolCollectionResult] = {}
+            contract_by_template: dict[str, ObservationContractRecord] = {}
+            observations: list[StateObservationRecord] = []
             observation_count = 0
             change_count = 0
             event_count = 0
@@ -2014,6 +2018,32 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                     .all()
                 )
                 snapshot_ids = [row.id for row in snapshots]
+                execution_item_ids = [row.execution_item_id for row in snapshots]
+                template_ids = [
+                    row.parser_template_id for row in snapshots if row.parser_template_id
+                ]
+                if execution_item_ids:
+                    collection_by_execution_item = {
+                        row.execution_item_id: row
+                        for row in db.query(PatrolCollectionResult)
+                        .filter(
+                            PatrolCollectionResult.run_id == snapshot_run_id,
+                            PatrolCollectionResult.execution_item_id.in_(execution_item_ids),
+                        )
+                        .all()
+                    }
+                if template_ids:
+                    contract_rows = (
+                        db.query(ObservationContractRecord)
+                        .filter(ObservationContractRecord.source_template_id.in_(template_ids))
+                        .order_by(ObservationContractRecord.contract_version.desc())
+                        .all()
+                    )
+                    for contract_row in contract_rows:
+                        contract_by_template.setdefault(
+                            contract_row.source_template_id,
+                            contract_row,
+                        )
                 for row in snapshots:
                     status = row.parse_status or "unknown"
                     parse_counts[status] = parse_counts.get(status, 0) + 1
@@ -2029,6 +2059,13 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                         db.query(StateObservationRecord.id)
                         .filter(StateObservationRecord.snapshot_id.in_(snapshot_ids))
                         .count()
+                    )
+                    observations = (
+                        db.query(StateObservationRecord)
+                        .filter(StateObservationRecord.snapshot_id.in_(snapshot_ids))
+                        .order_by(StateObservationRecord.observed_at.desc())
+                        .limit(20)
+                        .all()
                     )
                 change_filter = (
                     NetworkChangeRecord.run_id == snapshot_run_id,
@@ -2105,6 +2142,14 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                     "patrol_batch_id": run_context.get("patrol_batch_id"),
                     "snapshot_run_id": snapshot_run_id,
                     "snapshot_count": len(snapshots),
+                    "collection_status": patrol_run.collection_status if patrol_run else None,
+                    "parser_readiness_status": (
+                        patrol_run.parser_readiness_status if patrol_run else None
+                    ),
+                    "fact_readiness_status": (
+                        patrol_run.fact_readiness_status if patrol_run else None
+                    ),
+                    "analysis_status": patrol_run.analysis_status if patrol_run else None,
                     "observation_count": observation_count,
                     "change_count": change_count,
                     "event_count": event_count,
@@ -2147,10 +2192,57 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                             "command": row.canonical_command,
                             "parse_status": row.parse_status,
                             "parser_template_id": row.parser_template_id,
+                            "observation_contract_id": (
+                                contract_by_template[row.parser_template_id].id
+                                if row.parser_template_id in contract_by_template
+                                else None
+                            ),
+                            "execution_status": (
+                                collection_by_execution_item[row.execution_item_id].execution_status
+                                if row.execution_item_id in collection_by_execution_item
+                                else None
+                            ),
+                            "fact_status": (
+                                collection_by_execution_item[row.execution_item_id].fact_status
+                                if row.execution_item_id in collection_by_execution_item
+                                else None
+                            ),
+                            "normalization_status": (
+                                collection_by_execution_item[
+                                    row.execution_item_id
+                                ].normalization_status
+                                if row.execution_item_id in collection_by_execution_item
+                                else None
+                            ),
+                            "parser_candidate_id": (
+                                collection_by_execution_item[
+                                    row.execution_item_id
+                                ].parser_candidate_id
+                                if row.execution_item_id in collection_by_execution_item
+                                else None
+                            ),
                             "raw_text_hash": row.raw_text_hash,
                             "observed_at": _iso(row.observed_at),
                         }
                         for row in snapshots[:20]
+                    ],
+                    "observations": [
+                        {
+                            "observation_id": row.id,
+                            "snapshot_id": row.snapshot_id,
+                            "entity_type": row.entity_type,
+                            "entity_key": row.entity_key,
+                            "field": row.field_name,
+                            "observation_type": row.observation_type,
+                            "parser_template_id": row.parser_template_id,
+                            "contract_version": row.contract_version,
+                            "historical_backfill": bool(
+                                (row.metadata_json or {}).get("historical_backfill")
+                            ),
+                            "backfill_job_id": (row.metadata_json or {}).get("backfill_job_id"),
+                            "observed_at": _iso(row.observed_at),
+                        }
+                        for row in observations
                     ],
                     "changes": [
                         {
@@ -2160,6 +2252,12 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                             "field": row.field,
                             "change_type": row.change_type,
                             "event_status": row.event_status,
+                            "current_observation_id": row.current_observation_id,
+                            "previous_observation_id": row.previous_observation_id,
+                            "change_policy_id": row.change_policy_id,
+                            "change_policy_version_id": row.change_policy_version_id,
+                            "decision_reason": row.decision_reason,
+                            "analysis_revision": row.analysis_revision,
                             "detected_at": _iso(row.detected_at),
                         }
                         for row in changes[:10]
@@ -2175,6 +2273,16 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                             "occurred_at": _iso(row.occurred_at),
                             "last_seen_at": _iso(row.last_seen_at),
                             "occurrence_count": row.occurrence_count,
+                            "source_change_id": row.source_change_id,
+                            "event_rule_id": (
+                                ((row.payload_json or {}).get("rule") or {}).get("rule_id")
+                            ),
+                            "event_rule_version": (
+                                ((row.payload_json or {}).get("rule") or {}).get("version")
+                            ),
+                            "historical_backfill": bool(
+                                (row.payload_json or {}).get("historical_backfill")
+                            ),
                         }
                         for row in events[:10]
                     ],
@@ -2189,14 +2297,10 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                             "severity": occurrence.severity,
                             "observed_at": _iso(occurrence.observed_at),
                             "event_rule_id": (
-                                ((occurrence.payload_json or {}).get("rule") or {}).get(
-                                    "rule_id"
-                                )
+                                ((occurrence.payload_json or {}).get("rule") or {}).get("rule_id")
                             ),
                             "event_rule_version": (
-                                ((occurrence.payload_json or {}).get("rule") or {}).get(
-                                    "version"
-                                )
+                                ((occurrence.payload_json or {}).get("rule") or {}).get("version")
                             ),
                         }
                         for occurrence, event in occurrences[:20]

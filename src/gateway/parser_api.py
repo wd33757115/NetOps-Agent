@@ -26,6 +26,7 @@ from src.core.device_ops.repository import DeviceRepository
 from src.core.device_ops.tools import PatrolTool
 from src.core.observation.repository import ObservationContractRepository
 from src.core.parser.assets import TemplateAssetStore
+from src.core.parser.backfill import ParserBackfillService
 from src.core.parser.bootstrap import bootstrap_shared_templates
 from src.core.parser.discovery_assets import bootstrap_discovery_assets
 from src.core.parser.identity import DeviceIdentity
@@ -72,6 +73,32 @@ router = APIRouter(
 
 class ParserDispatchControlRequest(BaseModel):
     enabled: bool
+
+
+class ParserTemplateApprovalRequest(BaseModel):
+    actor: str = "manual-api"
+    reason: str = "approved after parser validation"
+
+
+class ParserTemplateForceActivationRequest(BaseModel):
+    actor: str
+    reason: str
+
+
+class ParserTemplateStatusRequest(BaseModel):
+    actor: str
+    reason: str
+
+
+class ParserBackfillCreateRequest(BaseModel):
+    template_id: str
+    requested_by: str
+    filters: dict[str, Any] | None = None
+
+
+class ParserBackfillCommitRequest(BaseModel):
+    actor: str
+    reason: str
 
 
 class ParserBulkJobDeleteRequest(BaseModel):
@@ -454,7 +481,11 @@ def bulk_delete_jobs(payload: ParserBulkJobDeleteRequest):
 def dispatch_job(job_id: str):
     if not ParserRepository().get_job(job_id):
         raise HTTPException(status_code=404, detail="parser job not found")
-    result = dispatch_ready_parser_jobs(job_id=job_id, limit=1)
+    result = dispatch_ready_parser_jobs(
+        job_id=job_id,
+        limit=1,
+        allow_production=True,
+    )
     if not result["dispatched"]:
         raise HTTPException(
             status_code=409,
@@ -463,6 +494,16 @@ def dispatch_job(job_id: str):
             else "parser job is not ready for dispatch",
         )
     return {"success": True, **result}
+
+
+@router.post("/jobs/{job_id}/sanitize")
+def sanitize_parser_job(job_id: str):
+    samples = ParserRepository().sanitize_pending_samples(job_id=job_id)
+    return {
+        "success": all(bool(item.get("success")) for item in samples),
+        "processed_count": len(samples),
+        "samples": samples,
+    }
 
 
 @router.post("/dispatch")
@@ -482,23 +523,117 @@ def set_dispatch_control(payload: ParserDispatchControlRequest):
 
 
 @router.post("/templates/{template_id}/activate")
-def activate_template(template_id: str):
+def activate_template(
+    template_id: str,
+    payload: ParserTemplateApprovalRequest | None = None,
+):
+    payload = payload or ParserTemplateApprovalRequest()
     try:
-        item = ParserRepository().activate_template(template_id)
+        item = ParserRepository().activate_template(
+            template_id,
+            approved_by=payload.actor,
+            reason=payload.reason,
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return item.to_dict()
 
 
+@router.post("/templates/{template_id}/force-activate")
+def force_activate_template(
+    template_id: str,
+    payload: ParserTemplateForceActivationRequest,
+):
+    try:
+        item = ParserRepository().activate_template(
+            template_id,
+            approved_by=payload.actor,
+            reason=payload.reason,
+            force=True,
+            approval_kind="force_activation",
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return item.to_dict()
+
+
+@router.post("/templates/{template_id}/rollback")
+def rollback_template(
+    template_id: str,
+    payload: ParserTemplateForceActivationRequest,
+):
+    try:
+        item = ParserRepository().rollback_template(
+            template_id,
+            actor=payload.actor,
+            reason=payload.reason,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return item.to_dict()
+
+
+@router.get("/backfills")
+def list_parser_backfills(status: str | None = None):
+    return {"items": ParserBackfillService().list_jobs(status=status)}
+
+
+@router.get("/backfills/{job_id}")
+def get_parser_backfill(job_id: str):
+    item = ParserBackfillService().get_job(job_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Parser backfill job not found")
+    return item
+
+
+@router.post("/backfills")
+def create_parser_backfill(payload: ParserBackfillCreateRequest):
+    try:
+        return ParserBackfillService().create_job(
+            template_id=payload.template_id,
+            requested_by=payload.requested_by,
+            filters=payload.filters,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/backfills/{job_id}/dry-run")
+def execute_parser_backfill_dry_run(job_id: str):
+    try:
+        return ParserBackfillService().execute_dry_run(job_id)
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/backfills/{job_id}/commit")
+def commit_parser_backfill(
+    job_id: str,
+    payload: ParserBackfillCommitRequest,
+):
+    try:
+        return ParserBackfillService().commit(
+            job_id,
+            actor=payload.actor,
+            reason=payload.reason,
+        )
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.post("/templates/{template_id}/reject")
-def reject_template(template_id: str):
-    ParserRepository().set_template_status(template_id, "rejected")
+def reject_template(template_id: str, payload: ParserTemplateStatusRequest):
+    ParserRepository().set_template_status(
+        template_id, "rejected", actor=payload.actor, reason=payload.reason
+    )
     return {"success": True, "template_id": template_id, "status": "rejected"}
 
 
 @router.post("/templates/{template_id}/deprecate")
-def deprecate_template(template_id: str):
-    ParserRepository().set_template_status(template_id, "deprecated")
+def deprecate_template(template_id: str, payload: ParserTemplateStatusRequest):
+    ParserRepository().set_template_status(
+        template_id, "deprecated", actor=payload.actor, reason=payload.reason
+    )
     return {"success": True, "template_id": template_id, "status": "deprecated"}
 
 
@@ -612,6 +747,9 @@ def parser_coverage():
     jobs = repository.list_jobs()
     active = sum(item["status"] == "active" for item in templates)
     open_jobs = [item for item in jobs if item["status"] in OPEN_JOB_STATUSES]
+    backlog = repository.backlog_summary()
+    backfills = ParserBackfillService().list_jobs()
+    governance = repository.governance_alert_summary()
     return {
         "templates_total": len(templates),
         "templates_active": active,
@@ -623,6 +761,14 @@ def parser_coverage():
         "device_profiles": len(repository.list_device_profiles()),
         "identity_signatures": len(repository.list_identity_signatures()),
         "auto_dispatch_enabled": repository.get_auto_dispatch_enabled(),
+        **backlog,
+        "backfills_pending_approval": sum(
+            item["status"] == "pending_approval" for item in backfills
+        ),
+        "backfills_failed": sum(
+            item["status"] in {"validation_failed", "failed"} for item in backfills
+        ),
+        **governance,
     }
 
 

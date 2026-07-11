@@ -40,6 +40,7 @@ from src.infrastructure.db.models import (
     ParserJobSample,
     ParserOutboxEvent,
     ParserTemplateJob,
+    PatrolCollectionResult,
     PatrolDataset,
     PatrolRun,
     RawEvidenceRecord,
@@ -890,6 +891,12 @@ def test_production_import_preserves_evidence_when_parser_fails(tmp_path: Path, 
         assert result["success"] is True
         assert result["production_parser_ready"] is False
         assert result["parse_violations"]
+        candidate_ids = {
+            item["candidate_job_id"]
+            for item in result["parser_results"]
+            if item.get("candidate_job_id")
+        }
+        assert candidate_ids
         with get_db_session() as db:
             snapshots = db.query(CommandSnapshot).filter(CommandSnapshot.run_id == run_id).all()
             assert snapshots
@@ -900,6 +907,37 @@ def test_production_import_preserves_evidence_when_parser_fails(tmp_path: Path, 
                 .count()
             )
             assert evidence_count == len(snapshots)
+            jobs = (
+                db.query(ParserTemplateJob)
+                .filter(ParserTemplateJob.id.in_(candidate_ids))
+                .all()
+            )
+            assert jobs
+            assert {job.source_mode for job in jobs} == {"production"}
+            samples = (
+                db.query(ParserJobSample)
+                .filter(ParserJobSample.job_id.in_(candidate_ids))
+                .all()
+            )
+            assert samples
+            assert {sample.sanitization_status for sample in samples} == {
+                "pending_sanitization"
+            }
+            assert all(sample.sanitized_text is None for sample in samples)
+            collection_results = (
+                db.query(PatrolCollectionResult)
+                .filter(PatrolCollectionResult.run_id == run_id)
+                .all()
+            )
+            assert {row.execution_status for row in collection_results} == {"complete"}
+            assert {row.fact_status for row in collection_results} == {
+                "blocked_by_parser"
+            }
+            assert {
+                row.parser_candidate_id
+                for row in collection_results
+                if row.parser_candidate_id
+            } == candidate_ids
     finally:
         _cleanup_runs(run_id)
 

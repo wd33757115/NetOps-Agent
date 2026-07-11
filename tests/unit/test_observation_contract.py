@@ -164,7 +164,12 @@ def test_parser_template_status_change_deactivates_observation_contract():
             is not None
         )
 
-        repository.set_template_status(template_id, "rejected")
+        repository.set_template_status(
+            template_id,
+            "rejected",
+            actor="reviewer",
+            reason="sample validation rejected",
+        )
 
         assert (
             ObservationContractRepository().get_active(
@@ -174,6 +179,11 @@ def test_parser_template_status_change_deactivates_observation_contract():
             is None
         )
         with get_db_session() as db:
+            template = db.get(ParserTemplate, template_id)
+            audit = template.validation_json["status_audit"][-1]
+            assert audit["actor"] == "reviewer"
+            assert audit["reason"] == "sample validation rejected"
+            assert audit["to_status"] == "rejected"
             row = (
                 db.query(ObservationContractRecord)
                 .filter(ObservationContractRecord.source_template_id == template_id)
@@ -207,7 +217,11 @@ def test_template_activation_deprecates_previous_observation_contract():
             "primary_keys": ["component"],
             "required_fields": ["component", "name"],
             "optional_fields": ["pid", "serial"],
-            "regression_validation": {"passed": True},
+            "regression_validation": {
+                "passed": True,
+                "sample_count": 2,
+                "passed_samples": 2,
+            },
         },
     }
     first_id = repository.register_template(
@@ -221,7 +235,11 @@ def test_template_activation_deprecates_previous_observation_contract():
         asset_path=f"/tmp/template-v2-{token}.textfsm",
     )
     try:
-        repository.activate_template(first_id)
+        repository.activate_template(
+            first_id,
+            approved_by="unit-test",
+            reason="validated first template",
+        )
         assert (
             ObservationContractRepository().get_active(
                 source_type="cli",
@@ -230,7 +248,11 @@ def test_template_activation_deprecates_previous_observation_contract():
             is not None
         )
 
-        repository.activate_template(second_id)
+        repository.activate_template(
+            second_id,
+            approved_by="unit-test",
+            reason="validated replacement template",
+        )
 
         assert (
             ObservationContractRepository().get_active(
@@ -253,11 +275,42 @@ def test_template_activation_deprecates_previous_observation_contract():
                 .one()
             )
             assert first_contract.status == "deprecated"
+            second_template = db.get(ParserTemplate, second_id)
+            assert second_template.validation_json["contract_approved_by"] == "unit-test"
+            assert second_template.validation_json["approval_audit"][-1]["reason"] == (
+                "validated replacement template"
+            )
+
+        repository.rollback_template(
+            first_id,
+            actor="unit-test",
+            reason="rollback rehearsal",
+        )
+        with get_db_session() as db:
+            first_template = db.get(ParserTemplate, first_id)
+            second_template = db.get(ParserTemplate, second_id)
+            assert first_template.status == "active"
+            assert second_template.status == "deprecated"
+            assert first_template.validation_json["approval_audit"][-1]["action"] == "rollback"
+        assert (
+            ObservationContractRepository().get_active(
+                source_type="cli",
+                schema_id=first_id,
+            )
+            is not None
+        )
+        assert (
+            ObservationContractRepository().get_active(
+                source_type="cli",
+                schema_id=second_id,
+            )
+            is None
+        )
     finally:
         with get_db_session() as db:
             db.query(ObservationContractRecord).filter(
                 ObservationContractRecord.source_template_id.in_([first_id, second_id])
             ).delete(synchronize_session=False)
-            db.query(ParserTemplate).filter(
-                ParserTemplate.id.in_([first_id, second_id])
-            ).delete(synchronize_session=False)
+            db.query(ParserTemplate).filter(ParserTemplate.id.in_([first_id, second_id])).delete(
+                synchronize_session=False
+            )

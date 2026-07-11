@@ -34,10 +34,12 @@ from src.infrastructure.db.models import (
     AuditLogRecord,
     ChangePolicyRecord,
     ChangePolicyVersionRecord,
+    ParserJobSample,
     NetworkChangeRecord,
     NetworkEventRecord,
     Notification,
     ParserOutboxEvent,
+    ParserTemplateJob,
     PatrolRun,
 )
 from src.infrastructure.db.postgres import get_db_session
@@ -415,6 +417,58 @@ def test_parser_outbox_claim_has_single_publisher_owner(postgres_available):
     finally:
         with get_db_session() as db:
             db.query(ParserOutboxEvent).filter_by(id=event_id).delete()
+
+
+def test_production_parser_candidate_creation_is_concurrently_deduplicated(postgres_available):
+    del postgres_available
+    token = uuid.uuid4().hex
+    run_id = f"parser-concurrency-{token}"
+    patrol = PatrolRepository()
+    patrol.create_run(run_id=run_id, mode="production", source="fault-injection")
+    snapshot_ids = []
+    for index in range(2):
+        snapshot_id, _ = patrol.save_snapshot_idempotent(
+            run_id=run_id,
+            device_id=f"SW{index + 1}",
+            device_name=f"SW{index + 1}",
+            vendor="H3C",
+            model="S6860-54HF",
+            command="display interface brief",
+            command_canonical="display interface brief",
+            raw_text=f"GE1/0/{index + 1} UP UP\n",
+            parse_status="template_missing",
+            execution_item_id=f"item-{index}-{token}",
+            import_fingerprint=f"fingerprint-{index}-{token}",
+        )
+        snapshot_ids.append(snapshot_id)
+
+    def create(item: tuple[str, str]) -> str:
+        snapshot_id, device_id = item
+        return ParserRepository().create_candidate(
+            job_type="CREATE_TEMPLATE",
+            vendor="H3C",
+            model="S6860-54HF",
+            family="Comware7",
+            command="display interface brief",
+            snapshot_id=snapshot_id,
+            device_id=device_id,
+            failure_code="template_missing",
+        )
+
+    job_ids: list[str] = []
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            job_ids = list(executor.map(create, zip(snapshot_ids, ["SW1", "SW2"])))
+        assert len(set(job_ids)) == 1
+        with get_db_session() as db:
+            assert db.query(ParserJobSample).filter_by(job_id=job_ids[0]).count() == 2
+    finally:
+        with get_db_session() as db:
+            if job_ids:
+                db.query(ParserOutboxEvent).filter_by(aggregate_id=job_ids[0]).delete()
+                db.query(ParserJobSample).filter_by(job_id=job_ids[0]).delete()
+                db.query(ParserTemplateJob).filter_by(id=job_ids[0]).delete()
+            db.query(PatrolRun).filter_by(id=run_id).delete()
 
 
 def test_event_batches_acquire_correlation_locks_in_global_order(postgres_available):

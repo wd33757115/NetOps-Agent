@@ -101,6 +101,11 @@ celery.conf.beat_schedule = {
         "schedule": 10.0,
         "options": {"queue": "netops.default"},
     },
+    "sanitize-parser-samples": {
+        "task": "sanitize_parser_samples",
+        "schedule": 15.0,
+        "options": {"queue": "netops.default"},
+    },
     "publish-network-event-outbox": {
         "task": "publish_network_event_outbox",
         "schedule": 5.0,

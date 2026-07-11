@@ -110,6 +110,8 @@ def persist_patrol_snapshots(
                         device_id=state_device_id,
                         canonical_command=str(command),
                         status=item_status,
+                        execution_status=item_status,
+                        parse_status="not_attempted",
                         failure_code=item_status,
                         observed_at=(item.get("observed_at") if isinstance(item, dict) else None),
                         execution_item_id=(
@@ -182,6 +184,8 @@ def persist_patrol_snapshots(
                     device_id=state_device_id,
                     canonical_command=command,
                     status=str(command_result.get("status") or "failed"),
+                    execution_status=str(command_result.get("status") or "failed"),
+                    parse_status="not_attempted",
                     failure_code=str(command_result.get("status") or "collection_failed"),
                     observed_at=command_result.get("observed_at"),
                     execution_item_id=command_result.get("execution_item_id"),
@@ -205,12 +209,21 @@ def persist_patrol_snapshots(
     collection_status = "completed"
     if imported_devices == 0:
         collection_status = "failed"
-    elif failed_devices or import_errors or snapshot_health != "ready":
+    elif failed_devices or import_errors:
         collection_status = "partial"
+    parser_readiness_status = (
+        "ready"
+        if production_parser_ready
+        else "blocked"
+        if imported_commands > 0 and parsed_commands == 0
+        else "partial"
+    )
     if finalize_run:
         repository.finish_run(
             snapshot_run_id,
             collection_status=collection_status,
+            parser_readiness_status=parser_readiness_status,
+            fact_readiness_status=parser_readiness_status,
             analysis_status="pending",
             baseline_eligible=False,
             metadata={
@@ -230,6 +243,8 @@ def persist_patrol_snapshots(
         "snapshot_errors": import_errors,
         "snapshot_health": snapshot_health,
         "collection_status": collection_status,
+        "parser_readiness_status": parser_readiness_status,
+        "fact_readiness_status": parser_readiness_status,
         "parsed_commands": parsed_commands,
         "failed_parse_commands": failed_parse_commands,
         "coverage_violations": coverage_violations,

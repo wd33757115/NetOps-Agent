@@ -193,6 +193,7 @@ export interface ParserJobItem {
   profile: string
   canonical_command: string
   status: string
+  source_mode: 'parser_validation' | 'production'
   sample_count: number
   attempts: number
   failure_code?: string
@@ -213,7 +214,26 @@ export interface ParserJobSample {
   dataset_id?: string
   device_id: string
   output_signature: string
+  sanitization_status: 'pending_sanitization' | 'sanitized' | 'failed'
+  sanitization_version?: string
+  sanitized_hash?: string
+  redaction_summary_json?: Record<string, number>
   created_at: string
+}
+
+export interface ParserBackfillJob {
+  id: string
+  template_id: string
+  status: string
+  dry_run: boolean
+  filters_json: Record<string, unknown>
+  summary_json?: Record<string, number>
+  requested_by: string
+  approved_by?: string
+  approval_reason?: string
+  last_error?: string
+  created_at: string
+  completed_at?: string
 }
 
 export interface ParserRuleGenerationJob {
@@ -418,6 +438,15 @@ export interface ParserCoverage {
   device_profiles: number
   identity_signatures: number
   auto_dispatch_enabled: boolean
+  production_open_jobs: number
+  pending_sanitization_samples: number
+  sanitized_samples: number
+  sanitization_failed_samples: number
+  backfills_pending_approval: number
+  backfills_failed: number
+  alert_count: number
+  blocked_by_parser_ratio_24h: number
+  alerts: Array<{ code: string; count: number; severity: 'warning' | 'error'; message: string }>
 }
 
 export interface ParserDispatchControl {
@@ -1425,6 +1454,24 @@ export const parserApi = {
     const response = await api.get<{ items: ParserJobItem[] }>('/parser/jobs/')
     return response.data.items
   },
+  backfills: async () => {
+    const response = await api.get<{ items: ParserBackfillJob[] }>('/parser/backfills/')
+    return response.data.items
+  },
+  createBackfill: async (data: {
+    template_id: string
+    requested_by: string
+    filters?: Record<string, unknown>
+  }) => (await api.post<ParserBackfillJob>('/parser/backfills/', data)).data,
+  dryRunBackfill: async (id: string) => (
+    await api.post(`/parser/backfills/${id}/dry-run/`)
+  ).data,
+  commitBackfill: async (id: string, data: { actor: string; reason: string }) => (
+    await api.post(`/parser/backfills/${id}/commit/`, data)
+  ).data,
+  sanitizeJob: async (id: string) => (
+    await api.post(`/parser/jobs/${id}/sanitize/`)
+  ).data,
   ruleGenerationJobs: async () => {
     const response = await api.get<{ items: ParserRuleGenerationJob[] }>('/parser/rule-generation-jobs/')
     return response.data.items
@@ -1538,8 +1585,8 @@ export const parserApi = {
     await api.post('/parser/import-execute/', data)
   ).data,
   activate: async (id: string) => (await api.post(`/parser/templates/${id}/activate/`)).data,
-  reject: async (id: string) => (await api.post(`/parser/templates/${id}/reject/`)).data,
-  deprecate: async (id: string) => (await api.post(`/parser/templates/${id}/deprecate/`)).data,
+  reject: async (id: string) => (await api.post(`/parser/templates/${id}/reject/`, { actor: 'admin-ui', reason: 'Rejected during manual review' })).data,
+  deprecate: async (id: string) => (await api.post(`/parser/templates/${id}/deprecate/`, { actor: 'admin-ui', reason: 'Deprecated during manual review' })).data,
   retryJob: async (id: string) => (await api.post(`/parser/jobs/${id}/retry/`)).data,
   cancelJob: async (id: string) => (await api.post(`/parser/jobs/${id}/cancel/`)).data,
   deleteJob: async (id: string) => (await api.delete(`/parser/jobs/${id}/`)).data,

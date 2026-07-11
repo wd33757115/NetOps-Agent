@@ -30,6 +30,8 @@ def _active_template():
             },
             "contract_version": 1,
             "contract_sha256": "digest-1",
+            "policy_intent": "Track operational status transitions.",
+            "event_intent": "Generate InterfaceDown and InterfaceUp candidates.",
         },
     )
 
@@ -64,6 +66,8 @@ def _active_optical_template():
             },
             "contract_version": 1,
             "contract_sha256": "digest-optical-1",
+            "policy_intent": "Use warning thresholds including -17 dBm.",
+            "event_intent": "Generate OpticalRxPowerLow recovery candidates.",
         },
     )
 
@@ -178,6 +182,44 @@ def test_publish_parser_outbox_seeds_rule_asset_generation(monkeypatch):
     assert result["rule_asset_seeds"] == [
         {"success": True, "created": True, "job": {"id": "job-1"}}
     ]
+
+
+def test_parser_outbox_releases_claim_when_rule_seed_fails(monkeypatch):
+    released = []
+
+    class FakeOutboxRow:
+        id = "event-1"
+        event_type = "parser.template.activated"
+        aggregate_id = "template-1"
+        claim_token = "claim-1"
+        payload_json = {"template_id": "template-1"}
+
+    class FakeRepository:
+        def claim_pending_outbox(self):
+            return [FakeOutboxRow()]
+
+        def release_outbox_claim(self, event_id, *, claim_token, error):
+            released.append((event_id, claim_token, error))
+
+        def mark_outbox_published(self, *_args, **_kwargs):
+            raise AssertionError("failed rule seed must remain pending")
+
+    class FakeSeedService:
+        def __init__(self, *, parser_repository):
+            assert isinstance(parser_repository, FakeRepository)
+
+        def seed_from_template(self, _template_id):
+            raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(parser_tasks, "ParserRepository", FakeRepository)
+    monkeypatch.setattr(parser_tasks, "RuleAssetTemplateActivationService", FakeSeedService)
+    monkeypatch.setattr(parser_tasks.EventBus, "publish", lambda *_args, **_kwargs: "msg-1")
+
+    result = parser_tasks.publish_parser_outbox()
+
+    assert result["published"] == []
+    assert released == [("event-1", "claim-1", "database unavailable")]
+    assert result["rule_asset_seeds"][0]["reason"] == "rule_asset_seed_failed"
 
 
 def test_generation_context_requires_sanitized_records_and_rejects_raw_fields():

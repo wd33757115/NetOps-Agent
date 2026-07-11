@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-import time
 import threading
+import time
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
@@ -16,6 +16,12 @@ from sqlalchemy.exc import IntegrityError
 
 from src.core.evidence import RawEvidenceRepository, evidence_id_for_command_snapshot
 from src.core.patrol.domain import SnapshotRecord
+from src.core.patrol.statuses import (
+    PatrolCommandStatus,
+    derive_command_status,
+    readiness_status,
+    validate_command_status,
+)
 from src.infrastructure.db.models import (
     CommandSnapshot,
     NetworkDevice,
@@ -363,9 +369,7 @@ class PatrolRepository:
         """Atomically decide and reserve a redelivered patrol attempt."""
         now = _utcnow()
         with get_db_session() as db:
-            digest = hashlib.sha256(
-                f"patrol-attempt-v1|{logical_run_id}".encode()
-            ).digest()
+            digest = hashlib.sha256(f"patrol-attempt-v1|{logical_run_id}".encode()).digest()
             db.execute(
                 text("SELECT pg_advisory_xact_lock(:lock_id)"),
                 {"lock_id": int.from_bytes(digest[:8], "big", signed=True)},
@@ -454,9 +458,7 @@ class PatrolRepository:
                 owner_token=owner_token,
             )
 
-    def mark_celery_task_completed(
-        self, run_id: str, *, owner_token: str | None = None
-    ) -> None:
+    def mark_celery_task_completed(self, run_id: str, *, owner_token: str | None = None) -> None:
         with get_db_session() as db:
             row = db.get(PatrolRun, run_id)
             if row is None:
@@ -478,6 +480,8 @@ class PatrolRepository:
         run_id: str,
         *,
         collection_status: str = "completed",
+        parser_readiness_status: str | None = None,
+        fact_readiness_status: str | None = None,
         analysis_status: str | None = None,
         baseline_eligible: bool | None = None,
         metadata: dict[str, Any] | None = None,
@@ -497,6 +501,19 @@ class PatrolRepository:
             row.device_count = int(counts[1] or 0)
             row.status = collection_status
             row.collection_status = collection_status
+            collection_rows = (
+                db.query(PatrolCollectionResult)
+                .filter(PatrolCollectionResult.run_id == run_id)
+                .all()
+            )
+            row.parser_readiness_status = parser_readiness_status or readiness_status(
+                [item.parse_status for item in collection_rows],
+                ready={"parsed", "parse_empty", "ignored"},
+            )
+            row.fact_readiness_status = fact_readiness_status or readiness_status(
+                [item.fact_status for item in collection_rows],
+                ready={"ready", "empty", "ignored"},
+            )
             if analysis_status is not None:
                 row.analysis_status = analysis_status
             if baseline_eligible is not None:
@@ -527,6 +544,15 @@ class PatrolRepository:
             if row is None:
                 raise ValueError(f"patrol run not found: {run_id}")
             row.analysis_status = analysis_status
+            collection_rows = (
+                db.query(PatrolCollectionResult)
+                .filter(PatrolCollectionResult.run_id == run_id)
+                .all()
+            )
+            row.fact_readiness_status = readiness_status(
+                [item.fact_status for item in collection_rows],
+                ready={"ready", "empty", "ignored"},
+            )
             if baseline_eligible is not None:
                 row.baseline_eligible = baseline_eligible
             if metadata:
@@ -543,9 +569,7 @@ class PatrolRepository:
         lease_seconds: int = 900,
     ) -> dict[str, Any]:
         scope_hash = hashlib.sha256(
-            json.dumps(scope, sort_keys=True, separators=(",", ":"), default=str).encode(
-                "utf-8"
-            )
+            json.dumps(scope, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
         ).hexdigest()
         bundle_digest = hashlib.sha256(
             json.dumps(
@@ -585,9 +609,7 @@ class PatrolRepository:
                     "rule_bundle_digest": row.rule_bundle_digest,
                     "result": dict(row.result_json or {}),
                 }
-            if row is not None and row.status == "running" and _lease_is_live(
-                row.lease_until, now
-            ):
+            if row is not None and row.status == "running" and _lease_is_live(row.lease_until, now):
                 return {
                     "reused": False,
                     "in_progress": True,
@@ -701,8 +723,7 @@ class PatrolRepository:
                 .update(
                     {
                         "heartbeat_at": now,
-                        "lease_until": now
-                        + timedelta(seconds=max(30, int(lease_seconds))),
+                        "lease_until": now + timedelta(seconds=max(30, int(lease_seconds))),
                         "updated_at": now,
                     },
                     synchronize_session=False,
@@ -770,11 +791,16 @@ class PatrolRepository:
                 row.updated_at = now
                 run = db.get(PatrolRun, row.run_id)
                 updates_run_status = bool((row.scope_json or {}).get("full_run", True))
-                if run is not None and updates_run_status and run.analysis_status in {
-                    "normalizing",
-                    "detecting",
-                    "building_events",
-                }:
+                if (
+                    run is not None
+                    and updates_run_status
+                    and run.analysis_status
+                    in {
+                        "normalizing",
+                        "detecting",
+                        "building_events",
+                    }
+                ):
                     run.analysis_status = "failed"
                     run.baseline_eligible = False
                     run.metadata_json = {
@@ -797,7 +823,12 @@ class PatrolRepository:
         run_id: str,
         device_id: str,
         canonical_command: str,
-        status: str,
+        status: str | None = None,
+        execution_status: str | None = None,
+        parse_status: str | None = None,
+        fact_status: str | None = None,
+        normalization_status: str | None = None,
+        parser_candidate_id: str | None = None,
         inventory_device_id: str | None = None,
         authoritative_for_deletion: bool = False,
         baseline_eligible: bool = False,
@@ -809,9 +840,43 @@ class PatrolRepository:
         owner_token: str | None = None,
     ) -> str:
         normalized_command = " ".join(str(canonical_command).strip().lower().split())
-        execution_item_id = execution_item_id or hashlib.sha256(
-            f"collection-result-v1|{run_id}|{device_id}|{normalized_command}".encode()
-        ).hexdigest()
+        legacy_status = str(status or "").strip().lower()
+        if execution_status is None:
+            execution_status = (
+                legacy_status
+                if legacy_status in {"complete", "completed", "failed", "timeout", "cancelled"}
+                else "complete"
+                if legacy_status in {"parsed", "empty", "ignored"}
+                else "failed"
+            )
+        if parse_status is None:
+            parse_status = {
+                "parsed": "parsed",
+                "empty": "parse_empty",
+                "ignored": "ignored",
+            }.get(legacy_status, "not_attempted")
+        derived = derive_command_status(
+            execution_status=execution_status,
+            parse_status=parse_status,
+        )
+        command_status = PatrolCommandStatus(
+            execution_status=derived.execution_status,
+            parse_status=derived.parse_status,
+            fact_status=fact_status or derived.fact_status,
+            normalization_status=normalization_status or derived.normalization_status,
+        )
+        validate_command_status(command_status)
+        if (authoritative_for_deletion or baseline_eligible) and command_status.fact_status not in {
+            "ready",
+            "empty",
+        }:
+            raise ValueError("collection result without ready facts cannot have baseline authority")
+        execution_item_id = (
+            execution_item_id
+            or hashlib.sha256(
+                f"collection-result-v1|{run_id}|{device_id}|{normalized_command}".encode()
+            ).hexdigest()
+        )
         with get_db_session() as db:
             self._require_collection_owner(db, run_id, owner_token)
             row = (
@@ -835,7 +900,13 @@ class PatrolRepository:
                 )
                 db.add(row)
             row.inventory_device_id = inventory_device_id or row.inventory_device_id
-            row.status = status
+            # Deprecated compatibility projection. New readers use the four dimensions.
+            row.status = command_status.execution_status
+            row.execution_status = command_status.execution_status
+            row.parse_status = command_status.parse_status
+            row.fact_status = command_status.fact_status
+            row.normalization_status = command_status.normalization_status
+            row.parser_candidate_id = parser_candidate_id or row.parser_candidate_id
             row.authoritative_for_deletion = bool(authoritative_for_deletion)
             row.baseline_eligible = bool(baseline_eligible)
             row.observed_entity_count = observed_entity_count
@@ -845,6 +916,40 @@ class PatrolRepository:
             row.updated_at = now
             db.flush()
             return row.id
+
+    def update_collection_normalization_status(
+        self,
+        *,
+        run_id: str,
+        snapshot_id: str,
+        normalization_status: str,
+        fact_status: str | None = None,
+        failure_code: str | None = None,
+    ) -> None:
+        if normalization_status not in {"normalized", "empty", "skipped", "blocked", "failed"}:
+            raise ValueError(f"unsupported normalization_status: {normalization_status}")
+        with get_db_session() as db:
+            snapshot = db.get(CommandSnapshot, snapshot_id)
+            if snapshot is None or snapshot.run_id != run_id:
+                return
+            device_id = str(snapshot.inventory_device_id or snapshot.device_id)
+            row = (
+                db.query(PatrolCollectionResult)
+                .filter(
+                    PatrolCollectionResult.run_id == run_id,
+                    PatrolCollectionResult.device_id == device_id,
+                    PatrolCollectionResult.execution_item_id == snapshot.execution_item_id,
+                )
+                .first()
+            )
+            if row is None:
+                return
+            row.normalization_status = normalization_status
+            if fact_status is not None:
+                row.fact_status = fact_status
+            if failure_code is not None:
+                row.failure_code = failure_code
+            row.updated_at = _utcnow()
 
     def list_collection_results(self, run_id: str) -> list[dict[str, Any]]:
         with get_db_session() as db:
@@ -907,7 +1012,15 @@ class PatrolRepository:
                     created_at=_utcnow(),
                 )
                 db.add(row)
-            row.status = "analysis_failed"
+                row.execution_status = "complete"
+                row.parse_status = snapshot.parse_status or "parsed"
+            row.status = row.execution_status or "complete"
+            row.fact_status = (
+                "blocked_by_contract"
+                if failure_code in {"contract_version_unavailable", "entity_key_invalid"}
+                else "normalization_failed"
+            )
+            row.normalization_status = "failed"
             row.authoritative_for_deletion = False
             row.baseline_eligible = False
             row.failure_code = failure_code
@@ -957,12 +1070,15 @@ class PatrolRepository:
         raw_hash = hashlib.sha256((raw_text or "").encode("utf-8")).hexdigest()
         status = parse_status or ("parsed" if structured_json is not None else "raw_only")
         snapshot_id = snapshot_id or str(uuid.uuid4())
-        execution_item_id = execution_item_id or hashlib.sha256(
-            (
-                f"command-snapshot-item-v1|{run_id}|{device_id}|"
-                f"{command_canonical}|{start_line or 0}"
-            ).encode()
-        ).hexdigest()
+        execution_item_id = (
+            execution_item_id
+            or hashlib.sha256(
+                (
+                    f"command-snapshot-item-v1|{run_id}|{device_id}|"
+                    f"{command_canonical}|{start_line or 0}"
+                ).encode()
+            ).hexdigest()
+        )
         try:
             with get_db_session() as db:
                 self._require_collection_owner(db, run_id, owner_token)

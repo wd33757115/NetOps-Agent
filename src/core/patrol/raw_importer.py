@@ -11,6 +11,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from src.common.config import get_settings
 from src.core.parser.identity import DeviceIdentityResolver
 from src.core.parser.runtime import ParserRuntime, ParserRuntimeResult
 from src.core.patrol.command_splitter import (
@@ -24,6 +25,7 @@ from src.core.patrol.modes import (
     normalize_patrol_mode,
 )
 from src.core.patrol.repository import PatrolRepository
+from src.core.patrol.statuses import derive_command_status, normalize_execution_status
 from src.infrastructure.db.postgres import require_postgres_connection
 
 
@@ -275,9 +277,7 @@ def import_raw_capture(
     run_owner_token: str | None = None,
     inventory_device_id: str | None = None,
     collector_complete: bool | None = None,
-    command_collection_statuses: (
-        dict[str, dict[str, Any]] | list[dict[str, Any]] | None
-    ) = None,
+    command_collection_statuses: (dict[str, dict[str, Any]] | list[dict[str, Any]] | None) = None,
     finalize_run: bool = True,
 ) -> dict[str, Any]:
     require_postgres_connection()
@@ -366,15 +366,10 @@ def import_raw_capture(
         canonical = " ".join(str(item.get("command") or "").strip().lower().split())
         status_queues.setdefault(canonical, []).append(item)
     block_collection_statuses = [
-        (status_queues.get(block.command_canonical) or [{}]).pop(0)
-        for block, _ in parsed_blocks
+        (status_queues.get(block.command_canonical) or [{}]).pop(0) for block, _ in parsed_blocks
     ]
     command_observed_ats = [
-        (
-            command_collection.get("observed_at")
-            or observed_at
-            or inspected.observed_at_text
-        )
+        (command_collection.get("observed_at") or observed_at or inspected.observed_at_text)
         for (block, _), command_collection in zip(
             parsed_blocks, block_collection_statuses, strict=True
         )
@@ -568,46 +563,62 @@ def import_raw_capture(
         if not snapshot_created:
             duplicate_snapshot_ids.append(snapshot_id)
         candidate_job_id = None
+        candidate_error = None
+        candidate_failure_codes = {
+            "template_missing",
+            "template_parse_error",
+            "unexpected_empty",
+            "required_fields_missing",
+            "field_validation_failed",
+            "primary_key_invalid",
+            "primary_key_duplicate",
+            "asset_hash_mismatch",
+        }
+        should_create_candidate = snapshot_created and (
+            mode == PARSER_VALIDATION_MODE
+            or (
+                mode == PRODUCTION_MODE
+                and get_settings().PRODUCTION_PARSER_BACKLOG_ENABLED
+                and parse_status in {"template_missing", "parse_failed"}
+            )
+        )
         if (
-            snapshot_created
-            and mode == PARSER_VALIDATION_MODE
-            and parsed.failure_code
-            in {
-                "template_missing",
-                "template_parse_error",
-                "unexpected_empty",
-                "required_fields_missing",
-                "field_validation_failed",
-                "primary_key_invalid",
-                "primary_key_duplicate",
-                "asset_hash_mismatch",
-            }
+            should_create_candidate
+            and (
+                parsed.failure_code in candidate_failure_codes
+                or mode == PRODUCTION_MODE
+            )
             and not _non_repairable_output(block.raw_output)
         ):
             from src.core.parser.repository import ParserRepository
 
-            candidate_job_id = ParserRepository().create_candidate(
-                job_type=(
-                    "CREATE_TEMPLATE"
-                    if parsed.failure_code == "template_missing"
-                    else "REPAIR_TEMPLATE"
-                ),
-                vendor=identity.vendor or "",
-                model=identity.model or "",
-                family=identity.family,
-                command=parsed.canonical_command,
-                snapshot_id=snapshot_id,
-                device_id=device_id,
-                raw_text=block.raw_output,
-                failure_code=parsed.failure_code,
-                dataset_id=dataset_id,
-            )
+            try:
+                candidate_job_id = ParserRepository().create_candidate(
+                    job_type=(
+                        "CREATE_TEMPLATE"
+                        if parse_status == "template_missing"
+                        else "REPAIR_TEMPLATE"
+                    ),
+                    vendor=identity.vendor or "",
+                    model=identity.model or "",
+                    family=identity.family,
+                    command=parsed.canonical_command,
+                    snapshot_id=snapshot_id,
+                    device_id=device_id,
+                    failure_code=parsed.failure_code,
+                    dataset_id=dataset_id,
+                )
+            except Exception as exc:
+                if mode != PRODUCTION_MODE:
+                    raise
+                candidate_error = f"{type(exc).__name__}: {exc}"
         parser_results.append(
             {
                 "snapshot_id": snapshot_id,
                 "command": block.command_canonical,
                 "parse_status": parse_status,
                 "candidate_job_id": candidate_job_id,
+                "candidate_error": candidate_error,
             }
         )
         if isinstance(structured, list):
@@ -616,11 +627,14 @@ def import_raw_capture(
             entity_count = 1
         else:
             entity_count = None
-        collection_status = {
-            "parsed": "complete",
-            "parse_empty": "empty",
-            "ignored": "ignored",
-        }.get(parse_status, "failed")
+        execution_status = normalize_execution_status(
+            command_collection.get("status")
+            or ("failed" if collector_complete is False else "complete")
+        )
+        command_status = derive_command_status(
+            execution_status=execution_status,
+            parse_status=parse_status,
+        )
         command_complete = (
             command_collection.get("status") == "complete"
             if command_collection
@@ -632,7 +646,12 @@ def import_raw_capture(
             inventory_device_id=inventory_device_id,
             device_id=str(inventory_device_id or device_id),
             canonical_command=block.command_canonical,
-            status=collection_status,
+            status=command_status.execution_status,
+            execution_status=command_status.execution_status,
+            parse_status=command_status.parse_status,
+            fact_status=command_status.fact_status,
+            normalization_status=command_status.normalization_status,
+            parser_candidate_id=candidate_job_id,
             authoritative_for_deletion=authoritative,
             baseline_eligible=authoritative,
             observed_entity_count=entity_count,
@@ -641,6 +660,10 @@ def import_raw_capture(
             execution_item_id=command_collection.get("execution_item_id"),
             metadata={
                 "parse_status": parse_status,
+                "execution_status": command_status.execution_status,
+                "fact_status": command_status.fact_status,
+                "normalization_status": command_status.normalization_status,
+                "parser_candidate_error": candidate_error,
                 "snapshot_id": snapshot_id,
                 "collector_complete": command_complete,
                 "collection_item_id": command_collection.get("collection_item_id"),
@@ -648,10 +671,38 @@ def import_raw_capture(
             },
             owner_token=run_owner_token,
         )
+    execution_statuses = [
+        normalize_execution_status(
+            item.get("status") or ("failed" if collector_complete is False else "complete")
+        )
+        for item in block_collection_statuses
+    ]
+    if not execution_statuses:
+        run_collection_status = "failed"
+    elif all(status == "complete" for status in execution_statuses):
+        run_collection_status = "completed"
+    elif any(status == "complete" for status in execution_statuses):
+        run_collection_status = "partial"
+    else:
+        run_collection_status = "failed"
+    parser_readiness_status = (
+        "ready"
+        if not blocking and not parse_violations
+        else "blocked"
+        if parsed_blocks
+        and all(
+            parsed.parser_status not in {"success", "empty"}
+            for _, parsed in parsed_blocks
+            if parsed.policy_status == "eligible"
+        )
+        else "partial"
+    )
     if finalize_run:
         repository.finish_run(
             rid,
-            collection_status=("completed" if not blocking and not parse_violations else "partial"),
+            collection_status=run_collection_status,
+            parser_readiness_status=parser_readiness_status,
+            fact_readiness_status=parser_readiness_status,
             analysis_status="pending",
             baseline_eligible=False,
             owner_token=run_owner_token,
@@ -680,6 +731,9 @@ def import_raw_capture(
         "coverage_violations": blocking,
         "parse_violations": parse_violations,
         "production_parser_ready": not (mode == PRODUCTION_MODE and (blocking or parse_violations)),
+        "collection_status": run_collection_status,
+        "parser_readiness_status": parser_readiness_status,
+        "fact_readiness_status": parser_readiness_status,
         "parser_results": parser_results,
     }
 

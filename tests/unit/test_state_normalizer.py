@@ -6,15 +6,16 @@ from src.core.patrol.change_detector import (
     detect_changes_from_params,
     detect_observation_changes_against_history,
 )
+from src.core.patrol.repository import AnalysisAttemptInProgressError
 from src.core.state import normalizer
 from src.core.state.domain import StateObservation
 from src.core.state.normalizer import (
+    _build_snapshot_normalization,
     normalize_run,
     normalize_snapshot,
     observations_from_snapshot,
 )
 from src.core.state.repository import StateRepository
-from src.core.patrol.repository import AnalysisAttemptInProgressError
 
 
 class _AnalysisPatrolRepository:
@@ -57,6 +58,49 @@ def _install_analysis_runtime(monkeypatch):
         "src.core.patrol.change_detector.PatrolRepository",
         _AnalysisPatrolRepository,
     )
+
+
+@pytest.mark.parametrize(
+    ("parse_status", "normalization_status", "fact_status", "reason"),
+    [
+        ("template_missing", "blocked", "blocked_by_parser", "blocked_by_parser"),
+        ("parse_failed", "blocked", "blocked_by_parser", "blocked_by_parser"),
+        ("identity_unknown", "blocked", "blocked_by_identity", "blocked_by_identity"),
+        ("ignored", "skipped", "ignored", "ignored_by_policy"),
+        ("parse_empty", "empty", "empty", "legitimate_empty"),
+    ],
+)
+def test_normalizer_classifies_zero_observation_snapshots(
+    parse_status,
+    normalization_status,
+    fact_status,
+    reason,
+):
+    class FakeRepository:
+        def get_snapshot_context(self, snapshot_id):
+            return {
+                "mode": "production",
+                "source": "test",
+                "dataset_id": None,
+                "snapshot": {
+                    "id": snapshot_id,
+                    "run_id": "run-1",
+                    "parse_status": parse_status,
+                    "structured_json": [] if parse_status == "parse_empty" else None,
+                },
+            }
+
+    result, observations, _ = _build_snapshot_normalization(
+        FakeRepository(),
+        "snapshot-1",
+        update_current_state=None,
+    )
+
+    assert result["success"] is True
+    assert result["normalization_status"] == normalization_status
+    assert result["fact_status"] == fact_status
+    assert result["no_observation_reason"] == reason
+    assert observations == []
 
 
 def _state_observation(observed_at: str, value: str = "up") -> StateObservation:
@@ -493,6 +537,7 @@ def test_normalize_run_can_limit_to_selected_devices(monkeypatch):
 
 def test_observation_change_detector_uses_observation_ids(monkeypatch):
     _install_analysis_runtime(monkeypatch)
+
     class FakeRepository:
         def list_run_observations(self, run_id):
             return [
@@ -789,6 +834,7 @@ def test_observation_change_detector_uses_active_change_policy(monkeypatch):
 
 def test_observation_change_detector_emits_threshold_crossing_with_policy(monkeypatch):
     _install_analysis_runtime(monkeypatch)
+
     class FakePolicyRepository:
         def get_active_policy(self, observation_type):
             return {
@@ -989,23 +1035,17 @@ def test_change_detection_input_revision_includes_prior_observations(monkeypatch
                 "rule_bundle_digest": "digest",
             }
 
-    monkeypatch.setattr(
-        "src.core.patrol.change_detector.StateRepository", FakeStateRepository
-    )
+    monkeypatch.setattr("src.core.patrol.change_detector.StateRepository", FakeStateRepository)
     monkeypatch.setattr(
         "src.core.patrol.change_detector.ChangePolicyRepository", FakePolicyRepository
     )
-    monkeypatch.setattr(
-        "src.core.patrol.change_detector.PatrolRepository", FakePatrolRepository
-    )
+    monkeypatch.setattr("src.core.patrol.change_detector.PatrolRepository", FakePatrolRepository)
 
     with pytest.raises(AnalysisAttemptInProgressError):
         detect_observation_changes_against_history(
             current_run_id="run-current", previous_run_id="run-previous"
         )
-    prior.append(
-        {"id": "prior-2", "snapshot_id": "snapshot-p2", "observed_at": "2026-01-01"}
-    )
+    prior.append({"id": "prior-2", "snapshot_id": "snapshot-p2", "observed_at": "2026-01-01"})
     with pytest.raises(AnalysisAttemptInProgressError):
         detect_observation_changes_against_history(
             current_run_id="run-current", previous_run_id="run-previous"
