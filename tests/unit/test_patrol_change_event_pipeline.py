@@ -514,7 +514,7 @@ def test_event_repository_dedupes_active_event_and_resolves_recovery():
 
         recovery_events = build_events_from_changes(recovery_change)
         assert [event.event_type for event in recovery_events] == ["CPURecovered"]
-        assert repository.save_events(recovery_events) == 1
+        assert repository.save_events(recovery_events) == 0
 
         with get_db_session() as db:
             high = (
@@ -525,28 +525,27 @@ def test_event_repository_dedupes_active_event_and_resolves_recovery():
                 )
                 .one()
             )
-            recovered = (
+            assert (
                 db.query(NetworkEventRecord)
                 .filter(
                     NetworkEventRecord.run_id == run_id,
                     NetworkEventRecord.event_type == "CPURecovered",
                 )
-                .one()
+                .count()
+                == 0
             )
             assert high.status == "resolved"
             assert high.payload_json["latest_source_change_id"] == "change-high-1"
             assert high.payload_json["recovered_by_event_type"] == "CPURecovered"
-            assert recovered.status == "resolved"
-            assert recovered.payload_json["event_class"] == "recovery"
             outbox_rows = (
                 db.query(NetworkEventOutboxRecord)
-                .filter(NetworkEventOutboxRecord.event_id.in_([high.id, recovered.id]))
+                .filter(NetworkEventOutboxRecord.event_id == high.id)
                 .all()
             )
-            assert len(outbox_rows) == 4
+            assert len(outbox_rows) == 3
             assert {row.status for row in outbox_rows} == {"pending"}
             publication_kinds = [row.payload_json["publication_kind"] for row in outbox_rows]
-            assert publication_kinds.count("opening") == 2
+            assert publication_kinds.count("opening") == 1
             assert publication_kinds.count("recurrence") == 1
             assert publication_kinds.count("recovery") == 1
     finally:

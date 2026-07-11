@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
+import threading
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
@@ -74,6 +76,7 @@ class RedeliveryDecision:
     attempt_number: int
     run_id: str
     reason: str
+    owner_token: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -87,13 +90,81 @@ class AnalysisAttemptInProgressError(RuntimeError):
     """Raised when another owner still holds a live analysis lease."""
 
 
+class PatrolRunFencedError(RuntimeError):
+    """Raised when a stale collection owner attempts to mutate a patrol run."""
+
+
 def _compact_analysis_result(result: dict[str, Any]) -> dict[str, Any]:
     omitted = {"changes", "events", "results"}
     return {key: value for key, value in result.items() if key not in omitted}
 
 
+class AnalysisLeaseHeartbeat:
+    """Wall-clock lease renewal independent of analysis item throughput."""
+
+    def __init__(
+        self,
+        repository: PatrolRepository,
+        attempt: dict[str, Any],
+        *,
+        interval_seconds: float = 30.0,
+    ) -> None:
+        self._repository = repository
+        self._attempt = attempt
+        self._interval = max(1.0, float(interval_seconds))
+        self._last_heartbeat = time.monotonic()
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self) -> AnalysisLeaseHeartbeat:
+        self._thread.start()
+        return self
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=min(5.0, self._interval))
+
+    def __call__(self, *, force: bool = False) -> None:
+        now = time.monotonic()
+        if not force and now - self._last_heartbeat < self._interval:
+            return
+        with self._lock:
+            now = time.monotonic()
+            if not force and now - self._last_heartbeat < self._interval:
+                return
+            self._repository.touch_analysis_attempt(
+                str(self._attempt["attempt_id"]),
+                attempt_number=int(self._attempt["attempt_number"]),
+                owner_token=str(self._attempt["owner_token"]),
+            )
+            self._last_heartbeat = now
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._interval):
+            try:
+                self(force=True)
+            except AnalysisAttemptFencedError:
+                return
+            except Exception:
+                continue
+
+
 class PatrolRepository:
     """Authoritative PostgreSQL patrol data-plane repository."""
+
+    @staticmethod
+    def _require_collection_owner(db, run_id: str, owner_token: str | None) -> PatrolRun:
+        row = db.query(PatrolRun).filter(PatrolRun.id == run_id).with_for_update().one_or_none()
+        if row is None:
+            raise ValueError(f"patrol run not found: {run_id}")
+        if row.owner_token is None and owner_token is None and row.status != "abandoned":
+            return row
+        if row.status != "running":
+            raise PatrolRunFencedError(f"patrol run no longer accepts collection writes: {run_id}")
+        if row.owner_token is not None and row.owner_token != owner_token:
+            raise PatrolRunFencedError(f"patrol run collection owner was fenced: {run_id}")
+        return row
 
     def ensure_dataset(
         self,
@@ -140,6 +211,8 @@ class PatrolRepository:
         attempt_number: int = 0,
         worker_id: str | None = None,
         lease_seconds: int | None = None,
+        owner_token: str | None = None,
+        owner_generation: int = 1,
     ) -> str:
         run_id = run_id or str(uuid.uuid4())
         with get_db_session() as db:
@@ -159,6 +232,8 @@ class PatrolRepository:
                     or ("parser_validation" if mode == "parser_validation" else "scheduled_patrol"),
                     logical_run_id=logical_run_id or run_id,
                     attempt_number=max(0, int(attempt_number)),
+                    owner_generation=max(1, int(owner_generation)),
+                    owner_token=owner_token,
                     worker_id=worker_id,
                     heartbeat_at=now,
                     lease_until=(
@@ -183,6 +258,8 @@ class PatrolRepository:
                     if row.worker_id and worker_id and row.worker_id != worker_id:
                         raise ValueError("reserved patrol attempt belongs to another worker")
                     now = _utcnow()
+                    if row.owner_token is not None and row.owner_token != owner_token:
+                        raise PatrolRunFencedError("reserved patrol attempt owner token mismatch")
                     row.status = "running"
                     row.collection_status = "running"
                     row.analysis_status = "pending"
@@ -199,8 +276,14 @@ class PatrolRepository:
                         else row.lease_until
                     )
                     row.started_at = _as_datetime(started_at)
+                    row.metadata_json = {
+                        **(row.metadata_json or {}),
+                        "attempt_reserved": False,
+                    }
                 elif row.worker_id and worker_id and row.worker_id != worker_id:
                     raise ValueError("patrol attempt belongs to another worker")
+                elif row.owner_token is not None and row.owner_token != owner_token:
+                    raise PatrolRunFencedError("patrol attempt owner token mismatch")
                 if row.mode != mode or row.source != source:
                     raise ValueError(
                         "existing patrol run identity does not match requested source/mode"
@@ -216,16 +299,17 @@ class PatrolRepository:
         lease_seconds: int,
         worker_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        owner_token: str | None = None,
     ) -> None:
         now = _utcnow()
         with get_db_session() as db:
-            row = db.get(PatrolRun, run_id)
-            if row is None or row.status != "running":
-                return
+            row = self._require_collection_owner(db, run_id, owner_token)
             row.heartbeat_at = now
             row.last_progress_at = now
             row.lease_until = now + timedelta(seconds=max(30, int(lease_seconds)))
             if worker_id:
+                if row.worker_id and row.worker_id != worker_id:
+                    raise PatrolRunFencedError(f"patrol run worker was fenced: {run_id}")
                 row.worker_id = worker_id
             if metadata:
                 row.metadata_json = {**(row.metadata_json or {}), **metadata}
@@ -305,16 +389,8 @@ class PatrolRepository:
                     attempt_number=int(latest.attempt_number or 0),
                     run_id=latest.id,
                     reason="broker_redelivered_after_terminal_collection_commit",
+                    owner_token=latest.owner_token,
                 )
-            if latest is not None and latest.status in {"reserved", "running"}:
-                lease_is_live = _lease_is_live(latest.lease_until, now)
-                if lease_is_live and (latest.metadata_json or {}).get("attempt_reserved"):
-                    return RedeliveryDecision(
-                        action="attempt_in_progress",
-                        attempt_number=int(latest.attempt_number or 0),
-                        run_id=latest.id,
-                        reason="a_redelivery_attempt_already_owns_execution",
-                    )
             next_attempt = (
                 max(
                     [int(row.attempt_number or 0) for row in rows],
@@ -341,6 +417,7 @@ class PatrolRepository:
                 }
                 row.updated_at = now
             run_id = f"{logical_run_id}-attempt-{next_attempt}"
+            owner_token = uuid.uuid4().hex
             db.add(
                 PatrolRun(
                     id=run_id,
@@ -353,6 +430,8 @@ class PatrolRepository:
                     run_purpose="scheduled_patrol",
                     logical_run_id=logical_run_id,
                     attempt_number=next_attempt,
+                    owner_generation=next_attempt + 1,
+                    owner_token=owner_token,
                     worker_id=worker_id,
                     heartbeat_at=now,
                     lease_until=now + timedelta(seconds=max(30, int(lease_seconds))),
@@ -372,13 +451,20 @@ class PatrolRepository:
                 attempt_number=next_attempt,
                 run_id=run_id,
                 reason="worker_lost_attempt_replaced",
+                owner_token=owner_token,
             )
 
-    def mark_celery_task_completed(self, run_id: str) -> None:
+    def mark_celery_task_completed(
+        self, run_id: str, *, owner_token: str | None = None
+    ) -> None:
         with get_db_session() as db:
             row = db.get(PatrolRun, run_id)
             if row is None:
                 return
+            if row.owner_token is not None and row.owner_token != owner_token:
+                raise PatrolRunFencedError(
+                    f"patrol run completion marker owner was fenced: {run_id}"
+                )
             now = _utcnow()
             row.metadata_json = {
                 **(row.metadata_json or {}),
@@ -395,11 +481,10 @@ class PatrolRepository:
         analysis_status: str | None = None,
         baseline_eligible: bool | None = None,
         metadata: dict[str, Any] | None = None,
+        owner_token: str | None = None,
     ) -> None:
         with get_db_session() as db:
-            row = db.get(PatrolRun, run_id)
-            if row is None:
-                raise ValueError(f"patrol run not found: {run_id}")
+            row = self._require_collection_owner(db, run_id, owner_token)
             counts = (
                 db.query(
                     func.count(CommandSnapshot.id),
@@ -721,12 +806,14 @@ class PatrolRepository:
         observed_at: str | datetime | None = None,
         execution_item_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        owner_token: str | None = None,
     ) -> str:
         normalized_command = " ".join(str(canonical_command).strip().lower().split())
         execution_item_id = execution_item_id or hashlib.sha256(
             f"collection-result-v1|{run_id}|{device_id}|{normalized_command}".encode()
         ).hexdigest()
         with get_db_session() as db:
+            self._require_collection_owner(db, run_id, owner_token)
             row = (
                 db.query(PatrolCollectionResult)
                 .filter(
@@ -865,6 +952,7 @@ class PatrolRepository:
         metadata: dict[str, Any] | None = None,
         inventory_device_id: str | None = None,
         execution_item_id: str | None = None,
+        owner_token: str | None = None,
     ) -> tuple[str, bool]:
         raw_hash = hashlib.sha256((raw_text or "").encode("utf-8")).hexdigest()
         status = parse_status or ("parsed" if structured_json is not None else "raw_only")
@@ -877,6 +965,7 @@ class PatrolRepository:
         ).hexdigest()
         try:
             with get_db_session() as db:
+                self._require_collection_owner(db, run_id, owner_token)
                 existing_by_id = db.get(CommandSnapshot, snapshot_id)
                 if existing_by_id is not None:
                     RawEvidenceRepository().upsert_cli_command_evidence_row(

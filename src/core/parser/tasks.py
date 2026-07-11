@@ -72,16 +72,24 @@ def publish_parser_outbox():
     repository = ParserRepository()
     published: list[str] = []
     rule_asset_seeds: list[dict] = []
-    for row in repository.list_pending_outbox():
-        message_id = EventBus.publish(
-            STREAM_PARSER,
-            DomainEvent(
-                event_type=row.event_type,
-                source="parser-control-plane",
-                correlation_id=row.aggregate_id,
-                payload=dict(row.payload_json or {}),
-            ),
-        )
+    for row in repository.claim_pending_outbox():
+        claim_token = str(row.claim_token or "")
+        try:
+            message_id = EventBus.publish(
+                STREAM_PARSER,
+                DomainEvent(
+                    event_id=str(row.id),
+                    event_type=row.event_type,
+                    source="parser-control-plane",
+                    correlation_id=row.aggregate_id,
+                    payload=dict(row.payload_json or {}),
+                ),
+            )
+        except Exception as exc:
+            repository.release_outbox_claim(
+                row.id, claim_token=claim_token, error=str(exc)
+            )
+            continue
         if message_id:
             if row.event_type == "parser.template.activated":
                 try:
@@ -102,6 +110,12 @@ def publish_parser_outbox():
                             "error": str(exc),
                         }
                     )
-            repository.mark_outbox_published(row.id)
+            repository.mark_outbox_published(row.id, claim_token=claim_token)
             published.append(row.id)
+        else:
+            repository.release_outbox_claim(
+                row.id,
+                claim_token=claim_token,
+                error="event_bus_publish_returned_none",
+            )
     return {"published": published, "rule_asset_seeds": rule_asset_seeds}

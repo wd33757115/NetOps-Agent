@@ -70,10 +70,10 @@
 
 ### Phase E：迁移、测试与发布门禁
 
-- 新增 `0030_patrol_ownership_fencing`，包含数据 preflight、时区语义修正、所有权与幂等约束。
-- 从空数据库执行 `0001 -> 0030` 成功。
-- 真实 PostgreSQL/Redis/RabbitMQ 故障注入 6 项通过。
-- 全量单元测试 516 项通过；前端 Vite production build 通过。
+- 新增 `0030_patrol_ownership_fencing` 与 `0031_patrol_fact_ownership`，包含数据 preflight、时区语义、Collection owner fencing、事实身份和 Parser Outbox claim。
+- 从空数据库执行 `0001 -> 0031` 成功，`alembic check` 无 metadata drift。
+- 真实 PostgreSQL/Redis/RabbitMQ 故障注入 10 项通过。
+- 全量单元测试 519 项通过；前端 Vite production build 通过。
 
 ## 4. 发布门禁与剩余工作
 
@@ -92,13 +92,44 @@
 ```text
 python -m compileall ...                                      PASS
 ruff check（本轮关键模块，排除既有格式债务）                    PASS
-pytest tests/unit -q                                          516 passed
+pytest tests/unit -q                                          519 passed
 pytest tests/integration/test_patrol_runtime_fault_injection.py -q
-                                                             6 passed
-空 PostgreSQL 数据库 alembic upgrade head                     PASS (0030)
+                                                             10 passed
+空 PostgreSQL 数据库 alembic upgrade head                     PASS (0031)
+空库与开发库 alembic check                                    PASS
+0030 seeded data -> 0031 backfill                              PASS
 npm --prefix web/react_frontend run build                     PASS
 ```
 
-已知非阻断项：pytest 输出一条 `Unknown config option: env` 告警，说明当前环境未安装或未启用 pytest-env；Vite 提示主 bundle 偏大和 api.ts 同时被动态/静态导入。这两项是工具链与前端性能债务，不影响本轮巡检事实正确性，但应进入后续性能与构建治理清单。
+pytest 的无效 `env` 配置已移除，测试不再产生插件告警。Vite 仍提示主 bundle 偏大和 api.ts 同时被动态/静态导入，这是前端性能债务，不影响本轮巡检事实正确性。
 
-`alembic check` 还报告了仓库历史遗留的跨模块 metadata drift，包括 AgentModuleControl、CollectionPolicy、CommandProfile、DynamicGroup、RawEvidence 以及部分 ChangePolicy/EventRule 的 index/unique 表达差异和若干 server default 差异。它不影响已经验证通过的空库 `upgrade head` 和本轮运行时约束，但会污染未来 autogenerate，建议独立建立 schema reconciliation migration；不应把这些跨模块变更混入本轮巡检 ownership 修复后直接自动应用。
+历史 metadata drift 已通过模型与既有迁移语义对齐解决；当前开发库和临时空库均返回 `No new upgrade operations detected`。
+
+## 6. 第二轮深审问题收口
+
+| 问题 | 核查 | 最终处理 |
+|---|---|---|
+| 连续 Worker hard-kill / reserved hot requeue | 存在，P1 | 每次 broker redelivery 都在事务锁下 fence 旧 attempt 并分配新 generation；不再等待 900 秒旧 lease。 |
+| Collection stale writer 写 Snapshot、Result 或复活 Run | 存在，P1 | PatrolRun 增加 owner_generation/owner_token；Snapshot、CollectionResult、touch、finish、completion marker 全部验证 owner。 |
+| Change input revision 未包含 prior observations | 存在，P1 | scope digest 同时覆盖 current 与实际读取的 prior observations；历史 backfill 会创建新 attempt。 |
+| normalizer 成功后仍停留 normalizing | 存在，P1/P2 | full-run 成功明确推进到 `normalized`，partial/failed 保持独立状态。 |
+| Audit/Notify 逻辑事件 ID 随机 | 存在，P1/P2 | Skill/Workflow publisher 按逻辑 payload 生成稳定 UUID5；Parser 使用 outbox row ID。 |
+| Consumer processing lease 无续约 | 存在，P1/P2 | handler 执行期间后台 heartbeat 续约；真实 Redis lease renewal 测试通过。 |
+| Analysis heartbeat 由条数驱动 | 存在，P2 | 独立后台 heartbeat guard 按墙钟续约，不依赖 item 数量或单项处理时长。 |
+| legacy v1 折叠不同 execution item | 存在，P2 | 有 execution_item_id 时禁止回退到 v1 fingerprint。 |
+| terminal collection 早于 archive | 存在，P2 | archive 成功后才提交 terminal collection；完成事实代表后处理已完成。 |
+| Event 同时间戳无总序 | 存在，P2 | 使用 fact time + event class rank + source change/event ID 总序。 |
+| execution item 在 baseline join 丢失 | 存在，P1 | StateObservation 增加正式 execution_item_id，baseline SQL 精确 join execution item。 |
+| Change crash retry 返回幽灵 ID | 存在，P1 | 新 Change 使用 deterministic UUID5；写入后按 idempotency key读取数据库 canonical ID，兼容旧随机主键。 |
+| 多 EventRule 候选被错误折叠 | 存在，P1 | candidate ID 和幂等键包含 correlation、rule ID/version。 |
+| Event batch 反序锁死锁 | 存在，P1/P2 | 事务开始先收集整个 batch 所需 locks，全局排序后一次获取；真实 PostgreSQL 并发测试通过。 |
+| Recovery 发布两条消息 | 存在，P1/P2 | 采用 lifecycle occurrence 模型；命中原 fault 时只发布原 aggregate 的 recovery occurrence。 |
+| Parser Outbox 双 publisher 与随机事件 ID | 存在，P1/P2 | pending -> publishing claim、token、lease、SKIP LOCKED；DomainEvent ID 固定为 outbox ID。 |
+| Parser stale failure_code 判断错误 | 存在，P2 | 在修改状态前保存 previous_status，正确区分 dispatch_timeout/worker_timeout。 |
+| CurrentState equal-time 不确定 | 存在，P2/P1 | Observation/CurrentState 保存 fact_order_key；数据库 upsert 使用 observed_at + fact_order_key。 |
+| NetworkChange / no-event 巨型 SQL | 存在，P2 | Change 500 条、状态更新 1000 条分块。 |
+| Consumer transient failure 直接 DLQ | 存在，P2 | 普通异常保留 pending 并计数重试；Permanent/Poison 或超过上限才 DLQ。 |
+| Parser 状态机 lost transition | 存在，P2 | transition、dispatch、stale reconciliation 使用行锁；支持 expected_status CAS。 |
+| 巡检事实 timestamp 混用无时区 | 存在，P2 | Snapshot、Result、Evidence、Observation、CurrentState、Change/Decision 统一 timestamptz，并迁移历史值。 |
+
+第二轮验证额外覆盖：连续两次 takeover、旧 owner 的 Snapshot/Result/finish fencing、prior revision digest、cross-item baseline authority、canonical Change ID、同 event type 不同 correlation、反序 batch locks、Parser Outbox 单 owner、Redis processing lease renewal 和非空历史数据 backfill。

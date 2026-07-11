@@ -119,6 +119,16 @@ class FakeRedis:
     def exists(self, key):
         return 1 if key in self.kv else 0
 
+    def incr(self, key):
+        self.kv[key] = str(int(self.kv.get(key, "0")) + 1)
+        return int(self.kv[key])
+
+    def expire(self, key, _ttl):
+        return 1 if key in self.kv else 0
+
+    def delete(self, key):
+        return int(self.kv.pop(key, None) is not None)
+
     def xrevrange(self, stream, count=50):
         items = self.streams.get(stream, [])
         return list(reversed(items[-count:]))

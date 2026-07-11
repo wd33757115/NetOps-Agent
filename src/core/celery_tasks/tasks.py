@@ -3,10 +3,9 @@
 
 import os
 import sys
+import uuid
 from datetime import datetime
 from typing import Any
-
-from celery.exceptions import Reject
 
 from src.core.celery_tasks.celery_app import celery
 
@@ -113,10 +112,20 @@ def _patrol_redelivery_decision(request: Any, *, mode: str = "production") -> di
     retries = int(getattr(request, "retries", 0) or 0)
     delivery_info = dict(getattr(request, "delivery_info", None) or {})
     if not delivery_info.get("redelivered"):
-        return {"action": "execute", "attempt_number": retries, "run_id": None}
+        return {
+            "action": "execute",
+            "attempt_number": retries,
+            "run_id": None,
+            "owner_token": uuid.uuid4().hex,
+        }
     task_id = str(getattr(request, "id", "") or "")
     if not task_id:
-        return {"action": "execute", "attempt_number": max(1, retries), "run_id": None}
+        return {
+            "action": "execute",
+            "attempt_number": max(1, retries),
+            "run_id": None,
+            "owner_token": uuid.uuid4().hex,
+        }
     return PatrolRepository().prepare_redelivery_attempt(
         f"patrol-{task_id}",
         worker_id=getattr(request, "hostname", None),
@@ -178,8 +187,6 @@ def execute_device_patrol_task(
                 "redelivery_skipped": True,
                 "reason": redelivery.get("reason"),
             }
-        if redelivery["action"] == "attempt_in_progress":
-            raise Reject(str(redelivery.get("reason") or "attempt in progress"), requeue=True)
         result = DevicePatrolRunner().run(
             DevicePatrolRunRequest(
                 filter_params=filter_params,
@@ -191,11 +198,15 @@ def execute_device_patrol_task(
                 task_id=getattr(self.request, "id", None),
                 attempt_number=int(redelivery.get("attempt_number") or 0),
                 worker_id=getattr(self.request, "hostname", None),
+                owner_token=str(redelivery.get("owner_token") or uuid.uuid4().hex),
             )
         )
         snapshot_run_id = result.get("snapshot_run_id")
         if snapshot_run_id:
-            PatrolRepository().mark_celery_task_completed(str(snapshot_run_id))
+            PatrolRepository().mark_celery_task_completed(
+                str(snapshot_run_id),
+                owner_token=str(redelivery.get("owner_token") or "") or None,
+            )
         execution_time_ms = int((datetime.now() - execution_start).total_seconds() * 1000)
         log.info(
             "device_patrol_task_completed",

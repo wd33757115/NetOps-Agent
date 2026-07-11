@@ -369,6 +369,19 @@ def test_observation_baseline_requires_collection_level_eligibility():
             )
         )
         db.add(
+            PatrolCollectionResult(
+                id=str(uuid.uuid4()),
+                run_id=run_id,
+                execution_item_id=f"eligible-other-item-{snapshot_id}",
+                device_id="SW1",
+                canonical_command="show interface status",
+                status="parsed",
+                authoritative_for_deletion=True,
+                baseline_eligible=True,
+                observed_at=now,
+            )
+        )
+        db.add(
             StateObservationRecord(
                 id=observation_id,
                 idempotency_key=str(uuid.uuid4()),
@@ -379,6 +392,7 @@ def test_observation_baseline_requires_collection_level_eligibility():
                 source_type="cli",
                 device_id="SW1",
                 canonical_command="show interface status",
+                execution_item_id=f"item-{snapshot_id}",
                 entity_type="interface_l2",
                 entity_key='["Gi1/0/1"]',
                 field_name="status",
@@ -388,6 +402,7 @@ def test_observation_baseline_requires_collection_level_eligibility():
                 value_type="string",
                 observation_kind="state",
                 observed_at=now,
+                fact_order_key=f"0|item-{snapshot_id}|{observation_id}",
                 confidence=1.0,
             )
         )
@@ -398,7 +413,10 @@ def test_observation_baseline_requires_collection_level_eligibility():
         with get_db_session() as db:
             row = (
                 db.query(PatrolCollectionResult)
-                .filter(PatrolCollectionResult.run_id == run_id)
+                .filter(
+                    PatrolCollectionResult.run_id == run_id,
+                    PatrolCollectionResult.execution_item_id == f"item-{snapshot_id}",
+                )
                 .one()
             )
             row.baseline_eligible = True

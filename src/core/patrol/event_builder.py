@@ -87,7 +87,7 @@ def build_events_from_changes(
     occurred_at = _now()
     rules = load_event_rules() if rules is None else rules
     for index, change in enumerate(changes):
-        if heartbeat is not None and index and index % 500 == 0:
+        if heartbeat is not None:
             heartbeat()
         matched_rules = match_event_rules(change, rules=rules, preordered=True)
         if not matched_rules:
@@ -108,7 +108,21 @@ def build_events_from_changes(
             )
             events.append(
                 NetworkEvent(
-                    event_id=str(uuid.uuid4()),
+                    event_id=str(
+                        uuid.uuid5(
+                            uuid.NAMESPACE_URL,
+                            "|".join(
+                                [
+                                    "network-event-candidate-v2",
+                                    str(change.get("change_id") or ""),
+                                    rule.event_type,
+                                    correlation_key,
+                                    rule.rule_id,
+                                    str(rule.version),
+                                ]
+                            ),
+                        )
+                    ),
                     event_type=rule.event_type,
                     severity=rule.severity,
                     device_id=device_id,
@@ -282,6 +296,7 @@ def build_events_from_params(params: dict[str, Any]) -> dict[str, Any]:
         AnalysisAttemptFencedError,
         AnalysisAttemptInProgressError,
         PatrolRepository,
+        AnalysisLeaseHeartbeat,
     )
 
     run_id = params.get("run_id")
@@ -360,6 +375,7 @@ def build_events_from_params(params: dict[str, Any]) -> dict[str, Any]:
         }
     if attempt["in_progress"]:
         raise AnalysisAttemptInProgressError(f"event building already running for {run_id}")
+    heartbeat = AnalysisLeaseHeartbeat(patrol_repository, attempt)
     if updates_run_status:
         try:
             patrol_repository.update_analysis_status(
@@ -370,15 +386,12 @@ def build_events_from_params(params: dict[str, Any]) -> dict[str, Any]:
             )
         except ValueError:
             pass
+    heartbeat.start()
     try:
         rules = event_rules_from_snapshot(
             list(attempt["rule_bundle"].get("event_rules") or [])
         )
-        patrol_repository.touch_analysis_attempt(
-            str(attempt["attempt_id"]),
-            attempt_number=int(attempt["attempt_number"]),
-            owner_token=str(attempt["owner_token"]),
-        )
+        heartbeat(force=True)
         result = _build_events_from_params_impl(
             {
                 **params,
@@ -386,12 +399,9 @@ def build_events_from_params(params: dict[str, Any]) -> dict[str, Any]:
                 "_analysis_updates_run_status": updates_run_status,
             },
             rules=rules,
-            heartbeat=lambda: patrol_repository.touch_analysis_attempt(
-                str(attempt["attempt_id"]),
-                attempt_number=int(attempt["attempt_number"]),
-                owner_token=str(attempt["owner_token"]),
-            ),
+            heartbeat=heartbeat,
         )
+        heartbeat.stop()
         patrol_repository.complete_analysis_attempt(
             str(attempt["attempt_id"]),
             attempt_number=int(attempt["attempt_number"]),
@@ -400,6 +410,7 @@ def build_events_from_params(params: dict[str, Any]) -> dict[str, Any]:
         )
         return result
     except Exception as exc:
+        heartbeat.stop()
         try:
             patrol_repository.fail_analysis_attempt(
                 str(attempt["attempt_id"]),

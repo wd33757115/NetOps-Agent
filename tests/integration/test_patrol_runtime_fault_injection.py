@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 
 import pytest
 from kombu import Connection
@@ -12,15 +13,21 @@ from src.core.events.idempotency import (
     claim_processing,
     is_processed,
     mark_processed,
+    renew_processing,
 )
 from src.core.events.streams import (
     IDEMPOTENCY_PREFIX,
     IDEMPOTENCY_PROCESSING_PREFIX,
 )
 from src.core.patrol.change_detector import NetworkChange
-from src.core.patrol.change_event_repository import ChangeEventRepository
+from src.core.patrol.change_event_repository import (
+    ChangeEventRepository,
+    deterministic_change_id,
+)
 from src.core.patrol.change_policy_repository import ChangePolicyRepository
 from src.core.patrol.repository import PatrolRepository
+from src.core.patrol.event_builder import NetworkEvent
+from src.core.parser.repository import ParserRepository
 from src.core.workflows.repository import create_notification
 from src.gateway.audit_service import write_audit_log
 from src.infrastructure.db.models import (
@@ -28,7 +35,9 @@ from src.infrastructure.db.models import (
     ChangePolicyRecord,
     ChangePolicyVersionRecord,
     NetworkChangeRecord,
+    NetworkEventRecord,
     Notification,
+    ParserOutboxEvent,
     PatrolRun,
 )
 from src.infrastructure.db.postgres import get_db_session
@@ -86,6 +95,28 @@ def test_real_redis_processing_claim_is_atomic():
             f"{IDEMPOTENCY_PREFIX}{group}:{occurrence_id}",
             f"{IDEMPOTENCY_PROCESSING_PREFIX}{group}:{occurrence_id}",
         )
+
+
+def test_real_redis_processing_lease_can_be_renewed():
+    client = _redis_or_skip()
+    group = f"lease-renewal-{uuid.uuid4().hex}"
+    event_id = uuid.uuid4().hex
+    owner = uuid.uuid4().hex
+    try:
+        assert claim_processing(group, event_id, owner_token=owner, lease_ms=1_000) == "claimed"
+        time.sleep(0.7)
+        assert renew_processing(
+            group, event_id, owner_token=owner, lease_ms=1_000
+        ) is True
+        time.sleep(0.5)
+        assert (
+            claim_processing(
+                group, event_id, owner_token=uuid.uuid4().hex, lease_ms=1_000
+            )
+            == "busy"
+        )
+    finally:
+        client.delete(f"{IDEMPOTENCY_PROCESSING_PREFIX}{group}:{event_id}")
 
 
 def test_real_redis_pending_message_is_reclaimed_after_worker_loss():
@@ -315,4 +346,114 @@ def test_explicit_replay_has_distinct_change_derivation_identity(postgres_availa
         with get_db_session() as db:
             db.query(NetworkChangeRecord).filter(
                 NetworkChangeRecord.run_id == run_id
+            ).delete(synchronize_session=False)
+
+
+def test_change_retry_uses_canonical_deterministic_id(postgres_available):
+    del postgres_available
+    run_id = f"deterministic-change-{uuid.uuid4()}"
+    repository = ChangeEventRepository()
+
+    def candidate() -> NetworkChange:
+        return NetworkChange(
+            change_id=str(uuid.uuid4()),
+            run_id=run_id,
+            device_id="SW1",
+            command="show interface status",
+            entity_type="interface_l2",
+            entity_key='["Gi1/0/1"]',
+            field="status",
+            old_value="up",
+            new_value="down",
+            change_type="modified",
+            previous_snapshot_id="before",
+            current_snapshot_id="after",
+            detected_at="2026-07-11T01:00:00+00:00",
+            analysis_revision="original",
+            rule_bundle_digest="bundle-v1",
+        )
+
+    first = candidate()
+    second = candidate()
+    expected_id = deterministic_change_id(first)
+    try:
+        assert repository.save_changes([first]) == 1
+        assert repository.save_changes([second]) == 0
+        with get_db_session() as db:
+            row = db.query(NetworkChangeRecord).filter_by(run_id=run_id).one()
+            assert row.id == expected_id == deterministic_change_id(second)
+    finally:
+        with get_db_session() as db:
+            db.query(NetworkChangeRecord).filter_by(run_id=run_id).delete()
+
+
+def test_parser_outbox_claim_has_single_publisher_owner(postgres_available):
+    del postgres_available
+    event_id = str(uuid.uuid4())
+    with get_db_session() as db:
+        db.add(
+            ParserOutboxEvent(
+                id=event_id,
+                event_type="parser.template.activated",
+                aggregate_id=str(uuid.uuid4()),
+                payload_json={"template_id": "template-1"},
+                status="pending",
+                created_at=datetime(2000, 1, 1, tzinfo=timezone.utc),
+            )
+        )
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            claims = list(
+                executor.map(
+                    lambda _index: ParserRepository().claim_pending_outbox(limit=1),
+                    range(2),
+                )
+            )
+        claimed = [row for batch in claims for row in batch if row.id == event_id]
+        assert len(claimed) == 1
+        assert claimed[0].claim_token
+    finally:
+        with get_db_session() as db:
+            db.query(ParserOutboxEvent).filter_by(id=event_id).delete()
+
+
+def test_event_batches_acquire_correlation_locks_in_global_order(postgres_available):
+    del postgres_available
+    suffix = uuid.uuid4().hex
+
+    def event(rule_id: str, correlation_key: str, change_id: str) -> NetworkEvent:
+        return NetworkEvent(
+            event_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{suffix}|{change_id}")),
+            event_type="SharedFault",
+            severity="major",
+            device_id="SW1",
+            entity_type="interface_l2",
+            entity_key='["Gi1/0/1"]',
+            source_change_id=change_id,
+            run_id=None,
+            occurred_at="2026-07-11T01:00:00+00:00",
+            status="open",
+            payload={
+                "correlation_key": correlation_key,
+                "rule": {"rule_id": rule_id, "version": 1, "event_class": "fault"},
+            },
+        )
+
+    a1 = event("FaultA", f"A-{suffix}", f"a1-{suffix}")
+    b1 = event("FaultB", f"B-{suffix}", f"b1-{suffix}")
+    a2 = event("FaultA", f"A-{suffix}", f"a2-{suffix}")
+    b2 = event("FaultB", f"B-{suffix}", f"b2-{suffix}")
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(
+                executor.map(
+                    lambda batch: ChangeEventRepository().save_events(batch),
+                    ([a1, b1], [b2, a2]),
+                )
+            )
+        assert sum(results) == 2
+    finally:
+        with get_db_session() as db:
+            db.query(NetworkEventRecord).filter(
+                NetworkEventRecord.correlation_key.in_([f"A-{suffix}", f"B-{suffix}"])
             ).delete(synchronize_session=False)

@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 
 from src.core.observation import ObservationContractRepository
 from src.core.patrol.repository import PatrolRepository
@@ -799,25 +799,77 @@ class ParserRepository:
                         break
             return output
 
-    def list_pending_outbox(self, limit: int = 100) -> list[ParserOutboxEvent]:
+    def claim_pending_outbox(
+        self, limit: int = 100, *, lease_seconds: int = 120
+    ) -> list[ParserOutboxEvent]:
+        now = utcnow()
         with get_db_session() as db:
             rows = (
                 db.query(ParserOutboxEvent)
-                .filter(ParserOutboxEvent.status == "pending")
+                .filter(
+                    or_(
+                        ParserOutboxEvent.status == "pending",
+                        and_(
+                            ParserOutboxEvent.status == "publishing",
+                            ParserOutboxEvent.lease_until < now,
+                        ),
+                    )
+                )
                 .order_by(ParserOutboxEvent.created_at)
                 .limit(limit)
+                .with_for_update(skip_locked=True)
                 .all()
             )
+            for row in rows:
+                row.status = "publishing"
+                row.claim_token = uuid.uuid4().hex
+                row.lease_until = now + timedelta(seconds=max(30, int(lease_seconds)))
+                row.attempts = int(row.attempts or 0) + 1
+                row.last_error = None
+            db.flush()
             for row in rows:
                 db.expunge(row)
             return rows
 
-    def mark_outbox_published(self, event_id: str) -> None:
+    def mark_outbox_published(self, event_id: str, *, claim_token: str) -> None:
         with get_db_session() as db:
-            row = db.query(ParserOutboxEvent).filter(ParserOutboxEvent.id == event_id).one()
-            row.status = "published"
-            row.published_at = utcnow()
-            row.attempts = int(row.attempts or 0) + 1
+            updated = (
+                db.query(ParserOutboxEvent)
+                .filter(
+                    ParserOutboxEvent.id == event_id,
+                    ParserOutboxEvent.status == "publishing",
+                    ParserOutboxEvent.claim_token == claim_token,
+                )
+                .update(
+                    {
+                        ParserOutboxEvent.status: "published",
+                        ParserOutboxEvent.published_at: utcnow(),
+                        ParserOutboxEvent.claim_token: None,
+                        ParserOutboxEvent.lease_until: None,
+                    },
+                    synchronize_session=False,
+                )
+            )
+            if updated != 1:
+                raise ParserJobStateError(f"parser outbox claim was fenced: {event_id}")
+
+    def release_outbox_claim(
+        self, event_id: str, *, claim_token: str, error: str
+    ) -> None:
+        with get_db_session() as db:
+            db.query(ParserOutboxEvent).filter(
+                ParserOutboxEvent.id == event_id,
+                ParserOutboxEvent.status == "publishing",
+                ParserOutboxEvent.claim_token == claim_token,
+            ).update(
+                {
+                    ParserOutboxEvent.status: "pending",
+                    ParserOutboxEvent.claim_token: None,
+                    ParserOutboxEvent.lease_until: None,
+                    ParserOutboxEvent.last_error: str(error)[:4000],
+                },
+                synchronize_session=False,
+            )
 
     def list_jobs(self, *, status: str | None = None) -> list[dict[str, Any]]:
         with get_db_session() as db:
@@ -836,10 +888,20 @@ class ParserRepository:
         failure_code: str | None = None,
         celery_task_id: str | None = None,
         clear_dispatch: bool = False,
+        expected_status: str | None = None,
     ) -> dict[str, Any]:
         with get_db_session() as db:
-            job = db.query(ParserTemplateJob).filter(ParserTemplateJob.id == job_id).one()
+            job = (
+                db.query(ParserTemplateJob)
+                .filter(ParserTemplateJob.id == job_id)
+                .with_for_update()
+                .one()
+            )
             current = job.status
+            if expected_status is not None and current != expected_status:
+                raise ParserJobStateError(
+                    f"parser job {job_id} expected {expected_status}, found {current}"
+                )
             if status != current and status not in JOB_TRANSITIONS.get(current, set()):
                 raise ParserJobStateError(
                     f"parser job {job_id} cannot transition from {current} to {status}"
@@ -865,7 +927,12 @@ class ParserRepository:
 
     def mark_job_dispatched(self, job_id: str, celery_task_id: str) -> dict[str, Any]:
         with get_db_session() as db:
-            job = db.query(ParserTemplateJob).filter(ParserTemplateJob.id == job_id).one()
+            job = (
+                db.query(ParserTemplateJob)
+                .filter(ParserTemplateJob.id == job_id)
+                .with_for_update()
+                .one()
+            )
             if job.status not in {"collecting", "pending"}:
                 raise ParserJobStateError(
                     f"parser job {job_id} cannot be dispatched from {job.status}"
@@ -888,6 +955,7 @@ class ParserRepository:
             jobs = (
                 db.query(ParserTemplateJob)
                 .filter(ParserTemplateJob.status.in_(["pending", "running", "validating"]))
+                .with_for_update(skip_locked=True)
                 .all()
             )
             for job in jobs:
@@ -906,13 +974,14 @@ class ParserRepository:
                 max_age = pending_seconds if job.status == "pending" else running_seconds
                 if (now - reference_utc).total_seconds() < max_age:
                     continue
+                previous_status = job.status
                 job.status = "failed"
                 job.failure_code = (
-                    "dispatch_timeout" if job.status == "pending" else "worker_timeout"
+                    "dispatch_timeout" if previous_status == "pending" else "worker_timeout"
                 )
                 job.last_error = (
                     "parser job was not claimed by a worker before timeout"
-                    if job.status == "pending"
+                    if previous_status == "pending"
                     else "parser job exceeded the worker execution timeout"
                 )
                 job.updated_at = now

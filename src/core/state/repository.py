@@ -129,8 +129,8 @@ class StateRepository:
                     and_(
                         PatrolCollectionResult.run_id == StateObservationRecord.run_id,
                         PatrolCollectionResult.device_id == StateObservationRecord.device_id,
-                        PatrolCollectionResult.canonical_command
-                        == StateObservationRecord.canonical_command,
+                        PatrolCollectionResult.execution_item_id
+                        == StateObservationRecord.execution_item_id,
                     ),
                 ).filter(
                     PatrolRun.baseline_eligible.is_(True),
@@ -160,8 +160,8 @@ class StateRepository:
                     and_(
                         PatrolCollectionResult.run_id == StateObservationRecord.run_id,
                         PatrolCollectionResult.device_id == StateObservationRecord.device_id,
-                        PatrolCollectionResult.canonical_command
-                        == StateObservationRecord.canonical_command,
+                        PatrolCollectionResult.execution_item_id
+                        == StateObservationRecord.execution_item_id,
                     ),
                 )
                 .filter(
@@ -195,8 +195,8 @@ class StateRepository:
                     and_(
                         PatrolCollectionResult.run_id == StateObservationRecord.run_id,
                         PatrolCollectionResult.device_id == StateObservationRecord.device_id,
-                        PatrolCollectionResult.canonical_command
-                        == StateObservationRecord.canonical_command,
+                        PatrolCollectionResult.execution_item_id
+                        == StateObservationRecord.execution_item_id,
                     ),
                 )
                 .filter(StateObservationRecord.run_id != run_id)
@@ -270,6 +270,7 @@ class StateRepository:
             "vendor": item.vendor,
             "model": item.model,
             "canonical_command": item.canonical_command,
+            "execution_item_id": item.execution_item_id or "",
             "entity_type": item.entity_type,
             "entity_key": item.entity_key,
             "field_name": item.field_name,
@@ -282,6 +283,7 @@ class StateRepository:
             "value_type": item.value_type,
             "observation_kind": item.observation_kind,
             "observed_at": _datetime(item.observed_at),
+            "fact_order_key": item.fact_order_key,
             "parser_template_id": item.parser_template_id,
             "parser_version": item.parser_version,
             "contract_version": item.contract_version,
@@ -328,6 +330,9 @@ class StateRepository:
             "source_evidence_id": item.evidence_id,
             "schema_id": item.schema_id,
             "observed_at": incoming_observed_at,
+            "fact_order_key": item.fact_order_key,
+            "source_execution_item_id": item.execution_item_id,
+            "source_observation_id": item.observation_id,
             "lifecycle_status": (
                 "deleted"
                 if (item.metadata or {}).get("presence_state") == "absent"
@@ -358,8 +363,10 @@ class StateRepository:
         latest_by_state_key: dict[str, StateObservation] = {}
         for item in observations:
             existing = latest_by_state_key.get(item.state_key)
-            if existing is None or _datetime(item.observed_at) > _datetime(
-                existing.observed_at
+            if existing is None or (
+                _datetime(item.observed_at), item.fact_order_key
+            ) > (
+                _datetime(existing.observed_at), existing.fact_order_key
             ):
                 latest_by_state_key[item.state_key] = item
         observations = list(latest_by_state_key.values())
@@ -389,6 +396,9 @@ class StateRepository:
             "source_evidence_id": excluded.source_evidence_id,
             "schema_id": excluded.schema_id,
             "observed_at": excluded.observed_at,
+            "fact_order_key": excluded.fact_order_key,
+            "source_execution_item_id": excluded.source_execution_item_id,
+            "source_observation_id": excluded.source_observation_id,
             "lifecycle_status": excluded.lifecycle_status,
             "missing_since": excluded.missing_since,
             "missing_count": excluded.missing_count,
@@ -401,7 +411,13 @@ class StateRepository:
             stmt.on_conflict_do_update(
                 index_elements=["state_key"],
                 set_=update_values,
-                where=excluded.observed_at > CurrentStateRecord.observed_at,
+                where=or_(
+                    excluded.observed_at > CurrentStateRecord.observed_at,
+                    and_(
+                        excluded.observed_at == CurrentStateRecord.observed_at,
+                        excluded.fact_order_key > CurrentStateRecord.fact_order_key,
+                    ),
+                ),
             )
             .returning(CurrentStateRecord.id)
         )

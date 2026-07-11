@@ -185,12 +185,18 @@ def observations_from_snapshot(
             if not isinstance(field_semantics, dict):
                 field_semantics = {}
             value_text, value_number, value_type = _value_parts(value)
+            observation_type = (
+                str(field_semantics.get("observation_type"))
+                if field_semantics.get("observation_type")
+                else None
+            )
+            semantic_field = observation_type or normalized_field_name
             state_key = _digest(
                 [
                     state_device_id,
                     entity_type,
                     entity_key,
-                    field_name,
+                    semantic_field,
                 ]
             )
             observation_key = _digest(
@@ -203,9 +209,17 @@ def observations_from_snapshot(
                     value,
                 ]
             )
+            observation_id = str(uuid.uuid5(uuid.NAMESPACE_URL, observation_key))
+            execution_item_id = str(snapshot.get("execution_item_id") or "")
+            command_ordinal = int(
+                (snapshot.get("metadata_json") or {}).get("command_ordinal") or 0
+            )
+            fact_order_key = (
+                f"{command_ordinal:020d}|{execution_item_id}|{observation_id}"
+            )
             observations.append(
                 StateObservation(
-                    observation_id=str(uuid.uuid4()),
+                    observation_id=observation_id,
                     idempotency_key=observation_key,
                     state_key=state_key,
                     run_id=snapshot["run_id"],
@@ -223,11 +237,7 @@ def observations_from_snapshot(
                     entity_type=entity_type,
                     entity_key=entity_key,
                     field_name=str(field_name),
-                    observation_type=(
-                        str(field_semantics.get("observation_type"))
-                        if field_semantics.get("observation_type")
-                        else None
-                    ),
+                    observation_type=observation_type,
                     semantic_type=(
                         str(field_semantics.get("semantic_type"))
                         if field_semantics.get("semantic_type")
@@ -246,6 +256,8 @@ def observations_from_snapshot(
                     parser_version=snapshot.get("parser_version"),
                     contract_version=contract.get("contract_version")
                     or snapshot.get("contract_version"),
+                    execution_item_id=execution_item_id,
+                    fact_order_key=fact_order_key,
                     confidence=1.0,
                     metadata={
                         "canonical_command": snapshot["canonical_command"],
@@ -366,6 +378,7 @@ def normalize_run(
         AnalysisAttemptFencedError,
         AnalysisAttemptInProgressError,
         PatrolRepository,
+        AnalysisLeaseHeartbeat,
     )
 
     snapshot_ids = (
@@ -397,6 +410,7 @@ def normalize_run(
         }
     if attempt["in_progress"]:
         raise AnalysisAttemptInProgressError(f"normalization already running for {run_id}")
+    heartbeat = AnalysisLeaseHeartbeat(patrol_repository, attempt)
 
     if updates_run_status:
         try:
@@ -407,6 +421,7 @@ def normalize_run(
             )
         except ValueError:
             pass
+    heartbeat.start()
     try:
         result = _normalize_run_impl(
             run_id,
@@ -414,12 +429,9 @@ def normalize_run(
             update_current_state=update_current_state,
             device_ids=device_ids,
             update_run_status=updates_run_status,
-            heartbeat=lambda: patrol_repository.touch_analysis_attempt(
-                str(attempt["attempt_id"]),
-                attempt_number=int(attempt["attempt_number"]),
-                owner_token=str(attempt["owner_token"]),
-            ),
+            heartbeat=heartbeat,
         )
+        heartbeat.stop()
         patrol_repository.complete_analysis_attempt(
             str(attempt["attempt_id"]),
             attempt_number=int(attempt["attempt_number"]),
@@ -428,6 +440,7 @@ def normalize_run(
         )
         return result
     except Exception as exc:
+        heartbeat.stop()
         try:
             patrol_repository.fail_analysis_attempt(
                 str(attempt["attempt_id"]),
@@ -470,7 +483,7 @@ def _normalize_run_impl(
     should_update_current = False
     patrol_repository = PatrolRepository()
     for index, snapshot_id in enumerate(snapshot_ids):
-        if heartbeat is not None and index % 100 == 0:
+        if heartbeat is not None:
             heartbeat()
         snapshot_result, observations, update_current = _build_snapshot_normalization(
             repository,
@@ -538,6 +551,19 @@ def _normalize_run_impl(
                 baseline_eligible=False,
                 metadata={
                     "normalization_failed_snapshot_count": failed_count,
+                    "normalization_successful_snapshot_count": successful_count,
+                },
+            )
+        except ValueError:
+            pass
+    elif update_run_status:
+        try:
+            PatrolRepository().update_analysis_status(
+                run_id,
+                analysis_status="normalized",
+                baseline_eligible=False,
+                metadata={
+                    "normalization_failed_snapshot_count": 0,
                     "normalization_successful_snapshot_count": successful_count,
                 },
             )

@@ -149,14 +149,16 @@ def test_publish_parser_outbox_seeds_rule_asset_generation(monkeypatch):
         id = "event-1"
         event_type = "parser.template.activated"
         aggregate_id = "template-1"
+        claim_token = "claim-1"
         payload_json = {"template_id": "template-1"}
 
     class FakeRepository:
-        def list_pending_outbox(self):
+        def claim_pending_outbox(self):
             return [FakeOutboxRow()]
 
-        def mark_outbox_published(self, event_id):
+        def mark_outbox_published(self, event_id, *, claim_token):
             assert event_id == "event-1"
+            assert claim_token == "claim-1"
 
     class FakeSeedService:
         def __init__(self, *, parser_repository):

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import socket
+import threading
 import uuid
 from abc import ABC, abstractmethod
 from typing import Any
@@ -18,12 +19,27 @@ from src.core.events.domain_event import DomainEvent
 from src.core.events.idempotency import (
     IdempotencyStoreUnavailableError,
     claim_processing,
+    clear_processing_failures,
     is_processed,
     mark_processed,
+    record_processing_failure,
     release_processing,
+    renew_processing,
 )
 
 logger = logging.getLogger(__name__)
+
+
+class RetryableConsumerError(RuntimeError):
+    """A transient handler failure that should remain pending before DLQ."""
+
+
+class PermanentConsumerError(RuntimeError):
+    """A valid event that cannot succeed on retry."""
+
+
+class PoisonMessageError(PermanentConsumerError):
+    """An invalid envelope or payload that should be quarantined immediately."""
 
 
 class StreamConsumer(ABC):
@@ -121,12 +137,38 @@ class StreamConsumer(ABC):
                     continue
                 if claim_state != "claimed":
                     continue
-                self.handle(event)
+                lease_ms = int(
+                    getattr(get_settings(), "EVENT_BUS_PROCESSING_LEASE_MS", 120_000)
+                )
+                stop_heartbeat = threading.Event()
+
+                def heartbeat() -> None:
+                    interval = max(1.0, lease_ms / 3000)
+                    while not stop_heartbeat.wait(interval):
+                        try:
+                            if not renew_processing(
+                                self.group,
+                                event.idempotency_key,
+                                owner_token=processing_owner or "",
+                                lease_ms=lease_ms,
+                            ):
+                                return
+                        except IdempotencyStoreUnavailableError:
+                            return
+
+                heartbeat_thread = threading.Thread(target=heartbeat, daemon=True)
+                heartbeat_thread.start()
+                try:
+                    self.handle(event)
+                finally:
+                    stop_heartbeat.set()
+                    heartbeat_thread.join(timeout=1)
                 mark_processed(
                     self.group,
                     event.idempotency_key,
                     owner_token=processing_owner,
                 )
+                clear_processing_failures(self.group, event.idempotency_key)
                 client.xack(stream, self.group, msg_id)
                 processed += 1
             except IdempotencyStoreUnavailableError as exc:
@@ -152,12 +194,26 @@ class StreamConsumer(ABC):
                         event.idempotency_key,
                         owner_token=processing_owner,
                     )
+                retry_count = 0
+                immediate_dlq = isinstance(exc, PermanentConsumerError)
+                if event is not None and not immediate_dlq:
+                    try:
+                        retry_count = record_processing_failure(
+                            self.group, event.idempotency_key
+                        )
+                    except IdempotencyStoreUnavailableError:
+                        continue
+                    if retry_count < int(
+                        getattr(get_settings(), "EVENT_BUS_MAX_PROCESSING_RETRIES", 3)
+                    ):
+                        continue
                 dlq_event = event or DomainEvent(
                     event_type="event.invalid_envelope",
                     source="system",
                     payload={
                         "source_stream": stream,
                         "source_message_id": str(msg_id),
+                        "retry_count": retry_count,
                     },
                 )
                 dlq_message_id = EventBus.publish_dlq(

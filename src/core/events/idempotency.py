@@ -119,3 +119,51 @@ def release_processing(group: str, event_id: str, *, owner_token: str) -> None:
         )
     except Exception:
         return
+
+
+def renew_processing(
+    group: str, event_id: str, *, owner_token: str, lease_ms: int
+) -> bool:
+    client = get_redis()
+    if not client:
+        raise IdempotencyStoreUnavailableError("event idempotency store is unavailable")
+    try:
+        renewed = client.eval(
+            """
+            if redis.call('GET', KEYS[1]) ~= ARGV[1] then
+                return 0
+            end
+            redis.call('PEXPIRE', KEYS[1], ARGV[2])
+            return 1
+            """,
+            1,
+            _processing_key(group, event_id),
+            owner_token,
+            str(max(1_000, int(lease_ms))),
+        )
+        return int(renewed or 0) == 1
+    except Exception as exc:
+        raise IdempotencyStoreUnavailableError("event processing lease renewal failed") from exc
+
+
+def record_processing_failure(group: str, event_id: str) -> int:
+    client = get_redis()
+    if not client:
+        raise IdempotencyStoreUnavailableError("event idempotency store is unavailable")
+    key = f"{IDEMPOTENCY_PROCESSING_PREFIX}failures:{group}:{event_id}"
+    try:
+        value = client.incr(key)
+        client.expire(key, IDEMPOTENCY_TTL_SEC)
+        return int(value)
+    except Exception as exc:
+        raise IdempotencyStoreUnavailableError("event failure counter update failed") from exc
+
+
+def clear_processing_failures(group: str, event_id: str) -> None:
+    client = get_redis()
+    if not client:
+        return
+    try:
+        client.delete(f"{IDEMPOTENCY_PROCESSING_PREFIX}failures:{group}:{event_id}")
+    except Exception:
+        return

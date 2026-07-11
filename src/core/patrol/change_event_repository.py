@@ -42,17 +42,46 @@ def _digest(parts: Iterable[Any]) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def change_idempotency_key(change: Any) -> str:
+    return _digest(
+        (
+            change.previous_snapshot_id,
+            change.current_snapshot_id,
+            change.device_id,
+            change.command,
+            change.entity_type,
+            change.entity_key,
+            change.field,
+            change.change_type,
+            change.old_value,
+            change.new_value,
+            getattr(change, "analysis_revision", "original"),
+            getattr(change, "rule_bundle_digest", None),
+        )
+    )
+
+
+def deterministic_change_id(change: Any) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, change_idempotency_key(change)))
+
+
 def _event_class(event: Any) -> str:
     rule = dict((event.payload or {}).get("rule") or {})
     return str(rule.get("event_class") or "fault")
 
 
-def _not_older(candidate: datetime, current: datetime) -> bool:
-    if candidate.tzinfo is None:
-        candidate = candidate.replace(tzinfo=timezone.utc)
-    if current.tzinfo is None:
-        current = current.replace(tzinfo=timezone.utc)
-    return candidate >= current
+def _event_order_key(event: Any) -> str:
+    event_class_rank = "1" if _event_class(event) == "recovery" else "0"
+    return f"{event_class_rank}|{event.source_change_id or event.event_id}"
+
+
+def _event_not_older(event: Any, row: NetworkEventRecord) -> bool:
+    candidate = _datetime(event.occurred_at)
+    current = _datetime(row.last_seen_at)
+    return (candidate, _event_order_key(event)) >= (
+        current,
+        str(row.last_seen_order_key or ""),
+    )
 
 
 class ChangeEventRepository:
@@ -82,25 +111,10 @@ class ChangeEventRepository:
                 )
             change_values: list[dict[str, Any]] = []
             for change in changes:
-                key = _digest(
-                    (
-                        change.previous_snapshot_id,
-                        change.current_snapshot_id,
-                        change.device_id,
-                        change.command,
-                        change.entity_type,
-                        change.entity_key,
-                        change.field,
-                        change.change_type,
-                        change.old_value,
-                        change.new_value,
-                        getattr(change, "analysis_revision", "original"),
-                        getattr(change, "rule_bundle_digest", None),
-                    )
-                )
+                key = change_idempotency_key(change)
                 change_values.append(
                     {
-                        "id": change.change_id,
+                        "id": deterministic_change_id(change),
                         "idempotency_key": key,
                         "run_id": change.run_id,
                         "device_id": change.device_id,
@@ -147,15 +161,38 @@ class ChangeEventRepository:
                         "created_at": datetime.now(timezone.utc),
                     }
                 )
-            if change_values:
+            for offset in range(0, len(change_values), 500):
                 stmt = (
                     pg_insert(NetworkChangeRecord)
-                    .values(change_values)
+                    .values(change_values[offset : offset + 500])
                     .on_conflict_do_nothing(index_elements=["idempotency_key"])
                     .returning(NetworkChangeRecord.id)
                 )
-                created = len(db.execute(stmt).all())
+                created += len(db.execute(stmt).all())
         return created
+
+    def canonical_change_ids(self, changes: list[Any]) -> dict[str, str]:
+        keys = {change_idempotency_key(change) for change in changes}
+        if not keys:
+            return {}
+        result: dict[str, str] = {}
+        ordered = sorted(keys)
+        with get_db_session() as db:
+            for offset in range(0, len(ordered), 1000):
+                rows = (
+                    db.query(
+                        NetworkChangeRecord.idempotency_key,
+                        NetworkChangeRecord.id,
+                    )
+                    .filter(
+                        NetworkChangeRecord.idempotency_key.in_(
+                            ordered[offset : offset + 1000]
+                        )
+                    )
+                    .all()
+                )
+                result.update({str(key): str(change_id) for key, change_id in rows})
+        return result
 
     def list_changes(
         self,
@@ -216,25 +253,43 @@ class ChangeEventRepository:
     ) -> int:
         if not change_ids:
             return 0
+        updated = 0
         with get_db_session() as db:
-            query = db.query(NetworkChangeRecord).filter(NetworkChangeRecord.id.in_(change_ids))
-            if only_pending:
-                query = query.filter(NetworkChangeRecord.event_status == "pending")
-            rows = query.all()
-            for row in rows:
-                row.event_status = status
-            return len(rows)
+            for offset in range(0, len(change_ids), 1000):
+                query = db.query(NetworkChangeRecord).filter(
+                    NetworkChangeRecord.id.in_(change_ids[offset : offset + 1000])
+                )
+                if only_pending:
+                    query = query.filter(NetworkChangeRecord.event_status == "pending")
+                rows = query.all()
+                for row in rows:
+                    row.event_status = status
+                updated += len(rows)
+        return updated
 
     def save_events(self, events: list[Any]) -> int:
         created = 0
         with get_db_session() as db:
+            required_locks = sorted(
+                {
+                    lock
+                    for event in events
+                    for lock in self._required_event_correlations(event)
+                }
+            )
+            for event_type, correlation_key in required_locks:
+                self._lock_correlation_identity(db, event_type, correlation_key)
             for event in events:
-                self._lock_required_event_correlations(db, event)
                 if self._resolve_recovered_event(db, event):
                     if event.source_change_id:
                         change = db.get(NetworkChangeRecord, event.source_change_id)
                         if change is not None:
                             change.event_status = "event_created"
+                    continue
+                correlation_key = str(
+                    (event.payload or {}).get("correlation_key") or ""
+                )
+                rule = dict((event.payload or {}).get("rule") or {})
                 key = _digest(
                     (
                         event.source_change_id,
@@ -243,6 +298,9 @@ class ChangeEventRepository:
                         event.entity_type,
                         event.entity_key,
                         event.run_id,
+                        correlation_key,
+                        rule.get("rule_id"),
+                        rule.get("version"),
                     )
                 )
                 if (
@@ -259,7 +317,7 @@ class ChangeEventRepository:
                     if occurrence_id is None:
                         continue
                     observed_at = _datetime(event.occurred_at)
-                    if _not_older(observed_at, active.last_seen_at):
+                    if _event_not_older(event, active):
                         payload = dict(active.payload_json or {})
                         payload["latest_change"] = event.payload.get("change")
                         payload["latest_source_change_id"] = event.source_change_id
@@ -275,6 +333,7 @@ class ChangeEventRepository:
                         active.latest_change_id = event.source_change_id
                         active.last_seen_run_id = event.run_id
                         active.last_seen_at = observed_at
+                        active.last_seen_order_key = _event_order_key(event)
                     active.occurrence_count = int(active.occurrence_count or 1) + 1
                     if event.source_change_id:
                         change = db.get(NetworkChangeRecord, event.source_change_id)
@@ -293,7 +352,7 @@ class ChangeEventRepository:
                 if (
                     latest is not None
                     and latest.status == "resolved"
-                    and not _not_older(observed_at, latest.last_seen_at)
+                    and not _event_not_older(event, latest)
                     and _event_class(event) != "recovery"
                 ):
                     occurrence_id = self._record_event_occurrence(
@@ -346,6 +405,7 @@ class ChangeEventRepository:
                         occurred_at=_datetime(event.occurred_at),
                         first_seen_at=_datetime(event.occurred_at),
                         last_seen_at=_datetime(event.occurred_at),
+                        last_seen_order_key=_event_order_key(event),
                         occurrence_count=1,
                         status=("resolved" if _event_class(event) == "recovery" else event.status),
                         payload_json=self._event_payload(event),
@@ -593,7 +653,7 @@ class ChangeEventRepository:
             )
 
     @staticmethod
-    def _lock_required_event_correlations(db, event: Any) -> None:
+    def _required_event_correlations(event: Any) -> set[tuple[str, str]]:
         payload = event.payload or {}
         keys = {
             str(value)
@@ -609,18 +669,28 @@ class ChangeEventRepository:
         if isinstance(target_types, str):
             target_types = [target_types]
         event_types = {str(event.event_type), *(str(item) for item in target_types)}
-        for event_type, correlation_key in sorted(
+        return {
             (event_type, correlation_key)
             for event_type in event_types
             for correlation_key in keys
+        }
+
+    @staticmethod
+    def _lock_correlation_identity(db, event_type: str, correlation_key: str) -> None:
+        digest = hashlib.sha256(
+            f"network-event-v1|{event_type}|{correlation_key}".encode()
+        ).digest()
+        db.execute(
+            text("SELECT pg_advisory_xact_lock(:lock_id)"),
+            {"lock_id": int.from_bytes(digest[:8], byteorder="big", signed=True)},
+        )
+
+    @classmethod
+    def _lock_required_event_correlations(cls, db, event: Any) -> None:
+        for event_type, correlation_key in sorted(
+            cls._required_event_correlations(event)
         ):
-            digest = hashlib.sha256(
-                f"network-event-v1|{event_type}|{correlation_key}".encode()
-            ).digest()
-            db.execute(
-                text("SELECT pg_advisory_xact_lock(:lock_id)"),
-                {"lock_id": int.from_bytes(digest[:8], byteorder="big", signed=True)},
-            )
+            cls._lock_correlation_identity(db, event_type, correlation_key)
 
     def _resolve_recovered_event(self, db, event: Any) -> bool:
         rule = dict((event.payload or {}).get("rule") or {})
@@ -650,7 +720,7 @@ class ChangeEventRepository:
             )
             for row in rows:
                 recovered_at = _datetime(event.occurred_at)
-                projection_applied = _not_older(recovered_at, row.last_seen_at)
+                projection_applied = _event_not_older(event, row)
                 occurrence_id = self._record_event_occurrence(
                     db,
                     row.id,
@@ -686,6 +756,7 @@ class ChangeEventRepository:
                         row.latest_change_id = event.source_change_id
                         row.last_seen_run_id = event.run_id
                         row.last_seen_at = recovered_at
+                        row.last_seen_order_key = _event_order_key(event)
                 if projection_applied:
                     payload = dict(row.payload_json or {})
                     payload["recovery_change"] = change

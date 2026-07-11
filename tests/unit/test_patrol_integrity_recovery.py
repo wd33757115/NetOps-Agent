@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -13,6 +14,8 @@ from src.core.patrol.event_builder import NetworkEvent, _event_correlation_ident
 from src.core.patrol.event_rules import EventRuleRepository
 from src.core.patrol.repository import (
     AnalysisAttemptFencedError,
+    AnalysisLeaseHeartbeat,
+    PatrolRunFencedError,
     PatrolRepository,
     _as_datetime,
 )
@@ -105,6 +108,26 @@ def test_normalize_run_commits_valid_collections_and_quarantines_invalid(monkeyp
     assert saved["observations"] == [observation]
     assert saved["update_current_state"] is True
     assert failed[0]["snapshot_id"] == "snapshot-bad"
+
+
+def test_analysis_lease_heartbeat_is_wall_clock_driven():
+    touches = []
+
+    class FakeRepository:
+        def touch_analysis_attempt(self, attempt_id, **kwargs):
+            touches.append((attempt_id, kwargs))
+
+    heartbeat = AnalysisLeaseHeartbeat(
+        FakeRepository(),
+        {"attempt_id": "attempt-1", "attempt_number": 1, "owner_token": "owner-1"},
+        interval_seconds=1,
+    ).start()
+    try:
+        time.sleep(1.1)
+    finally:
+        heartbeat.stop()
+
+    assert len(touches) >= 1
 
 
 def test_tombstone_identity_is_deterministic():
@@ -417,6 +440,81 @@ def test_redelivery_fences_live_attempt_owned_by_dead_worker():
         reserved = repository.get_run(decision.run_id)
         assert reserved["status"] == "reserved"
         assert reserved["worker_id"] == "worker-B"
+    finally:
+        with get_db_session() as db:
+            db.query(PatrolRun).filter(PatrolRun.logical_run_id == logical_run_id).delete(
+                synchronize_session=False
+            )
+
+
+def test_collection_owner_fences_stale_fact_writes_and_second_hard_kill():
+    logical_run_id = f"patrol-{uuid.uuid4()}"
+    repository = PatrolRepository()
+    try:
+        repository.create_run(
+            run_id=logical_run_id,
+            source="device-patrol",
+            mode="production",
+            logical_run_id=logical_run_id,
+            worker_id="worker-A",
+            owner_token="owner-A",
+            lease_seconds=900,
+        )
+        first_takeover = repository.prepare_redelivery_attempt(
+            logical_run_id, worker_id="worker-B"
+        )
+
+        with pytest.raises(PatrolRunFencedError):
+            repository.save_collection_result(
+                run_id=logical_run_id,
+                device_id="SW1",
+                canonical_command="show version",
+                status="complete",
+                owner_token="owner-A",
+            )
+        with pytest.raises(PatrolRunFencedError):
+            repository.save_snapshot_idempotent(
+                run_id=logical_run_id,
+                device_id="SW1",
+                device_name="SW1",
+                command="show version",
+                command_canonical="show version",
+                raw_text="stale output",
+                owner_token="owner-A",
+            )
+        with pytest.raises(PatrolRunFencedError):
+            repository.finish_run(
+                logical_run_id,
+                collection_status="completed",
+                owner_token="owner-A",
+            )
+
+        repository.create_run(
+            run_id=first_takeover.run_id,
+            source="device-patrol",
+            mode="production",
+            logical_run_id=logical_run_id,
+            attempt_number=first_takeover.attempt_number,
+            worker_id="worker-B",
+            owner_token=first_takeover.owner_token,
+            lease_seconds=900,
+        )
+        assert repository.get_run(first_takeover.run_id)["metadata_json"][
+            "attempt_reserved"
+        ] is False
+
+        second_takeover = repository.prepare_redelivery_attempt(
+            logical_run_id, worker_id="worker-C"
+        )
+        assert second_takeover.action == "allocate_new_attempt"
+        assert second_takeover.attempt_number == 2
+        assert repository.get_run(first_takeover.run_id)["status"] == "abandoned"
+        with pytest.raises(PatrolRunFencedError):
+            repository.finish_run(
+                first_takeover.run_id,
+                collection_status="completed",
+                owner_token=first_takeover.owner_token,
+            )
     finally:
         with get_db_session() as db:
             db.query(PatrolRun).filter(PatrolRun.logical_run_id == logical_run_id).delete(

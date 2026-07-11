@@ -38,6 +38,8 @@ class StateObservation:
     observation_type: str | None = None
     semantic_type: str | None = None
     unit: str | None = None
+    execution_item_id: str | None = None
+    fact_order_key: str = ""
     confidence: float = 1.0
     metadata: dict[str, Any] | None = None
 

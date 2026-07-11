@@ -7,13 +7,16 @@ from __future__ import annotations
 
 import hashlib
 import json
-import uuid
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from src.core.parser.key_contract import EntityKeyError, index_records
-from src.core.patrol.change_event_repository import ChangeEventRepository
+from src.core.patrol.change_event_repository import (
+    ChangeEventRepository,
+    change_idempotency_key,
+    deterministic_change_id,
+)
 from src.core.patrol.change_policy import compare_with_policy, policy_from_dict
 from src.core.patrol.change_policy_repository import ChangePolicyRepository
 from src.core.patrol.command_splitter import canonicalize_command
@@ -22,6 +25,7 @@ from src.core.patrol.repository import (
     AnalysisAttemptFencedError,
     AnalysisAttemptInProgressError,
     PatrolRepository,
+    AnalysisLeaseHeartbeat,
 )
 from src.core.state.repository import StateRepository
 
@@ -64,6 +68,11 @@ class NetworkChange:
         data["old"] = data.pop("old_value")
         data["new"] = data.pop("new_value")
         return data
+
+
+def _new_change(**values: Any) -> NetworkChange:
+    change = NetworkChange(change_id="", **values)
+    return replace(change, change_id=deterministic_change_id(change))
 
 
 def _now() -> str:
@@ -190,7 +199,8 @@ def _state_key(observation: dict[str, Any]) -> str:
             observation.get("device_id"),
             observation.get("entity_type"),
             observation.get("entity_key"),
-            observation.get("field_name"),
+            observation.get("observation_type")
+            or str(observation.get("field_name") or "").strip().lower(),
         ],
         ensure_ascii=False,
         sort_keys=True,
@@ -295,8 +305,7 @@ def _observation_to_change(
     basis = current or previous or {}
     old = previous.get("value_json") if previous else None
     new = current.get("value_json") if current else None
-    return NetworkChange(
-        change_id=str(uuid.uuid4()),
+    return _new_change(
         run_id=run_id,
         device_id=basis.get("device_id"),
         command=basis.get("canonical_command"),
@@ -362,8 +371,7 @@ def detect_changes_between_values(
 
     for key in sorted(set(prev_map) - set(curr_map)):
         changes.append(
-            NetworkChange(
-                change_id=str(uuid.uuid4()),
+            _new_change(
                 run_id=run_id,
                 device_id=device_id,
                 command=command,
@@ -382,8 +390,7 @@ def detect_changes_between_values(
 
     for key in sorted(set(curr_map) - set(prev_map)):
         changes.append(
-            NetworkChange(
-                change_id=str(uuid.uuid4()),
+            _new_change(
                 run_id=run_id,
                 device_id=device_id,
                 command=command,
@@ -411,8 +418,7 @@ def detect_changes_between_values(
             if _equivalent_values(str(field), old, new):
                 continue
             changes.append(
-                NetworkChange(
-                    change_id=str(uuid.uuid4()),
+                _new_change(
                     run_id=run_id,
                     device_id=device_id,
                     command=command,
@@ -442,8 +448,7 @@ def detect_changes_between_snapshots(
         if previous.raw_text_hash == current.raw_text_hash:
             return []
         return [
-            NetworkChange(
-                change_id=str(uuid.uuid4()),
+            _new_change(
                 run_id=current.run_id,
                 device_id=current.device_id,
                 command=current.command_canonical,
@@ -698,7 +703,19 @@ def detect_changes_from_params(params: dict[str, Any]) -> dict[str, Any]:
             "previous_run_id/current_run_id, or current_run_id"
         )
 
+    changes = [replace(change, change_id=deterministic_change_id(change)) for change in changes]
     persisted_change_count = save_changes(changes) if persist else 0
+    if persist:
+        canonical_ids = ChangeEventRepository().canonical_change_ids(changes)
+        changes = [
+            replace(
+                change,
+                change_id=canonical_ids.get(
+                    change_idempotency_key(change), change.change_id
+                ),
+            )
+            for change in changes
+        ]
     return {
         "success": True,
         "change_count": len(changes),
@@ -718,22 +735,52 @@ def detect_observation_changes_against_history(
     analysis_revision: str = "original",
 ) -> dict[str, Any]:
     patrol_repository = PatrolRepository()
+    state_repository = StateRepository()
     if device_ids:
-        input_observations = StateRepository().list_run_observations(
+        input_observations = state_repository.list_run_observations(
             current_run_id, device_ids=device_ids
         )
     else:
-        input_observations = StateRepository().list_run_observations(current_run_id)
+        input_observations = state_repository.list_run_observations(current_run_id)
+    if previous_run_id:
+        try:
+            prior_observations = (
+                state_repository.list_observations_for_runs(
+                    [previous_run_id], device_ids=device_ids, baseline_only=True
+                )
+                if device_ids
+                else state_repository.list_observations_for_runs(
+                    [previous_run_id], baseline_only=True
+                )
+            )
+        except TypeError:
+            prior_observations = (
+                state_repository.list_observations_for_runs(
+                    [previous_run_id], device_ids=device_ids
+                )
+                if device_ids
+                else state_repository.list_observations_for_runs([previous_run_id])
+            )
+    else:
+        prior_observations = state_repository.list_prior_observations_for_run(
+            current_run_id
+        )
     input_revision_digest = hashlib.sha256(
         json.dumps(
-            [
-            [
-                item.get("id"),
-                item.get("snapshot_id"),
-                item.get("observed_at"),
-            ]
-            for item in sorted(input_observations, key=lambda row: str(row.get("id") or ""))
-            ],
+            {
+                "current": [
+                    [item.get("id"), item.get("snapshot_id"), item.get("observed_at")]
+                    for item in sorted(
+                        input_observations, key=lambda row: str(row.get("id") or "")
+                    )
+                ],
+                "prior": [
+                    [item.get("id"), item.get("snapshot_id"), item.get("observed_at")]
+                    for item in sorted(
+                        prior_observations, key=lambda row: str(row.get("id") or "")
+                    )
+                ],
+            },
             sort_keys=True,
             separators=(",", ":"),
             default=str,
@@ -747,6 +794,7 @@ def detect_observation_changes_against_history(
             persist=False,
             missing_confirmations=missing_confirmations,
             current_observations=input_observations,
+            prior_observations=prior_observations,
             analysis_revision=analysis_revision,
         )
     frozen_policies = ChangePolicyRepository().list_active_policies()
@@ -788,12 +836,7 @@ def detect_observation_changes_against_history(
         raise AnalysisAttemptInProgressError(
             f"change detection already running for {current_run_id}"
         )
-    def heartbeat() -> None:
-        patrol_repository.touch_analysis_attempt(
-            str(attempt["attempt_id"]),
-            attempt_number=int(attempt["attempt_number"]),
-            owner_token=str(attempt["owner_token"]),
-        )
+    heartbeat = AnalysisLeaseHeartbeat(patrol_repository, attempt)
     updates_run_status = not bool(device_ids)
     if updates_run_status:
         try:
@@ -805,6 +848,7 @@ def detect_observation_changes_against_history(
             )
         except ValueError:
             pass
+    heartbeat.start()
     try:
         result = _detect_observation_changes_against_history_impl(
             current_run_id=current_run_id,
@@ -814,10 +858,12 @@ def detect_observation_changes_against_history(
             missing_confirmations=missing_confirmations,
             policy_bundle=list(attempt["rule_bundle"].get("change_policies") or []),
             current_observations=input_observations,
+            prior_observations=prior_observations,
             heartbeat=heartbeat,
             analysis_revision=analysis_revision,
             rule_bundle_digest=str(attempt["rule_bundle_digest"]),
         )
+        heartbeat.stop()
         patrol_repository.complete_analysis_attempt(
             str(attempt["attempt_id"]),
             attempt_number=int(attempt["attempt_number"]),
@@ -826,6 +872,7 @@ def detect_observation_changes_against_history(
         )
         return result
     except Exception as exc:
+        heartbeat.stop()
         try:
             patrol_repository.fail_analysis_attempt(
                 str(attempt["attempt_id"]),
@@ -860,6 +907,7 @@ def _detect_observation_changes_against_history_impl(
     missing_confirmations: int = 2,
     policy_bundle: list[dict[str, Any]] | None = None,
     current_observations: list[dict[str, Any]] | None = None,
+    prior_observations: list[dict[str, Any]] | None = None,
     heartbeat: Any | None = None,
     analysis_revision: str = "original",
     rule_bundle_digest: str | None = None,
@@ -914,7 +962,9 @@ def _detect_observation_changes_against_history_impl(
     }
     prior_by_key: dict[str, dict[str, Any]] = {}
     policy_resolver = ChangePolicyResolver(policy_bundle)
-    if previous_run_id:
+    if prior_observations is not None:
+        pass
+    elif previous_run_id:
         try:
             prior_observations = (
                 repository.list_observations_for_runs(
@@ -941,7 +991,7 @@ def _detect_observation_changes_against_history_impl(
     for prior in prior_observations:
         prior_by_key.setdefault(_state_key(prior), prior)
     for index, current in enumerate(current_observations):
-        if heartbeat is not None and index and index % 500 == 0:
+        if heartbeat is not None:
             heartbeat()
         previous = prior_by_key.get(_state_key(current))
         if previous:
@@ -1033,7 +1083,7 @@ def _detect_observation_changes_against_history_impl(
                 )
             )
     for index, (key, previous) in enumerate(prior_by_key.items()):
-        if heartbeat is not None and index and index % 500 == 0:
+        if heartbeat is not None:
             heartbeat()
         if key in current_by_key:
             continue
@@ -1100,6 +1150,7 @@ def _detect_observation_changes_against_history_impl(
         )
         for change in changes
     ]
+    changes = [replace(change, change_id=deterministic_change_id(change)) for change in changes]
     for decision in decisions:
         decision["analysis_revision"] = analysis_revision
         decision["rule_bundle_digest"] = rule_bundle_digest
@@ -1112,6 +1163,17 @@ def _detect_observation_changes_against_history_impl(
         if persist
         else 0
     )
+    if persist:
+        canonical_ids = ChangeEventRepository().canonical_change_ids(changes)
+        changes = [
+            replace(
+                change,
+                change_id=canonical_ids.get(
+                    change_idempotency_key(change), change.change_id
+                ),
+            )
+            for change in changes
+        ]
     return {
         "success": True,
         "current_run_id": current_run_id,
@@ -1177,7 +1239,19 @@ def detect_changes_against_history(
             else detect_changes_between_snapshots(previous, current)
         )
 
+    changes = [replace(change, change_id=deterministic_change_id(change)) for change in changes]
     persisted_change_count = save_changes(changes) if persist else 0
+    if persist:
+        canonical_ids = ChangeEventRepository().canonical_change_ids(changes)
+        changes = [
+            replace(
+                change,
+                change_id=canonical_ids.get(
+                    change_idempotency_key(change), change.change_id
+                ),
+            )
+            for change in changes
+        ]
     return {
         "success": True,
         "current_run_id": current_run_id,

@@ -272,6 +272,7 @@ def import_raw_capture(
     model: str | None = None,
     observed_at: str | None = None,
     metadata: dict[str, Any] | None = None,
+    run_owner_token: str | None = None,
     inventory_device_id: str | None = None,
     collector_complete: bool | None = None,
     command_collection_statuses: (
@@ -400,28 +401,35 @@ def import_raw_capture(
         )
     ]
     legacy_fingerprints = [
-        _import_fingerprint(
-            mode=mode,
-            dataset_id=dataset_id,
-            source_file_hash=source_file_hash,
-            device_id=device_id,
-            canonical_command=block.command_canonical,
-            raw_text=block.raw_output,
-            run_id=run_id,
-            inventory_device_id=inventory_device_id,
-            command_observed_at=command_observed_at,
-            command_ordinal=block.start_line,
-            fact_version="v1",
+        (
+            None
+            if command_collection.get("execution_item_id")
+            else _import_fingerprint(
+                mode=mode,
+                dataset_id=dataset_id,
+                source_file_hash=source_file_hash,
+                device_id=device_id,
+                canonical_command=block.command_canonical,
+                raw_text=block.raw_output,
+                run_id=run_id,
+                inventory_device_id=inventory_device_id,
+                command_observed_at=command_observed_at,
+                command_ordinal=block.start_line,
+                fact_version="v1",
+            )
         )
-        for (block, _), command_observed_at in zip(
-            parsed_blocks, command_observed_ats, strict=True
+        for (block, _), command_observed_at, command_collection in zip(
+            parsed_blocks,
+            command_observed_ats,
+            block_collection_statuses,
+            strict=True,
         )
     ]
     existing = repository.find_snapshots_by_import_fingerprints(
-        {*fingerprints, *legacy_fingerprints}
+        {fingerprint for fingerprint in [*fingerprints, *legacy_fingerprints] if fingerprint}
     )
     fingerprints = [
-        legacy if legacy in existing else current
+        legacy if legacy and legacy in existing else current
         for current, legacy in zip(fingerprints, legacy_fingerprints, strict=True)
     ]
     if fingerprints and all(fingerprint in existing for fingerprint in fingerprints):
@@ -487,6 +495,7 @@ def import_raw_capture(
         },
         started_at=observed_at,
         run_purpose=str((metadata or {}).get("run_purpose") or "scheduled_patrol"),
+        owner_token=run_owner_token,
     )
 
     snapshot_ids: list[str] = []
@@ -553,6 +562,7 @@ def import_raw_capture(
             },
             inventory_device_id=inventory_device_id,
             execution_item_id=command_collection.get("execution_item_id"),
+            owner_token=run_owner_token,
         )
         snapshot_ids.append(snapshot_id)
         if not snapshot_created:
@@ -636,6 +646,7 @@ def import_raw_capture(
                 "collection_item_id": command_collection.get("collection_item_id"),
                 "command_ordinal": command_collection.get("command_ordinal"),
             },
+            owner_token=run_owner_token,
         )
     if finalize_run:
         repository.finish_run(
@@ -643,6 +654,7 @@ def import_raw_capture(
             collection_status=("completed" if not blocking and not parse_violations else "partial"),
             analysis_status="pending",
             baseline_eligible=False,
+            owner_token=run_owner_token,
         )
     return {
         "success": True,

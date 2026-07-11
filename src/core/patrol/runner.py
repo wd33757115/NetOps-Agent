@@ -53,6 +53,7 @@ def persist_patrol_snapshots(
     started_at: str | datetime | None = None,
     create_run: bool = True,
     finalize_run: bool = True,
+    run_owner_token: str | None = None,
 ) -> dict[str, Any]:
     """Import completed patrol raw-output files into the snapshot store."""
     from src.core.patrol.raw_importer import import_raw_capture
@@ -71,6 +72,7 @@ def persist_patrol_snapshots(
             },
             run_purpose=run_purpose,
             started_at=started_at,
+            owner_token=run_owner_token,
         )
 
     imported_commands = 0
@@ -118,6 +120,7 @@ def persist_patrol_snapshots(
                                 item.get("error") if isinstance(item, dict) else detail.get("error")
                             )
                         },
+                        owner_token=run_owner_token,
                     )
             continue
         try:
@@ -129,6 +132,7 @@ def persist_patrol_snapshots(
             imported = import_raw_capture(
                 file_path=str(output_file),
                 mode=mode,
+                run_owner_token=run_owner_token,
                 run_id=snapshot_run_id,
                 device_name=detail.get("device_name"),
                 ip=detail.get("ip"),
@@ -182,6 +186,7 @@ def persist_patrol_snapshots(
                     observed_at=command_result.get("observed_at"),
                     execution_item_id=command_result.get("execution_item_id"),
                     metadata={"error": command_result.get("error")},
+                    owner_token=run_owner_token,
                 )
         except Exception as exc:
             import_errors.append(f"{output_file}: {exc}")
@@ -213,6 +218,7 @@ def persist_patrol_snapshots(
                 "failed_device_count": failed_devices,
                 "snapshot_health": snapshot_health,
             },
+            owner_token=run_owner_token,
         )
 
     return {
@@ -287,6 +293,7 @@ class DevicePatrolRunRequest:
     task_id: str | None = None
     attempt_number: int = 0
     worker_id: str | None = None
+    owner_token: str | None = None
 
 
 class DevicePatrolRunner:
@@ -332,6 +339,7 @@ class DevicePatrolRunner:
         )
         run_purpose = "baseline" if request.save_baseline else "scheduled_patrol"
         streaming_persistence = self._snapshot_persister is persist_patrol_snapshots
+        owner_token = request.owner_token or uuid.uuid4().hex
         if streaming_persistence:
             from src.core.patrol.repository import PatrolRepository
 
@@ -349,6 +357,8 @@ class DevicePatrolRunner:
                 attempt_number=attempt_number,
                 worker_id=request.worker_id,
                 lease_seconds=settings.PATROL_RUN_LEASE_SECONDS,
+                owner_token=owner_token,
+                owner_generation=attempt_number + 1,
             )
 
             def persist_device_result(detail: dict[str, Any]) -> dict[str, Any]:
@@ -361,11 +371,13 @@ class DevicePatrolRunner:
                     run_purpose=run_purpose,
                     create_run=False,
                     finalize_run=False,
+                    run_owner_token=owner_token,
                 )
                 PatrolRepository().touch_run(
                     snapshot_run_id,
                     lease_seconds=settings.PATROL_RUN_LEASE_SECONDS,
                     worker_id=request.worker_id,
+                    owner_token=owner_token,
                     metadata={"last_persisted_device": detail.get("device_name")},
                 )
                 return persisted
@@ -393,11 +405,13 @@ class DevicePatrolRunner:
                     run_purpose=run_purpose,
                     create_run=False,
                     finalize_run=False,
+                    run_owner_token=owner_token,
                 )
                 PatrolRepository().touch_run(
                     snapshot_run_id,
                     lease_seconds=settings.PATROL_RUN_LEASE_SECONDS,
                     worker_id=request.worker_id,
+                    owner_token=owner_token,
                     metadata={
                         "last_persisted_command": (
                             (manifest.get("commands") or [{}])[-1].get("command")
@@ -432,28 +446,14 @@ class DevicePatrolRunner:
                     analysis_status="failed",
                     baseline_eligible=False,
                     metadata={"collection_failure": str(exc)},
+                    owner_token=owner_token,
                 )
             raise
 
         if streaming_persistence:
-            from src.core.patrol.repository import PatrolRepository
-
             snapshot_result = _combine_snapshot_results(
                 snapshot_run_id=snapshot_run_id,
                 details=result.details or [],
-            )
-            PatrolRepository().finish_run(
-                snapshot_run_id,
-                collection_status=str(snapshot_result["collection_status"]),
-                analysis_status=(
-                    "failed" if snapshot_result["collection_status"] == "failed" else "pending"
-                ),
-                baseline_eligible=False,
-                metadata={
-                    "successful_device_count": snapshot_result["snapshot_devices"],
-                    "failed_device_count": snapshot_result["failed_devices"],
-                    "snapshot_health": snapshot_result["snapshot_health"],
-                },
             )
         else:
             snapshot_result = self._snapshot_persister(
@@ -469,6 +469,25 @@ class DevicePatrolRunner:
             output_files=result.output_files or [],
             ticket_id=request.ticket_id,
         )
+        if streaming_persistence:
+            from src.core.patrol.repository import PatrolRepository
+
+            PatrolRepository().finish_run(
+                snapshot_run_id,
+                collection_status=str(snapshot_result["collection_status"]),
+                analysis_status=(
+                    "failed" if snapshot_result["collection_status"] == "failed" else "pending"
+                ),
+                baseline_eligible=False,
+                metadata={
+                    "successful_device_count": snapshot_result["snapshot_devices"],
+                    "failed_device_count": snapshot_result["failed_devices"],
+                    "snapshot_health": snapshot_result["snapshot_health"],
+                    "archive_status": "completed",
+                    "raw_outputs_archive": raw_outputs_url,
+                },
+                owner_token=owner_token,
+            )
         if int(result.success_devices or 0) == 0 and not snapshot_result.get("snapshot_devices"):
             raise PatrolPlatformError(result.message or "device patrol failed")
         if snapshot_result["snapshot_errors"] and not snapshot_result.get("snapshot_devices"):

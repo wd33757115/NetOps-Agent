@@ -14,6 +14,7 @@ from src.core.state.normalizer import (
     observations_from_snapshot,
 )
 from src.core.state.repository import StateRepository
+from src.core.patrol.repository import AnalysisAttemptInProgressError
 
 
 class _AnalysisPatrolRepository:
@@ -952,3 +953,62 @@ def test_state_observation_mode_takes_precedence_over_snapshot_run_diff(monkeypa
 
     assert result["success"] is True
     assert calls["observation"] == ("run-current", "run-previous", False)
+
+
+def test_change_detection_input_revision_includes_prior_observations(monkeypatch):
+    scopes = []
+    prior = [{"id": "prior-1", "snapshot_id": "snapshot-p1", "observed_at": "2026-01-01"}]
+
+    class FakeStateRepository:
+        def list_run_observations(self, _run_id):
+            return [
+                {
+                    "id": "current-1",
+                    "snapshot_id": "snapshot-c1",
+                    "observed_at": "2026-01-02",
+                }
+            ]
+
+        def list_observations_for_runs(self, _run_ids, **_kwargs):
+            return list(prior)
+
+    class FakePolicyRepository:
+        def list_active_policies(self):
+            return []
+
+    class FakePatrolRepository:
+        def begin_analysis_attempt(self, *, scope, **_kwargs):
+            scopes.append(scope)
+            return {
+                "reused": False,
+                "in_progress": True,
+                "attempt_id": "attempt-1",
+                "attempt_number": 1,
+                "owner_token": None,
+                "rule_bundle": {},
+                "rule_bundle_digest": "digest",
+            }
+
+    monkeypatch.setattr(
+        "src.core.patrol.change_detector.StateRepository", FakeStateRepository
+    )
+    monkeypatch.setattr(
+        "src.core.patrol.change_detector.ChangePolicyRepository", FakePolicyRepository
+    )
+    monkeypatch.setattr(
+        "src.core.patrol.change_detector.PatrolRepository", FakePatrolRepository
+    )
+
+    with pytest.raises(AnalysisAttemptInProgressError):
+        detect_observation_changes_against_history(
+            current_run_id="run-current", previous_run_id="run-previous"
+        )
+    prior.append(
+        {"id": "prior-2", "snapshot_id": "snapshot-p2", "observed_at": "2026-01-01"}
+    )
+    with pytest.raises(AnalysisAttemptInProgressError):
+        detect_observation_changes_against_history(
+            current_run_id="run-current", previous_run_id="run-previous"
+        )
+
+    assert scopes[0]["input_revision_digest"] != scopes[1]["input_revision_digest"]
