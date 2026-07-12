@@ -1,0 +1,349 @@
+import { expect, test, type Page } from '@playwright/test'
+
+const admin = {
+  id: 1,
+  username: 'admin',
+  email: 'admin@example.test',
+  role: 'admin',
+}
+
+const device = {
+  device_id: 'device-1',
+  device_name: 'core-sw-01',
+  management_ip: '10.0.0.1',
+  vendor: 'Cisco',
+  model: 'C9300-48P',
+  site: 'DC-A',
+  role: 'core',
+  status: 'active',
+  last_connection_status: 'connected',
+  groups: ['core'],
+  patrol_readiness: {
+    status: 'ready',
+    mode: 'production',
+    command_count: 2,
+    eligible_count: 2,
+    ready_count: 2,
+    blocked_count: 0,
+    profile_name: 'golden-patrol-interface-optical',
+  },
+}
+
+const batch = {
+  patrol_batch_id: 'batch-incident-1',
+  workflow_name: 'patrol-change-event',
+  source: 'device-management',
+  total: 1,
+  status_counts: { failed: 1 },
+  failed_count: 1,
+  running_count: 0,
+  completed_count: 0,
+  pending_count: 0,
+  cancelled_count: 0,
+  sample_devices: ['core-sw-01'],
+  target_type: 'group',
+  target_label: '设备分组：core',
+  selector: { group_ids: ['core'] },
+  target_count: 2,
+  launched_count: 1,
+  skipped_count: 1,
+  connection_succeeded_count: 0,
+  connection_failed_count: 1,
+  connection_pending_count: 0,
+  manifest_available: true,
+  archived: false,
+  created_at: '2026-07-12T09:00:00Z',
+}
+
+const failedRun = {
+  run_id: 'workflow-run-1',
+  template_name: 'patrol-change-event',
+  source: 'device-management',
+  status: 'failed',
+  current_step_index: 5,
+  error_message: 'InterfaceDown event requires operator review',
+  device_id: device.device_id,
+  device_name: device.device_name,
+  patrol_batch_id: batch.patrol_batch_id,
+  created_at: '2026-07-12T09:00:00Z',
+}
+
+const evidenceItem = {
+  workflow_run_id: failedRun.run_id,
+  workflow_status: 'failed',
+  workflow_created_at: '2026-07-12T09:00:00Z',
+  workflow_completed_at: '2026-07-12T09:01:00Z',
+  execution_plan_id: 'plan-1',
+  execution_plan: {
+    execution_plan_id: 'plan-1',
+    device_id: device.device_id,
+    action: 'patrol',
+    mode: 'production',
+    profile_name: 'golden-patrol-interface-optical',
+    policy_source: 'command-profile-binding',
+    command_count: 2,
+    plan_sha256: 'plan-digest',
+    status: 'completed',
+  },
+  patrol_batch_id: batch.patrol_batch_id,
+  snapshot_run_id: 'snapshot-run-1',
+  snapshot_count: 1,
+  observation_count: 1,
+  change_count: 1,
+  event_count: 1,
+  parse_counts: { parsed: 1 },
+  steps: [],
+  snapshots: [{
+    snapshot_id: 'snapshot-1',
+    command: 'show interface status',
+    parse_status: 'parsed',
+    parser_template_id: 'parser-template-interface-status-v1',
+    observation_contract_id: 'contract-interface-status-v1',
+    raw_text_hash: '1234567890abcdef',
+  }],
+  observations: [{
+    observation_id: 'observation-1',
+    snapshot_id: 'snapshot-1',
+    entity_type: 'interface_l2',
+    entity_key: 'Gi1/0/1',
+    field: 'status',
+    observation_type: 'interface.oper_status',
+    value: 'down',
+    observation_contract_id: 'contract-interface-status-v1',
+  }],
+  changes: [{
+    change_id: 'change-1',
+    entity_type: 'interface_l2',
+    entity_key: 'Gi1/0/1',
+    field: 'status',
+    change_type: 'modified',
+    observation_type: 'interface.oper_status',
+    old_value: 'up',
+    new_value: 'down',
+    event_status: 'event_created',
+    change_policy_id: 'interface-oper-status',
+    change_policy_version_id: 'change-policy-interface-v1',
+    decision_reason: 'active interface changed from up to down',
+  }],
+  events: [{
+    event_id: 'event-interface-down-1',
+    event_type: 'InterfaceDown',
+    severity: 'critical',
+    entity_type: 'interface_l2',
+    entity_key: 'Gi1/0/1',
+    status: 'active',
+    old_value: 'up',
+    new_value: 'down',
+    event_rule_id: 'event-rule-interface-down',
+    event_rule_version: 1,
+    occurred_at: '2026-07-12T09:01:00Z',
+  }],
+}
+
+async function installAuthenticatedApi(page: Page) {
+  await page.addInitScript((user) => {
+    localStorage.setItem('access_token', 'visual-access-token')
+    localStorage.setItem('auth_user', JSON.stringify(user))
+  }, admin)
+
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url())
+    const path = url.pathname
+
+    if (path.endsWith('/auth/me/')) return route.fulfill({ json: admin })
+    if (path.endsWith('/health/')) {
+      return route.fulfill({
+        json: {
+          status: 'healthy',
+          services: { postgres: true, redis: true, celery: true, minio: true },
+          timestamp: '2026-07-12T10:00:00Z',
+        },
+      })
+    }
+    if (path.endsWith('/skills/stats/')) {
+      return route.fulfill({
+        json: {
+          total_skills: 24,
+          enabled_skills: 22,
+          disabled_skills: 2,
+          categories: { network: 12, governance: 6, general: 6 },
+        },
+      })
+    }
+    if (path.endsWith('/devices/')) {
+      return route.fulfill({ json: { items: [device], total: 1, limit: 200, offset: 0 } })
+    }
+    if (path.endsWith('/workflows/runs/patrol-batches/')) {
+      return route.fulfill({ json: { items: [batch] } })
+    }
+    if (path.endsWith('/workflows/runs/')) {
+      return route.fulfill({
+        json: url.searchParams.get('patrol_batch_id') ? [failedRun] : [],
+      })
+    }
+    if (path.endsWith('/workflows/runs/patrol-batches/batch-incident-1/summary/')) {
+      return route.fulfill({
+        json: {
+          patrol_batch_id: batch.patrol_batch_id,
+          run_count: 1,
+          device_count: 1,
+          change_count: 2,
+          event_count: 1,
+          status_counts: { failed: 1 },
+          event_types: { InterfaceDown: 1 },
+          severities: { critical: 1 },
+          quality: {
+            status: 'degraded',
+            command_count: 25,
+            execution_success_count: 25,
+            parser_eligible_count: 7,
+            parser_ready_count: 5,
+            observation_count: 32,
+          },
+          no_event_summary: {
+            total: 1,
+            by_reason: { no_active_event_rules: 1 },
+          },
+          runs: [],
+          sample_events: [],
+          sample_changes: [],
+          deliverables: { csv_url: '', report_url: '' },
+        },
+      })
+    }
+    if (path.endsWith('/workflows/runs/patrol-batches/batch-incident-1/devices')) {
+      return route.fulfill({
+        json: {
+          patrol_batch_id: batch.patrol_batch_id,
+          target_type: batch.target_type,
+          target_label: batch.target_label,
+          selector: batch.selector,
+          target_count: 2,
+          launched_count: 1,
+          skipped_count: 1,
+          total: 2,
+          limit: 50,
+          offset: 0,
+          items: [
+            {
+              device_id: device.device_id,
+              device_name: device.device_name,
+              management_ip: device.management_ip,
+              selection_status: 'launched',
+              preflight_status: 'ready',
+              connection_status: 'failed',
+              workflow_run_id: failedRun.run_id,
+              workflow_status: 'failed',
+              error_message: 'SSH authentication failed',
+            },
+            {
+              device_id: 'device-2',
+              device_name: 'core-sw-02',
+              management_ip: '10.0.0.2',
+              selection_status: 'skipped',
+              preflight_status: 'failed',
+              connection_status: 'not_attempted',
+              failure_code: 'credential_missing',
+              error_message: '未绑定凭据',
+            },
+          ],
+        },
+      })
+    }
+    if (path.endsWith('/devices/device-1/evidence-timeline/')) {
+      return route.fulfill({ json: { device, items: [evidenceItem], limit: 10 } })
+    }
+    if (path.endsWith('/devices/device-1/execution-plans/')) {
+      return route.fulfill({ json: { device, items: [], limit: 10 } })
+    }
+    if (path.endsWith('/parser/coverage/')) {
+      return route.fulfill({
+        json: {
+          templates_total: 8,
+          templates_active: 8,
+          jobs_total: 0,
+          jobs_pending: 0,
+          missing_candidates: 0,
+          repair_candidates: 0,
+          production_open_jobs: 0,
+          pending_sanitization_samples: 0,
+          sanitized_samples: 12,
+          backfills_pending_approval: 0,
+          backfills_failed: 0,
+          alerts: [],
+        },
+      })
+    }
+    if (path.endsWith('/parser/dispatch-control/')) {
+      return route.fulfill({ json: { auto_dispatch_enabled: false } })
+    }
+    if (path.endsWith('/parser/runtime-assets/resolve/')) {
+      return route.fulfill({
+        json: {
+          ready: true,
+          observation_contracts: {},
+          change_policies: {},
+          event_rules: [],
+          missing_observation_contracts: [],
+          missing_change_policies: [],
+        },
+      })
+    }
+    if (path.endsWith('/devices/import/template/')) {
+      return route.fulfill({ json: { columns: [], example_csv: '' } })
+    }
+    return route.fulfill({ json: { items: [] } })
+  })
+}
+
+async function settle(page: Page) {
+  await page.evaluate(async () => {
+    await document.fonts.ready
+  })
+}
+
+test('login visual baseline', async ({ page }) => {
+  await page.goto('/login')
+  await expect(page.getByRole('heading', { name: 'NetOps Agent' })).toBeVisible()
+  await settle(page)
+  await expect(page).toHaveScreenshot('login.png')
+})
+
+test('devices visual baseline', async ({ page }) => {
+  await installAuthenticatedApi(page)
+  await page.goto('/devices')
+  await expect(page.getByText('core-sw-01')).toBeVisible()
+  await settle(page)
+  await expect(page).toHaveScreenshot('devices.png')
+})
+
+test('parser control plane visual baseline', async ({ page }) => {
+  await installAuthenticatedApi(page)
+  await page.goto('/skills/parser')
+  await expect(page.getByRole('tab', { name: /今日待办/ })).toBeVisible()
+  await settle(page)
+  await expect(page).toHaveScreenshot('parser-control-plane.png')
+})
+
+test('patrol batch and evidence visual baselines', async ({ page }) => {
+  await installAuthenticatedApi(page)
+  await page.goto('/devices?tab=patrol')
+  await expect(page.getByText(batch.patrol_batch_id).first()).toBeVisible()
+  await page.getByRole('button', { name: /详情$/ }).first().click()
+  await expect(page.getByText('SSH authentication failed')).toBeVisible()
+  await settle(page)
+  await expect(page).toHaveScreenshot('patrol-batch.png')
+
+  await page.getByRole('button', { name: /巡检详情$/ }).first().click()
+  await expect(page.getByText('接口 Gi1/0/1 已 Down')).toBeVisible()
+  await settle(page)
+  await expect(page).toHaveScreenshot('evidence-timeline.png')
+})
+
+test('status visual baseline', async ({ page }) => {
+  await installAuthenticatedApi(page)
+  await page.goto('/status')
+  await expect(page.getByText('Skill 总数')).toBeVisible()
+  await settle(page)
+  await expect(page).toHaveScreenshot('status.png')
+})

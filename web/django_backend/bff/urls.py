@@ -4,7 +4,25 @@
 from django.urls import path
 
 from . import auth, user_admin
-from .views import chat, conversations, devices, health, itsm, knowledge, maintenance, notifications, parser, rag, skills, storage, system, tasks, upload, workflows, artifacts
+from .views import (
+    artifacts,
+    chat,
+    conversations,
+    devices,
+    health,
+    itsm,
+    knowledge,
+    maintenance,
+    notifications,
+    parser,
+    rag,
+    skills,
+    storage,
+    system,
+    tasks,
+    upload,
+    workflows,
+)
 
 urlpatterns = [
     path("auth/login/", auth.bff_login, name="bff_login"),
@@ -59,6 +77,11 @@ urlpatterns = [
         name="bff_patrol_batch_summary",
     ),
     path(
+        "workflows/runs/patrol-batches/<str:patrol_batch_id>/devices",
+        workflows.proxy_patrol_batch_devices,
+        name="bff_patrol_batch_devices",
+    ),
+    path(
         "workflows/runs/patrol-batches/<str:patrol_batch_id>/archive/",
         workflows.proxy_patrol_batch_archive,
         name="bff_patrol_batch_archive",
@@ -82,6 +105,21 @@ urlpatterns = [
         "workflows/runs/patrol-batches/<str:patrol_batch_id>/export.csv",
         workflows.proxy_patrol_batch_export,
         name="bff_patrol_batch_export",
+    ),
+    path(
+        "workflows/runs/patrol-batches/<str:patrol_batch_id>/raw-data.jsonl",
+        workflows.proxy_patrol_batch_raw_data,
+        name="bff_patrol_batch_raw_data",
+    ),
+    path(
+        "workflows/runs/patrol-batches/<str:patrol_batch_id>/raw-cli.zip",
+        workflows.proxy_patrol_batch_raw_cli,
+        name="bff_patrol_batch_raw_cli",
+    ),
+    path(
+        "workflows/runs/patrol-batches/<str:patrol_batch_id>/events.csv",
+        workflows.proxy_patrol_batch_events,
+        name="bff_patrol_batch_events",
     ),
     path(
         "workflows/runs/patrol-batches/<str:patrol_batch_id>/report.md",

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import io
 import hashlib
+import io
 import ipaddress
 import re
 from dataclasses import dataclass
@@ -44,15 +44,38 @@ class ParserRuntimeResult:
 
 
 class ParserRuntime:
-    def __init__(self, *, policy=None, registry=None, asset_store=None, output_classifier=None):
-        self.policy = policy or ParserPolicy()
+    def __init__(
+        self,
+        *,
+        policy=None,
+        registry=None,
+        asset_store=None,
+        output_classifier=None,
+        runtime_bundle=None,
+    ):
         if registry is None:
-            from .repository import ParserRepository
+            from .runtime_repository import ParserRuntimeRepository
 
-            registry = ParserRepository()
+            registry = ParserRuntimeRepository()
         self.registry = registry
+        policy_repository = registry if hasattr(registry, "list_command_aliases") else None
+        self.policy = policy or ParserPolicy(repository=policy_repository)
         self.asset_store = asset_store or TemplateAssetStore()
         self.output_classifier = output_classifier or OutputClassifier()
+        self.runtime_bundle = runtime_bundle
+
+    def _resolve_template(self, *, identity: DeviceIdentity, canonical_command: str):
+        if self.runtime_bundle is not None:
+            return self.runtime_bundle.resolve(
+                canonical_command=canonical_command,
+                registry=self.registry,
+            )
+        return self.registry.resolve_active(
+            vendor=identity.vendor or "",
+            model=identity.model or "",
+            family=identity.family,
+            command=canonical_command,
+        )
 
     def check_coverage(
         self,
@@ -70,9 +93,9 @@ class ParserRuntime:
         result = {
             "canonical_command": decision.canonical_command,
             "policy_status": (
-                "eligible" if decision.enabled else (
-                    "raw" if decision.handling == "raw_hash_diff" else "ignored"
-                )
+                "eligible"
+                if decision.enabled
+                else ("raw" if decision.handling == "raw_hash_diff" else "ignored")
             ),
             "identity_status": identity.status,
             "coverage_status": "ignored",
@@ -94,11 +117,9 @@ class ParserRuntime:
                 "coverage_status": "identity_unknown",
                 "failure_code": "identity_unknown",
             }
-        template = self.registry.resolve_active(
-            vendor=identity.vendor or "",
-            model=identity.model or "",
-            family=identity.family,
-            command=decision.canonical_command,
+        template = self._resolve_template(
+            identity=identity,
+            canonical_command=decision.canonical_command,
         )
         if template is None:
             return {
@@ -217,11 +238,9 @@ class ParserRuntime:
                 category=decision.category,
                 **common,
             )
-        template = self.registry.resolve_active(
-            vendor=identity.vendor or "",
-            model=identity.model or "",
-            family=identity.family,
-            command=decision.canonical_command,
+        template = self._resolve_template(
+            identity=identity,
+            canonical_command=decision.canonical_command,
         )
         if template is None:
             return ParserRuntimeResult(
@@ -251,8 +270,10 @@ class ParserRuntime:
             legal_empty = bool(
                 spec
                 and spec.allow_empty
-                and any(re.search(pattern, raw_text or "", re.IGNORECASE | re.DOTALL)
-                        for pattern in spec.empty_patterns)
+                and any(
+                    re.search(pattern, raw_text or "", re.IGNORECASE | re.DOTALL)
+                    for pattern in spec.empty_patterns
+                )
             )
             if legal_empty:
                 return ParserRuntimeResult(
@@ -285,13 +306,9 @@ class ParserRuntime:
             key_result = validate_entity_keys(records, spec.primary_keys)
             if not key_result.valid:
                 failure_code = (
-                    "primary_key_duplicate"
-                    if key_result.duplicate_keys
-                    else "primary_key_invalid"
+                    "primary_key_duplicate" if key_result.duplicate_keys else "primary_key_invalid"
                 )
-                return self._failed(
-                    decision, identity, template, failure_code, evidence
-                )
+                return self._failed(decision, identity, template, failure_code, evidence)
         if spec:
             for record in records:
                 for field, validator in spec.validators.items():

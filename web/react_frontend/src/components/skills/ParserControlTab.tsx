@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
   Alert, Button, Col, Descriptions, Drawer, Input, Popconfirm, Row, Select, Space, Spin,
   Statistic, Switch, Table, Tabs, Tag, Typography, message,
@@ -7,7 +7,8 @@ import {
   CheckOutlined, CloseOutlined, DeleteOutlined, DownloadOutlined, EyeOutlined,
   HistoryOutlined, PlayCircleOutlined, ReloadOutlined, StopOutlined,
 } from '@ant-design/icons'
-import { useMutation, useQuery, useQueryClient } from 'react-query'
+import { useMutation } from 'react-query'
+import { useSearchParams } from 'react-router-dom'
 import {
   parserApi, type ParserCommandAlias, type ParserDeviceProfile,
   type ParserIdentitySignature, type ParserJobItem, type ParserTemplateItem,
@@ -15,45 +16,42 @@ import {
   type ParserEventRule, type ParserCommandProfile, type ParserCommandProfileBinding,
   type ParserCommandProfileImpactPreview, type ParserEffectivePlanPreview,
   type ParserEventRuleReplayResult, type ParserEventRuleTestResult,
-  type ParserChangePolicy, type ParserObservationContract, type ParserRuleGenerationJob,
-  type ParserRuleGenerationJobPreview, type ParserReplayReport,
-  type ParserApprovalAudit, type ParserAgentLoopAttempt, type ParserRuntimeRuleAssetBundle,
+  type ParserRuleGenerationJob,
+  type ParserRuleGenerationJobPreview,
   type ParserRuleGenerationContextPreview, type ParserBackfillJob,
 } from '../../services/api'
 import { useIsMobile } from '../../hooks/useBreakpoint'
-
-const statusColor = (status: string) => {
-  if (status === 'active' || status === 'succeeded') return 'green'
-  if (status === 'failed' || status === 'validation_failed' || status === 'rejected') return 'red'
-  if (status === 'deprecated' || status === 'cancelled' || status === 'superseded') return 'default'
-  return 'blue'
-}
-
-const statusLabel = (status?: string) => {
-  const labels: Record<string, string> = {
-    active: '已激活',
-    cancelled: '已取消',
-    collecting: '收集中',
-    deprecated: '已废弃',
-    draft: '草稿',
-    failed: '失败',
-    pending: '待处理',
-    pending_approval: '待审批',
-    rejected: '已拒绝',
-    running: '运行中',
-    succeeded: '成功',
-    superseded: '已替换',
-    unavailable: '不可用',
-    validating: '验证中',
-  }
-  return status ? labels[status] || status : '无'
-}
-
-const codePanelStyle: React.CSSProperties = {
-  background: '#f5f5f5', border: '1px solid #e5e7eb', borderRadius: 6,
-  fontFamily: 'Consolas, Monaco, monospace', margin: 0, overflow: 'auto',
-  padding: 16, whiteSpace: 'pre',
-}
+import RuleAssetChainWorkspace from './parser/RuleAssetChainWorkspace'
+import RuntimeAssetsWorkspace from './parser/RuntimeAssetsWorkspace'
+import {
+  ChangePoliciesWorkspace,
+  ObservationContractsWorkspace,
+} from './parser/RuleAssetVersionWorkspaces'
+import {
+  ParserJobDetailDrawer,
+  ParserTemplatePreviewDrawer,
+  RuleJobPreviewDrawer,
+} from './parser/ParserDetailDrawers'
+import {
+  hasFocusMatched,
+  parserWorkspaceTabs,
+  resolveParserControlFocus,
+  type ParserSubWorkspaceKey,
+  type ParserWorkspaceKey,
+} from './parser/parserControlFocus'
+import { useParserControlData } from './parser/useParserControlData'
+import { ruleJobApprovalBlockers } from './parser/parserWorkspaceModel'
+import ParserGovernancePanel from './parser/ParserGovernancePanel'
+import StandardTableShell from './parser/StandardTableShell'
+import {
+  codePanelStyle,
+  governanceStatusLabel,
+  queryErrorLabel,
+  shortDigest,
+  statusColor,
+  statusLabel,
+  successTag,
+} from './parser/parserUi'
 
 const downloadBase64File = (filename: string, contentBase64: string, mimeType = 'application/zip') => {
   const binary = window.atob(contentBase64)
@@ -86,39 +84,6 @@ const numberValue = (value: unknown): number | null => {
   const numeric = Number(value)
   return Number.isFinite(numeric) ? numeric : null
 }
-
-const successTag = (success: unknown, okText = '通过', failText = '未通过') => {
-  if (success === true) return <Tag color="green">{okText}</Tag>
-  if (success === false) return <Tag color="red">{failText}</Tag>
-  return <Tag>无报告</Tag>
-}
-
-const shortDigest = (value?: string | null) => value ? value.slice(0, 12) : '-'
-
-const countMapText = (value?: Record<string, number> | null, emptyText = '-') => {
-  const entries = Object.entries(value || {})
-  if (!entries.length) return emptyText
-  return entries.map(([key, count]) => `${key}: ${count}`).join(' | ')
-}
-
-const extractObservationTypesFromContracts = (contracts: ParserObservationContract[]) => {
-  const values = new Set<string>()
-  contracts.forEach((contract) => {
-    const semantics = asRecord(contract.state_semantics_json)
-    Object.values(semantics || {}).forEach((item) => {
-      const observationType = asRecord(item)?.observation_type
-      if (typeof observationType === 'string' && observationType.trim()) {
-        values.add(observationType.trim())
-      }
-    })
-  })
-  return Array.from(values).sort()
-}
-
-const runtimeObservationSchemas = (contracts: ParserObservationContract[]) =>
-  contracts
-    .filter((item) => item.status === 'active' && item.source_type && item.schema_id)
-    .map((item) => [item.source_type, item.schema_id] as [string, string])
 
 const hasRevisionRequest = (report?: Record<string, unknown> | null) => {
   const loop = asRecord(report?.agent_loop)
@@ -155,20 +120,6 @@ const ruleJobNextAction = (row: ParserRuleGenerationJob) => {
   return '-'
 }
 
-const ruleJobActionKey = (row: ParserRuleGenerationJob) => {
-  if (canSubmitRuleCandidate(row)) return 'submit'
-  if (row.status === 'pending_approval') return 'approval'
-  if (row.status === 'active') return 'active'
-  if (row.status === 'rejected') return 'rejected'
-  if (row.status === 'deprecated') return 'deprecated'
-  if (isAgentLoopRevisionJob(row) && ['draft', 'validating'].includes(row.status)) return 'execute_revision'
-  if (isParserTemplateSeedJob(row)) return 'start_generation'
-  if (hasRevisionRequest(row.validation_report_json)) return 'revise'
-  if (row.status === 'failed') return 'failed'
-  if (row.status === 'draft') return 'draft'
-  return 'wait'
-}
-
 const ruleJobLifecycleHint = (row: ParserRuleGenerationJob) => {
   if (canSubmitRuleCandidate(row)) return '验证已通过但尚未形成审批资产。提交后会进入待审批队列，不会直接激活。'
   if (row.status === 'pending_approval') return '审批会激活对应资产版本，并废弃同一资产的旧 active 版本。'
@@ -195,24 +146,27 @@ const defaultGenerationContextOverrides = (row: ParserRuleGenerationJob) => {
   return JSON.stringify(Object.keys(value).length ? value : { records: [] }, null, 2)
 }
 
-const governanceStatusLabel = (status?: string) => {
-  const labels: Record<string, string> = {
-    active: '已激活',
-    deprecated: '已废弃',
-    draft: '草稿',
-    pending_approval: '待审批',
-    rejected: '已拒绝',
-    validating: '验证中',
-    validation_failed: '验证失败',
-    committing: '提交中',
-    completed: '已完成',
-  }
-  return status ? labels[status] || status : '-'
-}
-
 const ParserControlTab: React.FC = () => {
-  const queryClient = useQueryClient()
   const isMobile = useIsMobile()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const searchKey = searchParams.toString()
+  const focus = useMemo(
+    () => resolveParserControlFocus(new URLSearchParams(searchKey)),
+    [searchKey],
+  )
+  const workspace = focus.workspace
+  const activeSubWorkspace = focus.subWorkspace || parserWorkspaceTabs[workspace][0]
+  useEffect(() => {
+    if (focus.fallbackReason && import.meta.env.DEV) {
+      console.warn('Parser Control focus fallback', {
+        kind: searchParams.get('focus'),
+        id: searchParams.get('id'),
+        workspace: searchParams.get('workspace'),
+        subtab: searchParams.get('subtab'),
+        reason: focus.fallbackReason,
+      })
+    }
+  }, [focus.fallbackReason, searchKey, searchParams])
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [preview, setPreview] = useState<ParserTemplatePreview | null>(null)
@@ -265,160 +219,67 @@ const ParserControlTab: React.FC = () => {
   const [activationSelector, setActivationSelector] = useState('{}')
   const [activationImpact, setActivationImpact] = useState<ParserCommandProfileImpactPreview | null>(null)
 
-  const polling = { refetchInterval: 5000 }
-  const { data: coverage } = useQuery('parser-coverage', parserApi.coverage, polling)
-  const { data: templates = [], isLoading: templatesLoading } = useQuery(
-    'parser-templates', parserApi.templates, polling,
-  )
-  const { data: jobs = [], isLoading: jobsLoading } = useQuery(
-    'parser-jobs', parserApi.jobs, polling,
-  )
-  const { data: backfills = [], isLoading: backfillsLoading } = useQuery(
-    'parser-backfills', parserApi.backfills, polling,
-  )
-  const { data: ruleGenerationJobs = [], isLoading: ruleGenerationJobsLoading } = useQuery(
-    'parser-rule-generation-jobs', parserApi.ruleGenerationJobs, polling,
-  )
-  const { data: observationContracts = [], isLoading: observationContractsLoading } = useQuery(
-    'parser-observation-contracts', parserApi.observationContracts, polling,
-  )
-  const { data: changePolicies = [], isLoading: changePoliciesLoading } = useQuery(
-    'parser-change-policies', parserApi.changePolicies, polling,
-  )
-  const { data: replayReports = [], isLoading: replayReportsLoading } = useQuery(
-    'parser-replay-reports', parserApi.replayReports, polling,
-  )
-  const { data: approvalAudit = [], isLoading: approvalAuditLoading } = useQuery(
-    'parser-approval-audit', parserApi.approvalAudit, polling,
-  )
-  const { data: agentLoopAttempts = [], isLoading: agentLoopAttemptsLoading } = useQuery(
-    'parser-agent-loop-attempts', parserApi.agentLoopAttempts, polling,
-  )
-  const { data: dispatchControl } = useQuery(
-    'parser-dispatch-control', parserApi.dispatchControl, polling,
-  )
-  const { data: jobDetail, isLoading: jobLoading } = useQuery(
-    ['parser-job', jobId], () => parserApi.job(jobId as string),
-    { enabled: Boolean(jobId), refetchInterval: jobId ? 5000 : false },
-  )
-  const { data: aliases = [] } = useQuery('parser-aliases', parserApi.aliases)
-  const { data: deviceProfiles = [] } = useQuery('parser-device-profiles', parserApi.deviceProfiles)
-  const { data: identitySignatures = [] } = useQuery(
-    'parser-identity-signatures', parserApi.identitySignatures,
-  )
-  const { data: datasets = [] } = useQuery('parser-datasets', parserApi.datasets, polling)
-  const { data: eventRules = [] } = useQuery('parser-event-rules', parserApi.eventRules, polling)
-  const { data: commandProfiles = [] } = useQuery('parser-command-profiles', parserApi.commandProfiles, polling)
-  const { data: commandProfileBindings = [] } = useQuery(
-    'parser-command-profile-bindings', parserApi.commandProfileBindings, polling,
-  )
-  const runtimeSchemas = useMemo(
-    () => runtimeObservationSchemas(observationContracts),
-    [observationContracts],
-  )
-  const runtimeObservationTypes = useMemo(() => {
-    const inferred = extractObservationTypesFromContracts(
-      observationContracts.filter((item) => item.status === 'active'),
-    )
-    if (inferred.length) return inferred
-    return Array.from(new Set(
-      changePolicies
-        .filter((item) => item.version_status === 'active' && item.observation_type)
-        .map((item) => item.observation_type),
-    )).sort()
-  }, [observationContracts, changePolicies])
-  const { data: runtimeAssets, isLoading: runtimeAssetsLoading } = useQuery<ParserRuntimeRuleAssetBundle>(
-    ['parser-runtime-assets', runtimeSchemas.map((item) => item.join(':')).join('|'), runtimeObservationTypes.join('|')],
-    () => parserApi.resolveRuntimeAssets({
-      observation_schemas: runtimeSchemas,
-      observation_types: runtimeObservationTypes,
-      include_event_rules: true,
-    }),
-    { ...polling, enabled: Boolean(runtimeSchemas.length || runtimeObservationTypes.length || eventRules.length) },
-  )
+  const {
+    coverage, coverageError, workspaceErrors, templates, templatesLoading, jobsLoading,
+    backfills, backfillsLoading,
+    ruleGenerationJobs, ruleGenerationJobsLoading, observationContracts,
+    observationContractsLoading, changePolicies, changePoliciesLoading, replayReports,
+    replayReportsLoading, approvalAudit, approvalAuditLoading, agentLoopAttempts,
+    agentLoopAttemptsLoading, dispatchControl, jobDetail, jobLoading, aliases,
+    deviceProfiles, identitySignatures, datasets, eventRules, commandProfiles,
+    commandProfileBindings, runtimeSchemas, runtimeObservationTypes, ruleAssetChainRows,
+    runtimeAssets, runtimeAssetsLoading, filteredTemplates, filteredJobs,
+    filteredEventRules, eventRuleStatusCounts, ruleJobStatusCounts, ruleJobActionCounts,
+    activeRuntimeCounts, ruleJobAssetTypeOptions, filteredRuleGenerationJobs, refresh,
+  } = useParserControlData({
+    workspace,
+    jobId,
+    templateStatus,
+    templateSearch,
+    jobStatus,
+    jobType,
+    jobSearch,
+    eventRuleStatus,
+    eventRuleSearch,
+    ruleJobStatus,
+    ruleJobAction,
+    ruleJobAssetType,
+    ruleJobSearch,
+  })
 
-  const filteredTemplates = useMemo(() => templates.filter((item) => {
-    const text = `${item.vendor} ${item.profile} ${item.canonical_command} ${item.category}`.toLowerCase()
-    return (!templateStatus || item.status === templateStatus)
-      && (!templateSearch || text.includes(templateSearch.trim().toLowerCase()))
-  }), [templates, templateStatus, templateSearch])
+  const changeWorkspace = (nextWorkspace: string) => {
+    const typedWorkspace = nextWorkspace as ParserWorkspaceKey
+    const next = new URLSearchParams(searchParams)
+    next.set('workspace', typedWorkspace)
+    next.set('subtab', parserWorkspaceTabs[typedWorkspace][0])
+    next.delete('focus')
+    next.delete('id')
+    setSearchParams(next, { replace: true })
+  }
 
-  const filteredJobs = useMemo(() => jobs.filter((item) => {
-    const text = `${item.vendor} ${item.profile} ${item.canonical_command}`.toLowerCase()
-    return (!jobStatus || item.status === jobStatus)
-      && (!jobType || item.job_type === jobType)
-      && (!jobSearch || text.includes(jobSearch.trim().toLowerCase()))
-  }), [jobs, jobStatus, jobType, jobSearch])
+  const changeSubWorkspace = (subWorkspace: string) => {
+    const next = new URLSearchParams(searchParams)
+    next.set('workspace', workspace)
+    next.set('subtab', subWorkspace)
+    next.delete('focus')
+    next.delete('id')
+    setSearchParams(next, { replace: true })
+  }
 
-  const filteredEventRules = useMemo(() => eventRules.filter((item) => {
-    const text = `${item.rule_name} ${item.event_type} ${item.severity} ${item.version_status}`.toLowerCase()
-    return (!eventRuleStatus || item.version_status === eventRuleStatus)
-      && (!eventRuleSearch || text.includes(eventRuleSearch.trim().toLowerCase()))
-  }), [eventRules, eventRuleStatus, eventRuleSearch])
+  const clearFocus = () => {
+    const next = new URLSearchParams(searchParams)
+    next.delete('focus')
+    next.delete('id')
+    setSearchParams(next, { replace: true })
+  }
 
-  const eventRuleStatusCounts = useMemo(() => eventRules.reduce((acc, item) => {
-    const status = item.version_status || 'unknown'
-    acc[status] = (acc[status] || 0) + 1
-    return acc
-  }, {} as Record<string, number>), [eventRules])
-  const ruleJobStatusCounts = useMemo(() => ruleGenerationJobs.reduce((acc, item) => {
-    const status = item.status || 'unknown'
-    acc[status] = (acc[status] || 0) + 1
-    return acc
-  }, {} as Record<string, number>), [ruleGenerationJobs])
-  const ruleJobActionCounts = useMemo(() => ({
-    submit: ruleGenerationJobs.filter(canSubmitRuleCandidate).length,
-    approval: ruleGenerationJobs.filter((item) => item.status === 'pending_approval').length,
-    active: ruleGenerationJobs.filter((item) => item.status === 'active').length,
-    revision: ruleGenerationJobs.filter((item) =>
-      hasRevisionRequest(item.validation_report_json) || isAgentLoopRevisionJob(item),
-    ).length,
-  }), [ruleGenerationJobs])
-  const activeRuntimeCounts = useMemo(() => ({
-    contracts: observationContracts.filter((item) => item.status === 'active').length,
-    policies: changePolicies.filter((item) => item.version_status === 'active').length,
-    eventRules: eventRules.filter((item) => item.version_status === 'active').length,
-  }), [observationContracts, changePolicies, eventRules])
-  const ruleJobAssetTypeOptions = useMemo(() => {
-    const values = new Set<string>()
-    ruleGenerationJobs.forEach((item) => {
-      if (item.asset_type) values.add(item.asset_type)
-      if (item.job_type) values.add(item.job_type)
-    })
-    return Array.from(values).sort().map((value) => ({ value, label: value }))
-  }, [ruleGenerationJobs])
-  const filteredRuleGenerationJobs = useMemo(() => ruleGenerationJobs.filter((item) => {
-    const actionKey = ruleJobActionKey(item)
-    const assetType = item.asset_type || item.job_type || ''
-    const text = [
-      item.id,
-      item.job_type,
-      item.asset_type,
-      item.status,
-      item.source_ref,
-      item.asset_ref,
-      item.asset_id,
-      item.asset_version_id,
-      item.created_by,
-      ruleJobNextAction(item),
-    ].filter(Boolean).join(' ').toLowerCase()
-    return (!ruleJobStatus || item.status === ruleJobStatus)
-      && (!ruleJobAction || actionKey === ruleJobAction)
-      && (!ruleJobAssetType || assetType === ruleJobAssetType)
-      && (!ruleJobSearch || text.includes(ruleJobSearch.trim().toLowerCase()))
-  }), [ruleGenerationJobs, ruleJobStatus, ruleJobAction, ruleJobAssetType, ruleJobSearch])
-
-  const refresh = () => {
-    ;['parser-coverage', 'parser-templates', 'parser-jobs', 'parser-aliases',
-      'parser-device-profiles', 'parser-identity-signatures', 'parser-datasets',
-      'parser-event-rules', 'parser-command-profiles',
-      'parser-command-profile-bindings', 'parser-rule-generation-jobs',
-      'parser-observation-contracts', 'parser-change-policies',
-      'parser-replay-reports', 'parser-approval-audit',
-      'parser-agent-loop-attempts', 'parser-runtime-assets', 'parser-backfills'].forEach((key) =>
-      queryClient.invalidateQueries(key))
-    queryClient.invalidateQueries('parser-dispatch-control')
-    if (jobId) queryClient.invalidateQueries(['parser-job', jobId])
+  const acceptFocusFallback = () => {
+    const next = new URLSearchParams(searchParams)
+    next.set('workspace', workspace)
+    next.set('subtab', activeSubWorkspace)
+    next.delete('focus')
+    next.delete('id')
+    setSearchParams(next, { replace: true })
   }
 
   const action = useMutation(
@@ -688,7 +549,9 @@ const ParserControlTab: React.FC = () => {
     setGenerationContextOpen(true)
   }
 
-  const renderRuleGenerationActions = (row: ParserRuleGenerationJob) => (
+  const renderRuleGenerationActions = (row: ParserRuleGenerationJob) => {
+    const approvalBlockers = ruleJobApprovalBlockers(row)
+    return (
     <Space wrap>
       <Button size="small" icon={<EyeOutlined />} loading={ruleJobPreviewLoading}
         onClick={() => showRuleJobPreview(row.id)}>
@@ -696,11 +559,20 @@ const ParserControlTab: React.FC = () => {
       </Button>
       {row.status === 'pending_approval' && (
         <>
+          {approvalBlockers.length > 0 && (
+            <Typography.Text type="danger">
+              审批阻断：{approvalBlockers.join('；')}
+            </Typography.Text>
+          )}
           <Popconfirm title="确认审批并激活该规则资产版本？"
             description="审批后该版本会进入生产运行时，同一资产的旧 active 版本会被废弃。"
             okText="审批激活" cancelText="取消"
+            disabled={approvalBlockers.length > 0}
             onConfirm={() => ruleGenerationLifecycle.mutate({ type: 'approve', id: row.id })}>
-            <Button size="small" icon={<CheckOutlined />} loading={ruleGenerationLifecycle.isLoading}>
+            <Button size="small" icon={<CheckOutlined />}
+              disabled={approvalBlockers.length > 0}
+              title={approvalBlockers[0]}
+              loading={ruleGenerationLifecycle.isLoading}>
               审批激活
             </Button>
           </Popconfirm>
@@ -749,7 +621,8 @@ const ParserControlTab: React.FC = () => {
         </Button>
       )}
     </Space>
-  )
+    )
+  }
 
   const deleteProfile = useMutation(
     (profileVersionId: string) => parserApi.deleteCommandProfile(profileVersionId),
@@ -955,21 +828,6 @@ const ParserControlTab: React.FC = () => {
     { title: '证据命令', dataIndex: 'evidence_command', width: 180 },
     { title: '识别规则', dataIndex: 'pattern' }, { title: '置信度', dataIndex: 'confidence', width: 90 },
   ]
-  const datasetColumns = [
-    { title: '数据集', dataIndex: 'dataset_id', width: 220 },
-    { title: '设备', dataIndex: 'device_count', width: 70 },
-    { title: 'Snapshot', dataIndex: 'snapshot_count', width: 90 },
-    { title: '结构化覆盖率', dataIndex: 'structured_coverage_rate', width: 130,
-      render: (value: number) => `${(value * 100).toFixed(1)}%` },
-    { title: '缺模板率', dataIndex: 'missing_template_rate', width: 110,
-      render: (value: number) => `${(value * 100).toFixed(1)}%` },
-    { title: '解析失败率', dataIndex: 'parse_failure_rate', width: 110,
-      render: (value: number) => `${(value * 100).toFixed(1)}%` },
-    { title: '主键稳定率', dataIndex: 'primary_key_stability_rate', width: 110,
-      render: (value: number) => `${(value * 100).toFixed(1)}%` },
-    { title: '最后导入', dataIndex: 'last_imported_at', width: 190 },
-  ]
-
   const eventRuleColumns = [
     { title: '规则名', dataIndex: 'rule_name', width: 180 },
     { title: '事件类型', dataIndex: 'event_type', width: 180 },
@@ -1162,167 +1020,6 @@ const ParserControlTab: React.FC = () => {
     { title: '操作', width: 270, render: (_: unknown, row: ParserRuleGenerationJob) => renderRuleGenerationActions(row) },
   ]
 
-  const observationContractColumns = [
-    { title: 'Schema', dataIndex: 'schema_id', width: 280,
-      render: (value: string, row: ParserObservationContract) => (
-        <Space direction="vertical" size={0}>
-          <Typography.Text copyable>{value}</Typography.Text>
-          <Typography.Text type="secondary">{row.source_type} v{row.version}</Typography.Text>
-        </Space>
-      ) },
-    { title: '状态', dataIndex: 'status', width: 110,
-      render: (value: string) => <Tag color={statusColor(value)}>{governanceStatusLabel(value)}</Tag> },
-    { title: '实体类型', dataIndex: 'entity_type', width: 160 },
-    { title: '主键', dataIndex: 'primary_keys_json', width: 180,
-      render: (value: string[] | null) => (value || []).join(', ') || '-' },
-    { title: '必填字段', dataIndex: 'required_fields_json', width: 240,
-      render: (value: string[] | null) => (value || []).join(', ') || '-' },
-    { title: '语义字段', dataIndex: 'state_semantics_json', width: 220,
-      render: (value: Record<string, unknown> | null) => Object.keys(value || {}).join(', ') || '-' },
-    { title: '允许空结果', dataIndex: 'allow_empty', width: 110,
-      render: (value: boolean) => <Tag color={value ? 'blue' : 'default'}>{value ? '是' : '否'}</Tag> },
-    { title: '来源 Job', dataIndex: 'source_job_id', width: 220,
-      render: (value: string | null) => value || '-' },
-    { title: 'Digest', dataIndex: 'contract_sha256', width: 120,
-      render: (value: string | null) => <Typography.Text copyable={Boolean(value)}>{shortDigest(value)}</Typography.Text> },
-    { title: '更新时间', dataIndex: 'updated_at', width: 190 },
-  ]
-
-  const changePolicyColumns = [
-    { title: '策略', dataIndex: 'policy_name', width: 240,
-      render: (value: string, row: ParserChangePolicy) => (
-        <Space direction="vertical" size={0}>
-          <Typography.Text strong>{value}</Typography.Text>
-          <Typography.Text type="secondary">v{row.version} / {row.version_id}</Typography.Text>
-        </Space>
-      ) },
-    { title: '状态', dataIndex: 'version_status', width: 110,
-      render: (value: string) => <Tag color={statusColor(value)}>{governanceStatusLabel(value)}</Tag> },
-    { title: 'Observation Type', dataIndex: 'observation_type', width: 240 },
-    { title: '语义类型', dataIndex: 'semantic_type', width: 120 },
-    { title: '比较模式', dataIndex: 'compare_mode', width: 180 },
-    { title: '阈值/策略', dataIndex: 'policy', width: 260,
-      render: (value: Record<string, unknown>) => {
-        const thresholds = asRecord(value?.thresholds)
-        const parts = [
-          thresholds ? `thresholds=${JSON.stringify(thresholds)}` : null,
-          value?.deadband !== undefined ? `deadband=${String(value.deadband)}` : null,
-          value?.recovery_threshold !== undefined ? `recovery=${String(value.recovery_threshold)}` : null,
-        ].filter(Boolean)
-        return parts.length ? <Typography.Text code>{parts.join(' | ')}</Typography.Text> : '-'
-      } },
-    { title: '来源 Job', dataIndex: 'source_job_id', width: 220,
-      render: (value: string | null) => value || '-' },
-    { title: 'Digest', dataIndex: 'digest', width: 120,
-      render: (value: string | null) => <Typography.Text copyable={Boolean(value)}>{shortDigest(value)}</Typography.Text> },
-    { title: '激活时间', dataIndex: 'activated_at', width: 190,
-      render: (value: string | null) => value || '-' },
-  ]
-
-  const replayReportColumns = [
-    { title: '状态', dataIndex: 'success', width: 110,
-      render: (value: boolean | null) => successTag(value, '通过', '未通过') },
-    { title: '资产', dataIndex: 'asset_type', width: 170,
-      render: (value: string | null, row: ParserReplayReport) => (
-        <Space direction="vertical" size={0}>
-          <Typography.Text strong>{value || row.job_type}</Typography.Text>
-          <Typography.Text type="secondary">{governanceStatusLabel(row.job_status)}</Typography.Text>
-        </Space>
-      ) },
-    { title: '样本/命中', width: 130,
-      render: (_: unknown, row: ParserReplayReport) => `${row.matched_change_count}/${row.sampled_change_count}` },
-    { title: '预估日事件', dataIndex: 'estimated_daily_event_count', width: 120 },
-    { title: '碰撞', dataIndex: 'collision_count', width: 90,
-      render: (value: number) => <Tag color={value ? 'red' : 'green'}>{value || 0}</Tag> },
-    { title: '事件类型', dataIndex: 'event_types', width: 260,
-      render: (value: Record<string, number>) => <Typography.Text code>{countMapText(value)}</Typography.Text> },
-    { title: '实体类型', dataIndex: 'matched_entity_types', width: 260,
-      render: (value: Record<string, number>) => <Typography.Text code>{countMapText(value)}</Typography.Text> },
-    { title: 'Top Devices', dataIndex: 'top_devices', width: 260,
-      render: (value: Record<string, number>) => <Typography.Text code>{countMapText(value)}</Typography.Text> },
-    { title: '资产版本', dataIndex: 'asset_version_id', width: 260,
-      render: (value: string | null, row: ParserReplayReport) => (
-        <Space direction="vertical" size={0}>
-          <Typography.Text copyable={Boolean(value)}>{value || '-'}</Typography.Text>
-          <Typography.Text type="secondary">digest {shortDigest(row.asset_digest)}</Typography.Text>
-        </Space>
-      ) },
-    { title: '更新时间', dataIndex: 'updated_at', width: 190 },
-  ]
-
-  const approvalAuditColumns = [
-    { title: '动作', dataIndex: 'action', width: 110,
-      render: (value: string) => {
-        const color = value === 'approved' ? 'green' : value === 'rejected' ? 'red' : 'default'
-        const label = value === 'approved' ? '批准' : value === 'rejected' ? '拒绝' : value === 'deprecated' ? '废弃' : value
-        return <Tag color={color}>{label}</Tag>
-      } },
-    { title: '资产', dataIndex: 'asset_type', width: 180,
-      render: (value: string | null, row: ParserApprovalAudit) => (
-        <Space direction="vertical" size={0}>
-          <Typography.Text strong>{value || row.job_type}</Typography.Text>
-          <Typography.Text type="secondary">{governanceStatusLabel(row.job_status)}</Typography.Text>
-        </Space>
-      ) },
-    { title: '资产版本', dataIndex: 'asset_version_id', width: 260,
-      render: (value: string | null, row: ParserApprovalAudit) => (
-        <Space direction="vertical" size={0}>
-          <Typography.Text copyable={Boolean(value)}>{value || row.asset_ref || '-'}</Typography.Text>
-          <Typography.Text type="secondary">digest {shortDigest(row.asset_digest)}</Typography.Text>
-        </Space>
-      ) },
-    { title: '审批人', dataIndex: 'actor', width: 140,
-      render: (value: string | null) => value || '-' },
-    { title: '验证门槛', width: 220,
-      render: (_: unknown, row: ParserApprovalAudit) => (
-        <Space direction="vertical" size={0}>
-          <span>总体 {successTag(row.validation_success, '通过', '未通过')}</span>
-          <span>静态 {successTag(row.synthetic_success, '通过', '未通过')}</span>
-          <span>回放 {successTag(row.replay_success, '通过', '未通过')}</span>
-        </Space>
-      ) },
-    { title: '原因', dataIndex: 'reason', width: 240,
-      render: (value: string | null) => value || '-' },
-    { title: '来源 Job', dataIndex: 'job_id', width: 220,
-      render: (value: string) => <Typography.Text copyable>{value}</Typography.Text> },
-    { title: '发生时间', dataIndex: 'occurred_at', width: 210,
-      render: (value: string | null) => value || '-' },
-  ]
-
-  const agentLoopAttemptColumns = [
-    { title: '阶段', dataIndex: 'stage', width: 220,
-      render: (value: string, row: ParserAgentLoopAttempt) => (
-        <Space direction="vertical" size={0}>
-          <Typography.Text strong>{value || '-'}</Typography.Text>
-          <Typography.Text type="secondary">{row.generator || '-'}</Typography.Text>
-        </Space>
-      ) },
-    { title: '结果', dataIndex: 'success', width: 100,
-      render: (value: boolean | null) => successTag(value, '通过', '未通过') },
-    { title: '资产', dataIndex: 'asset_type', width: 180,
-      render: (value: string | null, row: ParserAgentLoopAttempt) => (
-        <Space direction="vertical" size={0}>
-          <Typography.Text strong>{value || row.job_type}</Typography.Text>
-          <Typography.Text type="secondary">{governanceStatusLabel(row.job_status)}</Typography.Text>
-        </Space>
-      ) },
-    { title: '尝试', dataIndex: 'attempt', width: 80 },
-    { title: '模式', dataIndex: 'mode', width: 160,
-      render: (value: string | null) => value || '-' },
-    { title: '下一步', dataIndex: 'next_action', width: 180,
-      render: (value: string | null) => value || '-' },
-    { title: '输出摘要', dataIndex: 'output_summary', width: 320,
-      render: (value: Record<string, unknown>) => (
-        <Typography.Text code>
-          {JSON.stringify(value || {}).slice(0, 180)}
-        </Typography.Text>
-      ) },
-    { title: '来源 Job', dataIndex: 'job_id', width: 220,
-      render: (value: string) => <Typography.Text copyable>{value}</Typography.Text> },
-    { title: '更新时间', dataIndex: 'updated_at', width: 190,
-      render: (value: string | null) => value || '-' },
-  ]
-
   const renderRuleGenerationDetails = (row: ParserRuleGenerationJob) => {
     const report = asRecord(row.validation_report_json)
     const synthetic = nestedRecord(report, 'synthetic_validation')
@@ -1402,7 +1099,7 @@ const ParserControlTab: React.FC = () => {
       label: `${item.profile_name} v${item.version || ''}`,
     }))
 
-  return <div>
+  return <div className="parser-control-root">
     <Row gutter={16} style={{ marginBottom: 16 }}>
       <Col span={4}><Statistic title="模板总数" value={coverage?.templates_total || 0} /></Col>
       <Col span={4}><Statistic title="Active" value={coverage?.templates_active || 0} /></Col>
@@ -1427,7 +1124,79 @@ const ParserControlTab: React.FC = () => {
         style={{ marginBottom: 8 }}
       />
     ))}
-    <Tabs items={[
+    {(coverageError || workspaceErrors.length > 0) && (
+      <Alert
+        type="error"
+        showIcon
+        message="Parser Control 数据加载不完整"
+        description={[
+          coverageError ? `概览：${queryErrorLabel(coverageError)}` : null,
+          ...workspaceErrors.map((item) => `${item.source}：${queryErrorLabel(item.error)}`),
+        ].filter(Boolean).join('；')}
+        action={<Button size="small" icon={<ReloadOutlined />} onClick={refresh}>重试</Button>}
+        style={{ marginBottom: 12 }}
+      />
+    )}
+    <Tabs
+      activeKey={workspace}
+      onChange={changeWorkspace}
+      items={[
+        { key: 'today', label: '今日待办' },
+        { key: 'parser-assets', label: 'Parser 资产' },
+        { key: 'rule-assets', label: '规则资产' },
+        { key: 'governance', label: '治理与审计' },
+      ]}
+    />
+    {focus.fallbackReason && (
+      <Alert
+        type="warning"
+        showIcon
+        message="深链参数已安全回退"
+        description={focus.fallbackMessage || '已打开推荐工作区。'}
+        action={<Button size="small" onClick={acceptFocusFallback}>使用推荐视图</Button>}
+        style={{ marginBottom: 12 }}
+      />
+    )}
+    {focus.kind && focus.id && (
+      <Alert
+        type="info"
+        showIcon
+        closable
+        onClose={clearFocus}
+        message={`正在定位 ${focus.kind}`}
+        description={(
+          <Space direction="vertical" size={4}>
+            <Typography.Text copyable>{focus.id}</Typography.Text>
+            {focus.focusHint && <Typography.Text type="secondary">{focus.focusHint}</Typography.Text>}
+          </Space>
+        )}
+        style={{ marginBottom: 12 }}
+      />
+    )}
+    {workspace === 'governance' ? (
+      <ParserGovernancePanel
+        activeSubWorkspace={activeSubWorkspace}
+        onSubWorkspaceChange={changeSubWorkspace}
+        isMobile={isMobile}
+        replayReports={replayReports}
+        replayReportsLoading={replayReportsLoading}
+        approvalAudit={approvalAudit}
+        approvalAuditLoading={approvalAuditLoading}
+        agentLoopAttempts={agentLoopAttempts}
+        agentLoopAttemptsLoading={agentLoopAttemptsLoading}
+        datasets={datasets}
+        sourcePath={sourcePath}
+        datasetId={datasetId}
+        importPreview={importPreview}
+        importPreviewLoading={importPreviewMutation.isLoading}
+        importLoading={importMutation.isLoading}
+        onSourcePathChange={(value) => { setSourcePath(value); setImportPreview(null) }}
+        onDatasetIdChange={(value) => { setDatasetId(value); setImportPreview(null) }}
+        onPreviewImport={() => importPreviewMutation.mutate()}
+        onImport={() => importMutation.mutate()}
+      />
+    ) : (
+      <Tabs activeKey={activeSubWorkspace} onChange={changeSubWorkspace} items={[
       { key: 'templates', label: '模板资产', children:
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           <Space wrap>
@@ -1441,7 +1210,10 @@ const ParserControlTab: React.FC = () => {
               ]} />
           </Space>
             <Button icon={<DownloadOutlined />} loading={exportTemplates.isLoading} onClick={() => exportTemplates.mutate()}>导出全部模板</Button>
-          <Table rowKey="id" loading={templatesLoading} dataSource={filteredTemplates} columns={templateColumns} pagination={{ pageSize: 20 }} size="small" scroll={{ x: 980 }} />
+          <Table rowKey="id" loading={templatesLoading} dataSource={filteredTemplates}
+            rowClassName={(row: ParserTemplateItem) => hasFocusMatched(focus, { id: row.id })
+              ? 'ant-table-row-selected' : undefined}
+            columns={templateColumns} pagination={{ pageSize: 20 }} size="small" scroll={{ x: 980 }} />
         </Space> },
       { key: 'jobs', label: '任务队列', children:
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -1450,11 +1222,11 @@ const ParserControlTab: React.FC = () => {
               <Space wrap>
                 <Input.Search allowClear placeholder="搜索厂商、设备或命令" style={{ width: 280 }}
                   value={jobSearch} onChange={(event) => setJobSearch(event.target.value)} />
-                <Select allowClear placeholder="任务状态" style={{ width: 150 }} value={jobStatus}
+                <Select aria-label="任务状态" allowClear placeholder="任务状态" style={{ width: 150 }} value={jobStatus}
                   onChange={setJobStatus} options={[
                     'collecting', 'pending', 'running', 'validating', 'succeeded', 'failed', 'cancelled', 'superseded',
                   ].map((value) => ({ value, label: value }))} />
-                <Select allowClear placeholder="任务类型" style={{ width: 170 }} value={jobType}
+                <Select aria-label="任务类型" allowClear placeholder="任务类型" style={{ width: 170 }} value={jobType}
                   onChange={setJobType} options={[
                     { value: 'CREATE_TEMPLATE', label: 'CREATE_TEMPLATE' },
                     { value: 'REPAIR_TEMPLATE', label: 'REPAIR_TEMPLATE' },
@@ -1465,13 +1237,17 @@ const ParserControlTab: React.FC = () => {
               <Space>
                 <Button danger icon={<DeleteOutlined />} disabled={!selectedJobIds.length} loading={bulkDeleteJobs.isLoading} onClick={() => bulkDeleteJobs.mutate()}>删除已选任务</Button>
                 <Typography.Text>自动调度</Typography.Text>
-                <Switch checked={Boolean(dispatchControl?.auto_dispatch_enabled)}
+                <Switch aria-label="自动调度" checked={Boolean(dispatchControl?.auto_dispatch_enabled)}
                   loading={toggleDispatch.isLoading}
                   onChange={(checked) => toggleDispatch.mutate(checked)} />
               </Space>
             </Col>
           </Row>
-          <Table rowKey="id" loading={jobsLoading} dataSource={filteredJobs} columns={jobColumns} pagination={{ pageSize: 20 }} size="small" scroll={{ x: 930 }} rowSelection={{ selectedRowKeys: selectedJobIds, onChange: setSelectedJobIds, getCheckboxProps: (row: ParserJobItem) => ({ disabled: ['collecting', 'pending', 'running', 'validating'].includes(row.status) }) }} />
+          <StandardTableShell<ParserJobItem> rowKey="id" loading={jobsLoading}
+            dataSource={filteredJobs} columns={jobColumns} emptyText="暂无 Parser 任务"
+            scroll={{ x: 930 }} rowSelection={{ selectedRowKeys: selectedJobIds,
+              onChange: setSelectedJobIds,
+              getCheckboxProps: (row) => ({ disabled: ['collecting', 'pending', 'running', 'validating'].includes(row.status) }) }} />
         </Space> },
       { key: 'backfills', label: '历史回填', children:
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -1488,71 +1264,22 @@ const ParserControlTab: React.FC = () => {
               创建回填
             </Button>
           </Space>
-          <Table rowKey="id" loading={backfillsLoading} dataSource={backfills}
-            columns={backfillColumns} pagination={{ pageSize: 20 }} size="small" scroll={{ x: 980 }} />
+          <StandardTableShell<ParserBackfillJob> rowKey="id" loading={backfillsLoading}
+            dataSource={backfills} columns={backfillColumns} emptyText="暂无历史回填任务"
+            scroll={{ x: 980 }} />
         </Space> },
+      { key: 'asset-chain', label: '资产链健康', children:
+        <RuleAssetChainWorkspace rows={ruleAssetChainRows} focusId={focus.id} /> },
       { key: 'runtime-assets', label: '运行时资产健康', children:
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
-          <Alert
-            type={runtimeAssets?.ready ? 'success' : 'warning'}
-            showIcon
-            message={runtimeAssets?.ready ? '运行时规则资产已就绪' : '运行时规则资产存在缺口'}
-            description="生产巡检、状态归一化、变化检测和事件构建只应读取 active 资产；这里展示当前 active 数据契约、变化策略、事件规则及缺失项。"
-          />
-          <Spin spinning={runtimeAssetsLoading}>
-            <Row gutter={[12, 12]}>
-              <Col xs={12} md={6}>
-                <Statistic title="Active 数据契约" value={runtimeAssets?.counts?.observation_contracts ?? activeRuntimeCounts.contracts} />
-              </Col>
-              <Col xs={12} md={6}>
-                <Statistic title="Active 变化策略" value={runtimeAssets?.counts?.change_policies ?? activeRuntimeCounts.policies} />
-              </Col>
-              <Col xs={12} md={6}>
-                <Statistic title="Active 事件规则" value={runtimeAssets?.counts?.event_rules ?? activeRuntimeCounts.eventRules} />
-              </Col>
-              <Col xs={12} md={6}>
-                <Statistic
-                  title="缺口数量"
-                  value={(runtimeAssets?.missing_observation_contracts?.length || 0) + (runtimeAssets?.missing_change_policies?.length || 0)}
-                />
-              </Col>
-            </Row>
-          </Spin>
-          <Descriptions bordered size="small" column={1}>
-            <Descriptions.Item label="检查的数据契约">
-              {runtimeSchemas.length
-                ? runtimeSchemas.map((item) => item.join(':')).join(' | ')
-                : '暂无 active 数据契约'}
-            </Descriptions.Item>
-            <Descriptions.Item label="检查的观察类型">
-              {runtimeObservationTypes.length ? runtimeObservationTypes.join(' | ') : '暂无可推导观察类型'}
-            </Descriptions.Item>
-          </Descriptions>
-          <Row gutter={[12, 12]}>
-            <Col span={isMobile ? 24 : 12}>
-              <Typography.Title level={5}>缺失数据契约</Typography.Title>
-              <Table
-                rowKey="id"
-                size="small"
-                pagination={false}
-                dataSource={(runtimeAssets?.missing_observation_contracts || []).map((id) => ({ id }))}
-                columns={[{ title: 'Schema', dataIndex: 'id' }]}
-                locale={{ emptyText: '无缺失数据契约' }}
-              />
-            </Col>
-            <Col span={isMobile ? 24 : 12}>
-              <Typography.Title level={5}>缺失变化策略</Typography.Title>
-              <Table
-                rowKey="id"
-                size="small"
-                pagination={false}
-                dataSource={(runtimeAssets?.missing_change_policies || []).map((id) => ({ id }))}
-                columns={[{ title: 'Observation Type', dataIndex: 'id' }]}
-                locale={{ emptyText: '无缺失变化策略' }}
-              />
-            </Col>
-          </Row>
-        </Space> },
+        <RuntimeAssetsWorkspace
+          assets={runtimeAssets}
+          loading={runtimeAssetsLoading}
+          activeCounts={activeRuntimeCounts}
+          schemas={runtimeSchemas}
+          observationTypes={runtimeObservationTypes}
+          isMobile={isMobile}
+          focusId={focus.id}
+        /> },
       { key: 'rule-generation', label: `规则资产任务 (${ruleGenerationJobs.length})`, children:
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           <Alert type="info" showIcon
@@ -1640,181 +1367,18 @@ const ParserControlTab: React.FC = () => {
           />
         </Space> },
       { key: 'observation-contracts', label: `数据契约 (${observationContracts.length})`, children:
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
-          <Alert type="info" showIcon
-            message="ObservationContract 固化结构化字段到标准观测语义的映射；生产状态链路只消费已治理的契约版本。" />
-          <Table<ParserObservationContract>
-            rowKey="id"
-            loading={observationContractsLoading}
-            dataSource={observationContracts}
-            columns={observationContractColumns}
-            expandable={{
-              expandedRowRender: (row) => (
-                <pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap', maxHeight: 420 }}>
-                  {JSON.stringify({
-                    primary_keys: row.primary_keys_json,
-                    required_fields: row.required_fields_json,
-                    optional_fields: row.optional_fields_json,
-                    validators: row.validators_json,
-                    ignore_fields: row.ignore_fields_json,
-                    allow_empty: row.allow_empty,
-                    empty_patterns: row.empty_patterns_json,
-                    state_semantics: row.state_semantics_json,
-                    approval: row.approval_json,
-                  }, null, 2)}
-                </pre>
-              ),
-            }}
-            pagination={{ pageSize: 20 }}
-            size="small"
-            scroll={{ x: 1500 }}
-          />
-        </Space> },
+        <ObservationContractsWorkspace
+          items={observationContracts}
+          loading={observationContractsLoading}
+          focusId={focus.id}
+        /> },
       { key: 'change-policies', label: `变化策略 (${changePolicies.length})`, children:
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
-          <Alert type="info" showIcon
-            message="ChangePolicy 定义状态、数值、计数器和原文哈希如何比较；Change Detector 运行时只读取 active 策略。" />
-          <Table<ParserChangePolicy>
-            rowKey="version_id"
-            loading={changePoliciesLoading}
-            dataSource={changePolicies}
-            columns={changePolicyColumns}
-            expandable={{
-              expandedRowRender: (row) => (
-                <Row gutter={[12, 12]}>
-                  <Col span={isMobile ? 24 : 12}>
-                    <Typography.Title level={5}>策略内容</Typography.Title>
-                    <pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap', maxHeight: 360 }}>
-                      {JSON.stringify(row.policy || {}, null, 2)}
-                    </pre>
-                  </Col>
-                  <Col span={isMobile ? 24 : 12}>
-                    <Typography.Title level={5}>验证报告</Typography.Title>
-                    <pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap', maxHeight: 360 }}>
-                      {JSON.stringify(row.validation_report || {}, null, 2)}
-                    </pre>
-                  </Col>
-                </Row>
-              ),
-            }}
-            pagination={{ pageSize: 20 }}
-            size="small"
-            scroll={{ x: 1500 }}
-          />
-        </Space> },
-      { key: 'replay-reports', label: `历史回放报告 (${replayReports.length})`, children:
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
-          <Alert type="info" showIcon
-            message="历史回放报告用于评估候选 EventRule 在历史变化样本上的命中、碰撞和潜在误报；审批前应同时查看静态校验和历史回放结果。" />
-          <Table<ParserReplayReport>
-            rowKey="id"
-            loading={replayReportsLoading}
-            dataSource={replayReports}
-            columns={replayReportColumns}
-            expandable={{
-              expandedRowRender: (row) => (
-                <Row gutter={[12, 12]}>
-                  <Col span={isMobile ? 24 : 12}>
-                    <Typography.Title level={5}>异常命中</Typography.Title>
-                    <pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap', maxHeight: 360 }}>
-                      {JSON.stringify(row.unexpected_matches || [], null, 2)}
-                    </pre>
-                  </Col>
-                  <Col span={isMobile ? 24 : 12}>
-                    <Typography.Title level={5}>完整报告</Typography.Title>
-                    <pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap', maxHeight: 360 }}>
-                      {JSON.stringify(row.report_json || {}, null, 2)}
-                    </pre>
-                  </Col>
-                </Row>
-              ),
-            }}
-            pagination={{ pageSize: 20 }}
-            size="small"
-            scroll={{ x: 1780 }}
-          />
-        </Space> },
-      { key: 'agent-loop-attempts', label: `Agent Loop 尝试 (${agentLoopAttempts.length})`, children:
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
-          <Alert type="info" showIcon
-            message="Agent Loop 尝试记录展示 LLM 候选资产生成、确定性验证器反馈和下一步建议；这里只保存脱敏摘要，不展示原始 CLI 私有样本。" />
-          <Table<ParserAgentLoopAttempt>
-            rowKey="id"
-            loading={agentLoopAttemptsLoading}
-            dataSource={agentLoopAttempts}
-            columns={agentLoopAttemptColumns}
-            expandable={{
-              expandedRowRender: (row) => (
-                <Row gutter={[12, 12]}>
-                  <Col span={isMobile ? 24 : 12}>
-                    <Typography.Title level={5}>输入摘要</Typography.Title>
-                    <pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap', maxHeight: 360 }}>
-                      {JSON.stringify(row.input_summary || {}, null, 2)}
-                    </pre>
-                  </Col>
-                  <Col span={isMobile ? 24 : 12}>
-                    <Typography.Title level={5}>输出摘要</Typography.Title>
-                    <pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap', maxHeight: 360 }}>
-                      {JSON.stringify(row.output_summary || {}, null, 2)}
-                    </pre>
-                  </Col>
-                  <Col span={isMobile ? 24 : 12}>
-                    <Typography.Title level={5}>验证反馈</Typography.Title>
-                    <pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap', maxHeight: 360 }}>
-                      {JSON.stringify(row.validator_feedback || {}, null, 2)}
-                    </pre>
-                  </Col>
-                  <Col span={isMobile ? 24 : 12}>
-                    <Typography.Title level={5}>修订请求</Typography.Title>
-                    <pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap', maxHeight: 360 }}>
-                      {JSON.stringify(row.revision_request || {}, null, 2)}
-                    </pre>
-                  </Col>
-                </Row>
-              ),
-            }}
-            pagination={{ pageSize: 20 }}
-            size="small"
-            scroll={{ x: 1600 }}
-          />
-        </Space> },
-      { key: 'approval-audit', label: `审批审计 (${approvalAudit.length})`, children:
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
-          <Alert type="info" showIcon
-            message="审批审计记录规则资产从候选进入生产、被拒绝或被废弃的治理动作；每条记录都保留来源 Job、资产版本、验证结果和回放证据摘要。" />
-          <Table<ParserApprovalAudit>
-            rowKey="id"
-            loading={approvalAuditLoading}
-            dataSource={approvalAudit}
-            columns={approvalAuditColumns}
-            expandable={{
-              expandedRowRender: (row) => (
-                <Row gutter={[12, 12]}>
-                  <Col span={isMobile ? 24 : 12}>
-                    <Typography.Title level={5}>治理元数据</Typography.Title>
-                    <Descriptions bordered size="small" column={1}>
-                      <Descriptions.Item label="Source">{row.source_ref || '-'}</Descriptions.Item>
-                      <Descriptions.Item label="Asset ID">{row.asset_id || '-'}</Descriptions.Item>
-                      <Descriptions.Item label="Asset Ref">{row.asset_ref || '-'}</Descriptions.Item>
-                      <Descriptions.Item label="Created By">{row.created_by || '-'}</Descriptions.Item>
-                      <Descriptions.Item label="Created At">{row.created_at || '-'}</Descriptions.Item>
-                      <Descriptions.Item label="Updated At">{row.updated_at || '-'}</Descriptions.Item>
-                    </Descriptions>
-                  </Col>
-                  <Col span={isMobile ? 24 : 12}>
-                    <Typography.Title level={5}>Governance JSON</Typography.Title>
-                    <pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap', maxHeight: 360 }}>
-                      {JSON.stringify(row.governance || {}, null, 2)}
-                    </pre>
-                  </Col>
-                </Row>
-              ),
-            }}
-            pagination={{ pageSize: 20 }}
-            size="small"
-            scroll={{ x: 1560 }}
-          />
-        </Space> },
+        <ChangePoliciesWorkspace
+          items={changePolicies}
+          loading={changePoliciesLoading}
+          isMobile={isMobile}
+          focusId={focus.id}
+        /> },
       { key: 'aliases', label: `命令别名 (${aliases.length})`, children:
         <Table<ParserCommandAlias> rowKey="id" dataSource={aliases} columns={aliasColumns} pagination={{ pageSize: 20 }} size="small" /> },
       { key: 'profiles', label: `设备档案 (${deviceProfiles.length})`, children:
@@ -1933,6 +1497,11 @@ const ParserControlTab: React.FC = () => {
             </Col>
           </Row>
           <Table<ParserEventRule> rowKey={(row) => row.version_id || row.rule_id}
+            rowClassName={(row) => hasFocusMatched(focus, {
+              versionId: row.version_id,
+              ruleId: row.rule_id,
+              sourceJobId: row.source_job_id,
+            }) ? 'ant-table-row-selected' : undefined}
             dataSource={filteredEventRules} columns={eventRuleColumns}
             expandable={{
               expandedRowRender: (row) => {
@@ -2051,57 +1620,16 @@ const ParserControlTab: React.FC = () => {
             dataSource={commandProfileBindings} columns={bindingColumns}
             pagination={{ pageSize: 20 }} size="small" scroll={{ x: 900 }} />
         </Space> },
-      { key: 'datasets', label: `验证数据集覆盖率 (${datasets.length})`, children:
-        <Space direction="vertical" size={16} style={{ width: '100%' }}>
-          <Row gutter={[12, 12]}>
-            <Col flex="auto"><Input value={sourcePath} onChange={(event) => {
-              setSourcePath(event.target.value); setImportPreview(null)
-            }} placeholder="巡检文件或目录绝对路径" /></Col>
-            <Col flex="240px"><Input value={datasetId} onChange={(event) => {
-              setDatasetId(event.target.value); setImportPreview(null)
-            }} placeholder="数据集 ID，例如 2025Q4" /></Col>
-            <Col><Button icon={<EyeOutlined />} loading={importPreviewMutation.isLoading}
-              disabled={!sourcePath.trim()} onClick={() => importPreviewMutation.mutate()}>
-              导入预览
-            </Button></Col>
-            <Col><Button type="primary" loading={importMutation.isLoading}
-              disabled={!importPreview || importPreview.new_snapshots === 0}
-              onClick={() => importMutation.mutate()}>
-              确认导入
-            </Button></Col>
-          </Row>
-          {importPreview && <Alert type={importPreview.parse_failed ? 'warning' : 'info'} showIcon
-            message={`预览：${importPreview.file_count} 个文件，${importPreview.device_count} 台设备，新增 ${importPreview.new_snapshots}，重复 ${importPreview.duplicate_snapshots}`}
-            description={`模板就绪 ${importPreview.ready}；缺模板 ${importPreview.template_missing}；解析失败 ${importPreview.parse_failed}；忽略 ${importPreview.ignored}；身份未知 ${importPreview.identity_unknown}`} />}
-          <Table rowKey="dataset_id" dataSource={datasets} columns={datasetColumns}
-            pagination={{ pageSize: 20 }} size="small" scroll={{ x: 1100 }} />
-        </Space> },
-    ]} />
+      ].filter((item) => parserWorkspaceTabs[workspace].includes(item.key as ParserSubWorkspaceKey))} />
+    )}
 
-    <Drawer title="解析模板预览" open={previewOpen} onClose={() => setPreviewOpen(false)}
-      width={isMobile ? '100vw' : 720} destroyOnClose>
-      {previewLoading ? <div style={{ display: 'grid', minHeight: 240, placeItems: 'center' }}><Spin /></div>
-        : preview ? <Space direction="vertical" size={16} style={{ width: '100%' }}>
-          <Descriptions size="small" column={2} bordered>
-            <Descriptions.Item label="厂商">{preview.vendor}</Descriptions.Item>
-            <Descriptions.Item label="型号">{preview.profile}</Descriptions.Item>
-            <Descriptions.Item label="命令">{preview.canonical_command}</Descriptions.Item>
-            <Descriptions.Item label="类别">{preview.category}</Descriptions.Item>
-            <Descriptions.Item label="版本">{preview.version}</Descriptions.Item>
-            <Descriptions.Item label="状态"><Tag color={statusColor(preview.status)}>{preview.status}</Tag></Descriptions.Item>
-            <Descriptions.Item label="哈希校验" span={2}>
-              <Tag color={preview.hash_valid ? 'green' : 'red'}>{preview.hash_valid ? '通过' : '失败'}</Tag>
-              <Typography.Text copyable style={{ marginLeft: 8 }}>{preview.sha256}</Typography.Text>
-            </Descriptions.Item>
-          </Descriptions>
-          <Typography.Title level={5} style={{ margin: 0 }}>TextFSM 模板</Typography.Title>
-          <Typography.Paragraph copyable style={{ ...codePanelStyle, maxHeight: 480 }}>{preview.content}</Typography.Paragraph>
-          <Typography.Title level={5} style={{ margin: 0 }}>验证结果</Typography.Title>
-          <Typography.Paragraph style={{ ...codePanelStyle, maxHeight: 280, whiteSpace: 'pre-wrap' }}>
-            {JSON.stringify(preview.validation, null, 2)}
-          </Typography.Paragraph>
-        </Space> : null}
-    </Drawer>
+    <ParserTemplatePreviewDrawer
+      open={previewOpen}
+      onClose={() => setPreviewOpen(false)}
+      isMobile={isMobile}
+      loading={previewLoading}
+      preview={preview || undefined}
+    />
 
     <Drawer title="模板激活前对比" open={comparisonOpen}
       onClose={() => { setComparisonOpen(false); setComparisonTemplate(null); setComparison(null) }}
@@ -2139,61 +1667,13 @@ const ParserControlTab: React.FC = () => {
         </Space> : null}
     </Drawer>
 
-    <Drawer title="规则资产审批前预览" open={ruleJobPreviewOpen}
+    <RuleJobPreviewDrawer
+      open={ruleJobPreviewOpen}
       onClose={() => { setRuleJobPreviewOpen(false); setRuleJobPreview(null) }}
-      width={isMobile ? '100vw' : 920} destroyOnClose>
-      {ruleJobPreviewLoading ? <div style={{ display: 'grid', minHeight: 240, placeItems: 'center' }}><Spin /></div>
-        : ruleJobPreview ? <Space direction="vertical" size={16} style={{ width: '100%' }}>
-          <Alert showIcon
-            type={ruleJobPreview.approval_readiness.can_approve ? 'success' : 'warning'}
-            message={ruleJobPreview.approval_readiness.can_approve ? '候选资产满足审批前置条件' : '候选资产仍有审批阻断'}
-            description={ruleJobPreview.approval_readiness.blockers.length
-              ? ruleJobPreview.approval_readiness.blockers.join('；')
-              : '静态验证、资产引用和历史回放摘要均可作为审批证据。'} />
-          <Descriptions size="small" column={isMobile ? 1 : 3} bordered>
-            <Descriptions.Item label="任务类型">{ruleJobPreview.job.job_type}</Descriptions.Item>
-            <Descriptions.Item label="任务状态">
-              <Tag color={statusColor(ruleJobPreview.job.status)}>{governanceStatusLabel(ruleJobPreview.job.status)}</Tag>
-            </Descriptions.Item>
-            <Descriptions.Item label="资产类型">{String(ruleJobPreview.asset_summary.asset_type || '-')}</Descriptions.Item>
-            <Descriptions.Item label="资产引用" span={isMobile ? 1 : 2}>
-              <Typography.Text copyable={Boolean(ruleJobPreview.asset_summary.asset_ref)}>
-                {String(ruleJobPreview.asset_summary.asset_ref || ruleJobPreview.asset_summary.asset_version_id || '-')}
-              </Typography.Text>
-            </Descriptions.Item>
-            <Descriptions.Item label="资产摘要">
-              <Typography.Text copyable={Boolean(ruleJobPreview.asset_summary.asset_digest)}>
-                {shortDigest(String(ruleJobPreview.asset_summary.asset_digest || ''))}
-              </Typography.Text>
-            </Descriptions.Item>
-            <Descriptions.Item label="验证">{successTag(ruleJobPreview.validation_summary.success as boolean | undefined)}</Descriptions.Item>
-            <Descriptions.Item label="生成器">{String(ruleJobPreview.validation_summary.generator || '-')}</Descriptions.Item>
-            <Descriptions.Item label="测试用例">{String(ruleJobPreview.validation_summary.case_count || '-')}</Descriptions.Item>
-            <Descriptions.Item label="历史回放">
-              {ruleJobPreview.historical_replay ? successTag(ruleJobPreview.historical_replay.success as boolean | undefined) : <Tag>未执行</Tag>}
-            </Descriptions.Item>
-            <Descriptions.Item label="回放命中">{String(ruleJobPreview.historical_replay?.matched_change_count ?? '-')}</Descriptions.Item>
-            <Descriptions.Item label="回放冲突">{String(ruleJobPreview.historical_replay?.collision_count ?? '-')}</Descriptions.Item>
-            <Descriptions.Item label="Agent Loop">
-              {ruleJobPreview.agent_loop
-                ? `${ruleJobPreview.agent_loop.attempt_count || 0} 轮 / ${ruleJobPreview.agent_loop.next_action || '-'}`
-                : '-'}
-            </Descriptions.Item>
-          </Descriptions>
-          <Typography.Title level={5} style={{ margin: 0 }}>候选资产摘要</Typography.Title>
-          <Typography.Paragraph copyable style={{ ...codePanelStyle, maxHeight: 320, whiteSpace: 'pre-wrap' }}>
-            {JSON.stringify(ruleJobPreview.candidate_preview || {}, null, 2)}
-          </Typography.Paragraph>
-          <Typography.Title level={5} style={{ margin: 0 }}>输入摘要</Typography.Title>
-          <Typography.Paragraph copyable style={{ ...codePanelStyle, maxHeight: 240, whiteSpace: 'pre-wrap' }}>
-            {JSON.stringify(ruleJobPreview.payload_summary || {}, null, 2)}
-          </Typography.Paragraph>
-          <Typography.Title level={5} style={{ margin: 0 }}>验证报告</Typography.Title>
-          <Typography.Paragraph copyable style={{ ...codePanelStyle, maxHeight: 360, whiteSpace: 'pre-wrap' }}>
-            {JSON.stringify(ruleJobPreview.validation_report || {}, null, 2)}
-          </Typography.Paragraph>
-        </Space> : null}
-    </Drawer>
+      isMobile={isMobile}
+      loading={ruleJobPreviewLoading}
+      preview={ruleJobPreview || undefined}
+    />
 
     <Drawer title="补充规则资产生成上下文" open={generationContextOpen}
       onClose={() => {
@@ -2265,36 +1745,13 @@ const ParserControlTab: React.FC = () => {
       </Space> : null}
     </Drawer>
 
-    <Drawer title="生成任务详情" open={jobOpen} onClose={() => { setJobOpen(false); setJobId(null) }}
-      width={isMobile ? '100vw' : 760} destroyOnClose>
-      {jobLoading ? <div style={{ display: 'grid', minHeight: 240, placeItems: 'center' }}><Spin /></div>
-        : jobDetail ? <Space direction="vertical" size={16} style={{ width: '100%' }}>
-          <Descriptions size="small" column={2} bordered>
-            <Descriptions.Item label="任务类型">{jobDetail.job_type}</Descriptions.Item>
-            <Descriptions.Item label="状态"><Tag color={statusColor(jobDetail.status)}>{jobDetail.status}</Tag></Descriptions.Item>
-            <Descriptions.Item label="厂商">{jobDetail.vendor}</Descriptions.Item>
-            <Descriptions.Item label="设备">{jobDetail.profile}</Descriptions.Item>
-            <Descriptions.Item label="命令" span={2}>{jobDetail.canonical_command}</Descriptions.Item>
-            <Descriptions.Item label="样本数">{jobDetail.sample_count}</Descriptions.Item>
-            <Descriptions.Item label="尝试次数">{jobDetail.attempts}</Descriptions.Item>
-            <Descriptions.Item label="Celery Task" span={2}>{jobDetail.celery_task_id || '-'}</Descriptions.Item>
-            <Descriptions.Item label="失败代码">{jobDetail.failure_code || '-'}</Descriptions.Item>
-            <Descriptions.Item label="错误">{jobDetail.last_error || '-'}</Descriptions.Item>
-            <Descriptions.Item label="创建时间">{jobDetail.created_at || '-'}</Descriptions.Item>
-            <Descriptions.Item label="调度时间">{jobDetail.dispatched_at || '-'}</Descriptions.Item>
-            <Descriptions.Item label="开始时间">{jobDetail.started_at || '-'}</Descriptions.Item>
-            <Descriptions.Item label="完成时间">{jobDetail.completed_at || '-'}</Descriptions.Item>
-          </Descriptions>
-          <Typography.Title level={5} style={{ margin: 0 }}>样本引用</Typography.Title>
-          <Table rowKey="id" size="small" pagination={false} dataSource={jobDetail.samples || []}
-            scroll={{ x: 780 }} columns={[
-              { title: '设备', dataIndex: 'device_id', width: 170 },
-              { title: 'Snapshot', dataIndex: 'snapshot_id', width: 250 },
-              { title: '数据源', dataIndex: 'snapshot_source', render: () => 'PostgreSQL' },
-              { title: '数据集', dataIndex: 'dataset_id' },
-            ]} />
-        </Space> : null}
-    </Drawer>
+    <ParserJobDetailDrawer
+      open={jobOpen}
+      onClose={() => { setJobOpen(false); setJobId(null) }}
+      isMobile={isMobile}
+      loading={jobLoading}
+      job={jobDetail || undefined}
+    />
 
     <Drawer title="激活采集命令集" open={activationOpen}
       onClose={() => {

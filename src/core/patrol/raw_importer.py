@@ -24,7 +24,6 @@ from src.core.patrol.modes import (
     PRODUCTION_MODE,
     normalize_patrol_mode,
 )
-from src.core.patrol.repository import PatrolRepository
 from src.core.patrol.statuses import derive_command_status, normalize_execution_status
 from src.infrastructure.db.postgres import require_postgres_connection
 
@@ -172,7 +171,9 @@ def preview_raw_path(
         raise ValueError(f"no txt/log patrol files found under: {path}")
 
     runtime = ParserRuntime()
-    repository = PatrolRepository()
+    from src.core.patrol.repository import PatrolSnapshotRepository
+
+    snapshot_repository = PatrolSnapshotRepository()
     dataset_id = _dataset_id(path, metadata)
     totals = {
         "ready": 0,
@@ -186,7 +187,7 @@ def preview_raw_path(
     devices: set[str] = set()
     commands: set[str] = set()
     file_results: list[dict[str, Any]] = []
-    existing_fingerprints = repository.list_import_fingerprints(mode=mode)
+    existing_fingerprints = snapshot_repository.list_import_fingerprints(mode=mode)
     for candidate in files:
         text = _read_text_best_effort(candidate)
         file_hash = hashlib.sha256(candidate.read_bytes()).hexdigest()
@@ -278,6 +279,7 @@ def import_raw_capture(
     inventory_device_id: str | None = None,
     collector_complete: bool | None = None,
     command_collection_statuses: (dict[str, dict[str, Any]] | list[dict[str, Any]] | None) = None,
+    parser_runtime_bundle: dict[str, Any] | None = None,
     finalize_run: bool = True,
 ) -> dict[str, Any]:
     require_postgres_connection()
@@ -302,7 +304,12 @@ def import_raw_capture(
     vendor = identity.vendor
     model = identity.model
 
-    runtime = ParserRuntime()
+    runtime_bundle = None
+    if parser_runtime_bundle:
+        from src.core.parser.runtime_bundle import ParserRuntimeBundle
+
+        runtime_bundle = ParserRuntimeBundle.from_dict(parser_runtime_bundle)
+    runtime = ParserRuntime(runtime_bundle=runtime_bundle)
     coverage = [
         runtime.check_coverage(
             identity=identity,
@@ -364,7 +371,15 @@ def import_raw_capture(
         and parsed.failure_code != "unsupported_command"
     ]
 
-    repository = PatrolRepository()
+    from src.core.patrol.repository import (
+        PatrolCollectionResultRepository,
+        PatrolSnapshotRepository,
+    )
+    from src.core.patrol.run_repository import PatrolRunRepository
+
+    run_repository = PatrolRunRepository()
+    collection_repository = PatrolCollectionResultRepository()
+    snapshot_repository = PatrolSnapshotRepository()
     dataset_id = _dataset_id(path, metadata)
     if isinstance(command_collection_statuses, dict):
         status_items = [
@@ -432,7 +447,7 @@ def import_raw_capture(
             strict=True,
         )
     ]
-    existing = repository.find_snapshots_by_import_fingerprints(
+    existing = snapshot_repository.find_snapshots_by_import_fingerprints(
         {fingerprint for fingerprint in [*fingerprints, *legacy_fingerprints] if fingerprint}
     )
     fingerprints = [
@@ -475,7 +490,7 @@ def import_raw_capture(
                 if isinstance(structured, dict)
                 else None
             )
-            repository.save_collection_result(
+            collection_repository.save_collection_result(
                 run_id=str(snapshot.run_id),
                 inventory_device_id=inventory_device_id,
                 device_id=str(inventory_device_id or snapshot.device_id),
@@ -541,7 +556,7 @@ def import_raw_capture(
             ],
         }
     import_source = str((metadata or {}).get("source") or "imported_file")
-    repository.ensure_dataset(
+    run_repository.ensure_dataset(
         dataset_id=dataset_id,
         name=str((metadata or {}).get("dataset_name") or dataset_id),
         mode=mode,
@@ -551,7 +566,7 @@ def import_raw_capture(
             **(metadata or {}),
         },
     )
-    rid = repository.create_run(
+    rid = run_repository.create_run(
         run_id=run_id,
         source=import_source,
         mode=mode,
@@ -561,6 +576,9 @@ def import_raw_capture(
             "prompt_style": inspected.prompt_style,
             "patrol_mode": mode,
             "dataset_id": dataset_id,
+            "parser_runtime_bundle_digest": (
+                runtime_bundle.digest if runtime_bundle is not None else None
+            ),
             **(metadata or {}),
         },
         started_at=observed_at,
@@ -610,7 +628,7 @@ def import_raw_capture(
         deterministic_snapshot_id = (
             str(uuid.uuid5(uuid.NAMESPACE_URL, fingerprint)) if run_id else None
         )
-        snapshot_id, snapshot_created = repository.save_snapshot_idempotent(
+        snapshot_id, snapshot_created = snapshot_repository.save_snapshot_idempotent(
             run_id=rid,
             device_id=device_id,
             device_name=device_name,
@@ -643,6 +661,9 @@ def import_raw_capture(
                 "output_status": parsed.output_status,
                 "capability": parsed.capability,
                 "capability_status": parsed.capability_status,
+                "parser_runtime_bundle_digest": (
+                    runtime_bundle.digest if runtime_bundle is not None else None
+                ),
             },
             inventory_device_id=inventory_device_id,
             execution_item_id=command_collection.get("execution_item_id"),
@@ -651,7 +672,7 @@ def import_raw_capture(
         snapshot_ids.append(snapshot_id)
         if not snapshot_created:
             duplicate_snapshot_ids.append(snapshot_id)
-        stored_snapshot = repository.get_snapshot(snapshot_id)
+        stored_snapshot = snapshot_repository.get_snapshot(snapshot_id)
         if stored_snapshot is None or not stored_snapshot.execution_item_id:
             raise RuntimeError(f"persisted snapshot identity is unavailable: {snapshot_id}")
         candidate_job_id = None
@@ -682,10 +703,10 @@ def import_raw_capture(
             )
             and not _non_repairable_output(block.raw_output)
         ):
-            from src.core.parser.repository import ParserRepository
+            from src.core.parser.repository import ParserJobRepository
 
             try:
-                candidate_job_id = ParserRepository().create_candidate(
+                candidate_job_id = ParserJobRepository().create_candidate(
                     job_type=(
                         "CREATE_TEMPLATE"
                         if parse_status == "template_missing"
@@ -736,7 +757,7 @@ def import_raw_capture(
         authoritative = bool(
             command_complete and parse_status in {"parsed", "parse_empty", "raw_hashed"}
         )
-        repository.save_collection_result(
+        collection_repository.save_collection_result(
             run_id=rid,
             inventory_device_id=inventory_device_id,
             device_id=str(inventory_device_id or device_id),
@@ -794,7 +815,7 @@ def import_raw_capture(
         else "partial"
     )
     if finalize_run:
-        repository.finish_run(
+        run_repository.finish_run(
             rid,
             collection_status=run_collection_status,
             parser_readiness_status=parser_readiness_status,

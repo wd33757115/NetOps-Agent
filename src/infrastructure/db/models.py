@@ -210,6 +210,89 @@ class WorkflowRun(Base):
     completed_at = Column(DateTime, nullable=True)
 
 
+class PatrolBatchSummaryProjection(Base):
+    """Rebuildable materialized patrol batch report."""
+
+    __tablename__ = "netops_patrol_batch_summary_projections"
+
+    patrol_batch_id = Column(String(128), primary_key=True)
+    source_digest = Column(String(64), nullable=False, index=True)
+    status = Column(String(32), nullable=False, index=True)
+    run_count = Column(Integer, nullable=False, default=0)
+    summary_json = Column(JSON, nullable=False)
+    markdown_text = Column(Text, nullable=False)
+    object_key = Column(String(512), nullable=True)
+    generated_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class PatrolBatchRecord(Base):
+    """Durable launch-time manifest for a patrol batch."""
+
+    __tablename__ = "netops_patrol_batches"
+
+    patrol_batch_id = Column(String(128), primary_key=True)
+    workflow_name = Column(String(128), nullable=False)
+    launch_mode = Column(String(32), nullable=False)
+    patrol_mode = Column(String(32), nullable=False)
+    ticket_id = Column(String(128), nullable=True, index=True)
+    target_type = Column(String(32), nullable=False, index=True)
+    target_label = Column(String(256), nullable=False)
+    selector_json = Column(JSON, nullable=False)
+    target_count = Column(Integer, nullable=False, default=0)
+    launched_count = Column(Integer, nullable=False, default=0)
+    skipped_count = Column(Integer, nullable=False, default=0)
+    archived = Column(Boolean, nullable=False, default=False, server_default=text("false"), index=True)
+    archived_at = Column(DateTime(timezone=True), nullable=True)
+    archive_reason = Column(Text, nullable=True)
+    archived_by = Column(String(128), nullable=True)
+    keep_until = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class PatrolBatchDeviceRecord(Base):
+    """One launch-time target per device, suitable for server-side pagination."""
+
+    __tablename__ = "netops_patrol_batch_devices"
+
+    id = Column(String(64), primary_key=True)
+    patrol_batch_id = Column(
+        String(128),
+        ForeignKey("netops_patrol_batches.patrol_batch_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    device_id = Column(String(256), nullable=False, index=True)
+    device_name = Column(String(256), nullable=True, index=True)
+    management_ip = Column(String(64), nullable=True)
+    selection_status = Column(String(32), nullable=False, index=True)
+    preflight_status = Column(String(32), nullable=False, index=True)
+    failure_code = Column(String(128), nullable=True, index=True)
+    error_message = Column(Text, nullable=True)
+    workflow_run_id = Column(String(64), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index(
+            "uq_netops_patrol_batch_device",
+            "patrol_batch_id",
+            "device_id",
+            unique=True,
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
 class WorkflowPluginMetadata(Base):
     """Workflow 插件治理元数据（文件仍为运行时真相源）。"""
 
@@ -626,6 +709,27 @@ class NetworkDeviceConnectionHealth(Base):
     source = Column(String(64), nullable=False, default="unknown", index=True)
     metadata_json = Column(JSON, nullable=True)
     checked_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class DeviceReadinessProjection(Base):
+    """Rebuildable device-list read model; never a patrol fact source."""
+
+    __tablename__ = "netops_device_readiness_projections"
+
+    device_id = Column(
+        String(64),
+        ForeignKey("netops_devices.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    mode = Column(String(32), primary_key=True)
+    status = Column(String(32), nullable=False, index=True)
+    source_digest = Column(String(64), nullable=False, index=True)
+    readiness_json = Column(JSON, nullable=False)
+    computed_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
 
     def to_dict(self):
         return {column.name: getattr(self, column.name) for column in self.__table__.columns}

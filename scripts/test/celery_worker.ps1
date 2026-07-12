@@ -5,7 +5,7 @@
 param(
     [string]$ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
     [string]$LogLevel = "info",
-    [string]$Queues = "netops.default,netops.firewall,netops.device",
+    [string]$Queues = "netops.default,netops.firewall,netops.device,netops.patrol,netops.ai",
     [string]$Pool = "solo",
     [switch]$KeepExisting
 )

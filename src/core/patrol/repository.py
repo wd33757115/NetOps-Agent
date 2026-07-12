@@ -15,14 +15,14 @@ from sqlalchemy import func, or_, text
 from sqlalchemy.exc import IntegrityError
 
 from src.core.evidence import RawEvidenceRepository, evidence_id_for_command_snapshot
+from src.core.parser.output_classifier import OUTPUT_STATUSES
 from src.core.patrol.domain import SnapshotRecord
+from src.core.patrol.run_status_projector import PatrolRunStatusProjector
 from src.core.patrol.statuses import (
     PatrolCommandStatus,
     derive_command_status,
-    readiness_status,
     validate_command_status,
 )
-from src.core.parser.output_classifier import OUTPUT_STATUSES
 from src.infrastructure.db.models import (
     CommandSnapshot,
     NetworkDevice,
@@ -157,8 +157,8 @@ class AnalysisLeaseHeartbeat:
                 continue
 
 
-class PatrolRepository:
-    """Authoritative PostgreSQL patrol data-plane repository."""
+class _PatrolRepositoryBase:
+    """Shared patrol ownership guard used by write repositories."""
 
     @staticmethod
     def _require_collection_owner(db, run_id: str, owner_token: str | None) -> PatrolRun:
@@ -172,6 +172,10 @@ class PatrolRepository:
         if row.owner_token is not None and row.owner_token != owner_token:
             raise PatrolRunFencedError(f"patrol run collection owner was fenced: {run_id}")
         return row
+
+
+class PatrolRunRepositoryBackend(_PatrolRepositoryBase):
+    """Patrol run, dataset, lease and collection ownership persistence."""
 
     def ensure_dataset(
         self,
@@ -507,13 +511,16 @@ class PatrolRepository:
                 .filter(PatrolCollectionResult.run_id == run_id)
                 .all()
             )
-            row.parser_readiness_status = parser_readiness_status or readiness_status(
-                [item.parse_status for item in collection_rows],
-                ready={"parsed", "parse_empty", "ignored", "raw_hashed", "not_applicable"},
+            readiness = PatrolRunStatusProjector.project(collection_rows)
+            row.parser_readiness_status = (
+                readiness.parser_readiness_status
+                if collection_rows
+                else parser_readiness_status or readiness.parser_readiness_status
             )
-            row.fact_readiness_status = fact_readiness_status or readiness_status(
-                [item.fact_status for item in collection_rows],
-                ready={"ready", "empty", "ignored", "not_applicable"},
+            row.fact_readiness_status = (
+                readiness.fact_readiness_status
+                if collection_rows
+                else fact_readiness_status or readiness.fact_readiness_status
             )
             if analysis_status is not None:
                 row.analysis_status = analysis_status
@@ -550,15 +557,23 @@ class PatrolRepository:
                 .filter(PatrolCollectionResult.run_id == run_id)
                 .all()
             )
-            row.fact_readiness_status = readiness_status(
-                [item.fact_status for item in collection_rows],
-                ready={"ready", "empty", "ignored"},
-            )
+            readiness = PatrolRunStatusProjector.project(collection_rows)
+            row.parser_readiness_status = readiness.parser_readiness_status
+            row.fact_readiness_status = readiness.fact_readiness_status
             if baseline_eligible is not None:
                 row.baseline_eligible = baseline_eligible
             if metadata:
                 row.metadata_json = {**(row.metadata_json or {}), **metadata}
             row.updated_at = _utcnow()
+
+    def get_run(self, run_id: str) -> dict[str, Any] | None:
+        with get_db_session() as db:
+            row = db.get(PatrolRun, run_id)
+            return row.to_dict() if row else None
+
+
+class PatrolAnalysisAttemptRepository(_PatrolRepositoryBase):
+    """Immutable rule bundle, lease and completion for analysis attempts."""
 
     def begin_analysis_attempt(
         self,
@@ -813,10 +828,9 @@ class PatrolRepository:
                 run_ids.add(row.run_id)
         return {"reconciled_count": len(run_ids), "run_ids": sorted(run_ids)}
 
-    def get_run(self, run_id: str) -> dict[str, Any] | None:
-        with get_db_session() as db:
-            row = db.get(PatrolRun, run_id)
-            return row.to_dict() if row else None
+
+class PatrolCollectionResultRepository(_PatrolRepositoryBase):
+    """Command collection and normalization result persistence."""
 
     def save_collection_result(
         self,
@@ -1035,6 +1049,10 @@ class PatrolRepository:
                 "snapshot_id": snapshot_id,
             }
             row.updated_at = _utcnow()
+
+
+class PatrolSnapshotRepository(_PatrolRepositoryBase):
+    """Immutable command snapshot and dataset query persistence."""
 
     def save_snapshot(
         self,
@@ -1404,3 +1422,12 @@ class PatrolRepository:
             execution_item_id=row.execution_item_id,
             output_status=row.output_status,
         )
+
+
+class PatrolRepository(
+    PatrolRunRepositoryBackend,
+    PatrolAnalysisAttemptRepository,
+    PatrolCollectionResultRepository,
+    PatrolSnapshotRepository,
+):
+    """Compatibility facade; new callers should depend on one aggregate repository."""

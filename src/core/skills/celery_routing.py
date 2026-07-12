@@ -15,8 +15,27 @@ DOMAIN_QUEUE_MAP: dict[str, str] = {
     "default": "netops.default",
 }
 
+ROLE_QUEUE_MAP: dict[str, str] = {
+    "device-patrol": "netops.patrol",
+    "state-normalizer": "netops.patrol",
+    "change-detector": "netops.patrol",
+    "event-builder": "netops.patrol",
+    "patrol-raw-ingestor": "netops.patrol",
+    "report-generator": "netops.patrol",
+    "textfsm-generator": "netops.ai",
+    "observation-contract-generator": "netops.ai",
+    "change-policy-generator": "netops.ai",
+    "event-rule-generator": "netops.ai",
+    "llm-result-analyzer": "netops.ai",
+    "official-document-writing": "netops.ai",
+    "official_document": "netops.ai",
+}
+
 
 def resolve_skill_celery_queue(skill_name: str) -> str:
+    role_queue = ROLE_QUEUE_MAP.get(str(skill_name or "").strip())
+    if role_queue:
+        return role_queue
     entry = get_catalog_entry(skill_name)
     if entry:
         if entry.get("celery_queue"):

@@ -405,6 +405,8 @@ class RuleGenerationJobRepository:
         replay = cls._extract_historical_replay(validation_report)
         if replay and replay.get("success") is False:
             blockers.append("historical replay failed")
+        if replay and int(replay.get("collision_count") or 0) > 0:
+            blockers.append("historical replay has collisions")
         return blockers
 
     @classmethod

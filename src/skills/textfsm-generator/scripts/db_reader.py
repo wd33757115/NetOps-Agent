@@ -11,7 +11,7 @@ from pathlib import Path
 from config_loader import CommandMapping
 
 from src.core.parser.policy import ParserPolicy
-from src.core.parser.repository import ParserRepository
+from src.core.parser.repository import ParserMetadataRepository
 from src.core.patrol.repository import PatrolRepository
 
 
@@ -37,7 +37,7 @@ def discover_missing_template_candidates(
     """Return one PostgreSQL validation sample for each unresolved parser profile."""
     del patrol_db, devices_db, command_mappings
 
-    parser_repository = ParserRepository()
+    parser_repository = ParserMetadataRepository()
     policy = ParserPolicy(repository=parser_repository)
     snapshots = PatrolRepository().list_dataset_snapshots(mode="parser_validation")
     seen: set[tuple[str, str, str]] = set()

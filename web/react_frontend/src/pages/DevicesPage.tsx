@@ -1,15 +1,15 @@
 import React, { useMemo, useState } from 'react'
-import { Alert, AutoComplete, Button, Descriptions, Drawer, Form, Input, Modal, Row, Col, Select, Space, Table, Tabs, Tag, Typography, Upload, message } from 'antd'
-import { DeleteOutlined, DownloadOutlined, EditOutlined, EyeOutlined, ImportOutlined, LinkOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined, SafetyCertificateOutlined, SearchOutlined } from '@ant-design/icons'
+import { Alert, AutoComplete, Button, Descriptions, Drawer, Dropdown, Form, Input, Modal, Progress, Row, Col, Select, Space, Table, Tabs, Tag, Typography, Upload, message } from 'antd'
+import { DeleteOutlined, DownloadOutlined, EditOutlined, EyeOutlined, ImportOutlined, LinkOutlined, MoreOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined, SafetyCertificateOutlined, SearchOutlined } from '@ant-design/icons'
 import { useMutation, useQuery } from 'react-query'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import GrokShellLayout from '../components/layout/GrokShellLayout'
-import ParserControlTab from '../components/skills/ParserControlTab'
 import WorkflowRunMonitor from '../components/skills/WorkflowRunMonitor'
 import AgentModuleControlTab from '../components/devices/AgentModuleControlTab'
 import ControlPlaneOverview from '../components/devices/ControlPlaneOverview'
 import DeviceAssetInventoryPanel, { type DeviceAssetFilters } from '../components/devices/DeviceAssetInventoryPanel'
 import PatrolOperationsPanel from '../components/devices/PatrolOperationsPanel'
+import EvidenceTimeline from '../components/devices/EvidenceTimeline'
 import {
   deviceApi,
   parserApi,
@@ -22,8 +22,6 @@ import {
   type DeviceCredentialInspection,
   type DeviceDynamicGroup,
   type DeviceDynamicGroupPreview,
-  type DeviceEvidenceTimelineItem,
-  type DeviceExecutionPlanRecord,
   type DeviceEffectivePlanPreview,
   type DeviceIdentityDiscoveryResult,
   type DeviceImportPayload,
@@ -37,6 +35,7 @@ import {
   type ParserCommandProfile,
   type ParserCommandProfileImpactPreview,
   type PatrolBatchResultSummary,
+  type PatrolBatchDevicePage,
   type PatrolBatchSummary,
   type WorkflowRunSummary,
 } from '../services/api'
@@ -121,8 +120,8 @@ const hasActiveWorkflowRuns = (runs: WorkflowRunSummary[] = []) =>
 
 const hasActivePatrolBatches = (batches: PatrolBatchSummary[] = []) =>
   batches.some((batch) => {
-    const running = Number(batch.running || 0)
-    const pending = Number(batch.pending || 0)
+    const running = Number(batch.running_count || 0)
+    const pending = Number(batch.pending_count || 0)
     return running + pending > 0
   })
 
@@ -157,15 +156,6 @@ const statusLabel = (status?: string) => {
     update: '更新',
   }
   return status ? labels[status] || status : '未知'
-}
-
-const severityLabel = (severity?: string) => {
-  const labels: Record<string, string> = {
-    critical: '严重',
-    warning: '璀﹀憡',
-    info: '淇℃伅',
-  }
-  return severity ? labels[severity] || severity : '-'
 }
 
 type PatrolPreviewIssue = DevicePatrolPreview['errors'][number]
@@ -327,8 +317,10 @@ const importExample = [
 
 const DevicesPage: React.FC = () => {
   const isMobile = useIsMobile()
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const activeTab = searchParams.get('tab') || 'overview'
+  const requestedTab = searchParams.get('tab') || 'overview'
+  const activeTab = ['overview', 'patrol', 'modules'].includes(requestedTab) ? requestedTab : 'overview'
   const [form] = Form.useForm<DeviceFormValues>()
   const [bulkForm] = Form.useForm<BulkFormValues>()
   const [patrolForm] = Form.useForm<PatrolFormValues>()
@@ -368,6 +360,9 @@ const DevicesPage: React.FC = () => {
   const [patrolLaunch, setPatrolLaunch] = useState<DevicePatrolLaunchResult | null>(null)
   const [activePatrolBatchId, setActivePatrolBatchId] = useState<string | null>(null)
   const [showArchivedPatrolBatches, setShowArchivedPatrolBatches] = useState(false)
+  const [batchDevicePage, setBatchDevicePage] = useState(1)
+  const [batchDeviceSearch, setBatchDeviceSearch] = useState('')
+  const [batchDeviceSelectionStatus, setBatchDeviceSelectionStatus] = useState<string>()
   const [monitorRunId, setMonitorRunId] = useState<string | null>(null)
   const [healthOpen, setHealthOpen] = useState(false)
   const [evidenceOpen, setEvidenceOpen] = useState(false)
@@ -404,20 +399,6 @@ const DevicesPage: React.FC = () => {
     ['devices', queryParams],
     () => deviceApi.list(queryParams),
     { keepPreviousData: true },
-  )
-  const { data: recentPatrolRuns = [], refetch: refetchRecentPatrolRuns } = useQuery(
-    ['device-patrol-workflow-runs', selected?.device_id],
-    () => workflowApi.listRuns({
-      template_name: 'patrol-change-event',
-      source: 'device-management',
-      device_id: selected?.device_id,
-      limit: 10,
-    }),
-    {
-      refetchInterval: (runs) => (hasActiveWorkflowRuns(runs as WorkflowRunSummary[]) ? 5000 : false),
-      refetchOnWindowFocus: false,
-      retry: false,
-    },
   )
   const { data: activeBatchRuns = [], refetch: refetchActiveBatchRuns } = useQuery(
     ['device-patrol-batch-runs', activePatrolBatchId],
@@ -461,6 +442,28 @@ const DevicesPage: React.FC = () => {
     ['device-dynamic-groups'],
     () => deviceApi.dynamicGroups(),
     { refetchOnWindowFocus: false },
+  )
+  const { data: activeBatchDevices, isLoading: activeBatchDevicesLoading } = useQuery<PatrolBatchDevicePage>(
+    [
+      'device-patrol-batch-devices', activePatrolBatchId, batchDevicePage,
+      batchDeviceSearch, batchDeviceSelectionStatus,
+    ],
+    () => workflowApi.listPatrolBatchDevices(activePatrolBatchId!, {
+      limit: 50,
+      offset: (batchDevicePage - 1) * 50,
+      search: batchDeviceSearch.trim() || undefined,
+      selection_status: batchDeviceSelectionStatus,
+    }),
+    {
+      enabled: Boolean(activePatrolBatchId),
+      keepPreviousData: true,
+      refetchInterval: (page) => page?.items.some((item) =>
+        ['pending', 'queued', 'running', 'in_progress'].includes(item.workflow_status || ''))
+        ? 10000
+        : false,
+      refetchOnWindowFocus: false,
+      retry: false,
+    },
   )
   const { data: deviceGroups = [], refetch: refetchDeviceGroups } = useQuery(
     ['device-groups'],
@@ -516,20 +519,25 @@ const DevicesPage: React.FC = () => {
     },
   )
 
+  const activeBatch = useMemo(
+    () => patrolBatches.find((item) => item.patrol_batch_id === activePatrolBatchId),
+    [activePatrolBatchId, patrolBatches],
+  )
   const activeBatchSummary = useMemo(() => {
-    const counts = activeBatchRuns.reduce<Record<string, number>>((acc, run) => {
-      acc[run.status] = (acc[run.status] || 0) + 1
-      return acc
-    }, {})
+    const counts = activeBatchResultSummary?.status_counts || activeBatch?.status_counts
+      || activeBatchRuns.reduce<Record<string, number>>((acc, run) => {
+        acc[run.status] = (acc[run.status] || 0) + 1
+        return acc
+      }, {})
     return {
-      total: activeBatchRuns.length,
+      total: activeBatch?.launched_count ?? activeBatchResultSummary?.run_count ?? activeBatchRuns.length,
       completed: counts.completed || 0,
       failed: counts.failed || 0,
-      running: counts.running || 0,
-      pending: counts.pending || 0,
+      running: (counts.running || 0) + (counts.in_progress || 0) + (counts.collecting || 0),
+      pending: (counts.pending || 0) + (counts.queued || 0),
       cancelled: counts.cancelled || 0,
     }
-  }, [activeBatchRuns])
+  }, [activeBatch, activeBatchResultSummary, activeBatchRuns])
 
   const saveDevice = useMutation(
     async (values: DeviceFormValues) => {
@@ -984,7 +992,7 @@ const DevicesPage: React.FC = () => {
     },
     {
       onSuccess: (result) => { setPatrolPreview(result); setPatrolLaunch(null) },
-      onError: (error: any) => message.error(extractErrorMessage(error, '宸℃棰勮澶辫触')),
+      onError: (error: any) => message.error(extractErrorMessage(error, '巡检预览失败')),
     },
   )
 
@@ -1007,7 +1015,6 @@ const DevicesPage: React.FC = () => {
         setPatrolLaunch(result)
         setActivePatrolBatchId(result.patrol_batch_id || null)
         setMonitorRunId(result.runs?.[0]?.workflow_run_id || null)
-        refetchRecentPatrolRuns()
         refetchActiveBatchRuns()
         refetchPatrolBatches()
           message.success(
@@ -1029,7 +1036,6 @@ const DevicesPage: React.FC = () => {
       onSuccess: async (result) => {
         message.success('Workflow 重试已启动')
         setMonitorRunId(result.run_id)
-        await refetchRecentPatrolRuns()
         await refetchActiveBatchRuns()
         await refetchPatrolBatches()
         await refetchActiveBatchResultSummary()
@@ -1046,7 +1052,6 @@ const DevicesPage: React.FC = () => {
         if (result.runs?.[0]?.run_id) {
           setMonitorRunId(result.runs[0].run_id)
         }
-        await refetchRecentPatrolRuns()
         await refetchActiveBatchRuns()
         await refetchPatrolBatches()
       },
@@ -1062,7 +1067,6 @@ const DevicesPage: React.FC = () => {
         setActivePatrolBatchId(result.new_patrol_batch_id)
         await Promise.all([
           refetchPatrolBatches(),
-          refetchRecentWorkflowRuns(),
           refetchActiveBatchRuns(),
           refetchActiveBatchResultSummary(),
         ])
@@ -1081,10 +1085,14 @@ const DevicesPage: React.FC = () => {
         }
         await Promise.all([
           refetchPatrolBatches(),
-          refetchRecentPatrolRuns(),
         ])
       },
-      onError: (error: any) => message.error(extractErrorMessage(error, '批次归档失败')),
+      onError: (error: any) => {
+        const detail = extractErrorMessage(error, '批次归档失败')
+        message.error(detail.includes('active runs')
+          ? '该批次仍有设备正在运行，结束后才能归档'
+          : detail)
+      },
     },
   )
 
@@ -1092,27 +1100,10 @@ const DevicesPage: React.FC = () => {
     (batchId: string) => workflowApi.restorePatrolBatch(batchId, { reason: 'manual restore from Device Management' }),
     {
       onSuccess: async (result) => {
-        message.success(`宸叉仮澶嶆壒娆?${result.patrol_batch_id}`)
+        message.success(`已恢复批次 ${result.patrol_batch_id}`)
         await refetchPatrolBatches()
       },
       onError: (error: any) => message.error(extractErrorMessage(error, '批次恢复失败')),
-    },
-  )
-
-  const exportPatrolBatch = useMutation(
-    (batchId: string) => workflowApi.exportPatrolBatch(batchId),
-    {
-      onSuccess: (blob, batchId) => {
-        const url = window.URL.createObjectURL(blob)
-        const link = document.createElement('a')
-        link.href = url
-        link.download = `${batchId}.csv`
-        document.body.appendChild(link)
-        link.click()
-        link.remove()
-        window.URL.revokeObjectURL(url)
-      },
-      onError: (error: any) => message.error(extractErrorMessage(error, '批次 CSV 导出失败')),
     },
   )
 
@@ -1130,6 +1121,40 @@ const DevicesPage: React.FC = () => {
         window.URL.revokeObjectURL(url)
       },
       onError: (error: any) => message.error(extractErrorMessage(error, '批次报告导出失败')),
+    },
+  )
+
+  const exportPatrolBatchRawCli = useMutation(
+    (batchId: string) => workflowApi.exportPatrolBatchRawCli(batchId),
+    {
+      onSuccess: (blob, batchId) => {
+        const url = window.URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = `${batchId}-raw-output.zip`
+        document.body.appendChild(link)
+        link.click()
+        link.remove()
+        window.URL.revokeObjectURL(url)
+      },
+      onError: (error: any) => message.error(extractErrorMessage(error, '原始输出导出失败')),
+    },
+  )
+
+  const exportPatrolBatchEvents = useMutation(
+    (batchId: string) => workflowApi.exportPatrolBatchEvents(batchId),
+    {
+      onSuccess: (blob, batchId) => {
+        const url = window.URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = `${batchId}-events.csv`
+        document.body.appendChild(link)
+        link.click()
+        link.remove()
+        window.URL.revokeObjectURL(url)
+      },
+      onError: (error: any) => message.error(extractErrorMessage(error, '事件数据导出失败')),
     },
   )
 
@@ -1229,13 +1254,13 @@ const DevicesPage: React.FC = () => {
     ])
   }
 
-  const devices = data?.items || []
+  const devices = useMemo(() => data?.items || [], [data?.items])
 
   const openDeviceEvidenceTimeline = (deviceId?: string | null, deviceName?: string | null) => {
     const key = String(deviceId || '').trim()
     const name = String(deviceName || '').trim()
     if (!key && !name) {
-      message.warning('缺少设备 ID，无法打开证据链')
+      message.warning('缺少设备 ID，无法打开巡检详情')
       return
     }
     const matched = devices.find((item) => item.device_id === key || item.device_name === name)
@@ -1315,7 +1340,7 @@ const DevicesPage: React.FC = () => {
   const confirmDeleteDevice = (device: ManagedDevice) => {
     Modal.confirm({
       title: '删除设备资产',
-      content: '设备 ' + (device.device_name || device.device_id) + ' 将从资产清单中删除，历史巡检、证据链和 Workflow 记录会保留。',
+      content: '设备 ' + (device.device_name || device.device_id) + ' 将从资产清单中删除，历史巡检详情和执行记录会保留。',
       okText: '删除',
       okButtonProps: { danger: true, loading: deleteDevice.isLoading },
       cancelText: '取消',
@@ -1538,126 +1563,6 @@ const DevicesPage: React.FC = () => {
       render: (value: string) => value ? <Typography.Text type="danger">{value}</Typography.Text> : '-' },
   ]
 
-  const executionPlanColumns = [
-    { title: '计划 ID', dataIndex: 'execution_plan_id', width: 240,
-      render: (value: string) => <Typography.Text copyable code>{value}</Typography.Text> },
-    { title: '状态', dataIndex: 'status', width: 120,
-      render: (value: string) => <Tag color={value === 'launched' ? 'green' : value === 'launch_failed' ? 'red' : 'blue'}>{statusLabel(value)}</Tag> },
-    { title: '来源', dataIndex: 'launch_source', width: 120,
-      render: (value: string) => value || '-' },
-    { title: '采集命令集', dataIndex: 'profile_name', width: 170 },
-    { title: '策略来源', dataIndex: 'policy_source', width: 150 },
-    { title: '命令数', dataIndex: 'command_count', width: 90 },
-    { title: 'Plan Hash', dataIndex: 'plan_sha256', width: 150,
-      render: (value: string) => value ? <Typography.Text code>{value.slice(0, 12)}</Typography.Text> : '-' },
-    { title: 'Workflow / Task', width: 240,
-      render: (_: unknown, row: DeviceExecutionPlanRecord) => (
-        row.workflow_run_id
-          ? <Typography.Text copyable code>{row.workflow_run_id}</Typography.Text>
-          : row.celery_task_id
-            ? <Typography.Text copyable code>{row.celery_task_id}</Typography.Text>
-            : '-'
-      ) },
-    { title: '鍒涘缓鏃堕棿', dataIndex: 'created_at', width: 190,
-      render: (value: string) => formatDateTime(value) },
-  ]
-
-  const evidenceColumns = [
-    { title: 'Workflow Run', dataIndex: 'workflow_run_id', width: 240,
-      render: (value: string) => value ? <Typography.Text copyable code>{value}</Typography.Text> : '-' },
-    { title: '状态', dataIndex: 'workflow_status', width: 110,
-      render: (value: string) => <Tag color={value === 'completed' ? 'green' : value === 'failed' ? 'red' : 'blue'}>{statusLabel(value)}</Tag> },
-    { title: '执行计划', dataIndex: 'execution_plan_id', width: 220,
-      render: (value: string) => value ? <Typography.Text copyable code>{value}</Typography.Text> : '-' },
-    { title: 'Snapshot Run', dataIndex: 'snapshot_run_id', width: 220,
-      render: (value: string) => value ? <Typography.Text copyable code>{value}</Typography.Text> : '-' },
-    { title: '快照', dataIndex: 'snapshot_count', width: 100 },
-    { title: '观测项', dataIndex: 'observation_count', width: 120 },
-    { title: '变化', dataIndex: 'change_count', width: 100,
-      render: (value: number) => <Tag color={value ? 'orange' : 'default'}>{value}</Tag> },
-    { title: '事件', dataIndex: 'event_count', width: 90,
-      render: (value: number) => <Tag color={value ? 'red' : 'default'}>{value}</Tag> },
-    { title: '创建时间', dataIndex: 'workflow_created_at', width: 190,
-      render: (value: string) => formatDateTime(value) },
-  ]
-
-  const renderEvidenceDetails = (item: DeviceEvidenceTimelineItem) => (
-    <Space direction="vertical" size={12} style={{ width: '100%' }}>
-      <Space wrap>
-        {Object.entries(item.parse_counts || {}).map(([status, count]) => (
-          <Tag key={status}>{status}: {count}</Tag>
-        ))}
-      </Space>
-      <Descriptions size="small" bordered column={isMobile ? 1 : 4}>
-        <Descriptions.Item label="批次">{item.patrol_batch_id || '-'}</Descriptions.Item>
-        <Descriptions.Item label="完成时间">{formatDateTime(item.workflow_completed_at)}</Descriptions.Item>
-        <Descriptions.Item label="Snapshot Run">{item.snapshot_run_id || '-'}</Descriptions.Item>
-        <Descriptions.Item label="Workflow">{item.workflow_status || '-'}</Descriptions.Item>
-        <Descriptions.Item label="执行计划" span={isMobile ? 1 : 2}>
-          {item.execution_plan_id ? <Typography.Text copyable code>{item.execution_plan_id}</Typography.Text> : '-'}
-        </Descriptions.Item>
-        <Descriptions.Item label="计划来源">{item.execution_plan?.policy_source || '-'}</Descriptions.Item>
-        <Descriptions.Item label="计划命令">{item.execution_plan?.command_count ?? '-'}</Descriptions.Item>
-      </Descriptions>
-      <Table
-        rowKey={(row: any, index) => `${row.step_name}-${index}`}
-        size="small"
-        pagination={false}
-        dataSource={item.steps || []}
-        columns={[
-          { title: '步骤', dataIndex: 'step_name' },
-          { title: 'Skill', dataIndex: 'skill_name', width: 180 },
-          { title: '状态', dataIndex: 'status', width: 110,
-            render: (value: string) => <Tag color={value === 'completed' ? 'green' : value === 'failed' ? 'red' : 'blue'}>{statusLabel(value)}</Tag> },
-          { title: '错误', dataIndex: 'error', render: (value: string) => value ? <Typography.Text type="danger">{value}</Typography.Text> : '-' },
-        ]}
-      />
-      <Table
-        rowKey="snapshot_id"
-        size="small"
-        pagination={false}
-        dataSource={item.snapshots || []}
-        columns={[
-          { title: '命令', dataIndex: 'command' },
-          { title: '解析状态', dataIndex: 'parse_status', width: 130 },
-          { title: '模板', dataIndex: 'parser_template_id', width: 220, render: (value: string) => value || '-' },
-          { title: 'Raw Hash', dataIndex: 'raw_text_hash', width: 160,
-            render: (value: string) => value ? <Typography.Text code>{value.slice(0, 12)}</Typography.Text> : '-' },
-        ]}
-        scroll={{ x: 880 }}
-      />
-      <Table
-        rowKey="change_id"
-        size="small"
-        pagination={false}
-        dataSource={item.changes || []}
-        columns={[
-          { title: '实体', dataIndex: 'entity_type', width: 140 },
-          { title: '主键', dataIndex: 'entity_key' },
-          { title: '字段', dataIndex: 'field', width: 140 },
-          { title: '类型', dataIndex: 'change_type', width: 120 },
-          { title: '事件状态', dataIndex: 'event_status', width: 140 },
-        ]}
-        scroll={{ x: 900 }}
-      />
-      <Table
-        rowKey="event_id"
-        size="small"
-        pagination={false}
-        dataSource={item.events || []}
-        columns={[
-          { title: '事件', dataIndex: 'event_type' },
-          { title: '严重级别', dataIndex: 'severity', width: 110,
-            render: (value: string) => <Tag color={value === 'critical' ? 'red' : value === 'warning' ? 'orange' : 'blue'}>{severityLabel(value)}</Tag> },
-          { title: '实体', dataIndex: 'entity_type', width: 140 },
-          { title: '主键', dataIndex: 'entity_key' },
-          { title: '状态', dataIndex: 'status', width: 100 },
-        ]}
-        scroll={{ x: 860 }}
-      />
-    </Space>
-  )
-
   const dynamicGroupColumns = [
     { title: '分组名称', dataIndex: 'name', width: 180 },
     { title: '状态', dataIndex: 'status', width: 110,
@@ -1712,137 +1617,115 @@ const DevicesPage: React.FC = () => {
       render: (value: string) => <Button size="small" icon={<EyeOutlined />} onClick={() => setMonitorRunId(value)}>查看</Button> },
   ]
 
-  const recentWorkflowColumns = [
-    { title: '设备', dataIndex: 'device_name', width: 190,
-      render: (value: string, row: WorkflowRunSummary) => (
-        <Space>
-          <Typography.Text>{value || row.device_id || '-'}</Typography.Text>
-          {(value || row.device_id) && (
-            <Button
-              size="small"
-              icon={<SearchOutlined />}
-              onClick={() => openDeviceEvidenceTimeline(row.device_id, value)}
-            >
-              证据链
-            </Button>
+  const patrolBatchColumns = [
+    { title: '批次 / 发起时间', dataIndex: 'patrol_batch_id', width: 280,
+      render: (value: string, row: PatrolBatchSummary) => (
+        <Space direction="vertical" size={2}>
+          <Typography.Text copyable code>{value}</Typography.Text>
+          <Space size={4}>
+            <Tag color={row.archived ? 'warning' : 'green'}>{row.archived ? '已归档' : '当前'}</Tag>
+            <Typography.Text type="secondary">{formatDateTime(row.created_at)}</Typography.Text>
+          </Space>
+          {isMobile && (
+            <Typography.Text type="secondary" ellipsis={{ tooltip: row.target_label }}>
+              {row.target_label || '旧批次未保存范围快照'}
+            </Typography.Text>
           )}
         </Space>
       ) },
-    { title: '状态', dataIndex: 'status', width: 120,
-      render: (value: string) => <Tag color={value === 'completed' ? 'green' : value === 'failed' ? 'red' : 'blue'}>{statusLabel(value)}</Tag> },
-    { title: '来源', dataIndex: 'source', width: 150,
-      render: (value: string) => value || '-' },
-    { title: '工单', dataIndex: 'ticket_id', width: 150,
-      render: (value: string) => value || '-' },
-    { title: '创建时间', dataIndex: 'created_at', width: 190,
+    { title: '巡检范围', dataIndex: 'target_label', width: 260,
+      render: (value: string, row: PatrolBatchSummary) => (
+        <Space direction="vertical" size={2}>
+          <Typography.Text ellipsis={{ tooltip: value }}>{value || '旧批次未保存范围快照'}</Typography.Text>
+          <Typography.Text type="secondary">
+            目标 {row.target_count ?? row.total} · 发起 {row.launched_count ?? row.total} · 跳过 {row.skipped_count ?? 0}
+          </Typography.Text>
+        </Space>
+      ) },
+    { title: '设备执行进度', width: 250,
+      render: (_: unknown, row: PatrolBatchSummary) => {
+        const target = row.target_count ?? row.total
+        const settled = row.completed_count + row.failed_count + row.cancelled_count + (row.skipped_count || 0)
+        const percent = target ? Math.min(100, Math.round((settled / target) * 100)) : 0
+        return (
+          <Space direction="vertical" size={2} style={{ width: '100%' }}>
+            <Progress percent={percent} size="small" showInfo={false}
+              status={row.failed_count || row.skipped_count ? 'exception' : row.running_count || row.pending_count ? 'active' : 'success'} />
+            <Typography.Text type="secondary">
+              完成 {row.completed_count} · 运行 {row.running_count} · 等待 {row.pending_count} · 失败 {row.failed_count}
+            </Typography.Text>
+          </Space>
+        )
+      } },
+    { title: '登录 / 采集', width: 210,
+      render: (_: unknown, row: PatrolBatchSummary) => row.manifest_available ? (
+        <Space wrap size={[4, 4]}>
+          <Tag color="green">成功 {row.connection_succeeded_count || 0}</Tag>
+          <Tag color={(row.connection_failed_count || 0) > 0 ? 'red' : 'default'}>失败 {row.connection_failed_count || 0}</Tag>
+          {(row.connection_pending_count || 0) > 0 && <Tag color="blue">处理中 {row.connection_pending_count}</Tag>}
+        </Space>
+      ) : <Typography.Text type="secondary">旧批次无设备清单</Typography.Text> },
+    { title: '完成时间', dataIndex: 'completed_at', width: 180,
       render: (value: string) => formatDateTime(value) },
-    { title: 'Run ID', dataIndex: 'run_id',
-      render: (value: string) => <Typography.Text copyable code>{value}</Typography.Text> },
-    { title: '批次', dataIndex: 'patrol_batch_id', width: 170,
-      render: (value: string) => value ? <Typography.Text copyable code>{value}</Typography.Text> : '-' },
-    { title: '错误', dataIndex: 'error_message',
-      render: (value: string) => value ? <Typography.Text type="danger">{value}</Typography.Text> : '-' },
-    { title: '操作', dataIndex: 'run_id', width: 180,
-      render: (value: string, row: WorkflowRunSummary) => (
+    { title: '操作', dataIndex: 'patrol_batch_id', width: isMobile ? 132 : 280, fixed: 'right' as const,
+      render: (value: string, row: PatrolBatchSummary) => {
+        const hasActiveRuns = row.running_count + row.pending_count > 0
+        return (
         <Space>
-          <Button size="small" icon={<EyeOutlined />} onClick={() => setMonitorRunId(value)}>查看</Button>
-          {['failed', 'cancelled'].includes(row.status) && (
+          <Button type="primary" size="small" icon={<EyeOutlined />} onClick={() => {
+            setActivePatrolBatchId(value)
+            setBatchDevicePage(1)
+            setBatchDeviceSearch('')
+            setBatchDeviceSelectionStatus(undefined)
+          }}>{isMobile ? '详情' : '查看详情'}</Button>
+          {!isMobile && (
             <Button
               size="small"
               icon={<ReloadOutlined />}
-              loading={retryWorkflowRun.isLoading}
-              onClick={() => retryWorkflowRun.mutate(value)}
+              disabled={Boolean(row.archived) || (!row.failed_count && !row.cancelled_count)}
+              loading={retryPatrolBatch.isLoading}
+              onClick={() => retryPatrolBatch.mutate(value)}
             >
-              重试
+              重试失败项
             </Button>
           )}
+          <Dropdown
+            menu={{
+              items: [
+                ...(isMobile ? [{
+                  key: 'retry',
+                  label: '重试失败项',
+                  icon: <ReloadOutlined />,
+                  disabled: Boolean(row.archived) || (!row.failed_count && !row.cancelled_count)
+                    || retryPatrolBatch.isLoading,
+                }] : []),
+                {
+                  key: 'rerun',
+                  label: hasActiveRuns ? '运行结束后可全量重跑' : '全量重跑',
+                  icon: <PlayCircleOutlined />,
+                  disabled: Boolean(row.archived) || hasActiveRuns || rerunPatrolBatch.isLoading,
+                },
+                {
+                  key: row.archived ? 'restore' : 'archive',
+                  label: row.archived ? '恢复批次'
+                    : hasActiveRuns ? '运行结束后可归档' : '归档批次',
+                  danger: !row.archived,
+                  disabled: hasActiveRuns || restorePatrolBatch.isLoading || archivePatrolBatch.isLoading,
+                },
+              ],
+              onClick: ({ key }) => {
+                if (key === 'retry') retryPatrolBatch.mutate(value)
+                if (key === 'rerun') rerunPatrolBatch.mutate(value)
+                if (key === 'restore') restorePatrolBatch.mutate(value)
+                if (key === 'archive') archivePatrolBatch.mutate(value)
+              },
+            }}
+          >
+            <Button size="small" icon={<MoreOutlined />} aria-label={`更多批次操作 ${value}`} />
+          </Dropdown>
         </Space>
-      ) },
-  ]
-
-  const patrolBatchColumns = [
-    { title: '批次', dataIndex: 'patrol_batch_id', width: 230,
-      render: (value: string) => <Typography.Text copyable code>{value}</Typography.Text> },
-    { title: '治理状态', dataIndex: 'archived', width: 110,
-      render: (value: boolean, row: PatrolBatchSummary) => (
-        <Space direction="vertical" size={2}>
-          <Tag color={value ? 'warning' : 'green'}>{value ? '已归档' : '当前'}</Tag>
-          {row.keep_until && <Typography.Text type="secondary" style={{ fontSize: 12 }}>保留至 {formatDateTime(row.keep_until)}</Typography.Text>}
-        </Space>
-      ) },
-    { title: '总数', dataIndex: 'total', width: 80 },
-    { title: '完成', dataIndex: 'completed_count', width: 100,
-      render: (value: number) => <Tag color="green">{value}</Tag> },
-    { title: '运行中', dataIndex: 'running_count', width: 90,
-      render: (value: number) => <Tag color="blue">{value}</Tag> },
-    { title: '等待中', dataIndex: 'pending_count', width: 90,
-      render: (value: number) => <Tag>{value}</Tag> },
-    { title: '失败', dataIndex: 'failed_count', width: 90,
-      render: (value: number) => <Tag color={value ? 'red' : 'default'}>{value}</Tag> },
-    { title: '设备示例', dataIndex: 'sample_devices',
-      render: (value: string[]) => (value || []).join(', ') || '-' },
-    { title: '创建时间', dataIndex: 'created_at', width: 190,
-      render: (value: string) => formatDateTime(value) },
-    { title: '归档时间', dataIndex: 'archived_at', width: 190,
-      render: (value: string) => formatDateTime(value) },
-    { title: '操作', dataIndex: 'patrol_batch_id', width: 540,
-      render: (value: string, row: PatrolBatchSummary) => (
-        <Space>
-          <Button size="small" icon={<EyeOutlined />} onClick={() => setActivePatrolBatchId(value)}>查看</Button>
-          <Button
-            size="small"
-            icon={<ReloadOutlined />}
-            disabled={Boolean(row.archived) || (!row.failed_count && !row.cancelled_count)}
-            loading={retryPatrolBatch.isLoading}
-            onClick={() => retryPatrolBatch.mutate(value)}
-          >
-            重试失败项
-          </Button>
-          <Button
-            size="small"
-            icon={<PlayCircleOutlined />}
-            disabled={Boolean(row.archived)}
-            loading={rerunPatrolBatch.isLoading}
-            onClick={() => rerunPatrolBatch.mutate(value)}
-          >
-            全量重跑
-          </Button>
-          <Button
-            size="small"
-            icon={<DownloadOutlined />}
-            loading={exportPatrolBatch.isLoading}
-            onClick={() => exportPatrolBatch.mutate(value)}
-          >
-            CSV
-          </Button>
-          <Button
-            size="small"
-            icon={<DownloadOutlined />}
-            loading={exportPatrolBatchReport.isLoading}
-            onClick={() => exportPatrolBatchReport.mutate(value)}
-          >
-            报告
-          </Button>
-          {row.archived ? (
-            <Button
-              size="small"
-              loading={restorePatrolBatch.isLoading}
-              onClick={() => restorePatrolBatch.mutate(value)}
-            >
-              恢复
-            </Button>
-          ) : (
-            <Button
-              size="small"
-              danger
-              loading={archivePatrolBatch.isLoading}
-              onClick={() => archivePatrolBatch.mutate(value)}
-            >
-              归档
-            </Button>
-          )}
-        </Space>
-      ) },
+        )
+      } },
   ]
 
   const renderPatrolPreviewIssueDetails = (item: PatrolPreviewIssue) => {
@@ -1991,35 +1874,10 @@ const DevicesPage: React.FC = () => {
   return (
     <GrokShellLayout
       title="设备管理"
-      subtitle="管理设备资产、凭据引用和采集命令集，预览 device-patrol 与 device-backup 使用的执行计划。"
+      subtitle="维护设备资产并执行确定性巡检；Parser 与 LLM 规则资产统一在 Skills 控制面治理。"
       toolbar={
-        <Space>
+        <Space wrap>
           <Button icon={<PlusOutlined />} type="primary" onClick={openCreate}>新增设备</Button>
-          <Button icon={<ImportOutlined />} onClick={() => setImportOpen(true)}>导入设备</Button>
-          <Button icon={<SearchOutlined />} onClick={openDynamicGroupCreate}>动态分组</Button>
-          <Button icon={<LinkOutlined />} onClick={openProfileBinding}>绑定采集命令集</Button>
-          <Button
-            onClick={() => { bulkForm.resetFields(); setBulkPreview(null); setBulkOpen(true) }}
-          >
-            批量更新
-          </Button>
-          <Button loading={applyBulkStatus.isLoading} onClick={() => confirmBulkStatus('disabled')}>
-            批量停用
-          </Button>
-          <Button loading={applyBulkStatus.isLoading} onClick={() => confirmBulkStatus('active')}>
-            批量启用
-          </Button>
-          <Button
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() => {
-              setBulkDeletePreview(null)
-              setBulkDeleteOpen(true)
-              previewBulkDelete.mutate()
-            }}
-          >
-            批量删除
-          </Button>
           <Button
             icon={<PlayCircleOutlined />}
             onClick={() => {
@@ -2037,9 +1895,39 @@ const DevicesPage: React.FC = () => {
           >
             发起巡检
           </Button>
-          <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isLoading}>
-            刷新
-          </Button>
+          <Dropdown
+            trigger={['click']}
+            menu={{
+              items: [
+                { key: 'import', icon: <ImportOutlined />, label: '导入设备', onClick: () => setImportOpen(true) },
+                { key: 'dynamic-group', icon: <SearchOutlined />, label: '动态分组', onClick: openDynamicGroupCreate },
+                { key: 'profile-binding', icon: <LinkOutlined />, label: '绑定采集命令集', onClick: openProfileBinding },
+                { type: 'divider' },
+                { key: 'refresh', icon: <ReloadOutlined />, label: '刷新当前数据', onClick: () => refetch() },
+              ],
+            }}
+          >
+            <Button icon={<MoreOutlined />} aria-label="更多设备操作">更多</Button>
+          </Dropdown>
+          {activeTab === 'overview' && selectedRowKeys.length > 0 && (
+            <Space wrap className="device-selection-toolbar">
+              <Typography.Text type="secondary">已选择 {selectedRowKeys.length} 台</Typography.Text>
+              <Button onClick={() => { bulkForm.resetFields(); setBulkPreview(null); setBulkOpen(true) }}>批量更新</Button>
+              <Button loading={applyBulkStatus.isLoading} onClick={() => confirmBulkStatus('active')}>启用</Button>
+              <Button loading={applyBulkStatus.isLoading} onClick={() => confirmBulkStatus('disabled')}>停用</Button>
+              <Button
+                danger
+                icon={<DeleteOutlined />}
+                onClick={() => {
+                  setBulkDeletePreview(null)
+                  setBulkDeleteOpen(true)
+                  previewBulkDelete.mutate()
+                }}
+              >
+                删除
+              </Button>
+            </Space>
+          )}
         </Space>
       }
     >
@@ -2064,6 +1952,13 @@ const DevicesPage: React.FC = () => {
         <Alert
           type="info"
           showIcon
+          message="Parser 与规则资产由 Skills 控制面统一治理"
+          description="设备列表只展示运行就绪度和阻塞原因；模板、LLM 候选资产、回放、审批与激活在唯一控制面处理。"
+          action={<Button size="small" onClick={() => navigate('/skills/parser')}>进入资产控制面</Button>}
+        />
+        <Alert
+          type="info"
+          showIcon
           message="device-patrol 和 device-backup 会优先使用设备管理生成的 ExecutionPlan；这里用于维护设备资产、检查连接状态和确认计划来源。"
         />
         {devicesIsError && (
@@ -2084,40 +1979,45 @@ const DevicesPage: React.FC = () => {
           onFiltersChange={(patch) => setFilters((value) => ({ ...value, ...patch }))}
           onSelectedRowKeysChange={setSelectedRowKeys}
         />
-        <PatrolOperationsPanel
-          activeBatchRuns={activeBatchRuns}
+              </Space>
+            ),
+          },
+          {
+            key: 'patrol',
+            label: '巡检运行',
+            children: <PatrolOperationsPanel
+          activeBatch={activeBatch}
+          activeBatchDevices={activeBatchDevices}
+          activeBatchDevicesLoading={activeBatchDevicesLoading}
           activeBatchResultSummary={activeBatchResultSummary}
           activeBatchSummary={activeBatchSummary}
           activePatrolBatchId={activePatrolBatchId}
           monitorRunId={monitorRunId}
           patrolBatches={patrolBatches}
           patrolBatchColumns={patrolBatchColumns}
-          recentPatrolRuns={recentPatrolRuns}
-          recentWorkflowColumns={recentWorkflowColumns}
-          selected={selected}
           showArchivedBatches={showArchivedPatrolBatches}
           onClearActiveBatch={() => setActivePatrolBatchId(null)}
           onCloseMonitor={() => setMonitorRunId(null)}
-          onExportBatch={(batchId) => exportPatrolBatch.mutate(batchId)}
           onExportBatchReport={(batchId) => exportPatrolBatchReport.mutate(batchId)}
+          onExportBatchRawCli={(batchId) => exportPatrolBatchRawCli.mutate(batchId)}
+          onExportBatchEvents={(batchId) => exportPatrolBatchEvents.mutate(batchId)}
           onOpenDeviceEvidence={openDeviceEvidenceTimeline}
           onOpenRun={(runId) => setMonitorRunId(runId)}
           onRefreshActiveBatchRuns={() => refetchActiveBatchRuns()}
           onRefreshPatrolBatches={() => refetchPatrolBatches()}
-          onRefreshRecentPatrolRuns={() => refetchRecentPatrolRuns()}
           onRetryRun={(runId) => retryWorkflowRun.mutate(runId)}
           onToggleArchivedBatches={setShowArchivedPatrolBatches}
-          exportBatchLoading={exportPatrolBatch.isLoading}
+          batchDevicePage={batchDevicePage}
+          batchDeviceSearch={batchDeviceSearch}
+          batchDeviceSelectionStatus={batchDeviceSelectionStatus}
+          onBatchDevicePageChange={setBatchDevicePage}
+          onBatchDeviceSearchChange={(value) => { setBatchDeviceSearch(value); setBatchDevicePage(1) }}
+          onBatchDeviceSelectionStatusChange={(value) => { setBatchDeviceSelectionStatus(value); setBatchDevicePage(1) }}
           exportBatchReportLoading={exportPatrolBatchReport.isLoading}
+          exportBatchRawCliLoading={exportPatrolBatchRawCli.isLoading}
+          exportBatchEventsLoading={exportPatrolBatchEvents.isLoading}
           retryRunLoading={retryWorkflowRun.isLoading}
-        />
-              </Space>
-            ),
-          },
-          {
-            key: 'parser',
-            label: 'Parser 控制面',
-            children: <ParserControlTab />,
+        />,
           },
           {
             key: 'modules',
@@ -2208,7 +2108,7 @@ const DevicesPage: React.FC = () => {
                   setEvidenceOpen(true)
                 }}
               >
-                证据链
+                巡检详情
               </Button>
             </Space>
             {connectivityResult && (
@@ -2407,7 +2307,7 @@ const DevicesPage: React.FC = () => {
       </Drawer>
 
       <Drawer
-        title={evidenceDevice ? `证据链 - ${evidenceDevice.device_name}` : '证据链'}
+        title={evidenceDevice ? `巡检详情 - ${evidenceDevice.device_name}` : '巡检详情'}
         open={evidenceOpen}
         onClose={() => {
           setEvidenceOpen(false)
@@ -2416,31 +2316,44 @@ const DevicesPage: React.FC = () => {
         width={isMobile ? '100vw' : 1200}
         destroyOnClose
       >
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
-          <Alert
-            type="info"
-            showIcon
-            message="证据时间线会把执行计划、Workflow 执行、命令快照、状态观测、网络变化和事件关联起来。"
-          />
-          <Table<DeviceExecutionPlanRecord>
-            rowKey="execution_plan_id"
-            size="small"
-            pagination={{ pageSize: 5 }}
-            dataSource={executionPlans?.items || []}
-            columns={executionPlanColumns}
-            scroll={{ x: 1420 }}
-            locale={{ emptyText: '暂无执行计划记录' }}
-          />
-          <Table<DeviceEvidenceTimelineItem>
-            rowKey="workflow_run_id"
-            size="small"
-            pagination={{ pageSize: 8 }}
-            dataSource={evidenceTimeline?.items || []}
-            columns={evidenceColumns}
-            expandable={{ expandedRowRender: renderEvidenceDetails }}
-            scroll={{ x: 1400 }}
-          />
-        </Space>
+        <EvidenceTimeline
+          items={evidenceTimeline?.items || []}
+          executionPlans={executionPlans?.items || []}
+          isMobile={isMobile}
+        onNavigate={(kind, id) => {
+            if (kind === 'workflow-run') {
+              setEvidenceOpen(false)
+              setSearchParams((current) => {
+                const next = new URLSearchParams(current)
+                next.set('tab', 'patrol')
+                return next
+              })
+              setMonitorRunId(id)
+              return
+            }
+            setEvidenceOpen(false)
+            setMonitorRunId(null)
+            if (kind === 'parser-template') {
+              navigate(`/skills/parser?focus=${kind}&id=${encodeURIComponent(id)}&workspace=parser-assets&subtab=templates`)
+              return
+            }
+            if (kind === 'observation-contract') {
+              navigate(`/skills/parser?focus=${kind}&id=${encodeURIComponent(id)}&workspace=rule-assets&subtab=observation-contracts`)
+              return
+            }
+            if (kind === 'change-policy' || kind === 'change') {
+              navigate(`/skills/parser?focus=${kind}&id=${encodeURIComponent(id)}&workspace=rule-assets&subtab=change-policies`)
+              return
+            }
+            if (kind === 'event-rule') {
+              navigate(`/skills/parser?focus=${kind}&id=${encodeURIComponent(id)}&workspace=rule-assets&subtab=event-rules`)
+              return
+            }
+            if (kind === 'snapshot') {
+              navigate(`/skills/parser?focus=${kind}&id=${encodeURIComponent(id)}&workspace=parser-assets&subtab=templates`)
+            }
+          }}
+        />
       </Drawer>
 
       <Drawer
@@ -2947,7 +2860,7 @@ const DevicesPage: React.FC = () => {
                 return false
               }}
             >
-              <Button icon={<ImportOutlined />}>閫夋嫨 CSV/XLSX</Button>
+              <Button icon={<ImportOutlined />}>选择 CSV/XLSX</Button>
             </Upload>
             {importFilePayload && (
               <>
@@ -3023,9 +2936,9 @@ const DevicesPage: React.FC = () => {
         open={bulkOpen}
         onCancel={() => setBulkOpen(false)}
         footer={[
-          <Button key="close" onClick={() => setBulkOpen(false)}>鍏抽棴</Button>,
+          <Button key="close" onClick={() => setBulkOpen(false)}>关闭</Button>,
           <Button key="preview" icon={<SearchOutlined />} loading={previewBulk.isLoading} onClick={() => previewBulk.mutate()}>
-            棰勮
+            预览
           </Button>,
           <Button
             key="apply"
@@ -3144,7 +3057,7 @@ const DevicesPage: React.FC = () => {
             message={selectedRowKeys.length
               ? `将删除已勾选的 ${selectedRowKeys.length} 台设备资产。`
               : '未勾选设备时，将删除当前筛选结果中的设备资产。'}
-            description="删除只影响设备资产清单，不会删除历史巡检、证据链、Workflow 记录或事件数据。"
+            description="删除只影响设备资产清单，不会删除历史巡检详情、执行记录或事件数据。"
           />
           {bulkDeletePreview && (
             <Space direction="vertical" size={8} style={{ width: '100%' }}>

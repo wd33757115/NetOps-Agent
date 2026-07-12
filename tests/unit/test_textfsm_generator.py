@@ -1497,7 +1497,7 @@ class TestParserJobSamples(unittest.TestCase):
             }
             for sample_id in ("sample-a", "sample-b")
         }
-        with patch("generate_templates.ParserRepository") as parser_repository:
+        with patch("generate_templates.ParserJobRepository") as parser_repository:
             parser_repository.return_value.get_job.return_value = job
             with patch("generate_templates.PatrolRepository") as patrol_repository:
                 patrol_repository.return_value.get_snapshot_context.side_effect = (
@@ -1525,7 +1525,7 @@ class TestParserJobSamples(unittest.TestCase):
                 }
             ],
         }
-        with patch("generate_templates.ParserRepository") as repository:
+        with patch("generate_templates.ParserJobRepository") as repository:
             repository.return_value.get_job.return_value = job
             with patch("generate_templates.PatrolRepository") as patrol_repository:
                 candidate = _job_candidate({"job_id": "job-1"})
@@ -1548,7 +1548,7 @@ class TestParserJobSamples(unittest.TestCase):
                 }
             ],
         }
-        with patch("generate_templates.ParserRepository") as repository:
+        with patch("generate_templates.ParserJobRepository") as repository:
             repository.return_value.get_job.return_value = job
             with self.assertRaisesRegex(ValueError, "not sanitized"):
                 _job_candidate({"job_id": "job-1"})

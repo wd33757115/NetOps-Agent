@@ -245,7 +245,7 @@ const UsersPage: React.FC = () => {
     })
 
     return base
-  }, [editForm, users, currentUserId, deleteMutation.isLoading, hasLastLogin])
+  }, [editForm, users, currentUserId, deleteMutation, hasLastLogin])
 
   const toolbar = (
     <>

@@ -13,6 +13,7 @@ from sqlalchemy import and_, func, or_, text
 
 from src.common.config import get_settings
 from src.core.observation import ObservationContractRepository
+from src.core.parser.outbox_repository import add_outbox_row
 from src.core.parser.sanitization import sanitize_parser_sample
 from src.core.patrol.repository import PatrolRepository
 from src.infrastructure.db.models import (
@@ -829,63 +830,147 @@ class ParserRepository:
         recent_before = now - timedelta(hours=24)
         alerts: list[dict[str, Any]] = []
         with get_db_session() as db:
-            production_open = db.query(func.count(ParserTemplateJob.id)).filter(
-                ParserTemplateJob.source_mode == "production",
-                ParserTemplateJob.status.in_(OPEN_JOB_STATUSES),
-            ).scalar() or 0
-            stale_candidates = db.query(func.count(ParserTemplateJob.id)).filter(
-                ParserTemplateJob.source_mode == "production",
-                ParserTemplateJob.status.in_(OPEN_JOB_STATUSES),
-                ParserTemplateJob.updated_at < stale_before,
-            ).scalar() or 0
-            failed_generation = db.query(func.count(ParserTemplateJob.id)).filter(
-                ParserTemplateJob.source_mode == "production",
-                ParserTemplateJob.status == "failed",
-                ParserTemplateJob.updated_at >= recent_before,
-            ).scalar() or 0
-            activation_publish_failures = db.query(func.count(ParserOutboxEvent.id)).filter(
-                ParserOutboxEvent.event_type == "parser.template.activated",
-                ParserOutboxEvent.status == "pending",
-                ParserOutboxEvent.attempts > 0,
-            ).scalar() or 0
-            stale_approvals = db.query(func.count(ParserTemplate.id)).filter(
-                ParserTemplate.status == "pending_approval",
-                ParserTemplate.updated_at < stale_before,
-            ).scalar() or 0
-            recent_results = db.query(func.count(PatrolCollectionResult.id)).filter(
-                PatrolCollectionResult.updated_at >= recent_before,
-            ).scalar() or 0
-            blocked_results = db.query(func.count(PatrolCollectionResult.id)).filter(
-                PatrolCollectionResult.updated_at >= recent_before,
-                PatrolCollectionResult.fact_status == "blocked_by_parser",
-            ).scalar() or 0
-            rule_jobs = db.query(RuleGenerationJobRecord).filter(
-                RuleGenerationJobRecord.updated_at >= recent_before,
-            ).all()
+            production_open = (
+                db.query(func.count(ParserTemplateJob.id))
+                .filter(
+                    ParserTemplateJob.source_mode == "production",
+                    ParserTemplateJob.status.in_(OPEN_JOB_STATUSES),
+                )
+                .scalar()
+                or 0
+            )
+            stale_candidates = (
+                db.query(func.count(ParserTemplateJob.id))
+                .filter(
+                    ParserTemplateJob.source_mode == "production",
+                    ParserTemplateJob.status.in_(OPEN_JOB_STATUSES),
+                    ParserTemplateJob.updated_at < stale_before,
+                )
+                .scalar()
+                or 0
+            )
+            failed_generation = (
+                db.query(func.count(ParserTemplateJob.id))
+                .filter(
+                    ParserTemplateJob.source_mode == "production",
+                    ParserTemplateJob.status == "failed",
+                    ParserTemplateJob.updated_at >= recent_before,
+                )
+                .scalar()
+                or 0
+            )
+            activation_publish_failures = (
+                db.query(func.count(ParserOutboxEvent.id))
+                .filter(
+                    ParserOutboxEvent.event_type == "parser.template.activated",
+                    ParserOutboxEvent.status == "pending",
+                    ParserOutboxEvent.attempts > 0,
+                )
+                .scalar()
+                or 0
+            )
+            stale_approvals = (
+                db.query(func.count(ParserTemplate.id))
+                .filter(
+                    ParserTemplate.status == "pending_approval",
+                    ParserTemplate.updated_at < stale_before,
+                )
+                .scalar()
+                or 0
+            )
+            recent_results = (
+                db.query(func.count(PatrolCollectionResult.id))
+                .filter(
+                    PatrolCollectionResult.updated_at >= recent_before,
+                )
+                .scalar()
+                or 0
+            )
+            blocked_results = (
+                db.query(func.count(PatrolCollectionResult.id))
+                .filter(
+                    PatrolCollectionResult.updated_at >= recent_before,
+                    PatrolCollectionResult.fact_status == "blocked_by_parser",
+                )
+                .scalar()
+                or 0
+            )
+            rule_jobs = (
+                db.query(RuleGenerationJobRecord)
+                .filter(
+                    RuleGenerationJobRecord.updated_at >= recent_before,
+                )
+                .all()
+            )
 
         blocked_ratio = float(blocked_results) / float(recent_results) if recent_results else 0.0
         rule_generation_failures = sum(
             item.status in {"failed", "validation_failed", "rejected"} for item in rule_jobs
         )
         replay_collisions = sum(
-            int(((item.validation_report_json or {}).get("replay") or {}).get("collision_count") or 0)
+            int(
+                ((item.validation_report_json or {}).get("replay") or {}).get("collision_count")
+                or 0
+            )
             for item in rule_jobs
         )
 
         def add(code: str, count: int | float, severity: str, message: str) -> None:
             if count:
-                alerts.append({"code": code, "count": count, "severity": severity, "message": message})
+                alerts.append(
+                    {"code": code, "count": count, "severity": severity, "message": message}
+                )
 
         if production_open >= max(1, settings.PARSER_BACKLOG_ALERT_THRESHOLD):
-            add("parser_backlog_high", production_open, "warning", "Production Parser backlog exceeded its configured threshold.")
-        add("parser_candidate_stale", stale_candidates, "warning", "Production Parser candidates exceeded the generation SLA.")
-        add("parser_approval_stale", stale_approvals, "warning", "Generated Parser templates are waiting too long for approval.")
-        add("parser_generation_failed", failed_generation, "error", "Production Parser generation failed in the last 24 hours.")
-        add("template_activation_publish_failed", activation_publish_failures, "error", "Template activation outbox delivery is retrying.")
+            add(
+                "parser_backlog_high",
+                production_open,
+                "warning",
+                "Production Parser backlog exceeded its configured threshold.",
+            )
+        add(
+            "parser_candidate_stale",
+            stale_candidates,
+            "warning",
+            "Production Parser candidates exceeded the generation SLA.",
+        )
+        add(
+            "parser_approval_stale",
+            stale_approvals,
+            "warning",
+            "Generated Parser templates are waiting too long for approval.",
+        )
+        add(
+            "parser_generation_failed",
+            failed_generation,
+            "error",
+            "Production Parser generation failed in the last 24 hours.",
+        )
+        add(
+            "template_activation_publish_failed",
+            activation_publish_failures,
+            "error",
+            "Template activation outbox delivery is retrying.",
+        )
         if blocked_ratio >= settings.PARSER_BLOCKED_RATIO_ALERT_THRESHOLD and recent_results:
-            add("blocked_by_parser_ratio_high", round(blocked_ratio, 4), "warning", "The 24-hour blocked-by-parser ratio exceeded its configured threshold.")
-        add("rule_generation_failed", rule_generation_failures, "error", "Rule asset generation or validation failed in the last 24 hours.")
-        add("rule_replay_collision", replay_collisions, "error", "Rule replay detected collisions; approval must remain blocked.")
+            add(
+                "blocked_by_parser_ratio_high",
+                round(blocked_ratio, 4),
+                "warning",
+                "The 24-hour blocked-by-parser ratio exceeded its configured threshold.",
+            )
+        add(
+            "rule_generation_failed",
+            rule_generation_failures,
+            "error",
+            "Rule asset generation or validation failed in the last 24 hours.",
+        )
+        add(
+            "rule_replay_collision",
+            replay_collisions,
+            "error",
+            "Rule replay detected collisions; approval must remain blocked.",
+        )
         return {
             "alerts": alerts,
             "alert_count": len(alerts),
@@ -1340,13 +1425,80 @@ class ParserRepository:
 
     @staticmethod
     def _add_outbox(db, *, event_type: str, aggregate_id: str, payload: dict[str, Any]) -> None:
-        db.add(
-            ParserOutboxEvent(
-                id=str(uuid.uuid4()),
-                event_type=event_type,
-                aggregate_id=aggregate_id,
-                payload_json=payload,
-                status="pending",
-                created_at=utcnow(),
-            )
+        add_outbox_row(
+            db,
+            event_type=event_type,
+            aggregate_id=aggregate_id,
+            payload=payload,
         )
+
+
+class ParserTemplateRepository:
+    """Template lifecycle aggregate with atomic activation and outbox writes."""
+
+    backfill_contract_metadata = ParserRepository.backfill_contract_metadata
+    resolve_active = ParserRepository.resolve_active
+    register_template = ParserRepository.register_template
+    activate_template = ParserRepository.activate_template
+    rollback_template = ParserRepository.rollback_template
+    list_templates = ParserRepository.list_templates
+    get_template = ParserRepository.get_template
+    find_template_version = ParserRepository.find_template_version
+    has_trusted_family = ParserRepository.has_trusted_family
+    set_template_status = ParserRepository.set_template_status
+    record_regression_validation = ParserRepository.record_regression_validation
+    _add_outbox = staticmethod(ParserRepository._add_outbox)
+
+
+class ParserJobRepository:
+    """Parser generation job aggregate, including candidate sample creation."""
+
+    get_auto_dispatch_enabled = ParserRepository.get_auto_dispatch_enabled
+    set_auto_dispatch_enabled = ParserRepository.set_auto_dispatch_enabled
+    create_candidate = ParserRepository.create_candidate
+    supersede_legacy_jobs = ParserRepository.supersede_legacy_jobs
+    cancel_job = ParserRepository.cancel_job
+    retry_job = ParserRepository.retry_job
+    delete_job = ParserRepository.delete_job
+    delete_jobs = ParserRepository.delete_jobs
+    list_dispatchable_jobs = ParserRepository.list_dispatchable_jobs
+    list_jobs = ParserRepository.list_jobs
+    backlog_summary = ParserRepository.backlog_summary
+    transition_job_status = ParserRepository.transition_job_status
+    mark_job_dispatched = ParserRepository.mark_job_dispatched
+    fail_stale_jobs = ParserRepository.fail_stale_jobs
+    get_job = ParserRepository.get_job
+    _add_outbox = staticmethod(ParserRepository._add_outbox)
+
+
+class ParserSampleRepository:
+    """Sanitization boundary for samples already owned by a parser job."""
+
+    sanitize_pending_samples = ParserRepository.sanitize_pending_samples
+
+
+class ParserParseResultRepository:
+    """Runtime parse evidence and coverage violation persistence."""
+
+    save_parse_result = ParserRepository.save_parse_result
+    get_latest_parse_result = ParserRepository.get_latest_parse_result
+    record_coverage_violation = ParserRepository.record_coverage_violation
+    _add_outbox = staticmethod(ParserRepository._add_outbox)
+
+
+class ParserMetadataRepository:
+    """Command aliases and device identity metadata used by parser discovery."""
+
+    list_command_aliases = ParserRepository.list_command_aliases
+    upsert_command_alias = ParserRepository.upsert_command_alias
+    list_device_profiles = ParserRepository.list_device_profiles
+    find_device_profile = ParserRepository.find_device_profile
+    upsert_device_profile = ParserRepository.upsert_device_profile
+    list_identity_signatures = ParserRepository.list_identity_signatures
+    register_identity_signature = ParserRepository.register_identity_signature
+
+
+class ParserGovernanceProjectionRepository:
+    """Cross-aggregate read projection for control-plane alert counters."""
+
+    governance_alert_summary = ParserRepository.governance_alert_summary

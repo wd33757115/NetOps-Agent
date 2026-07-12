@@ -538,9 +538,9 @@ def _snapshot_key_contract(
             "structured snapshots require parser template metadata or explicit primary_keys"
         )
     try:
-        from src.core.parser.repository import ParserRepository
+        from src.core.parser.repository import ParserTemplateRepository
 
-        repository = ParserRepository()
+        repository = ParserTemplateRepository()
         previous_template = repository.get_template(previous.parser_name)
         current_template = repository.get_template(current.parser_name)
     except Exception as exc:
@@ -572,9 +572,9 @@ def detect_versioned_changes(
 ) -> list[NetworkChange] | None:
     """Compare append-only parse revisions only when both use one parser version."""
     try:
-        from src.core.parser.repository import ParserRepository
+        from src.core.parser.repository import ParserParseResultRepository
 
-        repository = ParserRepository()
+        repository = ParserParseResultRepository()
         previous_result = repository.get_latest_parse_result(previous.snapshot_id)
         current_result = repository.get_latest_parse_result(current.snapshot_id)
     except Exception:

@@ -67,9 +67,11 @@ export async function streamChatMessage(
   let buffer = ''
   let finalAnswer: ChatResponse | null = null
 
-  while (true) {
+  let streamDone = false
+  while (!streamDone) {
     const { done, value } = await reader.read()
-    if (done) break
+    streamDone = done
+    if (streamDone) break
     buffer += decoder.decode(value, { stream: true })
 
     const parts = buffer.split('\n\n')

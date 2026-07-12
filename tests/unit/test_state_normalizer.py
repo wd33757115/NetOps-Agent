@@ -253,7 +253,7 @@ def test_template_contract_prefers_observation_contract(monkeypatch):
     )
     monkeypatch.setattr(
         normalizer,
-        "ParserRepository",
+        "ParserTemplateRepository",
         ParserRepositoryShouldNotBeUsed,
     )
 
@@ -286,7 +286,7 @@ def test_template_contract_resolves_exact_snapshot_version(monkeypatch):
     )
     monkeypatch.setattr(
         normalizer,
-        "ParserRepository",
+        "ParserTemplateRepository",
         ParserRepositoryShouldNotBeUsed,
     )
 
@@ -310,7 +310,7 @@ def test_template_contract_fails_closed_when_snapshot_version_is_missing(monkeyp
         "ObservationContractRepository",
         FakeContractRepository,
     )
-    monkeypatch.setattr(normalizer, "ParserRepository", FakeParserRepository)
+    monkeypatch.setattr(normalizer, "ParserTemplateRepository", FakeParserRepository)
 
     with pytest.raises(
         normalizer.ObservationContractVersionError,

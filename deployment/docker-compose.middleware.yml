@@ -96,6 +96,7 @@ services:
       - netops-network
 
   qdrant:
+    profiles: ["rag-qdrant"]
     image: qdrant/qdrant:latest
     container_name: netops-qdrant
     ports:

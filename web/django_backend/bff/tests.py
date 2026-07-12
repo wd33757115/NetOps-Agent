@@ -23,10 +23,14 @@ class PatrolBatchDownloadRouteTests(SimpleTestCase):
         batch_id = "patrol-batch-test"
         expected = {
             "bff_patrol_batch_summary": "summary/",
+            "bff_patrol_batch_devices": "devices",
             "bff_patrol_batch_archive": "archive/",
             "bff_patrol_batch_restore": "restore/",
             "bff_patrol_batch_rerun": "rerun/",
             "bff_patrol_batch_retry": "retry/",
+            "bff_patrol_batch_raw_data": "raw-data.jsonl",
+            "bff_patrol_batch_raw_cli": "raw-cli.zip",
+            "bff_patrol_batch_events": "events.csv",
         }
 
         for route_name, suffix in expected.items():

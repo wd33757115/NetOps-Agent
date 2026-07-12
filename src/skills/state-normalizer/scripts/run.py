@@ -12,7 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.core.state import normalize_state_from_params  # noqa: E402
+from src.core.patrol.handlers import NormalizePatrolHandler  # noqa: E402
 
 
 def main() -> int:
@@ -23,7 +23,7 @@ def main() -> int:
     args = parser.parse_args()
     with open(args.params, encoding="utf-8-sig") as f:
         params = json.load(f)
-    result = normalize_state_from_params(params)
+    result = NormalizePatrolHandler().handle(params)
     print(json.dumps(result, ensure_ascii=False, default=str))
     return 0 if result.get("success") else 1
 

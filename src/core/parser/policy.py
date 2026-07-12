@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
-import re
 from typing import Any
 
 import yaml
@@ -75,24 +75,24 @@ class ParserPolicy:
         policy_path: str | Path | None = None,
         repository=None,
     ):
-        self.policy = load_yaml(
-            policy_path or SHARED_PARSER_CONFIG_ROOT / "command_policy.yaml"
-        )
+        self.policy = load_yaml(policy_path or SHARED_PARSER_CONFIG_ROOT / "command_policy.yaml")
         if repository is None:
-            from .repository import ParserRepository
+            from .repository import ParserMetadataRepository
 
-            repository = ParserRepository()
+            repository = ParserMetadataRepository()
         self.repository = repository
         self.aliases = {
             self._basic_normalize(alias): self._basic_normalize(canonical)
             for alias, canonical in DEFAULT_COMMAND_ALIASES.items()
         }
-        self.aliases.update({
-            self._basic_normalize(item["alias"]): self._basic_normalize(
-                item["canonical_command"]
-            )
-            for item in repository.list_command_aliases()
-        })
+        self.aliases.update(
+            {
+                self._basic_normalize(item["alias"]): self._basic_normalize(
+                    item["canonical_command"]
+                )
+                for item in repository.list_command_aliases()
+            }
+        )
 
     @staticmethod
     def _basic_normalize(command: str) -> str:
@@ -152,12 +152,7 @@ class ParserPolicy:
                 enabled=enabled,
                 canonical_command=canonical,
                 handling=str(
-                    global_metadata.get("handling")
-                    or (
-                        "structured"
-                        if enabled
-                        else "raw_only"
-                    )
+                    global_metadata.get("handling") or ("structured" if enabled else "raw_only")
                 ),
                 capability=capability,
                 capability_status=capability_status,
@@ -201,8 +196,7 @@ class ParserPolicy:
             if models and str(model or "").casefold() not in models:
                 continue
             if model_patterns and not any(
-                re.search(pattern, str(model or ""), re.IGNORECASE)
-                for pattern in model_patterns
+                re.search(pattern, str(model or ""), re.IGNORECASE) for pattern in model_patterns
             ):
                 continue
             return "supported"
@@ -216,6 +210,4 @@ class ParserPolicy:
         family: str | None = None,
         command: str,
     ) -> bool:
-        return self.decide(
-            vendor=vendor, model=model, family=family, command=command
-        ).enabled
+        return self.decide(vendor=vendor, model=model, family=family, command=command).enabled

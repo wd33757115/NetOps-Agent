@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useMemo } from 'react'
 import { message } from 'antd'
 import { useMutation } from 'react-query'
 import GrokShellLayout from '../components/layout/GrokShellLayout'
@@ -42,7 +42,10 @@ const ChatPage: React.FC = () => {
     refreshConversationMeta,
   } = useChatStore()
 
-  const currentMessages = conversations.find((c) => c.id === currentConversationId)?.messages || []
+  const currentMessages = useMemo(
+    () => conversations.find((c) => c.id === currentConversationId)?.messages || [],
+    [conversations, currentConversationId],
+  )
 
   useEffect(() => {
     if (!initialized.current) {

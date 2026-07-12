@@ -12,10 +12,10 @@ from sqlalchemy import or_
 
 from src.common.config import get_settings
 from src.core.parser.identity import DeviceIdentity
-from src.core.parser.repository import ParserRepository
+from src.core.parser.repository import ParserParseResultRepository, ParserTemplateRepository
 from src.core.parser.runtime import ParserRuntime
 from src.core.patrol.change_detector import detect_historical_backfill_changes
-from src.core.patrol.event_builder import build_events_from_params
+from src.core.patrol.handlers import BuildEventsHandler
 from src.core.state.normalizer import observations_from_snapshot
 from src.core.state.repository import StateRepository
 from src.infrastructure.db.models import (
@@ -160,7 +160,7 @@ class ParserBackfillService:
             filters = dict(job.filters_json or {})
 
         snapshots = self._target_snapshots(template_id, filters)
-        template = ParserRepository().get_template(template_id)
+        template = ParserTemplateRepository().get_template(template_id)
         if template is None:
             raise ValueError("backfill template disappeared")
         runtime = ParserRuntime(registry=_TemplateRegistry(template))
@@ -301,7 +301,7 @@ class ParserBackfillService:
             job.updated_at = _now()
             result_payloads = [result.to_dict() for result in results]
 
-        template = ParserRepository().get_template(template_id)
+        template = ParserTemplateRepository().get_template(template_id)
         if template is None or template.status != "active":
             raise ValueError("backfill template is no longer active")
         total_created = 0
@@ -324,7 +324,7 @@ class ParserBackfillService:
                 update_current_state=False,
             )
             total_created += created
-            ParserRepository().save_parse_result(
+            ParserParseResultRepository().save_parse_result(
                 snapshot_id=snapshot.id,
                 template_id=template.id,
                 template_version=template.version,
@@ -346,7 +346,7 @@ class ParserBackfillService:
             )
             changes = list(change_result.get("changes") or [])
             change_count += len(changes)
-            event_result = build_events_from_params(
+            event_result = BuildEventsHandler().handle(
                 {
                     "run_id": run_id,
                     "changes": changes,

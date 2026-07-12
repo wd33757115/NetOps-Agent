@@ -4,6 +4,7 @@
 import React, { useState } from 'react'
 import {
   Col,
+  Collapse,
   Row,
   Spin,
   Table,
@@ -146,7 +147,17 @@ const StatusPage: React.FC = () => {
                       </GrokChip>
                     ))}
                 </div>
-                <pre className="grok-code-block">{JSON.stringify(health, null, 2)}</pre>
+                <Collapse
+                  ghost
+                  size="small"
+                  items={[{
+                    key: 'health-payload',
+                    label: '技术详情：健康检查响应',
+                    children: (
+                      <pre className="grok-code-block">{JSON.stringify(health, null, 2)}</pre>
+                    ),
+                  }]}
+                />
               </section>
             </Col>
 

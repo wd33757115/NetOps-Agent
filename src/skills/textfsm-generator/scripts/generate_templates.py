@@ -34,7 +34,11 @@ from src.core.parser.assets import (
     safe_slug,
 )
 from src.core.parser.contract_inference import infer_contract
-from src.core.parser.repository import ParserRepository
+from src.core.parser.repository import (
+    ParserJobRepository,
+    ParserMetadataRepository,
+    ParserTemplateRepository,
+)
 from src.core.patrol.repository import PatrolRepository
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
@@ -71,7 +75,7 @@ def _job_candidate(params: dict[str, Any]) -> Candidate | None:
     job_id = str(params.get("job_id") or "").strip()
     if not job_id:
         return None
-    job = ParserRepository().get_job(job_id, include_sanitized_payload=True)
+    job = ParserJobRepository().get_job(job_id, include_sanitized_payload=True)
     if not job:
         raise ValueError(f"parser template job does not exist: {job_id}")
     samples: list[TemplateSample] = []
@@ -273,10 +277,14 @@ def _regression_samples(
     }
     output: list[TemplateSample] = []
     allowed_models = {candidate.model.casefold()}
-    if target_profile and candidate.family and target_profile.casefold() == candidate.family.casefold():
+    if (
+        target_profile
+        and candidate.family
+        and target_profile.casefold() == candidate.family.casefold()
+    ):
         allowed_models.update(
             str(item.get("model") or "").casefold()
-            for item in ParserRepository().list_device_profiles()
+            for item in ParserMetadataRepository().list_device_profiles()
             if str(item.get("vendor") or "").casefold() == candidate.vendor.casefold()
             and str(item.get("family") or "").casefold() == candidate.family.casefold()
         )
@@ -350,7 +358,7 @@ def _process_candidate(
 ) -> GenerationReport:
     target_profile = candidate.model
     if source_job_id:
-        source_job = ParserRepository().get_job(source_job_id)
+        source_job = ParserJobRepository().get_job(source_job_id)
         if source_job:
             target_profile = str(source_job.get("profile") or target_profile)
     trigger_sample_count = len(candidate.samples)
@@ -481,7 +489,7 @@ def _process_candidate(
                 "confidence": candidate.confidence,
             },
         }
-        repository = ParserRepository()
+        repository = ParserTemplateRepository()
         repository.register_template(
             vendor=candidate.vendor,
             model=candidate.model,

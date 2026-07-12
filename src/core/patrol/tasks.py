@@ -13,11 +13,13 @@ def publish_network_event_outbox():
 @celery.task(name="reconcile_patrol_runs")
 def reconcile_patrol_runs():
     from src.core.patrol.change_event_repository import ChangeEventRepository
-    from src.core.patrol.repository import PatrolRepository
+    from src.core.patrol.repository import (
+        PatrolAnalysisAttemptRepository,
+        PatrolRunRepositoryBackend,
+    )
 
-    repository = PatrolRepository()
-    runs = repository.reconcile_stale_runs(limit=200)
-    analysis = repository.reconcile_stale_analysis_attempts(limit=200)
+    runs = PatrolRunRepositoryBackend().reconcile_stale_runs(limit=200)
+    analysis = PatrolAnalysisAttemptRepository().reconcile_stale_analysis_attempts(limit=200)
     decisions = ChangeEventRepository().purge_expired_change_decisions(limit=5000)
     return {
         **runs,

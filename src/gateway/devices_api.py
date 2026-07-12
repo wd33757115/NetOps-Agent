@@ -7,6 +7,7 @@ import binascii
 import csv
 import io
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -30,8 +31,13 @@ from src.core.device_ops.identity_discovery import (
     identity_evidence,
     platform_for_identity,
 )
+from src.core.device_ops.readiness_projection import (
+    DeviceReadinessProjectionRepository,
+    readiness_source_digest,
+)
 from src.core.device_ops.repository import DeviceRepository, normalize_device_status
 from src.core.evidence import evidence_id_for_command_snapshot
+from src.core.patrol.handlers import StartPatrolCommand, StartPatrolHandler
 from src.core.patrol.modes import PRODUCTION_MODE, normalize_patrol_mode
 from src.core.rule_control import RuntimeRuleAssetResolver
 from src.gateway.audit_service import write_audit_log
@@ -61,6 +67,9 @@ from src.infrastructure.db.models import (
     WorkflowStepRecord,
 )
 from src.infrastructure.db.postgres import get_db_session
+from src.observability.read_metrics import observe_read
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/v1/devices",
@@ -1995,10 +2004,13 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
             events: list[NetworkEventRecord] = []
             occurrences: list[tuple[NetworkEventOccurrenceRecord, NetworkEventRecord]] = []
             parse_counts: dict[str, int] = {}
+            policy_blocking_reason_counts: dict[str, int] = {}
+            evidence_fingerprints: list[str] = []
             evidence_by_snapshot: dict[str, RawEvidenceRecord] = {}
             collection_by_execution_item: dict[str, PatrolCollectionResult] = {}
             contract_by_template: dict[str, ObservationContractRecord] = {}
             observations: list[StateObservationRecord] = []
+            changes_by_id: dict[str, NetworkChangeRecord] = {}
             observation_count = 0
             change_count = 0
             event_count = 0
@@ -2076,6 +2088,8 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                 occurrence_event_ids = db.query(NetworkEventOccurrenceRecord.event_id).filter(
                     NetworkEventOccurrenceRecord.run_id == snapshot_run_id
                 )
+                no_event_reason_counts = {}
+                no_event_count = 0
                 event_query = db.query(NetworkEventRecord).filter(
                     or_(
                         NetworkEventRecord.run_id == snapshot_run_id,
@@ -2103,6 +2117,18 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                     .limit(20)
                     .all()
                 )
+                for change in changes:
+                    if change.event_status == "no_event" and change.decision_reason:
+                        reason = str(change.decision_reason)
+                        policy_blocking_reason_counts[reason] = (
+                            policy_blocking_reason_counts.get(reason, 0) + 1
+                        )
+                    status = str(change.event_status or '').lower()
+                    if 'no_event' in status or 'not_created' in status or 'skipped' in status:
+                        no_event_count += 1
+                        reason = str(change.no_event_reason or change.decision_reason or 'unknown')
+                        no_event_reason_counts[reason] = no_event_reason_counts.get(reason, 0) + 1
+                changes_by_id = {row.id: row for row in changes}
                 events = event_query.order_by(NetworkEventRecord.occurred_at.desc()).limit(20).all()
                 occurrences = (
                     db.query(NetworkEventOccurrenceRecord, NetworkEventRecord)
@@ -2118,6 +2144,24 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                     .limit(20)
                     .all()
                 )
+
+            policy_blocking_reasons = sorted(policy_blocking_reason_counts.keys())
+            policy_blocking_reason = policy_blocking_reasons[0] if policy_blocking_reasons else None
+            policy_blocking_count = sum(policy_blocking_reason_counts.values())
+            no_event_reasons = sorted(no_event_reason_counts.keys())
+            no_event_reason = no_event_reasons[0] if no_event_reasons else None
+            if snapshots:
+                evidence_fingerprints = [
+                    str(row.import_fingerprint)
+                    for row in snapshots
+                    if row.import_fingerprint
+                ] or [
+                    row.raw_text_hash
+                    for row in snapshots
+                    if row.raw_text_hash
+                ]
+            evidence_fingerprint = evidence_fingerprints[0] if evidence_fingerprints else None
+
             items.append(
                 {
                     "workflow_run_id": run.id if run is not None else None,
@@ -2151,6 +2195,13 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                         patrol_run.fact_readiness_status if patrol_run else None
                     ),
                     "analysis_status": patrol_run.analysis_status if patrol_run else None,
+                    "policy_blocking_reasons": policy_blocking_reasons,
+                    "policy_blocking_reason": policy_blocking_reason,
+                    "policy_blocking_count": policy_blocking_count,
+                    "no_event_count": no_event_count,
+                    "no_event_reason": no_event_reason,
+                    "no_event_reasons": no_event_reasons,
+                    "evidence_fingerprint": evidence_fingerprint,
                     "observation_count": observation_count,
                     "change_count": change_count,
                     "event_count": event_count,
@@ -2189,6 +2240,9 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                                 evidence_by_snapshot[row.id].content_ref
                                 if row.id in evidence_by_snapshot
                                 else f"command_snapshot:{row.id}"
+                            ),
+                            "evidence_fingerprint": (
+                                row.import_fingerprint or row.raw_text_hash
                             ),
                             "command": row.canonical_command,
                             "parse_status": row.parse_status,
@@ -2236,7 +2290,18 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                             "entity_key": row.entity_key,
                             "field": row.field_name,
                             "observation_type": row.observation_type,
+                            "semantic_type": row.semantic_type,
+                            "unit": row.unit,
+                            "value": row.value_json,
+                            "value_text": row.value_text,
+                            "value_number": row.value_number,
+                            "confidence": row.confidence,
                             "parser_template_id": row.parser_template_id,
+                            "observation_contract_id": (
+                                contract_by_template[row.parser_template_id].id
+                                if row.parser_template_id in contract_by_template
+                                else None
+                            ),
                             "contract_version": row.contract_version,
                             "historical_backfill": bool(
                                 (row.metadata_json or {}).get("historical_backfill")
@@ -2253,12 +2318,23 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                             "entity_key": row.entity_key,
                             "field": row.field,
                             "change_type": row.change_type,
+                            "observation_type": row.observation_type,
+                            "old_value": row.old_value_json,
+                            "new_value": row.new_value_json,
+                            "old_number": row.old_number,
+                            "new_number": row.new_number,
                             "event_status": row.event_status,
                             "current_observation_id": row.current_observation_id,
                             "previous_observation_id": row.previous_observation_id,
                             "change_policy_id": row.change_policy_id,
                             "change_policy_version_id": row.change_policy_version_id,
                             "decision_reason": row.decision_reason,
+                            "no_event_reason": (
+                                row.decision_reason if row.event_status == "no_event" else None
+                            ),
+                            "comparison_type": row.comparison_type,
+                            "policy_snapshot": row.policy_snapshot_json,
+                            "rule_bundle_digest": row.rule_bundle_digest,
                             "analysis_revision": row.analysis_revision,
                             "detected_at": _iso(row.detected_at),
                         }
@@ -2276,6 +2352,41 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                             "last_seen_at": _iso(row.last_seen_at),
                             "occurrence_count": row.occurrence_count,
                             "source_change_id": row.source_change_id,
+                            "old_value": (
+                                changes_by_id[row.source_change_id].old_value_json
+                                if row.source_change_id in changes_by_id
+                                else None
+                            ),
+                            "new_value": (
+                                changes_by_id[row.source_change_id].new_value_json
+                                if row.source_change_id in changes_by_id
+                                else None
+                            ),
+                            "old_number": (
+                                changes_by_id[row.source_change_id].old_number
+                                if row.source_change_id in changes_by_id
+                                else None
+                            ),
+                            "new_number": (
+                                changes_by_id[row.source_change_id].new_number
+                                if row.source_change_id in changes_by_id
+                                else None
+                            ),
+                            "change_policy_id": (
+                                changes_by_id[row.source_change_id].change_policy_id
+                                if row.source_change_id in changes_by_id
+                                else None
+                            ),
+                            "change_policy_version_id": (
+                                changes_by_id[row.source_change_id].change_policy_version_id
+                                if row.source_change_id in changes_by_id
+                                else None
+                            ),
+                            "policy_snapshot": (
+                                changes_by_id[row.source_change_id].policy_snapshot_json
+                                if row.source_change_id in changes_by_id
+                                else None
+                            ),
                             "event_rule_id": (
                                 ((row.payload_json or {}).get("rule") or {}).get("rule_id")
                             ),
@@ -2316,10 +2427,15 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
     }
 
 
-def _patrol_readiness(device: dict[str, Any], mode: str = PRODUCTION_MODE) -> dict[str, Any]:
+def _patrol_readiness(
+    device: dict[str, Any],
+    mode: str = PRODUCTION_MODE,
+    *,
+    policy_resolver: CollectionPolicyResolver | None = None,
+) -> dict[str, Any]:
     try:
         normalized_mode = normalize_patrol_mode(mode)
-        plan = CollectionPolicyResolver().build_plan(
+        plan = (policy_resolver or CollectionPolicyResolver()).build_plan(
             device=device,
             action="patrol",
             mode=normalized_mode,
@@ -2585,7 +2701,43 @@ def _patrol_launch_preview(
     }
 
 
+def _patrol_target_snapshot(payload: DevicePatrolLaunchRequest) -> dict[str, Any]:
+    if payload.device_ids:
+        return {
+            "target_type": "selected",
+            "target_label": f"手工选择 {len(payload.device_ids)} 台设备",
+            "selector": {"device_ids": list(payload.device_ids)},
+        }
+    if payload.dynamic_group_id:
+        return {
+            "target_type": "dynamic_group",
+            "target_label": f"动态分组 {payload.dynamic_group_id}",
+            "selector": {"dynamic_group_id": payload.dynamic_group_id},
+        }
+    selector = payload.filters.model_dump(exclude_none=True) if payload.filters else {}
+    group = str(selector.get("group") or "").strip()
+    if group:
+        label = f"设备分组 {group}"
+    elif selector:
+        summary = "，".join(f"{key}={value}" for key, value in list(selector.items())[:3])
+        label = f"筛选条件：{summary}"
+    else:
+        label = "全部启用设备"
+    return {
+        "target_type": "filters",
+        "target_label": label,
+        "selector": selector,
+    }
+
+
 @router.get("")
+@observe_read(
+    "device_list",
+    variant=lambda args: (
+        "with_readiness" if args.get("include_patrol_readiness") else "without_readiness"
+    ),
+    result_count=lambda result: len(result.get("items") or []),
+)
 def list_devices(
     device_id: str | None = None,
     device_name: str | None = None,
@@ -2631,10 +2783,51 @@ def list_devices(
     total = len(devices)
     page = devices[offset : offset + limit]
     items: list[dict[str, Any]] = []
+    readiness_resolver = None
+    readiness_projections: dict[str, dict[str, Any]] = {}
+    readiness_revision = "projection-unavailable"
+    readiness_projection_repository = None
+    if include_patrol_readiness:
+        readiness_projection_repository = DeviceReadinessProjectionRepository()
+        try:
+            readiness_revision = readiness_projection_repository.asset_revision()
+            readiness_projections = readiness_projection_repository.list_for_devices(
+                [str(item.get("device_id") or "") for item in page],
+                mode=normalize_patrol_mode(readiness_mode),
+            )
+        except Exception:
+            # Rolling deployments may serve traffic before the projection migration.
+            readiness_projection_repository = None
     for item in page:
         redacted = _redact_device(item)
         if include_patrol_readiness:
-            redacted["patrol_readiness"] = _patrol_readiness(item, readiness_mode)
+            device_id_value = str(item.get("device_id") or "")
+            source_digest = readiness_source_digest(
+                item,
+                mode=normalize_patrol_mode(readiness_mode),
+                asset_revision=readiness_revision,
+            )
+            projected = readiness_projections.get(device_id_value)
+            if projected and projected.get("source_digest") == source_digest:
+                redacted["patrol_readiness"] = projected
+            else:
+                readiness_resolver = readiness_resolver or CollectionPolicyResolver()
+                computed = _patrol_readiness(
+                    item,
+                    readiness_mode,
+                    policy_resolver=readiness_resolver,
+                )
+                redacted["patrol_readiness"] = computed
+                if readiness_projection_repository is not None and device_id_value:
+                    try:
+                        readiness_projection_repository.upsert(
+                            device_id=device_id_value,
+                            mode=normalize_patrol_mode(readiness_mode),
+                            source_digest=source_digest,
+                            readiness=computed,
+                        )
+                    except Exception:
+                        pass
         items.append(redacted)
     return {
         "items": items,
@@ -2976,160 +3169,41 @@ def launch_device_patrol(payload: DevicePatrolLaunchRequest, request: Request):
         )
     if payload.launch_mode not in {"workflow", "direct"}:
         raise HTTPException(status_code=400, detail="launch_mode must be workflow or direct")
-    patrol_batch_id = f"patrol-batch-{uuid.uuid4()}"
-    plan_repository = ExecutionPlanRepository()
-    if payload.launch_mode == "workflow":
-        from src.core.workflows.engine import WorkflowEngine
+    try:
+        result = StartPatrolHandler(
+            plan_repository=ExecutionPlanRepository(),
+        ).handle(
+            StartPatrolCommand(
+                rows=preview["rows"],
+                target_count=preview["target_count"],
+                skipped_errors=preview["errors"],
+                launch_mode=payload.launch_mode,
+                workflow_name=payload.workflow_name,
+                mode=payload.mode,
+                save_baseline=payload.save_baseline,
+                ticket_id=payload.ticket_id,
+                target_snapshot=_patrol_target_snapshot(payload),
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    launched = result["runs"] or result["tasks"]
+    try:
+        from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
 
-        launched: list[dict[str, Any]] = []
-        for row in preview["rows"]:
-            plan_record = plan_repository.create_plan(
-                row["plan"],
-                launch_source="workflow",
-                patrol_batch_id=patrol_batch_id,
-            )
-            context = {
-                "execution_plan": row["plan"],
-                "execution_plan_id": plan_record["execution_plan_id"],
-                "filter_params": {},
-                "ticket_id": payload.ticket_id,
-                "save_baseline": payload.save_baseline,
-                "mode": payload.mode,
-                "update_current_state": normalize_patrol_mode(payload.mode) == PRODUCTION_MODE,
-                "publish_events": False,
-                "patrol_batch_id": patrol_batch_id,
-                "device_id": row["device_id"],
-                "device_name": row["device_name"],
-            }
-            try:
-                run_id = WorkflowEngine.start(
-                    payload.workflow_name,
-                    context,
-                    source="device-management",
-                )
-            except ValueError as exc:
-                plan_repository.mark_failed(
-                    plan_record["execution_plan_id"],
-                    failure_code="workflow_launch_failed",
-                    error=str(exc),
-                )
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-            plan_repository.mark_launched(
-                plan_record["execution_plan_id"],
-                launch_source="workflow",
-                patrol_batch_id=patrol_batch_id,
-                workflow_run_id=run_id,
-            )
-            launched.append(
-                {
-                    "device_id": row["device_id"],
-                    "device_name": row["device_name"],
-                    "ip": row["ip"],
-                    "execution_plan_id": plan_record["execution_plan_id"],
-                    "workflow_run_id": run_id,
-                    "workflow_name": payload.workflow_name,
-                    "patrol_batch_id": patrol_batch_id,
-                    "command_count": row["command_count"],
-                }
-            )
-        result = {
-            "success": True,
-            "target_count": preview["target_count"],
-            "launched_count": len(launched),
-            "mode": payload.mode,
-            "save_baseline": payload.save_baseline,
-            "ticket_id": payload.ticket_id,
-            "patrol_batch_id": patrol_batch_id,
-            "launch_mode": payload.launch_mode,
-            "workflow_name": payload.workflow_name,
-            "runs": launched,
-            "tasks": [],
-            "skipped_count": preview["error_count"],
-            "skipped_errors": preview["errors"],
-        }
-        _audit_device_action(
-            request,
-            "device_patrol_launch",
-            "patrol_batch",
-            patrol_batch_id,
-            {
-                "launch_mode": payload.launch_mode,
-                "workflow_name": payload.workflow_name,
-                "mode": payload.mode,
-                "save_baseline": payload.save_baseline,
-                "target_count": result["target_count"],
-                "launched_count": result["launched_count"],
-                "skipped_count": result["skipped_count"],
-                "device_ids": [item.get("device_id") for item in launched[:50]],
-            },
+        PatrolBatchManifestRepository().record_launch(
+            result=result,
+            ready_rows=preview["rows"],
+            skipped_errors=preview["errors"],
+            target_snapshot=_patrol_target_snapshot(payload),
         )
-        return result
-
-    from src.core.celery_tasks.tasks import execute_device_patrol_task
-
-    launched: list[dict[str, Any]] = []
-    for row in preview["rows"]:
-        plan_record = plan_repository.create_plan(
-            row["plan"],
-            launch_source="direct",
-            patrol_batch_id=patrol_batch_id,
-        )
-        try:
-            task = execute_device_patrol_task.apply_async(
-                kwargs={
-                    "execution_plan": row["plan"],
-                    "execution_plan_id": plan_record["execution_plan_id"],
-                    "ticket_id": payload.ticket_id,
-                    "save_baseline": payload.save_baseline,
-                    "mode": payload.mode,
-                    "patrol_batch_id": patrol_batch_id,
-                },
-                queue="netops.device",
-            )
-        except Exception as exc:
-            plan_repository.mark_failed(
-                plan_record["execution_plan_id"],
-                failure_code="celery_launch_failed",
-                error=str(exc),
-            )
-            raise
-        plan_repository.mark_launched(
-            plan_record["execution_plan_id"],
-            launch_source="direct",
-            patrol_batch_id=patrol_batch_id,
-            celery_task_id=task.id,
-        )
-        launched.append(
-            {
-                "device_id": row["device_id"],
-                "device_name": row["device_name"],
-                "ip": row["ip"],
-                "execution_plan_id": plan_record["execution_plan_id"],
-                "celery_task_id": task.id,
-                "patrol_batch_id": patrol_batch_id,
-                "command_count": row["command_count"],
-            }
-        )
-    result = {
-        "success": True,
-        "target_count": preview["target_count"],
-        "launched_count": len(launched),
-        "mode": payload.mode,
-        "save_baseline": payload.save_baseline,
-        "ticket_id": payload.ticket_id,
-        "patrol_batch_id": patrol_batch_id,
-        "launch_mode": payload.launch_mode,
-        "workflow_name": payload.workflow_name,
-        "runs": [],
-        "tasks": launched,
-        "skipped_count": preview["error_count"],
-        "skipped_errors": preview["errors"],
-    }
+    except Exception:
+        logger.exception("failed to persist patrol batch manifest", extra={"patrol_batch_id": result["patrol_batch_id"]})
     _audit_device_action(
         request,
         "device_patrol_launch",
         "patrol_batch",
-        patrol_batch_id,
+        result["patrol_batch_id"],
         {
             "launch_mode": payload.launch_mode,
             "workflow_name": payload.workflow_name,
@@ -3365,9 +3439,9 @@ def discover_device_identity_endpoint(device_id: str, request: Request):
         )
         device_after_health = updated_identity or device_after_health
         try:
-            from src.core.parser.repository import ParserRepository
+            from src.core.parser.repository import ParserMetadataRepository
 
-            ParserRepository().upsert_device_profile(
+            ParserMetadataRepository().upsert_device_profile(
                 vendor=result.identity.vendor or "",
                 model=result.identity.model or "",
                 family=result.identity.family,

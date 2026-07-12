@@ -32,9 +32,9 @@ const LoginPage: React.FC = () => {
   }
 
   return (
-    <div className="grok-login-page">
+    <main className="grok-login-page">
       <Card className="grok-login-card">
-        <Title level={3} style={{ marginBottom: 8 }}>
+        <Title level={1} style={{ marginBottom: 8, fontSize: 24 }}>
           NetOps Agent
         </Title>
         <Paragraph type="secondary" style={{ marginBottom: 24 }}>
@@ -65,7 +65,7 @@ const LoginPage: React.FC = () => {
           演示账号：admin/admin123 · operator/operator123 · viewer/viewer123
         </Paragraph>
       </Card>
-    </div>
+    </main>
   )
 }
 

@@ -36,7 +36,8 @@ class Settings(BaseSettings):
     CELERY_MAX_RETRIES: int = 3
     # 空字符串表示自动：Windows → solo，Linux/macOS → prefork
     CELERY_WORKER_POOL: str = ""
-    CELERY_WORKER_QUEUES: str = "netops.default,netops.firewall,netops.device"
+    CELERY_WORKER_QUEUES: str = "netops.default,netops.firewall,netops.patrol,netops.ai"
+    CELERY_WORKER_ROLE: str = "all"
 
     MINIO_ENDPOINT: str = "localhost:9000"
     MINIO_ACCESS_KEY: str = "minioadmin"

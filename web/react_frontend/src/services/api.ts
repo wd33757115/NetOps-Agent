@@ -1113,7 +1113,7 @@ export interface DeviceExecutionPlanResponse {
 }
 
 export interface DeviceEvidenceTimelineItem {
-  workflow_run_id: string
+  workflow_run_id?: string | null
   workflow_status?: string
   workflow_created_at?: string | null
   workflow_completed_at?: string | null
@@ -1125,6 +1125,13 @@ export interface DeviceEvidenceTimelineItem {
   observation_count: number
   change_count: number
   event_count: number
+  no_event_count?: number
+  policy_blocking_count?: number
+  policy_blocking_reason?: string | null
+  policy_blocking_reasons?: string[]
+  no_event_reason?: string | null
+  no_event_reasons?: string[]
+  evidence_fingerprint?: string | null
   parse_counts: Record<string, number>
   steps: Array<{
     step_name: string
@@ -1139,7 +1146,31 @@ export interface DeviceEvidenceTimelineItem {
     command: string
     parse_status: string
     parser_template_id?: string | null
+    observation_contract_id?: string | null
+    output_status?: string | null
+    execution_status?: string | null
+    fact_status?: string | null
+    normalization_status?: string | null
     raw_text_hash: string
+    evidence_fingerprint?: string | null
+    observed_at?: string | null
+  }>
+  observations: Array<{
+    observation_id: string
+    snapshot_id: string
+    entity_type: string
+    entity_key: string
+    field: string
+    observation_type?: string | null
+    semantic_type?: string | null
+    unit?: string | null
+    value?: unknown
+    value_text?: string | null
+    value_number?: number | null
+    confidence?: number | null
+    parser_template_id?: string | null
+    observation_contract_id?: string | null
+    contract_version?: number | null
     observed_at?: string | null
   }>
   changes: Array<{
@@ -1148,7 +1179,20 @@ export interface DeviceEvidenceTimelineItem {
     entity_key: string
     field: string
     change_type: string
+    observation_type?: string | null
+    old_value?: unknown
+    new_value?: unknown
+    old_number?: number | null
+    new_number?: number | null
     event_status: string
+    collision_reason?: string | null
+    change_policy_id?: string | null
+    change_policy_version_id?: string | null
+    decision_reason?: string | null
+    no_event_reason?: string | null
+    comparison_type?: string | null
+    policy_snapshot?: Record<string, unknown> | null
+    rule_bundle_digest?: string | null
     detected_at?: string | null
   }>
   events: Array<{
@@ -1158,7 +1202,30 @@ export interface DeviceEvidenceTimelineItem {
     entity_type: string
     entity_key: string
     status: string
+    source_change_id?: string | null
+    old_value?: unknown
+    new_value?: unknown
+    old_number?: number | null
+    new_number?: number | null
+    change_policy_id?: string | null
+    change_policy_version_id?: string | null
+    policy_snapshot?: Record<string, unknown> | null
+    event_rule_id?: string | null
+    event_rule_version?: number | string | null
+    occurrence_count?: number
     occurred_at?: string | null
+  }>
+  event_occurrence_count?: number
+  event_occurrences?: Array<{
+    occurrence_id: string
+    event_id: string
+    event_type: string
+    occurrence_kind: string
+    source_change_id?: string | null
+    severity: string
+    observed_at?: string | null
+    event_rule_id?: string | null
+    event_rule_version?: number | string | null
   }>
 }
 
@@ -2296,6 +2363,16 @@ export interface PatrolBatchSummary {
   created_at?: string | null
   completed_at?: string | null
   sample_devices: string[]
+  target_type?: 'selected' | 'group' | 'dynamic_group' | 'filters' | string
+  target_label?: string
+  selector?: Record<string, unknown>
+  target_count?: number
+  launched_count?: number
+  skipped_count?: number
+  connection_succeeded_count?: number
+  connection_failed_count?: number
+  connection_pending_count?: number
+  manifest_available?: boolean
   archived?: boolean
   archived_count?: number
   archived_at?: string | null
@@ -2327,6 +2404,22 @@ export interface PatrolBatchResultSummary {
   status_counts: Record<string, number>
   event_types: Record<string, number>
   severities: Record<string, number>
+  quality?: {
+    status?: string
+    command_count?: number
+    execution_success_count?: number
+    parser_eligible_count?: number
+    parser_ready_count?: number
+    parser_ready_rate?: number
+    observation_count?: number
+  }
+  no_event_summary?: {
+    total?: number
+    by_reason?: Record<string, number>
+    missing_rule_count?: number
+    evaluated_no_match_count?: number
+    unmatched_rule_count?: number
+  }
   runs: Array<{
     run_id: string
     device_id?: string | null
@@ -2342,7 +2435,40 @@ export interface PatrolBatchResultSummary {
   deliverables: {
     csv_url: string
     report_url: string
+    execution_ledger_url?: string
+    raw_cli_url?: string
+    raw_data_url?: string
+    events_url?: string
   }
+}
+
+export interface PatrolBatchDeviceItem {
+  device_id: string
+  device_name?: string | null
+  management_ip?: string | null
+  selection_status: 'launched' | 'skipped' | string
+  preflight_status: 'ready' | 'failed' | string
+  connection_status: 'succeeded' | 'failed' | 'pending' | 'not_attempted' | 'unknown' | string
+  workflow_run_id?: string | null
+  workflow_status?: string | null
+  failure_code?: string | null
+  error_message?: string | null
+  created_at?: string | null
+  completed_at?: string | null
+}
+
+export interface PatrolBatchDevicePage {
+  patrol_batch_id: string
+  target_type: string
+  target_label: string
+  selector: Record<string, unknown>
+  target_count: number
+  launched_count: number
+  skipped_count: number
+  total: number
+  limit: number
+  offset: number
+  items: PatrolBatchDeviceItem[]
 }
 
 export interface WorkflowStepDetail {
@@ -2479,6 +2605,16 @@ export const workflowApi = {
     const response = await api.get<PatrolBatchResultSummary>(`/workflows/runs/patrol-batches/${batchId}/summary/`)
     return response.data
   },
+  listPatrolBatchDevices: async (
+    batchId: string,
+    params?: { limit?: number; offset?: number; search?: string; selection_status?: string },
+  ): Promise<PatrolBatchDevicePage> => {
+    const response = await api.get<PatrolBatchDevicePage>(
+      `/workflows/runs/patrol-batches/${batchId}/devices`,
+      { params },
+    )
+    return response.data
+  },
   retryPatrolBatch: async (batchId: string): Promise<{
     success: boolean
     patrol_batch_id: string
@@ -2511,6 +2647,27 @@ export const workflowApi = {
     const response = await api.get(`/workflows/runs/patrol-batches/${batchId}/report.md`, {
       responseType: 'blob',
     })
+    return response.data
+  },
+  exportPatrolBatchRawData: async (batchId: string): Promise<Blob> => {
+    const response = await api.get(
+      `/workflows/runs/patrol-batches/${batchId}/raw-data.jsonl`,
+      { responseType: 'blob' },
+    )
+    return response.data
+  },
+  exportPatrolBatchRawCli: async (batchId: string): Promise<Blob> => {
+    const response = await api.get(
+      `/workflows/runs/patrol-batches/${batchId}/raw-cli.zip`,
+      { responseType: 'blob' },
+    )
+    return response.data
+  },
+  exportPatrolBatchEvents: async (batchId: string): Promise<Blob> => {
+    const response = await api.get(
+      `/workflows/runs/patrol-batches/${batchId}/events.csv`,
+      { responseType: 'blob' },
+    )
     return response.data
   },
   getRun: async (runId: string): Promise<WorkflowRunDetail> => {

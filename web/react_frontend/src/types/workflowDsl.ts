@@ -245,7 +245,6 @@ export function buildDslFromWizard(values: WizardFormValues): WorkflowDSL {
 export function mergeChatYamlIntoDsl(dsl: WorkflowDSL, chatYaml: string): WorkflowDSL {
   if (!chatYaml.trim()) return dsl
 
-  const workflowLine = chatYaml.match(/^workflow:\s*(.+)$/m)
   const priorityLine = chatYaml.match(/^priority:\s*(\d+)/m)
   const descLine = chatYaml.match(/^description:\s*(.+)$/m)
 

@@ -51,9 +51,9 @@ GENERIC_MODEL_PATTERNS = (
 class DeviceIdentityResolver:
     def __init__(self, *, repository=None, policy=None):
         if repository is None:
-            from .repository import ParserRepository
+            from .runtime_repository import ParserRuntimeRepository
 
-            repository = ParserRepository()
+            repository = ParserRuntimeRepository()
         self.repository = repository
         self.policy = policy or ParserPolicy(repository=repository)
 

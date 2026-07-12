@@ -44,7 +44,7 @@ def test_bootstrap_shared_templates_resolves_current_immutable_path(tmp_path, mo
         def activate_template(self, template_id):
             self.activated.append(template_id)
 
-    monkeypatch.setattr(parser_bootstrap, "ParserRepository", FakeRepository)
+    monkeypatch.setattr(parser_bootstrap, "ParserTemplateRepository", FakeRepository)
 
     result = parser_bootstrap.bootstrap_shared_templates(tmp_path)
 
@@ -105,7 +105,7 @@ def test_bootstrap_shared_templates_discovers_filesystem_assets_without_manifest
         def activate_template(self, template_id):
             self.activated.append(template_id)
 
-    monkeypatch.setattr(parser_bootstrap, "ParserRepository", FakeRepository)
+    monkeypatch.setattr(parser_bootstrap, "ParserTemplateRepository", FakeRepository)
 
     result = parser_bootstrap.bootstrap_shared_templates(tmp_path)
 

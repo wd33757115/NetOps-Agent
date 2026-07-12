@@ -3,6 +3,8 @@
 
 FROM python:3.11-slim
 
+ARG REQUIREMENTS_FILE=requirements-gateway.txt
+
 # 设置工作目录
 WORKDIR /app
 
@@ -18,11 +20,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# 复制 requirements 文件
-COPY requirements.txt /app/
+# 复制角色依赖清单
+COPY requirements*.txt /app/
 
 # 安装 Python 依赖（只在构建时执行一次）
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r ${REQUIREMENTS_FILE}
 
 # 复制项目文件
 COPY . /app/

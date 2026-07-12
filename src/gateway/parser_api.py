@@ -32,8 +32,12 @@ from src.core.parser.discovery_assets import bootstrap_discovery_assets
 from src.core.parser.identity import DeviceIdentity
 from src.core.parser.repository import (
     OPEN_JOB_STATUSES,
+    ParserGovernanceProjectionRepository,
+    ParserJobRepository,
     ParserJobStateError,
-    ParserRepository,
+    ParserMetadataRepository,
+    ParserSampleRepository,
+    ParserTemplateRepository,
 )
 from src.core.parser.runtime import ParserRuntime
 from src.core.parser.tasks import dispatch_ready_parser_jobs
@@ -242,12 +246,12 @@ class CommandProfileImpactPreviewRequest(BaseModel):
 
 @router.get("/templates")
 def list_templates(status: str | None = None):
-    return {"items": ParserRepository().list_templates(status=status)}
+    return {"items": ParserTemplateRepository().list_templates(status=status)}
 
 
 @router.get("/templates/export")
 def export_templates(status: str | None = "active"):
-    repository = ParserRepository()
+    repository = ParserTemplateRepository()
     asset_store = TemplateAssetStore()
     asset_root = asset_store.root.resolve()
     templates = repository.list_templates(status=status if status != "all" else None)
@@ -314,7 +318,7 @@ def export_templates(status: str | None = "active"):
 
 @router.get("/templates/{template_id}/preview")
 def preview_template(template_id: str):
-    template = ParserRepository().get_template(template_id)
+    template = ParserTemplateRepository().get_template(template_id)
     if not template:
         raise HTTPException(status_code=404, detail="parser template not found")
 
@@ -374,7 +378,7 @@ def _parse_snapshot_with_template(template, snapshot):
 
 @router.get("/templates/{template_id}/comparison")
 def compare_template(template_id: str, limit: int = 20):
-    repository = ParserRepository()
+    repository = ParserTemplateRepository()
     candidate = repository.get_template(template_id)
     if not candidate:
         raise HTTPException(status_code=404, detail="parser template not found")
@@ -431,12 +435,12 @@ def compare_template(template_id: str, limit: int = 20):
 
 @router.get("/jobs")
 def list_jobs(status: str | None = None):
-    return {"items": ParserRepository().list_jobs(status=status)}
+    return {"items": ParserJobRepository().list_jobs(status=status)}
 
 
 @router.get("/jobs/{job_id}")
 def get_job(job_id: str):
-    item = ParserRepository().get_job(job_id)
+    item = ParserJobRepository().get_job(job_id)
     if not item:
         raise HTTPException(status_code=404, detail="parser job not found")
     return item
@@ -445,7 +449,7 @@ def get_job(job_id: str):
 @router.post("/jobs/{job_id}/retry")
 def retry_job(job_id: str):
     try:
-        ParserRepository().retry_job(job_id)
+        ParserJobRepository().retry_job(job_id)
     except ParserJobStateError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"success": True, "job_id": job_id, "status": "pending"}
@@ -454,7 +458,7 @@ def retry_job(job_id: str):
 @router.post("/jobs/{job_id}/cancel")
 def cancel_job(job_id: str):
     try:
-        item = ParserRepository().cancel_job(job_id)
+        item = ParserJobRepository().cancel_job(job_id)
     except ParserJobStateError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if item.get("celery_task_id"):
@@ -465,7 +469,7 @@ def cancel_job(job_id: str):
 @router.delete("/jobs/{job_id}")
 def delete_job(job_id: str):
     try:
-        result = ParserRepository().delete_job(job_id)
+        result = ParserJobRepository().delete_job(job_id)
     except ParserJobStateError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"success": True, "job_id": job_id, **result}
@@ -473,13 +477,13 @@ def delete_job(job_id: str):
 
 @router.post("/jobs/bulk-delete")
 def bulk_delete_jobs(payload: ParserBulkJobDeleteRequest):
-    result = ParserRepository().delete_jobs(payload.job_ids)
+    result = ParserJobRepository().delete_jobs(payload.job_ids)
     return {"success": result["failed_count"] == 0, **result}
 
 
 @router.post("/jobs/{job_id}/dispatch")
 def dispatch_job(job_id: str):
-    if not ParserRepository().get_job(job_id):
+    if not ParserJobRepository().get_job(job_id):
         raise HTTPException(status_code=404, detail="parser job not found")
     result = dispatch_ready_parser_jobs(
         job_id=job_id,
@@ -498,7 +502,7 @@ def dispatch_job(job_id: str):
 
 @router.post("/jobs/{job_id}/sanitize")
 def sanitize_parser_job(job_id: str):
-    samples = ParserRepository().sanitize_pending_samples(job_id=job_id)
+    samples = ParserSampleRepository().sanitize_pending_samples(job_id=job_id)
     return {
         "success": all(bool(item.get("success")) for item in samples),
         "processed_count": len(samples),
@@ -513,12 +517,12 @@ def dispatch_jobs():
 
 @router.get("/dispatch-control")
 def get_dispatch_control():
-    return {"auto_dispatch_enabled": ParserRepository().get_auto_dispatch_enabled()}
+    return {"auto_dispatch_enabled": ParserJobRepository().get_auto_dispatch_enabled()}
 
 
 @router.post("/dispatch-control")
 def set_dispatch_control(payload: ParserDispatchControlRequest):
-    enabled = ParserRepository().set_auto_dispatch_enabled(payload.enabled)
+    enabled = ParserJobRepository().set_auto_dispatch_enabled(payload.enabled)
     return {"success": True, "auto_dispatch_enabled": enabled}
 
 
@@ -529,7 +533,7 @@ def activate_template(
 ):
     payload = payload or ParserTemplateApprovalRequest()
     try:
-        item = ParserRepository().activate_template(
+        item = ParserTemplateRepository().activate_template(
             template_id,
             approved_by=payload.actor,
             reason=payload.reason,
@@ -545,7 +549,7 @@ def force_activate_template(
     payload: ParserTemplateForceActivationRequest,
 ):
     try:
-        item = ParserRepository().activate_template(
+        item = ParserTemplateRepository().activate_template(
             template_id,
             approved_by=payload.actor,
             reason=payload.reason,
@@ -563,7 +567,7 @@ def rollback_template(
     payload: ParserTemplateForceActivationRequest,
 ):
     try:
-        item = ParserRepository().rollback_template(
+        item = ParserTemplateRepository().rollback_template(
             template_id,
             actor=payload.actor,
             reason=payload.reason,
@@ -623,7 +627,7 @@ def commit_parser_backfill(
 
 @router.post("/templates/{template_id}/reject")
 def reject_template(template_id: str, payload: ParserTemplateStatusRequest):
-    ParserRepository().set_template_status(
+    ParserTemplateRepository().set_template_status(
         template_id, "rejected", actor=payload.actor, reason=payload.reason
     )
     return {"success": True, "template_id": template_id, "status": "rejected"}
@@ -631,7 +635,7 @@ def reject_template(template_id: str, payload: ParserTemplateStatusRequest):
 
 @router.post("/templates/{template_id}/deprecate")
 def deprecate_template(template_id: str, payload: ParserTemplateStatusRequest):
-    ParserRepository().set_template_status(
+    ParserTemplateRepository().set_template_status(
         template_id, "deprecated", actor=payload.actor, reason=payload.reason
     )
     return {"success": True, "template_id": template_id, "status": "deprecated"}
@@ -661,7 +665,7 @@ def preview_validation_import(payload: ParserImportRequest):
 @router.post("/import-execute")
 def execute_validation_import(payload: ParserImportRequest):
     try:
-        retired = ParserRepository().supersede_legacy_jobs()
+        retired = ParserJobRepository().supersede_legacy_jobs()
         result = import_raw_path(
             file_path=payload.source_path,
             mode="parser_validation",
@@ -726,30 +730,32 @@ def dataset_coverage():
 
 @router.get("/aliases")
 def list_aliases():
-    return {"items": ParserRepository().list_command_aliases()}
+    return {"items": ParserMetadataRepository().list_command_aliases()}
 
 
 @router.get("/device-profiles")
 def list_device_profiles():
-    return {"items": ParserRepository().list_device_profiles()}
+    return {"items": ParserMetadataRepository().list_device_profiles()}
 
 
 @router.get("/identity-signatures")
 def list_identity_signatures():
-    return {"items": ParserRepository().list_identity_signatures()}
+    return {"items": ParserMetadataRepository().list_identity_signatures()}
 
 
 @router.get("/coverage")
 def parser_coverage():
-    repository = ParserRepository()
-    repository.backfill_contract_metadata()
-    templates = repository.list_templates()
-    jobs = repository.list_jobs()
+    templates_repository = ParserTemplateRepository()
+    jobs_repository = ParserJobRepository()
+    metadata_repository = ParserMetadataRepository()
+    templates_repository.backfill_contract_metadata()
+    templates = templates_repository.list_templates()
+    jobs = jobs_repository.list_jobs()
     active = sum(item["status"] == "active" for item in templates)
     open_jobs = [item for item in jobs if item["status"] in OPEN_JOB_STATUSES]
-    backlog = repository.backlog_summary()
+    backlog = jobs_repository.backlog_summary()
     backfills = ParserBackfillService().list_jobs()
-    governance = repository.governance_alert_summary()
+    governance = ParserGovernanceProjectionRepository().governance_alert_summary()
     return {
         "templates_total": len(templates),
         "templates_active": active,
@@ -757,10 +763,10 @@ def parser_coverage():
         "jobs_pending": len(open_jobs),
         "missing_candidates": sum(item["job_type"] == "CREATE_TEMPLATE" for item in open_jobs),
         "repair_candidates": sum(item["job_type"] == "REPAIR_TEMPLATE" for item in open_jobs),
-        "command_aliases": len(repository.list_command_aliases()),
-        "device_profiles": len(repository.list_device_profiles()),
-        "identity_signatures": len(repository.list_identity_signatures()),
-        "auto_dispatch_enabled": repository.get_auto_dispatch_enabled(),
+        "command_aliases": len(metadata_repository.list_command_aliases()),
+        "device_profiles": len(metadata_repository.list_device_profiles()),
+        "identity_signatures": len(metadata_repository.list_identity_signatures()),
+        "auto_dispatch_enabled": jobs_repository.get_auto_dispatch_enabled(),
         **backlog,
         "backfills_pending_approval": sum(
             item["status"] == "pending_approval" for item in backfills

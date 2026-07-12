@@ -155,6 +155,20 @@ def test_rule_generation_job_preview_summarizes_validation_and_redacts_private_p
         )
         candidate = preview["candidate_preview"]["skill_result.candidate_rules"][0]
         assert candidate["raw_text"]["redacted"] is True
+
+        with get_db_session() as db:
+            row = db.get(RuleGenerationJobRecord, job["id"])
+            report = dict(row.validation_report_json or {})
+            report["historical_replay"] = {
+                **dict(report.get("historical_replay") or {}),
+                "success": True,
+                "collision_count": 1,
+            }
+            row.validation_report_json = report
+
+        blocked_preview = repo.preview_job(job["id"])
+        assert blocked_preview["approval_readiness"]["can_approve"] is False
+        assert "historical replay has collisions" in blocked_preview["approval_readiness"]["blockers"]
     finally:
         with get_db_session() as db:
             db.query(RuleGenerationJobRecord).filter(

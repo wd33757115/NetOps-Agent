@@ -12,6 +12,7 @@ import pytest
 from src.gateway import devices_api
 from src.infrastructure.db.models import (
     CommandSnapshot,
+    NetworkChangeRecord,
     NetworkEventRecord,
     PatrolRun,
 )
@@ -283,6 +284,111 @@ def test_list_devices_can_include_patrol_readiness(monkeypatch):
     assert readiness["blocked_count"] == 1
     assert readiness["policy_source"] == "device_profile"
     assert readiness["violations"][0]["canonical_command"] == "show inventory"
+
+
+def test_list_devices_reuses_one_policy_resolver_for_500_readiness_rows(monkeypatch):
+    devices = [
+        {
+            "device_id": f"device-{index}",
+            "device_name": f"SW{index}",
+            "ip": f"192.0.2.{(index % 250) + 1}",
+            "password": "secret",
+            "attributes": {},
+        }
+        for index in range(500)
+    ]
+
+    class FakeRepository:
+        def get_devices_by_filter(self, **_kwargs):
+            return devices
+
+    resolver_instances = []
+
+    class FakeResolver:
+        def __init__(self):
+            resolver_instances.append(self)
+
+    seen_resolvers = []
+
+    def readiness(_device, _mode, *, policy_resolver):
+        seen_resolvers.append(policy_resolver)
+        return {"status": "ready"}
+
+    monkeypatch.setattr(devices_api, "DeviceRepository", FakeRepository)
+    monkeypatch.setattr(devices_api, "CollectionPolicyResolver", FakeResolver)
+    monkeypatch.setattr(devices_api, "_patrol_readiness", readiness)
+
+    result = devices_api.list_devices(
+        include_patrol_readiness=True,
+        limit=500,
+        offset=0,
+    )
+
+    assert len(result["items"]) == 500
+    assert len(resolver_instances) == 1
+    assert set(map(id, seen_resolvers)) == {id(resolver_instances[0])}
+
+
+def test_list_devices_uses_one_projection_batch_for_500_warm_rows(monkeypatch):
+    devices = [
+        {
+            "device_id": f"device-{index}",
+            "device_name": f"SW{index}",
+            "ip": f"192.0.2.{(index % 250) + 1}",
+            "vendor": "Cisco",
+            "model": "C2960",
+            "attributes": {},
+        }
+        for index in range(500)
+    ]
+
+    class FakeDeviceRepository:
+        def get_devices_by_filter(self, **_kwargs):
+            return devices
+
+    projection_reads = []
+
+    class FakeProjectionRepository:
+        def asset_revision(self):
+            return "assets-v1"
+
+        def list_for_devices(self, device_ids, *, mode):
+            projection_reads.append((device_ids, mode))
+            return {
+                device["device_id"]: {
+                    "status": "ready",
+                    "source_digest": devices_api.readiness_source_digest(
+                        device,
+                        mode=mode,
+                        asset_revision="assets-v1",
+                    ),
+                }
+                for device in devices
+            }
+
+    monkeypatch.setattr(devices_api, "DeviceRepository", FakeDeviceRepository)
+    monkeypatch.setattr(
+        devices_api,
+        "DeviceReadinessProjectionRepository",
+        FakeProjectionRepository,
+    )
+    monkeypatch.setattr(
+        devices_api,
+        "_patrol_readiness",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("warm projection must avoid live readiness resolution")
+        ),
+    )
+
+    result = devices_api.list_devices(
+        include_patrol_readiness=True,
+        limit=500,
+        offset=0,
+    )
+
+    assert len(result["items"]) == 500
+    assert len(projection_reads) == 1
+    assert len(projection_reads[0][0]) == 500
 
 
 def test_list_devices_patrol_readiness_blocks_missing_runtime_rule_assets(monkeypatch):
@@ -1724,6 +1830,7 @@ def test_device_timeline_includes_direct_patrol_and_legacy_opening_event():
     run_id = f"timeline-{uuid.uuid4()}"
     snapshot_id = str(uuid.uuid4())
     event_id = str(uuid.uuid4())
+    change_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
     device_id = f"device-{uuid.uuid4()}"
     with get_db_session() as db:
@@ -1760,16 +1867,44 @@ def test_device_timeline_includes_direct_patrol_and_legacy_opening_event():
             )
         )
         db.add(
+            NetworkChangeRecord(
+                id=change_id,
+                idempotency_key=uuid.uuid4().hex,
+                run_id=run_id,
+                device_id=device_id,
+                canonical_command="show interface transceiver detail",
+                entity_type="interface_optical",
+                entity_key='["Gi1/0/1"]',
+                field="rx_power_dbm",
+                observation_type="interface.optical.rx_power",
+                old_value_json=-15.0,
+                new_value_json=-18.0,
+                old_number=-15.0,
+                new_number=-18.0,
+                change_type="modified",
+                source="patrol",
+                event_status="event_created",
+                change_policy_id="optical-policy",
+                change_policy_version_id="optical-policy-v2",
+                comparison_type="threshold",
+                decision_reason="change_policy_matched",
+                policy_snapshot_json={"thresholds": {"low": -17.0}, "recovery_threshold": -15.0},
+                detected_at=now,
+                processed_at=now,
+                confidence=1.0,
+            )
+        )
+        db.add(
             NetworkEventRecord(
                 id=event_id,
                 idempotency_key=uuid.uuid4().hex,
-                event_type="InterfaceDown",
+                event_type="OpticalRxPowerLow",
                 severity="major",
                 device_id=device_id,
-                entity_type="interface_l2",
+                entity_type="interface_optical",
                 entity_key='["Gi1/0/1"]',
                 correlation_key=uuid.uuid4().hex,
-                source_change_id=None,
+                source_change_id=change_id,
                 run_id=run_id,
                 latest_change_id=None,
                 last_seen_run_id=run_id,
@@ -1778,7 +1913,7 @@ def test_device_timeline_includes_direct_patrol_and_legacy_opening_event():
                 last_seen_at=now,
                 occurrence_count=1,
                 status="open",
-                payload_json={},
+                payload_json={"rule": {"rule_id": "optical-rx-low", "version": 3}},
                 created_at=now,
             )
         )
@@ -1794,9 +1929,19 @@ def test_device_timeline_includes_direct_patrol_and_legacy_opening_event():
         assert result["items"][0]["snapshot_count"] == 1
         assert result["items"][0]["event_count"] == 1
         assert result["items"][0]["events"][0]["event_id"] == event_id
+        assert result["items"][0]["changes"][0]["old_number"] == -15.0
+        assert result["items"][0]["changes"][0]["new_number"] == -18.0
+        assert result["items"][0]["changes"][0]["change_policy_version_id"] == "optical-policy-v2"
+        assert result["items"][0]["events"][0]["new_number"] == -18.0
+        assert result["items"][0]["events"][0]["event_rule_id"] == "optical-rx-low"
+        assert result["items"][0]["events"][0]["event_rule_version"] == 3
+        assert result["items"][0]["events"][0]["policy_snapshot"]["thresholds"]["low"] == -17.0
     finally:
         with get_db_session() as db:
             db.query(NetworkEventRecord).filter(NetworkEventRecord.id == event_id).delete(
+                synchronize_session=False
+            )
+            db.query(NetworkChangeRecord).filter(NetworkChangeRecord.id == change_id).delete(
                 synchronize_session=False
             )
             db.query(PatrolRun).filter(PatrolRun.id == run_id).delete(synchronize_session=False)
@@ -1910,7 +2055,7 @@ def test_launch_device_patrol_submits_one_task_per_plan(monkeypatch):
                 "mode": "production",
                 "patrol_batch_id": result["patrol_batch_id"],
             },
-            "netops.device",
+            "netops.patrol",
         )
     ]
 

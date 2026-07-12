@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.core.parser.repository import ParserRepository
+from src.core.parser.repository import ParserTemplateRepository
 from src.core.rule_control.repository import RuleGenerationJobRepository
 
 
@@ -20,10 +20,10 @@ class RuleAssetTemplateActivationService:
     def __init__(
         self,
         *,
-        parser_repository: ParserRepository | None = None,
+        parser_repository: Any | None = None,
         job_repository: RuleGenerationJobRepository | None = None,
     ) -> None:
-        self.parser_repository = parser_repository or ParserRepository()
+        self.parser_repository = parser_repository or ParserTemplateRepository()
         self.job_repository = job_repository or RuleGenerationJobRepository()
 
     def seed_from_template(self, template_id: str) -> dict[str, Any]:

@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { useCallback, useMemo, useState } from 'react'
-import { Tabs } from 'antd'
+import React, { Suspense, useCallback, useMemo, useState } from 'react'
+import { Spin, Tabs } from 'antd'
+import { useNavigate, useParams } from 'react-router-dom'
 import GrokShellLayout from '../components/layout/GrokShellLayout'
 import { useIsMobile } from '../hooks/useBreakpoint'
 import SkillManageTab from '../components/skills/SkillManageTab'
@@ -11,11 +12,22 @@ import TemplateMarketTab from '../components/skills/TemplateMarketTab'
 import DevGuideTab from '../components/skills/DevGuideTab'
 import WorkflowWizard, { WorkflowWizardInitial } from '../components/skills/WorkflowWizard'
 import WorkflowWizardShell from '../components/skills/WorkflowWizardShell'
-import ParserControlTab from '../components/skills/ParserControlTab'
+
+const ParserControlTab = React.lazy(() => import('../components/skills/ParserControlTab'))
+
+const workspaceFallback = (
+  <div className="grok-page-loading is-compact" role="status" aria-label="工作区加载中">
+    <Spin />
+  </div>
+)
 
 const SkillsPage: React.FC = () => {
   const isMobile = useIsMobile()
-  const [activeTab, setActiveTab] = useState('skills')
+  const navigate = useNavigate()
+  const { section } = useParams<{ section?: string }>()
+  const activeTab = ['skills', 'workflows', 'market', 'parser', 'guide'].includes(section || '')
+    ? section!
+    : 'skills'
   const [wizardOpen, setWizardOpen] = useState(false)
   const [wizardInitial, setWizardInitial] = useState<WorkflowWizardInitial | null>(null)
 
@@ -45,12 +57,12 @@ const SkillsPage: React.FC = () => {
             open={wizardOpen && activeTab === 'workflows'}
             onClose={closeWizard}
             initial={wizardInitial}
-            onSaved={() => setActiveTab('workflows')}
+            onSaved={() => navigate('/skills/workflows')}
           />
         </WorkflowWizardShell>
       </>
     ),
-    [activeTab, closeWizard, openWizard, wizardInitial, wizardOpen],
+    [activeTab, closeWizard, navigate, openWizard, wizardInitial, wizardOpen],
   )
 
   const tabItems = [
@@ -72,7 +84,11 @@ const SkillsPage: React.FC = () => {
     {
       key: 'parser',
       label: 'Parser 控制面',
-      children: <ParserControlTab />,
+      children: (
+        <Suspense fallback={workspaceFallback}>
+          <ParserControlTab />
+        </Suspense>
+      ),
     },
     {
       key: 'guide',
@@ -88,7 +104,7 @@ const SkillsPage: React.FC = () => {
     >
       <Tabs
         activeKey={activeTab}
-        onChange={setActiveTab}
+        onChange={(key) => navigate(key === 'skills' ? '/skills' : `/skills/${key}`)}
         items={tabItems}
         size={isMobile ? 'small' : 'middle'}
         className="grok-skills-tabs"

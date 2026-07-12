@@ -617,7 +617,7 @@ const StoragePage: React.FC = () => {
 
   const treeNodes = useMemo(
     () => (treeData ? treeToNodes(treeData, canWrite ? bindDropZone : undefined) : []),
-    [treeData, canWrite, bindDropZone, dropTargetId]
+    [treeData, canWrite, bindDropZone]
   )
 
   const buildContextMenu = (row: StorageFile | StorageFolder): MenuProps => {

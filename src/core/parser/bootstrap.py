@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .assets import DEFAULT_ASSET_ROOT, TemplateAssetStore
-from .repository import ParserRepository
+from .repository import ParserTemplateRepository
 
 
 def _candidate_template_paths(
@@ -364,7 +364,7 @@ def bootstrap_shared_templates(root: str | Path | None = None) -> dict[str, Any]
         manifest: dict[str, Any] = {"templates": []}
     else:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    repository = ParserRepository()
+    repository = ParserTemplateRepository()
     assets = TemplateAssetStore(source_root)
     imported = skipped = 0
     errors: list[str] = []

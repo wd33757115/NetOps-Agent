@@ -14,6 +14,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from src.infrastructure.db.models import Notification, WorkflowRun, WorkflowStepRecord
 from src.infrastructure.db.postgres import get_db_session
 
+TERMINAL_WORKFLOW_STATUSES = {"completed", "failed", "cancelled"}
+
 
 def _now():
     return datetime.now(timezone.utc)
@@ -117,26 +119,48 @@ def update_run_status(run_id: str, status: str, *, error: str | None = None) -> 
         run.updated_at = _now()
         if error:
             run.error_message = error
+        elif status == "completed":
+            run.error_message = None
         if status in ("completed", "failed"):
             run.completed_at = _now()
 
 
-def update_run_step_index(run_id: str, step_index: int) -> None:
+def update_run_step_index(run_id: str, step_index: int, *, status: str = "running") -> None:
     with get_db_session() as db:
         run = db.query(WorkflowRun).filter(WorkflowRun.id == run_id).first()
         if run:
             run.current_step_index = step_index
-            run.status = "running"
+            run.status = status
             run.updated_at = _now()
 
 
-def mark_step_running(step_id: str, celery_task_id: str) -> None:
+def mark_step_queued(step_id: str, celery_task_id: str) -> bool:
     with get_db_session() as db:
         step = db.query(WorkflowStepRecord).filter(WorkflowStepRecord.id == step_id).first()
-        if step:
-            step.status = "running"
-            step.celery_task_id = celery_task_id
-            step.started_at = _now()
+        if not step:
+            return False
+        run = db.query(WorkflowRun).filter(WorkflowRun.id == step.run_id).first()
+        if not run or run.status in TERMINAL_WORKFLOW_STATUSES:
+            return False
+        step.status = "queued"
+        step.celery_task_id = celery_task_id
+        return True
+
+
+def mark_step_running(step_id: str, celery_task_id: str) -> bool:
+    with get_db_session() as db:
+        step = db.query(WorkflowStepRecord).filter(WorkflowStepRecord.id == step_id).first()
+        if not step:
+            return False
+        run = db.query(WorkflowRun).filter(WorkflowRun.id == step.run_id).first()
+        if not run or run.status in TERMINAL_WORKFLOW_STATUSES:
+            return False
+        step.status = "running"
+        step.celery_task_id = celery_task_id
+        step.started_at = _now()
+        run.status = "running"
+        run.updated_at = _now()
+        return True
 
 
 def mark_step_completed(step_id: str, result: dict[str, Any]) -> None:
@@ -262,22 +286,13 @@ def list_workflow_runs(
             q = q.filter(WorkflowRun.source == source)
         if status:
             q = q.filter(WorkflowRun.status == status)
-        has_context_filter = bool(device_id or patrol_batch_id)
-        fetch_limit = 1000 if has_context_filter else max(1, min(limit, 200))
-        runs = q.limit(fetch_limit).all()
         if device_id:
-            runs = [
-                run
-                for run in runs
-                if str((run.context or {}).get("device_id") or "") == str(device_id)
-            ]
+            q = q.filter(WorkflowRun.context["device_id"].as_string() == str(device_id))
         if patrol_batch_id:
-            runs = [
-                run
-                for run in runs
-                if str((run.context or {}).get("patrol_batch_id") or "") == str(patrol_batch_id)
-            ]
-        runs = runs[: max(1, min(limit, 200))]
+            q = q.filter(
+                WorkflowRun.context["patrol_batch_id"].as_string() == str(patrol_batch_id)
+            )
+        runs = q.limit(max(1, min(limit, 200))).all()
         for r in runs:
             db.expunge(r)
         return runs

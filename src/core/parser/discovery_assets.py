@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .repository import ParserRepository
+from .repository import ParserMetadataRepository, ParserTemplateRepository
 
 BUILTIN_ALIASES = {
     "display cpu-us": "display cpu",
@@ -24,9 +24,10 @@ BUILTIN_ALIASES = {
 
 
 def bootstrap_discovery_assets() -> dict[str, Any]:
-    repository = ParserRepository()
+    metadata_repository = ParserMetadataRepository()
+    template_repository = ParserTemplateRepository()
     for alias, canonical in BUILTIN_ALIASES.items():
-        repository.upsert_command_alias(
+        metadata_repository.upsert_command_alias(
             alias=alias,
             canonical_command=canonical,
             confidence=1.0,
@@ -35,10 +36,10 @@ def bootstrap_discovery_assets() -> dict[str, Any]:
 
     profiles = 0
     signatures = 0
-    for template in repository.list_templates(status="active"):
+    for template in template_repository.list_templates(status="active"):
         if not template.get("model"):
             continue
-        repository.upsert_device_profile(
+        metadata_repository.upsert_device_profile(
             vendor=template["vendor"],
             model=template["model"],
             family=template.get("family"),
@@ -50,7 +51,7 @@ def bootstrap_discovery_assets() -> dict[str, Any]:
         )
         profiles += 1
         if template.get("category") == "device_version":
-            repository.register_identity_signature(
+            metadata_repository.register_identity_signature(
                 vendor=template["vendor"],
                 model=template["model"],
                 family=template.get("family"),

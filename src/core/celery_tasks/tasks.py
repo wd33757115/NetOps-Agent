@@ -16,18 +16,46 @@ sys.path.insert(0, BASE_DIR)
 from src.common.config import get_settings
 from src.core.backup.runner import DeviceBackupRunner, DeviceBackupRunRequest
 from src.core.logging import get_logger
-from src.core.patrol.repository import PatrolRepository
-from src.core.patrol.runner import (
-    DevicePatrolRunner,
-    DevicePatrolRunRequest,
-    PatrolPlatformError,
-)
+from src.core.patrol.handlers import ExecutePatrolCommand, ExecutePatrolHandler
+from src.core.patrol.run_coordinator import PatrolRunCoordinator
+from src.core.patrol.runner import PatrolPlatformError
 from src.core.patrol.runner import (
     persist_patrol_snapshots as _persist_patrol_snapshots,  # noqa: F401
 )
 
 settings = get_settings()
 log = get_logger(__name__)
+
+
+@celery.task(name="materialize_patrol_batch_report", max_retries=2, retry_backoff=5)
+def materialize_patrol_batch_report_task(patrol_batch_id: str) -> dict[str, Any]:
+    from src.core.patrol.patrol_report_service import PatrolReportService
+    from src.core.workflows.patrol_batch_projection import (
+        MaterializePatrolBatchReportHandler,
+    )
+    from src.core.workflows.patrol_batch_service import build_patrol_batch_summary
+    from src.core.workflows.repository import list_workflow_runs
+    from src.infrastructure.storage.minio_client import get_minio_storage
+
+    runs = list_workflow_runs(
+        limit=1000,
+        template_name="patrol-change-event",
+        source="device-management",
+        patrol_batch_id=patrol_batch_id,
+    )
+    if not runs:
+        return {"success": False, "patrol_batch_id": patrol_batch_id, "reason": "not_found"}
+    markdown = MaterializePatrolBatchReportHandler(
+        summary_builder=build_patrol_batch_summary,
+        renderer=PatrolReportService.render_markdown,
+        object_storage=get_minio_storage(),
+    ).handle(patrol_batch_id, runs)
+    return {
+        "success": True,
+        "patrol_batch_id": patrol_batch_id,
+        "run_count": len(runs),
+        "report_bytes": len(markdown.encode("utf-8")),
+    }
 
 
 def _legacy_skill_execute(skill_name: str, **params: Any) -> dict[str, Any]:
@@ -109,43 +137,12 @@ def execute_config_backup_task(
 
 
 def _patrol_redelivery_decision(request: Any, *, mode: str = "production") -> dict[str, Any]:
-    retries = int(getattr(request, "retries", 0) or 0)
-    delivery_info = dict(getattr(request, "delivery_info", None) or {})
-    if not delivery_info.get("redelivered"):
-        return {
-            "action": "execute",
-            "attempt_number": retries,
-            "run_id": None,
-            "owner_token": uuid.uuid4().hex,
-        }
-    task_id = str(getattr(request, "id", "") or "")
-    if not task_id:
-        return {
-            "action": "execute",
-            "attempt_number": max(1, retries),
-            "run_id": None,
-            "owner_token": uuid.uuid4().hex,
-        }
-    return PatrolRepository().prepare_redelivery_attempt(
-        f"patrol-{task_id}",
-        worker_id=getattr(request, "hostname", None),
-        mode=mode,
-    ).to_dict()
+    return PatrolRunCoordinator().prepare_delivery(request, mode=mode)
 
 
 def _patrol_attempt_number(request: Any) -> int:
     """Compatibility helper for callers that only need the allocated number."""
-    retries = int(getattr(request, "retries", 0) or 0)
-    delivery_info = dict(getattr(request, "delivery_info", None) or {})
-    if not delivery_info.get("redelivered"):
-        return retries
-    task_id = str(getattr(request, "id", "") or "")
-    if not task_id:
-        return max(1, retries)
-    decision = PatrolRepository().prepare_redelivery_attempt(f"patrol-{task_id}")
-    if hasattr(decision, "attempt_number"):
-        return int(decision.attempt_number)
-    return int(decision)
+    return PatrolRunCoordinator().attempt_number(request)
 
 
 @celery.task(
@@ -187,8 +184,8 @@ def execute_device_patrol_task(
                 "redelivery_skipped": True,
                 "reason": redelivery.get("reason"),
             }
-        result = DevicePatrolRunner().run(
-            DevicePatrolRunRequest(
+        result = ExecutePatrolHandler().handle(
+            ExecutePatrolCommand(
                 filter_params=filter_params,
                 ticket_id=ticket_id,
                 save_baseline=save_baseline,
@@ -201,12 +198,6 @@ def execute_device_patrol_task(
                 owner_token=str(redelivery.get("owner_token") or uuid.uuid4().hex),
             )
         )
-        snapshot_run_id = result.get("snapshot_run_id")
-        if snapshot_run_id:
-            PatrolRepository().mark_celery_task_completed(
-                str(snapshot_run_id),
-                owner_token=str(redelivery.get("owner_token") or "") or None,
-            )
         execution_time_ms = int((datetime.now() - execution_start).total_seconds() * 1000)
         log.info(
             "device_patrol_task_completed",

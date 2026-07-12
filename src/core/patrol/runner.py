@@ -54,14 +54,17 @@ def persist_patrol_snapshots(
     create_run: bool = True,
     finalize_run: bool = True,
     run_owner_token: str | None = None,
+    parser_runtime_bundle: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Import completed patrol raw-output files into the snapshot store."""
     from src.core.patrol.raw_importer import import_raw_capture
-    from src.core.patrol.repository import PatrolRepository
+    from src.core.patrol.repository import PatrolCollectionResultRepository
+    from src.core.patrol.run_repository import PatrolRunRepository
 
-    repository = PatrolRepository()
+    run_repository = PatrolRunRepository()
+    collection_repository = PatrolCollectionResultRepository()
     if create_run:
-        repository.create_run(
+        run_repository.create_run(
             run_id=snapshot_run_id,
             source="device-patrol",
             mode=mode,
@@ -69,6 +72,9 @@ def persist_patrol_snapshots(
                 "ticket_id": ticket_id,
                 "execution_plan_id": execution_plan_id,
                 "requested_device_count": len(details),
+                "parser_runtime_bundle_digest": (
+                    parser_runtime_bundle.get("digest") if parser_runtime_bundle else None
+                ),
             },
             run_purpose=run_purpose,
             started_at=started_at,
@@ -104,7 +110,7 @@ def persist_patrol_snapshots(
                     item_status = (
                         str(item.get("status") or "failed") if isinstance(item, dict) else "failed"
                     )
-                    repository.save_collection_result(
+                    collection_repository.save_collection_result(
                         run_id=snapshot_run_id,
                         inventory_device_id=detail.get("inventory_device_id"),
                         device_id=state_device_id,
@@ -149,6 +155,7 @@ def persist_patrol_snapshots(
                 inventory_device_id=detail.get("inventory_device_id"),
                 collector_complete=detail.get("collection_status") == "complete",
                 command_collection_statuses=command_statuses,
+                parser_runtime_bundle=parser_runtime_bundle,
                 finalize_run=False,
             )
             imported_commands += int(imported.get("command_count") or 0)
@@ -178,7 +185,7 @@ def persist_patrol_snapshots(
                 command = str(command_result.get("command") or "")
                 if command_result.get("status") == "complete":
                     continue
-                repository.save_collection_result(
+                collection_repository.save_collection_result(
                     run_id=snapshot_run_id,
                     inventory_device_id=detail.get("inventory_device_id"),
                     device_id=state_device_id,
@@ -219,7 +226,7 @@ def persist_patrol_snapshots(
         else "partial"
     )
     if finalize_run:
-        repository.finish_run(
+        run_repository.finish_run(
             snapshot_run_id,
             collection_status=collection_status,
             parser_readiness_status=parser_readiness_status,
@@ -320,10 +327,12 @@ class DevicePatrolRunner:
         tools_loader: Callable[[], Any] | None = None,
         minio_storage_factory: Callable[[], Any] | None = None,
         snapshot_persister: Callable[..., dict[str, Any]] = persist_patrol_snapshots,
+        runtime_bundle_factory: Callable[[Any], Any | None] | None = None,
     ) -> None:
         self._tools_loader = tools_loader
         self._minio_storage_factory = minio_storage_factory or get_minio_storage
         self._snapshot_persister = snapshot_persister
+        self._runtime_bundle_factory = runtime_bundle_factory or _build_parser_runtime_bundle
 
     def run(self, request: DevicePatrolRunRequest) -> dict[str, Any]:
         execution_start = datetime.now(timezone.utc)
@@ -354,17 +363,26 @@ class DevicePatrolRunner:
         )
         run_purpose = "baseline" if request.save_baseline else "scheduled_patrol"
         streaming_persistence = self._snapshot_persister is persist_patrol_snapshots
+        runtime_bundle = (
+            self._runtime_bundle_factory(context.execution_plan)
+            if streaming_persistence and context.execution_plan is not None
+            else None
+        )
+        runtime_bundle_data = runtime_bundle.to_dict() if runtime_bundle is not None else None
         owner_token = request.owner_token or uuid.uuid4().hex
         if streaming_persistence:
-            from src.core.patrol.repository import PatrolRepository
+            from src.core.patrol.run_repository import PatrolRunRepository
 
-            PatrolRepository().create_run(
+            PatrolRunRepository().create_run(
                 run_id=snapshot_run_id,
                 source="device-patrol",
                 mode=mode,
                 metadata={
                     "ticket_id": request.ticket_id,
                     "execution_plan_id": request.execution_plan_id,
+                    "parser_runtime_bundle_digest": (
+                        runtime_bundle.digest if runtime_bundle is not None else None
+                    ),
                 },
                 run_purpose=run_purpose,
                 started_at=collection_started_at,
@@ -387,8 +405,9 @@ class DevicePatrolRunner:
                     create_run=False,
                     finalize_run=False,
                     run_owner_token=owner_token,
+                    parser_runtime_bundle=runtime_bundle_data,
                 )
-                PatrolRepository().touch_run(
+                PatrolRunRepository().touch_run(
                     snapshot_run_id,
                     lease_seconds=settings.PATROL_RUN_LEASE_SECONDS,
                     worker_id=request.worker_id,
@@ -421,8 +440,9 @@ class DevicePatrolRunner:
                     create_run=False,
                     finalize_run=False,
                     run_owner_token=owner_token,
+                    parser_runtime_bundle=runtime_bundle_data,
                 )
-                PatrolRepository().touch_run(
+                PatrolRunRepository().touch_run(
                     snapshot_run_id,
                     lease_seconds=settings.PATROL_RUN_LEASE_SECONDS,
                     worker_id=request.worker_id,
@@ -453,9 +473,9 @@ class DevicePatrolRunner:
             )
         except Exception as exc:
             if streaming_persistence:
-                from src.core.patrol.repository import PatrolRepository
+                from src.core.patrol.run_repository import PatrolRunRepository
 
-                PatrolRepository().finish_run(
+                PatrolRunRepository().finish_run(
                     snapshot_run_id,
                     collection_status="failed",
                     analysis_status="failed",
@@ -479,15 +499,16 @@ class DevicePatrolRunner:
                 execution_plan_id=request.execution_plan_id,
                 run_purpose=run_purpose,
                 started_at=collection_started_at,
+                parser_runtime_bundle=runtime_bundle_data,
             )
         raw_outputs_url = self._archive_raw_outputs(
             output_files=result.output_files or [],
             ticket_id=request.ticket_id,
         )
         if streaming_persistence:
-            from src.core.patrol.repository import PatrolRepository
+            from src.core.patrol.run_repository import PatrolRunRepository
 
-            PatrolRepository().finish_run(
+            PatrolRunRepository().finish_run(
                 snapshot_run_id,
                 collection_status=str(snapshot_result["collection_status"]),
                 analysis_status=(
@@ -526,12 +547,14 @@ class DevicePatrolRunner:
                 "status": "success",
                 "data_quality_status": snapshot_result.get("snapshot_health", "ready"),
                 "execution_plan_id": request.execution_plan_id,
+                "parser_runtime_bundle_digest": (
+                    runtime_bundle.digest if runtime_bundle is not None else None
+                ),
                 "raw_outputs_url": raw_outputs_url,
                 "raw_outputs_archive": raw_outputs_url,
                 **snapshot_result,
             },
         )
-
     def _archive_raw_outputs(
         self,
         *,
@@ -544,3 +567,34 @@ class DevicePatrolRunner:
             minio_storage_factory=self._minio_storage_factory,
             spec=PATROL_ARCHIVE_SPEC,
         )
+
+
+def _build_parser_runtime_bundle(execution_plan: Any):
+    """Resolve Parser assets once before an explicit device plan starts."""
+    from src.core.device_ops.repository import DeviceRepository
+    from src.core.parser.identity import DeviceIdentity
+    from src.core.parser.runtime_bundle import ParserRuntimeBundle
+
+    matches = DeviceRepository().get_devices_by_filter(
+        device_id=str(execution_plan.device_id),
+        status=None,
+    )
+    if not matches:
+        return None
+    device = matches[0]
+    vendor = str(device.get("vendor") or "").strip()
+    model = str(device.get("model") or "").strip()
+    if not vendor or not model:
+        return None
+    identity = DeviceIdentity(
+        vendor=vendor,
+        model=model,
+        family=str(device.get("family") or "").strip() or None,
+        confidence=1.0,
+        evidence_text="inventory execution plan",
+        source="inventory",
+    )
+    return ParserRuntimeBundle.build(
+        identity=identity,
+        commands=execution_plan.command_texts(),
+    )

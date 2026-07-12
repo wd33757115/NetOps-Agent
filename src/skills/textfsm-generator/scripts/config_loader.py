@@ -66,10 +66,10 @@ def load_command_mapping(path: Path | None = None) -> list[CommandMapping]:
                 )
     if mappings:
         return mappings
-    from src.core.parser.repository import ParserRepository
+    from src.core.parser.repository import ParserTemplateRepository
 
     seen: set[tuple[str, str, str]] = set()
-    for template in ParserRepository().list_templates(status="active"):
+    for template in ParserTemplateRepository().list_templates(status="active"):
         key = (
             str(template["vendor"]),
             str(template["profile"]),

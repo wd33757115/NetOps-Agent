@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from src.core.patrol.change_detector import detect_changes_from_params
+from src.core.patrol.handlers import DetectChangesHandler
 from src.core.patrol.change_event_repository import ChangeEventRepository
 from src.core.patrol.repository import PatrolRepository
 
@@ -81,7 +81,7 @@ def build_run_quality_summary(run_id: str) -> dict[str, Any]:
 def build_human_diff(params: dict[str, Any]) -> dict[str, Any]:
     effective = dict(params)
     effective.setdefault("persist", False)
-    result = detect_changes_from_params(effective)
+    result = DetectChangesHandler().handle(effective)
     return {
         **result,
         "report_type": "patrol_diff",

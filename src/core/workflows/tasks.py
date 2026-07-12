@@ -13,7 +13,13 @@ from celery import chord
 from src.core.celery_tasks.celery_app import celery
 from src.core.workflows.engine import WorkflowEngine
 from src.core.workflows.registry import find_step_template, get_template
-from src.core.workflows.repository import get_workflow_run, list_workflow_steps, mark_step_failed, mark_step_running
+from src.core.workflows.repository import (
+    TERMINAL_WORKFLOW_STATUSES,
+    get_workflow_run,
+    list_workflow_steps,
+    mark_step_failed,
+    mark_step_running,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +27,11 @@ logger = logging.getLogger(__name__)
 @celery.task(bind=True, name="execute_skill_task")
 def execute_skill_task(self, skill_name: str, **params):
     """通用 Skill 执行 Celery 任务。"""
-    from src.core.parser.repository import ParserJobStateError, ParserRepository
+    from src.core.parser.repository import ParserJobRepository, ParserJobStateError
     from src.core.skills.executor import SkillExecutionError, execute_skill
 
     job_id = str(params.get("job_id") or "") if skill_name == "textfsm-generator" else ""
-    repository = ParserRepository() if job_id else None
+    repository = ParserJobRepository() if job_id else None
     if repository:
         try:
             repository.transition_job_status(job_id, "running")
@@ -65,9 +71,7 @@ def execute_skill_task(self, skill_name: str, **params):
         repository.transition_job_status(
             job_id,
             "succeeded" if success else "failed",
-            None
-            if success
-            else str((result or {}).get("error") or (result or {}).get("message")),
+            None if success else str((result or {}).get("error") or (result or {}).get("message")),
             failure_code=None if success else "generator_failed",
         )
     return result
@@ -108,7 +112,12 @@ def _run_subworkflow_step(run_id: str, step_index: int, step_tpl) -> dict:
         child = get_workflow_run(child_run_id)
 
     if not child:
-        return {"success": False, "error": "子 Workflow 不存在", "step_index": step_index, "child_run_id": child_run_id}
+        return {
+            "success": False,
+            "error": "子 Workflow 不存在",
+            "step_index": step_index,
+            "child_run_id": child_run_id,
+        }
     if child.status == "failed":
         return {
             "success": False,
@@ -156,7 +165,11 @@ def _run_workflow_step(run_id: str, step_index: int) -> dict:
     step_rec = steps[step_index]
     step_tpl = find_step_template(template, step_rec.step_name)
     if not step_tpl:
-        return {"success": False, "error": f"unknown step: {step_rec.step_name}", "step_index": step_index}
+        return {
+            "success": False,
+            "error": f"unknown step: {step_rec.step_name}",
+            "step_index": step_index,
+        }
 
     if step_tpl.subworkflow:
         return _run_subworkflow_step(run_id, step_index, step_tpl)
@@ -166,8 +179,24 @@ def _run_workflow_step(run_id: str, step_index: int) -> dict:
         result = execute_skill_task.run(skill_name=step_tpl.skill_name, **params)
         return {**(result or {}), "step_index": step_index}
     except Exception as exc:
-        logger.exception("Workflow 步骤执行异常 run=%s step=%s skill=%s", run_id, step_index, step_tpl.skill_name)
+        logger.exception(
+            "Workflow 步骤执行异常 run=%s step=%s skill=%s", run_id, step_index, step_tpl.skill_name
+        )
         return {"success": False, "error": str(exc), "step_index": step_index}
+
+
+def _workflow_step_queue(run_id: str, step_index: int) -> str:
+    from src.core.skills.celery_routing import resolve_skill_celery_queue
+
+    run = get_workflow_run(run_id)
+    template = get_template(run.template_name) if run else None
+    steps = list_workflow_steps(run_id)
+    if not template or step_index >= len(steps):
+        return "netops.default"
+    step_template = find_step_template(template, steps[step_index].step_name)
+    return (
+        resolve_skill_celery_queue(step_template.skill_name) if step_template else "netops.default"
+    )
 
 
 @celery.task(bind=True, name="execute_workflow_step_only")
@@ -214,9 +243,14 @@ def dispatch_parallel_batch_task(self, run_id: str, indices: list[int]):
     """并行调度同组步骤。"""
     if not indices:
         return {"success": False, "error": "empty batch"}
-    header = [execute_workflow_step_only.s(run_id, idx) for idx in indices]
+    queues = [_workflow_step_queue(run_id, idx) for idx in indices]
+    header = [
+        execute_workflow_step_only.s(run_id, idx).set(queue=queue)
+        for idx, queue in zip(indices, queues, strict=True)
+    ]
     next_index = max(indices) + 1
-    chord(header)(parallel_batch_complete.s(run_id, next_index))
+    callback_queue = queues[0] if len(set(queues)) == 1 else "netops.default"
+    chord(header)(parallel_batch_complete.s(run_id, next_index).set(queue=callback_queue))
     return {"success": True, "batch": indices}
 
 
@@ -226,13 +260,30 @@ def dispatch_workflow_step_task(self, run_id: str, step_index: int):
     run = get_workflow_run(run_id)
     if not run:
         return {"success": False, "error": "workflow run not found"}
+    if run.status in TERMINAL_WORKFLOW_STATUSES:
+        logger.warning(
+            "Ignoring late workflow task run=%s step=%s status=%s",
+            run_id,
+            step_index,
+            run.status,
+        )
+        return {
+            "success": False,
+            "ignored": True,
+            "error": f"workflow already {run.status}",
+        }
 
     steps = list_workflow_steps(run_id)
     if step_index >= len(steps):
         return {"success": False, "error": "invalid step"}
 
     step_rec = steps[step_index]
-    mark_step_running(step_rec.id, self.request.id)
+    if not mark_step_running(step_rec.id, self.request.id):
+        return {
+            "success": False,
+            "ignored": True,
+            "error": "workflow reached a terminal state before task execution",
+        }
 
     result = _run_workflow_step(run_id, step_index)
     try:
@@ -241,5 +292,7 @@ def dispatch_workflow_step_task(self, run_id: str, step_index: int):
     except Exception as exc:
         logger.exception("Workflow 步骤完成处理异常 run=%s step=%s", run_id, step_index)
         mark_step_failed(step_rec.id, str(exc))
-        WorkflowEngine.handle_step_complete(run_id, step_index, {"success": False, "error": str(exc)})
+        WorkflowEngine.handle_step_complete(
+            run_id, step_index, {"success": False, "error": str(exc)}
+        )
         raise

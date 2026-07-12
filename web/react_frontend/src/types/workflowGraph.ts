@@ -307,7 +307,6 @@ export function appendSkillNode(
     target: END_ID,
   })
 
-  const endNode = graph.nodes.find((n) => n.id === END_ID)
   const nodes = graph.nodes.map((n) =>
     n.id === END_ID ? { ...n, position: { ...n.position, y: y + 120 } } : n,
   )

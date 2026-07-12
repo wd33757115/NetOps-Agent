@@ -10,7 +10,7 @@ from typing import Any
 
 from src.core.observation import ObservationContractRepository
 from src.core.parser.key_contract import EntityKeyError, build_entity_key
-from src.core.parser.repository import ParserRepository
+from src.core.parser.repository import ParserTemplateRepository
 from src.core.state.domain import StateObservation
 from src.core.state.repository import StateRepository
 
@@ -107,7 +107,7 @@ def _template_contract(
     )
     if contract:
         return contract
-    template = ParserRepository().get_template(template_id)
+    template = ParserTemplateRepository().get_template(template_id)
     if not template:
         if contract_version is not None:
             raise ObservationContractVersionError(

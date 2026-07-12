@@ -107,6 +107,7 @@ const WorkflowRunMonitor: React.FC<WorkflowRunMonitorProps> = ({ runId, onClose,
     () => workflowApi.getRun(runId!),
     { enabled: !!runId, refetchOnWindowFocus: false },
   )
+  const runStatus = run?.status
 
   const timeline = useMemo(() => {
     const base = run?.timeline || []
@@ -121,21 +122,21 @@ const WorkflowRunMonitor: React.FC<WorkflowRunMonitorProps> = ({ runId, onClose,
   }, [run?.timeline, liveEvents])
 
   useEffect(() => {
-    if (!runId || !run) return undefined
-    if (run.status === 'completed' || run.status === 'failed') return undefined
+    if (!runId || !runStatus) return undefined
+    if (runStatus === 'completed' || runStatus === 'failed') return undefined
 
     const timer = window.setInterval(() => {
       refetch()
     }, 2500)
     return () => window.clearInterval(timer)
-  }, [runId, run?.status, refetch])
+  }, [runId, runStatus, refetch])
 
   useEffect(() => {
-    if (!runId || !run) return undefined
-    if (run.status === 'completed' || run.status === 'failed') return undefined
+    if (!runId || !runStatus) return undefined
+    if (runStatus === 'completed' || runStatus === 'failed') return undefined
 
     const url = workflowApi.getRunEventsStreamUrl(runId)
-    const es = new EventSource(url, { withCredentials: true } as EventSourceInit)
+    const es = new EventSource(url, { withCredentials: true })
 
     const onTimeline = (e: MessageEvent) => {
       try {
@@ -156,7 +157,7 @@ const WorkflowRunMonitor: React.FC<WorkflowRunMonitorProps> = ({ runId, onClose,
     es.onerror = () => es.close()
 
     return () => es.close()
-  }, [runId, run?.status, refetch])
+  }, [runId, runStatus, refetch])
 
   if (!runId) return null
 

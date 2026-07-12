@@ -156,13 +156,16 @@ def test_publish_parser_outbox_seeds_rule_asset_generation(monkeypatch):
         claim_token = "claim-1"
         payload_json = {"template_id": "template-1"}
 
-    class FakeRepository:
-        def claim_pending_outbox(self):
+    class FakeOutboxRepository:
+        def claim_pending(self):
             return [FakeOutboxRow()]
 
-        def mark_outbox_published(self, event_id, *, claim_token):
+        def mark_published(self, event_id, *, claim_token):
             assert event_id == "event-1"
             assert claim_token == "claim-1"
+
+    class FakeRepository:
+        pass
 
     class FakeSeedService:
         def __init__(self, *, parser_repository):
@@ -172,7 +175,8 @@ def test_publish_parser_outbox_seeds_rule_asset_generation(monkeypatch):
             assert template_id == "template-1"
             return {"success": True, "created": True, "job": {"id": "job-1"}}
 
-    monkeypatch.setattr(parser_tasks, "ParserRepository", FakeRepository)
+    monkeypatch.setattr(parser_tasks, "ParserTemplateRepository", FakeRepository)
+    monkeypatch.setattr(parser_tasks, "ParserOutboxRepository", FakeOutboxRepository)
     monkeypatch.setattr(parser_tasks, "RuleAssetTemplateActivationService", FakeSeedService)
     monkeypatch.setattr(parser_tasks.EventBus, "publish", lambda *_args, **_kwargs: "msg-1")
 
@@ -194,15 +198,18 @@ def test_parser_outbox_releases_claim_when_rule_seed_fails(monkeypatch):
         claim_token = "claim-1"
         payload_json = {"template_id": "template-1"}
 
-    class FakeRepository:
-        def claim_pending_outbox(self):
+    class FakeOutboxRepository:
+        def claim_pending(self):
             return [FakeOutboxRow()]
 
-        def release_outbox_claim(self, event_id, *, claim_token, error):
+        def release(self, event_id, *, claim_token, error):
             released.append((event_id, claim_token, error))
 
-        def mark_outbox_published(self, *_args, **_kwargs):
+        def mark_published(self, *_args, **_kwargs):
             raise AssertionError("failed rule seed must remain pending")
+
+    class FakeRepository:
+        pass
 
     class FakeSeedService:
         def __init__(self, *, parser_repository):
@@ -211,7 +218,8 @@ def test_parser_outbox_releases_claim_when_rule_seed_fails(monkeypatch):
         def seed_from_template(self, _template_id):
             raise RuntimeError("database unavailable")
 
-    monkeypatch.setattr(parser_tasks, "ParserRepository", FakeRepository)
+    monkeypatch.setattr(parser_tasks, "ParserTemplateRepository", FakeRepository)
+    monkeypatch.setattr(parser_tasks, "ParserOutboxRepository", FakeOutboxRepository)
     monkeypatch.setattr(parser_tasks, "RuleAssetTemplateActivationService", FakeSeedService)
     monkeypatch.setattr(parser_tasks.EventBus, "publish", lambda *_args, **_kwargs: "msg-1")
 

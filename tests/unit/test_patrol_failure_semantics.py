@@ -264,12 +264,12 @@ def test_patrol_batch_is_bounded_and_isolates_device_lease_failure():
 def test_patrol_worker_redelivery_allocates_new_attempt(monkeypatch):
     calls = []
 
-    class FakeRepository:
-        def prepare_redelivery_attempt(self, logical_run_id):
-            calls.append(logical_run_id)
+    class FakeCoordinator:
+        def attempt_number(self, request):
+            calls.append(request.id)
             return 4
 
-    monkeypatch.setattr(celery_tasks, "PatrolRepository", FakeRepository)
+    monkeypatch.setattr(celery_tasks, "PatrolRunCoordinator", FakeCoordinator)
     request = SimpleNamespace(
         id="task-1",
         retries=0,
@@ -277,7 +277,7 @@ def test_patrol_worker_redelivery_allocates_new_attempt(monkeypatch):
     )
 
     assert celery_tasks._patrol_attempt_number(request) == 4
-    assert calls == ["patrol-task-1"]
+    assert calls == ["task-1"]
     assert celery_tasks.execute_device_patrol_task.acks_late is True
     assert celery_tasks.execute_device_patrol_task.reject_on_worker_lost is True
 

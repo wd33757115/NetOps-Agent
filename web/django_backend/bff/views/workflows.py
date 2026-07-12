@@ -7,8 +7,8 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
 from ..decorators import require_jwt, require_role
-from ..sync_async import sync_bff_view
 from ..proxy_client import TASK_TIMEOUT, proxy_binary_to_fastapi, proxy_to_fastapi
+from ..sync_async import sync_bff_view
 from ._helpers import forward_client_headers, parse_json_body
 
 logger = logging.getLogger("bff.views.workflows")
@@ -394,6 +394,21 @@ async def proxy_patrol_batch_summary(
     )
 
 
+@csrf_exempt
+@require_jwt
+@sync_bff_view
+async def proxy_patrol_batch_devices(
+    request: HttpRequest, patrol_batch_id: str
+) -> JsonResponse:
+    return await proxy_to_fastapi(
+        method="GET",
+        fastapi_path=f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/devices",
+        request_id=request.bff_request_id,
+        params=dict(request.GET.items()),
+        extra_headers=forward_client_headers(request),
+    )
+
+
 async def _proxy_patrol_batch_action(
     request: HttpRequest,
     patrol_batch_id: str,
@@ -451,6 +466,45 @@ async def proxy_patrol_batch_export(request: HttpRequest, patrol_batch_id: str):
     return await proxy_binary_to_fastapi(
         method="GET",
         fastapi_path=f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/export.csv",
+        request_id=request.bff_request_id,
+        timeout=TASK_TIMEOUT,
+        extra_headers=forward_client_headers(request),
+    )
+
+
+@csrf_exempt
+@require_jwt
+@sync_bff_view
+async def proxy_patrol_batch_raw_data(request: HttpRequest, patrol_batch_id: str):
+    return await proxy_binary_to_fastapi(
+        method="GET",
+        fastapi_path=f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/raw-data.jsonl",
+        request_id=request.bff_request_id,
+        timeout=TASK_TIMEOUT,
+        extra_headers=forward_client_headers(request),
+    )
+
+
+@csrf_exempt
+@require_jwt
+@sync_bff_view
+async def proxy_patrol_batch_raw_cli(request: HttpRequest, patrol_batch_id: str):
+    return await proxy_binary_to_fastapi(
+        method="GET",
+        fastapi_path=f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/raw-cli.zip",
+        request_id=request.bff_request_id,
+        timeout=TASK_TIMEOUT,
+        extra_headers=forward_client_headers(request),
+    )
+
+
+@csrf_exempt
+@require_jwt
+@sync_bff_view
+async def proxy_patrol_batch_events(request: HttpRequest, patrol_batch_id: str):
+    return await proxy_binary_to_fastapi(
+        method="GET",
+        fastapi_path=f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/events.csv",
         request_id=request.bff_request_id,
         timeout=TASK_TIMEOUT,
         extra_headers=forward_client_headers(request),

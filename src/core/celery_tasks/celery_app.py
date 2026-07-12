@@ -50,7 +50,7 @@ celery = Celery(
         "src.core.workflows.tasks",
         "src.core.parser.tasks",
         "src.core.patrol.tasks",
-    ]
+    ],
 )
 
 _celery_conf: dict = {
@@ -70,8 +70,15 @@ _celery_conf: dict = {
     # Phase 2：按 Skill domain 路由到独立队列（Worker 需监听对应 queue）
     "task_routes": {
         "src.core.celery_tasks.tasks.execute_firewall_policy_task": {"queue": "netops.firewall"},
-        "src.core.celery_tasks.tasks.execute_config_backup_task": {"queue": "netops.device"},
-        "src.core.celery_tasks.tasks.execute_device_patrol_task": {"queue": "netops.device"},
+        "src.core.celery_tasks.tasks.execute_config_backup_task": {"queue": "netops.patrol"},
+        "src.core.celery_tasks.tasks.execute_device_patrol_task": {"queue": "netops.patrol"},
+        "materialize_patrol_batch_report": {"queue": "netops.patrol"},
+        "publish_network_event_outbox": {"queue": "netops.patrol"},
+        "reconcile_patrol_runs": {"queue": "netops.patrol"},
+        "dispatch_parser_jobs": {"queue": "netops.ai"},
+        "publish_parser_outbox": {"queue": "netops.ai"},
+        "sanitize_parser_samples": {"queue": "netops.ai"},
+        "reconcile_parser_jobs": {"queue": "netops.ai"},
     },
     "task_default_queue": "netops.default",
 }
@@ -94,32 +101,32 @@ celery.conf.beat_schedule = {
     "dispatch-parser-jobs": {
         "task": "dispatch_parser_jobs",
         "schedule": 30.0,
-        "options": {"queue": "netops.default"},
+        "options": {"queue": "netops.ai"},
     },
     "publish-parser-outbox": {
         "task": "publish_parser_outbox",
         "schedule": 10.0,
-        "options": {"queue": "netops.default"},
+        "options": {"queue": "netops.ai"},
     },
     "sanitize-parser-samples": {
         "task": "sanitize_parser_samples",
         "schedule": 15.0,
-        "options": {"queue": "netops.default"},
+        "options": {"queue": "netops.ai"},
     },
     "publish-network-event-outbox": {
         "task": "publish_network_event_outbox",
         "schedule": 5.0,
-        "options": {"queue": "netops.default"},
+        "options": {"queue": "netops.patrol"},
     },
     "reconcile-parser-jobs": {
         "task": "reconcile_parser_jobs",
         "schedule": 60.0,
-        "options": {"queue": "netops.default"},
+        "options": {"queue": "netops.ai"},
     },
     "reconcile-patrol-runs": {
         "task": "reconcile_patrol_runs",
         "schedule": 60.0,
-        "options": {"queue": "netops.default"},
+        "options": {"queue": "netops.patrol"},
     },
 }
 
@@ -127,6 +134,12 @@ celery.conf.beat_schedule = {
 @worker_ready.connect
 def _on_worker_ready(**kwargs):
     """Celery Worker 启动后订阅 Workflow 热重载广播与 EventBus Consumers。"""
+    if settings.CELERY_WORKER_ROLE not in {"all", "control"}:
+        logger.info(
+            "celery_control_consumers_skipped",
+            worker_role=settings.CELERY_WORKER_ROLE,
+        )
+        return
     from src.core.events.worker import start_event_consumers
     from src.core.workflows.reload_bus import start_reload_listener
 
@@ -134,6 +147,7 @@ def _on_worker_ready(**kwargs):
     start_event_consumers()
     logger.info("celery_workflow_reload_listener_started")
     logger.info("celery_event_consumers_started")
+
 
 celery.autodiscover_tasks(["src.core.celery_tasks"])
 

@@ -10,7 +10,12 @@ from src.core.celery_tasks.celery_app import celery
 from src.core.events.bus import EventBus
 from src.core.events.domain_event import DomainEvent
 from src.core.events.streams import STREAM_PARSER
-from src.core.parser.repository import ParserRepository
+from src.core.parser.outbox_repository import ParserOutboxRepository
+from src.core.parser.repository import (
+    ParserJobRepository,
+    ParserSampleRepository,
+    ParserTemplateRepository,
+)
 from src.core.rule_control import RuleAssetTemplateActivationService
 
 
@@ -18,11 +23,11 @@ def dispatch_ready_parser_jobs(
     *,
     job_id: str | None = None,
     limit: int | None = None,
-    repository: ParserRepository | None = None,
+    repository: ParserJobRepository | None = None,
     celery_app=None,
     allow_production: bool = False,
 ) -> dict:
-    repository = repository or ParserRepository()
+    repository = repository or ParserJobRepository()
     celery_app = celery_app or celery
     batch_limit = limit or int(os.getenv("PARSER_DISPATCH_BATCH_SIZE", "1"))
     dispatched: list[str] = []
@@ -42,7 +47,7 @@ def dispatch_ready_parser_jobs(
                     "job_id": job["id"],
                     "publish": True,
                 },
-                queue="netops.default",
+                queue="netops.ai",
                 task_id=task_id,
             )
             dispatched.append(job["id"])
@@ -59,7 +64,7 @@ def dispatch_ready_parser_jobs(
 
 @celery.task(name="dispatch_parser_jobs")
 def dispatch_parser_jobs():
-    repository = ParserRepository()
+    repository = ParserJobRepository()
     if not repository.get_auto_dispatch_enabled():
         return {"dispatched": [], "failed": [], "auto_dispatch_enabled": False}
     return {
@@ -70,12 +75,12 @@ def dispatch_parser_jobs():
 
 @celery.task(name="reconcile_parser_jobs")
 def reconcile_parser_jobs():
-    return {"failed": ParserRepository().fail_stale_jobs()}
+    return {"failed": ParserJobRepository().fail_stale_jobs()}
 
 
 @celery.task(name="sanitize_parser_samples")
 def sanitize_parser_samples(job_id: str | None = None, limit: int = 100):
-    samples = ParserRepository().sanitize_pending_samples(job_id=job_id, limit=limit)
+    samples = ParserSampleRepository().sanitize_pending_samples(job_id=job_id, limit=limit)
     return {
         "processed_count": len(samples),
         "succeeded_count": sum(bool(item.get("success")) for item in samples),
@@ -86,10 +91,11 @@ def sanitize_parser_samples(job_id: str | None = None, limit: int = 100):
 
 @celery.task(name="publish_parser_outbox")
 def publish_parser_outbox():
-    repository = ParserRepository()
+    parser_repository = ParserTemplateRepository()
+    outbox_repository = ParserOutboxRepository()
     published: list[str] = []
     rule_asset_seeds: list[dict] = []
-    for row in repository.claim_pending_outbox():
+    for row in outbox_repository.claim_pending():
         claim_token = str(row.claim_token or "")
         try:
             message_id = EventBus.publish(
@@ -103,7 +109,7 @@ def publish_parser_outbox():
                 ),
             )
         except Exception as exc:
-            repository.release_outbox_claim(row.id, claim_token=claim_token, error=str(exc))
+            outbox_repository.release(row.id, claim_token=claim_token, error=str(exc))
             continue
         if message_id:
             if (
@@ -114,7 +120,7 @@ def publish_parser_outbox():
                     template_id = str((row.payload_json or {}).get("template_id") or "")
                     if template_id:
                         seed_result = RuleAssetTemplateActivationService(
-                            parser_repository=repository,
+                            parser_repository=parser_repository,
                         ).seed_from_template(template_id)
                         rule_asset_seeds.append(seed_result)
                         if not seed_result.get("success"):
@@ -131,16 +137,16 @@ def publish_parser_outbox():
                     }
                     if not rule_asset_seeds or rule_asset_seeds[-1].get("success"):
                         rule_asset_seeds.append(failure)
-                    repository.release_outbox_claim(
+                    outbox_repository.release(
                         row.id,
                         claim_token=claim_token,
                         error=str(exc),
                     )
                     continue
-            repository.mark_outbox_published(row.id, claim_token=claim_token)
+            outbox_repository.mark_published(row.id, claim_token=claim_token)
             published.append(row.id)
         else:
-            repository.release_outbox_claim(
+            outbox_repository.release(
                 row.id,
                 claim_token=claim_token,
                 error="event_bus_publish_returned_none",

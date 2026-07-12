@@ -209,6 +209,8 @@ pnpm-lock.yaml
 # ============================================================
 web/react_frontend/dist/
 web/react_frontend/build/
+web/react_frontend/test-results/
+web/react_frontend/playwright-report/
 web/react_frontend/.env
 web/react_frontend/.env.local
 web/react_frontend/.env.development.local

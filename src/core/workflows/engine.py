@@ -13,15 +13,20 @@ from src.core.logging import get_logger
 from src.core.workflows.artifacts import normalize_step_result
 from src.core.workflows.events import publish_workflow_event
 from src.core.workflows.expression import build_step_env, resolve_inputs, resolve_value
-from src.core.workflows.registry import TEMPLATES, get_template, load_workflows, resolve_active_steps
+from src.core.workflows.registry import (
+    get_template,
+    load_workflows,
+    resolve_active_steps,
+)
 from src.core.workflows.repository import (
+    TERMINAL_WORKFLOW_STATUSES,
     create_notification,
     create_workflow_run,
     create_workflow_steps,
     get_workflow_run,
     list_workflow_steps,
     mark_step_completed,
-    mark_step_running,
+    mark_step_queued,
     update_run_context,
     update_run_status,
     update_run_step_index,
@@ -73,7 +78,9 @@ def _pop_wf_trace(run_id: str):
 
 class WorkflowEngine:
     @classmethod
-    def _publish_workflow_notify(cls, event_type: str, run_id: str, payload: dict[str, Any]) -> bool:
+    def _publish_workflow_notify(
+        cls, event_type: str, run_id: str, payload: dict[str, Any]
+    ) -> bool:
         """发布 Workflow 通知领域事件；返回 True 表示无需再走直接 create_notification。"""
         settings = get_settings()
         if not settings.EVENT_BUS_ENABLED:
@@ -229,7 +236,9 @@ class WorkflowEngine:
             cls._complete_workflow(run_id)
             return
         template = get_template(run.template_name)
-        batch = cls._parallel_batch_indices(template, steps, step_index) if template else [step_index]
+        batch = (
+            cls._parallel_batch_indices(template, steps, step_index) if template else [step_index]
+        )
         if len(batch) > 1:
             cls._dispatch_parallel_batch(run_id, batch)
             return
@@ -237,23 +246,29 @@ class WorkflowEngine:
 
     @classmethod
     def _dispatch_parallel_batch(cls, run_id: str, indices: list[int]) -> None:
+        from src.core.skills.celery_routing import resolve_skill_celery_queue
         from src.core.workflows.tasks import dispatch_parallel_batch_task
 
         run = get_workflow_run(run_id)
         if not run:
             return
         steps = list_workflow_steps(run_id)
-        update_run_step_index(run_id, indices[0])
+        update_run_step_index(run_id, indices[0], status="queued")
         for idx in indices:
             step = steps[idx]
             publish_workflow_event(
                 run_id,
                 step_name=step.step_name,
                 skill_name=step.skill_name,
-                status="running",
-                message=f"并行执行: {step.skill_name}",
+                status="queued",
+                message=f"已进入并行执行队列: {step.skill_name}",
             )
-        dispatch_parallel_batch_task.apply_async(args=[run_id, indices])
+        queues = {resolve_skill_celery_queue(steps[index].skill_name) for index in indices}
+        coordinator_queue = queues.pop() if len(queues) == 1 else "netops.default"
+        dispatch_parallel_batch_task.apply_async(
+            args=[run_id, indices],
+            queue=coordinator_queue,
+        )
         log.info(
             "workflow_parallel_batch_dispatched",
             run_id=run_id,
@@ -263,37 +278,54 @@ class WorkflowEngine:
 
     @classmethod
     def dispatch_step(cls, run_id: str, step_index: int) -> None:
+        from src.core.skills.celery_routing import resolve_skill_celery_queue
         from src.core.workflows.tasks import dispatch_workflow_step_task
 
         run = get_workflow_run(run_id)
-        if not run:
+        if not run or run.status in TERMINAL_WORKFLOW_STATUSES:
             return
         steps = list_workflow_steps(run_id)
         if step_index >= len(steps):
             cls._complete_workflow(run_id)
             return
-        update_run_step_index(run_id, step_index)
+        update_run_step_index(run_id, step_index, status="queued")
         step = steps[step_index]
         publish_workflow_event(
             run_id,
             step_name=step.step_name,
             skill_name=step.skill_name,
-            status="running",
-            message=f"正在执行: {step.skill_name}",
+            status="queued",
+            message=f"已进入执行队列: {step.skill_name}",
         )
-        async_result = dispatch_workflow_step_task.apply_async(args=[run_id, step_index])
-        mark_step_running(step.id, async_result.id)
+        queue = resolve_skill_celery_queue(step.skill_name)
+        async_result = dispatch_workflow_step_task.apply_async(
+            args=[run_id, step_index],
+            queue=queue,
+        )
+        mark_step_queued(step.id, async_result.id)
         log.info(
             "workflow_step_dispatched",
             run_id=run_id,
             step_index=step_index,
             step_name=step.step_name,
             skill_name=step.skill_name,
+            celery_queue=queue,
             celery_task_id=async_result.id,
         )
 
     @classmethod
-    def handle_step_complete(cls, run_id: str, step_index: int, raw_result: dict[str, Any] | None) -> None:
+    def handle_step_complete(
+        cls, run_id: str, step_index: int, raw_result: dict[str, Any] | None
+    ) -> None:
+        run = get_workflow_run(run_id)
+        if not run or run.status in TERMINAL_WORKFLOW_STATUSES:
+            log.warning(
+                "workflow_late_step_completion_ignored",
+                run_id=run_id,
+                step_index=step_index,
+                workflow_status=run.status if run else "missing",
+            )
+            return
         steps = list_workflow_steps(run_id)
         if step_index >= len(steps):
             return
@@ -372,14 +404,18 @@ class WorkflowEngine:
         if next_index >= len(steps):
             cls._complete_workflow(run_id)
             return
-        batch = cls._parallel_batch_indices(template, steps, next_index) if template else [next_index]
+        batch = (
+            cls._parallel_batch_indices(template, steps, next_index) if template else [next_index]
+        )
         if len(batch) > 1:
             cls._dispatch_parallel_batch(run_id, batch)
         else:
             cls.dispatch_step(run_id, next_index)
 
     @classmethod
-    def handle_parallel_batch_complete(cls, run_id: str, results: list[dict[str, Any]], next_index: int) -> None:
+    def handle_parallel_batch_complete(
+        cls, run_id: str, results: list[dict[str, Any]], next_index: int
+    ) -> None:
         """并行批完成后继续调度或标记失败。"""
         for item in results or []:
             if not item.get("success", True):
@@ -400,7 +436,9 @@ class WorkflowEngine:
         if next_index >= len(steps):
             cls._complete_workflow(run_id)
             return
-        batch = cls._parallel_batch_indices(template, steps, next_index) if template else [next_index]
+        batch = (
+            cls._parallel_batch_indices(template, steps, next_index) if template else [next_index]
+        )
         if len(batch) > 1:
             cls._dispatch_parallel_batch(run_id, batch)
         else:
@@ -428,7 +466,9 @@ class WorkflowEngine:
             step_records=steps,
             current_step_index=len(steps),
         )
-        from src.core.workflows.artifacts import collect_download_links, notification_download_payload
+        from src.core.workflows.artifacts import (
+            collect_download_links,
+        )
 
         publish_workflow_event(
             run_id,
@@ -439,8 +479,26 @@ class WorkflowEngine:
                 "langfuse_trace_id": (run.context or {}).get("langfuse_trace_id"),
             },
         )
-        cls._finish_trace(run_id, "completed", message, output={"artifacts": list(artifacts.keys())})
+        cls._finish_trace(
+            run_id, "completed", message, output={"artifacts": list(artifacts.keys())}
+        )
         cls._notify_success(run_id, template, env, artifacts)
+        context = dict(run.context or {})
+        patrol_batch_id = str(context.get("patrol_batch_id") or "").strip()
+        if run.template_name == "patrol-change-event" and patrol_batch_id:
+            try:
+                from src.core.celery_tasks.tasks import (
+                    materialize_patrol_batch_report_task,
+                )
+
+                materialize_patrol_batch_report_task.delay(patrol_batch_id)
+            except Exception as exc:
+                log.warning(
+                    "patrol_batch_report_materialization_dispatch_failed",
+                    run_id=run_id,
+                    patrol_batch_id=patrol_batch_id,
+                    error=str(exc),
+                )
         log.info(
             "workflow_run_completed",
             run_id=run_id,
@@ -450,7 +508,9 @@ class WorkflowEngine:
         )
 
     @classmethod
-    def _finish_trace(cls, run_id: str, status: str, message: str, *, output: Any | None = None) -> None:
+    def _finish_trace(
+        cls, run_id: str, status: str, message: str, *, output: Any | None = None
+    ) -> None:
         wf_trace = _pop_wf_trace(run_id)
         if not wf_trace:
             wf_trace = _ensure_wf_trace(run_id)
@@ -473,11 +533,18 @@ class WorkflowEngine:
         body_tpl = oc.notification_body if oc else "流程已完成。"
         title = str(resolve_value(title_tpl, env) if title_tpl else "Workflow 已完成")
         body = str(resolve_value(body_tpl, env) if body_tpl else "流程已完成。")
-        from src.core.workflows.artifacts import collect_download_links, notification_download_payload
+        from src.core.workflows.artifacts import (
+            collect_download_links,
+            notification_download_payload,
+        )
 
         links = collect_download_links(artifacts=artifacts)
         if links:
-            body = body.rstrip() + "\n\n" + "\n".join(f"下载 {lnk['label']}: {lnk['url']}" for lnk in links)
+            body = (
+                body.rstrip()
+                + "\n\n"
+                + "\n".join(f"下载 {lnk['label']}: {lnk['url']}" for lnk in links)
+            )
 
         if cls._publish_workflow_notify(
             "workflow.completed",
@@ -507,13 +574,20 @@ class WorkflowEngine:
         if not run or not run.user_id:
             return
         label = step.step_name.replace("_", " ")
-        from src.core.workflows.artifacts import collect_download_links, notification_download_payload
+        from src.core.workflows.artifacts import (
+            collect_download_links,
+            notification_download_payload,
+        )
 
         body = str(result.get("message") or step.skill_name)
 
         links = collect_download_links(result=result if isinstance(result, dict) else None)
         if links:
-            body = body.rstrip() + "\n\n" + "\n".join(f"下载 {lnk['label']}: {lnk['url']}" for lnk in links)
+            body = (
+                body.rstrip()
+                + "\n\n"
+                + "\n".join(f"下载 {lnk['label']}: {lnk['url']}" for lnk in links)
+            )
 
         if cls._publish_workflow_notify(
             "workflow.step.completed",
@@ -533,7 +607,9 @@ class WorkflowEngine:
             body=body,
             workflow_run_id=run_id,
             thread_id=run.thread_id,
-            payload=notification_download_payload(result=result if isinstance(result, dict) else None),
+            payload=notification_download_payload(
+                result=result if isinstance(result, dict) else None
+            ),
             level="info",
         )
 

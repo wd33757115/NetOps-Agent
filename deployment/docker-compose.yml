@@ -1,8 +1,6 @@
 # SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
 # SPDX-License-Identifier: Apache-2.0
 
-version: '3.8'
-
 networks:
   netops-network:
     driver: bridge
@@ -97,6 +95,7 @@ services:
       - netops-network
 
   qdrant:
+    profiles: ["rag", "rag-qdrant"]
     image: qdrant/qdrant:latest
     container_name: netops-qdrant
     ports:
@@ -114,6 +113,7 @@ services:
       - netops-network
 
   langfuse:
+    profiles: ["observability"]
     image: ghcr.io/langfuse/langfuse:latest
     container_name: netops-langfuse
     ports:
@@ -132,9 +132,12 @@ services:
       - netops-network
 
   migrate:
+    profiles: ["core"]
     build:
       context: ..
       dockerfile: deployment/Dockerfile.fastapi
+      args:
+        REQUIREMENTS_FILE: requirements-gateway.txt
     container_name: netops-migrate
     env_file:
       - ../.env
@@ -150,6 +153,7 @@ services:
       - netops-network
 
   django-migrate:
+    profiles: ["core"]
     build:
       context: ..
       dockerfile: deployment/Dockerfile.django
@@ -171,9 +175,12 @@ services:
       - netops-network
 
   fastapi:
+    profiles: ["core"]
     build:
       context: ..
       dockerfile: deployment/Dockerfile.fastapi
+      args:
+        REQUIREMENTS_FILE: requirements-gateway.txt
     container_name: netops-fastapi
     # 仅内网可达，不映射 host 8000（前端统一走 Django :8001）
     expose:
@@ -204,11 +211,14 @@ services:
     networks:
       - netops-network
 
-  celery:
+  celery-patrol:
+    profiles: ["core"]
     build:
       context: ..
-      dockerfile: deployment/Dockerfile.fastapi
-    container_name: netops-celery
+      dockerfile: deployment/Dockerfile.core-worker
+      args:
+        REQUIREMENTS_FILE: requirements-core.txt
+    container_name: netops-celery-patrol
     env_file:
       - ../.env
     environment:
@@ -219,8 +229,10 @@ services:
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
       - DEBUG=false
       - USE_SUPERVISOR_V2=true
+      - CELERY_WORKER_ROLE=patrol
+      - CELERY_WORKER_QUEUES=netops.patrol
       - TZ=Asia/Shanghai
-    command: celery -A src.core.celery_tasks.celery_app worker --loglevel=info -c 2
+    command: celery -A src.core.celery_tasks.celery_app worker --loglevel=info -Q netops.patrol -c 2
     depends_on:
       postgres:
         condition: service_healthy
@@ -230,13 +242,73 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-      fastapi:
-        condition: service_started
+    restart: unless-stopped
+    networks:
+      - netops-network
+
+  celery-control:
+    profiles: ["core"]
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.core-worker
+      args:
+        REQUIREMENTS_FILE: requirements-core.txt
+    container_name: netops-celery-control
+    env_file:
+      - ../.env
+    environment:
+      - POSTGRES_HOST=postgres
+      - REDIS_HOST=redis
+      - MINIO_ENDPOINT=minio:9000
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - CELERY_WORKER_ROLE=control
+      - CELERY_WORKER_QUEUES=netops.default,netops.firewall
+      - DEBUG=false
+      - TZ=Asia/Shanghai
+    command: celery -A src.core.celery_tasks.celery_app worker --loglevel=info -Q netops.default,netops.firewall -c 2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - netops-network
+
+  celery-beat:
+    profiles: ["core"]
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.core-worker
+      args:
+        REQUIREMENTS_FILE: requirements-core.txt
+    container_name: netops-celery-beat
+    env_file:
+      - ../.env
+    environment:
+      - POSTGRES_HOST=postgres
+      - REDIS_HOST=redis
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - CELERY_WORKER_ROLE=beat
+      - TZ=Asia/Shanghai
+    command: celery -A src.core.celery_tasks.celery_app beat --loglevel=info
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
     networks:
       - netops-network
 
   django:
+    profiles: ["core"]
     build:
       context: ..
       dockerfile: deployment/Dockerfile.django
@@ -265,6 +337,7 @@ services:
       - netops-network
 
   react:
+    profiles: ["core"]
     build:
       context: ..
       dockerfile: deployment/Dockerfile.react
@@ -276,5 +349,17 @@ services:
     depends_on:
       - django
     restart: unless-stopped
+    networks:
+      - netops-network
+
+  frontend-dev:
+    profiles: ["development"]
+    image: node:22-alpine
+    working_dir: /app/web/react_frontend
+    volumes:
+      - ..:/app
+    command: npm run dev -- --host 0.0.0.0 --port 4173
+    ports:
+      - "4173:4173"
     networks:
       - netops-network

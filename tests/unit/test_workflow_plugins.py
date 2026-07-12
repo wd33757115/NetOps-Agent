@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from src.core.workflows import patrol_batch_service
 from src.core.workflows.expression import build_step_env, resolve_inputs, resolve_value
 from src.core.workflows.registry import WORKFLOWS_ROOT, get_template, load_workflows
 
@@ -324,12 +325,27 @@ def test_list_workflow_runs_filters_device_context(monkeypatch):
         def __eq__(self, other):
             return lambda item: getattr(item, self.name) == other
 
+    class FakeJsonValue:
+        def __init__(self, key):
+            self.key = key
+
+        def as_string(self):
+            return self
+
+        def __eq__(self, other):
+            return lambda item: str((item.context or {}).get(self.key) or "") == other
+
+    class FakeJsonColumn:
+        def __getitem__(self, key):
+            return FakeJsonValue(key)
+
     class FakeWorkflowRun:
         created_at = FakeColumn("created_at")
         template_name = FakeColumn("template_name")
         ticket_id = FakeColumn("ticket_id")
         source = FakeColumn("source")
         status = FakeColumn("status")
+        context = FakeJsonColumn()
 
     class FakeSession:
         def query(self, _model):
@@ -467,6 +483,7 @@ def test_retry_workflow_run_rejects_completed(monkeypatch):
 def test_list_patrol_batches_groups_runs(monkeypatch):
     from types import SimpleNamespace
 
+    from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
     from src.gateway import workflow_api
 
     runs = [
@@ -527,6 +544,11 @@ def test_list_patrol_batches_groups_runs(monkeypatch):
         ),
     ]
     monkeypatch.setattr(workflow_api, "list_workflow_runs", lambda **_kwargs: runs)
+    monkeypatch.setattr(
+        PatrolBatchManifestRepository,
+        "list_batches",
+        lambda self, **_kwargs: [],
+    )
 
     result = asyncio.run(workflow_api.list_patrol_batches())
 
@@ -893,10 +915,10 @@ def test_export_patrol_batch_report_summarizes_changes_and_events(monkeypatch):
             return False
 
     monkeypatch.setattr(workflow_api, "list_workflow_runs", lambda **_kwargs: runs)
-    monkeypatch.setattr(workflow_api, "WorkflowStepRecord", FakeWorkflowStepRecord)
-    monkeypatch.setattr(workflow_api, "NetworkChangeRecord", FakeNetworkChangeRecord)
-    monkeypatch.setattr(workflow_api, "NetworkEventRecord", FakeNetworkEventRecord)
-    monkeypatch.setattr(workflow_api, "get_db_session", lambda: FakeSessionContext())
+    monkeypatch.setattr(patrol_batch_service, "WorkflowStepRecord", FakeWorkflowStepRecord)
+    monkeypatch.setattr(patrol_batch_service, "NetworkChangeRecord", FakeNetworkChangeRecord)
+    monkeypatch.setattr(patrol_batch_service, "NetworkEventRecord", FakeNetworkEventRecord)
+    monkeypatch.setattr(patrol_batch_service, "get_db_session", lambda: FakeSessionContext())
 
     response = asyncio.run(workflow_api.export_patrol_batch_report("batch-1"))
     body = response.body.decode("utf-8")
@@ -1016,10 +1038,10 @@ def test_patrol_batch_summary_exposes_report_counts(monkeypatch):
             return False
 
     monkeypatch.setattr(workflow_api, "list_workflow_runs", lambda **_kwargs: runs)
-    monkeypatch.setattr(workflow_api, "WorkflowStepRecord", FakeWorkflowStepRecord)
-    monkeypatch.setattr(workflow_api, "NetworkChangeRecord", FakeNetworkChangeRecord)
-    monkeypatch.setattr(workflow_api, "NetworkEventRecord", FakeNetworkEventRecord)
-    monkeypatch.setattr(workflow_api, "get_db_session", lambda: FakeSessionContext())
+    monkeypatch.setattr(patrol_batch_service, "WorkflowStepRecord", FakeWorkflowStepRecord)
+    monkeypatch.setattr(patrol_batch_service, "NetworkChangeRecord", FakeNetworkChangeRecord)
+    monkeypatch.setattr(patrol_batch_service, "NetworkEventRecord", FakeNetworkEventRecord)
+    monkeypatch.setattr(patrol_batch_service, "get_db_session", lambda: FakeSessionContext())
 
     result = asyncio.run(workflow_api.get_patrol_batch_summary("batch-1"))
 
@@ -1035,9 +1057,9 @@ def test_patrol_batch_summary_exposes_report_counts(monkeypatch):
 
 
 def test_patrol_report_does_not_treat_collected_state_as_healthy():
-    from src.gateway.workflow_api import _domain_checks
+    from src.core.workflows.patrol_batch_service import domain_checks
 
-    checks = _domain_checks(
+    checks = domain_checks(
         observations=[
             {
                 "entity_type": "interface_l3",
@@ -1062,7 +1084,7 @@ def test_patrol_report_does_not_treat_collected_state_as_healthy():
 
 
 def test_patrol_report_distinguishes_missing_rules_from_evaluated_non_match():
-    from src.gateway.workflow_api import _domain_checks
+    from src.core.workflows.patrol_batch_service import domain_checks
 
     base = {
         "device_id": "device-1",
@@ -1074,13 +1096,13 @@ def test_patrol_report_distinguishes_missing_rules_from_evaluated_non_match():
     observation = {**base, "value": 51}
     command = {"command": "display memory", "parse_status": "parsed"}
 
-    missing = _domain_checks(
+    missing = domain_checks(
         observations=[observation],
         command_details=[command],
         changes=[{**base, "no_event_reason": "no_active_event_rules"}],
         events=[],
     )
-    evaluated = _domain_checks(
+    evaluated = domain_checks(
         observations=[observation],
         command_details=[command],
         changes=[

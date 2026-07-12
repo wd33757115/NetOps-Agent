@@ -111,10 +111,41 @@ jobs:
       - run: pip install -r requirements.txt pytest
       - run: pytest tests/integration/test_skills_api.py -v
 
+  test-frontend:
+    needs: lint
+    # Visual baselines are generated with the Windows Chrome rendering stack.
+    # Keep CI on the same platform to avoid font rasterization false positives.
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: web/react_frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/react_frontend/package-lock.json
+      - run: npm ci
+      - run: npx playwright install chrome
+      - run: npm run check:ci
+      - name: Upload Playwright diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-diagnostics
+          path: web/react_frontend/test-results
+          retention-days: 7
+
   docker-build:
-    needs: [test-fastapi, test-django, test-skills-ui]
+    needs: [test-fastapi, test-django, test-skills-ui, test-frontend]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: docker compose -f deployment/docker-compose.yml --profile core config --quiet
+      - run: docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.ai.yml --profile core --profile ai config --quiet
+      - run: docker build -t netops-gateway-core -f deployment/Dockerfile.fastapi --build-arg REQUIREMENTS_FILE=requirements-gateway.txt .
+      - run: docker build -t netops-worker-core -f deployment/Dockerfile.core-worker --build-arg REQUIREMENTS_FILE=requirements-core.txt .
+      - run: docker build -t netops-worker-ai -f deployment/Dockerfile.core-worker --build-arg REQUIREMENTS_FILE=requirements-ai-worker.txt .
       - run: docker build -t netops-django -f deployment/Dockerfile.django .
       - run: docker build -t netops-react -f deployment/Dockerfile.react --build-arg REACT_APP_API_URL=http://localhost:8001 .

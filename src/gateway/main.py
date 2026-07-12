@@ -11,14 +11,7 @@
 #   python -m src.gateway.main
 #   uvicorn src.gateway.main:app --host 0.0.0.0 --port 8000 --reload
 #
-# 【生产环境 - Gunicorn + UvicornWorker（多 worker，高并发）】
-#   gunicorn src.gateway.main:app -k uvicorn.workers.UvicornWorker --workers 4 --bind 0.0.0.0:8000 --timeout 120 --keep-alive 5
-#
-# 【生产环境 - CPU 动态 worker 数】
-#   gunicorn src.gateway.main:app -k uvicorn.workers.UvicornWorker --workers $(nproc) --bind 0.0.0.0:8000 --timeout 120 --keep-alive 5
-#
-# 【生产环境 - 多 worker + 多线程（IO 密集型）】
-#   gunicorn src.gateway.main:app -k uvicorn.workers.UvicornWorker --workers 4 --threads 2 --bind 0.0.0.0:8000
+# 【生产环境】使用 Gunicorn + UvicornWorker，并按 CPU/IO 负载配置 worker。
 #
 # 【开发环境 - 禁用热重载但多 worker 测试】
 #   uvicorn src.gateway.main:app --host 0.0.0.0 --port 8000 --workers 4
@@ -49,43 +42,54 @@ import json
 import uuid
 
 import uvicorn
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
-from langchain_core.messages import HumanMessage
 
-from src.agents.supervisor.graph_v2 import compiled_graph_v2
-from src.auth.dependencies import get_current_user, get_optional_user, require_role
+from src.auth.dependencies import get_optional_user
 from src.auth.models import CurrentUser
 from src.gateway.audit_service import write_audit_log
 from src.gateway.bff_security import is_enforce_bff_origin_enabled
-from src.gateway.chat_stream import stream_supervisor_chat
 
 
 def get_supervisor_graph():
     """加载 Supervisor v2 协同图（v1 已废弃）。"""
+    from src.agents.supervisor.graph_v2 import compiled_graph_v2
+
     log.info("supervisor_v2_enabled")
     return compiled_graph_v2()
 
-from src.core.rag_service.service import get_rag_service
+
+def _human_message(content: str):
+    """Load the AI message type only when a chat transport is used."""
+    from langchain_core.messages import HumanMessage
+
+    return HumanMessage(content=content)
+
+
+from src.gateway.artifacts_api import router as artifacts_router
 from src.gateway.bff_security import (
     is_bff_bypass_path,
-    is_enforce_bff_origin_enabled,
     is_trusted_bff_request,
     reject_envelope,
 )
 from src.gateway.conversation_service import get_conversation_service
-from src.gateway.exception_handlers import register_exception_handlers
-from src.gateway.skills_api import router as skills_router
-from src.gateway.knowledge_api import router as knowledge_router
-from src.gateway.storage_api import router as storage_router
-from src.gateway.artifacts_api import router as artifacts_router
-from src.gateway.workflow_api import router as workflow_router
-from src.gateway.notification_api import router as notification_router
-from src.gateway.events_api import router as events_router
-from src.gateway.parser_api import router as parser_router
 from src.gateway.devices_api import router as devices_router
+from src.gateway.events_api import router as events_router
+from src.gateway.exception_handlers import register_exception_handlers
+from src.gateway.knowledge_api import router as knowledge_router
 from src.gateway.maintenance_api import router as maintenance_router
+from src.gateway.notification_api import router as notification_router
+from src.gateway.parser_api import router as parser_router
 from src.gateway.schemas import (
     AddMessageRequest,
     ChatFileUploadRequest,
@@ -104,6 +108,9 @@ from src.gateway.schemas import (
     TaskResponse,
     UpdateConversationRequest,
 )
+from src.gateway.skills_api import router as skills_router
+from src.gateway.storage_api import router as storage_router
+from src.gateway.workflow_api import router as workflow_router
 from src.infrastructure.db.migrations import require_database_schema_current
 from src.infrastructure.db.postgres import (
     require_postgres_connection,
@@ -171,6 +178,8 @@ async def lifespan(app: FastAPI):
 
     # --- 启动：预加载 RAG 服务 ---
     try:
+        from src.core.rag_service.service import get_rag_service
+
         app.state.rag_service = get_rag_service()
         log.info("rag_service_loaded")
     except Exception as e:
@@ -179,9 +188,9 @@ async def lifespan(app: FastAPI):
 
     # --- 启动：加载 Workflow / ITSM 插件包 ---
     try:
-        from src.core.workflows.registry import load_workflows
-        from src.core.plugins.itsm_webhook import get_itsm_webhook_registry
         from src.core.plugins.chat_intent import get_chat_intent_registry
+        from src.core.plugins.itsm_webhook import get_itsm_webhook_registry
+        from src.core.workflows.registry import load_workflows
 
         wf_count = len(load_workflows(force=True))
         get_itsm_webhook_registry().load(force=True)
@@ -249,6 +258,7 @@ async def lifespan(app: FastAPI):
 
     try:
         from src.infrastructure.db.postgres import engine
+
         engine.dispose()
         log.info("postgres_engine_disposed")
     except Exception:
@@ -305,7 +315,11 @@ async def bff_origin_check(request: Request, call_next):
         return await call_next(request)
 
     if not is_trusted_bff_request(request.headers):
-        request_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-Id") or str(uuid.uuid4())
+        request_id = (
+            getattr(request.state, "request_id", None)
+            or request.headers.get("X-Request-Id")
+            or str(uuid.uuid4())
+        )
         return JSONResponse(
             status_code=403,
             content=reject_envelope(request_id=request_id),
@@ -318,7 +332,11 @@ async def bff_origin_check(request: Request, call_next):
 @app.middleware("http")
 async def request_logging_middleware(request: Request, call_next):
     """注入 request_id 并记录 HTTP 请求摘要。"""
-    request_id = request.headers.get("X-Request-Id") or request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    request_id = (
+        request.headers.get("X-Request-Id")
+        or request.headers.get("X-Request-ID")
+        or str(uuid.uuid4())
+    )
     request.state.request_id = request_id
     tokens = bind_context(request_id=request_id)
     path = request.url.path
@@ -367,13 +385,14 @@ def get_graph():
 # API 端点
 # =============================================================================
 
+
 @app.get("/", tags=["System"])
 async def root():
     return {
         "service": settings.PROJECT_NAME,
         "version": "2.0.0",
         "status": "running",
-        "description": "NetOps Multi-Agent System API Gateway"
+        "description": "NetOps Multi-Agent System API Gateway",
     }
 
 
@@ -391,6 +410,7 @@ async def health_check():
     try:
         if app.state.redis_pool:
             import redis.asyncio as aioredis
+
             r = aioredis.Redis(connection_pool=app.state.redis_pool)
             await r.ping()
             services["redis"] = True
@@ -400,10 +420,7 @@ async def health_check():
         services["redis"] = False
 
     all_healthy = all(services.values())
-    return HealthResponse(
-        status="healthy" if all_healthy else "degraded",
-        services=services
-    )
+    return HealthResponse(status="healthy" if all_healthy else "degraded", services=services)
 
 
 @app.get("/health/diagnostics", tags=["System"], response_model=None)
@@ -420,7 +437,9 @@ async def chat_endpoint_legacy(request: ChatRequest):
     return await chat_endpoint(request)
 
 
-@app.post("/api/v1/chat", tags=["Chat"], response_model=ChatResponse, status_code=status.HTTP_200_OK)
+@app.post(
+    "/api/v1/chat", tags=["Chat"], response_model=ChatResponse, status_code=status.HTTP_200_OK
+)
 async def chat_endpoint(
     request: ChatRequest,
     http_request: Request,
@@ -457,7 +476,9 @@ async def chat_endpoint(
         conversation_id = conversation["id"]
     else:
         if effective_user_id:
-            conversation = conv_service.get_conversation_for_user(conversation_id, effective_user_id)
+            conversation = conv_service.get_conversation_for_user(
+                conversation_id, effective_user_id
+            )
         else:
             conversation = conv_service.get_conversation(conversation_id)
         if not conversation:
@@ -471,11 +492,11 @@ async def chat_endpoint(
     if user and user.thread_prefix:
         thread_id = f"{user.thread_prefix}-{conversation_id.split('-')[-1]}"
 
-    conv_service.update_conversation(conversation_id, thread_id=thread_id, user_id=effective_user_id)
+    conv_service.update_conversation(
+        conversation_id, thread_id=thread_id, user_id=effective_user_id
+    )
 
-    config = {
-        "configurable": {"thread_id": thread_id}
-    }
+    config = {"configurable": {"thread_id": thread_id}}
 
     # 延迟加载 Agent Graph
     agent_graph = app.state.agent_graph
@@ -489,12 +510,12 @@ async def chat_endpoint(
             log.error("chat_graph_load_failed", error=str(e), exc_info=e)
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Agent Graph loading failed: {str(e)}"
+                detail=f"Agent Graph loading failed: {str(e)}",
             )
 
     try:
         initial_state = {
-            "messages": [HumanMessage(content=request.query)],
+            "messages": [_human_message(request.query)],
             "source": request.source.value,
             "task_id": str(uuid.uuid4()),
             "thread_id": thread_id,
@@ -547,11 +568,9 @@ async def chat_endpoint(
 
         # 保存用户消息和Agent回复到数据库
         conv_service.add_message(
-            conversation_id=conversation_id,
-            role="user",
-            content=request.query
+            conversation_id=conversation_id, role="user", content=request.query
         )
-        
+
         conv_service.add_message(
             conversation_id=conversation_id,
             role="assistant",
@@ -559,7 +578,7 @@ async def chat_endpoint(
             agent_type=next_agent,
             celery_task_id=celery_task_id,
             download_url=download_url,
-            references=references
+            references=references,
         )
 
         # 生成对话标题
@@ -590,13 +609,13 @@ async def chat_endpoint(
             task_id=result.get("task_id"),
             celery_task_id=celery_task_id,
             download_url=download_url,
-            references=references
+            references=references,
         )
 
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Agent invocation failed: {str(e)}"
+            detail=f"Agent invocation failed: {str(e)}",
         )
 
 
@@ -619,6 +638,14 @@ async def chat_stream_endpoint(
             )
 
     enforce_auth = is_enforce_bff_origin_enabled()
+
+    try:
+        from src.gateway.chat_stream import stream_supervisor_chat
+    except ModuleNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"AI chat dependencies are not installed: {exc.name}",
+        ) from exc
 
     async def event_generator():
         async for event in stream_supervisor_chat(
@@ -661,6 +688,13 @@ async def websocket_chat_endpoint(websocket: WebSocket):
     config = {"configurable": {"thread_id": thread_id}}
 
     agent_graph = app.state.agent_graph
+    if not agent_graph:
+        try:
+            agent_graph = get_supervisor_graph()
+            app.state.agent_graph = agent_graph
+        except Exception as exc:
+            await websocket.close(code=1013, reason=f"AI chat unavailable: {exc}")
+            return
 
     try:
         while True:
@@ -676,36 +710,36 @@ async def websocket_chat_endpoint(websocket: WebSocket):
             except json.JSONDecodeError:
                 query = data
 
-            await websocket.send_json({
-                "type": "status",
-                "status": "thinking",
-                "thread_id": thread_id,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            })
+            await websocket.send_json(
+                {
+                    "type": "status",
+                    "status": "thinking",
+                    "thread_id": thread_id,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            )
 
             try:
                 # [Async] run graph.invoke in thread pool
                 result = await asyncio.to_thread(
-                    agent_graph.invoke,
-                    {"messages": [HumanMessage(content=query)]},
-                    config
+                    agent_graph.invoke, {"messages": [_human_message(query)]}, config
                 )
                 response = result["messages"][-1].content
 
-                await websocket.send_json({
-                    "type": "message",
-                    "content": response,
-                    "thread_id": thread_id,
-                    "agent_type": result.get("next_agent"),
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                })
+                await websocket.send_json(
+                    {
+                        "type": "message",
+                        "content": response,
+                        "thread_id": thread_id,
+                        "agent_type": result.get("next_agent"),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
 
             except Exception as e:
-                await websocket.send_json({
-                    "type": "error",
-                    "error": str(e),
-                    "thread_id": thread_id
-                })
+                await websocket.send_json(
+                    {"type": "error", "error": str(e), "thread_id": thread_id}
+                )
 
     except WebSocketDisconnect:
         log.info("websocket_disconnected", thread_id=thread_id)
@@ -723,20 +757,14 @@ async def rag_search_endpoint(request: RAGSearchRequest):
     rag_service = app.state.rag_service
     if not rag_service:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="RAG Service not available"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="RAG Service not available"
         )
 
     result = rag_service.retrieve_formatted(
-        query=request.query,
-        top_k=request.top_k,
-        metadata_filters=request.metadata_filters
+        query=request.query, top_k=request.top_k, metadata_filters=request.metadata_filters
     )
 
-    return RAGSearchResponse(
-        count=result["count"],
-        results=result["references"]
-    )
+    return RAGSearchResponse(count=result["count"], results=result["references"])
 
 
 @app.post("/api/v1/itsm/webhook", tags=["ITSM"])
@@ -755,13 +783,10 @@ async def itsm_webhook_endpoint(event: ITSMEventRequest, background_tasks: Backg
         "event_id": event.event_id,
         "status": "accepted",
         "message": "ITSM 事件已接收，后台处理中...",
-        "query_endpoint": f"/api/v1/tasks/{task_id}"
+        "query_endpoint": f"/api/v1/tasks/{task_id}",
     }
 
-    return JSONResponse(
-        status_code=status.HTTP_202_ACCEPTED,
-        content=response
-    )
+    return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content=response)
 
 
 @app.post("/api/v1/itsm/webhook/callback", tags=["ITSM"])
@@ -786,7 +811,9 @@ async def itsm_callback_endpoint(request: dict):
     return JSONResponse(status_code=status.HTTP_200_OK, content=response)
 
 
-@app.post("/api/v1/itsm/webhook/firewall-policy", tags=["ITSM"], response_model=ITSMWorkflowStartResponse)
+@app.post(
+    "/api/v1/itsm/webhook/firewall-policy", tags=["ITSM"], response_model=ITSMWorkflowStartResponse
+)
 async def itsm_firewall_policy_webhook(request: ITSMFirewallPolicyRequest):
     """ITSM Webhook 兼容入口（转发至插件 route_key=firewall-policy）。"""
     from src.gateway.itsm_webhook_handler import handle_itsm_webhook
@@ -794,11 +821,15 @@ async def itsm_firewall_policy_webhook(request: ITSMFirewallPolicyRequest):
     return await handle_itsm_webhook("firewall-policy", request.model_dump())
 
 
-@app.post("/api/v1/itsm/webhook/{route_key}", tags=["ITSM"], response_model=ITSMWorkflowStartResponse)
+@app.post(
+    "/api/v1/itsm/webhook/{route_key}", tags=["ITSM"], response_model=ITSMWorkflowStartResponse
+)
 async def itsm_webhook_by_route(route_key: str, request: Request):
     """通用 ITSM Webhook（路由由 Workflow 插件包 ITSM.webhook.yaml 定义）。"""
     if route_key in ("callback",):
-        raise HTTPException(status_code=404, detail=f"请使用专用端点: /api/v1/itsm/webhook/{route_key}")
+        raise HTTPException(
+            status_code=404, detail=f"请使用专用端点: /api/v1/itsm/webhook/{route_key}"
+        )
     body = await request.json()
     from src.gateway.itsm_webhook_handler import handle_itsm_webhook
 
@@ -815,17 +846,11 @@ async def get_task_status(task_id: str):
 
         if result.state == "PENDING":
             return TaskResponse(
-                task_id=task_id,
-                status="pending",
-                celery_task_id=task_id,
-                result="任务等待执行"
+                task_id=task_id, status="pending", celery_task_id=task_id, result="任务等待执行"
             )
         elif result.state == "STARTED":
             return TaskResponse(
-                task_id=task_id,
-                status="processing",
-                celery_task_id=task_id,
-                result="任务执行中..."
+                task_id=task_id, status="processing", celery_task_id=task_id, result="任务执行中..."
             )
         elif result.state == "SUCCESS":
             task_result = result.get()
@@ -834,34 +859,27 @@ async def get_task_status(task_id: str):
                 status="completed",
                 celery_task_id=task_id,
                 result="任务执行成功",
-                file_url=task_result.get("download_url")
+                file_url=task_result.get("download_url"),
             )
         elif result.state == "FAILURE":
             return TaskResponse(
                 task_id=task_id,
                 status="failed",
                 celery_task_id=task_id,
-                error_message=str(result.info)
+                error_message=str(result.info),
             )
         elif result.state == "RETRY":
             return TaskResponse(
-                task_id=task_id,
-                status="retry",
-                celery_task_id=task_id,
-                result="任务重试中..."
+                task_id=task_id, status="retry", celery_task_id=task_id, result="任务重试中..."
             )
         else:
             return TaskResponse(
                 task_id=task_id,
                 status=result.state.lower() if result.state else "pending",
-                celery_task_id=task_id
+                celery_task_id=task_id,
             )
     except Exception as e:
-        return TaskResponse(
-            task_id=task_id,
-            status="failed",
-            error_message=str(e)
-        )
+        return TaskResponse(task_id=task_id, status="failed", error_message=str(e))
 
 
 @app.post("/api/v1/chat/upload", tags=["Chat"])
@@ -889,19 +907,19 @@ async def chat_upload_file(request: ChatFileUploadRequest):
             "file_path": file_path,
             "status": "uploaded",
             "message": f"文件 {request.filename} 上传成功",
-            "next_steps": "请继续输入命令执行策略生成，如：生成防火墙策略"
+            "next_steps": "请继续输入命令执行策略生成，如：生成防火墙策略",
         }
         return JSONResponse(status_code=status.HTTP_200_OK, content=response)
     except Exception as e:
         return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"error": str(e)}
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content={"error": str(e)}
         )
 
 
 # =============================================================================
 # 对话管理 API 端点
 # =============================================================================
+
 
 @app.post("/api/v1/conversations", tags=["Conversations"], response_model=ConversationResponse)
 async def create_conversation(
@@ -912,11 +930,9 @@ async def create_conversation(
     conv_service = get_conversation_service()
     user_id = user.user_id if user else request.user_id
     conversation = conv_service.create_conversation(
-        title=request.title,
-        user_id=user_id,
-        thread_id=request.thread_id
+        title=request.title, user_id=user_id, thread_id=request.thread_id
     )
-    
+
     return ConversationResponse(
         id=conversation["id"],
         title=conversation["title"],
@@ -926,7 +942,7 @@ async def create_conversation(
         summary=conversation["summary"],
         created_at=conversation["created_at"],
         updated_at=conversation["updated_at"],
-        message_count=0
+        message_count=0,
     )
 
 
@@ -942,26 +958,34 @@ async def get_conversations(
     effective_user_id = user.user_id if user else user_id
     if is_enforce_bff_origin_enabled() and not effective_user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未登录")
-    conversations = conv_service.get_conversations(user_id=effective_user_id, limit=limit, offset=offset)
-    
+    conversations = conv_service.get_conversations(
+        user_id=effective_user_id, limit=limit, offset=offset
+    )
+
     result = []
     for conv in conversations:
-        result.append(ConversationResponse(
-            id=conv["id"],
-            title=conv["title"],
-            user_id=conv["user_id"],
-            thread_id=conv["thread_id"],
-            status=conv["status"],
-            summary=conv["summary"],
-            created_at=conv["created_at"],
-            updated_at=conv["updated_at"],
-            message_count=conv.get("message_count", 0)
-        ))
-    
+        result.append(
+            ConversationResponse(
+                id=conv["id"],
+                title=conv["title"],
+                user_id=conv["user_id"],
+                thread_id=conv["thread_id"],
+                status=conv["status"],
+                summary=conv["summary"],
+                created_at=conv["created_at"],
+                updated_at=conv["updated_at"],
+                message_count=conv.get("message_count", 0),
+            )
+        )
+
     return result
 
 
-@app.get("/api/v1/conversations/{conversation_id}", tags=["Conversations"], response_model=ConversationDetailResponse)
+@app.get(
+    "/api/v1/conversations/{conversation_id}",
+    tags=["Conversations"],
+    response_model=ConversationDetailResponse,
+)
 async def get_conversation_detail(
     conversation_id: str,
     user: CurrentUser | None = Depends(get_optional_user),
@@ -971,33 +995,34 @@ async def get_conversation_detail(
     if user:
         conv = conv_service.get_conversation_for_user(conversation_id, user.user_id)
         if not conv:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
+            )
         data = conv_service.get_conversation_with_messages(conversation_id)
     else:
         data = conv_service.get_conversation_with_messages(conversation_id)
-    
+
     if not data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+
     conversation = data["conversation"]
     messages = data["messages"]
-    
+
     message_responses = []
     for msg in messages:
-        message_responses.append(MessageResponse(
-            id=msg["id"],
-            role=msg["role"],
-            content=msg["content"],
-            agent_type=msg.get("agent_type"),
-            celery_task_id=msg.get("celery_task_id"),
-            download_url=msg.get("download_url"),
-            references=msg.get("references"),
-            created_at=msg["created_at"]
-        ))
-    
+        message_responses.append(
+            MessageResponse(
+                id=msg["id"],
+                role=msg["role"],
+                content=msg["content"],
+                agent_type=msg.get("agent_type"),
+                celery_task_id=msg.get("celery_task_id"),
+                download_url=msg.get("download_url"),
+                references=msg.get("references"),
+                created_at=msg["created_at"],
+            )
+        )
+
     return ConversationDetailResponse(
         conversation=ConversationResponse(
             id=conversation["id"],
@@ -1008,17 +1033,21 @@ async def get_conversation_detail(
             summary=conversation["summary"],
             created_at=conversation["created_at"],
             updated_at=conversation["updated_at"],
-            message_count=len(messages)
+            message_count=len(messages),
         ),
-        messages=message_responses
+        messages=message_responses,
     )
 
 
-@app.put("/api/v1/conversations/{conversation_id}", tags=["Conversations"], response_model=ConversationResponse)
+@app.put(
+    "/api/v1/conversations/{conversation_id}",
+    tags=["Conversations"],
+    response_model=ConversationResponse,
+)
 async def update_conversation(conversation_id: str, request: UpdateConversationRequest):
     """更新对话信息"""
     conv_service = get_conversation_service()
-    
+
     update_data = {}
     if request.title is not None:
         update_data["title"] = request.title
@@ -1026,17 +1055,14 @@ async def update_conversation(conversation_id: str, request: UpdateConversationR
         update_data["status"] = request.status
     if request.summary is not None:
         update_data["summary"] = request.summary
-    
+
     conversation = conv_service.update_conversation(conversation_id, **update_data)
-    
+
     if not conversation:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+
     messages = conv_service.get_messages(conversation_id)
-    
+
     return ConversationResponse(
         id=conversation["id"],
         title=conversation["title"],
@@ -1046,37 +1072,39 @@ async def update_conversation(conversation_id: str, request: UpdateConversationR
         summary=conversation["summary"],
         created_at=conversation["created_at"],
         updated_at=conversation["updated_at"],
-        message_count=len(messages)
+        message_count=len(messages),
     )
 
 
-@app.delete("/api/v1/conversations/{conversation_id}", tags=["Conversations"], status_code=status.HTTP_204_NO_CONTENT)
+@app.delete(
+    "/api/v1/conversations/{conversation_id}",
+    tags=["Conversations"],
+    status_code=status.HTTP_204_NO_CONTENT,
+)
 async def delete_conversation(conversation_id: str):
     """删除对话"""
     conv_service = get_conversation_service()
     success = conv_service.delete_conversation(conversation_id)
-    
+
     if not success:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+
     return None
 
 
-@app.post("/api/v1/conversations/{conversation_id}/messages", tags=["Conversations"], response_model=MessageResponse)
+@app.post(
+    "/api/v1/conversations/{conversation_id}/messages",
+    tags=["Conversations"],
+    response_model=MessageResponse,
+)
 async def add_message(conversation_id: str, request: AddMessageRequest):
     """添加消息到对话"""
     conv_service = get_conversation_service()
-    
+
     conversation = conv_service.get_conversation(conversation_id)
     if not conversation:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+
     message = conv_service.add_message(
         conversation_id=conversation_id,
         role=request.role,
@@ -1084,9 +1112,9 @@ async def add_message(conversation_id: str, request: AddMessageRequest):
         agent_type=request.agent_type,
         celery_task_id=request.celery_task_id,
         download_url=request.download_url,
-        references=request.references
+        references=request.references,
     )
-    
+
     return MessageResponse(
         id=message["id"],
         role=message["role"],
@@ -1095,7 +1123,7 @@ async def add_message(conversation_id: str, request: AddMessageRequest):
         celery_task_id=message.get("celery_task_id"),
         download_url=message.get("download_url"),
         references=message.get("references"),
-        created_at=message["created_at"]
+        created_at=message["created_at"],
     )
 
 
@@ -1103,24 +1131,21 @@ async def add_message(conversation_id: str, request: AddMessageRequest):
 async def summarize_conversation(conversation_id: str):
     """生成对话总结和标题"""
     conv_service = get_conversation_service()
-    
+
     conversation = conv_service.get_conversation(conversation_id)
     if not conversation:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+
     title = conv_service.generate_title(conversation_id)
     summary = conv_service.summarize_conversation(conversation_id)
-    
+
     conv_service.update_conversation(conversation_id, title=title, summary=summary)
-    
+
     return {
         "conversation_id": conversation_id,
         "title": title,
         "summary": summary,
-        "message": "对话总结生成成功"
+        "message": "对话总结生成成功",
     }
 
 
@@ -1150,7 +1175,7 @@ def start():
         port=target_port,
         reload=settings.DEBUG,
         workers=4,
-        timeout_keep_alive=120
+        timeout_keep_alive=120,
     )
 
 
