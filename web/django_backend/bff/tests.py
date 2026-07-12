@@ -18,3 +18,22 @@ class PatrolBatchDownloadRouteTests(SimpleTestCase):
         )
         self.assertEqual(match.url_name, "bff_patrol_batch_report")
         self.assertEqual(match.kwargs["patrol_batch_id"], batch_id)
+
+    def test_batch_api_routes_resolve(self):
+        batch_id = "patrol-batch-test"
+        expected = {
+            "bff_patrol_batch_summary": "summary/",
+            "bff_patrol_batch_archive": "archive/",
+            "bff_patrol_batch_restore": "restore/",
+            "bff_patrol_batch_rerun": "rerun/",
+            "bff_patrol_batch_retry": "retry/",
+        }
+
+        for route_name, suffix in expected.items():
+            path = reverse(route_name, kwargs={"patrol_batch_id": batch_id})
+            match = resolve(path)
+            self.assertEqual(
+                path,
+                f"/api/workflows/runs/patrol-batches/{batch_id}/{suffix}",
+            )
+            self.assertEqual(match.url_name, route_name)

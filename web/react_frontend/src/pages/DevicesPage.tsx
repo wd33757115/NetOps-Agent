@@ -3177,7 +3177,13 @@ const DevicesPage: React.FC = () => {
         onCancel={() => setPatrolOpen(false)}
         footer={[
           <Button key="close" onClick={() => setPatrolOpen(false)}>关闭</Button>,
-          <Button key="preview" icon={<SearchOutlined />} loading={previewPatrol.isLoading} onClick={() => previewPatrol.mutate()}>
+          <Button
+            key="preview"
+            icon={<SearchOutlined />}
+            loading={previewPatrol.isLoading}
+            disabled={Boolean(patrolLaunch)}
+            onClick={() => previewPatrol.mutate()}
+          >
             预览
           </Button>,
           <Button
@@ -3185,10 +3191,14 @@ const DevicesPage: React.FC = () => {
             type="primary"
             icon={<PlayCircleOutlined />}
             loading={launchPatrol.isLoading}
-            disabled={previewPatrol.isLoading || Boolean(patrolPreview && patrolPreview.ready_count === 0)}
+            disabled={
+              previewPatrol.isLoading
+              || Boolean(patrolLaunch)
+              || Boolean(patrolPreview && patrolPreview.ready_count === 0)
+            }
             onClick={() => launchPatrol.mutate()}
           >
-            发起
+            {patrolLaunch ? '已发起' : '发起'}
           </Button>,
         ]}
         width={1080}

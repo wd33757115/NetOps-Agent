@@ -166,10 +166,27 @@ def build_events_from_changes(
     return events
 
 
+def no_event_reason(
+    change: dict[str, Any],
+    *,
+    active_rule_count: int | None = None,
+) -> str:
+    if change.get("change_type") == "missing":
+        return "presence_confirmation_pending"
+    if change.get("change_type") == "initial" and change.get("new") is None:
+        return "initial_empty_state"
+    if active_rule_count == 0:
+        return "no_active_event_rules"
+    if active_rule_count is not None:
+        return "active_rules_evaluated_no_match"
+    return "event_rule_context_unavailable"
+
+
 def summarize_no_event_changes(
     changes: list[dict[str, Any]],
     event_change_ids: set[str],
     *,
+    active_rule_count: int | None = None,
     limit: int = 10,
 ) -> dict[str, Any]:
     no_event_changes = [
@@ -186,14 +203,10 @@ def summarize_no_event_changes(
         str(change.get("change_type") or "unknown") for change in no_event_changes
     )
 
-    def reason(change: dict[str, Any]) -> str:
-        if change.get("change_type") == "missing":
-            return "presence_confirmation_pending"
-        if change.get("change_type") == "initial" and change.get("new") is None:
-            return "initial_empty_state"
-        return "no_active_rule_matched"
-
-    by_reason = Counter(reason(change) for change in no_event_changes)
+    by_reason = Counter(
+        no_event_reason(change, active_rule_count=active_rule_count)
+        for change in no_event_changes
+    )
     examples = [
         {
             "change_id": change.get("change_id"),
@@ -205,7 +218,7 @@ def summarize_no_event_changes(
             "change_type": change.get("change_type"),
             "old": change.get("old"),
             "new": change.get("new"),
-            "reason": reason(change),
+            "reason": no_event_reason(change, active_rule_count=active_rule_count),
         }
         for change in no_event_changes[:limit]
     ]
@@ -216,6 +229,7 @@ def summarize_no_event_changes(
         "by_command": dict(by_command.most_common(limit)),
         "by_change_type": dict(by_change_type.most_common(limit)),
         "by_reason": dict(by_reason.most_common(limit)),
+        "active_rule_count": active_rule_count,
         "examples": examples,
     }
 
@@ -454,7 +468,12 @@ def _build_events_from_params_impl(
             run_id=params.get("run_id"),
             device_id=params.get("device_id"),
         )
-    events = build_events_from_changes(list(changes or []), rules=rules, heartbeat=heartbeat)
+    effective_rules = load_event_rules() if rules is None else rules
+    events = build_events_from_changes(
+        list(changes or []),
+        rules=effective_rules,
+        heartbeat=heartbeat,
+    )
     persist = params.get("persist", True)
     persisted_event_count = save_events(events) if persist else 0
     event_change_ids = {event.source_change_id for event in events if event.source_change_id}
@@ -469,6 +488,14 @@ def _build_events_from_params_impl(
         no_event_count = ChangeEventRepository().mark_changes_event_status(
             no_event_change_ids,
             status="no_event",
+            decision_reasons={
+                str(change["change_id"]): no_event_reason(
+                    change,
+                    active_rule_count=len(effective_rules),
+                )
+                for change in changes or []
+                if change.get("change_id") and str(change["change_id"]) in no_event_change_ids
+            },
         )
     message_ids: list[str] = []
     if params.get("publish", False):
@@ -481,6 +508,7 @@ def _build_events_from_params_impl(
         "no_event_summary": summarize_no_event_changes(
             list(changes or []),
             event_change_ids,
+            active_rule_count=len(effective_rules),
         ),
         "storage": "postgresql",
         "events": [event.to_dict() for event in events],

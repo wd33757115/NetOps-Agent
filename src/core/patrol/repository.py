@@ -1401,4 +1401,6 @@ class PatrolRepository:
             evidence_id=evidence_id_for_command_snapshot(row.id),
             source_type="cli",
             schema_id=row.parser_template_id,
+            execution_item_id=row.execution_item_id,
+            output_status=row.output_status,
         )

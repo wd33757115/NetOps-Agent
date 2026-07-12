@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta, timezone
@@ -102,8 +103,24 @@ def _stringify(value: Any) -> str:
 def _equivalent_values(field: str, old: Any, new: Any) -> bool:
     old_text = _stringify(old).strip()
     new_text = _stringify(new).strip()
-    if str(field).lower() in {"status", "protocol", "state"}:
+    normalized_field = str(field).lower()
+    if normalized_field in {"status", "protocol", "state"}:
         return old_text.casefold() == new_text.casefold()
+    if normalized_field in {"ip", "ip_address", "address"}:
+        try:
+            old_interface = ipaddress.ip_interface(old_text)
+            new_interface = ipaddress.ip_interface(new_text)
+        except ValueError:
+            return old_text == new_text
+        if old_interface.ip != new_interface.ip:
+            return False
+        old_has_prefix = "/" in old_text
+        new_has_prefix = "/" in new_text
+        return (
+            not old_has_prefix
+            or not new_has_prefix
+            or old_interface.network.prefixlen == new_interface.network.prefixlen
+        )
     return old_text == new_text
 
 
@@ -207,6 +224,30 @@ def _state_key(observation: dict[str, Any]) -> str:
         separators=(",", ":"),
         default=str,
     )
+
+
+def _deduplicate_current_observations(
+    observations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    latest_by_key: dict[str, dict[str, Any]] = {}
+    for item in observations:
+        key = _state_key(item)
+        existing = latest_by_key.get(key)
+        item_order = (
+            _observed_datetime(item.get("observed_at"))
+            or datetime.min.replace(tzinfo=timezone.utc),
+            str(item.get("fact_order_key") or ""),
+        )
+        existing_order = (
+            (
+                _observed_datetime(existing.get("observed_at"))
+                or datetime.min.replace(tzinfo=timezone.utc)
+            ),
+            str(existing.get("fact_order_key") or ""),
+        ) if existing else None
+        if existing_order is None or item_order > existing_order:
+            latest_by_key[key] = item
+    return list(latest_by_key.values())
 
 
 def _collection_key(observation: dict[str, Any]) -> str:
@@ -966,6 +1007,7 @@ def _detect_observation_changes_against_history_impl(
             )
         else:
             current_observations = repository.list_run_observations(current_run_id)
+    current_observations = _deduplicate_current_observations(current_observations)
     current_by_key = {_state_key(item): item for item in current_observations}
     collection_results = patrol_repository.list_collection_results(current_run_id)
     current_collection_results = _aggregate_collection_results(collection_results)

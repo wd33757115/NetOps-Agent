@@ -370,6 +370,48 @@ def test_observations_from_snapshot_uses_template_contract(monkeypatch):
     assert observations[0].metadata["evidence_id"] == "ev-cli-test"
 
 
+def test_observations_from_snapshot_applies_validator_semantics(monkeypatch):
+    monkeypatch.setattr(
+        normalizer,
+        "_template_contract",
+        lambda template_id, **_kwargs: {
+            "entity_type": "interface_l3",
+            "primary_keys": ["interface"],
+            "validators": {
+                "ip_address": {"type": "ip_or_unassigned"},
+                "usage": {"type": "percent"},
+            },
+        },
+    )
+
+    observations = observations_from_snapshot(
+        {
+            "id": "snapshot-1",
+            "run_id": "run-1",
+            "device_id": "SW1",
+            "canonical_command": "display ip interface brief",
+            "parser_template_id": "template-1",
+            "observed_at": "2026-06-20T10:00:00+00:00",
+            "structured_json": [
+                {
+                    "interface": "GE1/0",
+                    "ip_address": "10.10.1.1/024",
+                    "usage": "56.7",
+                }
+            ],
+        },
+        mode="production",
+        source="test",
+        dataset_id=None,
+    )
+
+    by_field = {item.field_name: item for item in observations}
+    assert by_field["ip_address"].value == "10.10.1.1/24"
+    assert by_field["ip_address"].semantic_type == "ip_address"
+    assert by_field["usage"].unit == "%"
+    assert by_field["usage"].semantic_type == "percentage"
+
+
 def test_observations_from_snapshot_prefers_inventory_device_id(monkeypatch):
     monkeypatch.setattr(
         normalizer,

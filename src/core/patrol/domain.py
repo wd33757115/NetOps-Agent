@@ -30,3 +30,5 @@ class SnapshotRecord:
     evidence_id: str | None = None
     source_type: str = "cli"
     schema_id: str | None = None
+    execution_item_id: str | None = None
+    output_status: str = "not_classified"

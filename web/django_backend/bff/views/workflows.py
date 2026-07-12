@@ -383,6 +383,56 @@ async def proxy_patrol_batches(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_jwt
 @sync_bff_view
+async def proxy_patrol_batch_summary(
+    request: HttpRequest, patrol_batch_id: str
+) -> JsonResponse:
+    return await proxy_to_fastapi(
+        method="GET",
+        fastapi_path=f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/summary",
+        request_id=request.bff_request_id,
+        extra_headers=forward_client_headers(request),
+    )
+
+
+async def _proxy_patrol_batch_action(
+    request: HttpRequest,
+    patrol_batch_id: str,
+    action: str,
+) -> JsonResponse:
+    return await proxy_to_fastapi(
+        method="POST",
+        fastapi_path=f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/{action}",
+        request_id=request.bff_request_id,
+        timeout=TASK_TIMEOUT,
+        data=parse_json_body(request),
+        extra_headers=forward_client_headers(request),
+    )
+
+
+@csrf_exempt
+@require_jwt
+@sync_bff_view
+async def proxy_patrol_batch_archive(request: HttpRequest, patrol_batch_id: str) -> JsonResponse:
+    return await _proxy_patrol_batch_action(request, patrol_batch_id, "archive")
+
+
+@csrf_exempt
+@require_jwt
+@sync_bff_view
+async def proxy_patrol_batch_restore(request: HttpRequest, patrol_batch_id: str) -> JsonResponse:
+    return await _proxy_patrol_batch_action(request, patrol_batch_id, "restore")
+
+
+@csrf_exempt
+@require_jwt
+@sync_bff_view
+async def proxy_patrol_batch_rerun(request: HttpRequest, patrol_batch_id: str) -> JsonResponse:
+    return await _proxy_patrol_batch_action(request, patrol_batch_id, "rerun")
+
+
+@csrf_exempt
+@require_jwt
+@sync_bff_view
 async def proxy_patrol_batch_retry(request: HttpRequest, patrol_batch_id: str) -> JsonResponse:
     return await proxy_to_fastapi(
         method="POST",

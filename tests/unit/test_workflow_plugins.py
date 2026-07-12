@@ -901,11 +901,13 @@ def test_export_patrol_batch_report_summarizes_changes_and_events(monkeypatch):
     response = asyncio.run(workflow_api.export_patrol_batch_report("batch-1"))
     body = response.body.decode("utf-8")
 
-    assert "# Patrol Batch Report: batch-1" in body
-    assert "- Changes: 1" in body
-    assert "- Events: 1" in body
-    assert "- InterfaceDown: 1" in body
-    assert "| SW1 | workflow-1 | completed | snapshot-run-1 | 1 | 1 | - |" in body
+    assert "# 网络设备巡检报告" in body
+    assert "**批次 ID**：`batch-1`" in body
+    assert "**总体结论**：发现异常" in body
+    assert "Workflow 完成只表示巡检链路执行结束，不等同于设备健康" in body
+    assert "## 六、完整变化明细" in body
+    assert "InterfaceDown" in body
+    assert "| SW1 | workflow-1 | completed | snapshot-run-1" in body
 
 
 def test_patrol_batch_summary_exposes_report_counts(monkeypatch):
@@ -1030,3 +1032,62 @@ def test_patrol_batch_summary_exposes_report_counts(monkeypatch):
     assert result["runs"][0]["snapshot_run_id"] == "snapshot-run-1"
     assert result["sample_events"][0]["id"] == "event-1"
     assert result["deliverables"]["report_url"].endswith("/batch-1/report.md")
+
+
+def test_patrol_report_does_not_treat_collected_state_as_healthy():
+    from src.gateway.workflow_api import _domain_checks
+
+    checks = _domain_checks(
+        observations=[
+            {
+                "entity_type": "interface_l3",
+                "entity_key": '["GE1/0"]',
+                "field": "status",
+                "value": "down",
+                "command": "display interface brief",
+            }
+        ],
+        command_details=[
+            {
+                "command": "display interface brief",
+                "parse_status": "parsed",
+            }
+        ],
+        changes=[],
+        events=[],
+    )
+
+    assert checks[0]["status"] == "未发现变化（健康未判定）"
+    assert "不代表当前值处于健康范围" in checks[0]["reason"]
+
+
+def test_patrol_report_distinguishes_missing_rules_from_evaluated_non_match():
+    from src.gateway.workflow_api import _domain_checks
+
+    base = {
+        "device_id": "device-1",
+        "entity_type": "memory",
+        "entity_key": '["0"]',
+        "field": "usage",
+        "command": "display memory",
+    }
+    observation = {**base, "value": 51}
+    command = {"command": "display memory", "parse_status": "parsed"}
+
+    missing = _domain_checks(
+        observations=[observation],
+        command_details=[command],
+        changes=[{**base, "no_event_reason": "no_active_event_rules"}],
+        events=[],
+    )
+    evaluated = _domain_checks(
+        observations=[observation],
+        command_details=[command],
+        changes=[
+            {**base, "no_event_reason": "active_rules_evaluated_no_match"}
+        ],
+        events=[],
+    )
+
+    assert missing[0]["status"] == "规则缺失"
+    assert evaluated[0]["status"] == "有变化，未触发事件"

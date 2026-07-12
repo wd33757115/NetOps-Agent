@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import uuid
 from typing import Any
@@ -49,12 +50,26 @@ def _value_parts(value: Any) -> tuple[str | None, float | None, str]:
     return text, number, "string"
 
 
-def _normalize_observation_value(field_name: str, value: Any) -> Any:
+def _normalize_observation_value(
+    field_name: str,
+    value: Any,
+    *,
+    validator: dict[str, Any] | None = None,
+) -> Any:
     field = str(field_name).strip().lower()
     if isinstance(value, str):
         text = value.strip()
         if field in PLACEHOLDER_NORMALIZED_FIELDS and text.lower() in EMPTY_PLACEHOLDERS:
             return ""
+        if str((validator or {}).get("type") or "").lower() == "ip_or_unassigned":
+            if text.lower() in {"unassigned", "unset", "none", "n/a", "--", "-"}:
+                return text.lower()
+            try:
+                if "/" in text:
+                    return ipaddress.ip_interface(text).with_prefixlen
+                return ipaddress.ip_address(text).compressed
+            except ValueError:
+                return text
         return text
     return value
 
@@ -174,6 +189,7 @@ def observations_from_snapshot(
     ignore_fields = {str(field).strip().lower() for field in contract.get("ignore_fields") or []}
     ignore_fields.update(DEFAULT_IGNORE_FIELDS)
     state_semantics = dict(contract.get("state_semantics") or {})
+    validators = dict(contract.get("validators") or {})
     observations: list[StateObservation] = []
     external_device_id = str(snapshot["device_id"])
     state_device_id = str(snapshot.get("inventory_device_id") or external_device_id)
@@ -189,12 +205,26 @@ def observations_from_snapshot(
             normalized_field_name = str(field_name).strip().lower()
             if normalized_field_name in ignore_fields or field_name in primary_keys:
                 continue
-            value = _normalize_observation_value(str(field_name), record.get(field_name))
+            validator = validators.get(field_name) or validators.get(normalized_field_name)
+            if not isinstance(validator, dict):
+                validator = {}
+            value = _normalize_observation_value(
+                str(field_name),
+                record.get(field_name),
+                validator=validator,
+            )
             field_semantics = state_semantics.get(field_name) or state_semantics.get(
                 normalized_field_name
             )
             if not isinstance(field_semantics, dict):
                 field_semantics = {}
+            field_semantics = dict(field_semantics)
+            validator_type = str(validator.get("type") or "").lower()
+            if validator_type == "percent":
+                field_semantics.setdefault("semantic_type", "percentage")
+                field_semantics.setdefault("unit", "%")
+            elif validator_type == "ip_or_unassigned":
+                field_semantics.setdefault("semantic_type", "ip_address")
             value_text, value_number, value_type = _value_parts(value)
             observation_type = (
                 str(field_semantics.get("observation_type"))

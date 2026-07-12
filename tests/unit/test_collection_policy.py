@@ -112,6 +112,25 @@ def test_collection_policy_does_not_create_default_commands():
     assert plan.profile_version_id is None
 
 
+def test_collection_policy_deduplicates_profile_commands(monkeypatch):
+    monkeypatch.setattr(
+        CollectionPolicyResolver,
+        "_load_active_profile",
+        lambda *_args, **_kwargs: {
+            "profile_version_id": "version-1",
+            "commands": ["show version", " SHOW   VERSION ", "show inventory"],
+        },
+    )
+
+    plan = CollectionPolicyResolver().build_plan(
+        device={"device_id": "device-1", "command_file": "duplicate-profile"},
+        action="patrol",
+        mode="production",
+    )
+
+    assert plan.command_texts() == ["show version", "show inventory"]
+
+
 def test_collection_policy_prefers_active_profile(monkeypatch):
     monkeypatch.setattr(
         CollectionPolicyResolver,

@@ -14,6 +14,7 @@ from src.common.config import get_settings
 from src.core.celery_tasks.tasks import _persist_patrol_snapshots
 from src.core.patrol.change_detector import (
     _aggregate_collection_results,
+    _deduplicate_current_observations,
     detect_changes_between_values,
     detect_changes_from_params,
 )
@@ -217,6 +218,45 @@ def test_change_detector_ignores_status_case_noise():
     )
 
     assert changes == []
+
+
+def test_change_detector_treats_ip_with_unknown_prefix_as_same_host():
+    changes = detect_changes_between_values(
+        [{"interface": "GE1/0", "ip_address": "10.10.1.1/24"}],
+        [{"interface": "GE1/0", "ip_address": "10.10.1.1"}],
+        entity_type="interface_l3",
+        primary_keys=["interface"],
+    )
+
+    assert changes == []
+
+
+def test_change_detector_uses_latest_fact_for_duplicate_state_key():
+    common = {
+        "device_id": "device-1",
+        "entity_type": "interface_l3",
+        "entity_key": '["GE1/0"]',
+        "field_name": "ip_address",
+    }
+    observations = _deduplicate_current_observations(
+        [
+            {
+                **common,
+                "value_json": "10.10.1.1",
+                "observed_at": "2026-07-12T03:00:00+08:00",
+                "fact_order_key": "10|brief",
+            },
+            {
+                **common,
+                "value_json": "10.10.1.1/24",
+                "observed_at": "2026-07-12T03:00:01+08:00",
+                "fact_order_key": "14|ip-brief",
+            },
+        ]
+    )
+
+    assert len(observations) == 1
+    assert observations[0]["value_json"] == "10.10.1.1/24"
 
 
 def test_duplicate_collection_items_have_distinct_fact_identity_and_safe_authority():
@@ -617,8 +657,15 @@ def test_event_builder_marks_non_event_changes(monkeypatch):
             calls["events"] = events
             return len(events)
 
-        def mark_changes_event_status(self, change_ids, *, status, only_pending=True):
-            calls["no_event"] = (change_ids, status, only_pending)
+        def mark_changes_event_status(
+            self,
+            change_ids,
+            *,
+            status,
+            only_pending=True,
+            decision_reasons=None,
+        ):
+            calls["no_event"] = (change_ids, status, only_pending, decision_reasons)
             return len(change_ids)
 
     monkeypatch.setattr(
@@ -638,7 +685,30 @@ def test_event_builder_marks_non_event_changes(monkeypatch):
     assert result["no_event_summary"]["total"] == 1
     assert result["no_event_summary"]["by_field"] == {"cpu_5s": 1}
     assert result["no_event_summary"]["by_entity_type"] == {"cpu": 1}
-    assert calls["no_event"] == (["small-cpu"], "no_event", True)
+    assert calls["no_event"] == (
+        ["small-cpu"],
+        "no_event",
+        True,
+        {"small-cpu": "active_rules_evaluated_no_match"},
+    )
+
+
+def test_no_event_reason_distinguishes_missing_rules_from_non_match():
+    from src.core.patrol.event_builder import no_event_reason
+
+    change = {
+        "change_id": "memory-delta",
+        "change_type": "modified",
+        "field": "usage",
+        "old": 50,
+        "new": 51,
+    }
+
+    assert no_event_reason(change, active_rule_count=0) == "no_active_event_rules"
+    assert (
+        no_event_reason(change, active_rule_count=3)
+        == "active_rules_evaluated_no_match"
+    )
 
 
 def test_import_and_raw_hash_change_roundtrip(tmp_path: Path):
@@ -679,6 +749,54 @@ def test_import_and_raw_hash_change_roundtrip(tmp_path: Path):
         assert result["changes"][0]["field"] == "raw_text_hash"
     finally:
         _cleanup_runs(run1, run2)
+
+
+def test_duplicate_import_reconciles_provisional_collection_statuses(tmp_path: Path):
+    source = tmp_path / "SW2-10.0.0.2.log"
+    source.write_text(CISCO_SAMPLE, encoding="utf-8")
+    run_id = f"test-{uuid.uuid4()}"
+    try:
+        first = import_raw_capture(
+            file_path=source,
+            mode="parser_validation",
+            run_id=run_id,
+            vendor="Cisco",
+            collector_complete=False,
+        )
+        with get_db_session() as db:
+            provisional = (
+                db.query(PatrolCollectionResult)
+                .filter(PatrolCollectionResult.run_id == run_id)
+                .all()
+            )
+            assert {row.execution_status for row in provisional} == {"failed"}
+
+        final = import_raw_capture(
+            file_path=source,
+            mode="parser_validation",
+            run_id=run_id,
+            vendor="Cisco",
+            collector_complete=True,
+        )
+
+        assert final["new_snapshot_count"] == 0
+        assert final["duplicate_snapshot_count"] == first["command_count"]
+        with get_db_session() as db:
+            snapshots = db.query(CommandSnapshot).filter(CommandSnapshot.run_id == run_id).all()
+            reconciled = (
+                db.query(PatrolCollectionResult)
+                .filter(PatrolCollectionResult.run_id == run_id)
+                .all()
+            )
+            assert len(snapshots) == first["command_count"]
+            assert len(reconciled) == first["command_count"]
+            assert {row.execution_item_id for row in snapshots} == {
+                row.execution_item_id for row in reconciled
+            }
+            assert {row.execution_status for row in reconciled} == {"complete"}
+            assert all((row.metadata_json or {}).get("collector_complete") for row in reconciled)
+    finally:
+        _cleanup_runs(run_id)
 
 
 def test_command_observed_at_propagates_to_snapshot_and_evidence(tmp_path: Path):

@@ -244,6 +244,7 @@ class ChangeEventRepository:
         *,
         status: str,
         only_pending: bool = True,
+        decision_reasons: dict[str, str] | None = None,
     ) -> int:
         if not change_ids:
             return 0
@@ -258,6 +259,8 @@ class ChangeEventRepository:
                 rows = query.all()
                 for row in rows:
                     row.event_status = status
+                    if decision_reasons and str(row.id) in decision_reasons:
+                        row.decision_reason = decision_reasons[str(row.id)]
                 updated += len(rows)
         return updated
 

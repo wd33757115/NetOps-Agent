@@ -54,6 +54,26 @@ urlpatterns = [
     path("workflows/runs/", workflows.proxy_workflow_runs, name="bff_workflow_runs"),
     path("workflows/runs/patrol-batches/", workflows.proxy_patrol_batches, name="bff_patrol_batches"),
     path(
+        "workflows/runs/patrol-batches/<str:patrol_batch_id>/summary/",
+        workflows.proxy_patrol_batch_summary,
+        name="bff_patrol_batch_summary",
+    ),
+    path(
+        "workflows/runs/patrol-batches/<str:patrol_batch_id>/archive/",
+        workflows.proxy_patrol_batch_archive,
+        name="bff_patrol_batch_archive",
+    ),
+    path(
+        "workflows/runs/patrol-batches/<str:patrol_batch_id>/restore/",
+        workflows.proxy_patrol_batch_restore,
+        name="bff_patrol_batch_restore",
+    ),
+    path(
+        "workflows/runs/patrol-batches/<str:patrol_batch_id>/rerun/",
+        workflows.proxy_patrol_batch_rerun,
+        name="bff_patrol_batch_rerun",
+    ),
+    path(
         "workflows/runs/patrol-batches/<str:patrol_batch_id>/retry/",
         workflows.proxy_patrol_batch_retry,
         name="bff_patrol_batch_retry",

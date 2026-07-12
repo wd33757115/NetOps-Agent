@@ -266,6 +266,14 @@ class CollectionPolicyResolver:
                 active_profile.get("profile_version_id") if active_profile else None
             )
             commands = list(active_profile["commands"]) if active_profile else []
+        unique_commands: list[str] = []
+        seen_commands: set[str] = set()
+        for command in commands:
+            normalized = " ".join(str(command).strip().lower().split())
+            if not normalized or normalized in seen_commands:
+                continue
+            seen_commands.add(normalized)
+            unique_commands.append(str(command).strip())
         return ExecutionPlan(
             device_id=str(device.get("device_id") or ""),
             action=action,
@@ -276,7 +284,7 @@ class CollectionPolicyResolver:
             collector_options=collector_options,
             commands=tuple(
                 CollectionItem(command=command, action=action)
-                for command in commands
+                for command in unique_commands
             ),
             policy_source=policy_source,
             binding_id=binding_id,

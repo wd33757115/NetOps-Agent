@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import csv
 import io
+import ipaddress
+import json
 import uuid
 from collections import Counter
 from datetime import datetime, timezone
@@ -54,9 +56,12 @@ from src.gateway.schemas import (
     WorkflowTimelineEvent,
 )
 from src.infrastructure.db.models import (
+    CommandSnapshot,
     NetworkChangeRecord,
     NetworkEventOccurrenceRecord,
     NetworkEventRecord,
+    PatrolCollectionResult,
+    StateObservationRecord,
     WorkflowStepRecord,
 )
 from src.infrastructure.db.postgres import get_db_session
@@ -144,6 +149,14 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _iso(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
+
+
 def _run_context(run) -> dict[str, Any]:
     return dict(run.context or {})
 
@@ -183,86 +196,443 @@ def _format_report_value(value: Any) -> str:
     return str(value)
 
 
+REPORT_DOMAINS = (
+    ("interface", "接口状态"),
+    ("optical", "光模块与光功率"),
+    ("cpu", "CPU"),
+    ("memory", "内存"),
+    ("power", "电源"),
+    ("fan", "风扇"),
+    ("environment", "环境"),
+    ("device", "设备与版本"),
+    ("raw", "原始配置指纹"),
+)
+
+
+def _report_domain(entity_type: Any = None, command: Any = None) -> str | None:
+    entity = str(entity_type or "").lower()
+    text = str(command or "").lower()
+    if "optical" in entity or "transceiver" in text:
+        return "optical"
+    if "interface" in entity or "interface brief" in text:
+        return "interface"
+    if entity == "cpu" or " cpu" in f" {text}":
+        return "cpu"
+    if entity == "memory" or "memory" in text:
+        return "memory"
+    if entity == "power" or "power" in text:
+        return "power"
+    if entity == "fan" or " fan" in f" {text}":
+        return "fan"
+    if entity in {"environment", "temperature"} or "environment" in text:
+        return "environment"
+    if entity == "raw_command_output":
+        return "raw"
+    if entity == "device" or any(token in text for token in ("version", "device manuinfo")):
+        return "device"
+    return None
+
+
+def _markdown_cell(value: Any) -> str:
+    text = _format_report_value(value) or "-"
+    return text.replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+
+
+def _display_entity_key(value: Any) -> str:
+    if not isinstance(value, str):
+        return _format_report_value(value) or "__singleton__"
+    try:
+        decoded = json.loads(value)
+    except (TypeError, ValueError):
+        return value or "__singleton__"
+    if isinstance(decoded, list):
+        return "/".join(str(item) for item in decoded) or "__singleton__"
+    return _format_report_value(decoded) or "__singleton__"
+
+
+def _quality_from_run_data(
+    command_details: list[dict[str, Any]],
+    observations: list[dict[str, Any]],
+) -> dict[str, Any]:
+    parse_counts = Counter(str(item.get("parse_status") or "unknown") for item in command_details)
+    output_counts = Counter(
+        str(item.get("output_status") or "not_classified") for item in command_details
+    )
+    execution_success_count = sum(
+        item.get("execution_status") == "complete" for item in command_details
+    )
+    eligible = [
+        item
+        for item in command_details
+        if item.get("execution_status") == "complete"
+        and item.get("parse_status") not in {"ignored", "not_applicable", "raw_hashed"}
+    ]
+    ready = [item for item in eligible if item.get("parse_status") in {"parsed", "parse_empty"}]
+    parser_rate = len(ready) / len(eligible) if eligible else 1.0
+    degraded = (
+        parser_rate < 1.0
+        or bool(parse_counts.get("template_missing"))
+        or bool(parse_counts.get("parse_failed"))
+        or bool(output_counts.get("command_error"))
+        or bool(output_counts.get("empty_unverified"))
+        or execution_success_count < len(command_details)
+    )
+    return {
+        "status": "degraded" if degraded else "ready",
+        "command_count": len(command_details),
+        "execution_success_count": execution_success_count,
+        "parse_status_counts": dict(parse_counts),
+        "output_status_counts": dict(output_counts),
+        "parser_eligible_count": len(eligible),
+        "parser_ready_count": len(ready),
+        "parser_ready_rate": parser_rate,
+        "observation_count": len(observations),
+    }
+
+
+def _domain_checks(
+    *,
+    observations: list[dict[str, Any]],
+    command_details: list[dict[str, Any]],
+    changes: list[dict[str, Any]],
+    events: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    checks: list[dict[str, Any]] = []
+    latest_observations: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for item in observations:
+        key = (
+            str(item.get("entity_type") or ""),
+            str(item.get("entity_key") or ""),
+            str(item.get("field") or ""),
+        )
+        latest_observations[key] = item
+    observations = list(latest_observations.values())
+    for domain, label in REPORT_DOMAINS:
+        domain_observations = [
+            item
+            for item in observations
+            if _report_domain(item.get("entity_type"), item.get("command")) == domain
+        ]
+        domain_commands = [
+            item
+            for item in command_details
+            if _report_domain(None, item.get("command")) == domain
+        ]
+        domain_changes = [
+            item
+            for item in changes
+            if _report_domain(item.get("entity_type"), item.get("command")) == domain
+        ]
+        domain_events = [
+            item
+            for item in events
+            if _report_domain(item.get("entity_type"), item.get("event_type")) == domain
+        ]
+        if not any(
+            (domain_commands, domain_observations, domain_changes, domain_events)
+        ):
+            continue
+        parse_statuses = {str(item.get("parse_status") or "") for item in domain_commands}
+        if domain_events:
+            status = "异常"
+            reason = f"产生 {len(domain_events)} 个事件"
+        elif not domain_observations:
+            if parse_statuses and parse_statuses <= {"not_applicable"}:
+                status = "不适用"
+                reason = "设备输出表明该检查项不适用"
+            elif parse_statuses & {"template_missing", "parse_failed", "empty_unverified"}:
+                status = "数据不完整"
+                reason = "缺少可用 Parser 或结构化结果"
+            else:
+                status = "无法判断"
+                reason = "没有形成结构化观测"
+        elif domain_changes:
+            reason_counts = Counter(
+                str(item.get("no_event_reason") or "unknown")
+                for item in domain_changes
+            )
+            missing_rules = int(reason_counts.get("no_active_event_rules") or 0)
+            evaluated = int(
+                reason_counts.get("active_rules_evaluated_no_match") or 0
+            )
+            if missing_rules:
+                status = "规则缺失"
+                reason = (
+                    f"{len(domain_changes)} 条变化，其中 {missing_rules} 条因无活动规则"
+                    "无法完成事件判定"
+                )
+            elif evaluated == len(domain_changes):
+                status = "有变化，未触发事件"
+                reason = f"{evaluated} 条变化已由活动规则评估，均未达到触发条件"
+            else:
+                status = "需复核"
+                reason = f"检测到 {len(domain_changes)} 条变化，事件判定原因不完整"
+        else:
+            status = "未发现变化（健康未判定）"
+            reason = "已形成结构化观测；无变化或事件不代表当前值处于健康范围"
+        current_values = []
+        for item in domain_observations[:8]:
+            unit = str(item.get("unit") or "")
+            value = _format_report_value(item.get("value"))
+            current_values.append(
+                f"{_display_entity_key(item.get('entity_key'))} "
+                f"{item.get('field')}={value}{unit}"
+            )
+        checks.append(
+            {
+                "domain": domain,
+                "label": label,
+                "status": status,
+                "observation_count": len(domain_observations),
+                "change_count": len(domain_changes),
+                "event_count": len(domain_events),
+                "reason": reason,
+                "current_values": current_values,
+            }
+        )
+    return checks
+
+
+def _batch_report_conclusion(summary: dict[str, Any]) -> dict[str, str]:
+    failed_runs = sum(
+        count for status, count in summary["status_counts"].items() if status != "completed"
+    )
+    quality = summary.get("quality") or {}
+    no_event = summary.get("no_event_summary") or {}
+    missing_rules = int(no_event.get("missing_rule_count") or 0)
+    suspected = int(summary.get("suspected_format_change_count") or 0)
+    if failed_runs:
+        return {"status": "执行失败", "trust": "低", "reason": "存在未完成的巡检工作流"}
+    if summary.get("event_count"):
+        return {"status": "发现异常", "trust": "高", "reason": "已生成可追溯网络事件"}
+    if quality.get("status") == "degraded" or missing_rules or suspected:
+        reasons = []
+        if quality.get("status") == "degraded":
+            reasons.append("结构化数据覆盖不完整")
+        if missing_rules:
+            reasons.append(f"{missing_rules} 条变化因无活动事件规则而无法判定")
+        if suspected:
+            reasons.append(f"{suspected} 条变化疑似格式噪声")
+        return {"status": "部分可信，需复核", "trust": "中", "reason": "；".join(reasons)}
+    if summary.get("change_count"):
+        return {
+            "status": "检测到变化，未触发事件",
+            "trust": "高",
+            "reason": "活动规则已完成评估，变化未达到事件触发条件",
+        }
+    return {
+        "status": "未发现变化（健康未判定）",
+        "trust": "高",
+        "reason": "数据完整且无变化或事件；当前值是否健康仍由状态策略判定",
+    }
+
+
+def _suspected_format_change(field: Any, old: Any, new: Any) -> bool:
+    if str(field or "").lower() not in {"ip", "ip_address", "address"}:
+        return False
+    old_text = str(old or "").strip()
+    new_text = str(new or "").strip()
+    if not old_text or not new_text or ("/" in old_text) == ("/" in new_text):
+        return False
+    try:
+        return ipaddress.ip_interface(old_text).ip == ipaddress.ip_interface(new_text).ip
+    except ValueError:
+        return False
+
+
 def _build_patrol_batch_report(patrol_batch_id: str, runs: list[Any]) -> str:
     summary = _build_patrol_batch_summary(patrol_batch_id, runs)
-    status_counts = summary["status_counts"]
-    run_rows = summary["runs"]
-    event_types = Counter(summary["event_types"])
-    severities = Counter(summary["severities"])
-    total_change_count = summary["change_count"]
-    total_event_count = summary["event_count"]
-    sample_events = summary["sample_events"]
-    sample_changes = summary["sample_changes"]
-
+    conclusion = _batch_report_conclusion(summary)
+    quality = summary["quality"]
     lines = [
-        f"# Patrol Batch Report: {patrol_batch_id}",
+        "# 网络设备巡检报告",
         "",
-        "## Summary",
+        f"- **批次 ID**：`{patrol_batch_id}`",
+        f"- **生成时间**：{datetime.now(timezone.utc).isoformat()}",
         "",
-        f"- Workflow runs: {summary['run_count']}",
-        f"- Devices: {summary['device_count']}",
-        f"- Changes: {total_change_count}",
-        f"- Events: {total_event_count}",
-        f"- Status counts: {status_counts}",
+        "## 一、巡检结论",
         "",
-        "## Event Types",
+        f"- **总体结论**：{conclusion['status']}",
+        f"- **结论可信度**：{conclusion['trust']}",
+        f"- **判断依据**：{conclusion['reason']}",
+        f"- **工作流**：{summary['run_count']} 个，状态分布 {summary['status_counts']}",
+        f"- **设备**：{summary['device_count']} 台",
+        f"- **Observation / Change / Event**：{quality['observation_count']} / "
+        f"{summary['change_count']} / {summary['event_count']}",
         "",
+        "> Workflow 完成只表示巡检链路执行结束，不等同于设备健康。",
+        "",
+        "## 二、设备与执行",
+        "",
+        "| 设备 | Workflow Run | 状态 | Snapshot Run | 命令 | Observation | Change | Event |",
+        "|---|---|---|---|---:|---:|---:|---:|",
     ]
-    if event_types:
-        lines.extend(f"- {name}: {count}" for name, count in event_types.most_common())
-    else:
-        lines.append("- No events recorded")
-    lines.extend(["", "## Severities", ""])
-    if severities:
-        lines.extend(f"- {name}: {count}" for name, count in severities.most_common())
-    else:
-        lines.append("- No event severities recorded")
-    lines.extend(
-        [
-            "",
-            "## Workflow Runs",
-            "",
-            "| Device | Run | Status | Snapshot Run | Changes | Events | Error |",
-            "|---|---|---|---|---:|---:|---|",
-        ]
-    )
-    for row in run_rows:
-        device = row["device_name"] or row["device_id"] or "-"
-        error = str(row["error_message"]).replace("\n", " ")[:180]
+    for row in summary["runs"]:
         lines.append(
             "| "
             + " | ".join(
-                [
-                    str(device),
-                    str(row["run_id"]),
-                    str(row["status"]),
-                    str(row["snapshot_run_id"] or "-"),
-                    str(row["change_count"]),
-                    str(row["event_count"]),
-                    error or "-",
-                ]
+                _markdown_cell(value)
+                for value in (
+                    row["device_name"] or row["device_id"],
+                    row["run_id"],
+                    row["status"],
+                    row["snapshot_run_id"],
+                    row["quality"]["command_count"],
+                    row["quality"]["observation_count"],
+                    row["change_count"],
+                    row["event_count"],
+                )
             )
             + " |"
         )
-    lines.extend(["", "## Sample Events", ""])
-    if sample_events:
+    lines.extend(
+        [
+            "",
+            "## 三、业务检查项",
+            "",
+            "| 设备 | 检查项 | 状态 | Observation | Change | Event | 说明 | 当前值示例 |",
+            "|---|---|---|---:|---:|---:|---|---|",
+        ]
+    )
+    for row in summary["runs"]:
+        for check in row["domain_checks"]:
+            lines.append(
+                "| "
+                + " | ".join(
+                    _markdown_cell(value)
+                    for value in (
+                        row["device_name"] or row["device_id"],
+                        check["label"],
+                        check["status"],
+                        check["observation_count"],
+                        check["change_count"],
+                        check["event_count"],
+                        check["reason"],
+                        "; ".join(check["current_values"]) or "-",
+                    )
+                )
+                + " |"
+            )
+    lines.extend(
+        [
+            "",
+            "## 四、数据质量",
+            "",
+            f"- **数据质量状态**：{quality['status']}",
+            f"- **命令执行**：{quality['execution_success_count']} / {quality['command_count']}",
+            f"- **Snapshot 证据**：{quality['snapshot_count']}，重复命令证据 "
+            f"{quality['duplicate_snapshot_count']} 条",
+            f"- **Parser ready**：{quality['parser_ready_count']} / "
+            f"{quality['parser_eligible_count']} ({quality['parser_ready_rate']:.1%})",
+            f"- **Parse 状态**：{quality['parse_status_counts']}",
+            f"- **输出状态**：{quality['output_status_counts']}",
+            "",
+            "### 命令质量明细",
+            "",
+            "| 设备 | 命令 | 执行 | Parse | 输出分类 | Fact | 失败代码 |",
+            "|---|---|---|---|---|---|---|",
+        ]
+    )
+    for row in summary["runs"]:
+        for command in row["command_details"]:
+            lines.append(
+                "| "
+                + " | ".join(
+                    _markdown_cell(value)
+                    for value in (
+                        row["device_name"] or row["device_id"],
+                        command["command"],
+                        command["execution_status"],
+                        command["parse_status"],
+                        command["output_status"],
+                        command["fact_status"],
+                        command["failure_code"],
+                    )
+                )
+                + " |"
+            )
+    no_event = summary["no_event_summary"]
+    lines.extend(
+        [
+            "",
+            "## 五、事件与规则判定",
+            "",
+            f"- **事件数**：{summary['event_count']}",
+            f"- **未生成事件的 Change**：{no_event['total']}",
+            f"- **原因分布**：{no_event['by_reason']}",
+        ]
+    )
+    if summary["event_count"] == 0 and no_event["total"]:
+        if no_event["missing_rule_count"]:
+            lines.append(
+                "- **解释**：0 Event 不代表设备无异常；当前缺少活动 EventRule，"
+                "无法完成事件判定。"
+            )
+        elif no_event["evaluated_no_match_count"]:
+            lines.append(
+                "- **解释**：活动 EventRule 已评估这些变化，但均未达到触发条件；"
+                "这不等同于对当前状态做出健康认定。"
+            )
+        else:
+            lines.append(
+                "- **解释**：0 Event 不代表设备无异常；事件判定上下文不完整，需复核。"
+            )
+    lines.extend(
+        [
+            "",
+            "## 六、完整变化明细",
+            "",
+            "| 设备 | 命令 | 实体 | 主键 | 字段 | 旧值 | 新值 | 类型 | 事件状态 | 原因 | 备注 |",
+            "|---|---|---|---|---|---|---|---|---|---|---|",
+        ]
+    )
+    if summary["changes"]:
+        for change in summary["changes"]:
+            lines.append(
+                "| "
+                + " | ".join(
+                    _markdown_cell(value)
+                    for value in (
+                        change["device_name"] or change["device_id"],
+                        change["command"],
+                        change["entity_type"],
+                        _display_entity_key(change["entity_key"]),
+                        change["field"],
+                        change["old_value"],
+                        change["new_value"],
+                        change["change_type"],
+                        change["event_status"],
+                        change["no_event_reason"],
+                        change["note"],
+                    )
+                )
+                + " |"
+            )
+    else:
+        lines.append("| - | - | - | - | - | - | - | - | - | - | 无变化 |")
+    lines.extend(["", "## 七、事件明细", ""])
+    if summary["events"]:
         lines.extend(
-            f"- {event['device_id'] or '-'} {event['event_type']} {event['severity']} "
-            f"{event['entity_type']}/{event['entity_key']}"
-            for event in sample_events[:20]
+            f"- **{_markdown_cell(event['severity'])}** "
+            f"{_markdown_cell(event['event_type'])}："
+            f"{_markdown_cell(event['device_name'] or event['device_id'])} "
+            f"{_markdown_cell(event['entity_type'])}/"
+            f"{_markdown_cell(_display_entity_key(event['entity_key']))}"
+            for event in summary["events"]
         )
     else:
-        lines.append("- No sample events")
-    lines.extend(["", "## Sample Changes", ""])
-    if sample_changes:
-        lines.extend(
-            f"- {change['device_id'] or '-'} {change['entity_type']}/{change['entity_key']} "
-            f"{change['field']}: {_format_report_value(change['old_value'])} -> "
-            f"{_format_report_value(change['new_value'])}"
-            for change in sample_changes[:20]
-        )
+        lines.append("- 未生成事件；请结合上一节 no_event 原因判断，不能据此直接认定健康。")
+    lines.extend(["", "## 八、待处理项", ""])
+    if summary["action_items"]:
+        lines.extend(f"- {item}" for item in summary["action_items"])
     else:
-        lines.append("- No sample changes")
+        lines.append("- 无")
+    lines.extend(["", "## 九、证据引用", ""])
+    for row in summary["runs"]:
+        lines.append(
+            f"- {row['device_name'] or row['device_id']}：Workflow "
+            f"`{row['run_id']}`，Snapshot Run `{row['snapshot_run_id']}`"
+        )
     lines.append("")
     return "\n".join(lines)
 
@@ -280,11 +650,25 @@ def _build_patrol_batch_summary(patrol_batch_id: str, runs: list[Any]) -> dict[s
     severities: Counter[str] = Counter()
     total_change_count = 0
     total_event_count = 0
-    sample_events: list[dict[str, Any]] = []
-    sample_changes: list[dict[str, Any]] = []
+    all_events: list[dict[str, Any]] = []
+    all_changes: list[dict[str, Any]] = []
+    aggregate_parse_statuses: Counter[str] = Counter()
+    aggregate_output_statuses: Counter[str] = Counter()
+    aggregate_command_count = 0
+    aggregate_execution_success = 0
+    aggregate_parser_eligible = 0
+    aggregate_parser_ready = 0
+    aggregate_observations = 0
+    aggregate_snapshot_count = 0
+    aggregate_duplicate_snapshots = 0
+    aggregate_no_event_reasons: Counter[str] = Counter()
+    suspected_format_change_count = 0
 
     with get_db_session() as db:
         for run in runs:
+            context = run.context or {}
+            device_id = str(context.get("device_id") or "")
+            device_name = str(context.get("device_name") or device_id or "-")
             steps = (
                 db.query(WorkflowStepRecord)
                 .filter(WorkflowStepRecord.run_id == run.id)
@@ -298,7 +682,28 @@ def _build_patrol_batch_summary(patrol_batch_id: str, runs: list[Any]) -> dict[s
                     break
             changes: list[NetworkChangeRecord] = []
             events: list[NetworkEventRecord] = []
+            snapshots: list[CommandSnapshot] = []
+            collection_results: list[PatrolCollectionResult] = []
+            observation_rows: list[StateObservationRecord] = []
             if snapshot_run_id:
+                snapshots = (
+                    db.query(CommandSnapshot)
+                    .filter(CommandSnapshot.run_id == str(snapshot_run_id))
+                    .order_by(CommandSnapshot.observed_at.asc())
+                    .all()
+                )
+                collection_results = (
+                    db.query(PatrolCollectionResult)
+                    .filter(PatrolCollectionResult.run_id == str(snapshot_run_id))
+                    .order_by(PatrolCollectionResult.observed_at.asc())
+                    .all()
+                )
+                observation_rows = (
+                    db.query(StateObservationRecord)
+                    .filter(StateObservationRecord.run_id == str(snapshot_run_id))
+                    .order_by(StateObservationRecord.observed_at.asc())
+                    .all()
+                )
                 changes = (
                     db.query(NetworkChangeRecord)
                     .filter(NetworkChangeRecord.run_id == str(snapshot_run_id))
@@ -322,49 +727,225 @@ def _build_patrol_batch_summary(patrol_batch_id: str, runs: list[Any]) -> dict[s
                         NetworkEventRecord.run_id == str(snapshot_run_id)
                     )
                 events = event_query.order_by(NetworkEventRecord.occurred_at.desc()).all()
+            no_event_summary = {}
+            for step in steps:
+                candidate = _find_nested_value(step.result or {}, "no_event_summary")
+                if isinstance(candidate, dict):
+                    no_event_summary = candidate
+                    break
+            no_event_by_change = {
+                str(item.get("change_id")): str(item.get("reason") or "unknown")
+                for item in no_event_summary.get("examples") or []
+                if isinstance(item, dict) and item.get("change_id")
+            }
+            command_details = [
+                {
+                    "command": row.canonical_command,
+                    "execution_status": row.execution_status,
+                    "parse_status": row.parse_status,
+                    "output_status": row.output_status,
+                    "fact_status": row.fact_status,
+                    "failure_code": row.failure_code or "",
+                }
+                for row in collection_results
+            ]
+            if not command_details:
+                command_details = [
+                    {
+                        "command": row.canonical_command,
+                        "execution_status": "complete",
+                        "parse_status": row.parse_status,
+                        "output_status": row.output_status,
+                        "fact_status": "unknown",
+                        "failure_code": "",
+                    }
+                    for row in snapshots
+                ]
+            observations = [
+                {
+                    "id": row.id,
+                    "device_id": row.device_id,
+                    "command": row.canonical_command,
+                    "entity_type": row.entity_type,
+                    "entity_key": row.entity_key,
+                    "field": row.field_name,
+                    "observation_type": row.observation_type,
+                    "value": row.value_json,
+                    "unit": row.unit,
+                    "observed_at": _iso(row.observed_at),
+                }
+                for row in observation_rows
+            ]
+            observation_by_id = {str(item["id"]): item for item in observations}
+            serialized_changes: list[dict[str, Any]] = []
+            for change in changes:
+                change_id = str(getattr(change, "id", "") or "")
+                old_value = change.old_value_json
+                new_value = change.new_value_json
+                suspected_format = _suspected_format_change(
+                    change.field,
+                    old_value,
+                    new_value,
+                )
+                if suspected_format:
+                    suspected_format_change_count += 1
+                current_observation = observation_by_id.get(
+                    str(getattr(change, "current_observation_id", "") or "")
+                )
+                reason = no_event_by_change.get(change_id) or str(
+                    getattr(change, "decision_reason", "") or ""
+                )
+                serialized_changes.append(
+                    {
+                        "id": change_id,
+                        "device_id": change.device_id,
+                        "device_name": device_name,
+                        "command": getattr(change, "canonical_command", None) or "",
+                        "entity_type": change.entity_type,
+                        "entity_key": change.entity_key,
+                        "field": change.field,
+                        "old_value": old_value,
+                        "new_value": new_value,
+                        "unit": (current_observation or {}).get("unit"),
+                        "change_type": getattr(change, "change_type", None) or "modified",
+                        "event_status": getattr(change, "event_status", None) or "unknown",
+                        "no_event_reason": reason or "unknown",
+                        "note": "疑似同一 IP 的前缀格式差异" if suspected_format else "",
+                        "detected_at": _iso(getattr(change, "detected_at", None)),
+                    }
+                )
+            serialized_events = [
+                {
+                    "id": getattr(event, "id", None),
+                    "device_id": event.device_id,
+                    "device_name": device_name,
+                    "event_type": event.event_type,
+                    "severity": event.severity,
+                    "entity_type": event.entity_type,
+                    "entity_key": event.entity_key,
+                    "occurred_at": _iso(getattr(event, "occurred_at", None)),
+                }
+                for event in events
+            ]
             for event in events:
                 event_types[str(event.event_type or "unknown")] += 1
                 severities[str(event.severity or "unknown")] += 1
             total_change_count += len(changes)
             total_event_count += len(events)
-            sample_changes.extend(
-                {
-                    "id": getattr(change, "id", None),
-                    "device_id": change.device_id,
-                    "entity_type": change.entity_type,
-                    "entity_key": change.entity_key,
-                    "field": change.field,
-                    "old_value": change.old_value_json,
-                    "new_value": change.new_value_json,
-                    "detected_at": getattr(change, "detected_at", None),
-                }
-                for change in changes[:3]
+            all_changes.extend(serialized_changes)
+            all_events.extend(serialized_events)
+            run_quality = _quality_from_run_data(command_details, observations)
+            snapshot_command_counts = Counter(row.canonical_command for row in snapshots)
+            duplicate_snapshot_count = sum(
+                count - 1 for count in snapshot_command_counts.values() if count > 1
             )
-            sample_events.extend(
-                {
-                    "id": getattr(event, "id", None),
-                    "device_id": event.device_id,
-                    "event_type": event.event_type,
-                    "severity": event.severity,
-                    "entity_type": event.entity_type,
-                    "entity_key": event.entity_key,
-                    "occurred_at": getattr(event, "occurred_at", None),
-                }
-                for event in events[:3]
-            )
-            context = run.context or {}
+            run_quality["snapshot_count"] = len(snapshots)
+            run_quality["duplicate_snapshot_count"] = duplicate_snapshot_count
+            aggregate_parse_statuses.update(run_quality["parse_status_counts"])
+            aggregate_output_statuses.update(run_quality["output_status_counts"])
+            aggregate_command_count += run_quality["command_count"]
+            aggregate_execution_success += run_quality["execution_success_count"]
+            aggregate_parser_eligible += run_quality["parser_eligible_count"]
+            aggregate_parser_ready += run_quality["parser_ready_count"]
+            aggregate_observations += run_quality["observation_count"]
+            aggregate_snapshot_count += len(snapshots)
+            aggregate_duplicate_snapshots += duplicate_snapshot_count
+            aggregate_no_event_reasons.update(no_event_summary.get("by_reason") or {})
             run_rows.append(
                 {
                     "run_id": run.id,
-                    "device_id": context.get("device_id") or "",
-                    "device_name": context.get("device_name") or "",
+                    "device_id": device_id,
+                    "device_name": device_name,
                     "status": run.status or "",
                     "snapshot_run_id": snapshot_run_id or "",
                     "change_count": len(changes),
                     "event_count": len(events),
                     "error_message": run.error_message or "",
+                    "quality": run_quality,
+                    "command_details": command_details,
+                    "observations": observations,
+                    "changes": serialized_changes,
+                    "events": serialized_events,
+                    "no_event_summary": no_event_summary,
+                    "domain_checks": _domain_checks(
+                        observations=observations,
+                        command_details=command_details,
+                        changes=serialized_changes,
+                        events=serialized_events,
+                    ),
                 }
             )
+    parser_rate = (
+        aggregate_parser_ready / aggregate_parser_eligible
+        if aggregate_parser_eligible
+        else 1.0
+    )
+    aggregate_quality = {
+        "status": (
+            "degraded"
+            if parser_rate < 1.0
+            or aggregate_parse_statuses.get("template_missing")
+            or aggregate_parse_statuses.get("parse_failed")
+            or aggregate_output_statuses.get("command_error")
+            or aggregate_output_statuses.get("empty_unverified")
+            else "ready"
+        ),
+        "command_count": aggregate_command_count,
+        "execution_success_count": aggregate_execution_success,
+        "parse_status_counts": dict(aggregate_parse_statuses),
+        "output_status_counts": dict(aggregate_output_statuses),
+        "parser_eligible_count": aggregate_parser_eligible,
+        "parser_ready_count": aggregate_parser_ready,
+        "parser_ready_rate": parser_rate,
+        "observation_count": aggregate_observations,
+        "snapshot_count": aggregate_snapshot_count,
+        "duplicate_snapshot_count": aggregate_duplicate_snapshots,
+    }
+    no_event_total = sum(aggregate_no_event_reasons.values())
+    if not no_event_total:
+        no_event_total = sum(
+            change.get("event_status") == "no_event" for change in all_changes
+        )
+        aggregate_no_event_reasons.update(
+            change.get("no_event_reason") or "unknown"
+            for change in all_changes
+            if change.get("event_status") == "no_event"
+        )
+    action_items: list[str] = []
+    missing_commands = sorted(
+        {
+            command["command"]
+            for row in run_rows
+            for command in row["command_details"]
+            if command["parse_status"] == "template_missing"
+        }
+    )
+    if missing_commands:
+        action_items.append("补齐 Parser 模板：" + "、".join(missing_commands))
+    legacy_unmatched = int(
+        aggregate_no_event_reasons.get("no_active_rule_matched") or 0
+    )
+    missing_rule_count = int(
+        aggregate_no_event_reasons.get("no_active_event_rules") or 0
+    ) + legacy_unmatched
+    evaluated_no_match_count = int(
+        aggregate_no_event_reasons.get("active_rules_evaluated_no_match") or 0
+    )
+    if missing_rule_count:
+        action_items.append(
+            f"生成并激活 EventRule：{missing_rule_count} 条 Change 缺少活动规则判定"
+        )
+    if suspected_format_change_count:
+        action_items.append(
+            f"复核 IP 语义归一化：{suspected_format_change_count} 条变化仅存在前缀格式差异"
+        )
+    if aggregate_duplicate_snapshots:
+        action_items.append(
+            f"清理 Command Profile 重复项：检测到 {aggregate_duplicate_snapshots} 条重复命令证据"
+        )
+    command_errors = int(aggregate_output_statuses.get("command_error") or 0)
+    if command_errors:
+        action_items.append(f"处理命令执行错误：{command_errors} 条")
     return {
         "patrol_batch_id": patrol_batch_id,
         "run_count": len(runs),
@@ -375,8 +956,20 @@ def _build_patrol_batch_summary(patrol_batch_id: str, runs: list[Any]) -> dict[s
         "event_types": dict(event_types),
         "severities": dict(severities),
         "runs": run_rows,
-        "sample_events": sample_events[:20],
-        "sample_changes": sample_changes[:20],
+        "quality": aggregate_quality,
+        "no_event_summary": {
+            "total": no_event_total,
+            "by_reason": dict(aggregate_no_event_reasons),
+            "missing_rule_count": missing_rule_count,
+            "evaluated_no_match_count": evaluated_no_match_count,
+            "unmatched_rule_count": missing_rule_count + evaluated_no_match_count,
+        },
+        "suspected_format_change_count": suspected_format_change_count,
+        "events": all_events,
+        "changes": all_changes,
+        "sample_events": all_events[:20],
+        "sample_changes": all_changes[:20],
+        "action_items": action_items,
         "deliverables": {
             "csv_url": f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/export.csv",
             "report_url": f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/report.md",

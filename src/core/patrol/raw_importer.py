@@ -441,6 +441,69 @@ def import_raw_capture(
     ]
     if fingerprints and all(fingerprint in existing for fingerprint in fingerprints):
         existing_snapshots = [existing[fingerprint] for fingerprint in fingerprints]
+        # Streaming collection imports the growing capture repeatedly. The final
+        # pass must reconcile command statuses even though the immutable snapshots
+        # already exist; otherwise provisional failures remain stuck forever.
+        for (block, parsed), command_collection, snapshot in zip(
+            parsed_blocks,
+            block_collection_statuses,
+            existing_snapshots,
+            strict=True,
+        ):
+            execution_status = normalize_execution_status(
+                command_collection.get("status")
+                or ("failed" if collector_complete is False else "complete")
+            )
+            parse_status = str(snapshot.parse_status or "not_attempted")
+            command_status = derive_command_status(
+                execution_status=execution_status,
+                parse_status=parse_status,
+            )
+            command_complete = (
+                command_collection.get("status") == "complete"
+                if command_collection
+                else collector_complete is True
+            )
+            authoritative = bool(
+                command_complete and parse_status in {"parsed", "parse_empty", "raw_hashed"}
+            )
+            structured = snapshot.structured_json
+            entity_count = (
+                len(structured)
+                if isinstance(structured, list)
+                else 1
+                if isinstance(structured, dict)
+                else None
+            )
+            repository.save_collection_result(
+                run_id=str(snapshot.run_id),
+                inventory_device_id=inventory_device_id,
+                device_id=str(inventory_device_id or snapshot.device_id),
+                canonical_command=block.command_canonical,
+                status=command_status.execution_status,
+                execution_status=command_status.execution_status,
+                parse_status=command_status.parse_status,
+                output_status=str(snapshot.output_status or parsed.output_status),
+                fact_status=command_status.fact_status,
+                normalization_status=command_status.normalization_status,
+                authoritative_for_deletion=authoritative,
+                baseline_eligible=authoritative,
+                observed_entity_count=entity_count,
+                failure_code=parsed.failure_code,
+                observed_at=command_collection.get("observed_at") or snapshot.observed_at,
+                execution_item_id=snapshot.execution_item_id,
+                metadata={
+                    "parse_status": parse_status,
+                    "execution_status": command_status.execution_status,
+                    "fact_status": command_status.fact_status,
+                    "normalization_status": command_status.normalization_status,
+                    "snapshot_id": snapshot.snapshot_id,
+                    "collector_complete": command_complete,
+                    "collection_item_id": command_collection.get("collection_item_id"),
+                    "command_ordinal": command_collection.get("command_ordinal"),
+                },
+                owner_token=run_owner_token,
+            )
         return {
             "success": True,
             "run_id": existing_snapshots[0].run_id,
@@ -588,6 +651,9 @@ def import_raw_capture(
         snapshot_ids.append(snapshot_id)
         if not snapshot_created:
             duplicate_snapshot_ids.append(snapshot_id)
+        stored_snapshot = repository.get_snapshot(snapshot_id)
+        if stored_snapshot is None or not stored_snapshot.execution_item_id:
+            raise RuntimeError(f"persisted snapshot identity is unavailable: {snapshot_id}")
         candidate_job_id = None
         candidate_error = None
         candidate_failure_codes = {
@@ -687,7 +753,7 @@ def import_raw_capture(
             observed_entity_count=entity_count,
             failure_code=parsed.failure_code,
             observed_at=command_observed_at,
-            execution_item_id=command_collection.get("execution_item_id"),
+            execution_item_id=stored_snapshot.execution_item_id,
             metadata={
                 "parse_status": parse_status,
                 "execution_status": command_status.execution_status,
