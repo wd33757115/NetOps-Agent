@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import math
 from collections import Counter
 from datetime import datetime
 from typing import Any
@@ -274,6 +275,147 @@ def _find_nested_value(payload: Any, key: str) -> Any:
     return None
 
 
+PATROL_PIPELINE_STAGE_META = {
+    "device-patrol": ("命令采集与解析", "登录设备、执行巡检命令并保存原始输出"),
+    "state-normalizer": ("状态归一化", "将解析结果转换为统一的设备状态"),
+    "change-detector": ("变化检测", "与历史状态比较并识别有效变化"),
+    "event-builder": ("事件判定", "使用活动规则判断是否生成巡检事件"),
+}
+
+
+def _percentile(values: list[float], percentile: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    index = max(0, min(len(ordered) - 1, math.ceil(percentile * len(ordered)) - 1))
+    return ordered[index]
+
+
+def _duration_seconds(started_at: Any, completed_at: Any) -> float | None:
+    if not started_at or not completed_at:
+        return None
+    return max(0.0, (completed_at - started_at).total_seconds())
+
+
+def build_patrol_pipeline_summary(
+    runs: list[Any],
+    steps_by_run: dict[str, list[Any]],
+) -> dict[str, Any]:
+    definitions: dict[tuple[int, str, str], dict[str, Any]] = {}
+    for steps in steps_by_run.values():
+        for step in steps:
+            key = (int(step.step_index or 0), str(step.step_name), str(step.skill_name))
+            definitions.setdefault(
+                key,
+                {"step_index": key[0], "step_name": key[1], "skill_name": key[2]},
+            )
+
+    stages: list[dict[str, Any]] = []
+    total_runs = len(runs)
+    for definition in sorted(definitions.values(), key=lambda item: item["step_index"]):
+        statuses: Counter[str] = Counter()
+        durations: list[float] = []
+        started_values: list[Any] = []
+        completed_values: list[Any] = []
+        errors: list[dict[str, str]] = []
+        for run in runs:
+            matching = next(
+                (
+                    step
+                    for step in steps_by_run.get(str(run.id), [])
+                    if int(step.step_index or 0) == definition["step_index"]
+                    and str(step.step_name) == definition["step_name"]
+                ),
+                None,
+            )
+            if matching is None:
+                statuses["not_started"] += 1
+                continue
+            status = str(matching.status or "pending")
+            statuses[status] += 1
+            if matching.started_at:
+                started_values.append(matching.started_at)
+            if matching.completed_at:
+                completed_values.append(matching.completed_at)
+            duration = _duration_seconds(matching.started_at, matching.completed_at)
+            if duration is not None:
+                durations.append(duration)
+            if matching.error_message and len(errors) < 5:
+                context = dict(run.context or {})
+                errors.append(
+                    {
+                        "device_id": str(context.get("device_id") or ""),
+                        "device_name": str(
+                            context.get("device_name") or context.get("device_id") or run.id
+                        ),
+                        "message": str(matching.error_message),
+                    }
+                )
+
+        completed = int(statuses.get("completed") or 0)
+        failed = int(statuses.get("failed") or 0)
+        active = sum(
+            int(statuses.get(status) or 0)
+            for status in ("running", "queued", "in_progress", "collecting", "dispatching")
+        )
+        if active:
+            aggregate_status = "running"
+        elif failed:
+            aggregate_status = "degraded" if completed else "failed"
+        elif total_runs and completed == total_runs:
+            aggregate_status = "completed"
+        else:
+            aggregate_status = "pending"
+        label, description = PATROL_PIPELINE_STAGE_META.get(
+            definition["skill_name"],
+            (definition["step_name"], definition["skill_name"]),
+        )
+        p95 = _percentile(durations, 0.95)
+        stages.append(
+            {
+                **definition,
+                "key": f'{definition["step_index"]}:{definition["step_name"]}',
+                "label": label,
+                "description": description,
+                "status": aggregate_status,
+                "total": total_runs,
+                "status_counts": dict(statuses),
+                "completed_count": completed,
+                "failed_count": failed,
+                "active_count": active,
+                "pending_count": max(0, total_runs - completed - failed - active),
+                "completion_rate": completed / total_runs if total_runs else 0.0,
+                "started_at": _iso(min(started_values)) if started_values else None,
+                "completed_at": _iso(max(completed_values)) if completed_values else None,
+                "duration": {
+                    "sample_count": len(durations),
+                    "average_seconds": round(sum(durations) / len(durations), 3)
+                    if durations
+                    else None,
+                    "p95_seconds": round(p95, 3) if p95 is not None else None,
+                    "max_seconds": round(max(durations), 3) if durations else None,
+                },
+                "error_examples": errors,
+            }
+        )
+
+    completed_stages = [
+        stage for stage in stages if stage["duration"]["p95_seconds"] is not None
+    ]
+    bottleneck = max(
+        completed_stages,
+        key=lambda stage: float(stage["duration"]["p95_seconds"] or 0),
+        default=None,
+    )
+    return {
+        "total_devices": total_runs,
+        "stage_count": len(stages),
+        "stages": stages,
+        "bottleneck_stage_key": bottleneck["key"] if bottleneck else None,
+        "bottleneck_stage_label": bottleneck["label"] if bottleneck else None,
+    }
+
+
 def build_patrol_batch_summary(
     patrol_batch_id: str,
     runs: list[Any],
@@ -307,16 +449,32 @@ def build_patrol_batch_summary(
     suspected_format_change_count = 0
 
     with get_db_session() as db:
+        run_ids = [str(run.id) for run in runs]
+        if run_ids:
+            step_query = db.query(WorkflowStepRecord)
+            run_filter = (
+                WorkflowStepRecord.run_id == run_ids[0]
+                if len(run_ids) == 1
+                else WorkflowStepRecord.run_id.in_(run_ids)
+            )
+            all_steps = (
+                step_query.filter(run_filter)
+                .order_by(
+                    WorkflowStepRecord.run_id.asc(),
+                    WorkflowStepRecord.step_index.asc(),
+                )
+                .all()
+            )
+        else:
+            all_steps = []
+        steps_by_run: dict[str, list[Any]] = {}
+        for step in all_steps:
+            steps_by_run.setdefault(str(step.run_id), []).append(step)
         for run in runs:
             context = run.context or {}
             device_id = str(context.get("device_id") or "")
             device_name = str(context.get("device_name") or device_id or "-")
-            steps = (
-                db.query(WorkflowStepRecord)
-                .filter(WorkflowStepRecord.run_id == run.id)
-                .order_by(WorkflowStepRecord.step_index.asc())
-                .all()
-            )
+            steps = steps_by_run.get(str(run.id), [])
             snapshot_run_id = None
             for step in steps:
                 snapshot_run_id = _find_nested_value(
@@ -528,6 +686,7 @@ def build_patrol_batch_summary(
                     ),
                 }
             )
+        pipeline_summary = build_patrol_pipeline_summary(runs, steps_by_run)
     parser_rate = (
         aggregate_parser_ready / aggregate_parser_eligible
         if aggregate_parser_eligible
@@ -535,13 +694,17 @@ def build_patrol_batch_summary(
     )
     aggregate_quality = {
         "status": (
-            "degraded"
-            if parser_rate < 1.0
-            or aggregate_parse_statuses.get("template_missing")
-            or aggregate_parse_statuses.get("parse_failed")
-            or aggregate_output_statuses.get("command_error")
-            or aggregate_output_statuses.get("empty_unverified")
-            else "ready"
+            "not_started"
+            if not runs
+            else (
+                "degraded"
+                if parser_rate < 1.0
+                or aggregate_parse_statuses.get("template_missing")
+                or aggregate_parse_statuses.get("parse_failed")
+                or aggregate_output_statuses.get("command_error")
+                or aggregate_output_statuses.get("empty_unverified")
+                else "ready"
+            )
         ),
         "command_count": aggregate_command_count,
         "execution_success_count": aggregate_execution_success,
@@ -606,6 +769,7 @@ def build_patrol_batch_summary(
         "change_count": total_change_count,
         "event_count": total_event_count,
         "status_counts": dict(status_counts),
+        "pipeline": pipeline_summary,
         "event_types": dict(event_types),
         "severities": dict(severities),
         "runs": run_rows,
@@ -625,9 +789,13 @@ def build_patrol_batch_summary(
         "sample_changes": all_changes[:20],
         "action_items": action_items,
         "deliverables": {
-            "execution_ledger_url": f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/export.csv",
+            "execution_ledger_url": (
+                f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/export.csv"
+            ),
             "raw_cli_url": f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/raw-cli.zip",
-            "raw_data_url": f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/raw-data.jsonl",
+            "raw_data_url": (
+                f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/raw-data.jsonl"
+            ),
             "events_url": f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/events.csv",
             "report_url": f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/report.md",
             "csv_url": f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/export.csv",

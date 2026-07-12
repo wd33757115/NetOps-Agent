@@ -1,9 +1,9 @@
 import React from 'react'
 import { Alert, Button, Descriptions, Input, Progress, Select, Space, Switch, Table, Tag, Typography, type TableProps } from 'antd'
-import { DownloadOutlined, EyeOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
-import WorkflowRunMonitor from '../skills/WorkflowRunMonitor'
+import { DownloadOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
 import type { PatrolBatchDeviceItem, PatrolBatchDevicePage, PatrolBatchResultSummary, PatrolBatchSummary } from '../../services/api'
 import { useIsMobile } from '../../hooks/useBreakpoint'
+import PatrolBatchPipeline from './PatrolBatchPipeline'
 
 type TableColumns<T> = TableProps<T>['columns']
 
@@ -23,19 +23,30 @@ interface PatrolOperationsPanelProps {
   activeBatchDevicesLoading?: boolean
   activeBatchSummary: PatrolBatchCounts
   activePatrolBatchId: string | null
-  monitorRunId: string | null
   patrolBatches: PatrolBatchSummary[]
+  patrolBatchesLoading?: boolean
+  patrolBatchTotal: number
+  patrolBatchPage: number
+  patrolBatchPageSize: number
+  patrolBatchSearch: string
+  patrolBatchStatus?: string
   patrolBatchColumns: TableColumns<PatrolBatchSummary>
   showArchivedBatches: boolean
   onClearActiveBatch: () => void
-  onCloseMonitor: () => void
   onExportBatchReport: (batchId: string) => void
   onExportBatchRawCli: (batchId: string) => void
   onExportBatchEvents: (batchId: string) => void
-  onOpenDeviceEvidence: (deviceId?: string | null, deviceName?: string | null) => void
-  onOpenRun: (runId: string) => void
+  onOpenDeviceEvidence: (
+    deviceId?: string | null,
+    deviceName?: string | null,
+    workflowRunId?: string | null,
+    patrolBatchId?: string | null,
+  ) => void
   onRefreshActiveBatchRuns: () => void
   onRefreshPatrolBatches: () => void
+  onPatrolBatchPageChange: (page: number, pageSize: number) => void
+  onPatrolBatchSearch: (value: string) => void
+  onPatrolBatchStatusChange: (value?: string) => void
   onRetryRun: (runId: string) => void
   onToggleArchivedBatches: (checked: boolean) => void
   batchDevicePage: number
@@ -52,6 +63,7 @@ interface PatrolOperationsPanelProps {
 
 const ACTIVE_STATUSES = new Set(['pending', 'queued', 'running', 'in_progress', 'collecting', 'dispatching'])
 const ACTIONABLE_STATUSES = new Set(['failed', 'cancelled'])
+const PATROL_BATCH_PAGE_SIZE_OPTIONS = ['25', '50', '100']
 
 const statusColor = (status: string) => {
   if (status === 'completed') return 'green'
@@ -102,19 +114,25 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
   activeBatchDevicesLoading,
   activeBatchSummary,
   activePatrolBatchId,
-  monitorRunId,
   patrolBatches,
+  patrolBatchesLoading,
+  patrolBatchTotal,
+  patrolBatchPage,
+  patrolBatchPageSize,
+  patrolBatchSearch,
+  patrolBatchStatus,
   patrolBatchColumns,
   showArchivedBatches,
   onClearActiveBatch,
-  onCloseMonitor,
   onExportBatchReport,
   onExportBatchRawCli,
   onExportBatchEvents,
   onOpenDeviceEvidence,
-  onOpenRun,
   onRefreshActiveBatchRuns,
   onRefreshPatrolBatches,
+  onPatrolBatchPageChange,
+  onPatrolBatchSearch,
+  onPatrolBatchStatusChange,
   onRetryRun,
   onToggleArchivedBatches,
   batchDevicePage,
@@ -132,14 +150,37 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
   return (
   <Space direction="vertical" size={8} style={{ width: '100%' }}>
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
-      <Space style={{ width: '100%', justifyContent: 'space-between' }} align="start">
+      <div className="patrol-history__header">
         <Space direction="vertical" size={0}>
           <Typography.Text strong>巡检批次历史</Typography.Text>
           <Typography.Text type="secondary">
             数量均按设备统计；运行期间实时更新，结束后作为批次记录保留。
           </Typography.Text>
         </Space>
-        <Space>
+        <div className="patrol-history__filters">
+          <Input.Search
+            key={patrolBatchSearch}
+            size="small"
+            allowClear
+            defaultValue={patrolBatchSearch}
+            placeholder="批次号、范围或设备"
+            className="patrol-history__search"
+            onSearch={onPatrolBatchSearch}
+          />
+          <Select
+            size="small"
+            allowClear
+            placeholder="执行状态"
+            value={patrolBatchStatus}
+            style={{ width: 112 }}
+            options={[
+              { label: '运行中', value: 'active' },
+              { label: '已完成', value: 'completed' },
+              { label: '失败', value: 'failed' },
+              { label: '已取消', value: 'cancelled' },
+            ]}
+            onChange={onPatrolBatchStatusChange}
+          />
           <Switch
             aria-label="显示归档批次"
             size="small"
@@ -149,15 +190,27 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
             unCheckedChildren="当前"
           />
           <Button size="small" onClick={onRefreshPatrolBatches}>刷新批次</Button>
-        </Space>
-      </Space>
+        </div>
+      </div>
       <Table<PatrolBatchSummary>
+        className="patrol-history-table"
         rowKey="patrol_batch_id"
         size="small"
-        pagination={false}
+        loading={patrolBatchesLoading}
+        pagination={{
+          current: patrolBatchPage,
+          pageSize: patrolBatchPageSize,
+          total: patrolBatchTotal,
+          showSizeChanger: !isMobile,
+          showQuickJumper: !isMobile,
+          showLessItems: isMobile,
+          pageSizeOptions: PATROL_BATCH_PAGE_SIZE_OPTIONS,
+          showTotal: (total, range) => `第 ${range[0]}-${range[1]} 条，共 ${total} 个批次`,
+          onChange: onPatrolBatchPageChange,
+        }}
         dataSource={patrolBatches}
         columns={patrolBatchColumns}
-        scroll={{ x: 1180 }}
+        scroll={{ x: 1300 }}
       />
     </Space>
     {activePatrolBatchId && (
@@ -207,6 +260,12 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
             </>
           )}
         </Descriptions>
+
+        <PatrolBatchPipeline
+          batch={activeBatch}
+          counts={activeBatchSummary}
+          summary={activeBatchResultSummary}
+        />
 
         {activeBatchResultSummary?.quality && (
           <Alert
@@ -320,12 +379,15 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
                 { title: '失败原因', width: 320, render: (_, row) => row.error_message
                   ? <Typography.Text type="danger">{row.failure_code ? `${row.failure_code}: ` : ''}{row.error_message}</Typography.Text>
                   : <Typography.Text type="secondary">-</Typography.Text> },
-                { title: '操作', width: 220, fixed: 'right', render: (_, row) => (
+                { title: '操作', width: 180, fixed: 'right', render: (_, row) => (
                   <Space>
                     <Button size="small" icon={<SearchOutlined />}
-                      onClick={() => onOpenDeviceEvidence(row.device_id, row.device_name)}>巡检详情</Button>
-                    {row.workflow_run_id && <Button size="small" icon={<EyeOutlined />}
-                      onClick={() => onOpenRun(row.workflow_run_id!)}>执行日志</Button>}
+                      onClick={() => onOpenDeviceEvidence(
+                        row.device_id,
+                        row.device_name,
+                        row.workflow_run_id,
+                        activePatrolBatchId,
+                      )}>巡检详情</Button>
                     {row.workflow_run_id && ACTIONABLE_STATUSES.has(row.workflow_status || '') && (
                       <Button size="small" icon={<ReloadOutlined />} loading={retryRunLoading}
                         onClick={() => onRetryRun(row.workflow_run_id!)}>重试</Button>
@@ -342,11 +404,6 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
         </Space>
       </Space>
     )}
-    <WorkflowRunMonitor
-      runId={monitorRunId}
-      embedded
-      onClose={onCloseMonitor}
-    />
   </Space>
   )
 }

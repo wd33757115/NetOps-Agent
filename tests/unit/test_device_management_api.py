@@ -1779,9 +1779,17 @@ def test_list_device_evidence_timeline_redacts_device(monkeypatch):
             assert kwargs["status"] is None
             return [{"device_id": "device-1", "device_name": "SW1", "password": "secret"}]
 
-    def fake_timeline(device, *, limit):
+    timeline_calls = []
+
+    def fake_timeline(
+        device,
+        *,
+        limit,
+        workflow_run_id=None,
+        patrol_batch_id=None,
+    ):
         assert device["password"] == "secret"
-        assert limit == 5
+        timeline_calls.append((limit, workflow_run_id, patrol_batch_id))
         return {
             "device": devices_api._redact_device(device),
             "items": [
@@ -1801,9 +1809,16 @@ def test_list_device_evidence_timeline_redacts_device(monkeypatch):
     monkeypatch.setattr(devices_api, "_device_evidence_timeline", fake_timeline)
 
     result = devices_api.list_device_evidence_timeline("device-1", limit=5)
+    devices_api.list_device_evidence_timeline(
+        "device-1",
+        limit=1,
+        workflow_run_id="run-1",
+        patrol_batch_id="batch-1",
+    )
 
     assert "password" not in result["device"]
     assert result["items"][0]["snapshot_run_id"] == "patrol-1"
+    assert timeline_calls == [(5, None, None), (1, "run-1", "batch-1")]
 
 
 def test_device_api_has_no_known_mojibake_tokens():

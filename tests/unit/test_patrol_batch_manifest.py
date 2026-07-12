@@ -1,5 +1,5 @@
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -125,3 +125,45 @@ def test_manifest_supports_two_thousand_targets_with_server_pagination(monkeypat
     assert batches[0]["running_count"] == 499
     assert detached_runs is not None and len(detached_runs) == 1999
     assert detached_runs[0].context["patrol_batch_id"] == "batch-2000"
+
+
+def test_batch_history_uses_stable_server_pagination_and_total(monkeypatch):
+    session_scope = _session_factory(monkeypatch)
+    base_time = datetime(2026, 7, 1, tzinfo=timezone.utc)
+    with session_scope() as db:
+        db.bulk_save_objects(
+            [
+                PatrolBatchRecord(
+                    patrol_batch_id=f"batch-{index:04d}",
+                    workflow_name="patrol-change-event",
+                    launch_mode="workflow",
+                    patrol_mode="production",
+                    ticket_id=None,
+                    target_type="group",
+                    target_label=f"device group group-{index % 3}",
+                    selector_json={"group": f"group-{index % 3}"},
+                    target_count=1,
+                    launched_count=1,
+                    skipped_count=0,
+                    archived=False,
+                    created_at=base_time + timedelta(minutes=index),
+                    updated_at=base_time + timedelta(minutes=index),
+                )
+                for index in range(60)
+            ]
+        )
+
+    repository = PatrolBatchManifestRepository()
+    first = repository.list_batches_page(limit=25, offset=0)
+    third = repository.list_batches_page(limit=25, offset=50)
+    searched = repository.list_batches_page(limit=25, search="batch-0007")
+
+    assert first["total"] == 60
+    assert len(first["items"]) == 25
+    assert first["items"][0]["patrol_batch_id"] == "batch-0059"
+    assert third["total"] == 60
+    assert [item["patrol_batch_id"] for item in third["items"]] == [
+        f"batch-{index:04d}" for index in range(9, -1, -1)
+    ]
+    assert searched["total"] == 1
+    assert searched["items"][0]["patrol_batch_id"] == "batch-0007"

@@ -57,6 +57,17 @@ def _connection_status(*, selection_status: str, run: Any | None) -> str:
 
 
 class PatrolBatchManifestRepository:
+    def existing_batch_ids(self, patrol_batch_ids: set[str]) -> set[str]:
+        if not patrol_batch_ids:
+            return set()
+        with get_db_session() as db:
+            return {
+                str(value)
+                for (value,) in db.query(PatrolBatchRecord.patrol_batch_id)
+                .filter(PatrolBatchRecord.patrol_batch_id.in_(patrol_batch_ids))
+                .all()
+            }
+
     def workflow_runs(self, patrol_batch_id: str) -> list[Any] | None:
         with get_db_session() as db:
             if db.get(PatrolBatchRecord, patrol_batch_id) is None:
@@ -158,17 +169,68 @@ class PatrolBatchManifestRepository:
     def list_batches(
         self, *, limit: int = 20, include_archived: bool = False
     ) -> list[dict[str, Any]]:
+        return self.list_batches_page(
+            limit=limit,
+            offset=0,
+            include_archived=include_archived,
+        )["items"]
+
+    def list_batches_page(
+        self,
+        *,
+        limit: int = 25,
+        offset: int = 0,
+        include_archived: bool = False,
+        search: str | None = None,
+        status: str | None = None,
+    ) -> dict[str, Any]:
         with get_db_session() as db:
             query = db.query(PatrolBatchRecord)
             if not include_archived:
                 query = query.filter(PatrolBatchRecord.archived.is_(False))
+            if search and search.strip():
+                pattern = f"%{search.strip()}%"
+                query = query.filter(
+                    or_(
+                        PatrolBatchRecord.patrol_batch_id.ilike(pattern),
+                        PatrolBatchRecord.target_label.ilike(pattern),
+                        PatrolBatchRecord.ticket_id.ilike(pattern),
+                    )
+                )
+            normalized_status = str(status or "").strip().lower()
+            if normalized_status:
+                status_values = (
+                    ACTIVE_STATUSES
+                    if normalized_status == "active"
+                    else {normalized_status}
+                )
+                matched_batches = (
+                    db.query(PatrolBatchDeviceRecord.patrol_batch_id)
+                    .join(
+                        WorkflowRun,
+                        WorkflowRun.id == PatrolBatchDeviceRecord.workflow_run_id,
+                    )
+                    .filter(WorkflowRun.status.in_(status_values))
+                    .distinct()
+                )
+                query = query.filter(PatrolBatchRecord.patrol_batch_id.in_(matched_batches))
+            total = query.count()
             batches = (
-                query.order_by(PatrolBatchRecord.created_at.desc())
+                query.order_by(
+                    PatrolBatchRecord.created_at.desc(),
+                    PatrolBatchRecord.patrol_batch_id.desc(),
+                )
+                .offset(max(0, offset))
                 .limit(max(1, min(limit, 100)))
                 .all()
             )
             if not batches:
-                return []
+                return {
+                    "items": [],
+                    "total": total,
+                    "limit": max(1, min(limit, 100)),
+                    "offset": max(0, offset),
+                }
             batch_ids = [row.patrol_batch_id for row in batches]
             targets = (
                 db.query(PatrolBatchDeviceRecord)
@@ -245,7 +307,12 @@ class PatrolBatchManifestRepository:
                         "keep_until": _iso(batch.keep_until),
                     }
                 )
-            return result
+            return {
+                "items": result,
+                "total": total,
+                "limit": max(1, min(limit, 100)),
+                "offset": max(0, offset),
+            }
 
     def set_governance(
         self,

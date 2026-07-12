@@ -546,8 +546,18 @@ def test_list_patrol_batches_groups_runs(monkeypatch):
     monkeypatch.setattr(workflow_api, "list_workflow_runs", lambda **_kwargs: runs)
     monkeypatch.setattr(
         PatrolBatchManifestRepository,
-        "list_batches",
-        lambda self, **_kwargs: [],
+        "list_batches_page",
+        lambda self, **kwargs: {
+            "items": [],
+            "total": 0,
+            "limit": kwargs.get("limit", 25),
+            "offset": kwargs.get("offset", 0),
+        },
+    )
+    monkeypatch.setattr(
+        PatrolBatchManifestRepository,
+        "existing_batch_ids",
+        lambda self, _ids: set(),
     )
 
     result = asyncio.run(workflow_api.list_patrol_batches())
@@ -558,6 +568,9 @@ def test_list_patrol_batches_groups_runs(monkeypatch):
     assert result["items"][1]["completed_count"] == 1
     assert result["items"][1]["failed_count"] == 1
     assert result["items"][1]["sample_devices"] == ["SW1", "SW2"]
+    assert result["total"] == 2
+    assert result["page"] == 1
+    assert result["page_size"] == 25
     assert all(item["patrol_batch_id"] != "batch-archived" for item in result["items"])
 
     with_archived = asyncio.run(workflow_api.list_patrol_batches(include_archived=True))
@@ -861,6 +874,12 @@ def test_export_patrol_batch_report_summarizes_changes_and_events(monkeypatch):
             SimpleNamespace(
                 run_id="workflow-1",
                 step_index=0,
+                step_name="patrol",
+                skill_name="device-patrol",
+                status="completed",
+                started_at=None,
+                completed_at=None,
+                error_message=None,
                 result={"snapshot_run_id": "snapshot-run-1"},
             )
         ],
@@ -982,6 +1001,12 @@ def test_patrol_batch_summary_exposes_report_counts(monkeypatch):
             SimpleNamespace(
                 run_id="workflow-1",
                 step_index=0,
+                step_name="patrol",
+                skill_name="device-patrol",
+                status="completed",
+                started_at=None,
+                completed_at=None,
+                error_message=None,
                 result={"snapshot_run_id": "snapshot-run-1"},
             )
         ],
@@ -1049,11 +1074,31 @@ def test_patrol_batch_summary_exposes_report_counts(monkeypatch):
     assert result["device_count"] == 1
     assert result["change_count"] == 1
     assert result["event_count"] == 1
+    assert result["pipeline"]["stages"][0]["label"] == "命令采集与解析"
     assert result["event_types"] == {"InterfaceDown": 1}
     assert result["severities"] == {"critical": 1}
     assert result["runs"][0]["snapshot_run_id"] == "snapshot-run-1"
     assert result["sample_events"][0]["id"] == "event-1"
     assert result["deliverables"]["report_url"].endswith("/batch-1/report.md")
+
+
+def test_patrol_batch_summary_returns_diagnostic_empty_state_for_manifest_without_runs(
+    monkeypatch,
+):
+    from src.gateway import workflow_api
+
+    expected = {"patrol_batch_id": "batch-empty", "run_count": 0, "pipeline": {"stages": []}}
+    monkeypatch.setattr(workflow_api, "_list_patrol_batch_runs", lambda _batch_id: [])
+    monkeypatch.setattr(workflow_api, "_patrol_batch_manifest_exists", lambda _batch_id: True)
+    monkeypatch.setattr(
+        workflow_api,
+        "_build_patrol_batch_summary",
+        lambda _batch_id, _runs: expected,
+    )
+
+    result = asyncio.run(workflow_api.get_patrol_batch_summary("batch-empty"))
+
+    assert result == expected
 
 
 def test_patrol_report_does_not_treat_collected_state_as_healthy():

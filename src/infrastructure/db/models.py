@@ -253,6 +253,15 @@ class PatrolBatchRecord(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, index=True)
     updated_at = Column(DateTime(timezone=True), nullable=False)
 
+    __table_args__ = (
+        Index(
+            "ix_netops_patrol_batches_archive_created_id",
+            "archived",
+            "created_at",
+            "patrol_batch_id",
+        ),
+    )
+
     def to_dict(self):
         return {column.name: getattr(self, column.name) for column in self.__table__.columns}
 

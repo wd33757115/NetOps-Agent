@@ -1885,7 +1885,10 @@ export const deviceApi = {
     )
     return response.data
   },
-  evidenceTimeline: async (deviceId: string, params: { limit?: number } = {}) => {
+  evidenceTimeline: async (
+    deviceId: string,
+    params: { limit?: number; workflow_run_id?: string; patrol_batch_id?: string } = {},
+  ) => {
     const response = await api.get<DeviceEvidenceTimelineResponse>(
       `/devices/${deviceId}/evidence-timeline/`,
       { params },
@@ -2381,6 +2384,17 @@ export interface PatrolBatchSummary {
   keep_until?: string | null
 }
 
+export interface PatrolBatchPage {
+  items: PatrolBatchSummary[]
+  total: number
+  limit: number
+  offset: number
+  page: number
+  page_size: number
+  page_count: number
+  legacy_total?: number
+}
+
 export interface PatrolBatchGovernanceResult {
   success: boolean
   patrol_batch_id: string
@@ -2402,6 +2416,41 @@ export interface PatrolBatchResultSummary {
   change_count: number
   event_count: number
   status_counts: Record<string, number>
+  pipeline?: {
+    total_devices: number
+    stage_count: number
+    bottleneck_stage_key?: string | null
+    bottleneck_stage_label?: string | null
+    stages: Array<{
+      key: string
+      step_index: number
+      step_name: string
+      skill_name: string
+      label: string
+      description: string
+      status: string
+      total: number
+      status_counts: Record<string, number>
+      completed_count: number
+      failed_count: number
+      active_count: number
+      pending_count: number
+      completion_rate: number
+      started_at?: string | null
+      completed_at?: string | null
+      duration: {
+        sample_count: number
+        average_seconds?: number | null
+        p95_seconds?: number | null
+        max_seconds?: number | null
+      }
+      error_examples: Array<{
+        device_id: string
+        device_name: string
+        message: string
+      }>
+    }>
+  }
   event_types: Record<string, number>
   severities: Record<string, number>
   quality?: {
@@ -2589,9 +2638,28 @@ export const workflowApi = {
     const response = await api.get<WorkflowRunSummary[]>('/workflows/runs/', { params })
     return response.data
   },
-  listPatrolBatches: async (params?: { limit?: number; include_archived?: boolean }): Promise<PatrolBatchSummary[]> => {
-    const response = await api.get<{ items: PatrolBatchSummary[] }>('/workflows/runs/patrol-batches/', { params })
-    return response.data.items
+  listPatrolBatches: async (params?: {
+    limit?: number
+    offset?: number
+    include_archived?: boolean
+    search?: string
+    status?: string
+  }): Promise<PatrolBatchPage> => {
+    const response = await api.get<PatrolBatchPage>('/workflows/runs/patrol-batches/', { params })
+    const items = response.data.items || []
+    const limit = response.data.limit || params?.limit || 25
+    const offset = response.data.offset || params?.offset || 0
+    const total = response.data.total ?? items.length
+    return {
+      ...response.data,
+      items,
+      total,
+      limit,
+      offset,
+      page: response.data.page || Math.floor(offset / limit) + 1,
+      page_size: response.data.page_size || limit,
+      page_count: response.data.page_count ?? (total ? Math.ceil(total / limit) : 0),
+    }
   },
   archivePatrolBatch: async (batchId: string, data?: { reason?: string; keep_until?: string; force?: boolean }): Promise<PatrolBatchGovernanceResult> => {
     const response = await api.post<PatrolBatchGovernanceResult>(`/workflows/runs/patrol-batches/${batchId}/archive/`, data || {})

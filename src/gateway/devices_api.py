@@ -1873,16 +1873,28 @@ def _list_execution_plans_for_device(device_id: str, *, limit: int = 20) -> list
         return [_execution_plan_record_dict(row) for row in rows]
 
 
-def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dict[str, Any]:
+def _device_evidence_timeline(
+    device: dict[str, Any],
+    *,
+    limit: int = 10,
+    workflow_run_id: str | None = None,
+    patrol_batch_id: str | None = None,
+) -> dict[str, Any]:
     device_id = str(device.get("device_id") or "")
     limit = max(1, min(int(limit or 10), 50))
     with get_db_session() as db:
-        workflow_runs = (
-            db.query(WorkflowRun)
-            .filter(
-                WorkflowRun.template_name == "patrol-change-event",
-                WorkflowRun.context["device_id"].as_string() == device_id,
+        workflow_query = db.query(WorkflowRun).filter(
+            WorkflowRun.template_name == "patrol-change-event",
+            WorkflowRun.context["device_id"].as_string() == device_id,
+        )
+        if workflow_run_id:
+            workflow_query = workflow_query.filter(WorkflowRun.id == workflow_run_id)
+        if patrol_batch_id:
+            workflow_query = workflow_query.filter(
+                WorkflowRun.context["patrol_batch_id"].as_string() == patrol_batch_id
             )
+        workflow_runs = (
+            workflow_query
             .order_by(WorkflowRun.created_at.desc())
             .limit(limit)
             .all()
@@ -1953,6 +1965,8 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
             current = patrol_run_times.get(str(run_id))
             if current is None or (latest_observed_at and latest_observed_at > current):
                 patrol_run_times[str(run_id)] = latest_observed_at
+        if workflow_run_id or patrol_batch_id:
+            patrol_run_times = {}
         patrol_run_ids = [
             run_id
             for run_id, _observed_at in sorted(
@@ -2126,7 +2140,11 @@ def _device_evidence_timeline(device: dict[str, Any], *, limit: int = 10) -> dic
                     status = str(change.event_status or '').lower()
                     if 'no_event' in status or 'not_created' in status or 'skipped' in status:
                         no_event_count += 1
-                        reason = str(change.no_event_reason or change.decision_reason or 'unknown')
+                        reason = str(
+                            getattr(change, "no_event_reason", None)
+                            or change.decision_reason
+                            or "unknown"
+                        )
                         no_event_reason_counts[reason] = no_event_reason_counts.get(reason, 0) + 1
                 changes_by_id = {row.id: row for row in changes}
                 events = event_query.order_by(NetworkEventRecord.occurred_at.desc()).limit(20).all()
@@ -3510,8 +3528,15 @@ def list_device_execution_plans(
 def list_device_evidence_timeline(
     device_id: str,
     limit: int = Query(10, ge=1, le=50),
+    workflow_run_id: str | None = None,
+    patrol_batch_id: str | None = None,
 ):
     matches = DeviceRepository().get_devices_by_filter(device_id=device_id, status=None)
     if not matches:
         raise HTTPException(status_code=404, detail="device not found")
-    return _device_evidence_timeline(matches[0], limit=limit)
+    return _device_evidence_timeline(
+        matches[0],
+        limit=limit,
+        workflow_run_id=workflow_run_id,
+        patrol_batch_id=patrol_batch_id,
+    )

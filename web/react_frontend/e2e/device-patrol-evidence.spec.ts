@@ -35,6 +35,8 @@ async function mockPatrolOperations(page: Page) {
       return
     }
     if (path.endsWith('/workflows/runs/patrol-batches/')) {
+      const limit = Number(url.searchParams.get('limit') || 25)
+      const offset = Number(url.searchParams.get('offset') || 0)
       await route.fulfill({
         json: {
           items: [{
@@ -62,6 +64,12 @@ async function mockPatrolOperations(page: Page) {
             archived: false,
             created_at: '2026-07-12T09:00:00Z',
           }],
+          total: 30,
+          limit,
+          offset,
+          page: Math.floor(offset / limit) + 1,
+          page_size: limit,
+          page_count: 2,
         },
       })
       return
@@ -133,6 +141,26 @@ async function mockPatrolOperations(page: Page) {
           change_count: 2,
           event_count: 1,
           status_counts: { failed: 1 },
+          pipeline: {
+            total_devices: 1,
+            stage_count: 4,
+            bottleneck_stage_key: '0:patrol',
+            bottleneck_stage_label: '命令采集与解析',
+            stages: [
+              ['0:patrol', 0, 'patrol', 'device-patrol', '命令采集与解析', '登录设备、执行巡检命令并保存原始输出', 'failed', 0, 1, 0, 0, 12.4],
+              ['1:state', 1, 'state', 'state-normalizer', '状态归一化', '将解析结果转换为统一的设备状态', 'pending', 0, 0, 0, 1, null],
+              ['2:change', 2, 'change', 'change-detector', '变化检测', '与历史状态比较并识别有效变化', 'pending', 0, 0, 0, 1, null],
+              ['3:event', 3, 'event', 'event-builder', '事件判定', '使用活动规则判断是否生成巡检事件', 'pending', 0, 0, 0, 1, null],
+            ].map(([key, step_index, step_name, skill_name, label, description, status, completed_count, failed_count, active_count, pending_count, p95_seconds]) => ({
+              key, step_index, step_name, skill_name, label, description, status,
+              total: 1,
+              status_counts: { [String(status)]: 1 },
+              completed_count, failed_count, active_count, pending_count,
+              completion_rate: Number(completed_count),
+              duration: { sample_count: p95_seconds === null ? 0 : 1, average_seconds: p95_seconds, p95_seconds, max_seconds: p95_seconds },
+              error_examples: status === 'failed' ? [{ device_id: 'device-1', device_name: 'core-sw-01', message: 'SSH authentication failed' }] : [],
+            })),
+          },
           event_types: { InterfaceDown: 1 },
           severities: { critical: 1 },
           quality: {
@@ -258,23 +286,35 @@ test('traces a failed patrol run to its parser, change policy, and event rule', 
 
   await expect(page.getByRole('tab', { name: '巡检运行' })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByText('batch-incident-1').first()).toBeVisible()
-  await page.getByRole('button', { name: /详情$/ }).first().click()
+  await page.getByRole('button', { name: /查看批次详情/ }).first().click()
 
   await expect(page.getByText('设备分组：core').last()).toBeVisible()
-  await expect(page.getByText('SSH authentication failed')).toBeVisible()
+  await expect(page.getByText('SSH authentication failed', { exact: true })).toBeVisible()
   await expect(page.getByText('credential_missing: 未绑定凭据')).toBeVisible()
   await expect(page.getByText('1 条变化未生成事件')).toBeVisible()
   await expect(page.getByText('缺少启用中的事件规则：1')).toBeVisible()
   await page.getByRole('button', { name: /巡检详情$/ }).first().click()
 
   await expect(page.getByRole('dialog', { name: '巡检详情 - core-sw-01' })).toBeVisible()
+  await expect(page.getByText('接口 Gi1/0/1 已 Down')).toBeVisible()
+  await page.getByRole('button', { name: /处理过程与技术证据/ }).click()
   await expect(page.getByText('parser-template-interface-status-v1')).toBeVisible()
   await expect(page.getByText('change-policy-interface-v1')).toBeVisible()
-  await expect(page.getByText('接口 Gi1/0/1 已 Down')).toBeVisible()
   await expect(page.getByText(/规则 event-rule-interface-down v1/)).toBeVisible()
 
   const pageOverflow = await page.evaluate(
     () => document.documentElement.scrollWidth > window.innerWidth,
   )
   expect(pageOverflow).toBe(false)
+})
+
+test('paginates patrol batch history on the server and persists the page in the URL', async ({ page }) => {
+  await mockPatrolOperations(page)
+  await page.goto('/devices?tab=patrol')
+
+  const pageTwo = page.locator('.ant-pagination-item-2')
+  await expect(pageTwo).toBeVisible()
+  await pageTwo.click()
+
+  await expect(page).toHaveURL(/batch_page=2/)
 })

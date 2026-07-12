@@ -204,6 +204,15 @@ def _list_patrol_batch_runs(patrol_batch_id: str) -> list[Any]:
     )
 
 
+def _patrol_batch_manifest_exists(patrol_batch_id: str) -> bool:
+    from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
+
+    try:
+        return PatrolBatchManifestRepository().workflow_runs(patrol_batch_id) is not None
+    except Exception:
+        return False
+
+
 def _find_nested_value(value: Any, key: str) -> Any:
     if isinstance(value, dict):
         if key in value:
@@ -796,17 +805,33 @@ async def list_runs(
 
 
 @router.get("/runs/patrol-batches")
-async def list_patrol_batches(limit: int = 20, include_archived: bool = False):
+async def list_patrol_batches(
+    limit: int = 25,
+    offset: int = 0,
+    include_archived: bool = False,
+    search: str | None = None,
+    status: str | None = None,
+):
     from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
 
+    page_limit = max(1, min(limit, 100))
+    page_offset = max(0, offset)
+    repository = PatrolBatchManifestRepository()
     try:
-        manifest_items = PatrolBatchManifestRepository().list_batches(
-            limit=limit,
+        manifest_page = repository.list_batches_page(
+            limit=page_limit,
+            offset=page_offset,
             include_archived=include_archived,
+            search=search,
+            status=status,
         )
     except Exception:
-        manifest_items = []
-    manifest_ids = {str(item["patrol_batch_id"]) for item in manifest_items}
+        manifest_page = {
+            "items": [],
+            "total": 0,
+            "limit": page_limit,
+            "offset": page_offset,
+        }
     runs = list_workflow_runs(
         limit=1000,
         template_name="patrol-change-event",
@@ -874,18 +899,59 @@ async def list_patrol_batches(limit: int = 20, include_archived: bool = False):
             and len(item["sample_devices"]) < 5
         ):
             item["sample_devices"].append(device_name)
+    candidate_ids = {str(item["patrol_batch_id"]) for item in batches.values()}
+    try:
+        manifest_ids = repository.existing_batch_ids(candidate_ids)
+    except Exception:
+        manifest_ids = set()
+    normalized_search = str(search or "").strip().lower()
+    normalized_status = str(status or "").strip().lower()
     visible_batches = [
         item
         for item in batches.values()
         if str(item["patrol_batch_id"]) not in manifest_ids
         and (include_archived or not item.get("archived"))
+        and (
+            not normalized_search
+            or normalized_search in str(item.get("patrol_batch_id") or "").lower()
+            or normalized_search in str(item.get("ticket_id") or "").lower()
+            or normalized_search in " ".join(item.get("sample_devices") or []).lower()
+        )
+        and (
+            not normalized_status
+            or (
+                normalized_status == "active"
+                and any(
+                    item["status_counts"].get(key)
+                    for key in ACTIVE_PATROL_RUN_STATUSES
+                )
+            )
+            or item["status_counts"].get(normalized_status)
+        )
     ]
-    ordered = sorted(
-        [*manifest_items, *visible_batches],
+    legacy_items = sorted(
+        visible_batches,
         key=lambda item: str(item.get("created_at") or ""),
         reverse=True,
     )
-    return {"items": ordered[: max(1, min(limit, 100))]}
+    manifest_total = int(manifest_page.get("total") or 0)
+    legacy_total = len(legacy_items)
+    items = list(manifest_page.get("items") or [])
+    if len(items) < page_limit:
+        legacy_offset = max(0, page_offset - manifest_total)
+        legacy_limit = page_limit - len(items)
+        items.extend(legacy_items[legacy_offset : legacy_offset + legacy_limit])
+    total = manifest_total + legacy_total
+    return {
+        "items": items,
+        "total": total,
+        "limit": page_limit,
+        "offset": page_offset,
+        "page": page_offset // page_limit + 1,
+        "page_size": page_limit,
+        "page_count": (total + page_limit - 1) // page_limit if total else 0,
+        "legacy_total": legacy_total,
+    }
 
 
 @router.get("/runs/patrol-batches/{patrol_batch_id}/devices")
@@ -1102,7 +1168,7 @@ async def rerun_patrol_batch(
 @router.get("/runs/patrol-batches/{patrol_batch_id}/summary")
 async def get_patrol_batch_summary(patrol_batch_id: str):
     runs = _list_patrol_batch_runs(patrol_batch_id)
-    if not runs:
+    if not runs and not _patrol_batch_manifest_exists(patrol_batch_id):
         raise HTTPException(status_code=404, detail="patrol batch not found")
     return _build_patrol_batch_summary(patrol_batch_id, runs)
 

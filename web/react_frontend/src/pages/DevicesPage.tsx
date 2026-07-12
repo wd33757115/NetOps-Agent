@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react'
-import { Alert, AutoComplete, Button, Descriptions, Drawer, Dropdown, Form, Input, Modal, Progress, Row, Col, Select, Space, Table, Tabs, Tag, Typography, Upload, message } from 'antd'
+import { Alert, AutoComplete, Button, Descriptions, Drawer, Dropdown, Form, Input, Modal, Progress, Row, Col, Select, Space, Table, Tabs, Tag, Tooltip, Typography, Upload, message } from 'antd'
 import { DeleteOutlined, DownloadOutlined, EditOutlined, EyeOutlined, ImportOutlined, LinkOutlined, MoreOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined, SafetyCertificateOutlined, SearchOutlined } from '@ant-design/icons'
 import { useMutation, useQuery } from 'react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -34,6 +34,7 @@ import {
   type ManagedDevice,
   type ParserCommandProfile,
   type ParserCommandProfileImpactPreview,
+  type PatrolBatchPage,
   type PatrolBatchResultSummary,
   type PatrolBatchDevicePage,
   type PatrolBatchSummary,
@@ -315,12 +316,36 @@ const importExample = [
   'SW1,10.0.0.1,Cisco,WS-C2960XR-24TS-I,IOS-C2960,ios,access_switch,15.2(7)E10,FOC1234,xian,access,active,env:NETOPS_PASSWORD,browser-test-patrol,"core,xian","{""collector_options"": {""read_timeout"": 60}}"',
 ].join('\n')
 
+const PATROL_BATCH_PAGE_SIZES = [25, 50, 100]
+
+const positiveInteger = (value: string | null, fallback: number) => {
+  const parsed = Number.parseInt(value || '', 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+
 const DevicesPage: React.FC = () => {
   const isMobile = useIsMobile()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const requestedTab = searchParams.get('tab') || 'overview'
   const activeTab = ['overview', 'patrol', 'modules'].includes(requestedTab) ? requestedTab : 'overview'
+  const batchHistoryPage = positiveInteger(searchParams.get('batch_page'), 1)
+  const requestedBatchPageSize = positiveInteger(searchParams.get('batch_page_size'), 25)
+  const batchHistoryPageSize = PATROL_BATCH_PAGE_SIZES.includes(requestedBatchPageSize)
+    ? requestedBatchPageSize
+    : 25
+  const batchHistorySearch = searchParams.get('batch_search') || ''
+  const batchHistoryStatus = searchParams.get('batch_status') || undefined
+  const showArchivedPatrolBatches = searchParams.get('batch_archived') === '1'
+
+  const updateBatchHistoryQuery = (updates: Record<string, string | number | boolean | undefined>) => {
+    const next = new URLSearchParams(searchParams)
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value === undefined || value === '' || value === false) next.delete(key)
+      else next.set(key, value === true ? '1' : String(value))
+    })
+    setSearchParams(next)
+  }
   const [form] = Form.useForm<DeviceFormValues>()
   const [bulkForm] = Form.useForm<BulkFormValues>()
   const [patrolForm] = Form.useForm<PatrolFormValues>()
@@ -359,7 +384,6 @@ const DevicesPage: React.FC = () => {
   const [patrolPreview, setPatrolPreview] = useState<DevicePatrolPreview | null>(null)
   const [patrolLaunch, setPatrolLaunch] = useState<DevicePatrolLaunchResult | null>(null)
   const [activePatrolBatchId, setActivePatrolBatchId] = useState<string | null>(null)
-  const [showArchivedPatrolBatches, setShowArchivedPatrolBatches] = useState(false)
   const [batchDevicePage, setBatchDevicePage] = useState(1)
   const [batchDeviceSearch, setBatchDeviceSearch] = useState('')
   const [batchDeviceSelectionStatus, setBatchDeviceSelectionStatus] = useState<string>()
@@ -367,6 +391,9 @@ const DevicesPage: React.FC = () => {
   const [healthOpen, setHealthOpen] = useState(false)
   const [evidenceOpen, setEvidenceOpen] = useState(false)
   const [evidenceDevice, setEvidenceDevice] = useState<ManagedDevice | null>(null)
+  const [evidenceRunId, setEvidenceRunId] = useState<string | null>(null)
+  const [evidenceBatchId, setEvidenceBatchId] = useState<string | null>(null)
+  const [evidenceTab, setEvidenceTab] = useState<'result' | 'execution'>('result')
   const [dynamicGroupOpen, setDynamicGroupOpen] = useState(false)
   const [editingDynamicGroup, setEditingDynamicGroup] = useState<DeviceDynamicGroup | null>(null)
   const [dynamicGroupPreview, setDynamicGroupPreview] = useState<DeviceDynamicGroupPreview | null>(null)
@@ -429,14 +456,32 @@ const DevicesPage: React.FC = () => {
       retry: false,
     },
   )
-  const { data: patrolBatches = [], refetch: refetchPatrolBatches } = useQuery(
-    ['device-patrol-batches', showArchivedPatrolBatches],
-    () => workflowApi.listPatrolBatches({ limit: 20, include_archived: showArchivedPatrolBatches }),
+  const { data: patrolBatchPage, isFetching: patrolBatchesLoading, refetch: refetchPatrolBatches } = useQuery<PatrolBatchPage>(
+    [
+      'device-patrol-batches', showArchivedPatrolBatches, batchHistoryPage,
+      batchHistoryPageSize, batchHistorySearch, batchHistoryStatus,
+    ],
+    () => workflowApi.listPatrolBatches({
+      limit: batchHistoryPageSize,
+      offset: (batchHistoryPage - 1) * batchHistoryPageSize,
+      include_archived: showArchivedPatrolBatches,
+      search: batchHistorySearch || undefined,
+      status: batchHistoryStatus,
+    }),
     {
-      refetchInterval: (batches) => (hasActivePatrolBatches(batches as PatrolBatchSummary[]) ? 10000 : false),
+      keepPreviousData: true,
+      refetchInterval: (page) => (
+        batchHistoryPage === 1 && hasActivePatrolBatches((page as PatrolBatchPage | undefined)?.items || [])
+          ? 10000
+          : false
+      ),
       refetchOnWindowFocus: false,
       retry: false,
     },
+  )
+  const patrolBatches = useMemo(
+    () => patrolBatchPage?.items || [],
+    [patrolBatchPage?.items],
   )
   const { data: dynamicGroups = [], refetch: refetchDynamicGroups } = useQuery(
     ['device-dynamic-groups'],
@@ -503,8 +548,12 @@ const DevicesPage: React.FC = () => {
     },
   )
   const { data: evidenceTimeline } = useQuery(
-    ['device-evidence-timeline', evidenceDevice?.device_id],
-    () => deviceApi.evidenceTimeline(evidenceDevice!.device_id, { limit: 10 }),
+    ['device-evidence-timeline', evidenceDevice?.device_id, evidenceRunId, evidenceBatchId],
+    () => deviceApi.evidenceTimeline(evidenceDevice!.device_id, {
+      limit: evidenceRunId || evidenceBatchId ? 1 : 10,
+      workflow_run_id: evidenceRunId || undefined,
+      patrol_batch_id: evidenceBatchId || undefined,
+    }),
     {
       enabled: Boolean(evidenceDevice?.device_id && evidenceOpen),
       refetchOnWindowFocus: false,
@@ -1014,6 +1063,11 @@ const DevicesPage: React.FC = () => {
       onSuccess: (result) => {
         setPatrolLaunch(result)
         setActivePatrolBatchId(result.patrol_batch_id || null)
+        updateBatchHistoryQuery({
+          batch_page: 1,
+          batch_search: undefined,
+          batch_status: undefined,
+        })
         setMonitorRunId(result.runs?.[0]?.workflow_run_id || null)
         refetchActiveBatchRuns()
         refetchPatrolBatches()
@@ -1086,6 +1140,9 @@ const DevicesPage: React.FC = () => {
         await Promise.all([
           refetchPatrolBatches(),
         ])
+        if (!showArchivedPatrolBatches && patrolBatches.length === 1 && batchHistoryPage > 1) {
+          updateBatchHistoryQuery({ batch_page: batchHistoryPage - 1 })
+        }
       },
       onError: (error: any) => {
         const detail = extractErrorMessage(error, '批次归档失败')
@@ -1256,7 +1313,12 @@ const DevicesPage: React.FC = () => {
 
   const devices = useMemo(() => data?.items || [], [data?.items])
 
-  const openDeviceEvidenceTimeline = (deviceId?: string | null, deviceName?: string | null) => {
+  const openDeviceEvidenceTimeline = (
+    deviceId?: string | null,
+    deviceName?: string | null,
+    workflowRunId?: string | null,
+    patrolBatchId?: string | null,
+  ) => {
     const key = String(deviceId || '').trim()
     const name = String(deviceName || '').trim()
     if (!key && !name) {
@@ -1268,6 +1330,9 @@ const DevicesPage: React.FC = () => {
       device_id: key || name,
       device_name: name || key,
     })
+    setEvidenceRunId(workflowRunId || null)
+    setEvidenceBatchId(patrolBatchId || null)
+    setEvidenceTab('result')
     setEvidenceOpen(true)
   }
 
@@ -1667,62 +1732,63 @@ const DevicesPage: React.FC = () => {
       ) : <Typography.Text type="secondary">旧批次无设备清单</Typography.Text> },
     { title: '完成时间', dataIndex: 'completed_at', width: 180,
       render: (value: string) => formatDateTime(value) },
-    { title: '操作', dataIndex: 'patrol_batch_id', width: isMobile ? 132 : 280, fixed: 'right' as const,
+    { title: '操作', dataIndex: 'patrol_batch_id', width: isMobile ? 84 : 118, fixed: 'right' as const,
       render: (value: string, row: PatrolBatchSummary) => {
         const hasActiveRuns = row.running_count + row.pending_count > 0
+        const canRetry = !row.archived && Boolean(row.failed_count || row.cancelled_count)
         return (
-        <Space>
-          <Button type="primary" size="small" icon={<EyeOutlined />} onClick={() => {
-            setActivePatrolBatchId(value)
-            setBatchDevicePage(1)
-            setBatchDeviceSearch('')
-            setBatchDeviceSelectionStatus(undefined)
-          }}>{isMobile ? '详情' : '查看详情'}</Button>
-          {!isMobile && (
+        <Space size={2} className="patrol-history-table__actions">
+          <Tooltip title={isMobile ? '查看批次详情' : undefined}>
             <Button
+              type="text"
               size="small"
-              icon={<ReloadOutlined />}
-              disabled={Boolean(row.archived) || (!row.failed_count && !row.cancelled_count)}
-              loading={retryPatrolBatch.isLoading}
-              onClick={() => retryPatrolBatch.mutate(value)}
+              icon={<EyeOutlined />}
+              aria-label={`查看批次详情 ${value}`}
+              onClick={() => {
+                setActivePatrolBatchId(value)
+                setBatchDevicePage(1)
+                setBatchDeviceSearch('')
+                setBatchDeviceSelectionStatus(undefined)
+              }}
             >
-              重试失败项
+              {isMobile ? null : '详情'}
             </Button>
-          )}
-          <Dropdown
-            menu={{
-              items: [
-                ...(isMobile ? [{
+          </Tooltip>
+          <Tooltip title="更多批次操作">
+            <Dropdown
+              menu={{
+                items: [
+                  ...(canRetry ? [{
                   key: 'retry',
                   label: '重试失败项',
                   icon: <ReloadOutlined />,
-                  disabled: Boolean(row.archived) || (!row.failed_count && !row.cancelled_count)
-                    || retryPatrolBatch.isLoading,
-                }] : []),
-                {
-                  key: 'rerun',
-                  label: hasActiveRuns ? '运行结束后可全量重跑' : '全量重跑',
-                  icon: <PlayCircleOutlined />,
-                  disabled: Boolean(row.archived) || hasActiveRuns || rerunPatrolBatch.isLoading,
+                  disabled: retryPatrolBatch.isLoading,
+                  }] : []),
+                  {
+                    key: 'rerun',
+                    label: hasActiveRuns ? '运行结束后可全量重跑' : '全量重跑',
+                    icon: <PlayCircleOutlined />,
+                    disabled: Boolean(row.archived) || hasActiveRuns || rerunPatrolBatch.isLoading,
+                  },
+                  {
+                    key: row.archived ? 'restore' : 'archive',
+                    label: row.archived ? '恢复批次'
+                      : hasActiveRuns ? '运行结束后可归档' : '归档批次',
+                    danger: !row.archived,
+                    disabled: hasActiveRuns || restorePatrolBatch.isLoading || archivePatrolBatch.isLoading,
+                  },
+                ],
+                onClick: ({ key }) => {
+                  if (key === 'retry') retryPatrolBatch.mutate(value)
+                  if (key === 'rerun') rerunPatrolBatch.mutate(value)
+                  if (key === 'restore') restorePatrolBatch.mutate(value)
+                  if (key === 'archive') archivePatrolBatch.mutate(value)
                 },
-                {
-                  key: row.archived ? 'restore' : 'archive',
-                  label: row.archived ? '恢复批次'
-                    : hasActiveRuns ? '运行结束后可归档' : '归档批次',
-                  danger: !row.archived,
-                  disabled: hasActiveRuns || restorePatrolBatch.isLoading || archivePatrolBatch.isLoading,
-                },
-              ],
-              onClick: ({ key }) => {
-                if (key === 'retry') retryPatrolBatch.mutate(value)
-                if (key === 'rerun') rerunPatrolBatch.mutate(value)
-                if (key === 'restore') restorePatrolBatch.mutate(value)
-                if (key === 'archive') archivePatrolBatch.mutate(value)
-              },
-            }}
-          >
-            <Button size="small" icon={<MoreOutlined />} aria-label={`更多批次操作 ${value}`} />
-          </Dropdown>
+              }}
+            >
+              <Button type="text" size="small" icon={<MoreOutlined />} aria-label={`更多批次操作 ${value}`} />
+            </Dropdown>
+          </Tooltip>
         </Space>
         )
       } },
@@ -1992,21 +2058,42 @@ const DevicesPage: React.FC = () => {
           activeBatchResultSummary={activeBatchResultSummary}
           activeBatchSummary={activeBatchSummary}
           activePatrolBatchId={activePatrolBatchId}
-          monitorRunId={monitorRunId}
           patrolBatches={patrolBatches}
+          patrolBatchesLoading={patrolBatchesLoading}
+          patrolBatchTotal={patrolBatchPage?.total || 0}
+          patrolBatchPage={batchHistoryPage}
+          patrolBatchPageSize={batchHistoryPageSize}
+          patrolBatchSearch={batchHistorySearch}
+          patrolBatchStatus={batchHistoryStatus}
           patrolBatchColumns={patrolBatchColumns}
           showArchivedBatches={showArchivedPatrolBatches}
           onClearActiveBatch={() => setActivePatrolBatchId(null)}
-          onCloseMonitor={() => setMonitorRunId(null)}
           onExportBatchReport={(batchId) => exportPatrolBatchReport.mutate(batchId)}
           onExportBatchRawCli={(batchId) => exportPatrolBatchRawCli.mutate(batchId)}
           onExportBatchEvents={(batchId) => exportPatrolBatchEvents.mutate(batchId)}
           onOpenDeviceEvidence={openDeviceEvidenceTimeline}
-          onOpenRun={(runId) => setMonitorRunId(runId)}
           onRefreshActiveBatchRuns={() => refetchActiveBatchRuns()}
           onRefreshPatrolBatches={() => refetchPatrolBatches()}
+          onPatrolBatchPageChange={(page, pageSize) => {
+            setActivePatrolBatchId(null)
+            updateBatchHistoryQuery({
+              batch_page: pageSize === batchHistoryPageSize ? page : 1,
+              batch_page_size: pageSize,
+            })
+          }}
+          onPatrolBatchSearch={(value) => {
+            setActivePatrolBatchId(null)
+            updateBatchHistoryQuery({ batch_search: value.trim(), batch_page: 1 })
+          }}
+          onPatrolBatchStatusChange={(value) => {
+            setActivePatrolBatchId(null)
+            updateBatchHistoryQuery({ batch_status: value, batch_page: 1 })
+          }}
           onRetryRun={(runId) => retryWorkflowRun.mutate(runId)}
-          onToggleArchivedBatches={setShowArchivedPatrolBatches}
+          onToggleArchivedBatches={(checked) => {
+            setActivePatrolBatchId(null)
+            updateBatchHistoryQuery({ batch_archived: checked, batch_page: 1 })
+          }}
           batchDevicePage={batchDevicePage}
           batchDeviceSearch={batchDeviceSearch}
           batchDeviceSelectionStatus={batchDeviceSelectionStatus}
@@ -2312,47 +2399,62 @@ const DevicesPage: React.FC = () => {
         onClose={() => {
           setEvidenceOpen(false)
           setEvidenceDevice(null)
+          setEvidenceRunId(null)
+          setEvidenceBatchId(null)
+          setEvidenceTab('result')
         }}
         width={isMobile ? '100vw' : 1200}
         destroyOnClose
       >
-        <EvidenceTimeline
-          items={evidenceTimeline?.items || []}
-          executionPlans={executionPlans?.items || []}
-          isMobile={isMobile}
-        onNavigate={(kind, id) => {
-            if (kind === 'workflow-run') {
-              setEvidenceOpen(false)
-              setSearchParams((current) => {
-                const next = new URLSearchParams(current)
-                next.set('tab', 'patrol')
-                return next
-              })
-              setMonitorRunId(id)
-              return
-            }
-            setEvidenceOpen(false)
-            setMonitorRunId(null)
-            if (kind === 'parser-template') {
-              navigate(`/skills/parser?focus=${kind}&id=${encodeURIComponent(id)}&workspace=parser-assets&subtab=templates`)
-              return
-            }
-            if (kind === 'observation-contract') {
-              navigate(`/skills/parser?focus=${kind}&id=${encodeURIComponent(id)}&workspace=rule-assets&subtab=observation-contracts`)
-              return
-            }
-            if (kind === 'change-policy' || kind === 'change') {
-              navigate(`/skills/parser?focus=${kind}&id=${encodeURIComponent(id)}&workspace=rule-assets&subtab=change-policies`)
-              return
-            }
-            if (kind === 'event-rule') {
-              navigate(`/skills/parser?focus=${kind}&id=${encodeURIComponent(id)}&workspace=rule-assets&subtab=event-rules`)
-              return
-            }
-            if (kind === 'snapshot') {
-              navigate(`/skills/parser?focus=${kind}&id=${encodeURIComponent(id)}&workspace=parser-assets&subtab=templates`)
-            }
-          }}
+        <Tabs
+          activeKey={evidenceTab}
+          onChange={(key) => setEvidenceTab(key as 'result' | 'execution')}
+          items={[
+            {
+              key: 'result',
+              label: '巡检结果',
+              children: (
+                <EvidenceTimeline
+                  items={evidenceTimeline?.items || []}
+                  executionPlans={evidenceRunId ? [] : executionPlans?.items || []}
+                  isMobile={isMobile}
+                  onNavigate={(kind, id) => {
+                    if (kind === 'workflow-run') {
+                      setEvidenceRunId(id)
+                      setEvidenceTab('execution')
+                      return
+                    }
+                    setEvidenceOpen(false)
+                    if (kind === 'parser-template') {
+                      navigate(`/skills/parser?focus=${kind}&id=${encodeURIComponent(id)}&workspace=parser-assets&subtab=templates`)
+                      return
+                    }
+                    if (kind === 'observation-contract') {
+                      navigate(`/skills/parser?focus=${kind}&id=${encodeURIComponent(id)}&workspace=rule-assets&subtab=observation-contracts`)
+                      return
+                    }
+                    if (kind === 'change-policy' || kind === 'change') {
+                      navigate(`/skills/parser?focus=${kind}&id=${encodeURIComponent(id)}&workspace=rule-assets&subtab=change-policies`)
+                      return
+                    }
+                    if (kind === 'event-rule') {
+                      navigate(`/skills/parser?focus=${kind}&id=${encodeURIComponent(id)}&workspace=rule-assets&subtab=event-rules`)
+                      return
+                    }
+                    if (kind === 'snapshot') {
+                      navigate(`/skills/parser?focus=${kind}&id=${encodeURIComponent(id)}&workspace=parser-assets&subtab=templates`)
+                    }
+                  }}
+                />
+              ),
+            },
+            {
+              key: 'execution',
+              label: '执行过程',
+              disabled: !evidenceRunId,
+              children: <WorkflowRunMonitor runId={evidenceRunId} plain />,
+            },
+          ]}
         />
       </Drawer>
 

@@ -144,6 +144,7 @@ describe('EvidenceTimeline', () => {
       />,
     )
 
+    await userEvent.click(screen.getByRole('button', { name: /处理过程与技术证据/ }))
     expect(screen.getByTestId('evidence-policy-blocking')).toHaveTextContent('策略阻塞：template_missing')
     expect(screen.getByText('未报事件：policy missing')).toBeInTheDocument()
     expect(screen.getByText('碰撞阻塞：version conflict')).toBeInTheDocument()
@@ -159,7 +160,7 @@ describe('EvidenceTimeline', () => {
     expect(navigate).toHaveBeenCalledWith('change-policy', '1')
   })
 
-  it('should prevent duplicate key warnings when reasons repeat', () => {
+  it('should prevent duplicate key warnings when reasons repeat', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
     const item = baseItem({
@@ -208,6 +209,7 @@ describe('EvidenceTimeline', () => {
       />,
     )
 
+    await userEvent.click(screen.getByRole('button', { name: /处理过程与技术证据/ }))
     expect(screen.getAllByText('未报事件：policy missing')).toHaveLength(1)
     const hasDuplicateKeyWarning = consoleError.mock.calls.some((entry) => (
       String(entry[0]).includes('Encountered two children with the same key')
@@ -216,7 +218,7 @@ describe('EvidenceTimeline', () => {
     consoleError.mockRestore()
   })
 
-  it('should expose unknown closure reason when events are no_event but reasons are empty', () => {
+  it('should expose unknown closure reason when events are no_event but reasons are empty', async () => {
     const item = baseItem({
       no_event_count: 1,
       changes: [
@@ -246,6 +248,7 @@ describe('EvidenceTimeline', () => {
       />,
     )
 
+    await userEvent.click(screen.getByRole('button', { name: /处理过程与技术证据/ }))
     expect(screen.getByText('未分类：存在未报事件但未输出具体原因')).toBeInTheDocument()
   })
 })

@@ -1066,6 +1066,211 @@ body {
   font-weight: 500;
 }
 
+/* Keep dense row actions available without turning every table row into a primary call to action. */
+.patrol-history__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.patrol-history__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.patrol-history__search {
+  width: 240px;
+}
+
+.patrol-history-table .ant-table-cell-fix-right {
+  padding-inline: 8px;
+  background: #fff;
+}
+
+.patrol-history-table .ant-table-cell-fix-right-first::after {
+  box-shadow: -3px 0 7px -5px rgba(15, 23, 42, 0.28);
+}
+
+.patrol-history-table__actions .ant-btn-text {
+  height: 28px;
+  padding-inline: 6px;
+  color: #374151;
+}
+
+.patrol-history-table__actions .ant-btn-text:hover,
+.patrol-history-table__actions .ant-btn-text:focus-visible {
+  color: #111827;
+  background: #f3f4f6;
+}
+
+@media (max-width: 767px) {
+  .patrol-history__header {
+    flex-direction: column;
+  }
+
+  .patrol-history__filters {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .patrol-history__search {
+    flex: 1 0 100%;
+    width: 100%;
+  }
+
+  .patrol-history-table__actions .ant-btn-text {
+    width: 32px;
+    padding-inline: 0;
+  }
+}
+
+/* Patrol observability uses the same quiet, neutral language as the agent shell. */
+.patrol-pipeline {
+  width: 100%;
+  padding: 14px 0 4px;
+  border-top: 1px solid #ececec;
+  border-bottom: 1px solid #ececec;
+}
+
+.patrol-pipeline__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.patrol-pipeline__header .ant-typography {
+  margin-bottom: 0;
+}
+
+.patrol-pipeline__rail {
+  display: grid;
+  grid-template-columns: repeat(var(--pipeline-stage-count), minmax(180px, 1fr));
+  gap: 8px;
+  overflow-x: auto;
+  padding: 0 0 12px;
+}
+
+.patrol-pipeline__stage {
+  position: relative;
+  min-width: 180px;
+  min-height: 210px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.patrol-pipeline__stage.is-bottleneck {
+  border-color: #d6b978;
+  box-shadow: inset 0 2px 0 #d6b978;
+}
+
+.patrol-pipeline__stage-head {
+  display: grid;
+  grid-template-columns: 20px 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  min-height: 40px;
+}
+
+.patrol-pipeline__stage-icon {
+  color: #9ca3af;
+  font-size: 16px;
+}
+
+.patrol-pipeline__stage-icon.is-completed {
+  color: #24835b;
+}
+
+.patrol-pipeline__stage-icon.is-running {
+  color: #2563eb;
+}
+
+.patrol-pipeline__stage-icon.is-failed,
+.patrol-pipeline__stage-icon.is-degraded {
+  color: #c2413b;
+}
+
+.patrol-pipeline__stage-index {
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.patrol-pipeline__stage-desc {
+  display: block;
+  min-height: 40px;
+  margin: 4px 0 10px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.patrol-pipeline__progress-row {
+  display: grid;
+  grid-template-columns: minmax(70px, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.patrol-pipeline__progress-row .ant-progress {
+  margin: 0;
+}
+
+.patrol-pipeline__counts,
+.patrol-pipeline__latency {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 8px;
+  margin-top: 10px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.patrol-pipeline__latency {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding-top: 8px;
+  border-top: 1px solid #f0f0f0;
+  font-size: 11px;
+}
+
+.patrol-pipeline__counts strong {
+  color: #374151;
+  font-weight: 600;
+}
+
+.patrol-pipeline__counts .is-error,
+.patrol-pipeline__counts .is-error strong {
+  color: #b42318;
+}
+
+.patrol-pipeline__stage .ant-alert {
+  margin-top: 10px;
+  padding: 5px 8px;
+  font-size: 11px;
+}
+
+@media (max-width: 767px) {
+  .patrol-pipeline__header {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .patrol-pipeline__rail {
+    grid-template-columns: 1fr;
+    overflow-x: visible;
+  }
+
+  .patrol-pipeline__stage {
+    min-height: 0;
+  }
+}
+
 .grok-page-loading {
   text-align: center;
   padding: 80px 24px;

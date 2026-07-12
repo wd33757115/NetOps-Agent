@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React, { useEffect, useMemo, useState } from 'react'
-import { Alert, Card, List, Space, Spin, Steps, Tag, Typography } from 'antd'
+import { Alert, Card, Collapse, Descriptions, List, Space, Spin, Steps, Tag, Typography } from 'antd'
 import { LinkOutlined } from '@ant-design/icons'
 import { useQuery } from 'react-query'
 import { workflowApi, WorkflowTimelineEvent } from '../../services/api'
@@ -14,6 +14,7 @@ interface WorkflowRunMonitorProps {
   runId: string | null
   onClose?: () => void
   embedded?: boolean
+  plain?: boolean
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -35,10 +36,10 @@ type ArtifactMeta = {
 }
 
 function artifactLabel(key: string, meta?: ArtifactMeta) {
-  if (key === 'raw_outputs_archive') return 'Raw CLI outputs'
-  if (key === 'analysis_report') return 'Analysis report'
-  if (key === 'patrol_report') return 'Patrol report'
-  if (key === 'change_excel') return 'Change ticket'
+  if (key === 'raw_outputs_archive') return '原始输出'
+  if (key === 'analysis_report') return '分析报告'
+  if (key === 'patrol_report') return '巡检报告'
+  if (key === 'change_excel') return '变更工单'
   if (key === 'config_zip') return 'Config package'
   return meta?.filename || key.replaceAll('_', ' ')
 }
@@ -95,7 +96,29 @@ function formatTime(ts?: string) {
   }
 }
 
-const WorkflowRunMonitor: React.FC<WorkflowRunMonitorProps> = ({ runId, onClose, embedded }) => {
+function durationText(startedAt?: string | null, completedAt?: string | null) {
+  if (!startedAt || !completedAt) return '-'
+  const seconds = Math.max(0, (new Date(completedAt).getTime() - new Date(startedAt).getTime()) / 1000)
+  if (seconds < 1) return `${Math.round(seconds * 1000)}ms`
+  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`
+  return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`
+}
+
+const patrolStepMeta: Record<string, { label: string; description: string }> = {
+  'device-patrol': { label: '命令采集与解析', description: '登录设备、执行命令并保存原始输出' },
+  'state-normalizer': { label: '状态归一化', description: '转换为统一、可比较的设备状态' },
+  'change-detector': { label: '变化检测', description: '与历史状态比较并识别有效变化' },
+  'event-builder': { label: '事件判定', description: '使用活动规则判断是否生成巡检事件' },
+}
+
+const displayStatus = (status?: string | null) => {
+  const labels: Record<string, string> = {
+    pending: '等待中', queued: '排队中', running: '运行中', completed: '完成', failed: '失败',
+  }
+  return labels[String(status || '')] || status || '-'
+}
+
+const WorkflowRunMonitor: React.FC<WorkflowRunMonitorProps> = ({ runId, onClose, embedded, plain }) => {
   const [liveEvents, setLiveEvents] = useState<WorkflowTimelineEvent[]>([])
 
   useEffect(() => {
@@ -112,6 +135,31 @@ const WorkflowRunMonitor: React.FC<WorkflowRunMonitorProps> = ({ runId, onClose,
   const timeline = useMemo(() => {
     const base = run?.timeline || []
     const merged = [...base]
+    for (const step of run?.steps || []) {
+      const meta = patrolStepMeta[step.skill_name]
+      if (step.started_at && !merged.some((event) =>
+        event.step_name === step.step_name && event.status === 'started')) {
+        merged.push({
+          run_id: run?.run_id || '',
+          step_name: step.step_name,
+          skill_name: step.skill_name,
+          status: 'started',
+          message: `${meta?.label || step.step_name}开始执行`,
+          timestamp: step.started_at,
+        })
+      }
+      if (step.completed_at && !merged.some((event) =>
+        event.step_name === step.step_name && ['completed', 'failed'].includes(event.status))) {
+        merged.push({
+          run_id: run?.run_id || '',
+          step_name: step.step_name,
+          skill_name: step.skill_name,
+          status: step.status === 'failed' ? 'failed' : 'completed',
+          message: step.error_message || `${meta?.label || step.step_name}执行完成`,
+          timestamp: step.completed_at,
+        })
+      }
+    }
     for (const ev of liveEvents) {
       const key = `${ev.timestamp}-${ev.status}-${ev.step_name}-${ev.message}`
       if (!merged.some((m) => `${m.timestamp}-${m.status}-${m.step_name}-${m.message}` === key)) {
@@ -119,7 +167,7 @@ const WorkflowRunMonitor: React.FC<WorkflowRunMonitorProps> = ({ runId, onClose,
       }
     }
     return merged.sort((a, b) => String(a.timestamp || '').localeCompare(String(b.timestamp || '')))
-  }, [run?.timeline, liveEvents])
+  }, [run?.run_id, run?.steps, run?.timeline, liveEvents])
 
   useEffect(() => {
     if (!runId || !runStatus) return undefined
@@ -167,11 +215,18 @@ const WorkflowRunMonitor: React.FC<WorkflowRunMonitorProps> = ({ runId, onClose,
         <Spin />
       ) : run ? (
         <>
-          <div className="grok-chip-row" style={{ marginBottom: 12 }}>
+          <Alert
+            type={run.status === 'failed' ? 'error' : run.status === 'completed' ? 'success' : 'info'}
+            showIcon
+            message={`设备执行${displayStatus(run.status)}`}
+            description="步骤轨道展示完整处理流程；事件日志按实际时间记录每一步的开始、完成和错误。"
+            style={{ marginBottom: 12 }}
+          />
+          <div className="grok-chip-row" style={{ marginBottom: 8 }}>
             <GrokChip tone={run.status === 'completed' ? 'ok' : run.status === 'failed' ? 'warn' : undefined}>
-              {run.status}
+              {displayStatus(run.status)}
             </GrokChip>
-            <Tag>{run.template_name}</Tag>
+            <Tag>{String(run.context?.device_name || run.context?.device_id || run.template_name)}</Tag>
             {run.ticket_id && <Tag color="blue">{run.ticket_id}</Tag>}
             {run.langfuse_url && (
               <a href={run.langfuse_url} target="_blank" rel="noreferrer">
@@ -179,7 +234,14 @@ const WorkflowRunMonitor: React.FC<WorkflowRunMonitorProps> = ({ runId, onClose,
               </a>
             )}
           </div>
-          <Text copyable={{ text: run.run_id }} style={{ fontSize: 12 }}>Run ID: {run.run_id}</Text>
+          <Descriptions size="small" bordered column={2} style={{ marginTop: 10 }}>
+            <Descriptions.Item label="开始时间">{run.created_at || '-'}</Descriptions.Item>
+            <Descriptions.Item label="完成时间">{run.completed_at || '-'}</Descriptions.Item>
+            <Descriptions.Item label="总耗时">{durationText(run.created_at, run.completed_at)}</Descriptions.Item>
+            <Descriptions.Item label="执行编号">
+              <Text copyable={{ text: run.run_id }} code>{run.run_id}</Text>
+            </Descriptions.Item>
+          </Descriptions>
           {run.error_message && <Alert type="error" message={run.error_message} style={{ marginTop: 8 }} />}
 
           {run.child_runs && run.child_runs.length > 0 && (
@@ -205,7 +267,7 @@ const WorkflowRunMonitor: React.FC<WorkflowRunMonitorProps> = ({ runId, onClose,
             current={run.current_step_index}
             style={{ marginTop: 16 }}
             items={run.steps.map((s) => ({
-              title: `${s.step_name} (${s.skill_name})`,
+              title: patrolStepMeta[s.skill_name]?.label || s.step_name,
               status:
                 s.status === 'completed'
                   ? 'finish'
@@ -214,36 +276,57 @@ const WorkflowRunMonitor: React.FC<WorkflowRunMonitorProps> = ({ runId, onClose,
                     : s.status === 'running'
                       ? 'process'
                       : 'wait',
-              description: s.error_message || renderArtifacts(s.output_artifacts),
+              description: (
+                <Space direction="vertical" size={3}>
+                  <Text type="secondary">
+                    {patrolStepMeta[s.skill_name]?.description || s.skill_name}
+                  </Text>
+                  <Space wrap size={[8, 2]}>
+                    <Text type="secondary">状态：{displayStatus(s.status)}</Text>
+                    <Text type="secondary">开始：{formatTime(s.started_at || undefined) || '-'}</Text>
+                    <Text type="secondary">完成：{formatTime(s.completed_at || undefined) || '-'}</Text>
+                    <Text type="secondary">耗时：{durationText(s.started_at, s.completed_at)}</Text>
+                    {s.celery_task_id && <Text copyable code>任务 {s.celery_task_id}</Text>}
+                  </Space>
+                  {s.error_message && <Text type="danger">{s.error_message}</Text>}
+                  {renderArtifacts(s.output_artifacts)}
+                </Space>
+              ),
             }))}
           />
 
           {timeline.length > 0 && (
-            <Card size="small" title="运行时间线" style={{ marginTop: 16 }}>
-              <List
-                size="small"
-                dataSource={timeline}
-                renderItem={(ev) => (
-                  <List.Item>
-                    <List.Item.Meta
-                      title={
-                        <span>
-                          <Tag color={STATUS_COLOR[ev.status] || 'default'}>{ev.status}</Tag>
-                          {ev.step_name && <Text strong>{ev.step_name}</Text>}
-                          {ev.skill_name && <Text type="secondary"> · {ev.skill_name}</Text>}
-                        </span>
-                      }
-                      description={
-                        <>
-                          {ev.message && <div>{ev.message}</div>}
-                          <Text type="secondary" style={{ fontSize: 11 }}>{formatTime(ev.timestamp)}</Text>
-                        </>
-                      }
-                    />
-                  </List.Item>
-                )}
-              />
-            </Card>
+            <Collapse
+              style={{ marginTop: 16 }}
+              items={[{
+                key: 'execution-log',
+                label: `事件日志（${timeline.length}）`,
+                children: (
+                  <List
+                    size="small"
+                    dataSource={timeline}
+                    renderItem={(ev) => (
+                      <List.Item>
+                        <List.Item.Meta
+                          title={
+                            <span>
+                              <Tag color={STATUS_COLOR[ev.status] || 'default'}>{displayStatus(ev.status)}</Tag>
+                              {ev.step_name && <Text strong>{patrolStepMeta[String(ev.skill_name || '')]?.label || ev.step_name}</Text>}
+                            </span>
+                          }
+                          description={
+                            <>
+                              {ev.message && <div>{ev.message}</div>}
+                              <Text type="secondary" style={{ fontSize: 11 }}>{formatTime(ev.timestamp)}</Text>
+                            </>
+                          }
+                        />
+                      </List.Item>
+                    )}
+                  />
+                ),
+              }]}
+            />
           )}
 
           {run.steps.some((s) => s.skill_name === 'llm-result-analyzer' && hasArtifacts(s.output_artifacts)) && (
@@ -273,9 +356,11 @@ const WorkflowRunMonitor: React.FC<WorkflowRunMonitorProps> = ({ runId, onClose,
     </>
   )
 
+  if (plain) return content
+
   if (embedded) {
     return (
-      <Card size="small" title="运行监控" extra={onClose ? <a onClick={onClose}>关闭</a> : null}>
+      <Card size="small" title="设备执行过程" extra={onClose ? <a onClick={onClose}>关闭</a> : null}>
         {content}
       </Card>
     )

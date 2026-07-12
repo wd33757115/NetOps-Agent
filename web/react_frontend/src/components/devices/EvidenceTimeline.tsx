@@ -305,11 +305,78 @@ const RunEvidence: React.FC<{ item: DeviceEvidenceTimelineItem; isMobile?: boole
   if (noEventCount) closureEntries.push(`未报事件 ${noEventCount}`)
   if (collisionCount) closureEntries.push(`碰撞阻塞 ${collisionCount}`)
   if (!closureEntries.length) closureEntries.push('事件链条可被完整观察')
+  const executionFailed = item.workflow_status === 'failed'
+  const requiresAttention = Boolean(
+    executionFailed || item.event_count || item.policy_blocking_count || noEventCount || collisionCount,
+  )
+  const outcomeTitle = executionFailed
+    ? '巡检执行失败'
+    : item.event_count
+      ? `发现 ${item.event_count} 个巡检事件`
+      : item.policy_blocking_count || noEventCount || collisionCount
+        ? '巡检完成，部分结果需要关注'
+        : '巡检完成，未发现事件'
 
   return (
-    <Timeline
-      className="evidence-timeline"
-      items={[
+    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      <Alert
+        type={executionFailed ? 'error' : requiresAttention ? 'warning' : 'success'}
+        showIcon
+        message={outcomeTitle}
+        description={executionFailed
+          ? item.steps.find((step) => step.error)?.error || '执行过程发生错误，请查看处理过程。'
+          : closureEntries.join('；')}
+      />
+      <Descriptions size="small" bordered column={isMobile ? 2 : 5}>
+        <Descriptions.Item label="执行状态">{statusLabel(item.workflow_status)}</Descriptions.Item>
+        <Descriptions.Item label="命令输出">{item.snapshot_count}</Descriptions.Item>
+        <Descriptions.Item label="结构化结果">{item.observation_count}</Descriptions.Item>
+        <Descriptions.Item label="状态变化">{item.change_count}</Descriptions.Item>
+        <Descriptions.Item label="巡检事件">{item.event_count}</Descriptions.Item>
+      </Descriptions>
+      {item.events.length > 0 && (
+        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+          <Typography.Text strong>发现的问题</Typography.Text>
+          {item.events.map((event) => (
+            <Alert
+              key={`outcome-${event.event_id}`}
+              type={event.severity === 'critical' ? 'error' : event.severity === 'warning' ? 'warning' : 'info'}
+              showIcon
+              message={eventSummary(event)}
+              description={(
+                <Space wrap>
+                  <Tag color={severityColor(event.severity)}>{event.severity || '-'}</Tag>
+                  <Typography.Text>
+                    当前值：{renderValue(
+                      event.new_value,
+                      event.new_number,
+                      event.event_type.startsWith('Optical') ? 'dBm' : null,
+                    )}
+                  </Typography.Text>
+                  <Typography.Text>阈值：{thresholdSummary(event.policy_snapshot) || '-'}</Typography.Text>
+                  <Typography.Text type="secondary">{event.occurred_at || '-'}</Typography.Text>
+                </Space>
+              )}
+            />
+          ))}
+        </Space>
+      )}
+      {!item.events.length && (noEventCount > 0 || item.policy_blocking_count) && (
+        <Alert
+          type="warning"
+          showIcon
+          message="检测到状态变化，但未形成巡检事件"
+          description={closureEntries.join('；')}
+        />
+      )}
+      <Collapse
+        items={[{
+          key: 'processing-evidence',
+          label: '处理过程与技术证据',
+          children: (
+            <Timeline
+              className="evidence-timeline"
+              items={[
         {
           color: statusColor(item.workflow_status),
           children: (
@@ -536,8 +603,12 @@ const RunEvidence: React.FC<{ item: DeviceEvidenceTimelineItem; isMobile?: boole
             </Space>
           ),
         },
-      ]}
-    />
+              ]}
+            />
+          ),
+        }]}
+      />
+    </Space>
   )
 }
 
