@@ -325,6 +325,7 @@ def build_patrol_pipeline_summary(
                     for step in steps_by_run.get(str(run.id), [])
                     if int(step.step_index or 0) == definition["step_index"]
                     and str(step.step_name) == definition["step_name"]
+                    and str(step.skill_name) == definition["skill_name"]
                 ),
                 None,
             )
@@ -374,7 +375,10 @@ def build_patrol_pipeline_summary(
         stages.append(
             {
                 **definition,
-                "key": f'{definition["step_index"]}:{definition["step_name"]}',
+                "key": (
+                    f'{definition["step_index"]}:{definition["step_name"]}:'
+                    f'{definition["skill_name"]}'
+                ),
                 "label": label,
                 "description": description,
                 "status": aggregate_status,

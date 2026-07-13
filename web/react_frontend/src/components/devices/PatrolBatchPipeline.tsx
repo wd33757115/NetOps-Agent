@@ -32,6 +32,7 @@ const statusMeta = (status: string) => {
   if (status === 'running') return { color: 'processing', label: '运行中', icon: <LoadingOutlined /> }
   if (status === 'failed') return { color: 'error', label: '失败', icon: <ExclamationCircleOutlined /> }
   if (status === 'degraded') return { color: 'warning', label: '部分失败', icon: <ExclamationCircleOutlined /> }
+  if (status === 'not_started') return { color: 'default', label: '未开始', icon: <ClockCircleOutlined /> }
   return { color: 'default', label: '等待中', icon: <ClockCircleOutlined /> }
 }
 
@@ -76,11 +77,15 @@ const PatrolBatchPipeline: React.FC<PatrolBatchPipelineProps> = ({ batch, counts
       skill_name: 'batch-coordinator',
       label: '汇总与交付',
       description: '汇总设备结果、事件和最终报告',
-      status: counts.running || counts.pending
-        ? 'running'
-        : counts.failed || counts.cancelled
-          ? 'degraded'
-          : 'completed',
+      status: counts.total === 0 || terminal === 0
+        ? 'not_started'
+        : counts.running || counts.pending
+          ? 'running'
+          : counts.failed || counts.cancelled
+            ? 'degraded'
+            : terminal === counts.total
+              ? 'completed'
+              : 'pending',
       total: counts.total,
       status_counts: {},
       completed_count: counts.completed,

@@ -148,6 +148,17 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _patrol_batch_sort_key(item: dict[str, Any]) -> tuple[datetime, str]:
+    raw_created_at = str(item.get("created_at") or "")
+    try:
+        created_at = datetime.fromisoformat(raw_created_at.replace("Z", "+00:00"))
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+    except ValueError:
+        created_at = datetime.min.replace(tzinfo=timezone.utc)
+    return created_at, str(item.get("patrol_batch_id") or "")
+
+
 def _parse_optional_datetime(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -813,14 +824,16 @@ async def list_patrol_batches(
     status: str | None = None,
 ):
     from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
+    from src.core.patrol.legacy_batch_history import LegacyPatrolBatchHistoryRepository
 
     page_limit = max(1, min(limit, 100))
     page_offset = max(0, offset)
     repository = PatrolBatchManifestRepository()
+    merge_window = page_offset + page_limit
     try:
         manifest_page = repository.list_batches_page(
-            limit=page_limit,
-            offset=page_offset,
+            limit=merge_window,
+            offset=0,
             include_archived=include_archived,
             search=search,
             status=status,
@@ -829,118 +842,26 @@ async def list_patrol_batches(
         manifest_page = {
             "items": [],
             "total": 0,
-            "limit": page_limit,
-            "offset": page_offset,
+            "limit": merge_window,
+            "offset": 0,
         }
-    runs = list_workflow_runs(
-        limit=1000,
-        template_name="patrol-change-event",
-        source="device-management",
-    )
-    batches: dict[str, dict[str, Any]] = {}
-    for run in runs:
-        context = run.context or {}
-        batch_id = context.get("patrol_batch_id")
-        if not batch_id:
-            continue
-        item = batches.setdefault(
-            str(batch_id),
-            {
-                "patrol_batch_id": str(batch_id),
-                "workflow_name": run.template_name,
-                "source": run.source,
-                "ticket_id": run.ticket_id,
-                "total": 0,
-                "status_counts": {},
-                "failed_count": 0,
-                "running_count": 0,
-                "completed_count": 0,
-                "pending_count": 0,
-                "cancelled_count": 0,
-                "created_at": run.created_at,
-                "completed_at": None,
-                "sample_devices": [],
-                "archived": True,
-                "archived_count": 0,
-                "archived_at": None,
-                "archive_reason": None,
-                "archived_by": None,
-                "keep_until": None,
-            },
-        )
-        item["total"] += 1
-        if context.get("patrol_batch_archived"):
-            item["archived_count"] += 1
-            archived_at = context.get("patrol_batch_archived_at")
-            if archived_at and (
-                not item["archived_at"] or str(archived_at) > str(item["archived_at"])
-            ):
-                item["archived_at"] = archived_at
-            item["archive_reason"] = item["archive_reason"] or context.get(
-                "patrol_batch_archive_reason"
-            )
-            item["archived_by"] = item["archived_by"] or context.get("patrol_batch_archived_by")
-        else:
-            item["archived"] = False
-        item["keep_until"] = item["keep_until"] or context.get("patrol_batch_keep_until")
-        item["status_counts"][run.status] = item["status_counts"].get(run.status, 0) + 1
-        if run.status in {"failed", "running", "completed", "pending", "cancelled"}:
-            item[f"{run.status}_count"] += 1
-        if run.created_at and (not item["created_at"] or run.created_at < item["created_at"]):
-            item["created_at"] = run.created_at
-        if run.completed_at and (
-            not item["completed_at"] or run.completed_at > item["completed_at"]
-        ):
-            item["completed_at"] = run.completed_at
-        device_name = context.get("device_name") or context.get("device_id")
-        if (
-            device_name
-            and device_name not in item["sample_devices"]
-            and len(item["sample_devices"]) < 5
-        ):
-            item["sample_devices"].append(device_name)
-    candidate_ids = {str(item["patrol_batch_id"]) for item in batches.values()}
     try:
-        manifest_ids = repository.existing_batch_ids(candidate_ids)
+        legacy_page = LegacyPatrolBatchHistoryRepository().list_batches_window(
+            limit=merge_window,
+            include_archived=include_archived,
+            search=search,
+            status=status,
+        )
     except Exception:
-        manifest_ids = set()
-    normalized_search = str(search or "").strip().lower()
-    normalized_status = str(status or "").strip().lower()
-    visible_batches = [
-        item
-        for item in batches.values()
-        if str(item["patrol_batch_id"]) not in manifest_ids
-        and (include_archived or not item.get("archived"))
-        and (
-            not normalized_search
-            or normalized_search in str(item.get("patrol_batch_id") or "").lower()
-            or normalized_search in str(item.get("ticket_id") or "").lower()
-            or normalized_search in " ".join(item.get("sample_devices") or []).lower()
-        )
-        and (
-            not normalized_status
-            or (
-                normalized_status == "active"
-                and any(
-                    item["status_counts"].get(key)
-                    for key in ACTIVE_PATROL_RUN_STATUSES
-                )
-            )
-            or item["status_counts"].get(normalized_status)
-        )
-    ]
-    legacy_items = sorted(
-        visible_batches,
-        key=lambda item: str(item.get("created_at") or ""),
+        legacy_page = {"items": [], "total": 0}
+    manifest_total = int(manifest_page.get("total") or 0)
+    legacy_total = int(legacy_page.get("total") or 0)
+    merged_items = sorted(
+        [*(manifest_page.get("items") or []), *(legacy_page.get("items") or [])],
+        key=_patrol_batch_sort_key,
         reverse=True,
     )
-    manifest_total = int(manifest_page.get("total") or 0)
-    legacy_total = len(legacy_items)
-    items = list(manifest_page.get("items") or [])
-    if len(items) < page_limit:
-        legacy_offset = max(0, page_offset - manifest_total)
-        legacy_limit = page_limit - len(items)
-        items.extend(legacy_items[legacy_offset : legacy_offset + legacy_limit])
+    items = merged_items[page_offset : page_offset + page_limit]
     total = manifest_total + legacy_total
     return {
         "items": items,

@@ -484,6 +484,7 @@ def test_list_patrol_batches_groups_runs(monkeypatch):
     from types import SimpleNamespace
 
     from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
+    from src.core.patrol.legacy_batch_history import LegacyPatrolBatchHistoryRepository
     from src.gateway import workflow_api
 
     runs = [
@@ -543,7 +544,6 @@ def test_list_patrol_batches_groups_runs(monkeypatch):
             },
         ),
     ]
-    monkeypatch.setattr(workflow_api, "list_workflow_runs", lambda **_kwargs: runs)
     monkeypatch.setattr(
         PatrolBatchManifestRepository,
         "list_batches_page",
@@ -554,10 +554,26 @@ def test_list_patrol_batches_groups_runs(monkeypatch):
             "offset": kwargs.get("offset", 0),
         },
     )
+    def legacy_page(_self, **kwargs):
+        grouped = {
+            batch_id: [
+                run for run in runs if run.context.get("patrol_batch_id") == batch_id
+            ]
+            for batch_id in {run.context["patrol_batch_id"] for run in runs}
+        }
+        items = [
+            LegacyPatrolBatchHistoryRepository._serialize_batch(batch_id, batch_runs)
+            for batch_id, batch_runs in grouped.items()
+            if kwargs.get("include_archived")
+            or not all(run.context.get("patrol_batch_archived") for run in batch_runs)
+        ]
+        items.sort(key=lambda item: item["created_at"], reverse=True)
+        return {"items": items, "total": len(items)}
+
     monkeypatch.setattr(
-        PatrolBatchManifestRepository,
-        "existing_batch_ids",
-        lambda self, _ids: set(),
+        LegacyPatrolBatchHistoryRepository,
+        "list_batches_window",
+        legacy_page,
     )
 
     result = asyncio.run(workflow_api.list_patrol_batches())
@@ -574,10 +590,55 @@ def test_list_patrol_batches_groups_runs(monkeypatch):
     assert all(item["patrol_batch_id"] != "batch-archived" for item in result["items"])
 
     with_archived = asyncio.run(workflow_api.list_patrol_batches(include_archived=True))
-    archived = next(item for item in with_archived["items"] if item["patrol_batch_id"] == "batch-archived")
+    archived = next(
+        item
+        for item in with_archived["items"]
+        if item["patrol_batch_id"] == "batch-archived"
+    )
     assert archived["archived"] is True
     assert archived["archived_count"] == 1
     assert archived["archive_reason"] == "old batch"
+
+
+def test_list_patrol_batches_globally_merges_manifest_and_legacy(monkeypatch):
+    from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
+    from src.core.patrol.legacy_batch_history import LegacyPatrolBatchHistoryRepository
+    from src.gateway import workflow_api
+
+    monkeypatch.setattr(
+        PatrolBatchManifestRepository,
+        "list_batches_page",
+        lambda self, **_kwargs: {
+            "items": [
+                {"patrol_batch_id": "manifest-new", "created_at": "2026-07-03T00:00:00Z"},
+                {"patrol_batch_id": "manifest-old", "created_at": "2026-07-01T00:00:00Z"},
+            ],
+            "total": 2,
+        },
+    )
+    monkeypatch.setattr(
+        LegacyPatrolBatchHistoryRepository,
+        "list_batches_window",
+        lambda self, **_kwargs: {
+            "items": [
+                {"patrol_batch_id": "legacy-middle", "created_at": "2026-07-02T00:00:00Z"},
+            ],
+            "total": 1,
+        },
+    )
+
+    result = asyncio.run(workflow_api.list_patrol_batches(limit=2))
+
+    assert [item["patrol_batch_id"] for item in result["items"]] == [
+        "manifest-new",
+        "legacy-middle",
+    ]
+    assert result["total"] == 3
+
+    second_page = asyncio.run(workflow_api.list_patrol_batches(limit=2, offset=2))
+    assert [item["patrol_batch_id"] for item in second_page["items"]] == [
+        "manifest-old"
+    ]
 
 
 def test_archive_patrol_batch_writes_governance_context(monkeypatch):
@@ -606,12 +667,19 @@ def test_archive_patrol_batch_writes_governance_context(monkeypatch):
     updated = {}
 
     monkeypatch.setattr(workflow_api, "list_workflow_runs", lambda **_kwargs: runs)
-    monkeypatch.setattr(workflow_api, "update_run_context", lambda run_id, context: updated.setdefault(run_id, context))
+    monkeypatch.setattr(
+        workflow_api,
+        "update_run_context",
+        lambda run_id, context: updated.setdefault(run_id, context),
+    )
 
     result = asyncio.run(
         workflow_api.archive_patrol_batch(
             "batch-1",
-            workflow_api.PatrolBatchGovernanceRequest(reason="operator cleanup", keep_until="2026-12-31T00:00:00Z"),
+            workflow_api.PatrolBatchGovernanceRequest(
+                reason="operator cleanup",
+                keep_until="2026-12-31T00:00:00Z",
+            ),
             user=None,
         )
     )
@@ -639,7 +707,11 @@ def test_retry_patrol_batch_rejects_archived_batch(monkeypatch):
             ticket_id=None,
             source="device-management",
             status="failed",
-            context={"patrol_batch_id": "batch-1", "device_id": "device-1", "patrol_batch_archived": True},
+            context={
+                "patrol_batch_id": "batch-1",
+                "device_id": "device-1",
+                "patrol_batch_archived": True,
+            },
         )
     ]
     monkeypatch.setattr(workflow_api, "list_workflow_runs", lambda **_kwargs: runs)

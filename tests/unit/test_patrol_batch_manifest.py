@@ -167,3 +167,79 @@ def test_batch_history_uses_stable_server_pagination_and_total(monkeypatch):
     ]
     assert searched["total"] == 1
     assert searched["items"][0]["patrol_batch_id"] == "batch-0007"
+
+
+def test_batch_history_searches_all_devices_and_filters_aggregate_status(monkeypatch):
+    session_scope = _session_factory(monkeypatch)
+    now = datetime.now(timezone.utc)
+    with session_scope() as db:
+        for batch_id, statuses in {
+            "batch-active": ["completed", "running"],
+            "batch-failed": ["completed", "failed"],
+            "batch-completed": ["completed", "completed"],
+        }.items():
+            db.add(
+                PatrolBatchRecord(
+                    patrol_batch_id=batch_id,
+                    workflow_name="patrol-change-event",
+                    launch_mode="workflow",
+                    patrol_mode="production",
+                    target_type="group",
+                    target_label=batch_id,
+                    selector_json={},
+                    target_count=2,
+                    launched_count=2,
+                    skipped_count=0,
+                    archived=False,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            for index, status in enumerate(statuses):
+                run_id = f"{batch_id}-run-{index}"
+                db.add(
+                    WorkflowRun(
+                        id=run_id,
+                        template_name="patrol-change-event",
+                        source="device-management",
+                        status=status,
+                        context={"patrol_batch_id": batch_id},
+                        created_at=now,
+                    )
+                )
+                db.add(
+                    PatrolBatchDeviceRecord(
+                        id=f"{batch_id}-device-{index}",
+                        patrol_batch_id=batch_id,
+                        device_id=f"device-{batch_id}-{index}",
+                        device_name=(
+                            "hidden-target"
+                            if batch_id == "batch-failed" and index == 1
+                            else "other"
+                        ),
+                        management_ip=(
+                            "10.8.7.6"
+                            if batch_id == "batch-failed" and index == 1
+                            else None
+                        ),
+                        selection_status="launched",
+                        preflight_status="ready",
+                        workflow_run_id=run_id,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+
+    repository = PatrolBatchManifestRepository()
+
+    active = repository.list_batches_page(status="active")["items"]
+    failed = repository.list_batches_page(status="failed")["items"]
+    completed = repository.list_batches_page(status="completed")["items"]
+    by_name = repository.list_batches_page(search="hidden-target")["items"]
+    by_ip = repository.list_batches_page(search="10.8.7.6")["items"]
+
+    assert [item["patrol_batch_id"] for item in active] == ["batch-active"]
+    assert [item["patrol_batch_id"] for item in failed] == ["batch-failed"]
+    assert [item["patrol_batch_id"] for item in completed] == ["batch-completed"]
+    assert by_name[0]["patrol_batch_id"] == "batch-failed"
+    assert by_ip[0]["patrol_batch_id"] == "batch-failed"

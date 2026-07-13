@@ -269,9 +269,17 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
 
         {activeBatchResultSummary?.quality && (
           <Alert
-            type={activeBatchResultSummary.quality.status === 'ready' ? 'success' : 'warning'}
+            type={activeBatchResultSummary.quality.status === 'ready'
+              ? 'success'
+              : activeBatchResultSummary.quality.status === 'not_started'
+                ? 'info'
+                : 'warning'}
             showIcon
-            message={`巡检质量：${activeBatchResultSummary.quality.status === 'ready' ? '就绪' : '降级'}`}
+            message={`巡检质量：${activeBatchResultSummary.quality.status === 'ready'
+              ? '就绪'
+              : activeBatchResultSummary.quality.status === 'not_started'
+                ? '未开始 / 暂无质量数据'
+                : '降级'}`}
             description={
               `命令 ${activeBatchResultSummary.quality.execution_success_count || 0}/${activeBatchResultSummary.quality.command_count || 0} 执行成功，`
               + `解析 ${activeBatchResultSummary.quality.parser_ready_count || 0}/${activeBatchResultSummary.quality.parser_eligible_count || 0} 项就绪，`

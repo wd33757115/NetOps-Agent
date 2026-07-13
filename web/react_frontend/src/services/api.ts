@@ -2363,6 +2363,7 @@ export interface PatrolBatchSummary {
   completed_count: number
   pending_count: number
   cancelled_count: number
+  aggregate_status?: 'active' | 'failed' | 'cancelled' | 'completed' | 'pending' | string
   created_at?: string | null
   completed_at?: string | null
   sample_devices: string[]

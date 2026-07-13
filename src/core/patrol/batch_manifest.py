@@ -9,7 +9,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import or_
+from sqlalchemy import and_, func, or_
 
 from src.infrastructure.db.models import (
     PatrolBatchDeviceRecord,
@@ -54,6 +54,20 @@ def _connection_status(*, selection_status: str, run: Any | None) -> str:
     if any(marker in error for marker in CONNECTION_FAILURE_MARKERS):
         return "failed"
     return "unknown"
+
+
+def _aggregate_batch_status(
+    statuses: Counter[str], *, launched_count: int
+) -> str:
+    if any(statuses.get(status, 0) for status in ACTIVE_STATUSES):
+        return "active"
+    if statuses.get("failed", 0):
+        return "failed"
+    if statuses.get("cancelled", 0):
+        return "cancelled"
+    if launched_count > 0 and statuses.get("completed", 0) == launched_count:
+        return "completed"
+    return "pending"
 
 
 class PatrolBatchManifestRepository:
@@ -184,6 +198,8 @@ class PatrolBatchManifestRepository:
         search: str | None = None,
         status: str | None = None,
     ) -> dict[str, Any]:
+        page_limit = max(1, int(limit))
+        page_offset = max(0, offset)
         with get_db_session() as db:
             query = db.query(PatrolBatchRecord)
             if not include_archived:
@@ -195,41 +211,93 @@ class PatrolBatchManifestRepository:
                         PatrolBatchRecord.patrol_batch_id.ilike(pattern),
                         PatrolBatchRecord.target_label.ilike(pattern),
                         PatrolBatchRecord.ticket_id.ilike(pattern),
+                        db.query(PatrolBatchDeviceRecord.id)
+                        .filter(
+                            PatrolBatchDeviceRecord.patrol_batch_id
+                            == PatrolBatchRecord.patrol_batch_id,
+                            or_(
+                                PatrolBatchDeviceRecord.device_id.ilike(pattern),
+                                PatrolBatchDeviceRecord.device_name.ilike(pattern),
+                                PatrolBatchDeviceRecord.management_ip.ilike(pattern),
+                            ),
+                        )
+                        .exists(),
                     )
                 )
             normalized_status = str(status or "").strip().lower()
             if normalized_status:
-                status_values = (
-                    ACTIVE_STATUSES
-                    if normalized_status == "active"
-                    else {normalized_status}
+                run_for_target = db.query(WorkflowRun.id).filter(
+                    WorkflowRun.id == PatrolBatchDeviceRecord.workflow_run_id,
                 )
-                matched_batches = (
-                    db.query(PatrolBatchDeviceRecord.patrol_batch_id)
-                    .join(
-                        WorkflowRun,
-                        WorkflowRun.id == PatrolBatchDeviceRecord.workflow_run_id,
+                active_exists = db.query(PatrolBatchDeviceRecord.id).filter(
+                    PatrolBatchDeviceRecord.patrol_batch_id
+                    == PatrolBatchRecord.patrol_batch_id,
+                    run_for_target.filter(WorkflowRun.status.in_(ACTIVE_STATUSES)).exists(),
+                ).exists()
+                failed_exists = db.query(PatrolBatchDeviceRecord.id).filter(
+                    PatrolBatchDeviceRecord.patrol_batch_id
+                    == PatrolBatchRecord.patrol_batch_id,
+                    run_for_target.filter(WorkflowRun.status == "failed").exists(),
+                ).exists()
+                cancelled_exists = db.query(PatrolBatchDeviceRecord.id).filter(
+                    PatrolBatchDeviceRecord.patrol_batch_id
+                    == PatrolBatchRecord.patrol_batch_id,
+                    run_for_target.filter(WorkflowRun.status == "cancelled").exists(),
+                ).exists()
+                launched_target_count = (
+                    db.query(func.count(PatrolBatchDeviceRecord.id))
+                    .filter(
+                        PatrolBatchDeviceRecord.patrol_batch_id
+                        == PatrolBatchRecord.patrol_batch_id,
+                        PatrolBatchDeviceRecord.selection_status != "skipped",
                     )
-                    .filter(WorkflowRun.status.in_(status_values))
-                    .distinct()
+                    .correlate(PatrolBatchRecord)
+                    .scalar_subquery()
                 )
-                query = query.filter(PatrolBatchRecord.patrol_batch_id.in_(matched_batches))
+                incomplete_exists = db.query(PatrolBatchDeviceRecord.id).filter(
+                    PatrolBatchDeviceRecord.patrol_batch_id
+                    == PatrolBatchRecord.patrol_batch_id,
+                    PatrolBatchDeviceRecord.selection_status != "skipped",
+                    or_(
+                        PatrolBatchDeviceRecord.workflow_run_id.is_(None),
+                        ~run_for_target.filter(WorkflowRun.status == "completed").exists(),
+                    ),
+                ).exists()
+                completed = and_(
+                    PatrolBatchRecord.launched_count > 0,
+                    launched_target_count == PatrolBatchRecord.launched_count,
+                    ~incomplete_exists,
+                )
+                aggregate_filters = {
+                    "active": active_exists,
+                    "failed": and_(~active_exists, failed_exists),
+                    "cancelled": and_(~active_exists, ~failed_exists, cancelled_exists),
+                    "completed": completed,
+                    "pending": and_(
+                        ~active_exists,
+                        ~failed_exists,
+                        ~cancelled_exists,
+                        ~completed,
+                    ),
+                }
+                if normalized_status in aggregate_filters:
+                    query = query.filter(aggregate_filters[normalized_status])
             total = query.count()
             batches = (
                 query.order_by(
                     PatrolBatchRecord.created_at.desc(),
                     PatrolBatchRecord.patrol_batch_id.desc(),
                 )
-                .offset(max(0, offset))
-                .limit(max(1, min(limit, 100)))
+                .offset(page_offset)
+                .limit(page_limit)
                 .all()
             )
             if not batches:
                 return {
                     "items": [],
                     "total": total,
-                    "limit": max(1, min(limit, 100)),
-                    "offset": max(0, offset),
+                    "limit": page_limit,
+                    "offset": page_offset,
                 }
             batch_ids = [row.patrol_batch_id for row in batches]
             targets = (
@@ -289,6 +357,10 @@ class PatrolBatchManifestRepository:
                         "pending_count": int(run_statuses.get("pending") or 0)
                         + int(run_statuses.get("queued") or 0),
                         "cancelled_count": int(run_statuses.get("cancelled") or 0),
+                        "aggregate_status": _aggregate_batch_status(
+                            run_statuses,
+                            launched_count=int(batch.launched_count or 0),
+                        ),
                         "connection_succeeded_count": int(
                             connection_statuses.get("succeeded") or 0
                         ),
@@ -310,8 +382,8 @@ class PatrolBatchManifestRepository:
             return {
                 "items": result,
                 "total": total,
-                "limit": max(1, min(limit, 100)),
-                "offset": max(0, offset),
+                "limit": page_limit,
+                "offset": page_offset,
             }
 
     def set_governance(

@@ -89,3 +89,23 @@ def test_empty_manifest_summary_is_not_reported_as_ready(monkeypatch):
     assert result["run_count"] == 0
     assert result["quality"]["status"] == "not_started"
     assert result["pipeline"]["stages"] == []
+
+
+def test_pipeline_summary_keeps_same_named_steps_with_different_skills_separate():
+    started = datetime(2026, 7, 12, 12, 0, tzinfo=timezone.utc)
+    runs = [SimpleNamespace(id="run-1", context={"device_id": "d1"})]
+    steps = {
+        "run-1": [
+            _step(1, "normalize", "state-normalizer-v1", "completed", started, 1),
+            _step(1, "normalize", "state-normalizer-v2", "failed", started, 2),
+        ]
+    }
+
+    result = build_patrol_pipeline_summary(runs, steps)
+
+    assert [stage["key"] for stage in result["stages"]] == [
+        "1:normalize:state-normalizer-v1",
+        "1:normalize:state-normalizer-v2",
+    ]
+    assert result["stages"][0]["completed_count"] == 1
+    assert result["stages"][1]["failed_count"] == 1

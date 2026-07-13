@@ -291,6 +291,15 @@ const eventColumns = (onNavigate?: (kind: EvidenceNavigateKind, id: string) => v
   { title: '事件ID', dataIndex: 'event_id', width: 180, render: (value: string) => <Typography.Text copyable code>{value}</Typography.Text> },
 ]
 
+const ACTIVE_WORKFLOW_STATUSES = new Set([
+  'pending',
+  'queued',
+  'running',
+  'in_progress',
+  'collecting',
+  'dispatching',
+])
+
 const RunEvidence: React.FC<{ item: DeviceEvidenceTimelineItem; isMobile?: boolean; onNavigate?: EvidenceTimelineProps['onNavigate'] }> = ({
   item,
   isMobile,
@@ -305,27 +314,51 @@ const RunEvidence: React.FC<{ item: DeviceEvidenceTimelineItem; isMobile?: boole
   if (noEventCount) closureEntries.push(`未报事件 ${noEventCount}`)
   if (collisionCount) closureEntries.push(`碰撞阻塞 ${collisionCount}`)
   if (!closureEntries.length) closureEntries.push('事件链条可被完整观察')
-  const executionFailed = item.workflow_status === 'failed'
+  const workflowStatus = String(item.workflow_status || '').toLowerCase()
+  const executionActive = ACTIVE_WORKFLOW_STATUSES.has(workflowStatus)
+  const executionCancelled = workflowStatus === 'cancelled'
+  const executionFailed = workflowStatus === 'failed'
+  const executionCompleted = workflowStatus === 'completed'
   const requiresAttention = Boolean(
     executionFailed || item.event_count || item.policy_blocking_count || noEventCount || collisionCount,
   )
-  const outcomeTitle = executionFailed
-    ? '巡检执行失败'
-    : item.event_count
-      ? `发现 ${item.event_count} 个巡检事件`
-      : item.policy_blocking_count || noEventCount || collisionCount
-        ? '巡检完成，部分结果需要关注'
-        : '巡检完成，未发现事件'
+  const outcomeTitle = executionActive
+    ? '巡检进行中，最终结果尚未形成'
+    : executionCancelled
+      ? '巡检已取消，结果可能不完整'
+      : executionFailed
+        ? '巡检执行失败'
+        : executionCompleted && item.event_count
+          ? `发现 ${item.event_count} 个巡检事件`
+          : executionCompleted && (item.policy_blocking_count || noEventCount || collisionCount)
+            ? '巡检完成，部分结果需要关注'
+            : executionCompleted
+              ? '巡检完成，未发现事件'
+              : '巡检状态尚未收敛，最终结果不可用'
+  const outcomeType = executionFailed
+    ? 'error'
+    : executionCancelled || (executionCompleted && requiresAttention)
+      ? 'warning'
+      : executionCompleted
+        ? 'success'
+        : 'info'
+  const outcomeDescription = executionActive
+    ? '设备命令采集、解析或事件判定仍在执行，请等待任务进入终态后再判断巡检结果。'
+    : executionCancelled
+      ? '任务未执行完全部步骤，当前数据仅供排错，不代表完整巡检结论。'
+      : executionFailed
+        ? item.steps.find((step) => step.error)?.error || '执行过程发生错误，请查看处理过程。'
+        : executionCompleted
+          ? closureEntries.join('；')
+          : '当前状态不是可交付终态，请查看执行过程确认调度状态。'
 
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
       <Alert
-        type={executionFailed ? 'error' : requiresAttention ? 'warning' : 'success'}
+        type={outcomeType}
         showIcon
         message={outcomeTitle}
-        description={executionFailed
-          ? item.steps.find((step) => step.error)?.error || '执行过程发生错误，请查看处理过程。'
-          : closureEntries.join('；')}
+        description={outcomeDescription}
       />
       <Descriptions size="small" bordered column={isMobile ? 2 : 5}>
         <Descriptions.Item label="执行状态">{statusLabel(item.workflow_status)}</Descriptions.Item>

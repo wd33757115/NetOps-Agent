@@ -87,6 +87,28 @@ const baseItem = (overrides: Partial<DeviceEvidenceTimelineItem> = {}): DeviceEv
 })
 
 describe('EvidenceTimeline', () => {
+  it.each([
+    ['pending', '巡检进行中，最终结果尚未形成'],
+    ['running', '巡检进行中，最终结果尚未形成'],
+    ['cancelled', '巡检已取消，结果可能不完整'],
+  ])('should not report %s workflows as completed', (workflowStatus, expectedMessage) => {
+    render(
+      <EvidenceTimeline
+        items={[baseItem({
+          workflow_status: workflowStatus,
+          event_count: 0,
+          events: [],
+          change_count: 0,
+          changes: [],
+        })]}
+        executionPlans={[] as DeviceExecutionPlanRecord[]}
+      />,
+    )
+
+    expect(screen.getByText(expectedMessage)).toBeInTheDocument()
+    expect(screen.queryByText('巡检完成，未发现事件')).not.toBeInTheDocument()
+  })
+
   it('should expose policy/no_event/collision reasons separately and provide navigation callbacks', async () => {
     const navigate = vi.fn()
     const item = baseItem({
