@@ -162,9 +162,16 @@ export interface ParserDatasetCoverage {
   legal_empty_rate: number
   missing_template_rate: number
   parse_failure_rate: number
-  primary_key_stability_rate: number
+  primary_key_stability_rate: number | null
+  primary_key_evaluated_count?: number
   first_imported_at?: string
   last_imported_at?: string
+  scope_type?: 'dataset' | 'offline_patrol_run'
+  patrol_run_id?: string | null
+  offline_job_id?: string | null
+  period_role?: string | null
+  period_status?: string | null
+  observed_at?: string | null
 }
 
 export interface ParserImportPreview {
@@ -196,6 +203,11 @@ export interface ParserJobItem {
   source_mode: 'parser_validation' | 'production'
   sample_count: number
   attempts: number
+  contract_revision_count?: number
+  template_attempt_count?: number
+  best_attempt_id?: string
+  agent_state_json?: Record<string, unknown>
+  agent_budget_json?: Record<string, unknown>
   failure_code?: string
   last_error?: string
   celery_task_id?: string
@@ -205,6 +217,40 @@ export interface ParserJobItem {
   created_at: string
   updated_at: string
   samples?: ParserJobSample[]
+  attempt_summary?: {
+    total: number
+    best_attempt_id?: string
+    contract_revisions: number
+    template_attempts: number
+  }
+  generation_attempts?: ParserGenerationAttempt[]
+}
+
+export interface ParserGenerationAttempt {
+  id: string
+  job_id: string
+  attempt_number: number
+  parent_attempt_id?: string
+  stage: 'contract' | 'template' | 'validation' | 'holdout' | 'regression' | string
+  action: string
+  model_provider?: string
+  model_name?: string
+  textfsm_runtime_version: string
+  dialect_version: string
+  dialect_hash: string
+  prompt_version?: string
+  prompt_hash?: string
+  contract_hash?: string
+  train_sample_set_hash?: string
+  holdout_sample_set_hash?: string
+  template_sha256?: string
+  validation_report_json: Record<string, unknown>
+  failure_signature?: string
+  candidate_rank?: number
+  status: string
+  token_usage_json?: Record<string, number>
+  latency_ms?: number
+  created_at: string
 }
 
 export interface ParserJobSample {
@@ -279,6 +325,267 @@ export interface ParserRuleGenerationContextPreview {
   context: Record<string, unknown>
   missing_context: string[]
   privacy?: Record<string, unknown>
+  context_id?: string
+  context_digest?: string
+  dataset_ids?: string[]
+}
+
+export interface ParserRuleAssetBundleStep {
+  key: string
+  label: string
+  status: 'passed' | 'ready' | 'blocked'
+  detail: Record<string, unknown>
+}
+
+export interface ParserRuleAssetReplayScope {
+  mode?: string
+  run_ids?: string[]
+  run_id_count?: number
+  sampled_run_ids?: string[]
+  sampled_run_id_count?: number
+  missing_run_ids?: string[]
+}
+
+export interface ParserRuleAssetReplay {
+  success?: boolean
+  sampled_change_count?: number
+  matched_change_count?: number
+  collision_count?: number
+  event_count?: number
+  event_types?: Record<string, number>
+  matched_entity_types?: Record<string, number>
+  top_devices?: Record<string, number>
+  replacement_rule_ids?: string[]
+  replacement_logical_keys?: string[]
+  estimated_daily_event_count?: number
+  scope?: ParserRuleAssetReplayScope
+}
+
+export interface ParserRuleAssetContextPrivacy {
+  success?: boolean
+  raw_cli_included?: boolean
+  scope_type?: string | null
+  source_snapshot_count?: number | null
+  candidate_record_count?: number | null
+  sampled_record_count?: number | null
+}
+
+export interface ParserRuleAssetContextGate {
+  success: boolean
+  mode?: string | null
+  context_id?: string | null
+  context_digest?: string | null
+  errors: string[]
+  replay_run_id_count: number
+  privacy: ParserRuleAssetContextPrivacy
+}
+
+export interface ParserRuleAssetReplayGate {
+  success?: boolean
+  outcome_success?: boolean
+  scope_success?: boolean
+  scope_required?: boolean
+  scope_mode?: string
+  expected_run_ids?: string[]
+  actual_run_ids?: string[]
+  errors?: string[]
+}
+
+export interface ParserRuleAssetBundle {
+  id: string
+  status: string
+  source_ref?: string | null
+  observation_type?: string | null
+  command?: string | null
+  vendor?: string | null
+  model?: string | null
+  context_id?: string | null
+  context_digest?: string | null
+  context_gate?: ParserRuleAssetContextGate
+  offline_job_id?: string | null
+  offline_job_ids?: string[]
+  dataset_ids?: string[]
+  asset_counts: Record<string, number>
+  active_asset_counts: Record<string, number>
+  release_ready: boolean
+  blockers: string[]
+  replay: ParserRuleAssetReplay
+  replay_gate?: ParserRuleAssetReplayGate
+  steps: ParserRuleAssetBundleStep[]
+  children: Array<Record<string, unknown>>
+  created_by?: string | null
+  created_at?: string
+  updated_at?: string
+  completed_at?: string | null
+}
+
+export interface ParserRuleAssetBundlePage {
+  items: ParserRuleAssetBundle[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export type OfflinePatrolJobType = 'parser_validation' | 'history_compare'
+
+export interface OfflinePatrolPeriod {
+  id: string
+  role: 'sample' | 'baseline' | 'current'
+  label: string
+  observed_at: string
+  dataset_id: string
+  patrol_run_id?: string | null
+  status: string
+  result_json?: Record<string, unknown> | null
+}
+
+export interface OfflinePatrolSourceFile {
+  id: string
+  period_role: string
+  file_id: string
+  relative_path: string
+  sha256?: string | null
+  size_bytes: number
+  status: string
+  error_message?: string | null
+}
+
+export interface OfflinePatrolDeviceBinding {
+  id: string
+  period_role: string
+  external_device_id: string
+  device_name: string
+  management_ip?: string | null
+  inventory_device_id?: string | null
+  match_status: string
+  confidence: number
+  match_reason?: string | null
+}
+
+export interface OfflinePatrolJob {
+  id: string
+  job_type: OfflinePatrolJobType
+  name: string
+  display_name?: string
+  owner_id: string
+  status: string
+  vendor?: string | null
+  model?: string | null
+  publish_events: boolean
+  folder_id?: string | null
+  workflow_run_id?: string | null
+  attempt_number: number
+  progress: { phase?: string; percent?: number }
+  preview_totals: Record<string, number>
+  blocker_count: number
+  archived: boolean
+  created_at: string
+  updated_at: string
+  completed_at?: string | null
+  periods?: OfflinePatrolPeriod[]
+  source_files?: OfflinePatrolSourceFile[]
+  device_bindings?: OfflinePatrolDeviceBinding[]
+  preview?: Record<string, unknown>
+  result?: Record<string, unknown>
+  blockers?: Array<Record<string, unknown>>
+  error_message?: string | null
+}
+
+export interface OfflinePatrolReportRisk {
+  source?: string
+  event_type: string
+  severity: string
+  device_id?: string
+  device_name?: string
+  domain?: string
+  entity_type?: string
+  entity_key?: string
+  field?: string
+  current_value?: unknown
+  unit?: string | null
+  observed_at?: string
+  evidence_id?: string
+  evidence_chain?: Record<string, unknown>
+  correlation?: Record<string, unknown>
+}
+
+export interface OfflinePatrolReportTrendGroup {
+  severity: string
+  event_type: string
+  risk_name: string
+  device_name: string
+  count: number
+  objects: string
+  current_values: string
+  criterion: string
+}
+
+export interface OfflinePatrolReportTrend {
+  available: boolean
+  continuity_evidence?: string
+  period_count: number
+  periods?: Array<Record<string, unknown>>
+  comparisons?: Array<{
+    from?: string
+    to?: string
+    change_count: number
+    event_count: number
+    command_count: number
+    parser_ready_rate: number
+  }>
+  new_evidence_count?: number
+  persistent_evidence_count?: number
+  resolved_evidence_count?: number
+  new_evidence_groups?: OfflinePatrolReportTrendGroup[]
+  persistent_evidence_groups?: OfflinePatrolReportTrendGroup[]
+  resolved_evidence_groups?: OfflinePatrolReportTrendGroup[]
+}
+
+export interface OfflinePatrolAnalysisSummary {
+  title: string
+  generated_at: string
+  assessment: {
+    code: string
+    status: string
+    trust: string
+    basis: string
+    conclusion_allowed: boolean
+  }
+  metrics: Record<string, number>
+  risk_summary: {
+    total: number
+    by_severity: Record<string, number>
+    by_type: Record<string, number>
+    correlated_evidence_count: number
+  }
+  event_summary: {
+    fact_count: number
+    fault_fact_count: number
+    recovery_fact_count: number
+    resolved_prior_fault_count?: number
+    state_improvement_count?: number
+    fault_by_type: Record<string, number>
+    recovery_by_type: Record<string, number>
+  }
+  risks: OfflinePatrolReportRisk[]
+  correlated_evidence: OfflinePatrolReportRisk[]
+  trend?: OfflinePatrolReportTrend
+  data_quality: Record<string, unknown>
+  evidence: Record<string, unknown> & {
+    analysis?: {
+      attempt_id?: string
+      revision?: string
+      rule_bundle_digest?: string
+      source_change_count?: number
+    }
+  }
+}
+
+export interface OfflinePatrolJobPage {
+  items: OfflinePatrolJob[]
+  total: number
+  page: number
+  page_size: number
 }
 
 export interface ParserReplayReport {
@@ -438,6 +745,11 @@ export interface ParserCoverage {
   device_profiles: number
   identity_signatures: number
   auto_dispatch_enabled: boolean
+  dialect_version?: string
+  dialect_active_templates?: number
+  dialect_platform_violations?: number
+  dialect_runtime_blocked?: number
+  dialect_regression_evidence_missing?: number
   production_open_jobs: number
   pending_sanitization_samples: number
   sanitized_samples: number
@@ -1543,6 +1855,19 @@ export const parserApi = {
     const response = await api.get<{ items: ParserRuleGenerationJob[] }>('/parser/rule-generation-jobs/')
     return response.data.items
   },
+  ruleAssetBundles: async (params: {
+    status?: string
+    search?: string
+    limit?: number
+    offset?: number
+  } = {}): Promise<ParserRuleAssetBundlePage> => {
+    const response = await api.get<ParserRuleAssetBundlePage>('/parser/rule-asset-bundles/', { params })
+    return response.data
+  },
+  ruleAssetBundle: async (id: string): Promise<ParserRuleAssetBundle> => {
+    const response = await api.get<ParserRuleAssetBundle>(`/parser/rule-asset-bundles/${id}/`)
+    return response.data
+  },
   observationContracts: async () => {
     const response = await api.get<{ items: ParserObservationContract[] }>('/parser/observation-contracts/')
     return response.data.items
@@ -1591,7 +1916,15 @@ export const parserApi = {
   ).data,
   previewRuleGenerationContext: async (
     id: string,
-    data: { context_overrides?: Record<string, unknown>; actor?: string } = {},
+    data: {
+      context_overrides?: Record<string, unknown>
+      context_id?: string
+      dataset_ids?: string[]
+      max_records?: number
+      field_name?: string
+      observation_type?: string
+      actor?: string
+    } = {},
   ): Promise<ParserRuleGenerationContextPreview> => {
     const response = await api.post<ParserRuleGenerationContextPreview>(
       `/parser/rule-generation-jobs/${id}/generation-context/`,
@@ -1601,7 +1934,12 @@ export const parserApi = {
   },
   startRuleAssetGeneration: async (
     id: string,
-    data: { context_overrides?: Record<string, unknown>; actor?: string } = {},
+    data: {
+      context_overrides?: Record<string, unknown>
+      context_id?: string
+      dataset_ids?: string[]
+      actor?: string
+    } = {},
   ) => (
     await api.post(`/parser/rule-generation-jobs/${id}/start-generation/`, data)
   ).data,
@@ -1612,6 +1950,13 @@ export const parserApi = {
   job: async (id: string) => {
     const response = await api.get<ParserJobItem>(`/parser/jobs/${id}/`)
     return response.data
+  },
+  jobAttempts: async (id: string, includeTemplate = false) => {
+    const response = await api.get<{ items: ParserGenerationAttempt[] }>(
+      `/parser/jobs/${id}/attempts/`,
+      { params: { include_template: includeTemplate } },
+    )
+    return response.data.items
   },
   aliases: async () => {
     const response = await api.get<{ items: ParserCommandAlias[] }>('/parser/aliases/')
@@ -1641,8 +1986,10 @@ export const parserApi = {
     const response = await api.get<ParserTemplateExport>('/parser/templates/export/', { params: { status } })
     return response.data
   },
-  datasets: async () => {
-    const response = await api.get<{ items: ParserDatasetCoverage[] }>('/parser/datasets/')
+  datasets: async (datasetIds: string[] = []) => {
+    const response = await api.get<{ items: ParserDatasetCoverage[] }>('/parser/datasets/', {
+      params: datasetIds.length ? { dataset_ids: datasetIds.join(',') } : undefined,
+    })
     return response.data.items
   },
   previewImport: async (data: { source_path: string; dataset_id?: string }) => (
@@ -1766,6 +2113,69 @@ export const parserApi = {
     const response = await api.post<ParserEffectivePlanPreview>('/parser/effective-plan-preview/', data)
     return response.data
   },
+}
+
+export const offlinePatrolApi = {
+  list: async (params: {
+    page?: number
+    page_size?: number
+    search?: string
+    status?: string
+    job_type?: OfflinePatrolJobType
+    archived?: boolean
+  } = {}): Promise<OfflinePatrolJobPage> => (
+    await api.get<OfflinePatrolJobPage>('/patrol/offline-jobs/', { params })
+  ).data,
+  get: async (id: string): Promise<OfflinePatrolJob> => (
+    await api.get<OfflinePatrolJob>(`/patrol/offline-jobs/${id}/`)
+  ).data,
+  analysis: async (id: string): Promise<OfflinePatrolAnalysisSummary> => (
+    await api.get<OfflinePatrolAnalysisSummary>(`/patrol/offline-jobs/${id}/analysis-summary/`, {
+      timeout: 300000,
+    })
+  ).data,
+  create: async (data: {
+    job_type: OfflinePatrolJobType
+    name: string
+    periods: Array<{ role: string; label: string; observed_at: string }>
+    vendor?: string
+    model?: string
+    publish_events?: boolean
+    idempotency_key: string
+  }): Promise<OfflinePatrolJob> => (
+    await api.post<OfflinePatrolJob>('/patrol/offline-jobs/', data)
+  ).data,
+  attachSource: async (id: string, data: {
+    period_role: string
+    file_id: string
+    relative_path: string
+    sha256?: string
+    size_bytes: number
+  }): Promise<OfflinePatrolSourceFile> => (
+    await api.post<OfflinePatrolSourceFile>(`/patrol/offline-jobs/${id}/sources/`, data)
+  ).data,
+  removeSource: async (id: string, sourceId: string) => (
+    await api.delete(`/patrol/offline-jobs/${id}/sources/${sourceId}/`)
+  ).data,
+  preview: async (id: string) => (
+    await api.post(`/patrol/offline-jobs/${id}/preview/`, {})
+  ).data,
+  confirmBindings: async (id: string, bindings: Array<{ binding_id: string; inventory_device_id?: string | null }>) => (
+    await api.post(`/patrol/offline-jobs/${id}/device-bindings/confirm/`, { bindings })
+  ).data,
+  execute: async (id: string, idempotencyKey: string) => (
+    await api.post(`/patrol/offline-jobs/${id}/execute/`, { idempotency_key: idempotencyKey })
+  ).data,
+  cancel: async (id: string) => (await api.post(`/patrol/offline-jobs/${id}/cancel/`, {})).data,
+  retry: async (id: string) => (await api.post(`/patrol/offline-jobs/${id}/retry/`, {})).data,
+  archive: async (id: string) => (await api.post(`/patrol/offline-jobs/${id}/archive/`, {})).data,
+  restore: async (id: string) => (await api.post(`/patrol/offline-jobs/${id}/restore/`, {})).data,
+  artifact: async (id: string, kind: 'raw' | 'changes' | 'events' | 'report'): Promise<Blob> => (
+    await api.get(`/patrol/offline-jobs/${id}/artifacts/${kind}/`, {
+      responseType: 'blob',
+      timeout: 300000,
+    })
+  ).data as Blob,
 }
 
 export const deviceApi = {
@@ -2416,6 +2826,30 @@ export interface PatrolBatchResultSummary {
   device_count: number
   change_count: number
   event_count: number
+  current_finding_count?: number
+  assessment?: {
+    code: string
+    status: string
+    trust: string
+    basis: string
+    conclusion_allowed: boolean
+  }
+  risk_summary?: {
+    total: number
+    by_severity: Record<string, number>
+    by_type: Record<string, number>
+  }
+  current_state_rule_coverage?: {
+    available?: boolean
+    active_fault_rule_count?: number
+    latest_observation_count?: number
+    evaluated_observation_count?: number
+    evaluation_rate?: number
+    finding_count?: number
+    sources?: Record<string, number>
+    bundle_digests?: string[]
+    errors?: string[]
+  }
   status_counts: Record<string, number>
   pipeline?: {
     total_devices: number
@@ -2482,9 +2916,12 @@ export interface PatrolBatchResultSummary {
   }>
   sample_events: Array<Record<string, unknown>>
   sample_changes: Array<Record<string, unknown>>
+  sample_current_findings?: Array<Record<string, unknown>>
   deliverables: {
     csv_url: string
     report_url: string
+    report_json_url?: string
+    technical_report_url?: string
     execution_ledger_url?: string
     raw_cli_url?: string
     raw_data_url?: string
@@ -2713,7 +3150,7 @@ export const workflowApi = {
     return response.data
   },
   exportPatrolBatchReport: async (batchId: string): Promise<Blob> => {
-    const response = await api.get(`/workflows/runs/patrol-batches/${batchId}/report.md`, {
+    const response = await api.get(`/workflows/runs/patrol-batches/${batchId}/report.docx`, {
       responseType: 'blob',
     })
     return response.data

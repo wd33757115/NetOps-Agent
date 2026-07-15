@@ -193,13 +193,29 @@ class ChangeEventRepository:
         *,
         run_id: str | None = None,
         device_id: str | None = None,
+        analysis_revision: str | None = None,
+        rule_bundle_digest: str | None = None,
+        change_ids: list[str] | set[str] | tuple[str, ...] | None = None,
     ) -> list[dict[str, Any]]:
+        normalized_change_ids: list[str] | None = None
+        if change_ids is not None:
+            normalized_change_ids = sorted(
+                {str(change_id) for change_id in change_ids if str(change_id)}
+            )
+            if not normalized_change_ids:
+                return []
         with get_db_session() as db:
             query = db.query(NetworkChangeRecord)
             if run_id:
                 query = query.filter(NetworkChangeRecord.run_id == run_id)
             if device_id:
                 query = query.filter(NetworkChangeRecord.device_id == device_id)
+            if analysis_revision is not None:
+                query = query.filter(NetworkChangeRecord.analysis_revision == analysis_revision)
+            if rule_bundle_digest is not None:
+                query = query.filter(NetworkChangeRecord.rule_bundle_digest == rule_bundle_digest)
+            if normalized_change_ids is not None:
+                query = query.filter(NetworkChangeRecord.id.in_(normalized_change_ids))
             rows = query.order_by(NetworkChangeRecord.detected_at).all()
             return [
                 {
@@ -303,7 +319,13 @@ class ChangeEventRepository:
                 active = self._find_active_event(db, event)
                 if active is not None:
                     occurrence_id = self._record_event_occurrence(
-                        db, active.id, event, occurrence_kind="recurrence"
+                        db,
+                        active.id,
+                        event,
+                        occurrence_kind="recurrence",
+                        projection_metadata={
+                            "aggregate_status_after_occurrence": active.status,
+                        },
                     )
                     if occurrence_id is None:
                         continue
@@ -354,6 +376,7 @@ class ChangeEventRepository:
                             "projection_applied": False,
                             "superseded": True,
                             "superseded_reason": "fault_precedes_recovery_watermark",
+                            "aggregate_status_after_occurrence": latest.status,
                         },
                     )
                     if occurrence_id is not None:
@@ -404,7 +427,15 @@ class ChangeEventRepository:
                 )
                 db.flush()
                 occurrence_id = self._record_event_occurrence(
-                    db, event.event_id, event, occurrence_kind="opening"
+                    db,
+                    event.event_id,
+                    event,
+                    occurrence_kind="opening",
+                    projection_metadata={
+                        "aggregate_status_after_occurrence": (
+                            "resolved" if _event_class(event) == "recovery" else event.status
+                        ),
+                    },
                 )
                 if occurrence_id is None:
                     raise RuntimeError("opening event occurrence was not persisted")
@@ -546,6 +577,12 @@ class ChangeEventRepository:
     def _event_payload(event: Any) -> dict[str, Any]:
         payload = dict(event.payload or {})
         payload.setdefault("event_class", _event_class(event))
+        payload.setdefault("event_type", event.event_type)
+        payload.setdefault("severity", event.severity)
+        payload.setdefault("device_id", event.device_id)
+        payload.setdefault("entity_type", event.entity_type)
+        payload.setdefault("entity_key", event.entity_key)
+        payload.setdefault("occurred_at", event.occurred_at)
         return payload
 
     def _enqueue_event(
@@ -721,6 +758,9 @@ class ChangeEventRepository:
                             None
                             if projection_applied
                             else "recovery_precedes_latest_fault_watermark"
+                        ),
+                        "aggregate_status_after_occurrence": (
+                            "resolved" if projection_applied else row.status
                         ),
                     },
                 )
@@ -911,3 +951,120 @@ class ChangeEventRepository:
                 query = query.filter(NetworkEventOccurrenceRecord.event_id == event_id)
             rows = query.order_by(NetworkEventOccurrenceRecord.observed_at).all()
             return [row.to_dict() for row in rows]
+
+    def list_run_event_facts(
+        self,
+        *,
+        run_id: str,
+        device_id: str | None = None,
+        source_change_ids: list[str] | set[str] | tuple[str, ...] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return the event lifecycle facts produced by one patrol run."""
+
+        with get_db_session() as db:
+            query = (
+                db.query(NetworkEventOccurrenceRecord, NetworkEventRecord)
+                .join(
+                    NetworkEventRecord,
+                    NetworkEventRecord.id == NetworkEventOccurrenceRecord.event_id,
+                )
+                .filter(NetworkEventOccurrenceRecord.run_id == run_id)
+            )
+            if device_id:
+                query = query.filter(NetworkEventRecord.device_id == device_id)
+            if source_change_ids is not None:
+                normalized_change_ids = sorted(
+                    {str(change_id) for change_id in source_change_ids if str(change_id)}
+                )
+                if not normalized_change_ids:
+                    return []
+                query = query.filter(
+                    NetworkEventOccurrenceRecord.source_change_id.in_(normalized_change_ids)
+                )
+            rows = query.order_by(
+                NetworkEventOccurrenceRecord.observed_at,
+                NetworkEventOccurrenceRecord.id,
+            ).all()
+            facts: list[dict[str, Any]] = []
+            for occurrence, event in rows:
+                payload = dict(occurrence.payload_json or {})
+                status_after_occurrence = payload.get("aggregate_status_after_occurrence")
+                if not status_after_occurrence:
+                    if occurrence.occurrence_kind == "recovery":
+                        status_after_occurrence = "resolved"
+                    elif occurrence.occurrence_kind in {"opening", "recurrence"}:
+                        status_after_occurrence = "open"
+                    else:
+                        status_after_occurrence = event.status
+                facts.append(
+                    {
+                        "occurrence_id": occurrence.id,
+                        "event_id": event.id,
+                        "run_id": occurrence.run_id,
+                        "source_change_id": occurrence.source_change_id,
+                        "occurrence_kind": occurrence.occurrence_kind,
+                        "event_type": payload.get("event_type") or event.event_type,
+                        "severity": payload.get("severity") or occurrence.severity,
+                        "device_id": payload.get("device_id") or event.device_id,
+                        "entity_type": payload.get("entity_type") or event.entity_type,
+                        "entity_key": payload.get("entity_key") or event.entity_key,
+                        "correlation_key": event.correlation_key,
+                        "aggregate_status": event.status,
+                        "status": event.status,
+                        "status_after_occurrence": status_after_occurrence,
+                        "observed_at": occurrence.observed_at.isoformat(),
+                        "occurred_at": occurrence.observed_at.isoformat(),
+                        "payload": payload,
+                    }
+                )
+            return facts
+
+    def summarize_run_events(
+        self,
+        *,
+        run_id: str,
+        device_id: str | None = None,
+        source_change_ids: list[str] | set[str] | tuple[str, ...] | None = None,
+    ) -> dict[str, Any]:
+        facts = self.list_run_event_facts(
+            run_id=run_id,
+            device_id=device_id,
+            source_change_ids=source_change_ids,
+        )
+        by_kind: dict[str, int] = {"opening": 0, "recurrence": 0, "recovery": 0}
+        for item in facts:
+            kind = str(item.get("occurrence_kind") or "")
+            by_kind[kind] = by_kind.get(kind, 0) + 1
+        latest_by_event: dict[str, dict[str, Any]] = {}
+        for item in facts:
+            latest_by_event[str(item["event_id"])] = item
+        active_statuses = {"open", "acknowledged", "recovering"}
+        open_after_run_count = sum(
+            str(item.get("status_after_occurrence") or "") in active_statuses
+            for item in latest_by_event.values()
+        )
+        resolved_after_run_count = sum(
+            str(item.get("status_after_occurrence") or "") == "resolved"
+            for item in latest_by_event.values()
+        )
+        current_open_event_count = sum(
+            str(item.get("aggregate_status") or "") in active_statuses
+            for item in latest_by_event.values()
+        )
+        current_resolved_event_count = sum(
+            str(item.get("aggregate_status") or "") == "resolved"
+            for item in latest_by_event.values()
+        )
+        return {
+            "persisted_occurrence_count": len(facts),
+            "created_event_count": by_kind.get("opening", 0),
+            "updated_event_count": by_kind.get("recurrence", 0),
+            "recovered_event_count": by_kind.get("recovery", 0),
+            "unique_event_count": len(latest_by_event),
+            "open_after_run_count": open_after_run_count,
+            "resolved_after_run_count": resolved_after_run_count,
+            "current_open_event_count": current_open_event_count,
+            "current_resolved_event_count": current_resolved_event_count,
+            "open_event_count": current_open_event_count,
+            "resolved_event_count": current_resolved_event_count,
+        }

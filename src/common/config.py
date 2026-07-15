@@ -101,7 +101,9 @@ class Settings(BaseSettings):
     # Skill Catalog + 分级路由（Phase 2）
     SKILL_CATALOG_ENABLED: bool = True
     SKILL_CATALOG_USE_TIERED_ROUTING: bool = True
+    SKILL_CATALOG_SEMANTIC_ROUTING_ENABLED: bool = False
     SKILL_CATALOG_SEMANTIC_MIN_SCORE: float = 0.72
+    SKILL_CATALOG_INDEX_ON_BOOTSTRAP: bool = False
     PRE_PROCESS_TOP_K: int = 5
     PRE_PROCESS_HARD_LIMIT: int = 8
 

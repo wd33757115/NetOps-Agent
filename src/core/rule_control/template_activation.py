@@ -136,6 +136,14 @@ class RuleAssetTemplateActivationService:
         defaults = dict(payload.get("workflow_context_defaults") or {})
         context = {**defaults, **overrides}
         context["source_ref"] = job.get("source_ref") or context.get("source_ref")
+        template_id = str(payload.get("template_id") or "").strip()
+        if template_id:
+            expected_ref = f"parser_template:{template_id}"
+            if context.get("source_ref") != expected_ref:
+                raise ValueError("rule generation source_ref does not match parser template")
+            context["schema_id"] = template_id
+            context["schema_ref"] = expected_ref
+            context["source_template_id"] = template_id
         missing = _generation_context_missing(
             context,
             seed_missing=list(payload.get("missing_context") or []),
@@ -161,10 +169,30 @@ class RuleAssetTemplateActivationService:
         *,
         context_overrides: dict[str, Any] | None = None,
         actor: str | None = None,
+        context_id: str | None = None,
     ) -> dict[str, Any]:
+        overrides = dict(context_overrides or {})
+        immutable_context: dict[str, Any] | None = None
+        if context_id:
+            from src.core.rule_control.dataset_context import (
+                DatasetRuleGenerationContextService,
+            )
+
+            immutable_context = DatasetRuleGenerationContextService().load(
+                context_id=context_id,
+                job_id=job_id,
+            )
+            frozen = dict(immutable_context.get("context") or {})
+            for key, value in frozen.items():
+                if key in overrides and overrides[key] != value:
+                    raise ValueError(
+                        f"immutable rule generation context field cannot be overridden: {key}"
+                    )
+            overrides = {**frozen, **overrides}
+
         prepared = self.build_generation_context(
             job_id,
-            context_overrides=context_overrides,
+            context_overrides=overrides,
         )
         if not prepared["ready"]:
             raise ValueError(
@@ -173,9 +201,15 @@ class RuleAssetTemplateActivationService:
             )
         from src.core.workflows.engine import WorkflowEngine
 
+        workflow_context = dict(prepared["context"])
+        if context_id and immutable_context:
+            workflow_context["rule_generation_context_id"] = context_id
+            workflow_context["rule_generation_context_digest"] = immutable_context[
+                "context_digest"
+            ]
         run_id = WorkflowEngine.start(
             "rule-asset-generation",
-            prepared["context"],
+            workflow_context,
             source="parser-control-plane",
             user_id=actor,
         )
@@ -184,7 +218,8 @@ class RuleAssetTemplateActivationService:
             "workflow": "rule-asset-generation",
             "run_id": run_id,
             "job_id": job_id,
-            "context": prepared["context"],
+            "context_id": context_id,
+            "context": workflow_context,
         }
 
 
@@ -223,6 +258,9 @@ def _workflow_context_defaults(
         "vendor": getattr(template, "vendor", None),
         "model": getattr(template, "model", None),
         "source_ref": source_ref,
+        "schema_id": str(getattr(template, "id")),
+        "schema_ref": source_ref,
+        "source_template_id": str(getattr(template, "id")),
         "proposal": _contract_seed(template, validation),
         "observation_type": observation_type or None,
         "field_name": field_name,
@@ -230,7 +268,14 @@ def _workflow_context_defaults(
         "device_role": None,
         "policy_intent": validation.get("policy_intent"),
         "event_intent": validation.get("event_intent"),
+        "event_constraints": validation.get("event_constraints"),
+        "event_constraints_by_observation_type": validation.get(
+            "event_constraints_by_observation_type"
+        ),
         "policy_targets": _policy_targets(validation),
+        "generation_provider": "llm",
+        "max_agent_attempts": 3,
+        "replay_limit": 1000,
     }
 
 
@@ -276,16 +321,8 @@ def _missing_context(
     validation: dict[str, Any],
     semantic_field: tuple[str, dict[str, Any]] | None,
 ) -> list[str]:
+    del semantic_field
     missing = ["records"]
-    if semantic_field is None:
-        missing.extend(["observation_type", "field_name", "field_semantics"])
-        return missing
-    field_semantics = semantic_field[1]
-    if not field_semantics.get("observation_type"):
-        missing.append("observation_type")
-    semantic_type = str(field_semantics.get("semantic_type") or "").strip()
-    if semantic_type in {"gauge", "counter"}:
-        missing.append("historical_values")
     if not validation.get("primary_keys") and not validation.get("entity_type"):
         missing.append("contract_identity")
     return list(dict.fromkeys(missing))
@@ -349,7 +386,7 @@ def _generation_context_missing(
     seed_missing: list[str],
 ) -> list[str]:
     missing: list[str] = []
-    required = ["command", "records", "observation_type", "field_name"]
+    required = ["command", "records"]
     for key in required:
         value = context.get(key)
         if value in (None, "", [], {}):
@@ -359,11 +396,7 @@ def _generation_context_missing(
         not isinstance(records, list) or not all(isinstance(item, dict) for item in records)
     ):
         missing.append("records:list[object]")
-    if "historical_values" in seed_missing and not isinstance(
-        context.get("historical_values"),
-        list,
-    ):
-        missing.append("historical_values")
+    del seed_missing
     if context.get("field_semantics") and not isinstance(
         context.get("field_semantics"),
         dict,

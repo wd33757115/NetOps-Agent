@@ -117,7 +117,7 @@ def test_template_activation_seed_is_safe_and_idempotent():
     assert payload["missing_context"] == ["records"]
 
 
-def test_template_activation_seed_adds_optical_generation_intent():
+def test_template_activation_seed_compiles_all_targets_after_records_arrive():
     class FakeParserRepository:
         def get_template(self, template_id):
             assert template_id == "template-optical-1"
@@ -145,7 +145,7 @@ def test_template_activation_seed_adds_optical_generation_intent():
         "interface.optical.rx_power",
         "interface.optical.tx_power",
     ]
-    assert result["missing_context"] == ["records", "historical_values"]
+    assert result["missing_context"] == ["records"]
 
 
 def test_publish_parser_outbox_seeds_rule_asset_generation(monkeypatch):
@@ -230,6 +230,64 @@ def test_parser_outbox_releases_claim_when_rule_seed_fails(monkeypatch):
     assert result["rule_asset_seeds"][0]["reason"] == "rule_asset_seed_failed"
 
 
+def test_parser_outbox_acknowledges_obsolete_template_events(monkeypatch):
+    marked = []
+    released = []
+
+    class FakeOutboxRow:
+        id = "event-obsolete"
+        event_type = "parser.template.activated"
+        aggregate_id = "template-obsolete"
+        claim_token = "claim-obsolete"
+        payload_json = {"template_id": "template-obsolete"}
+
+    class FakeOutboxRepository:
+        def claim_pending(self):
+            return [FakeOutboxRow()]
+
+        def mark_published(self, event_id, *, claim_token):
+            marked.append((event_id, claim_token))
+
+        def release(self, event_id, *, claim_token, error):
+            released.append((event_id, claim_token, error))
+
+    class FakeRepository:
+        pass
+
+    class FakeSeedService:
+        def __init__(self, *, parser_repository):
+            assert isinstance(parser_repository, FakeRepository)
+
+        def seed_from_template(self, template_id):
+            return {
+                "success": False,
+                "created": False,
+                "reason": "parser_template_not_found",
+                "template_id": template_id,
+            }
+
+    monkeypatch.setattr(parser_tasks, "ParserTemplateRepository", FakeRepository)
+    monkeypatch.setattr(parser_tasks, "ParserOutboxRepository", FakeOutboxRepository)
+    monkeypatch.setattr(parser_tasks, "RuleAssetTemplateActivationService", FakeSeedService)
+    monkeypatch.setattr(parser_tasks.EventBus, "publish", lambda *_args, **_kwargs: "msg-1")
+
+    result = parser_tasks.publish_parser_outbox()
+
+    assert result["published"] == ["event-obsolete"]
+    assert result["rule_asset_seeds"] == [
+        {
+            "success": False,
+            "created": False,
+            "reason": "parser_template_not_found",
+            "template_id": "template-obsolete",
+            "skipped": True,
+            "terminal": True,
+        }
+    ]
+    assert marked == [("event-obsolete", "claim-obsolete")]
+    assert released == []
+
+
 def test_generation_context_requires_sanitized_records_and_rejects_raw_fields():
     class FakeJobRepository:
         def get_job(self, job_id):
@@ -238,6 +296,7 @@ def test_generation_context_requires_sanitized_records_and_rejects_raw_fields():
                 "id": "job-1",
                 "source_ref": "parser_template:template-1",
                 "payload_json": {
+                    "template_id": "template-1",
                     "workflow": "rule-asset-generation",
                     "missing_context": ["records"],
                     "workflow_context_defaults": {
@@ -276,6 +335,9 @@ def test_generation_context_requires_sanitized_records_and_rejects_raw_fields():
     assert missing["missing_context"] == ["records"]
     assert ready["ready"] is True
     assert ready["context"]["records"][0]["interface"] == "GigabitEthernet1/0/1"
+    assert ready["context"]["schema_id"] == "template-1"
+    assert ready["context"]["schema_ref"] == "parser_template:template-1"
+    assert ready["context"]["source_template_id"] == "template-1"
 
     try:
         service.build_generation_context("job-1", context_overrides={"raw_text": "secret"})
@@ -304,6 +366,7 @@ def test_start_generation_workflow_uses_prepared_context(monkeypatch):
                 "id": "job-1",
                 "source_ref": "parser_template:template-1",
                 "payload_json": {
+                    "template_id": "template-1",
                     "workflow": "rule-asset-generation",
                     "missing_context": ["records"],
                     "workflow_context_defaults": {
@@ -339,5 +402,7 @@ def test_start_generation_workflow_uses_prepared_context(monkeypatch):
     assert result["run_id"] == "workflow-1"
     assert started[0][0] == "rule-asset-generation"
     assert started[0][1]["source_ref"] == "parser_template:template-1"
+    assert started[0][1]["schema_id"] == "template-1"
+    assert started[0][1]["source_template_id"] == "template-1"
     assert started[0][2]["source"] == "parser-control-plane"
     assert started[0][2]["user_id"] == "operator"

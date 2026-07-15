@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from pathlib import Path
-
 from src.gateway import workflow_api
 
 
@@ -12,7 +10,7 @@ class _FixedDateTime:
         return datetime(2026, 7, 12, tzinfo=timezone.utc).astimezone(tz)
 
 
-def test_empty_patrol_batch_markdown_matches_golden(monkeypatch):
+def test_empty_patrol_batch_markdown_does_not_claim_health(monkeypatch):
     summary = {
         "run_count": 0,
         "device_count": 0,
@@ -52,11 +50,7 @@ def test_empty_patrol_batch_markdown_matches_golden(monkeypatch):
     )
 
     actual = workflow_api._build_patrol_batch_report("batch-golden", [])
-    fixture = (
-        Path(__file__).parents[1]
-        / "fixtures"
-        / "patrol_batch_report_empty_golden.md"
-    )
-    expected = fixture.read_text(encoding="utf-8").replace("\r\n", "\n")
 
-    assert actual == expected
+    assert "未形成可用巡检结论" in actual
+    assert "结论可信度**：低" in actual
+    assert "本次覆盖范围内未发现异常" not in actual

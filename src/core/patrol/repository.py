@@ -26,11 +26,13 @@ from src.core.patrol.statuses import (
 from src.infrastructure.db.models import (
     CommandSnapshot,
     NetworkDevice,
+    OfflinePatrolPeriodRecord,
     ParserTemplate,
     PatrolAnalysisAttemptRecord,
     PatrolCollectionResult,
     PatrolDataset,
     PatrolRun,
+    StateObservationRecord,
 )
 from src.infrastructure.db.postgres import get_db_session
 
@@ -1213,7 +1215,12 @@ class PatrolSnapshotRepository(_PatrolRepositoryBase):
             ).all()
             return [self._to_snapshot(row) for row in rows]
 
-    def list_datasets(self, *, mode: str | None = None) -> list[dict[str, Any]]:
+    def list_datasets(
+        self,
+        *,
+        mode: str | None = None,
+        dataset_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         with get_db_session() as db:
             query = db.query(
                 PatrolDataset,
@@ -1225,6 +1232,8 @@ class PatrolSnapshotRepository(_PatrolRepositoryBase):
             ).outerjoin(CommandSnapshot, CommandSnapshot.dataset_id == PatrolDataset.id)
             if mode:
                 query = query.filter(PatrolDataset.mode == mode)
+            if dataset_ids:
+                query = query.filter(PatrolDataset.id.in_(dataset_ids))
             rows = (
                 query.group_by(PatrolDataset.id)
                 .order_by(func.max(CommandSnapshot.created_at).desc().nullslast())
@@ -1248,6 +1257,50 @@ class PatrolSnapshotRepository(_PatrolRepositoryBase):
                     last_imported_at,
                 ) in rows
             ]
+
+    def get_offline_dataset_run_scopes(
+        self,
+        dataset_ids: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Resolve the authoritative current attempt for offline patrol datasets."""
+
+        normalized = sorted({str(item).strip() for item in dataset_ids if str(item).strip()})
+        if not normalized:
+            return {}
+        with get_db_session() as db:
+            rows = (
+                db.query(OfflinePatrolPeriodRecord)
+                .filter(OfflinePatrolPeriodRecord.dataset_id.in_(normalized))
+                .all()
+            )
+            return {
+                row.dataset_id: {
+                    "offline_job_id": row.job_id,
+                    "period_role": row.role,
+                    "observed_at": _iso(row.observed_at),
+                    "patrol_run_id": row.patrol_run_id,
+                    "period_status": row.status,
+                }
+                for row in rows
+            }
+
+    def list_snapshots_with_entity_keys(self, snapshot_ids: list[str]) -> set[str]:
+        """Return normalized snapshots that produced at least one non-empty entity key."""
+
+        normalized = sorted({str(item).strip() for item in snapshot_ids if str(item).strip()})
+        if not normalized:
+            return set()
+        with get_db_session() as db:
+            rows = (
+                db.query(StateObservationRecord.snapshot_id)
+                .filter(
+                    StateObservationRecord.snapshot_id.in_(normalized),
+                    StateObservationRecord.entity_key != "",
+                )
+                .distinct()
+                .all()
+            )
+            return {str(snapshot_id) for (snapshot_id,) in rows}
 
     def list_import_fingerprints(
         self,

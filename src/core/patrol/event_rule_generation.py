@@ -8,6 +8,7 @@ from typing import Any
 from src.core.patrol.change_policy import ChangePolicyProposal, policy_from_dict
 from src.core.patrol.event_rules import EventRuleDefinition
 from src.core.patrol.rule_validation import validate_event_rule_definition
+from src.core.state.observation_applicability import attach_governed_applicability
 
 
 INTERFACE_ENTITY_TYPES = {
@@ -345,6 +346,15 @@ def generate_event_rule_definitions(
             )
             for definition in definitions
         ]
+    definitions = [
+        replace(
+            definition,
+            condition=attach_governed_applicability(
+                dict(definition.condition), contract
+            )[0],
+        )
+        for definition in definitions
+    ]
     return definitions
 
 

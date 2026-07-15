@@ -89,6 +89,7 @@ from src.gateway.exception_handlers import register_exception_handlers
 from src.gateway.knowledge_api import router as knowledge_router
 from src.gateway.maintenance_api import router as maintenance_router
 from src.gateway.notification_api import router as notification_router
+from src.gateway.offline_patrol_api import router as offline_patrol_router
 from src.gateway.parser_api import router as parser_router
 from src.gateway.schemas import (
     AddMessageRequest,
@@ -288,6 +289,7 @@ app.include_router(notification_router)
 app.include_router(events_router)
 app.include_router(parser_router)
 app.include_router(devices_router)
+app.include_router(offline_patrol_router)
 app.include_router(maintenance_router)
 register_exception_handlers(app)
 

@@ -17,8 +17,12 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.core.observation.repository import ObservationContractRepository  # noqa: E402
 from src.core.patrol.change_policy_repository import ChangePolicyRepository  # noqa: E402
 from src.core.patrol.event_rules import EventRuleRepository  # noqa: E402
+from src.core.rule_control.replay_gate import evaluate_historical_replay_gate  # noqa: E402
 from src.core.rule_control.repository import RuleGenerationJobRepository  # noqa: E402
-from src.infrastructure.db.models import EventRuleVersionRecord  # noqa: E402
+from src.infrastructure.db.models import (  # noqa: E402
+    EventRuleVersionRecord,
+    RuleGenerationContextRecord,
+)
 from src.infrastructure.db.postgres import get_db_session  # noqa: E402
 
 
@@ -48,7 +52,9 @@ def _merge_agent_loops(*loops: Any) -> dict[str, Any] | None:
         return None
     merged = {
         "ready_for_approval": ready,
-        "next_action": "submit_for_approval" if ready else (next_actions[-1] if next_actions else "revise_candidate"),
+        "next_action": "submit_for_approval"
+        if ready
+        else (next_actions[-1] if next_actions else "revise_candidate"),
         "attempt_count": len(attempts),
         "attempts": attempts,
     }
@@ -58,15 +64,33 @@ def _merge_agent_loops(*loops: Any) -> dict[str, Any] | None:
     return merged
 
 
+def _source_template_id(params: dict[str, Any]) -> str | None:
+    explicit = str(params.get("source_template_id") or "").strip()
+    if explicit:
+        return explicit
+    source_ref = str(params.get("source_ref") or "").strip()
+    prefix = "parser_template:"
+    if source_ref.startswith(prefix):
+        template_id = source_ref[len(prefix) :].strip()
+        if template_id:
+            return template_id
+    return None
+
+
 def _schema_id(params: dict[str, Any], proposal: dict[str, Any]) -> str:
     explicit = params.get("schema_id")
     if explicit:
         return str(explicit)
-    vendor = str(params.get("vendor") or "Generic").strip() or "Generic"
-    model = str(params.get("model") or "Generic").strip() or "Generic"
-    command = str(params.get("command") or params.get("canonical_command") or "").strip()
-    category = str(proposal.get("category") or proposal.get("entity_type") or "record")
-    return ":".join(["cli", vendor, model, command or category])
+    template_id = _source_template_id(params)
+    if template_id:
+        return template_id
+    proposed = str(proposal.get("schema_id") or "").strip()
+    if proposed:
+        return proposed
+    raise ValueError(
+        "stable schema_id is required; parser-generated assets must use "
+        "source_ref=parser_template:<template_id>"
+    )
 
 
 def _transition_after_validation(
@@ -116,9 +140,7 @@ def _event_rule_validation_report(
                     limit = -1.0
                 if limit >= 0 and estimated > limit:
                     replay_success = False
-                    replay_errors.append(
-                        "historical replay estimated event rate exceeds limit"
-                    )
+                    replay_errors.append("historical replay estimated event rate exceeds limit")
 
     synthetic_success = synthetic.get("success") is True
     agent_loop = _merge_agent_loops(
@@ -128,6 +150,7 @@ def _event_rule_validation_report(
     report = {
         "success": synthetic_success and replay_success,
         "generator": "event-rule-generator",
+        "generation_provider": result.get("generation_provider") or "builtin",
         "agent_loop": agent_loop,
         "synthetic_validation": synthetic,
         "historical_replay": replay if isinstance(replay, dict) else None,
@@ -151,6 +174,7 @@ def _persist_contract(
     validation_report = {
         "success": _success(result),
         "generator": "observation-contract-generator",
+        "generation_provider": result.get("generation_provider") or "builtin",
         "validation": result.get("validation"),
         "agent_loop": _merge_agent_loops(result.get("agent_loop")),
     }
@@ -167,12 +191,17 @@ def _persist_contract(
         validation_report=validation_report,
         created_by=created_by,
     )
-    contract = ObservationContractRepository().upsert_contract(
+    source_template_id = _source_template_id(params)
+    schema_ref = params.get("schema_ref")
+    if not schema_ref and source_template_id:
+        schema_ref = f"parser_template:{source_template_id}"
+    contract = ObservationContractRepository().create_contract_version(
         source_type="cli",
         schema_id=_schema_id(params, proposal),
-        schema_ref=params.get("schema_ref"),
+        schema_ref=schema_ref,
         category=proposal.get("category"),
         validation=proposal,
+        source_template_id=source_template_id,
         status="draft",
         source_job_id=job["id"],
         approval={"source": "rule-asset-persister"},
@@ -204,54 +233,87 @@ def _persist_change_policy(
     created_by: str | None,
 ) -> list[dict[str, Any]]:
     result = params.get("change_policy_result") or params.get("change_policy")
-    if not isinstance(result, dict) or not result.get("policy"):
+    if not isinstance(result, dict):
         return []
-    policy = dict(result["policy"])
-    validation_report = {
-        "success": _success(result),
-        "generator": "change-policy-generator",
-        "validation": result.get("validation"),
-        "historical_stats": result.get("historical_stats"),
-        "agent_loop": _merge_agent_loops(result.get("agent_loop")),
-    }
+    child_results = [item for item in (result.get("results") or []) if isinstance(item, dict)]
+    if child_results:
+        policy_results = child_results
+    elif result.get("policy"):
+        policy_results = [result]
+    else:
+        policy_results = [
+            {
+                "success": result.get("success"),
+                "policy": item,
+                "generation_provider": result.get("generation_provider"),
+                "agent_loop": result.get("agent_loop"),
+            }
+            for item in (result.get("policies") or [])
+            if isinstance(item, dict)
+        ]
+    if not policy_results:
+        return []
     job_repo = RuleGenerationJobRepository()
-    job = job_repo.create_job(
-        job_type="CHANGE_POLICY",
-        source_ref=source_ref,
-        payload={"policy": policy},
-        validation_report=validation_report,
-        created_by=created_by,
-    )
-    name = str(
-        params.get("change_policy_name")
-        or f"policy:{policy.get('observation_type') or params.get('observation_type') or 'unknown'}"
-    )
-    persisted = ChangePolicyRepository().create_policy_version(
-        name=name,
-        policy=policy,
-        status="draft",
-        source_job_id=job["id"],
-        validation_report=validation_report,
-        created_by=created_by,
-    )
-    job = job_repo.attach_asset(
-        job["id"],
-        asset_type="CHANGE_POLICY",
-        asset_id=persisted["policy_id"],
-        asset_version_id=persisted["version_id"],
-        asset_digest=persisted["digest"],
-        asset_ref=f"change_policy_version:{persisted['version_id']}",
-    )
-    job = _transition_after_validation(job_repo, job["id"], validation_report)
-    return [
-        {
-            "asset_type": "CHANGE_POLICY",
-            "asset_id": persisted["policy_id"],
-            "asset_version_id": persisted["version_id"],
-            "asset_digest": persisted["digest"],
-            "job": job,
+    assets: list[dict[str, Any]] = []
+    for index, child_result in enumerate(policy_results):
+        policy_payload = child_result.get("policy")
+        if not isinstance(policy_payload, dict):
+            raise ValueError(f"change policy result {index} has no policy object")
+        policy = dict(policy_payload)
+        validation_report = {
+            "success": _success(child_result),
+            "generator": "change-policy-generator",
+            "generation_provider": child_result.get("generation_provider")
+            or result.get("generation_provider")
+            or "builtin",
+            "validation": child_result.get("validation"),
+            "historical_stats": child_result.get("historical_stats"),
+            "agent_loop": _merge_agent_loops(child_result.get("agent_loop")),
         }
-    ]
+        job = job_repo.create_job(
+            job_type="CHANGE_POLICY",
+            source_ref=source_ref,
+            payload={"policy": policy},
+            validation_report=validation_report,
+            created_by=created_by,
+        )
+        explicit_name = params.get("change_policy_name") if len(policy_results) == 1 else None
+        observation_type = (
+            policy.get("observation_type")
+            or params.get("observation_type")
+            or "unknown"
+        )
+        name = str(
+            explicit_name
+            or f"policy:{observation_type}"
+        )
+        persisted = ChangePolicyRepository().create_policy_version(
+            name=name,
+            policy=policy,
+            status="draft",
+            source_job_id=job["id"],
+            validation_report=validation_report,
+            created_by=created_by,
+        )
+        job = job_repo.attach_asset(
+            job["id"],
+            asset_type="CHANGE_POLICY",
+            asset_id=persisted["policy_id"],
+            asset_version_id=persisted["version_id"],
+            asset_digest=persisted["digest"],
+            asset_ref=f"change_policy_version:{persisted['version_id']}",
+        )
+        job = _transition_after_validation(job_repo, job["id"], validation_report)
+        assets.append(
+            {
+                "asset_type": "CHANGE_POLICY",
+                "asset_id": persisted["policy_id"],
+                "asset_version_id": persisted["version_id"],
+                "asset_digest": persisted["digest"],
+                "job": job,
+            }
+        )
+    return assets
 
 
 def _persist_event_rules(
@@ -298,9 +360,7 @@ def _persist_event_rules(
             exclusive=bool(rule.get("exclusive", False)),
             event_class=str(rule.get("event_class") or "fault"),
             recovery=dict(rule.get("recovery") or {}),
-            correlation_keys=(
-                rule.get("correlation_key") or rule.get("correlation_keys")
-            ),
+            correlation_keys=(rule.get("correlation_key") or rule.get("correlation_keys")),
         )
         with get_db_session() as db:
             version = db.get(EventRuleVersionRecord, version_id)
@@ -329,18 +389,218 @@ def _persist_event_rules(
     return assets
 
 
+def _context_gate(params: dict[str, Any], assets: list[dict[str, Any]]) -> dict[str, Any]:
+    context_id = str(params.get("rule_generation_context_id") or "").strip()
+    context_digest = str(params.get("rule_generation_context_digest") or "").strip()
+    providers = {
+        str(
+            ((asset.get("job") or {}).get("validation_report_json") or {}).get(
+                "generation_provider"
+            )
+            or ""
+        ).casefold()
+        for asset in assets
+    }
+    llm_generated = "llm" in providers
+    if not context_id:
+        return {
+            "success": not llm_generated,
+            "mode": "legacy_manual" if not llm_generated else "missing_immutable_context",
+            "context_id": None,
+            "context_digest": None,
+            "privacy": {"success": not llm_generated, "raw_cli_included": False},
+        }
+    with get_db_session() as db:
+        row = db.get(RuleGenerationContextRecord, context_id)
+        if row is None:
+            return {
+                "success": False,
+                "mode": "immutable_dataset_context",
+                "context_id": context_id,
+                "errors": ["rule generation context not found"],
+            }
+        privacy = dict(row.privacy_report_json or {})
+        digest_matches = not context_digest or context_digest == str(row.context_digest)
+        success = (
+            privacy.get("success") is True
+            and privacy.get("raw_cli_included") is False
+            and digest_matches
+        )
+        return {
+            "success": success,
+            "mode": "immutable_dataset_context",
+            "context_id": row.id,
+            "context_digest": row.context_digest,
+            "dataset_ids": list(row.dataset_ids_json or []),
+            "replay_run_ids": list(
+                dict(row.context_json or {}).get("replay_run_ids") or []
+            ),
+            "privacy": privacy,
+            "errors": [] if success else ["immutable context privacy or digest gate failed"],
+        }
+
+
+def _bundle_validation_report(
+    params: dict[str, Any],
+    assets: list[dict[str, Any]],
+) -> dict[str, Any]:
+    counts: dict[str, int] = {}
+    child_validation_success = True
+    child_jobs: list[dict[str, Any]] = []
+    for asset in assets:
+        asset_type = str(asset.get("asset_type") or "")
+        counts[asset_type] = counts.get(asset_type, 0) + 1
+        job = dict(asset.get("job") or {})
+        report = dict(job.get("validation_report_json") or {})
+        child_validation_success = child_validation_success and report.get("success") is True
+        child_jobs.append(
+            {
+                "job_id": job.get("id"),
+                "asset_type": asset_type,
+                "asset_id": asset.get("asset_id"),
+                "asset_version_id": asset.get("asset_version_id"),
+                "asset_digest": asset.get("asset_digest"),
+                "validation_success": report.get("success") is True,
+            }
+        )
+    completeness = (
+        counts.get("OBSERVATION_CONTRACT") == 1
+        and int(counts.get("CHANGE_POLICY") or 0) >= 1
+        and int(counts.get("EVENT_RULE") or 0) >= 1
+    )
+    replay = params.get("event_rule_replay") or params.get("historical_replay")
+    context_gate = _context_gate(params, assets)
+    replay_gate = evaluate_historical_replay_gate(
+        replay if isinstance(replay, dict) else None,
+        context_gate,
+    )
+    replay_success = replay_gate["success"] is True
+    success = (
+        completeness and child_validation_success and replay_success and context_gate["success"]
+    )
+    blockers: list[str] = []
+    if not completeness:
+        blockers.append("bundle must contain one Contract, one or more Policies and EventRules")
+    if not child_validation_success:
+        blockers.append("one or more child assets failed deterministic validation")
+    if not replay_success:
+        blockers.extend(replay_gate["errors"])
+    if not context_gate["success"]:
+        blockers.append("immutable sanitized context gate failed")
+    return {
+        "success": success,
+        "generator": "rule-asset-persister",
+        "bundle_gate": {
+            "success": success,
+            "asset_counts": counts,
+            "child_validation_success": child_validation_success,
+            "completeness": completeness,
+            "replay_gate": replay_gate,
+            "blockers": blockers,
+        },
+        "context_gate": context_gate,
+        "historical_replay": replay if isinstance(replay, dict) else None,
+        "children": child_jobs,
+        "agent_loop": _merge_agent_loops(
+            *[
+                ((asset.get("job") or {}).get("validation_report_json") or {}).get("agent_loop")
+                for asset in assets
+            ]
+        ),
+    }
+
+
 def run_persist(params: dict[str, Any]) -> dict[str, Any]:
     source_ref = params.get("source_ref")
     created_by = params.get("created_by") or "rule-asset-persister"
+    job_repo = RuleGenerationJobRepository()
+    bundle = job_repo.create_job(
+        job_type="RULE_ASSET_BUNDLE",
+        source_ref=source_ref,
+        payload={
+            "source_ref": source_ref,
+            "observation_type": params.get("observation_type"),
+            "command": params.get("command"),
+            "vendor": params.get("vendor"),
+            "model": params.get("model"),
+            "context_id": params.get("rule_generation_context_id"),
+            "context_digest": params.get("rule_generation_context_digest"),
+            "child_job_ids": [],
+        },
+        validation_report={"success": False, "stage": "persisting_candidates"},
+        created_by=created_by,
+    )
+    job_repo.transition_job(bundle["id"], status="validating")
+    bundle_source_ref = f"rule_asset_bundle:{bundle['id']}"
     assets: list[dict[str, Any]] = []
-    assets.extend(_persist_contract(params, source_ref=source_ref, created_by=created_by))
-    assets.extend(_persist_change_policy(params, source_ref=source_ref, created_by=created_by))
-    assets.extend(_persist_event_rules(params, source_ref=source_ref, created_by=created_by))
+    try:
+        assets.extend(
+            _persist_contract(
+                params,
+                source_ref=bundle_source_ref,
+                created_by=created_by,
+            )
+        )
+        assets.extend(
+            _persist_change_policy(
+                params,
+                source_ref=bundle_source_ref,
+                created_by=created_by,
+            )
+        )
+        assets.extend(
+            _persist_event_rules(
+                params,
+                source_ref=bundle_source_ref,
+                created_by=created_by,
+            )
+        )
+        validation_report = _bundle_validation_report(params, assets)
+        child_job_ids = [str(asset["job"]["id"]) for asset in assets]
+        payload = dict(bundle.get("payload_json") or {})
+        payload.update(
+            child_job_ids=child_job_ids,
+            asset_counts=(validation_report.get("bundle_gate") or {}).get("asset_counts") or {},
+        )
+        job_repo.update_payload(bundle["id"], payload=payload)
+        job_repo.attach_asset(
+            bundle["id"],
+            asset_type="RULE_ASSET_BUNDLE",
+            asset_id=bundle["id"],
+            asset_version_id=str(
+                params.get("rule_generation_context_digest")
+                or params.get("rule_generation_context_id")
+                or bundle["id"]
+            ),
+            asset_digest=params.get("rule_generation_context_digest"),
+            asset_ref=bundle_source_ref,
+        )
+        job_repo.attach_validation_report(
+            bundle["id"],
+            validation_report=validation_report,
+        )
+        bundle = job_repo.transition_job(
+            bundle["id"],
+            status="pending_approval" if validation_report["success"] else "rejected",
+        )
+    except Exception as exc:
+        failure_report = {
+            "success": False,
+            "stage": "persisting_candidates",
+            "errors": [f"{type(exc).__name__}: {exc}"],
+        }
+        job_repo.attach_validation_report(bundle["id"], validation_report=failure_report)
+        try:
+            bundle = job_repo.transition_job(bundle["id"], status="rejected")
+        except Exception:
+            pass
+        raise
     return {
         "success": True,
         "asset_count": len(assets),
         "assets": assets,
         "jobs": [asset["job"] for asset in assets],
+        "bundle": bundle,
     }
 
 

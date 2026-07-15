@@ -4,14 +4,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Any
 
 from src.core.parser.policy import load_yaml
+from src.core.state.observation_applicability import (
+    condition_applicability_matches,
+    context_from_change,
+)
 from src.infrastructure.db.models import (
     AuditLogRecord,
     EventRuleRecord,
@@ -48,6 +54,130 @@ def event_rule_digest(
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+_KNOWN_EVENT_RULE_ROLES = {
+    "threshold": "high",
+    "threshold_field_gte": "high",
+    "threshold_recovery": "high_recovery",
+    "threshold_field_high_recovery": "high_recovery",
+    "threshold_lte": "low",
+    "threshold_field_lte": "low",
+    "threshold_low_recovery": "low_recovery",
+    "threshold_field_low_recovery": "low_recovery",
+    "entity_status_down": "down",
+    "raw_config_hash": "raw_config_hash",
+}
+
+
+def _logical_token(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", str(value or "").casefold()).strip("-")
+
+
+def _logical_namespace(name: str, event_type: str) -> str:
+    """Return the platform-owned namespace while preserving legacy compatibility."""
+
+    candidate = str(name or "").strip()
+    if "." in candidate:
+        candidate = candidate.split(".", 1)[0]
+    return _logical_token(candidate or event_type) or "unnamespaced"
+
+
+def _logical_role(
+    *,
+    name: str,
+    event_type: str,
+    condition: dict[str, Any],
+    event_class: str,
+) -> str:
+    kind = str(condition.get("kind") or "").strip().casefold()
+    role = _KNOWN_EVENT_RULE_ROLES.get(kind)
+    if kind == "transition":
+        role = _logical_token(condition.get("to_group")) or "transition"
+    elif kind == "bgp_transition":
+        role = "up" if bool(condition.get("to_established")) else "down"
+
+    marker = "_".join(_logical_token(value) for value in (name, event_type, event_class))
+    if role == "low" and any(
+        token in marker for token in ("critical-low", "loss-of-light", "signal-loss")
+    ):
+        return "critical_low"
+    if role:
+        return role
+    return f"custom-{_logical_token(kind) or 'condition'}"
+
+
+def _canonical_logical_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): _canonical_logical_value(item)
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        }
+    if isinstance(value, (list, tuple, set)):
+        normalized = [_canonical_logical_value(item) for item in value]
+        return sorted(
+            normalized,
+            key=lambda item: json.dumps(item, sort_keys=True, default=str),
+        )
+    if isinstance(value, str):
+        return value.strip().casefold()
+    return value
+
+
+def event_rule_logical_key(
+    *,
+    name: str,
+    event_type: str,
+    condition: dict[str, Any],
+    event_class: str = "fault",
+) -> str:
+    """Identify a semantic EventRule slot independently of LLM wording and thresholds.
+
+    Known platform condition kinds intentionally exclude concrete threshold values and
+    reference-field choices. Those are versioned policy decisions. Entity/field scope,
+    applicability guards, namespace and trigger role remain part of the identity so two
+    genuinely different rules cannot silently replace each other. Unknown condition
+    kinds use their complete condition as a conservative fallback.
+    """
+
+    normalized_condition = dict(condition or {})
+    role = _logical_role(
+        name=name,
+        event_type=event_type,
+        condition=normalized_condition,
+        event_class=event_class,
+    )
+    scope: dict[str, Any] = {
+        "entity_types": sorted(
+            {norm(item) for item in normalized_condition.get("entity_types") or [] if norm(item)}
+        ),
+        "fields": sorted(
+            {
+                norm_field(item)
+                for item in normalized_condition.get("fields") or []
+                if norm_field(item)
+            }
+        ),
+        "applicability": _canonical_logical_value(normalized_condition.get("applicability") or {}),
+    }
+    if role == "raw_config_hash":
+        scope["command_markers"] = sorted(
+            {norm(item) for item in normalized_condition.get("command_markers") or [] if norm(item)}
+        )
+    if role.startswith("custom-"):
+        scope["condition"] = _canonical_logical_value(normalized_condition)
+
+    namespace = _logical_namespace(name, event_type)
+    payload = {
+        "namespace": namespace,
+        "role": role,
+        "event_class": norm(event_class) or "fault",
+        "scope": scope,
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()[:20]
+    return f"event-rule:v1:{namespace}:{role}:{digest}"
 
 
 def to_float(value: Any) -> float | None:
@@ -125,6 +255,26 @@ def is_interface_change(change: dict[str, Any]) -> bool:
     }
 
 
+REQUIRED_DEVICE_EVENT_CORRELATION_KEYS = (
+    "device_id",
+    "entity_type",
+    "entity_key",
+)
+
+
+def govern_event_correlation_keys(
+    correlation_keys: list[str] | tuple[str, ...] | None,
+) -> tuple[str, ...]:
+    """Keep generated event identities isolated by device and entity."""
+
+    proposed = [str(item).strip() for item in correlation_keys or () if str(item).strip()]
+    governed: list[str] = []
+    for key in (*REQUIRED_DEVICE_EVENT_CORRELATION_KEYS, *proposed):
+        if key not in governed:
+            governed.append(key)
+    return tuple(governed)
+
+
 @dataclass(frozen=True)
 class EventRule:
     rule_id: str
@@ -142,6 +292,13 @@ class EventRule:
         "entity_key",
         "field",
     )
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "correlation_keys",
+            govern_event_correlation_keys(self.correlation_keys),
+        )
 
     def match(self, change: dict[str, Any]) -> bool:
         return self.predicate(change)
@@ -165,6 +322,13 @@ class EventRuleDefinition:
         "entity_key",
         "field",
     )
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "correlation_keys",
+            govern_event_correlation_keys(self.correlation_keys),
+        )
 
     def to_rule(self) -> EventRule:
         return EventRule(
@@ -190,12 +354,16 @@ def _entity_type_allowed(condition: dict[str, Any], change: dict[str, Any]) -> b
 
 
 def condition_matches(condition: dict[str, Any], change: dict[str, Any]) -> bool:
+    if not condition_applicability_matches(condition, change):
+        return False
     kind = str(condition.get("kind") or "").strip()
     if kind == "threshold":
         if not _entity_type_allowed(condition, change):
             return False
         fields = {norm_field(item) for item in condition.get("fields") or []}
-        threshold = float(condition.get("gte"))
+        threshold = to_float(condition.get("gte"))
+        if threshold is None:
+            return False
         old_value = to_float(change.get("old"))
         new_value = to_float(change.get("new"))
         return (
@@ -212,7 +380,9 @@ def condition_matches(condition: dict[str, Any], change: dict[str, Any]) -> bool
         if not _entity_type_allowed(condition, change):
             return False
         fields = {norm_field(item) for item in condition.get("fields") or []}
-        threshold = float(condition.get("lt"))
+        threshold = to_float(condition.get("lt"))
+        if threshold is None:
+            return False
         old_value = to_float(change.get("old"))
         new_value = to_float(change.get("new"))
         return (
@@ -226,7 +396,9 @@ def condition_matches(condition: dict[str, Any], change: dict[str, Any]) -> bool
         if not _entity_type_allowed(condition, change):
             return False
         fields = {norm_field(item) for item in condition.get("fields") or []}
-        threshold = float(condition.get("lte"))
+        threshold = to_float(condition.get("lte"))
+        if threshold is None:
+            return False
         old_value = to_float(change.get("old"))
         new_value = to_float(change.get("new"))
         return (
@@ -243,8 +415,15 @@ def condition_matches(condition: dict[str, Any], change: dict[str, Any]) -> bool
         if not _entity_type_allowed(condition, change):
             return False
         fields = {norm_field(item) for item in condition.get("fields") or []}
-        low = float(condition.get("low"))
-        gt = float(condition.get("gt", low + float(condition.get("hysteresis", 0))))
+        low = to_float(condition.get("low"))
+        if low is None:
+            return False
+        gt = to_float(condition.get("gt"))
+        if gt is None:
+            hysteresis = to_float(condition.get("hysteresis"))
+            if hysteresis is None:
+                return False
+            gt = low + hysteresis
         old_value = to_float(change.get("old"))
         new_value = to_float(change.get("new"))
         return (
@@ -254,6 +433,42 @@ def condition_matches(condition: dict[str, Any], change: dict[str, Any]) -> bool
             and float(old_value) <= low
             and float(new_value) >= gt
         )
+    if kind in {
+        "threshold_field_gte",
+        "threshold_field_high_recovery",
+        "threshold_field_lte",
+        "threshold_field_low_recovery",
+    }:
+        if not _entity_type_allowed(condition, change):
+            return False
+        fields = {norm_field(item) for item in condition.get("fields") or []}
+        if norm_field(change.get("field")) not in fields:
+            return False
+        context = context_from_change(change)
+        reference_field = str(condition.get("reference_field") or "")
+        reference = to_float((context or {}).get(reference_field))
+        old_value = to_float(change.get("old"))
+        new_value = to_float(change.get("new"))
+        if reference is None or new_value is None:
+            return False
+        if kind == "threshold_field_gte":
+            return float(new_value) >= reference and (
+                change.get("change_type") == "initial"
+                or old_value is None
+                or float(old_value) < reference
+            )
+        if kind == "threshold_field_lte":
+            return float(new_value) <= reference and (
+                change.get("change_type") == "initial"
+                or old_value is None
+                or float(old_value) > reference
+            )
+        hysteresis = to_float(condition.get("hysteresis"))
+        if old_value is None or hysteresis is None:
+            return False
+        if kind == "threshold_field_high_recovery":
+            return float(old_value) >= reference and float(new_value) <= (reference - hysteresis)
+        return float(old_value) <= reference and float(new_value) >= (reference + hysteresis)
     if kind == "transition":
         fields = {norm_field(item) for item in condition.get("fields") or []}
         entity_types = {norm(item) for item in condition.get("entity_types") or []}
@@ -403,13 +618,12 @@ class EventRuleRepository:
                     version=int(version.version),
                     event_type=version.event_type,
                     severity=version.severity,
-                    predicate=lambda change, condition=_effective_condition(
-                        str(rule.name), dict(version.condition_json or {})
-                    ): (
-                        condition_matches(
-                            condition,
-                            change,
-                        )
+                    predicate=partial(
+                        condition_matches,
+                        _effective_condition(
+                            str(rule.name),
+                            dict(version.condition_json or {}),
+                        ),
                     ),
                     priority=int(version.priority or 100),
                     exclusive=bool(version.exclusive),
@@ -571,9 +785,7 @@ class EventRuleRepository:
                 exclusive=exclusive,
                 event_class=event_class,
                 recovery_json=recovery,
-                correlation_key_json=list(
-                    correlation_keys or ("device_id", "entity_type", "entity_key", "field")
-                ),
+                correlation_key_json=list(govern_event_correlation_keys(correlation_keys)),
                 status="active",
                 created_by=created_by,
                 activated_at=datetime.now(timezone.utc),
@@ -587,7 +799,7 @@ class EventRuleRepository:
                         "exclusive": exclusive,
                         "event_class": event_class,
                         "recovery": recovery,
-                        "correlation_keys": correlation_keys,
+                        "correlation_keys": govern_event_correlation_keys(correlation_keys),
                     },
                 ),
             )
@@ -647,9 +859,7 @@ class EventRuleRepository:
                 exclusive=exclusive,
                 event_class=event_class,
                 recovery_json=recovery,
-                correlation_key_json=list(
-                    correlation_keys or ("device_id", "entity_type", "entity_key", "field")
-                ),
+                correlation_key_json=list(govern_event_correlation_keys(correlation_keys)),
                 status=status,
                 created_by=created_by,
                 source_job_id=source_job_id,
@@ -665,7 +875,7 @@ class EventRuleRepository:
                         "exclusive": exclusive,
                         "event_class": event_class,
                         "recovery": recovery,
-                        "correlation_keys": correlation_keys,
+                        "correlation_keys": govern_event_correlation_keys(correlation_keys),
                     },
                 ),
             )
@@ -881,8 +1091,7 @@ def event_rules_from_snapshot(rows: list[dict[str, Any]]) -> list[EventRule]:
             event_class=str(row.get("event_class") or "fault"),
             recovery=dict(row.get("recovery") or {}),
             correlation_keys=tuple(
-                row.get("correlation_keys")
-                or ("device_id", "entity_type", "entity_key", "field")
+                row.get("correlation_keys") or ("device_id", "entity_type", "entity_key", "field")
             ),
         ).to_rule()
         for row in rows

@@ -9,7 +9,6 @@ from pathlib import Path
 from src.infrastructure.db.models import NetworkChangeRecord
 from src.infrastructure.db.postgres import get_db_session
 
-
 SCRIPT_PATH = (
     Path(__file__).resolve().parents[2]
     / "src"
@@ -66,12 +65,15 @@ def test_event_rule_replay_skill_replays_candidate_rules():
                 ],
                 "include_active_collisions": False,
                 "limit": 100,
+                "run_ids": ["pytest-event-rule-replay-skill"],
             }
         )
 
         assert result["success"] is True
         assert result["matched_change_count"] >= 1
         assert result["event_types"]["CPUHigh"] >= 1
+        assert result["scope"]["mode"] == "run_ids"
+        assert result["scope"]["run_ids"] == ["pytest-event-rule-replay-skill"]
     finally:
         with get_db_session() as db:
             db.query(NetworkChangeRecord).filter(NetworkChangeRecord.id == change_id).delete()

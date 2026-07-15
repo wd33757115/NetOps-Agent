@@ -9,16 +9,23 @@ import ipaddress
 import json
 import math
 from collections import Counter
+from collections.abc import Iterator
 from datetime import datetime
 from typing import Any
 
 from sqlalchemy import or_
 
+from src.core.patrol.event_rules import EventRuleRepository, condition_matches, norm, norm_field
+from src.core.patrol.leadership_report import build_leadership_report
+from src.core.state.observation_applicability import APPLICABILITY_CONTEXT_KEY
 from src.infrastructure.db.models import (
     CommandSnapshot,
     NetworkChangeRecord,
     NetworkEventOccurrenceRecord,
     NetworkEventRecord,
+    PatrolAnalysisAttemptRecord,
+    PatrolBatchDeviceRecord,
+    PatrolBatchRecord,
     PatrolCollectionResult,
     StateObservationRecord,
     WorkflowStepRecord,
@@ -57,7 +64,12 @@ def display_entity_key(value: Any) -> str:
 def report_domain(entity_type: Any = None, command: Any = None) -> str | None:
     entity = str(entity_type or "").lower()
     text = str(command or "").lower()
-    if "optical" in entity or "transceiver" in text:
+    if (
+        "optical" in entity
+        or "transceiver" in entity
+        or "transceiver" in text
+        or any(token in text for token in ("rx_power", "tx_power", "optical_power"))
+    ):
         return "optical"
     if "interface" in entity or "interface brief" in text:
         return "interface"
@@ -90,8 +102,7 @@ class PatrolBatchService:
             str(item.get("parse_status") or "unknown") for item in command_details
         )
         output_counts = Counter(
-            str(item.get("output_status") or "not_classified")
-            for item in command_details
+            str(item.get("output_status") or "not_classified") for item in command_details
         )
         execution_success_count = sum(
             item.get("execution_status") == "complete" for item in command_details
@@ -100,14 +111,9 @@ class PatrolBatchService:
             item
             for item in command_details
             if item.get("execution_status") == "complete"
-            and item.get("parse_status")
-            not in {"ignored", "not_applicable", "raw_hashed"}
+            and item.get("parse_status") not in {"ignored", "not_applicable", "raw_hashed"}
         ]
-        ready = [
-            item
-            for item in eligible
-            if item.get("parse_status") in {"parsed", "parse_empty"}
-        ]
+        ready = [item for item in eligible if item.get("parse_status") in {"parsed", "parse_empty"}]
         parser_rate = len(ready) / len(eligible) if eligible else 1.0
         degraded = (
             parser_rate < 1.0
@@ -136,6 +142,8 @@ class PatrolBatchService:
         command_details: list[dict[str, Any]],
         changes: list[dict[str, Any]],
         events: list[dict[str, Any]],
+        current_findings: list[dict[str, Any]] | None = None,
+        rule_coverage: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         checks: list[dict[str, Any]] = []
         latest_observations: dict[tuple[str, str, str], dict[str, Any]] = {}
@@ -168,12 +176,24 @@ class PatrolBatchService:
                 for item in events
                 if report_domain(item.get("entity_type"), item.get("event_type")) == domain
             ]
+            domain_findings = [
+                item for item in (current_findings or []) if str(item.get("domain") or "") == domain
+            ]
             if not any((domain_commands, domain_observations, domain_changes, domain_events)):
                 continue
-            parse_statuses = {
-                str(item.get("parse_status") or "") for item in domain_commands
-            }
-            if domain_events:
+            parse_statuses = {str(item.get("parse_status") or "") for item in domain_commands}
+            coverage_by_domain = dict((rule_coverage or {}).get("by_domain") or {})
+            domain_rule_coverage = dict(coverage_by_domain.get(domain) or {})
+            evaluated_current = int(domain_rule_coverage.get("evaluated_observation_count") or 0)
+            if domain_findings:
+                status = "异常"
+                reason = (
+                    f"{len(domain_findings)} 个当前状态命中活动故障规则；"
+                    f"另有 {len(domain_events)} 个变化事件"
+                    if domain_events
+                    else f"{len(domain_findings)} 个当前状态命中活动故障规则"
+                )
+            elif domain_events:
                 status = "异常"
                 reason = f"产生 {len(domain_events)} 个事件"
             elif not domain_observations:
@@ -186,15 +206,28 @@ class PatrolBatchService:
                 else:
                     status = "无法判断"
                     reason = "没有形成结构化观测"
+            elif current_findings is not None and rule_coverage is not None:
+                if not bool(rule_coverage.get("available", True)):
+                    status = "无法判断"
+                    reason = str(rule_coverage.get("error") or "活动规则上下文不可用")
+                elif not evaluated_current:
+                    status = "规则缺失"
+                    reason = "已形成结构化观测，但没有适用于当前状态的活动故障规则"
+                elif domain_changes:
+                    status = "本次覆盖范围内未发现当前异常"
+                    reason = (
+                        f"活动规则已评估 {evaluated_current} 条当前状态；"
+                        f"另检测到 {len(domain_changes)} 条变化，均未形成当前故障结论"
+                    )
+                else:
+                    status = "本次覆盖范围内未发现异常"
+                    reason = f"活动规则已评估 {evaluated_current} 条当前状态，均未命中故障条件"
             elif domain_changes:
                 reason_counts = Counter(
-                    str(item.get("no_event_reason") or "unknown")
-                    for item in domain_changes
+                    str(item.get("no_event_reason") or "unknown") for item in domain_changes
                 )
                 missing_rules = int(reason_counts.get("no_active_event_rules") or 0)
-                evaluated = int(
-                    reason_counts.get("active_rules_evaluated_no_match") or 0
-                )
+                evaluated = int(reason_counts.get("active_rules_evaluated_no_match") or 0)
                 if missing_rules:
                     status = "规则缺失"
                     reason = (
@@ -226,6 +259,8 @@ class PatrolBatchService:
                     "observation_count": len(domain_observations),
                     "change_count": len(domain_changes),
                     "event_count": len(domain_events),
+                    "current_finding_count": len(domain_findings),
+                    "evaluated_observation_count": evaluated_current,
                     "reason": reason,
                     "current_values": current_values,
                 }
@@ -251,6 +286,158 @@ domain_checks = PatrolBatchService.domain_checks
 suspected_format_change = PatrolBatchService.suspected_format_change
 
 
+def _condition_applies_to_observation(
+    condition: dict[str, Any], observation: dict[str, Any]
+) -> bool:
+    kind = str(condition.get("kind") or "").strip()
+    if kind in {"", "raw_config_hash", "threshold_recovery", "threshold_low_recovery"}:
+        return False
+    fields = {norm_field(item) for item in condition.get("fields") or []}
+    if fields and norm_field(observation.get("field")) not in fields:
+        return False
+    entity_types = {norm(item) for item in condition.get("entity_types") or []}
+    if entity_types and norm(observation.get("entity_type")) not in entity_types:
+        return False
+    if kind == "bgp_transition":
+        return "bgp" in norm(observation.get("entity_type")) or "bgp" in norm(
+            observation.get("command")
+        )
+    return kind in {
+        "threshold",
+        "threshold_lte",
+        "threshold_field_gte",
+        "threshold_field_lte",
+        "transition",
+        "bgp_transition",
+        "entity_status_down",
+    }
+
+
+def evaluate_current_state(
+    observations: list[dict[str, Any]],
+    rules: list[dict[str, Any]],
+    *,
+    rule_source: str,
+    rule_bundle_digest: str | None = None,
+) -> dict[str, Any]:
+    """Evaluate latest state against fault rules without inventing a historical change."""
+
+    latest: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    for item in observations:
+        key = (
+            str(item.get("device_id") or ""),
+            str(item.get("entity_type") or ""),
+            str(item.get("entity_key") or ""),
+            str(item.get("field") or ""),
+        )
+        current = latest.get(key)
+        if current is None or str(item.get("observed_at") or "") >= str(
+            current.get("observed_at") or ""
+        ):
+            latest[key] = item
+
+    findings: list[dict[str, Any]] = []
+    evaluated_keys: set[tuple[str, str, str, str]] = set()
+    by_domain: dict[str, dict[str, Any]] = {}
+    fault_rules = [row for row in rules if str(row.get("event_class") or "fault") != "recovery"]
+    for observation_key, observation in latest.items():
+        synthetic_change = {
+            "device_id": observation.get("device_id"),
+            "entity_type": observation.get("entity_type"),
+            "entity_key": observation.get("entity_key"),
+            "field": observation.get("field"),
+            "old": None,
+            "new": observation.get("value"),
+            "old_value": None,
+            "new_value": observation.get("value"),
+            "change_type": "initial",
+            "command": observation.get("command"),
+            "observation_type": observation.get("observation_type"),
+            "context": observation.get("context"),
+            "dimensions": observation.get("dimensions") or {},
+        }
+        applicable = []
+        for row in fault_rules:
+            condition = dict(row.get("effective_condition") or row.get("condition") or {})
+            if _condition_applies_to_observation(condition, observation):
+                applicable.append((row, condition))
+        if not applicable:
+            continue
+        evaluated_keys.add(observation_key)
+        domain = report_domain(observation.get("entity_type"), observation.get("command"))
+        domain_key = domain or "other"
+        domain_row = by_domain.setdefault(
+            domain_key,
+            {"evaluated_observation_count": 0, "finding_count": 0},
+        )
+        domain_row["evaluated_observation_count"] += 1
+        for row, condition in sorted(
+            applicable,
+            key=lambda item: -int(item[0].get("priority") or 100),
+        ):
+            try:
+                matched = condition_matches(condition, synthetic_change)
+            except (TypeError, ValueError, KeyError):
+                matched = False
+            if not matched:
+                continue
+            finding = {
+                "finding_id": (
+                    f"{row.get('rule_id') or row.get('rule_name')}|"
+                    f"{observation.get('device_id')}|{observation.get('entity_type')}|"
+                    f"{observation.get('entity_key')}|{observation.get('field')}"
+                ),
+                "device_id": observation.get("device_id"),
+                "device_name": observation.get("device_name"),
+                "run_id": observation.get("run_id"),
+                "domain": domain_key,
+                "entity_type": observation.get("entity_type"),
+                "entity_key": observation.get("entity_key"),
+                "field": observation.get("field"),
+                "value": observation.get("value"),
+                "unit": observation.get("unit"),
+                "event_type": row.get("event_type"),
+                "severity": row.get("severity") or "warning",
+                "rule_id": row.get("rule_id") or row.get("rule_name"),
+                "rule_version": row.get("version"),
+                "condition": condition,
+                "reference_field": condition.get("reference_field"),
+                "reference_value": dict(observation.get("context") or {}).get(
+                    str(condition.get("reference_field") or "")
+                ),
+                "command": observation.get("command"),
+                "observation_id": observation.get("id"),
+                "snapshot_id": observation.get("snapshot_id"),
+                "evidence_id": observation.get("evidence_id"),
+                "observation_type": observation.get("observation_type"),
+                "observed_at": observation.get("observed_at"),
+                "parser_template_id": observation.get("parser_template_id"),
+                "parser_version": observation.get("parser_version"),
+                "observation_contract_id": observation.get("observation_contract_id"),
+                "contract_version": observation.get("contract_version"),
+                "observation_contract_digest": observation.get("observation_contract_digest"),
+                "rule_source": rule_source,
+                "rule_bundle_digest": rule_bundle_digest,
+            }
+            findings.append(finding)
+            domain_row["finding_count"] += 1
+            if bool(row.get("exclusive")):
+                break
+    severity_counts = Counter(str(item.get("severity") or "unknown") for item in findings)
+    return {
+        "available": True,
+        "rule_source": rule_source,
+        "rule_bundle_digest": rule_bundle_digest,
+        "active_fault_rule_count": len(fault_rules),
+        "latest_observation_count": len(latest),
+        "evaluated_observation_count": len(evaluated_keys),
+        "finding_count": len(findings),
+        "severity_counts": dict(severity_counts),
+        "by_domain": by_domain,
+        "findings": findings,
+    }
+
+
 def _iso(value: Any) -> str:
     if value is None:
         return ""
@@ -273,6 +460,260 @@ def _find_nested_value(payload: Any, key: str) -> Any:
             if found is not None:
                 return found
     return None
+
+
+def _batch_scope(
+    db: Any,
+    patrol_batch_id: str,
+    runs: list[Any],
+    status_counts: Counter[str],
+) -> dict[str, Any]:
+    active_statuses = {
+        "pending",
+        "queued",
+        "running",
+        "in_progress",
+        "collecting",
+        "dispatching",
+    }
+    completed_count = int(status_counts.get("completed") or 0)
+    failed_count = int(status_counts.get("failed") or 0)
+    cancelled_count = int(status_counts.get("cancelled") or 0)
+    active_count = sum(int(status_counts.get(item) or 0) for item in active_statuses)
+    fallback = {
+        "manifest_available": False,
+        "target_type": "legacy",
+        "target_label": "历史巡检批次",
+        "selector": {},
+        "target_count": len(runs),
+        "launched_count": len(runs),
+        "skipped_count": 0,
+        "preflight_failed_count": 0,
+        "completed_count": completed_count,
+        "failed_count": failed_count,
+        "cancelled_count": cancelled_count,
+        "active_count": active_count,
+        "execution_coverage_rate": completed_count / len(runs) if runs else 0.0,
+    }
+    try:
+        manifest = db.get(PatrolBatchRecord, patrol_batch_id)
+    except (AttributeError, TypeError):
+        return fallback
+    if manifest is None:
+        return fallback
+    try:
+        targets = (
+            db.query(PatrolBatchDeviceRecord)
+            .filter(PatrolBatchDeviceRecord.patrol_batch_id == patrol_batch_id)
+            .all()
+        )
+    except (AttributeError, TypeError):
+        targets = []
+    target_count = int(manifest.target_count or len(targets) or len(runs))
+    launched_count = int(manifest.launched_count or len(runs))
+    skipped_count = int(manifest.skipped_count or 0)
+    preflight_failed = sum(
+        str(getattr(item, "preflight_status", "") or "") == "failed" for item in targets
+    )
+    return {
+        "manifest_available": True,
+        "target_type": manifest.target_type,
+        "target_label": manifest.target_label,
+        "selector": dict(manifest.selector_json or {}),
+        "target_count": target_count,
+        "launched_count": launched_count,
+        "skipped_count": skipped_count,
+        "preflight_failed_count": preflight_failed,
+        "completed_count": completed_count,
+        "failed_count": failed_count,
+        "cancelled_count": cancelled_count,
+        "active_count": active_count,
+        "execution_coverage_rate": completed_count / target_count if target_count else 0.0,
+        "created_at": _iso(manifest.created_at),
+    }
+
+
+def _frozen_event_rule_bundles(db: Any, snapshot_run_ids: list[str]) -> dict[str, dict[str, Any]]:
+    if not snapshot_run_ids:
+        return {}
+    try:
+        rows = (
+            db.query(PatrolAnalysisAttemptRecord)
+            .filter(
+                PatrolAnalysisAttemptRecord.run_id.in_(snapshot_run_ids),
+                PatrolAnalysisAttemptRecord.stage == "event_building",
+                PatrolAnalysisAttemptRecord.status == "completed",
+            )
+            .order_by(PatrolAnalysisAttemptRecord.completed_at.desc())
+            .all()
+        )
+    except (AttributeError, TypeError):
+        return {}
+    result: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        run_id = str(row.run_id)
+        if run_id in result:
+            continue
+        bundle = dict(row.rule_bundle_json or {})
+        result[run_id] = {
+            "rules": list(bundle.get("event_rules") or []),
+            "digest": row.rule_bundle_digest,
+            "source": "frozen_analysis_attempt",
+        }
+    return result
+
+
+def _runtime_event_rule_bundle(db: Any) -> dict[str, Any]:
+    # Fake sessions used by unit tests deliberately have no engine binding.
+    if not hasattr(db, "bind"):
+        return {"rules": [], "digest": None, "source": "unavailable", "error": None}
+    try:
+        rules = EventRuleRepository().snapshot_active_rules()
+    except Exception as exc:
+        return {
+            "rules": [],
+            "digest": None,
+            "source": "unavailable",
+            "error": f"活动 EventRule 加载失败：{exc}",
+        }
+    digests = sorted(
+        str(item.get("digest") or item.get("version_id") or item.get("rule_id") or "")
+        for item in rules
+    )
+    import hashlib
+
+    digest = hashlib.sha256("|".join(digests).encode("utf-8")).hexdigest() if rules else None
+    return {
+        "rules": rules,
+        "digest": digest,
+        "source": "active_runtime",
+        "error": None if rules else "没有活动 EventRule",
+    }
+
+
+def list_patrol_snapshot_run_ids(workflow_run_ids: list[str]) -> list[str]:
+    """Resolve collector run IDs without exposing persistence to HTTP handlers."""
+
+    if not workflow_run_ids:
+        return []
+    snapshot_ids: list[str] = []
+    seen: set[str] = set()
+    with get_db_session() as db:
+        steps = (
+            db.query(WorkflowStepRecord)
+            .filter(WorkflowStepRecord.run_id.in_(workflow_run_ids))
+            .order_by(
+                WorkflowStepRecord.run_id.asc(),
+                WorkflowStepRecord.step_index.asc(),
+            )
+            .all()
+        )
+        for step in steps:
+            run_id = str(step.run_id)
+            if run_id in seen:
+                continue
+            snapshot_run_id = _find_nested_value(step.result or {}, "snapshot_run_id")
+            if snapshot_run_id:
+                snapshot_ids.append(str(snapshot_run_id))
+                seen.add(run_id)
+    return snapshot_ids
+
+
+def iter_patrol_raw_snapshot_rows(
+    snapshot_run_ids: list[str],
+) -> Iterator[dict[str, Any]]:
+    """Stream transport-neutral raw snapshot dictionaries for an export."""
+
+    if not snapshot_run_ids:
+        return
+    with get_db_session() as db:
+        query = (
+            db.query(CommandSnapshot)
+            .filter(CommandSnapshot.run_id.in_(snapshot_run_ids))
+            .order_by(
+                CommandSnapshot.device_name.asc(),
+                CommandSnapshot.observed_at.asc(),
+                CommandSnapshot.canonical_command.asc(),
+            )
+            .yield_per(100)
+        )
+        for row in query:
+            yield {
+                "snapshot_run_id": row.run_id,
+                "snapshot_id": row.id,
+                "device_id": row.device_id,
+                "device_name": row.device_name,
+                "management_ip": row.management_ip,
+                "vendor": row.vendor,
+                "model": row.model,
+                "command": row.canonical_command,
+                "observed_at": _iso(row.observed_at) or None,
+                "parse_status": row.parse_status,
+                "output_status": row.output_status,
+                "raw_text_hash": row.raw_text_hash,
+                "raw_text": row.raw_text,
+            }
+
+
+def list_patrol_raw_output_artifacts(
+    workflow_run_ids: list[str],
+) -> dict[str, dict[str, Any]]:
+    """Return each device Workflow Run's immutable raw-output artifact."""
+
+    if not workflow_run_ids:
+        return {}
+    artifacts: dict[str, dict[str, Any]] = {}
+    with get_db_session() as db:
+        steps = (
+            db.query(WorkflowStepRecord)
+            .filter(
+                WorkflowStepRecord.run_id.in_(workflow_run_ids),
+                WorkflowStepRecord.skill_name == "device-patrol",
+            )
+            .all()
+        )
+        for step in steps:
+            artifact = dict((step.output_artifacts or {}).get("raw_outputs_archive") or {})
+            if artifact:
+                artifacts[str(step.run_id)] = artifact
+    return artifacts
+
+
+def iter_patrol_event_export_rows(
+    snapshot_run_ids: list[str],
+    device_names: dict[str, str],
+) -> Iterator[dict[str, Any]]:
+    """Stream batch event rows, including events linked through occurrences."""
+
+    if not snapshot_run_ids:
+        return
+    with get_db_session() as db:
+        occurrence_event_ids = db.query(NetworkEventOccurrenceRecord.event_id).filter(
+            NetworkEventOccurrenceRecord.run_id.in_(snapshot_run_ids)
+        )
+        events = (
+            db.query(NetworkEventRecord)
+            .filter(
+                or_(
+                    NetworkEventRecord.run_id.in_(snapshot_run_ids),
+                    NetworkEventRecord.id.in_(occurrence_event_ids),
+                )
+            )
+            .order_by(NetworkEventRecord.occurred_at.asc())
+            .yield_per(100)
+        )
+        for event in events:
+            device_id = str(event.device_id or "")
+            yield {
+                "event_id": event.id,
+                "device_id": device_id,
+                "device_name": device_names.get(device_id, device_id),
+                "event_type": event.event_type,
+                "severity": event.severity,
+                "entity_type": event.entity_type,
+                "entity_key": event.entity_key,
+                "occurred_at": _iso(event.occurred_at),
+            }
 
 
 PATROL_PIPELINE_STAGE_META = {
@@ -376,8 +817,8 @@ def build_patrol_pipeline_summary(
             {
                 **definition,
                 "key": (
-                    f'{definition["step_index"]}:{definition["step_name"]}:'
-                    f'{definition["skill_name"]}'
+                    f"{definition['step_index']}:{definition['step_name']}:"
+                    f"{definition['skill_name']}"
                 ),
                 "label": label,
                 "description": description,
@@ -403,9 +844,7 @@ def build_patrol_pipeline_summary(
             }
         )
 
-    completed_stages = [
-        stage for stage in stages if stage["duration"]["p95_seconds"] is not None
-    ]
+    completed_stages = [stage for stage in stages if stage["duration"]["p95_seconds"] is not None]
     bottleneck = max(
         completed_stages,
         key=lambda stage: float(stage["duration"]["p95_seconds"] or 0),
@@ -427,9 +866,7 @@ def build_patrol_batch_summary(
     status_counts = Counter(str(run.status or "unknown") for run in runs)
     device_ids = {
         str(
-            (run.context or {}).get("device_id")
-            or (run.context or {}).get("device_name")
-            or run.id
+            (run.context or {}).get("device_id") or (run.context or {}).get("device_name") or run.id
         )
         for run in runs
     }
@@ -451,6 +888,14 @@ def build_patrol_batch_summary(
     aggregate_duplicate_snapshots = 0
     aggregate_no_event_reasons: Counter[str] = Counter()
     suspected_format_change_count = 0
+    all_current_findings: list[dict[str, Any]] = []
+    aggregate_rule_domains: dict[str, dict[str, int]] = {}
+    aggregate_evaluated_observations = 0
+    aggregate_latest_observations = 0
+    aggregate_fault_rule_count = 0
+    rule_sources: Counter[str] = Counter()
+    rule_bundle_digests: set[str] = set()
+    rule_errors: set[str] = set()
 
     with get_db_session() as db:
         run_ids = [str(run.id) for run in runs]
@@ -474,18 +919,24 @@ def build_patrol_batch_summary(
         steps_by_run: dict[str, list[Any]] = {}
         for step in all_steps:
             steps_by_run.setdefault(str(step.run_id), []).append(step)
+        snapshot_run_by_workflow_run: dict[str, str] = {}
+        for workflow_run_id, steps in steps_by_run.items():
+            for step in steps:
+                snapshot_run_id = _find_nested_value(step.result or {}, "snapshot_run_id")
+                if snapshot_run_id:
+                    snapshot_run_by_workflow_run[workflow_run_id] = str(snapshot_run_id)
+                    break
+        frozen_rule_bundles = _frozen_event_rule_bundles(
+            db,
+            list(snapshot_run_by_workflow_run.values()),
+        )
+        runtime_rule_bundle: dict[str, Any] | None = None
         for run in runs:
             context = run.context or {}
             device_id = str(context.get("device_id") or "")
             device_name = str(context.get("device_name") or device_id or "-")
             steps = steps_by_run.get(str(run.id), [])
-            snapshot_run_id = None
-            for step in steps:
-                snapshot_run_id = _find_nested_value(
-                    step.result or {}, "snapshot_run_id"
-                )
-                if snapshot_run_id:
-                    break
+            snapshot_run_id = snapshot_run_by_workflow_run.get(str(run.id))
             changes: list[NetworkChangeRecord] = []
             events: list[NetworkEventRecord] = []
             snapshots: list[CommandSnapshot] = []
@@ -518,9 +969,7 @@ def build_patrol_batch_summary(
                 )
                 event_query = db.query(NetworkEventRecord)
                 try:
-                    occurrence_event_ids = db.query(
-                        NetworkEventOccurrenceRecord.event_id
-                    ).filter(
+                    occurrence_event_ids = db.query(NetworkEventOccurrenceRecord.event_id).filter(
                         NetworkEventOccurrenceRecord.run_id == str(snapshot_run_id)
                     )
                     event_query = event_query.filter(
@@ -533,9 +982,7 @@ def build_patrol_batch_summary(
                     event_query = event_query.filter(
                         NetworkEventRecord.run_id == str(snapshot_run_id)
                     )
-                events = event_query.order_by(
-                    NetworkEventRecord.occurred_at.desc()
-                ).all()
+                events = event_query.order_by(NetworkEventRecord.occurred_at.desc()).all()
             no_event_summary = {}
             for step in steps:
                 candidate = _find_nested_value(step.result or {}, "no_event_summary")
@@ -574,26 +1021,85 @@ def build_patrol_batch_summary(
                 {
                     "id": row.id,
                     "device_id": row.device_id,
+                    "device_name": device_name,
                     "command": row.canonical_command,
                     "entity_type": row.entity_type,
                     "entity_key": row.entity_key,
                     "field": row.field_name,
                     "observation_type": row.observation_type,
+                    "semantic_type": row.semantic_type,
                     "value": row.value_json,
                     "unit": row.unit,
                     "observed_at": _iso(row.observed_at),
+                    "source_type": row.source_type,
+                    "schema_id": row.schema_id,
+                    "parser_template_id": row.parser_template_id,
+                    "parser_version": row.parser_version,
+                    "contract_version": row.contract_version,
+                    "context": ((row.metadata_json or {}).get(APPLICABILITY_CONTEXT_KEY)),
                 }
                 for row in observation_rows
             ]
+            effective_rule_bundle = frozen_rule_bundles.get(str(snapshot_run_id or ""))
+            if effective_rule_bundle is None:
+                if runtime_rule_bundle is None:
+                    runtime_rule_bundle = _runtime_event_rule_bundle(db)
+                effective_rule_bundle = runtime_rule_bundle
+            rules = list(effective_rule_bundle.get("rules") or [])
+            if rules:
+                current_assessment = evaluate_current_state(
+                    observations,
+                    rules,
+                    rule_source=str(effective_rule_bundle.get("source") or "unknown"),
+                    rule_bundle_digest=effective_rule_bundle.get("digest"),
+                )
+            else:
+                current_assessment = {
+                    "available": False,
+                    "rule_source": str(effective_rule_bundle.get("source") or "unavailable"),
+                    "rule_bundle_digest": effective_rule_bundle.get("digest"),
+                    "active_fault_rule_count": 0,
+                    "latest_observation_count": len(observations),
+                    "evaluated_observation_count": 0,
+                    "finding_count": 0,
+                    "severity_counts": {},
+                    "by_domain": {},
+                    "findings": [],
+                    "error": effective_rule_bundle.get("error")
+                    or "没有可用于当前状态判定的活动 EventRule",
+                }
+            all_current_findings.extend(current_assessment["findings"])
+            aggregate_evaluated_observations += int(
+                current_assessment.get("evaluated_observation_count") or 0
+            )
+            aggregate_latest_observations += int(
+                current_assessment.get("latest_observation_count") or 0
+            )
+            aggregate_fault_rule_count = max(
+                aggregate_fault_rule_count,
+                int(current_assessment.get("active_fault_rule_count") or 0),
+            )
+            rule_sources.update([str(current_assessment.get("rule_source") or "unknown")])
+            if current_assessment.get("rule_bundle_digest"):
+                rule_bundle_digests.add(str(current_assessment["rule_bundle_digest"]))
+            if current_assessment.get("error"):
+                rule_errors.add(str(current_assessment["error"]))
+            for domain, values in dict(current_assessment.get("by_domain") or {}).items():
+                target = aggregate_rule_domains.setdefault(
+                    str(domain),
+                    {"evaluated_observation_count": 0, "finding_count": 0},
+                )
+                target["evaluated_observation_count"] += int(
+                    values.get("evaluated_observation_count") or 0
+                )
+                target["finding_count"] += int(values.get("finding_count") or 0)
             observation_by_id = {str(item["id"]): item for item in observations}
             serialized_changes: list[dict[str, Any]] = []
             for change in changes:
                 change_id = str(getattr(change, "id", "") or "")
                 old_value = change.old_value_json
                 new_value = change.new_value_json
-                suspected_format = suspected_format_change(
-                    change.field, old_value, new_value
-                )
+                suspected_format = suspected_format_change(change.field, old_value, new_value)
                 if suspected_format:
                     suspected_format_change_count += 1
                 current_observation = observation_by_id.get(
@@ -614,30 +1120,40 @@ def build_patrol_batch_summary(
                         "old_value": old_value,
                         "new_value": new_value,
                         "unit": (current_observation or {}).get("unit"),
-                        "change_type": getattr(change, "change_type", None)
-                        or "modified",
-                        "event_status": getattr(change, "event_status", None)
-                        or "unknown",
+                        "change_type": getattr(change, "change_type", None) or "modified",
+                        "event_status": getattr(change, "event_status", None) or "unknown",
                         "no_event_reason": reason or "unknown",
-                        "note": "疑似同一 IP 的前缀格式差异"
-                        if suspected_format
-                        else "",
+                        "note": "疑似同一 IP 的前缀格式差异" if suspected_format else "",
                         "detected_at": _iso(getattr(change, "detected_at", None)),
                     }
                 )
-            serialized_events = [
-                {
-                    "id": getattr(event, "id", None),
-                    "device_id": event.device_id,
-                    "device_name": device_name,
-                    "event_type": event.event_type,
-                    "severity": event.severity,
-                    "entity_type": event.entity_type,
-                    "entity_key": event.entity_key,
-                    "occurred_at": _iso(getattr(event, "occurred_at", None)),
-                }
-                for event in events
-            ]
+            serialized_events = []
+            for event in events:
+                payload = dict(getattr(event, "payload_json", None) or {})
+                rule_payload = dict(payload.get("rule") or {})
+                serialized_events.append(
+                    {
+                        "id": getattr(event, "id", None),
+                        "device_id": event.device_id,
+                        "device_name": device_name,
+                        "event_type": event.event_type,
+                        "severity": event.severity,
+                        "event_class": rule_payload.get("event_class")
+                        or payload.get("event_class")
+                        or "fault",
+                        "status": getattr(event, "status", None),
+                        "entity_type": event.entity_type,
+                        "entity_key": event.entity_key,
+                        "field": payload.get("field"),
+                        "current_value": payload.get("new"),
+                        "unit": payload.get("unit"),
+                        "rule_id": rule_payload.get("rule_id") or rule_payload.get("name"),
+                        "rule_version": rule_payload.get("version"),
+                        "condition": dict(rule_payload.get("condition") or {}),
+                        "domain": report_domain(event.entity_type, event.event_type),
+                        "occurred_at": _iso(getattr(event, "occurred_at", None)),
+                    }
+                )
             for event in events:
                 event_types[str(event.event_type or "unknown")] += 1
                 severities[str(event.severity or "unknown")] += 1
@@ -646,9 +1162,7 @@ def build_patrol_batch_summary(
             all_changes.extend(serialized_changes)
             all_events.extend(serialized_events)
             run_quality = quality_from_run_data(command_details, observations)
-            snapshot_command_counts = Counter(
-                row.canonical_command for row in snapshots
-            )
+            snapshot_command_counts = Counter(row.canonical_command for row in snapshots)
             duplicate_snapshot_count = sum(
                 count - 1 for count in snapshot_command_counts.values() if count > 1
             )
@@ -663,9 +1177,7 @@ def build_patrol_batch_summary(
             aggregate_observations += run_quality["observation_count"]
             aggregate_snapshot_count += len(snapshots)
             aggregate_duplicate_snapshots += duplicate_snapshot_count
-            aggregate_no_event_reasons.update(
-                no_event_summary.get("by_reason") or {}
-            )
+            aggregate_no_event_reasons.update(no_event_summary.get("by_reason") or {})
             run_rows.append(
                 {
                     "run_id": run.id,
@@ -681,20 +1193,25 @@ def build_patrol_batch_summary(
                     "observations": observations,
                     "changes": serialized_changes,
                     "events": serialized_events,
+                    "current_state_assessment": current_assessment,
+                    "current_findings": current_assessment["findings"],
                     "no_event_summary": no_event_summary,
                     "domain_checks": domain_checks(
                         observations=observations,
                         command_details=command_details,
                         changes=serialized_changes,
                         events=serialized_events,
+                        current_findings=current_assessment["findings"],
+                        rule_coverage=current_assessment,
                     ),
                 }
             )
         pipeline_summary = build_patrol_pipeline_summary(runs, steps_by_run)
+        scope = _batch_scope(db, patrol_batch_id, runs, status_counts)
     parser_rate = (
         aggregate_parser_ready / aggregate_parser_eligible
         if aggregate_parser_eligible
-        else 1.0
+        else (1.0 if runs else 0.0)
     )
     aggregate_quality = {
         "status": (
@@ -723,9 +1240,7 @@ def build_patrol_batch_summary(
     }
     no_event_total = sum(aggregate_no_event_reasons.values())
     if not no_event_total:
-        no_event_total = sum(
-            change.get("event_status") == "no_event" for change in all_changes
-        )
+        no_event_total = sum(change.get("event_status") == "no_event" for change in all_changes)
         aggregate_no_event_reasons.update(
             change.get("no_event_reason") or "unknown"
             for change in all_changes
@@ -742,12 +1257,10 @@ def build_patrol_batch_summary(
     )
     if missing_commands:
         action_items.append("补齐 Parser 模板：" + "、".join(missing_commands))
-    legacy_unmatched = int(
-        aggregate_no_event_reasons.get("no_active_rule_matched") or 0
+    legacy_unmatched = int(aggregate_no_event_reasons.get("no_active_rule_matched") or 0)
+    missing_rule_count = (
+        int(aggregate_no_event_reasons.get("no_active_event_rules") or 0) + legacy_unmatched
     )
-    missing_rule_count = int(
-        aggregate_no_event_reasons.get("no_active_event_rules") or 0
-    ) + legacy_unmatched
     evaluated_no_match_count = int(
         aggregate_no_event_reasons.get("active_rules_evaluated_no_match") or 0
     )
@@ -766,13 +1279,41 @@ def build_patrol_batch_summary(
     command_errors = int(aggregate_output_statuses.get("command_error") or 0)
     if command_errors:
         action_items.append(f"处理命令执行错误：{command_errors} 条")
-    return {
+    if aggregate_latest_observations and not aggregate_evaluated_observations:
+        action_items.append("补齐当前状态判定规则：结构化观测尚无可适用的活动 EventRule")
+    current_severities = Counter(
+        str(item.get("severity") or "unknown") for item in all_current_findings
+    )
+    current_event_types = Counter(
+        str(item.get("event_type") or "unknown") for item in all_current_findings
+    )
+    rule_coverage = {
+        "available": not bool(rule_errors) and bool(aggregate_fault_rule_count),
+        "active_fault_rule_count": aggregate_fault_rule_count,
+        "latest_observation_count": aggregate_latest_observations,
+        "evaluated_observation_count": aggregate_evaluated_observations,
+        "evaluation_rate": (
+            aggregate_evaluated_observations / aggregate_latest_observations
+            if aggregate_latest_observations
+            else 0.0
+        ),
+        "finding_count": len(all_current_findings),
+        "severity_counts": dict(current_severities),
+        "event_types": dict(current_event_types),
+        "by_domain": aggregate_rule_domains,
+        "sources": dict(rule_sources),
+        "bundle_digests": sorted(rule_bundle_digests),
+        "errors": sorted(rule_errors),
+        "error": "；".join(sorted(rule_errors)),
+    }
+    summary = {
         "patrol_batch_id": patrol_batch_id,
         "run_count": len(runs),
         "device_count": len(device_ids),
         "change_count": total_change_count,
         "event_count": total_event_count,
         "status_counts": dict(status_counts),
+        "scope": scope,
         "pipeline": pipeline_summary,
         "event_types": dict(event_types),
         "severities": dict(severities),
@@ -783,14 +1324,17 @@ def build_patrol_batch_summary(
             "by_reason": dict(aggregate_no_event_reasons),
             "missing_rule_count": missing_rule_count,
             "evaluated_no_match_count": evaluated_no_match_count,
-            "unmatched_rule_count": missing_rule_count
-            + evaluated_no_match_count,
+            "unmatched_rule_count": missing_rule_count + evaluated_no_match_count,
         },
         "suspected_format_change_count": suspected_format_change_count,
         "events": all_events,
         "changes": all_changes,
+        "current_findings": all_current_findings,
+        "current_finding_count": len(all_current_findings),
+        "current_state_rule_coverage": rule_coverage,
         "sample_events": all_events[:20],
         "sample_changes": all_changes[:20],
+        "sample_current_findings": all_current_findings[:20],
         "action_items": action_items,
         "deliverables": {
             "execution_ledger_url": (
@@ -801,7 +1345,17 @@ def build_patrol_batch_summary(
                 f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/raw-data.jsonl"
             ),
             "events_url": f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/events.csv",
-            "report_url": f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/report.md",
+            "report_url": f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/report.docx",
+            "report_json_url": (
+                f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/report.json"
+            ),
+            "technical_report_url": (
+                f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/report.md"
+            ),
             "csv_url": f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/export.csv",
         },
     }
+    leadership = build_leadership_report(patrol_batch_id, summary)
+    summary["assessment"] = leadership["assessment"]
+    summary["risk_summary"] = leadership["risk_summary"]
+    return summary

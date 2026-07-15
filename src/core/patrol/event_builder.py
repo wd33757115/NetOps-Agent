@@ -204,8 +204,7 @@ def summarize_no_event_changes(
     )
 
     by_reason = Counter(
-        no_event_reason(change, active_rule_count=active_rule_count)
-        for change in no_event_changes
+        no_event_reason(change, active_rule_count=active_rule_count) for change in no_event_changes
     )
     examples = [
         {
@@ -475,7 +474,33 @@ def _build_events_from_params_impl(
         heartbeat=heartbeat,
     )
     persist = params.get("persist", True)
-    persisted_event_count = save_events(events) if persist else 0
+    created_event_count = save_events(events) if persist else 0
+    event_persistence = {
+        "persisted_occurrence_count": created_event_count,
+        "created_event_count": created_event_count,
+        "updated_event_count": 0,
+        "recovered_event_count": 0,
+        "unique_event_count": created_event_count,
+        "open_after_run_count": created_event_count,
+        "resolved_after_run_count": 0,
+        "current_open_event_count": created_event_count,
+        "current_resolved_event_count": 0,
+        "open_event_count": created_event_count,
+        "resolved_event_count": 0,
+    }
+    if persist and run_id:
+        event_repository = ChangeEventRepository()
+        summarize_run_events = getattr(event_repository, "summarize_run_events", None)
+        if callable(summarize_run_events):
+            event_persistence = summarize_run_events(
+                run_id=str(run_id),
+                source_change_ids={
+                    str(change.get("change_id"))
+                    for change in changes or []
+                    if change.get("change_id")
+                },
+            )
+    persisted_event_count = int(event_persistence["persisted_occurrence_count"])
     event_change_ids = {event.source_change_id for event in events if event.source_change_id}
     event_change_ids = {str(change_id) for change_id in event_change_ids}
     no_event_count = 0
@@ -503,7 +528,19 @@ def _build_events_from_params_impl(
     result = {
         "success": True,
         "event_count": len(events),
+        "matched_event_count": len(events),
         "persisted_event_count": persisted_event_count,
+        "created_event_count": int(event_persistence["created_event_count"]),
+        "updated_event_count": int(event_persistence["updated_event_count"]),
+        "recovered_event_count": int(event_persistence["recovered_event_count"]),
+        "deduplicated_event_count": max(0, len(events) - persisted_event_count),
+        "unique_event_count": int(event_persistence["unique_event_count"]),
+        "open_after_run_count": int(event_persistence["open_after_run_count"]),
+        "resolved_after_run_count": int(event_persistence["resolved_after_run_count"]),
+        "current_open_event_count": int(event_persistence["current_open_event_count"]),
+        "current_resolved_event_count": int(event_persistence["current_resolved_event_count"]),
+        "open_event_count": int(event_persistence["open_event_count"]),
+        "resolved_event_count": int(event_persistence["resolved_event_count"]),
         "no_event_change_count": no_event_count,
         "no_event_summary": summarize_no_event_changes(
             list(changes or []),

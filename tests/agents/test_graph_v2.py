@@ -3,8 +3,8 @@
 
 """Supervisor v2 图编排单元测试（无 LLM / 无真实设备）。"""
 
-from src.agents.supervisor.heuristic_plan import build_heuristic_execution_plan as _build_heuristic_execution_plan
 from src.agents.supervisor.graph_v2 import (
+    INTERMEDIATE_RESULTS_RESET,
     _build_send_payload,
     _detect_dependency_cycle,
     _extract_ticket_id,
@@ -20,8 +20,11 @@ from src.agents.supervisor.graph_v2 import (
     orchestrator_dispatch,
     route_after_executor_v2,
 )
-from src.skill_system.router import SkillMatch
+from src.agents.supervisor.heuristic_plan import (
+    build_heuristic_execution_plan as _build_heuristic_execution_plan,
+)
 from src.agents.supervisor.models_v2 import ExecutionPlan, SkillTaskSpec
+from src.skill_system.router import SkillMatch
 
 
 def test_extract_ticket_id_from_query():
@@ -128,14 +131,18 @@ def test_next_runnable_task_respects_dependencies():
 def test_merge_dicts_reset_clears_stale_skill_results():
     stale = {"firewall-policy-generator": {"success": False, "error": "old"}}
     assert _merge_dicts(stale, INTERMEDIATE_RESULTS_RESET) == {}
-    assert _merge_dicts(stale, {"firewall-policy-generator": {"success": True}})["firewall-policy-generator"]["success"]
+    assert _merge_dicts(stale, {"firewall-policy-generator": {"success": True}})[
+        "firewall-policy-generator"
+    ]["success"]
 
 
 def test_orchestrator_runs_after_intermediate_reset():
     """模拟 pre_process 清空后，不应因 checkpoint 残留而跳过 Skill 执行。"""
     plan = ExecutionPlan(
         reasoning="防火墙",
-        skills=[SkillTaskSpec(skill_name="firewall-policy-generator", parameters={"ticket_id": "rg001"})],
+        skills=[
+            SkillTaskSpec(skill_name="firewall-policy-generator", parameters={"ticket_id": "rg001"})
+        ],
         execution_mode="parallel",
     )
     state = {
@@ -181,7 +188,9 @@ def test_orchestrator_sequential_single_send():
         reasoning="先巡检后备份",
         skills=[
             SkillTaskSpec(skill_name="device-inspection", parameters={}),
-            SkillTaskSpec(skill_name="config-backup", parameters={}, depends_on=["device-inspection"]),
+            SkillTaskSpec(
+                skill_name="config-backup", parameters={}, depends_on=["device-inspection"]
+            ),
         ],
         execution_mode="sequential",
     )

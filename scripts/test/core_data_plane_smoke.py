@@ -8,6 +8,10 @@ import json
 import sys
 from pathlib import Path
 
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, "reconfigure"):
+        stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
@@ -76,7 +80,7 @@ def main() -> int:
     assert events["event_count"] == 1
     assert readiness.parser_readiness_status == "ready"
     assert readiness.fact_readiness_status == "ready"
-    assert PatrolReportService.conclusion(
+    conclusion = PatrolReportService.conclusion(
         {
             "status_counts": {"completed": 1},
             "quality": {"status": "ready"},
@@ -84,7 +88,9 @@ def main() -> int:
             "change_count": 0,
             "event_count": 0,
         }
-    )["trust"] == "高"
+    )
+    assert conclusion["status"] == "未发现变化（健康未判定）"
+    assert conclusion["trust"] == "中"
     assert ParserRuntimeBundle.__module__ == "src.core.parser.runtime_bundle"
     assert PatrolRunCoordinator.__module__ == "src.core.patrol.run_coordinator"
 

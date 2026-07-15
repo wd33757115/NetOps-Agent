@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
-  Alert, Button, Col, Descriptions, Drawer, Input, Popconfirm, Row, Select, Space, Spin,
+  Alert, Button, Col, Descriptions, Divider, Drawer, Input, Popconfirm, Row, Select, Space, Spin,
   Statistic, Switch, Table, Tabs, Tag, Typography, message,
 } from 'antd'
 import {
@@ -22,6 +22,7 @@ import {
 } from '../../services/api'
 import { useIsMobile } from '../../hooks/useBreakpoint'
 import RuleAssetChainWorkspace from './parser/RuleAssetChainWorkspace'
+import RuleAssetBundleWorkspace from './parser/RuleAssetBundleWorkspace'
 import RuntimeAssetsWorkspace from './parser/RuntimeAssetsWorkspace'
 import {
   ChangePoliciesWorkspace,
@@ -45,6 +46,7 @@ import ParserGovernancePanel from './parser/ParserGovernancePanel'
 import StandardTableShell from './parser/StandardTableShell'
 import {
   codePanelStyle,
+  governanceAlertLabel,
   governanceStatusLabel,
   queryErrorLabel,
   shortDigest,
@@ -150,6 +152,14 @@ const ParserControlTab: React.FC = () => {
   const isMobile = useIsMobile()
   const [searchParams, setSearchParams] = useSearchParams()
   const searchKey = searchParams.toString()
+  const linkedOfflineJobId = searchParams.get('offline_job_id') || ''
+  const linkedDatasetIds = useMemo(() => {
+    const params = new URLSearchParams(searchKey)
+    return (params.get('dataset_ids') || params.get('dataset_id') || '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean)
+  }, [searchKey])
   const focus = useMemo(
     () => resolveParserControlFocus(new URLSearchParams(searchKey)),
     [searchKey],
@@ -177,6 +187,8 @@ const ParserControlTab: React.FC = () => {
   const [generationContextJob, setGenerationContextJob] = useState<ParserRuleGenerationJob | null>(null)
   const [generationContextOverrides, setGenerationContextOverrides] = useState('{\n  "records": []\n}')
   const [generationContextPreview, setGenerationContextPreview] = useState<ParserRuleGenerationContextPreview | null>(null)
+  const [generationContextDatasets, setGenerationContextDatasets] = useState<string[]>([])
+  const [generationContextId, setGenerationContextId] = useState<string | null>(null)
   const [jobOpen, setJobOpen] = useState(false)
   const [jobId, setJobId] = useState<string | null>(null)
   const [templateStatus, setTemplateStatus] = useState<string>()
@@ -245,6 +257,7 @@ const ParserControlTab: React.FC = () => {
     ruleJobAction,
     ruleJobAssetType,
     ruleJobSearch,
+    linkedDatasetIds,
   })
 
   const changeWorkspace = (nextWorkspace: string) => {
@@ -270,6 +283,21 @@ const ParserControlTab: React.FC = () => {
     const next = new URLSearchParams(searchParams)
     next.delete('focus')
     next.delete('id')
+    setSearchParams(next, { replace: true })
+  }
+
+  const clearDatasetContext = () => {
+    const next = new URLSearchParams(searchParams)
+    next.delete('offline_job_id')
+    next.delete('dataset_id')
+    next.delete('dataset_ids')
+    setSearchParams(next, { replace: true })
+  }
+
+  const openLinkedRuleBundles = () => {
+    const next = new URLSearchParams(searchParams)
+    next.set('workspace', 'today')
+    next.set('subtab', 'rule-generation')
     setSearchParams(next, { replace: true })
   }
 
@@ -507,17 +535,28 @@ const ParserControlTab: React.FC = () => {
   )
 
   const previewGenerationContext = useMutation(
-    ({ id, overrides }: { id: string; overrides: Record<string, unknown> }) =>
-      parserApi.previewRuleGenerationContext(id, { context_overrides: overrides }),
+    ({ id, overrides, datasetIds }: { id: string; overrides: Record<string, unknown>; datasetIds: string[] }) =>
+      parserApi.previewRuleGenerationContext(id, {
+        context_overrides: overrides,
+        dataset_ids: datasetIds.length ? datasetIds : undefined,
+        actor: 'ui',
+      }),
     {
-      onSuccess: setGenerationContextPreview,
+      onSuccess: (result) => {
+        setGenerationContextPreview(result)
+        setGenerationContextId(result.context_id || null)
+      },
       onError: (error: any) => message.error(error?.response?.data?.detail || '生成上下文预览失败'),
     },
   )
 
   const startRuleAssetGeneration = useMutation(
-    ({ id, overrides }: { id: string; overrides: Record<string, unknown> }) =>
-      parserApi.startRuleAssetGeneration(id, { context_overrides: overrides, actor: 'ui' }),
+    ({ id, overrides, contextId }: { id: string; overrides: Record<string, unknown>; contextId?: string }) =>
+      parserApi.startRuleAssetGeneration(id, {
+        context_overrides: overrides,
+        context_id: contextId,
+        actor: 'ui',
+      }),
     {
       onSuccess: (result: any) => {
         message.success(`已启动规则资产生成 Workflow：${result?.run_id || ''}`)
@@ -543,14 +582,34 @@ const ParserControlTab: React.FC = () => {
   }
 
   const openGenerationContext = (row: ParserRuleGenerationJob) => {
+    const linkedDatasets = (searchParams.get('dataset_ids') || searchParams.get('dataset_id') || '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean)
     setGenerationContextJob(row)
-    setGenerationContextOverrides(defaultGenerationContextOverrides(row))
+    setGenerationContextDatasets(linkedDatasets)
+    setGenerationContextOverrides(linkedDatasets.length ? '{}' : defaultGenerationContextOverrides(row))
+    setGenerationContextId(null)
     setGenerationContextPreview(null)
     setGenerationContextOpen(true)
   }
 
   const renderRuleGenerationActions = (row: ParserRuleGenerationJob) => {
     const approvalBlockers = ruleJobApprovalBlockers(row)
+    const bundledChild = Boolean(row.source_ref?.startsWith('rule_asset_bundle:'))
+    if (bundledChild || row.job_type === 'RULE_ASSET_BUNDLE') {
+      return (
+        <Space wrap>
+          <Button size="small" icon={<EyeOutlined />} loading={ruleJobPreviewLoading}
+            onClick={() => showRuleJobPreview(row.id)}>
+            预览
+          </Button>
+          <Typography.Text type="secondary">
+            {bundledChild ? '随资产包治理' : '请在资产包列表操作'}
+          </Typography.Text>
+        </Space>
+      )
+    }
     return (
     <Space wrap>
       <Button size="small" icon={<EyeOutlined />} loading={ruleJobPreviewLoading}
@@ -1108,6 +1167,15 @@ const ParserControlTab: React.FC = () => {
       <Col span={4}><Statistic title="待修复候选" value={coverage?.repair_candidates || 0} /></Col>
       <Col span={4}><Button icon={<ReloadOutlined />} title="刷新" onClick={refresh} /></Col>
     </Row>
+    {Boolean(coverage?.dialect_platform_violations) && (
+      <Alert
+        type={coverage?.dialect_runtime_blocked ? 'error' : 'warning'}
+        showIcon
+        message={`${coverage?.dialect_platform_violations || 0} 个 Active 模板待完成 ${coverage?.dialect_version || 'TextFSM'} 方言治理`}
+        description={`运行时阻断 ${coverage?.dialect_runtime_blocked || 0} 个；这些历史模板保持只读，替代候选通过回放和审批后再切换。`}
+        style={{ marginBottom: 12 }}
+      />
+    )}
     <Row gutter={16} style={{ marginBottom: 16 }}>
       <Col span={4}><Statistic title="生产待办" value={coverage?.production_open_jobs || 0} /></Col>
       <Col span={4}><Statistic title="待脱敏样本" value={coverage?.pending_sanitization_samples || 0} /></Col>
@@ -1120,7 +1188,7 @@ const ParserControlTab: React.FC = () => {
         key={item.code}
         type={item.severity}
         showIcon
-        message={`${item.message} (${item.count})`}
+        message={`${governanceAlertLabel(item.code, item.message)} (${item.count})`}
         style={{ marginBottom: 8 }}
       />
     ))}
@@ -1185,6 +1253,8 @@ const ParserControlTab: React.FC = () => {
         agentLoopAttempts={agentLoopAttempts}
         agentLoopAttemptsLoading={agentLoopAttemptsLoading}
         datasets={datasets}
+        linkedOfflineJobId={linkedOfflineJobId}
+        linkedDatasetIds={linkedDatasetIds}
         sourcePath={sourcePath}
         datasetId={datasetId}
         importPreview={importPreview}
@@ -1194,6 +1264,8 @@ const ParserControlTab: React.FC = () => {
         onDatasetIdChange={(value) => { setDatasetId(value); setImportPreview(null) }}
         onPreviewImport={() => importPreviewMutation.mutate()}
         onImport={() => importMutation.mutate()}
+        onClearDatasetFocus={clearDatasetContext}
+        onOpenRuleBundles={openLinkedRuleBundles}
       />
     ) : (
       <Tabs activeKey={activeSubWorkspace} onChange={changeSubWorkspace} items={[
@@ -1269,7 +1341,12 @@ const ParserControlTab: React.FC = () => {
             scroll={{ x: 980 }} />
         </Space> },
       { key: 'asset-chain', label: '资产链健康', children:
-        <RuleAssetChainWorkspace rows={ruleAssetChainRows} focusId={focus.id} /> },
+        <RuleAssetChainWorkspace
+          rows={ruleAssetChainRows}
+          focusId={focus.id}
+          seedJobs={ruleGenerationJobs.filter(isParserTemplateSeedJob)}
+          onGenerate={openGenerationContext}
+        /> },
       { key: 'runtime-assets', label: '运行时资产健康', children:
         <RuntimeAssetsWorkspace
           assets={runtimeAssets}
@@ -1282,8 +1359,13 @@ const ParserControlTab: React.FC = () => {
         /> },
       { key: 'rule-generation', label: `规则资产任务 (${ruleGenerationJobs.length})`, children:
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <RuleAssetBundleWorkspace
+            onAssetsChanged={refresh}
+            initialSearch={linkedOfflineJobId}
+          />
+          <Divider orientation="left" plain>兼容与专家任务</Divider>
           <Alert type="info" showIcon
-            message="规则资产任务用于治理 TextFSM、ObservationContract、ChangePolicy 与 EventRule 候选资产；只有审批激活后的版本才会进入生产运行时。" />
+            message="下表保留单资产 Job、历史修订和审计兼容入口。属于 Bundle 的子 Job 不能单独审批，正常发布请使用上方资产包流程。" />
           <Row gutter={[12, 12]}>
             <Col xs={12} md={6}>
               <Statistic title="待提交审批" value={ruleJobActionCounts.submit} />
@@ -1680,6 +1762,8 @@ const ParserControlTab: React.FC = () => {
         setGenerationContextOpen(false)
         setGenerationContextJob(null)
         setGenerationContextPreview(null)
+        setGenerationContextDatasets([])
+        setGenerationContextId(null)
       }}
       width={isMobile ? '100vw' : 920} destroyOnClose
       extra={<Space>
@@ -1688,7 +1772,11 @@ const ParserControlTab: React.FC = () => {
           onClick={() => {
             const overrides = parseGenerationOverrides()
             if (generationContextJob && overrides) {
-              previewGenerationContext.mutate({ id: generationContextJob.id, overrides })
+              previewGenerationContext.mutate({
+                id: generationContextJob.id,
+                overrides,
+                datasetIds: generationContextDatasets,
+              })
             }
           }}>
           预览上下文
@@ -1699,7 +1787,11 @@ const ParserControlTab: React.FC = () => {
           onClick={() => {
             const overrides = parseGenerationOverrides()
             if (generationContextJob && overrides) {
-              startRuleAssetGeneration.mutate({ id: generationContextJob.id, overrides })
+              startRuleAssetGeneration.mutate({
+                id: generationContextJob.id,
+                overrides,
+                contextId: generationContextId || undefined,
+              })
             }
           }}>
           启动生成
@@ -1725,6 +1817,28 @@ const ParserControlTab: React.FC = () => {
               : <Tag color="green">无</Tag>}
           </Descriptions.Item>
         </Descriptions>
+        <Space direction="vertical" size={6} style={{ width: '100%' }}>
+          <Typography.Text strong>离线巡检数据集</Typography.Text>
+          <Select
+            mode="multiple"
+            allowClear
+            placeholder="选择一个或多个离线数据集，系统自动构造脱敏 records 和历史数值"
+            value={generationContextDatasets}
+            onChange={(value) => {
+              setGenerationContextDatasets(value)
+              setGenerationContextOverrides(value.length ? '{}' : defaultGenerationContextOverrides(generationContextJob))
+              setGenerationContextPreview(null)
+              setGenerationContextId(null)
+            }}
+            options={datasets.map((item) => ({
+              value: item.dataset_id,
+              label: `${item.dataset_id} · ${item.device_count} 台 · ${item.snapshot_count} Snapshot`,
+            }))}
+          />
+          <Typography.Text type="secondary">
+            服务端只读取 structured_json，并执行敏感字段清除与设备身份假名化；原始 CLI 不会进入 LLM 上下文。
+          </Typography.Text>
+        </Space>
         <Input.TextArea rows={10} value={generationContextOverrides}
           onChange={(event) => {
             setGenerationContextOverrides(event.target.value)
@@ -1732,6 +1846,12 @@ const ParserControlTab: React.FC = () => {
           }}
           style={{ fontFamily: 'Consolas, Monaco, monospace' }}
           placeholder={'{\n  "records": [\n    { "interface": "GigabitEthernet1/0/1", "status": "up" }\n  ],\n  "historical_values": []\n}'} />
+        {generationContextPreview?.context_id && <Descriptions bordered size="small" column={isMobile ? 1 : 2}>
+          <Descriptions.Item label="不可变上下文"><Typography.Text copyable>{generationContextPreview.context_id}</Typography.Text></Descriptions.Item>
+          <Descriptions.Item label="Digest"><Typography.Text copyable>{generationContextPreview.context_digest}</Typography.Text></Descriptions.Item>
+          <Descriptions.Item label="采样记录">{String(generationContextPreview.privacy?.sampled_record_count ?? '-')}</Descriptions.Item>
+          <Descriptions.Item label="Raw CLI"><Tag color="green">未包含</Tag></Descriptions.Item>
+        </Descriptions>}
         {generationContextPreview && <Alert showIcon
           type={generationContextPreview.ready ? 'success' : 'warning'}
           message={generationContextPreview.ready ? '上下文已就绪，可以启动生成' : '上下文仍不完整'}

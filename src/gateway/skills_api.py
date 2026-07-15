@@ -59,7 +59,7 @@ async def catalog_reindex(force: bool = False):
     from src.skill_system.catalog import sync_and_index
 
     skill_system = get_skill_system()
-    stats = sync_and_index(skill_system.loader.list_all_metadata(), index=True)
+    stats = sync_and_index(skill_system.loader.list_all_metadata(), index=not force)
     if force:
         from src.skill_system.catalog.service import SkillCatalogService
 
@@ -86,7 +86,9 @@ async def update_skill_rollout(skill_name: str, request: SkillRolloutUpdateReque
 
 
 @router.post("/governance/archive-executions")
-async def archive_skill_executions_api(request: ArchiveExecutionsRequest = ArchiveExecutionsRequest()):
+async def archive_skill_executions_api(
+    request: ArchiveExecutionsRequest = ArchiveExecutionsRequest(),
+):
     from src.core.skills.archive import archive_skill_executions
 
     result = archive_skill_executions(

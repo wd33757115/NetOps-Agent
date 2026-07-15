@@ -1,6 +1,9 @@
 ---
 name: report-generator
 description: Regenerate Markdown patrol reports from persisted Changes and Events for a historical run.
+version: "1.1.0"
+entry_script: scripts/run.py
+entry_output: dir
 input_schema:
   type: object
   required: [run_id]
@@ -11,6 +14,7 @@ input_schema:
       type: string
     output_path:
       type: string
+      description: Administrator-only compatibility path used outside the platform executor.
     output_format:
       type: string
       enum: [markdown, html, xlsx]
@@ -23,6 +27,10 @@ output_schema:
       type: string
     output_path:
       type: string
+    output_filename:
+      type: string
+    artifacts:
+      type: object
 ---
 
 # report-generator

@@ -1,9 +1,10 @@
 import React from 'react'
-import { Alert, Button, Descriptions, Input, Progress, Select, Space, Switch, Table, Tag, Typography, type TableProps } from 'antd'
+import { Alert, Button, Descriptions, Input, Progress, Select, Space, Switch, Table, Tabs, Tag, Typography, type TableProps } from 'antd'
 import { DownloadOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
 import type { PatrolBatchDeviceItem, PatrolBatchDevicePage, PatrolBatchResultSummary, PatrolBatchSummary } from '../../services/api'
 import { useIsMobile } from '../../hooks/useBreakpoint'
 import PatrolBatchPipeline from './PatrolBatchPipeline'
+import OfflinePatrolPanel from './OfflinePatrolPanel'
 
 type TableColumns<T> = TableProps<T>['columns']
 
@@ -147,7 +148,7 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
   retryRunLoading,
 }) => {
   const isMobile = useIsMobile()
-  return (
+  const onlineContent = (
   <Space direction="vertical" size={8} style={{ width: '100%' }}>
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
       <div className="patrol-history__header">
@@ -254,12 +255,31 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
               <Descriptions.Item label="变化 / 事件">
                 {activeBatchResultSummary.change_count} / {activeBatchResultSummary.event_count}
               </Descriptions.Item>
+              <Descriptions.Item label="当前异常 / 规则评估">
+                {activeBatchResultSummary.current_finding_count || 0} / {activeBatchResultSummary.current_state_rule_coverage?.evaluated_observation_count || 0}
+              </Descriptions.Item>
               <Descriptions.Item label="事件类型">
                 {renderCounterTags(activeBatchResultSummary.event_types)}
               </Descriptions.Item>
             </>
           )}
         </Descriptions>
+
+        {activeBatchResultSummary?.assessment && (
+          <Alert
+            showIcon
+            type={activeBatchResultSummary.assessment.code.startsWith('abnormal')
+              ? 'error'
+              : activeBatchResultSummary.assessment.code === 'in_progress'
+                ? 'info'
+                : activeBatchResultSummary.assessment.code === 'normal_in_scope'
+                    || activeBatchResultSummary.assessment.code === 'normal_with_changes'
+                  ? 'success'
+                  : 'warning'}
+            message={`巡检结论：${activeBatchResultSummary.assessment.status}`}
+            description={`${activeBatchResultSummary.assessment.basis}（可信度：${activeBatchResultSummary.assessment.trust}）`}
+          />
+        )}
 
         <PatrolBatchPipeline
           batch={activeBatch}
@@ -326,12 +346,12 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
             </Button>
             <Button icon={<DownloadOutlined />} loading={exportBatchReportLoading}
               onClick={() => onExportBatchReport(activePatrolBatchId)}>
-              最终报告
+              巡检报告
             </Button>
           </Space>
           <Typography.Text type="secondary">
             原始输出按设备保留采集器生成的 .txt，并附完整设备清单和登录失败清单；
-            事件数据为 CSV，最终报告为 Markdown。
+            事件数据为 CSV；巡检报告为适合汇报与归档的 Word，技术明细和原始证据仍按批次留存。
           </Typography.Text>
         </Space>
 
@@ -414,6 +434,18 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
     )}
   </Space>
   )
+  return <Tabs
+    defaultActiveKey={new URLSearchParams(window.location.search).get('patrol_view') === 'offline' ? 'offline' : 'online'}
+    onChange={(value) => {
+      const url = new URL(window.location.href)
+      if (value === 'offline') url.searchParams.set('patrol_view', 'offline')
+      else url.searchParams.delete('patrol_view')
+      window.history.replaceState({}, '', url)
+    }}
+    items={[
+    { key: 'online', label: '在线巡检', children: onlineContent },
+    { key: 'offline', label: '离线巡检', children: <OfflinePatrolPanel /> },
+  ]} />
 }
 
 export default PatrolOperationsPanel

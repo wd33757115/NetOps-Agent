@@ -1,11 +1,15 @@
 import React from 'react'
-import { Alert, Descriptions, Space, Tag, Typography } from 'antd'
-import type { RuleAssetChainRow } from './parserWorkspaceModel'
+import { Alert, Button, Descriptions, Space, Tag, Tooltip, Typography } from 'antd'
+import { PlayCircleOutlined } from '@ant-design/icons'
+import type { ParserRuleGenerationJob } from '../../../services/api'
+import { asRecord, type RuleAssetChainRow } from './parserWorkspaceModel'
 import StandardTableShell from './StandardTableShell'
 
 interface RuleAssetChainWorkspaceProps {
   rows: RuleAssetChainRow[]
   focusId?: string | null
+  seedJobs?: ParserRuleGenerationJob[]
+  onGenerate?: (job: ParserRuleGenerationJob) => void
 }
 
 const chainStatus = (status: RuleAssetChainRow['status']) => {
@@ -14,7 +18,17 @@ const chainStatus = (status: RuleAssetChainRow['status']) => {
   return { color: 'orange', label: '待补事件规则' }
 }
 
-const RuleAssetChainWorkspace: React.FC<RuleAssetChainWorkspaceProps> = ({ rows, focusId }) => (
+const seedObservationType = (job: ParserRuleGenerationJob) => {
+  const defaults = asRecord(asRecord(job.payload_json)?.workflow_context_defaults)
+  return typeof defaults?.observation_type === 'string' ? defaults.observation_type : ''
+}
+
+const RuleAssetChainWorkspace: React.FC<RuleAssetChainWorkspaceProps> = ({
+  rows,
+  focusId,
+  seedJobs = [],
+  onGenerate,
+}) => (
   <Space direction="vertical" size={12} style={{ width: '100%' }}>
     <Alert
       type="info"
@@ -86,6 +100,26 @@ const RuleAssetChainWorkspace: React.FC<RuleAssetChainWorkspaceProps> = ({ rows,
             </Space>
           ),
         },
+        {
+          title: '下一步',
+          width: 150,
+          render: (_: unknown, row) => {
+            if (row.status === 'ready') return <Typography.Text type="secondary">持续观测</Typography.Text>
+            const seed = seedJobs.find((job) => seedObservationType(job) === row.observationType)
+            return (
+              <Tooltip title={seed ? '使用脱敏数据生成完整候选资产包' : '需要先激活对应 Parser 模板并形成生成种子'}>
+                <Button
+                  size="small"
+                  icon={<PlayCircleOutlined />}
+                  disabled={!seed || !onGenerate}
+                  onClick={() => seed && onGenerate?.(seed)}
+                >
+                  生成或补齐
+                </Button>
+              </Tooltip>
+            )
+          },
+        },
       ]}
       expandable={{
         expandedRowRender: (row) => (
@@ -102,7 +136,7 @@ const RuleAssetChainWorkspace: React.FC<RuleAssetChainWorkspaceProps> = ({ rows,
           </Descriptions>
         ),
       }}
-      scroll={{ x: 1150 }}
+      scroll={{ x: 1300 }}
     />
   </Space>
 )

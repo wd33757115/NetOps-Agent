@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import sys
@@ -7,7 +8,7 @@ from pathlib import Path
 
 from src.core.parser.contract_inference import ContractProposal
 from src.core.parser.contract_validation import infer_and_validate_contract
-
+from src.core.rule_control.generation_agent import ProviderResult
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SKILL_SCRIPT = (
@@ -34,6 +35,14 @@ def _run_skill(tmp_path: Path, params: dict, *, expect_success_exit: bool = True
     if expect_success_exit:
         assert completed.returncode == 0, completed.stderr or completed.stdout
     return json.loads(completed.stdout)
+
+
+def _load_skill_module():
+    spec = importlib.util.spec_from_file_location("observation_contract_skill", SKILL_SCRIPT)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_contract_validation_infers_interface_l3_primary_key():
@@ -114,6 +123,40 @@ def test_contract_validation_treats_false_as_present_for_required_field():
 
     assert result["success"] is True
     assert result["validation"]["missing_fields"] == []
+
+
+def test_contract_validation_checks_each_compiled_list_value():
+    proposal = ContractProposal(
+        category="measurement",
+        entity_type="measurement",
+        primary_keys=("name",),
+        required_fields=("name",),
+        optional_fields=("readings",),
+        validators={"readings": {"type": "number"}},
+    )
+
+    accepted = infer_and_validate_contract(
+        command="inspect measurements",
+        records=[{"name": "a", "readings": ["1.5", "2.5"]}],
+        proposal=proposal,
+    )
+    rejected = infer_and_validate_contract(
+        command="inspect measurements",
+        records=[{"name": "a", "readings": ["1.5", "invalid"]}],
+        proposal=proposal,
+    )
+
+    assert accepted["success"] is True
+    assert rejected["success"] is False
+    assert rejected["validation"]["value_errors"] == [
+        {
+            "record_index": 0,
+            "field": "readings",
+            "validator": "number",
+            "error": "value_not_numeric",
+            "value_index": 1,
+        }
+    ]
 
 
 def test_contract_validation_empty_output_requires_pattern_match():
@@ -226,3 +269,255 @@ def test_observation_contract_generator_skill_returns_revision_request(tmp_path:
     assert "choose stable non-empty primary keys" in result["agent_loop"][
         "revision_request"
     ]["required_fixes"]
+
+
+def test_contract_validation_scopes_primary_key_uniqueness_to_snapshot(tmp_path: Path):
+    proposal = {
+        "category": "interface",
+        "entity_type": "interface_l3",
+        "primary_keys": ["interface"],
+        "required_fields": ["interface", "status", "protocol"],
+        "optional_fields": [],
+    }
+    first = {"interface": "GE1/0/1", "status": "up", "protocol": "up"}
+    second = {"interface": "GE1/0/1", "status": "down", "protocol": "down"}
+
+    result = _run_skill(
+        tmp_path,
+        {
+            "mode": "validate",
+            "command": "display ip interface brief",
+            "proposal": proposal,
+            "records": [first, second],
+            "record_groups": [
+                {"group_id": "snapshot-a", "records": [first]},
+                {"group_id": "snapshot-b", "records": [second]},
+            ],
+        },
+    )
+
+    assert result["success"] is True
+    assert result["validation"]["snapshot_group_count"] == 2
+    assert result["validation"]["duplicate_key_count"] == 0
+
+
+def test_contract_validation_still_rejects_duplicates_inside_snapshot(tmp_path: Path):
+    duplicate = {"interface": "GE1/0/1", "status": "up", "protocol": "up"}
+    result = _run_skill(
+        tmp_path,
+        {
+            "mode": "validate",
+            "command": "display ip interface brief",
+            "proposal": {
+                "category": "interface",
+                "entity_type": "interface_l3",
+                "primary_keys": ["interface"],
+                "required_fields": ["interface", "status", "protocol"],
+                "optional_fields": [],
+            },
+            "records": [duplicate, duplicate],
+            "record_groups": [
+                {"group_id": "snapshot-a", "records": [duplicate, duplicate]}
+            ],
+        },
+        expect_success_exit=False,
+    )
+
+    assert result["success"] is False
+    assert result["validation"]["duplicate_key_count"] == 1
+
+
+def test_llm_loop_cannot_replace_approved_parser_contract(monkeypatch):
+    module = _load_skill_module()
+
+    class WeakThenCorrectProvider:
+        name = "weak-test-model"
+
+        def propose(
+            self,
+            *,
+            stage,
+            context,
+            attempt,
+            previous_candidate,
+            validator_feedback,
+        ):
+            assert stage == "observation_contract"
+            if attempt == 1:
+                candidate = {
+                    "category": "interface_status",
+                    "entity_type": "interface_status",
+                    "primary_keys": ["status"],
+                    "required_fields": ["interface"],
+                    "optional_fields": ["status"],
+                    "state_semantics": {
+                        "interface": {"semantic_type": "identity"},
+                        "status": {
+                            "semantic_type": "state",
+                            "observation_type": "interface/status",
+                        },
+                    },
+                }
+            else:
+                assert validator_feedback and validator_feedback.get("errors")
+                candidate = {
+                    "category": "interface_oper",
+                    "entity_type": "interface",
+                    "primary_keys": ["interface"],
+                    "required_fields": ["interface", "status"],
+                    "optional_fields": ["protocol"],
+                    "state_semantics": {
+                        "interface": {"semantic_type": "identity"},
+                        "status": {
+                            "semantic_type": "state",
+                            "observation_type": "interface.oper_status",
+                        },
+                        "protocol": {
+                            "semantic_type": "state",
+                            "comparison_role": "metadata",
+                            "monitor": False,
+                        },
+                    },
+                }
+            return ProviderResult(
+                candidate=candidate,
+                provider=self.name,
+                model_name="mock",
+            )
+
+    monkeypatch.setitem(
+        module.DEFAULT_RULE_GENERATION_PROVIDERS._factories,
+        "llm",
+        WeakThenCorrectProvider,
+    )
+    records = [
+        {"interface": "GE1/0/1", "status": "UP", "protocol": "UP"}
+    ]
+    result = module.run_contract_generation(
+        {
+            "mode": "infer_and_validate",
+            "command": "display interface brief",
+            "records": records,
+            "record_groups": [{"group_id": "snapshot-1", "records": records}],
+            "proposal": {
+                "category": "interface_oper",
+                "entity_type": "interface",
+                "primary_keys": ["interface"],
+                "required_fields": ["interface", "status"],
+                "optional_fields": ["protocol"],
+                "state_semantics": {
+                    "interface": {"semantic_type": "identity"},
+                    "status": {
+                        "semantic_type": "state",
+                        "observation_type": "interface.oper_status",
+                    },
+                    "protocol": {
+                        "semantic_type": "state",
+                        "comparison_role": "metadata",
+                        "monitor": False,
+                    },
+                },
+            },
+            "generation_provider": "llm",
+            "max_agent_attempts": 3,
+        }
+    )
+
+    assert result["success"] is True
+    assert result["proposal"]["entity_type"] == "interface"
+    assert list(result["proposal"]["primary_keys"]) == ["interface"]
+    assert result["proposal"]["state_semantics"]["status"]["observation_type"] == (
+        "interface.oper_status"
+    )
+    assert result["agent_loop"]["attempt_count"] == 2
+
+
+def test_llm_loop_requires_explicit_policy_target_decisions(monkeypatch):
+    module = _load_skill_module()
+
+    seed = {
+        "category": "network",
+        "entity_type": "interface_brief",
+        "primary_keys": ["interface"],
+        "required_fields": ["interface", "link"],
+        "optional_fields": ["protocol", "speed"],
+        "state_semantics": {
+            "interface": {"semantic_type": "identity"},
+            "link": {"semantic_type": "state"},
+            "protocol": {"semantic_type": "state"},
+            "speed": {"semantic_type": "gauge"},
+        },
+    }
+
+    class CopyThenDecideProvider:
+        name = "weak-test-model"
+
+        def propose(
+            self,
+            *,
+            stage,
+            context,
+            attempt,
+            previous_candidate,
+            validator_feedback,
+        ):
+            assert stage == "observation_contract"
+            if attempt == 1:
+                candidate = seed
+            else:
+                assert any(
+                    "must set observation_type" in error
+                    for error in validator_feedback["errors"]
+                )
+                candidate = {
+                    **seed,
+                    "state_semantics": {
+                        "interface": {"semantic_type": "identity"},
+                        "link": {
+                            "semantic_type": "state",
+                            "comparison_role": "observation",
+                            "monitor": True,
+                            "observation_type": "interface.oper_status",
+                        },
+                        "protocol": {
+                            "semantic_type": "state",
+                            "comparison_role": "metadata",
+                            "monitor": False,
+                        },
+                        "speed": {
+                            "semantic_type": "gauge",
+                            "comparison_role": "metadata",
+                            "monitor": False,
+                        },
+                    },
+                }
+            return ProviderResult(candidate=candidate, provider=self.name, model_name="mock")
+
+    monkeypatch.setitem(
+        module.DEFAULT_RULE_GENERATION_PROVIDERS._factories,
+        "llm",
+        CopyThenDecideProvider,
+    )
+    records = [
+        {"interface": "GE1/0/1", "link": "UP", "protocol": "UP", "speed": "10G"},
+        {"interface": "GE1/0/2", "link": "DOWN", "protocol": "DOWN", "speed": "10G"},
+    ]
+
+    result = module.run_contract_generation(
+        {
+            "mode": "infer_and_validate",
+            "command": "display interface brief",
+            "records": records,
+            "record_groups": [{"group_id": "snapshot-1", "records": records}],
+            "proposal": seed,
+            "generation_provider": "llm",
+            "max_agent_attempts": 3,
+        }
+    )
+
+    assert result["success"] is True
+    assert result["agent_loop"]["attempt_count"] == 2
+    assert result["proposal"]["state_semantics"]["link"]["observation_type"] == (
+        "interface.oper_status"
+    )
+    assert result["proposal"]["state_semantics"]["protocol"]["monitor"] is False

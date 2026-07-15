@@ -134,6 +134,62 @@ def test_observation_contract_rejects_same_version_different_digest():
             ).delete(synchronize_session=False)
 
 
+def test_create_contract_version_reuses_digest_and_allocates_next_version():
+    token = uuid.uuid4().hex
+    repository = ObservationContractRepository()
+    schema_id = f"generated-template-{token}"
+    base = {
+        "entity_type": "generic_sensor",
+        "primary_keys": ["sensor_id"],
+        "required_fields": ["sensor_id", "measurement"],
+        "state_semantics": {
+            "sensor_id": {"semantic_type": "identity"},
+            "measurement": {
+                "semantic_type": "gauge",
+                "observation_type": "generic.measurement",
+            },
+        },
+    }
+    try:
+        first = repository.create_contract_version(
+            source_type="cli",
+            schema_id=schema_id,
+            validation=base,
+            status="draft",
+        )
+        repeated = repository.create_contract_version(
+            source_type="cli",
+            schema_id=schema_id,
+            validation=base,
+            status="draft",
+        )
+        second = repository.create_contract_version(
+            source_type="cli",
+            schema_id=schema_id,
+            validation={
+                **base,
+                "state_semantics": {
+                    **base["state_semantics"],
+                    "measurement": {
+                        **base["state_semantics"]["measurement"],
+                        "context_fields": ["low_reference"],
+                    },
+                },
+            },
+            status="draft",
+        )
+
+        assert repeated.contract_id == first.contract_id
+        assert first.version == 1
+        assert second.version == 2
+        assert second.contract_sha256 != first.contract_sha256
+    finally:
+        with get_db_session() as db:
+            db.query(ObservationContractRecord).filter(
+                ObservationContractRecord.schema_id == schema_id
+            ).delete(synchronize_session=False)
+
+
 def test_parser_template_status_change_deactivates_observation_contract():
     token = uuid.uuid4().hex
     repository = ParserRepository()
@@ -247,7 +303,6 @@ def test_template_activation_deprecates_previous_observation_contract():
             )
             is not None
         )
-
         repository.activate_template(
             second_id,
             approved_by="unit-test",
@@ -312,5 +367,57 @@ def test_template_activation_deprecates_previous_observation_contract():
                 ObservationContractRecord.source_template_id.in_([first_id, second_id])
             ).delete(synchronize_session=False)
             db.query(ParserTemplate).filter(ParserTemplate.id.in_([first_id, second_id])).delete(
+                synchronize_session=False
+            )
+
+
+def test_template_registration_is_idempotent_for_one_agent_attempt():
+    token = uuid.uuid4().hex
+    repository = ParserRepository()
+    common = {
+        "vendor": "H3C",
+        "model": f"S6860-{token}",
+        "family": "Comware7",
+        "profile": f"S6860-{token}",
+        "command": "display interface brief",
+        "category": "interface",
+        "version": f"agent-{token}",
+        "asset_path": f"/tmp/agent-{token}.textfsm",
+        "sha256": "a" * 64,
+        "source_job_id": f"job-{token}",
+        "status": "pending_approval",
+        "validation": {
+            "entity_type": "interface",
+            "primary_keys": ["interface"],
+            "required_fields": ["interface", "status"],
+        },
+    }
+    template_id = repository.register_template(**common)
+    try:
+        assert repository.register_template(**common) == template_id
+        with get_db_session() as db:
+            assert (
+                db.query(ParserTemplate)
+                .filter(
+                    ParserTemplate.vendor == common["vendor"],
+                    ParserTemplate.profile == common["profile"],
+                    ParserTemplate.canonical_command == common["command"],
+                    ParserTemplate.version == common["version"],
+                )
+                .count()
+                == 1
+            )
+            assert (
+                db.query(ObservationContractRecord)
+                .filter(ObservationContractRecord.source_template_id == template_id)
+                .count()
+                == 1
+            )
+    finally:
+        with get_db_session() as db:
+            db.query(ObservationContractRecord).filter(
+                ObservationContractRecord.source_template_id == template_id
+            ).delete(synchronize_session=False)
+            db.query(ParserTemplate).filter(ParserTemplate.id == template_id).delete(
                 synchronize_session=False
             )

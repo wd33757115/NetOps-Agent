@@ -50,6 +50,7 @@ celery = Celery(
         "src.core.workflows.tasks",
         "src.core.parser.tasks",
         "src.core.patrol.tasks",
+        "src.core.patrol.offline_tasks",
     ],
 )
 
@@ -75,6 +76,7 @@ _celery_conf: dict = {
         "materialize_patrol_batch_report": {"queue": "netops.patrol"},
         "publish_network_event_outbox": {"queue": "netops.patrol"},
         "reconcile_patrol_runs": {"queue": "netops.patrol"},
+        "preview_offline_patrol_job": {"queue": "netops.patrol"},
         "dispatch_parser_jobs": {"queue": "netops.ai"},
         "publish_parser_outbox": {"queue": "netops.ai"},
         "sanitize_parser_samples": {"queue": "netops.ai"},

@@ -1,206 +1,165 @@
 # 巡检与 Parser 双模式使用手册
 
-## 1. 运行模式
+## 1. 数据与职责边界
 
-| 模式 | 用途 | Snapshot 数据库 | 模板候选 |
+巡检 Snapshot、Dataset、Parser 任务、状态、变化和事件统一存储在 PostgreSQL。
+浏览器上传的原始 CLI 保存在 MinIO 私有目录，并通过 `FileMetadata` 进行所有权和访问控制。
+
+| 模式 | 用途 | Snapshot 数据面 | 后续处理 |
 |---|---|---|---|
-| `parser_validation` | 收集和验证新设备、新版本、新输出格式 | `src/skills/shared/databases/parser-validation.db` | 可创建 CREATE/REPAIR 任务 |
-| `production` | 正式巡检、变化检测和事件构建 | `src/skills/shared/databases/patrol.db` | 禁止创建模板任务 |
+| `parser_validation` | 收集和验证新设备、新版本、新输出格式 | PostgreSQL validation Dataset | 可创建或修复 Parser 候选，不生成 Change/Event |
+| `production` | 正式巡检和历史周期分析 | PostgreSQL production Dataset | State、Change、Event、Report |
 
-设备清单由 `device-patrol` 和 `device-backup` 共用：
+旧 SQLite 文件不是运行数据源。`file_path` 仅作为管理员在服务器本机执行的兼容入口，
+普通用户应通过设备巡检页上传文件。
 
-`src/skills/shared/databases/devices.db`
+## 2. 两套操作入口
 
-三个 SQLite 文件均为本地私有运行数据，不应提交到 Git。
+### 设备巡检页
 
-## 2. 解析验证流程
+访问 `/devices?tab=patrol&patrol_view=offline`，用于：
+
+- 创建单周期解析验证任务；
+- 创建双周期变化分析任务；
+- 上传多文件、文件夹或 ZIP；
+- 预览设备身份、命令、Parser 状态和质量门禁；
+- 确认 Inventory 设备绑定；
+- 查看 Workflow、Change、Event 和报告；
+- 下载原始输出、设备列表及失败设备列表。
+
+任务列表采用服务端分页，支持搜索、用途、状态和归档筛选。
+
+### Skills / Parser 控制面
+
+用于处理离线任务发现的资产缺口：
+
+- `template_missing/parse_failed` 进入 Parser 候选生成、验证和激活；
+- active Parser 模板激活后幂等创建 `OBSERVATION_CONTRACT` 规则生成任务；
+- 从离线 Dataset 构建不可变 sanitized context；
+- 由 LLM 生成 ObservationContract、ChangePolicy 和 EventRule 候选；
+- 通过合成验证、历史回放、碰撞检查和审批后激活。
+
+新规则不会由离线导入代码硬编码。手工 JSON 和内置 Provider/Registry 仍作为兼容、测试及
+紧急兜底接口保留。
+
+## 3. 单周期解析验证
 
 ```text
-测试设备或离线巡检文件
+浏览器上传原始 CLI
+  -> OfflinePatrolJob(parser_validation)
+  -> 异步预览（不写 Snapshot）
+  -> 设备绑定确认
+  -> parser-validation-ingest
   -> patrol-raw-ingestor(mode=parser_validation)
-  -> parser-validation.db
-  -> ParserPolicy / Identity / Active Template
+  -> PostgreSQL Dataset / Snapshot
   -> CREATE_TEMPLATE 或 REPAIR_TEMPLATE 候选
-  -> textfsm-generator(job_id)
-  -> draft 模板
-  -> 审批并激活
+  -> textfsm-generator
+  -> 验证、审批、激活
 ```
 
-推荐通过 `parser-validation-ingest` Workflow，或直接调用：
+允许出现 `template_missing` 和 `parse_failed`，因为该模式的目的就是发现和修复 Parser。
+预览不会写 Snapshot，也不会创建候选任务；正式执行才会持久化。
 
-```json
-{
-  "file_path": "C:\\patrol-samples",
-  "mode": "parser_validation",
-  "run_id": "parser-validation-2026q2"
-}
-```
+## 4. 双周期变化分析
 
-命令不在结构化白名单时为 `ignored`，不会创建模板任务。身份不可靠时为 `identity_unknown`，也不会调用 LLM。
-
-## 3. 生成模板
-
-生产模板只能来自验证库中的控制面 Job：
-
-```json
-{
-  "job_id": "<parser_template_job_id>",
-  "minimum_sample_pass_rate": 1.0,
-  "publish": true
-}
-```
-
-Generator 生成并验证 draft，但不直接激活。目录和直接输入只用于发现、聚合与验证：
-
-```json
-{
-  "source_path": "C:\\patrol-samples",
-  "recursive": true,
-  "publish": false
-}
-```
-
-如果 Job 的任一样本不来自 `parser-validation.db`，Generator 会拒绝执行。
-
-## 4. 正式巡检流程
+baseline 的采集时间必须早于 current。执行流程为：
 
 ```text
-devices.db 中的 vendor + model
-  -> Parser 覆盖率预检
-  -> 通过后连接设备并采集
-  -> patrol.db
-  -> change-detector
-  -> event-builder
+执行前质量门禁
+  -> 导入 baseline
+  -> State Normalizer(update_current_state=false)
+  -> 导入 current
+  -> State Normalizer(update_current_state=false)
+  -> Change Detector
+  -> Event Builder
+  -> Report Generator
 ```
 
-正式模式遇到以下情况会报错，且不会触发 Generator：
+默认 `publish_events=false`，事件只作为本次历史分析结果保留；用户明确确认后才可发布到
+正式事件流。
 
-- 应结构化命令缺少 active 模板；
-- 设备 `vendor/model` 不完整；
-- 模板文件缺失或哈希不一致；
-- active 模板解析失败或返回非法空结果。
+以下情况会阻断执行：
 
-调用示例：
+- 文件损坏、哈希不符或没有可识别命令；
+- baseline 时间不早于 current；
+- 两个周期没有共同设备；
+- 关键结构化命令缺模板、解析失败或身份不明；
+- 比较字段缺少 active Contract、ChangePolicy 或 EventRule；
+- 设备匹配存在未确认歧义。
 
-```json
-{
-  "filter_params": {"device_name": "PE01"},
-  "mode": "production",
-  "save_baseline": false
-}
-```
+## 5. 幂等与重试
 
-标准 `patrol-change-event` Workflow 已固定使用 `production`。
-
-## 5. 设备库
-
-设备表分别保存厂商和精确型号：
+任务创建和 Workflow 执行均使用幂等键。每次重试生成新的 attempt，并使用确定性的
+PatrolRun ID：
 
 ```text
-vendor = H3C
-model  = S5130S-54S-HI-G
+{offline_job_id}-{period_role}-attempt-{attempt_number}
 ```
 
-不要合并为 `H3C S5130S-54S-HI-G`。现有数据库首次打开时会自动增加 `vendor` 列。
+Snapshot 使用源文件哈希、设备、规范化命令和原始输出哈希生成导入指纹。重复上传或重试
+不会重复写入相同 Snapshot。一个周期的所有文件共用一个 PatrolRun，全部文件处理完成后
+统一结束该 Run。
 
-测试初始化：
+## 6. LLM 上下文安全
 
-```powershell
-.\venv\Scripts\python.exe src\skills\device-backup\scripts\init_test_db.py
-```
-
-## 6. 查看、审批和激活
+规则生成上下文只查询以下 Snapshot 投影：
 
 ```text
-GET  /api/v1/parser/jobs
-GET  /api/v1/parser/templates
-GET  /api/v1/parser/templates/{template_id}/preview
-POST /api/v1/parser/templates/{template_id}/activate
-POST /api/v1/parser/templates/{template_id}/reject
+dataset_id
+device_id
+observed_at
+structured_json
 ```
 
-模板预览是只读操作，展示 TextFSM 内容、SHA-256 校验结果和生成时的验证报告。
+服务不会读取或发送 `raw_text`。上下文还会执行：
 
-## 7. 故障处理
+- 字段白名单和敏感键移除；
+- 设备名、管理 IP、邻居 IP 的稳定假名化；
+- 多 Dataset 轮询采样；
+- 数值字段 `historical_values` 自动生成；
+- context digest 和隐私检查报告持久化。
 
-`production patrol blocked by parser coverage preflight`：
-先用验证模式采集同型号、同版本样本，完成模板生成、审批和激活。
+生成 Workflow 使用不可变 `context_id`。上下文存在敏感数据、缺少有效 Parser 或历史回放
+存在碰撞时，不允许审批激活。
 
-`identity_unknown`：
-检查 `devices.db` 的 `vendor/model`，或补充
-PostgreSQL 中已确认的 `parser_device_profiles` 和
-`parser_identity_signatures`。首次未知型号只允许在 parser-validation
-模式通过通用厂商指纹和版本输出发现，审批模板后再固化身份资产。
+## 7. API
 
-Generator 拒绝数据库：
-确认 Job 样本来自
-`src/skills/shared/databases/parser-validation.db`。
-
-PostgreSQL 不可用：
-Parser 控制面是强依赖，应先恢复数据库连接，巡检不会绕过控制面运行。
-
-## 8. 数据边界
-
-- `devices.db`：设备资产和凭据。
-- `parser-validation.db`：模板研发样本，不参与正式变化分析。
-
-## 数据集、幂等与预览
-
-测试巡检导入支持 `dataset_id`，建议按季度或测试批次命名，例如
-`xian-2025Q3`、`xian-2025Q4`。Parser 控制面的“数据集覆盖率”页面按数据集展示：
-
-- 结构化覆盖率；
-- 缺模板率；
-- 解析失败率；
-- 合法空结果率；
-- 主键稳定率。
-
-写入前应先执行导入预览。预览只读取和解析文件，不创建 Snapshot 或模板任务，
-并返回预计新增、重复、模板就绪、缺模板、解析失败、忽略及身份未知数量。
-
-Snapshot 导入指纹由以下内容生成：
+离线巡检入口：
 
 ```text
-源文件哈希 + device_id + canonical_command + 原始输出哈希
+POST   /api/v1/patrol/offline-jobs
+GET    /api/v1/patrol/offline-jobs
+GET    /api/v1/patrol/offline-jobs/{job_id}
+POST   /api/v1/patrol/offline-jobs/{job_id}/sources
+POST   /api/v1/patrol/offline-jobs/{job_id}/preview
+POST   /api/v1/patrol/offline-jobs/{job_id}/device-bindings/confirm
+POST   /api/v1/patrol/offline-jobs/{job_id}/execute
+POST   /api/v1/patrol/offline-jobs/{job_id}/cancel
+POST   /api/v1/patrol/offline-jobs/{job_id}/retry
+POST   /api/v1/patrol/offline-jobs/{job_id}/archive
+GET    /api/v1/patrol/offline-jobs/{job_id}/artifacts/{kind}
 ```
 
-相同指纹再次导入时直接复用原 Snapshot，不会重复创建候选任务。
-
-## 任务合并与自动退役
-
-开放任务按以下维度合并：
+规则生成入口继续使用 Parser 控制面：
 
 ```text
-job_type + vendor + model/family + canonical_command + output_signature
+POST /api/v1/parser/rule-generation-jobs/{job_id}/generation-context
+POST /api/v1/parser/rule-generation-jobs/{job_id}/start-generation
 ```
 
-新 Snapshot 追加到已有开放任务。重新使用共享测试库导入时，仍引用旧
-`.runtime/patrol/control-plane-*.db` 的任务会标记为 `superseded`，默认不再调度。
+请求可传 `dataset_ids` 生成不可变上下文，或传已有 `context_id`。手工
+`context_overrides` 保持兼容，但不可覆盖不可变上下文中的 `records` 和
+`historical_values`。
 
-## 数据契约与回归验证
+## 8. 本地验收数据
 
-每个模板版本同时固化数据契约及其 SHA-256：
+完整本地验收使用 `lixian` 目录：
 
-```text
-entity_type
-primary_keys
-required_fields
-optional_fields
-validators
-allow_empty
-empty_patterns
-ignore_fields
-```
+| 周期 | 文件 | 设备 | 命令 |
+|---|---:|---:|---:|
+| Q1 | 2 | 2 | 54 |
+| Q2 | 2 | 2 | 44 |
+| Q3 | 2 | 2 | 54 |
 
-生成器除验证触发任务的样本外，还会加载共享测试库中同厂商、同型号、同命令的
-历史 Snapshot 作为回归集。候选模板必须通过全部回归样本才能激活。
-
-模板激活前，控制面会展示当前 active 模板与候选模板在相同 Snapshot 上的：
-
-- 解析状态；
-- 结构化记录；
-- 数据契约哈希变化；
-- 结果差异。
-- `patrol.db`：通过生产覆盖率门禁的正式 Snapshot。
-- PostgreSQL：模板、任务、样本引用、解析版本和 Outbox 的权威控制面。
-- `src/skills/shared/textfsm-templates/`：不可变模板文件。
+预览应识别 SW1/SW2、管理 IP、接口状态和光衰命令。完整目录只用于本地或预发布 E2E；
+CI 使用从中提取的最小脱敏样本。

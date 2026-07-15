@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field
@@ -87,7 +87,7 @@ class SkillMetadata(BaseModel):
     hidden: bool = Field(False, description="是否隐藏（不显示在列表）")
     fallback_to_rag: bool = Field(True, description="失败时是否走 RAG")
     celery_task: str | None = Field(None, description="关联的 Celery 任务（execution_mode=async 时）")
-    execution_mode: str = Field(
+    execution_mode: Literal["sync", "async"] = Field(
         "async",
         description="执行模式：sync（同步）或 async（Celery 异步，默认）",
     )
@@ -241,6 +241,8 @@ def parse_skill_md(file_path: Path, include_instructions: bool = True) -> SkillM
         enabled=frontmatter.get('enabled', True),
         hidden=frontmatter.get('hidden', False),
         fallback_to_rag=frontmatter.get('fallback_to_rag', True),
+        celery_task=frontmatter.get('celery_task'),
+        execution_mode=str(frontmatter.get('execution_mode', 'async')).strip().lower(),
         skill_path=str(skill_dir),
         skill_md_path=str(file_path)
     )

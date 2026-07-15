@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: rule-asset-generation
-description: 离线生成、验证、历史回放并持久化 ObservationContract、ChangePolicy 和 EventRule 候选资产
-version: "1.2"
+description: 使用脱敏结构化数据生成、验证、回放并持久化完整规则资产包
+version: "2.0"
 
 test:
   context:
@@ -11,6 +11,9 @@ test:
     vendor: Generic
     model: LAB
     source_ref: workflow:test:rule-asset-generation
+    schema_id: workflow-test-cpu
+    generation_provider: builtin
+    max_agent_attempts: 3
     records:
       - slot: "0"
         cpu_5s: "18"
@@ -28,13 +31,11 @@ test:
     historical_values: [18, 20, 25, 40, 88, 92]
     device_role: lab
     policy_intent: CPU 高利用率需要产生告警，恢复阈值必须低于告警阈值
-    event_intent: 生成 CPUHigh 和 CPURecovered 候选规则
+    event_intent: 生成 CPUHigh 与 CPURecovered 候选规则
     replay_limit: 1000
   required_context:
     - command
     - records
-    - observation_type
-    - field_name
 
 steps:
   - name: observation_contract
@@ -46,20 +47,36 @@ steps:
       vendor: ${context.vendor}
       model: ${context.model}
       records: ${context.records}
+      record_groups: ${context.record_groups}
       proposal: ${context.proposal}
+      policy_intent: ${context.policy_intent}
+      event_intent: ${context.event_intent}
+      generation_provider: ${context.generation_provider}
+      max_agent_attempts: ${context.max_agent_attempts}
       agent_loop: true
+
+  - name: rule_target_planning
+    label: Compile validated rule targets
+    skill: rule-target-planner
+    inputs:
+      contract: ${steps.observation_contract.result.proposal}
+      records: ${context.records}
 
   - name: change_policy
     label: 生成变化策略
     skill: change-policy-generator
     inputs:
       mode: infer_and_validate
-      observation_type: ${context.observation_type}
-      field_name: ${context.field_name}
-      field_semantics: ${context.field_semantics}
+      observation_type: ${steps.rule_target_planning.result.observation_type}
+      field_name: ${steps.rule_target_planning.result.field_name}
+      policy_targets: ${steps.rule_target_planning.result.policy_targets}
+      records: ${context.records}
       historical_values: ${context.historical_values}
+      historical_values_by_field: ${steps.rule_target_planning.result.historical_values_by_field}
       device_role: ${context.device_role}
       policy_intent: ${context.policy_intent}
+      generation_provider: ${context.generation_provider}
+      max_agent_attempts: ${context.max_agent_attempts}
       agent_loop: true
 
   - name: event_rule
@@ -68,7 +85,12 @@ steps:
     inputs:
       contract: ${steps.observation_contract.result.proposal}
       change_policy: ${steps.change_policy.result.policy}
+      change_policies: ${steps.change_policy.result.policies}
       intent: ${context.event_intent}
+      event_constraints: ${context.event_constraints}
+      event_constraints_by_observation_type: ${context.event_constraints_by_observation_type}
+      generation_provider: ${context.generation_provider}
+      max_agent_attempts: ${context.max_agent_attempts}
       agent_loop: true
 
   - name: event_rule_validation
@@ -85,17 +107,23 @@ steps:
     inputs:
       candidate_rules: ${steps.event_rule.result.rules}
       limit: ${context.replay_limit}
+      run_ids: ${context.replay_run_ids}
       include_active_collisions: true
 
   - name: persist_assets
-    label: 持久化候选资产
+    label: 持久化规则资产包
     skill: rule-asset-persister
     inputs:
       source_ref: ${context.source_ref}
+      schema_id: ${context.schema_id}
+      schema_ref: ${context.schema_ref}
+      source_template_id: ${context.source_template_id}
       command: ${context.command}
       vendor: ${context.vendor}
       model: ${context.model}
-      observation_type: ${context.observation_type}
+      observation_type: ${steps.rule_target_planning.result.observation_type}
+      rule_generation_context_id: ${context.rule_generation_context_id}
+      rule_generation_context_digest: ${context.rule_generation_context_digest}
       contract_result: ${steps.observation_contract.result}
       change_policy_result: ${steps.change_policy.result}
       event_rule_result: ${steps.event_rule.result}
@@ -103,8 +131,8 @@ steps:
       event_rule_replay: ${steps.event_rule_replay.result}
 
 on_complete:
-  message: 规则资产候选生成、验证、历史回放与持久化已完成
+  message: 规则资产包生成、验证、历史回放与持久化已完成
   notification:
-    title: 规则资产生成完成
-    body: ObservationContract、ChangePolicy 和 EventRule 候选资产已保存；通过验证和回放的任务已进入待审批。
+    title: 规则资产包生成完成
+    body: 候选资产已保存；只有全部门禁通过的 Bundle 才能整包审批并原子发布。
     level: success

@@ -12,6 +12,10 @@ from src.core.observation import ObservationContractRepository
 from src.core.parser.key_contract import EntityKeyError, build_entity_key
 from src.core.parser.repository import ParserTemplateRepository
 from src.core.state.domain import StateObservation
+from src.core.state.observation_applicability import (
+    APPLICABILITY_CONTEXT_KEY,
+    applicability_context_fields,
+)
 from src.core.state.repository import StateRepository
 
 DEFAULT_IGNORE_FIELDS = {"uptime"}
@@ -160,17 +164,17 @@ def observations_from_snapshot(
     mode: str,
     source: str,
     dataset_id: str | None,
+    observation_contract_version: int | None = None,
 ) -> list[StateObservation]:
     structured = snapshot.get("structured_json")
     if structured is None:
         return []
-    snapshot_contract_version = snapshot.get("contract_version")
     contract = (
         _template_contract(
             snapshot.get("parser_template_id"),
-            contract_version=int(snapshot_contract_version),
+            contract_version=int(observation_contract_version),
         )
-        if snapshot_contract_version is not None
+        if observation_contract_version is not None
         else _template_contract(snapshot.get("parser_template_id"))
     )
     if (snapshot.get("metadata_json") or {}).get("handling") == "raw_hash_diff":
@@ -193,6 +197,189 @@ def observations_from_snapshot(
     observations: list[StateObservation] = []
     external_device_id = str(snapshot["device_id"])
     state_device_id = str(snapshot.get("inventory_device_id") or external_device_id)
+
+    def append_observation(
+        *,
+        record: dict[str, Any],
+        entity_key: str,
+        field_name: str,
+        raw_value: Any,
+        value_index: int | None,
+    ) -> None:
+        normalized_field_name = str(field_name).strip().lower()
+        validator = validators.get(field_name) or validators.get(normalized_field_name)
+        if not isinstance(validator, dict):
+            validator = {}
+        value = _normalize_observation_value(
+            str(field_name),
+            raw_value,
+            validator=validator,
+        )
+        field_semantics = state_semantics.get(field_name) or state_semantics.get(
+            normalized_field_name
+        )
+        if not isinstance(field_semantics, dict):
+            field_semantics = {}
+        field_semantics = dict(field_semantics)
+        validator_type = str(validator.get("type") or "").lower()
+        if validator_type == "percent":
+            field_semantics.setdefault("semantic_type", "percentage")
+            field_semantics.setdefault("unit", "%")
+        elif validator_type == "ip_or_unassigned":
+            field_semantics.setdefault("semantic_type", "ip_address")
+        context_fields = set(
+            applicability_context_fields(field_semantics.get("applicability"))
+        )
+        context_fields.update(
+            str(item)
+            for item in field_semantics.get("context_fields") or []
+            if str(item).strip()
+        )
+        observation_context = None
+        if context_fields:
+            observation_context = {}
+            for context_field in context_fields:
+                context_validator = validators.get(context_field)
+                if not isinstance(context_validator, dict):
+                    context_validator = {}
+                context_value = record.get(context_field)
+                if value_index is not None and isinstance(context_value, list):
+                    context_value = (
+                        context_value[value_index]
+                        if value_index < len(context_value)
+                        else None
+                    )
+                observation_context[context_field] = _normalize_observation_value(
+                    context_field,
+                    context_value,
+                    validator=context_validator,
+                )
+        value_text, value_number, value_type = _value_parts(value)
+        observation_type = (
+            str(field_semantics.get("observation_type"))
+            if field_semantics.get("observation_type")
+            else None
+        )
+        semantic_field = observation_type or normalized_field_name
+        state_key = _digest(
+            [
+                state_device_id,
+                entity_type,
+                entity_key,
+                semantic_field,
+                value_index,
+            ]
+        )
+        observation_key = _digest(
+            [
+                snapshot["id"],
+                state_device_id,
+                entity_type,
+                entity_key,
+                field_name,
+                value_index,
+                value,
+            ]
+        )
+        observation_id = str(uuid.uuid5(uuid.NAMESPACE_URL, observation_key))
+        execution_item_id = str(snapshot.get("execution_item_id") or "")
+        command_ordinal = int(
+            (snapshot.get("metadata_json") or {}).get("command_ordinal") or 0
+        )
+        fact_order_key = f"{command_ordinal:020d}|{execution_item_id}|{observation_id}"
+        dimensions = None
+        if value_index is not None:
+            dimensions = {
+                **{str(key): record.get(key) for key in primary_keys},
+                "value_index": value_index + 1,
+            }
+        observations.append(
+            StateObservation(
+                observation_id=observation_id,
+                idempotency_key=observation_key,
+                state_key=state_key,
+                run_id=snapshot["run_id"],
+                snapshot_id=snapshot["id"],
+                dataset_id=dataset_id,
+                mode=mode,
+                source=source,
+                source_type=str(snapshot.get("source_type") or "cli"),
+                evidence_id=snapshot.get("evidence_id"),
+                schema_id=(
+                    contract.get("schema_id")
+                    or snapshot.get("schema_id")
+                    or snapshot.get("parser_template_id")
+                ),
+                device_id=state_device_id,
+                vendor=snapshot.get("vendor"),
+                model=snapshot.get("model"),
+                canonical_command=snapshot["canonical_command"],
+                entity_type=entity_type,
+                entity_key=entity_key,
+                field_name=str(field_name),
+                observation_type=observation_type,
+                semantic_type=(
+                    str(field_semantics.get("semantic_type"))
+                    if field_semantics.get("semantic_type")
+                    else None
+                ),
+                unit=(
+                    str(field_semantics.get("unit"))
+                    if field_semantics.get("unit")
+                    else None
+                ),
+                value=value,
+                value_text=value_text,
+                value_number=value_number,
+                value_type=value_type,
+                observation_kind="state",
+                observed_at=str(snapshot["observed_at"]),
+                parser_template_id=snapshot.get("parser_template_id"),
+                parser_version=snapshot.get("parser_version"),
+                contract_version=contract.get("contract_version"),
+                execution_item_id=execution_item_id,
+                fact_order_key=fact_order_key,
+                confidence=1.0,
+                metadata={
+                    "canonical_command": snapshot["canonical_command"],
+                    "primary_keys": primary_keys,
+                    "evidence_id": snapshot.get("evidence_id"),
+                    "source_type": str(snapshot.get("source_type") or "cli"),
+                    "external_device_id": external_device_id,
+                    "inventory_device_id": snapshot.get("inventory_device_id"),
+                    "execution_item_id": snapshot.get("execution_item_id"),
+                    "collection_item_id": (
+                        (snapshot.get("metadata_json") or {}).get("collection_item_id")
+                    ),
+                    "command_ordinal": (
+                        (snapshot.get("metadata_json") or {}).get("command_ordinal")
+                    ),
+                    "historical_backfill": bool(
+                        (snapshot.get("metadata_json") or {}).get("historical_backfill")
+                    ),
+                    "backfill_job_id": (
+                        (snapshot.get("metadata_json") or {}).get("backfill_job_id")
+                    ),
+                    "identity_status": (
+                        "inventory_bound"
+                        if snapshot.get("inventory_device_id")
+                        else "external_fallback"
+                    ),
+                    "observation_type": field_semantics.get("observation_type"),
+                    "semantic_type": field_semantics.get("semantic_type"),
+                    "unit": field_semantics.get("unit"),
+                    "parser_contract_version": snapshot.get("contract_version"),
+                    "observation_contract_id": contract.get("contract_id"),
+                    "observation_contract_version": contract.get("contract_version"),
+                    "observation_contract_digest": contract.get("contract_sha256"),
+                    "semantics": field_semantics,
+                    "dimensions": dimensions,
+                    "value_index": value_index + 1 if value_index is not None else None,
+                    APPLICABILITY_CONTEXT_KEY: observation_context,
+                },
+            )
+        )
+
     for record in _records(structured):
         if _looks_like_header_artifact(
             record,
@@ -205,128 +392,25 @@ def observations_from_snapshot(
             normalized_field_name = str(field_name).strip().lower()
             if normalized_field_name in ignore_fields or field_name in primary_keys:
                 continue
-            validator = validators.get(field_name) or validators.get(normalized_field_name)
-            if not isinstance(validator, dict):
-                validator = {}
-            value = _normalize_observation_value(
-                str(field_name),
-                record.get(field_name),
-                validator=validator,
-            )
-            field_semantics = state_semantics.get(field_name) or state_semantics.get(
-                normalized_field_name
-            )
-            if not isinstance(field_semantics, dict):
-                field_semantics = {}
-            field_semantics = dict(field_semantics)
-            validator_type = str(validator.get("type") or "").lower()
-            if validator_type == "percent":
-                field_semantics.setdefault("semantic_type", "percentage")
-                field_semantics.setdefault("unit", "%")
-            elif validator_type == "ip_or_unassigned":
-                field_semantics.setdefault("semantic_type", "ip_address")
-            value_text, value_number, value_type = _value_parts(value)
-            observation_type = (
-                str(field_semantics.get("observation_type"))
-                if field_semantics.get("observation_type")
-                else None
-            )
-            semantic_field = observation_type or normalized_field_name
-            state_key = _digest(
-                [
-                    state_device_id,
-                    entity_type,
-                    entity_key,
-                    semantic_field,
-                ]
-            )
-            observation_key = _digest(
-                [
-                    snapshot["id"],
-                    state_device_id,
-                    entity_type,
-                    entity_key,
-                    field_name,
-                    value,
-                ]
-            )
-            observation_id = str(uuid.uuid5(uuid.NAMESPACE_URL, observation_key))
-            execution_item_id = str(snapshot.get("execution_item_id") or "")
-            command_ordinal = int((snapshot.get("metadata_json") or {}).get("command_ordinal") or 0)
-            fact_order_key = f"{command_ordinal:020d}|{execution_item_id}|{observation_id}"
-            observations.append(
-                StateObservation(
-                    observation_id=observation_id,
-                    idempotency_key=observation_key,
-                    state_key=state_key,
-                    run_id=snapshot["run_id"],
-                    snapshot_id=snapshot["id"],
-                    dataset_id=dataset_id,
-                    mode=mode,
-                    source=source,
-                    source_type=str(snapshot.get("source_type") or "cli"),
-                    evidence_id=snapshot.get("evidence_id"),
-                    schema_id=snapshot.get("schema_id") or snapshot.get("parser_template_id"),
-                    device_id=state_device_id,
-                    vendor=snapshot.get("vendor"),
-                    model=snapshot.get("model"),
-                    canonical_command=snapshot["canonical_command"],
-                    entity_type=entity_type,
-                    entity_key=entity_key,
-                    field_name=str(field_name),
-                    observation_type=observation_type,
-                    semantic_type=(
-                        str(field_semantics.get("semantic_type"))
-                        if field_semantics.get("semantic_type")
-                        else None
-                    ),
-                    unit=(
-                        str(field_semantics.get("unit")) if field_semantics.get("unit") else None
-                    ),
-                    value=value,
-                    value_text=value_text,
-                    value_number=value_number,
-                    value_type=value_type,
-                    observation_kind="state",
-                    observed_at=str(snapshot["observed_at"]),
-                    parser_template_id=snapshot.get("parser_template_id"),
-                    parser_version=snapshot.get("parser_version"),
-                    contract_version=contract.get("contract_version")
-                    or snapshot.get("contract_version"),
-                    execution_item_id=execution_item_id,
-                    fact_order_key=fact_order_key,
-                    confidence=1.0,
-                    metadata={
-                        "canonical_command": snapshot["canonical_command"],
-                        "primary_keys": primary_keys,
-                        "evidence_id": snapshot.get("evidence_id"),
-                        "source_type": str(snapshot.get("source_type") or "cli"),
-                        "external_device_id": external_device_id,
-                        "inventory_device_id": snapshot.get("inventory_device_id"),
-                        "execution_item_id": snapshot.get("execution_item_id"),
-                        "collection_item_id": (
-                            (snapshot.get("metadata_json") or {}).get("collection_item_id")
-                        ),
-                        "command_ordinal": (
-                            (snapshot.get("metadata_json") or {}).get("command_ordinal")
-                        ),
-                        "historical_backfill": bool(
-                            (snapshot.get("metadata_json") or {}).get("historical_backfill")
-                        ),
-                        "backfill_job_id": (
-                            (snapshot.get("metadata_json") or {}).get("backfill_job_id")
-                        ),
-                        "identity_status": (
-                            "inventory_bound"
-                            if snapshot.get("inventory_device_id")
-                            else "external_fallback"
-                        ),
-                        "observation_type": field_semantics.get("observation_type"),
-                        "semantic_type": field_semantics.get("semantic_type"),
-                        "unit": field_semantics.get("unit"),
-                        "semantics": field_semantics,
-                    },
-                )
+            raw_value = record.get(field_name)
+            if isinstance(raw_value, list):
+                for value_index, item in enumerate(raw_value):
+                    if item in (None, ""):
+                        continue
+                    append_observation(
+                        record=record,
+                        entity_key=entity_key,
+                        field_name=str(field_name),
+                        raw_value=item,
+                        value_index=value_index,
+                    )
+                continue
+            append_observation(
+                record=record,
+                entity_key=entity_key,
+                field_name=str(field_name),
+                raw_value=raw_value,
+                value_index=None,
             )
     return observations
 

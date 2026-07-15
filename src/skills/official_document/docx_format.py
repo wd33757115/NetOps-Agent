@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from docx.enum.section import WD_ORIENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
@@ -17,6 +18,9 @@ BODY_LINE_SPACING = Pt(28)
 
 def setup_a4_margins(doc) -> None:
     for section in doc.sections:
+        section.orientation = WD_ORIENT.PORTRAIT
+        section.page_width = Cm(21.0)
+        section.page_height = Cm(29.7)
         section.top_margin = Cm(3.7)
         section.left_margin = Cm(2.8)
         section.right_margin = Cm(2.6)

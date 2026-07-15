@@ -1,6 +1,7 @@
 import React from 'react'
-import { Descriptions, Drawer, Space, Spin, Tag, Typography, Alert } from 'antd'
+import { Alert, Descriptions, Drawer, Space, Spin, Tag, Timeline, Typography } from 'antd'
 import type {
+  ParserGenerationAttempt,
   ParserJobItem,
   ParserRuleGenerationJobPreview,
   ParserTemplatePreview,
@@ -25,6 +26,64 @@ interface CommonDrawerProps {
   onClose: () => void
   isMobile: boolean
   loading: boolean
+}
+
+const attemptActionLabel = (value: string) => ({
+  propose_contract: '提出 Contract',
+  revise_contract: '修订 Contract',
+  generate_template: '生成模板',
+  repair_syntax: '修复语法',
+  repair_entity_anchor: '修复实体锚点',
+  repair_record_boundary: '修复记录边界',
+  repair_field_capture: '修复字段捕获',
+  repair_key_integrity: '修复主键',
+  tighten_noise_filter: '收紧噪声过滤',
+  repair_template: '修订模板',
+  request_contract_review: '重新审查 Contract',
+}[value] || value)
+
+const attemptStageLabel = (value: string) => ({
+  contract: 'Contract',
+  template: '模板生成',
+  validation: '确定性验证',
+  holdout: '留出集',
+  regression: '历史回归',
+}[value] || value)
+
+const attemptTimelineItem = (attempt: ParserGenerationAttempt) => {
+  const diagnostics = Array.isArray(attempt.validation_report_json?.diagnostics)
+    ? attempt.validation_report_json.diagnostics as Array<Record<string, unknown>>
+    : []
+  const diagnostic = diagnostics[0]
+  const tokenUsage = attempt.token_usage_json || {}
+  const totalTokens = Number(
+    tokenUsage.total_tokens
+      || (Number(tokenUsage.input_tokens || 0) + Number(tokenUsage.output_tokens || 0)),
+  )
+  return {
+    color: attempt.status === 'passed' ? 'green' : attempt.status === 'failed' ? 'red' : 'blue',
+    children: (
+      <Space direction="vertical" size={3} style={{ width: '100%' }}>
+        <Space wrap>
+          <Typography.Text strong>第 {attempt.attempt_number} 轮</Typography.Text>
+          <Tag>{attemptStageLabel(attempt.stage)}</Tag>
+          <Tag color={attempt.status === 'passed' ? 'success' : 'error'}>{attempt.status}</Tag>
+        </Space>
+        <Typography.Text>{attemptActionLabel(attempt.action)}</Typography.Text>
+        <Typography.Text type="secondary">
+          {attempt.model_name || attempt.model_provider || '确定性工具'}
+          {attempt.latency_ms ? ` · ${attempt.latency_ms} ms` : ''}
+          {totalTokens > 0 ? ` · ${totalTokens} tokens` : ''}
+          {attempt.created_at ? ` · ${attempt.created_at}` : ''}
+        </Typography.Text>
+        {diagnostic ? (
+          <Typography.Text type="danger">
+            {String(diagnostic.code || 'validation_failed')}：{String(diagnostic.message || '')}
+          </Typography.Text>
+        ) : null}
+      </Space>
+    ),
+  }
 }
 
 export const ParserTemplatePreviewDrawer: React.FC<
@@ -154,7 +213,17 @@ export const ParserJobDetailDrawer: React.FC<
           <Descriptions.Item label="设备">{job.profile}</Descriptions.Item>
           <Descriptions.Item label="命令" span={2}>{job.canonical_command}</Descriptions.Item>
           <Descriptions.Item label="样本数">{job.sample_count}</Descriptions.Item>
-          <Descriptions.Item label="尝试次数">{job.attempts}</Descriptions.Item>
+          <Descriptions.Item label="任务执行次数">{job.attempts}</Descriptions.Item>
+          <Descriptions.Item label="Contract 修订">{job.attempt_summary?.contract_revisions || 0}</Descriptions.Item>
+          <Descriptions.Item label="模板尝试">{job.attempt_summary?.template_attempts || 0}</Descriptions.Item>
+          <Descriptions.Item label="Token 使用">
+            {String(job.agent_state_json?.token_usage_total ?? 0)} / {String(job.agent_budget_json?.token_budget ?? '-')}
+          </Descriptions.Item>
+          <Descriptions.Item label="时间预算">
+            {job.agent_budget_json?.time_budget_seconds
+              ? `${String(job.agent_budget_json.time_budget_seconds)} 秒`
+              : '-'}
+          </Descriptions.Item>
           <Descriptions.Item label="Celery Task" span={2}>{job.celery_task_id || '-'}</Descriptions.Item>
           <Descriptions.Item label="失败代码">{job.failure_code || '-'}</Descriptions.Item>
           <Descriptions.Item label="错误">{job.last_error || '-'}</Descriptions.Item>
@@ -163,6 +232,20 @@ export const ParserJobDetailDrawer: React.FC<
           <Descriptions.Item label="开始时间">{job.started_at || '-'}</Descriptions.Item>
           <Descriptions.Item label="完成时间">{job.completed_at || '-'}</Descriptions.Item>
         </Descriptions>
+        {job.agent_state_json?.status === 'blocked' ? (
+          <Alert
+            type="warning"
+            showIcon
+            message="Parser Agent 已阻断，候选未进入审批"
+            description={String(job.agent_state_json?.stop_reason || job.last_error || '需要补充样本或人工检查 Contract 证据')}
+          />
+        ) : null}
+        <Typography.Title level={5} style={{ margin: 0 }}>生成与验证时间线</Typography.Title>
+        {(job.generation_attempts || []).length ? (
+          <Timeline items={(job.generation_attempts || []).map(attemptTimelineItem)} />
+        ) : (
+          <Typography.Text type="secondary">任务尚未产生 Agent Attempt。</Typography.Text>
+        )}
         <Typography.Title level={5} style={{ margin: 0 }}>样本引用</Typography.Title>
         <StandardTableShell
           rowKey="id"

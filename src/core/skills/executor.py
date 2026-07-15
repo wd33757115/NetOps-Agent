@@ -108,7 +108,10 @@ def _prepare_local_inputs(skill_name: str, params: dict[str, Any], tmpdir: str) 
         prepared["policy_file_url"] = policy_path
 
     topo = prepared.get("topology_file_url")
-    if topo and topo.startswith(("http://", "https://", "file://")) or (topo and os.path.exists(str(topo))):
+    if topo and (
+        topo.startswith(("http://", "https://", "file://"))
+        or os.path.exists(str(topo))
+    ):
         topo_path = os.path.join(tmpdir, "topology.json")
         try:
             _download_url_to_path(str(topo), Path(topo_path))
@@ -140,7 +143,12 @@ def _run_subprocess_skill(skill_name: str, params: dict[str, Any]) -> dict[str, 
         prepared = _prepare_local_inputs(skill_name, params, tmpdir)
         params_path = os.path.join(tmpdir, "params.json")
         with open(params_path, "w", encoding="utf-8") as f:
-            json.dump({k: v for k, v in prepared.items() if not k.startswith("_")}, f, ensure_ascii=False, default=str)
+            json.dump(
+                {k: v for k, v in prepared.items() if not k.startswith("_")},
+                f,
+                ensure_ascii=False,
+                default=str,
+            )
 
         cmd = [sys.executable, str(script), "--params", params_path]
         output_path = os.path.join(tmpdir, "output.xlsx")
@@ -182,11 +190,21 @@ def _run_subprocess_skill(skill_name: str, params: dict[str, Any]) -> dict[str, 
         if local_zip and os.path.isfile(str(local_zip)):
             skill_result = _upload_zip_from_path(skill_result, str(local_zip), params, skill_name)
 
-        if output_mode == "file" and os.path.isfile(output_path) and not skill_result.get("artifacts"):
+        if (
+            output_mode == "file"
+            and os.path.isfile(output_path)
+            and not skill_result.get("artifacts")
+        ):
             skill_result = _upload_file_output(skill_result, output_path, params, skill_name)
 
         if output_mode == "dir" and os.path.isdir(output_dir):
-            skill_result = _upload_dir_output(skill_result, output_dir, params, skill_name, prepared)
+            skill_result = _upload_dir_output(
+                skill_result,
+                output_dir,
+                params,
+                skill_name,
+                prepared,
+            )
 
         return skill_result
 
@@ -267,7 +285,8 @@ def _upload_dir_output(
     if skill_result.get("artifacts"):
         return skill_result
 
-    import zipfile
+    if skill_name == "report-generator":
+        return _upload_report_output(skill_result, output_dir, params)
 
     ticket_id = params.get("ticket_id") or f"SKILL_{datetime.now().strftime('%Y%m%d%H%M%S')}"
     zip_name = f"{skill_name.replace('-', '_')}_{ticket_id}.zip"
@@ -283,10 +302,66 @@ def _upload_dir_output(
             if minio.upload_file(object_name, f, content_type="application/zip"):
                 download_url = minio.get_presigned_url(object_name, expires=3600 * 24 * 7)
 
-    art = make_file_artifact(file_key=object_name, download_url=download_url, filename=zip_name, content_type="application/zip")
+    art = make_file_artifact(
+        file_key=object_name,
+        download_url=download_url,
+        filename=zip_name,
+        content_type="application/zip",
+    )
     skill_result.setdefault("artifacts", {})["config_zip"] = art
     skill_result.setdefault("download_url", download_url)
     skill_result.setdefault("config_file_key", object_name)
+    return skill_result
+
+
+def _upload_report_output(
+    skill_result: dict[str, Any],
+    output_dir: str,
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    files = sorted(path for path in Path(output_dir).rglob("*") if path.is_file())
+    if len(files) != 1:
+        raise SkillExecutionError(
+            "report-generator must produce exactly one report file; "
+            f"found {len(files)}"
+        )
+
+    report_path = files[0]
+    content_types = {
+        ".md": "text/markdown; charset=utf-8",
+        ".html": "text/html; charset=utf-8",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }
+    content_type = content_types.get(report_path.suffix.lower(), "application/octet-stream")
+    run_id = str(params.get("run_id") or params.get("ticket_id") or "patrol-run")
+    safe_run_id = "".join(
+        char if char.isalnum() or char in "._-" else "-" for char in run_id
+    ).strip("-.") or "patrol-run"
+    object_name = None
+    download_url = None
+    minio = get_minio_storage()
+    if minio and minio.is_ready():
+        object_name = f"patrol_reports/{safe_run_id}/{report_path.name}"
+        with report_path.open("rb") as stream:
+            if minio.upload_file(object_name, stream, content_type=content_type):
+                download_url = minio.get_presigned_url(
+                    object_name,
+                    expires=3600 * 24 * 7,
+                )
+
+    artifact = make_file_artifact(
+        file_key=object_name,
+        download_url=download_url,
+        filename=report_path.name,
+        content_type=content_type,
+    )
+    skill_result.setdefault("artifacts", {})["report"] = artifact
+    skill_result["output_path"] = report_path.name
+    skill_result.setdefault("output_filename", report_path.name)
+    skill_result.setdefault("report_file_key", object_name)
+    skill_result.setdefault("report_url", download_url)
+    skill_result.setdefault("download_url", download_url)
+    skill_result.setdefault("filename", report_path.name)
     return skill_result
 
 

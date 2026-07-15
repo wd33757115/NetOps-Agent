@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from src.core.patrol.event_rules import (
     EventRule,
+    EventRuleDefinition,
     condition_matches,
     default_event_rule_definitions,
     event_rules_from_snapshot,
@@ -40,6 +41,24 @@ def test_event_rules_can_be_rebuilt_from_immutable_snapshot():
     assert rules[0].match({"field": "rx_power_dbm", "new": -18.5}) is True
 
 
+def test_event_rule_governance_injects_device_and_entity_identity():
+    rule = EventRule(
+        rule_id="weak-llm-rule",
+        version=1,
+        event_type="OpticalRxPowerLow",
+        severity="warning",
+        predicate=lambda _change: True,
+        correlation_keys=("interface_name",),
+    )
+
+    assert rule.correlation_keys == (
+        "device_id",
+        "entity_type",
+        "entity_key",
+        "interface_name",
+    )
+
+
 def test_threshold_condition_matches_cpu_high():
     assert condition_matches(
         {
@@ -64,6 +83,39 @@ def test_threshold_condition_matches_cpu_high():
             "gte": 90,
         },
         {"field": "cpu_5s", "old": "91%", "new": "92%"},
+    )
+
+
+def test_dynamic_reference_threshold_and_recovery_conditions():
+    base_change = {
+        "entity_type": "generic_sensor",
+        "field": "measurement",
+        "dimensions": {"_observation_context": {"low_reference": -10.0}},
+        "change_type": "modified",
+    }
+    low_condition = {
+        "kind": "threshold_field_lte",
+        "entity_types": ["generic_sensor"],
+        "fields": ["measurement"],
+        "reference_field": "low_reference",
+    }
+    recovery_condition = {
+        "kind": "threshold_field_low_recovery",
+        "entity_types": ["generic_sensor"],
+        "fields": ["measurement"],
+        "reference_field": "low_reference",
+        "hysteresis": 2.0,
+    }
+
+    assert condition_matches(low_condition, {**base_change, "old": -9, "new": -10})
+    assert not condition_matches(low_condition, {**base_change, "old": -11, "new": -12})
+    assert condition_matches(
+        recovery_condition,
+        {**base_change, "old": -10, "new": -8},
+    )
+    assert not condition_matches(
+        recovery_condition,
+        {**base_change, "old": -10, "new": -9},
     )
 
 
@@ -262,6 +314,64 @@ def test_low_threshold_condition_matches_optical_power_drop_and_recovery():
     )
 
 
+def test_optical_condition_respects_governed_measurement_applicability():
+    applicability = {
+        "version": 1,
+        "on_missing_context": "reject",
+        "exclude_when": [
+            {
+                "code": "transceiver_absent",
+                "when": {
+                    "field": "transceiver_present",
+                    "op": "in_ci",
+                    "values": ["absent"],
+                },
+            },
+            {
+                "code": "measurement_not_applicable",
+                "when": {
+                    "all": [
+                        {"field": "bias_ma", "op": "lte", "value": 0},
+                        {
+                            "field": "rx_power_dbm",
+                            "op": "equals_field",
+                            "other_field": "tx_power_dbm",
+                        },
+                    ]
+                },
+            },
+        ],
+    }
+    condition = {
+        "kind": "threshold_lte",
+        "entity_types": ["interface_optical"],
+        "fields": ["rx_power_dbm"],
+        "lte": -17,
+        "applicability": applicability,
+    }
+    change = {
+        "entity_type": "interface_optical",
+        "field": "rx_power_dbm",
+        "old": -10,
+        "new": -40,
+        "change_type": "modified",
+    }
+
+    assert condition_matches(condition, change) is False
+    assert condition_matches(
+        condition,
+        {**change, "context": {"bias_ma": 6.5, "rx_power_dbm": -40, "tx_power_dbm": -2}},
+    ) is True
+    assert condition_matches(
+        condition,
+        {**change, "context": {"transceiver_present": "absent"}},
+    ) is False
+    assert condition_matches(
+        condition,
+        {**change, "context": {"bias_ma": 0, "rx_power_dbm": -40, "tx_power_dbm": -40}},
+    ) is False
+
+
 def test_transition_condition_matches_cisco_interface_status_down():
     assert condition_matches(
         {
@@ -415,6 +525,27 @@ def test_candidate_rule_validation_generates_repair_feedback_surface():
     assert result["success"] is True
     assert result["case_count"] >= 2
     assert all("device_id" not in row["change"] for row in result["rows"])
+
+
+def test_malformed_threshold_rule_returns_feedback_instead_of_throwing():
+    definition = EventRuleDefinition(
+        rule_id="missing-threshold",
+        version=1,
+        event_type="OpticalRxPowerLow",
+        severity="warning",
+        condition={
+            "kind": "threshold_lte",
+            "entity_types": ["interface_optical"],
+            "fields": ["rx_power_dbm"],
+            "lte": None,
+        },
+    )
+
+    result = validate_event_rule_definition(definition)
+
+    assert result["success"] is False
+    assert result["errors"] == ["condition.lte must be a number"]
+    assert condition_matches(definition.condition, {"field": "rx_power_dbm", "new": -40}) is False
 
 
 def test_rule_validation_sanitizes_private_identifiers():

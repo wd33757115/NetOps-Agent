@@ -12,6 +12,18 @@ inputs:
     type: string
     required: false
     description: Workflow, chat or dataset source reference.
+  - name: schema_id
+    type: string
+    required: false
+    description: Stable source schema identity. Parser assets use the Parser Template ID.
+  - name: schema_ref
+    type: string
+    required: false
+    description: Human-readable source reference, such as parser_template:<template_id>.
+  - name: source_template_id
+    type: string
+    required: false
+    description: Parser Template ID that owns the generated ObservationContract.
   - name: contract_result
     type: object
     required: false

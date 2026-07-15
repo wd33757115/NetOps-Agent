@@ -1,6 +1,6 @@
 ---
 name: textfsm-generator
-version: 1.2.0
+version: 1.3.0
 description: 从聊天 CLI、PostgreSQL 验证数据集或离线巡检文件目录生成并跨样本验证 TextFSM 模板，识别设备厂商和精确型号，发布共享 Parser 资产
 category: network
 tags: [textfsm, parser, template, patrol, offline]
@@ -132,7 +132,8 @@ fallback_to_rag: false
 - 离线文件和目录扫描。
 - 厂商、精确型号和设备族识别。
 - 命令白名单、别名归一化和跨样本分组。
-- TextFSM 生成、修复、验证、原子发布和 manifest 管理。
+- 证据 Contract、Parser IR、通用 Provider 与受限 Agent Loop。
+- TextFSM 生成、修复、12 项硬门禁、原子发布和 manifest 管理。
 
 ## 工作流程
 
@@ -141,14 +142,20 @@ fallback_to_rag: false
 3. 优先从版本和库存命令识别厂商、精确型号及设备族。
 4. 只处理 Skill 共享配置 `src/skills/shared/parser-config/command_policy.yaml` 中启用的命令。
 5. 按 `vendor + model + command` 聚合全部样本。
-6. 使用代表样本生成模板，并对该组全部样本验证。
-7. 通过配置的发布门槛后，原子写入共享目录并更新 manifest。
+6. LLM 从脱敏样本提出带行级证据的 Contract，系统规范化字段、校验器和语义引用。
+7. Structure Profiler 将证据编译为 Parser IR，六个通用 Provider 优先生成 TextFSM。
+8. 通用候选失败时，Agent 才允许 LLM 按单一结构化诊断修复模板。
+9. 对训练、留出、回归和负样本执行 12 项硬门禁；通过后才可提交审批或原子发布。
 
 ## 核心原则
 
 - Parser 资产独立于生成 Skill，可被巡检、导入和回放流程共同消费。
 - 结构化字段首先服务于稳定实体比较和事件构建，不追求解析全部 CLI。
 - 同型号全部样本的验证结果决定模板是否发布。
+- 自动路径禁止按厂商、型号、命令或业务字段编写 Python 分支。
+- `LegacyBuiltinProvider` 只保留为显式手工兼容接口，不进入自动 Provider Registry。
+- TextFSM `List` 仅表达同一实体的重复值，State Normalizer 按 `value_index` 展开。
+- 报告的 `success` 只统计 `accepted=true` 的资产，不能用样本平均分绕过硬门禁。
 
 ## 输入参数说明
 
@@ -166,6 +173,7 @@ fallback_to_rag: false
   "files_scanned": 54,
   "devices_detected": 54,
   "candidate_groups": 80,
+  "success_count": 80,
   "generated_templates": [],
   "validation_pass_rate": 1.0,
   "shared_templates_dir": "src/skills/shared/textfsm-templates"
@@ -190,7 +198,7 @@ fallback_to_rag: false
 - 不连接或执行任何网络设备命令。
 - 不根据 `display/show` 猜测离线文件的厂商。
 - 未识别设备和未配置命令必须明确报告并跳过。
-- LLM 只能在验证模式提出数据契约候选；字段、主键和校验器经过多样本确定性验证及人工审批后，固化到模板版本的 `validation_json`。
+- LLM 只能在验证模式提出数据契约或受限修复候选；字段、主键和校验器经过多样本确定性验证及人工审批后，固化到模板版本的 `validation_json`。
 - 正式巡检只读取 PostgreSQL 中 active 模板及其已审批契约，不实时调用 LLM。
 - 唯一持续人工维护的配置是 `src/skills/shared/parser-config/command_policy.yaml` 命令白名单。
 - 默认要求全部样本通过后才发布。
@@ -199,7 +207,8 @@ fallback_to_rag: false
 
 ## 实际执行说明
 
-平台通过 `scripts/run.py --params <json>` 执行。目录模式仅对命令白名单中的候选组调用 LLM，所有样本都会参与本地 TextFSM 验证。
+平台通过 `scripts/run.py --params <json>` 执行。目录模式仅对命令白名单中的候选组调用 LLM
+推断 Contract，所有样本都会参与本地 TextFSM 验证；模板优先由 Parser IR 通用 Provider 编译。
 
 ## 注意事项
 

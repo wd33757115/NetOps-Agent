@@ -21,6 +21,7 @@ class GenerationReport:
     command: str
     category: str
     template_generated: bool
+    accepted: bool
     compile_success: bool
     record_count: int
     field_coverage: int
@@ -41,6 +42,7 @@ class GenerationReport:
     confidence: float | None = None
     evidence_command: str | None = None
     evidence_text: str | None = None
+    agent_loop: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -85,7 +87,8 @@ def save_summary(
     payload = {
         "generated_at": datetime.now(BEIJING_TZ).isoformat(),
         "total": len(reports),
-        "success": sum(1 for report in reports if report.template_generated),
+        "success": sum(1 for report in reports if report.accepted),
+        "published": sum(1 for report in reports if report.template_generated),
         "metadata": metadata or {},
         "reports": [report.to_dict() for report in reports],
     }

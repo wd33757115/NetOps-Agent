@@ -9,6 +9,7 @@ sys.path.insert(0, str(BASE_DIR))
 
 import io
 import logging
+from pathlib import Path
 from typing import BinaryIO, Optional
 
 from src.common.config import get_settings
@@ -132,6 +133,19 @@ class MinIOStorage:
                 response.release_conn()
         except S3Error:
             return None
+
+    def download_to_file(self, object_name: str, destination: str | Path) -> bool:
+        """Stream an object to disk without holding a large patrol archive in memory."""
+        if not self._client:
+            return False
+        try:
+            path = Path(destination)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self._client.fget_object(self._bucket_name, object_name, str(path))
+            return True
+        except S3Error as exc:
+            logger.warning("MinIO download failed: %s", exc)
+            return False
 
     def presigned_put_url(self, object_name: str, expires: int = 3600) -> str | None:
         if not self._client:

@@ -65,6 +65,28 @@ function Start-LauncherProcess {
     ) -PassThru -WindowStyle Minimized
 }
 
+function Wait-ProjectPythonCommand {
+    param(
+        [string]$ProjectRoot,
+        [string]$CommandPattern,
+        [int]$TimeoutSec = 15
+    )
+    $rootPattern = [regex]::Escape($ProjectRoot)
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    do {
+        $match = Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.CommandLine -and
+                ($_.CommandLine -match $rootPattern) -and
+                ($_.CommandLine -match $CommandPattern)
+            } |
+            Select-Object -First 1
+        if ($match) { return $true }
+        Start-Sleep -Milliseconds 250
+    } while ((Get-Date) -lt $deadline)
+    return $false
+}
+
 # 3001 留给 Langfuse；React 固定 3000（vite strictPort），3002 为偶发备用端口清理
 $AppPorts = @($FastAPIPort, $DjangoPort, $ReactPort, 3002)
 $runtimeDir = Join-Path $ProjectRoot ".runtime\test"
@@ -98,6 +120,10 @@ if (Test-Path $pidFile) {
     }
     Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
 }
+# Celery Beat writes its own PID file. A forced Windows process-tree stop cannot
+# remove that file, so a clean restart must discard the now-stale runtime marker.
+$celeryBeatRuntimePid = Join-Path $runtimeDir "celery-beat.pid"
+Remove-Item $celeryBeatRuntimePid -Force -ErrorAction SilentlyContinue
 foreach ($round in 1..2) {
     foreach ($p in $AppPorts) { Kill-ProcessOnPort -Port $p | Out-Null }
     $busy = @()
@@ -271,7 +297,11 @@ New-LauncherScript -Path $celeryBeatLauncher -WorkingDirectory $ProjectRoot -Env
     'Remove-Item Env:DJANGO_SETTINGS_MODULE -ErrorAction SilentlyContinue'
 )
 $pids.celeryBeat = (Start-LauncherProcess -LauncherPath $celeryBeatLauncher).Id
-Write-ColorOutput ("  [OK] Celery Beat PID={0} (log: celery-beat.log)" -f $pids.celeryBeat) "Green"
+if (-not (Wait-ProjectPythonCommand -ProjectRoot $ProjectRoot -CommandPattern '(?i)-m\s+celery\b.*\bbeat\b')) {
+    Write-ColorOutput "  [ERROR] Celery Beat did not start. See celery-beat.log" "Red"
+    exit 1
+}
+Write-ColorOutput ("  [OK] Celery Beat launcher PID={0} (log: celery-beat.log)" -f $pids.celeryBeat) "Green"
 if ($dockerOk -and -not $SkipMiddleware) {
     Start-Sleep -Seconds 8
 }

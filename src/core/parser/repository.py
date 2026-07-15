@@ -15,12 +15,22 @@ from src.common.config import get_settings
 from src.core.observation import ObservationContractRepository
 from src.core.parser.outbox_repository import add_outbox_row
 from src.core.parser.sanitization import sanitize_parser_sample
+from src.core.parser.textfsm_dialect import (
+    DEFAULT_TEXTFSM_DIALECT,
+    installed_textfsm_version,
+)
+from src.core.parser.textfsm_dialect import (
+    dialect_hash as current_dialect_hash,
+)
 from src.core.patrol.repository import PatrolRepository
 from src.infrastructure.db.models import (
     CommandSnapshot,
+    ObservationContractRecord,
+    ParserBackfillJobRecord,
     ParserCommandAlias,
     ParserControlSetting,
     ParserDeviceProfile,
+    ParserGenerationAttempt,
     ParserIdentitySignature,
     ParserJobSample,
     ParserOutboxEvent,
@@ -61,6 +71,29 @@ def output_signature(raw_text: str) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24]
 
 
+def parser_job_asset_key(*, vendor: str, profile: str, command: str) -> str:
+    """Return the stable identity of one target TextFSM template asset."""
+
+    normalized = "|".join(
+        (
+            "parser-template-asset-v2",
+            " ".join(str(vendor or "").strip().casefold().split()),
+            " ".join(str(profile or "").strip().casefold().split()),
+            " ".join(str(command or "").strip().casefold().split()),
+        )
+    )
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def parser_job_asset_identity(*, vendor: str, profile: str, command: str) -> tuple[str, str, str]:
+    """Return the normalized fields that identify one governed Parser asset."""
+
+    return tuple(
+        " ".join(str(value or "").strip().casefold().split())
+        for value in (vendor, profile, command)
+    )
+
+
 def contract_digest(validation: dict[str, Any]) -> str:
     contract = {
         key: validation.get(key)
@@ -78,6 +111,107 @@ def contract_digest(validation: dict[str, Any]) -> str:
     }
     encoded = json.dumps(contract, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+PARSER_AGENT_HARD_GATES = {
+    "dialect_compatible",
+    "compiled",
+    "executed",
+    "contract_valid",
+    "key_valid",
+    "entity_complete",
+    "record_evidence_aligned",
+    "variant_coverage",
+    "empty_classified",
+    "holdout_passed",
+    "regression_passed",
+    "negative_passed",
+    "evidence_coverage",
+}
+
+
+def generated_template_activation_errors(
+    validation: dict[str, Any],
+    *,
+    source_job_id: str | None,
+) -> list[str]:
+    """Return hard-gate failures for an Agent-generated Parser candidate."""
+
+    agent = validation.get("parser_agent")
+    if not isinstance(agent, dict):
+        return []
+    errors: list[str] = []
+    if agent.get("status") != "passed":
+        errors.append("parser agent did not finish with status=passed")
+    gates = agent.get("hard_gates")
+    if not isinstance(gates, dict):
+        errors.append("parser agent hard gates are missing")
+    else:
+        missing = sorted(PARSER_AGENT_HARD_GATES - set(gates))
+        failed = sorted(
+            key
+            for key in PARSER_AGENT_HARD_GATES.intersection(gates)
+            if gates.get(key) is not True
+        )
+        if missing:
+            errors.append(f"parser agent hard gates are incomplete: {', '.join(missing)}")
+        if failed:
+            errors.append(f"parser agent hard gates failed: {', '.join(failed)}")
+    if source_job_id and not agent.get("best_attempt_id"):
+        errors.append("parser agent best attempt is missing")
+
+    dialect = validation.get("textfsm_dialect")
+    if not isinstance(dialect, dict):
+        errors.append("TextFSM dialect evidence is missing")
+        return errors
+    expected = DEFAULT_TEXTFSM_DIALECT
+    actual_runtime = installed_textfsm_version()
+    expected_hash = current_dialect_hash(expected)
+    if dialect.get("runtime_version") != actual_runtime:
+        errors.append("TextFSM runtime version changed after candidate validation")
+    if dialect.get("dialect_version") != expected.dialect_version:
+        errors.append("TextFSM dialect version changed after candidate validation")
+    if dialect.get("dialect_hash") != expected_hash:
+        errors.append("TextFSM dialect hash changed after candidate validation")
+    if dialect.get("prompt_version") != expected.prompt_version:
+        errors.append("TextFSM prompt version changed after candidate validation")
+    return errors
+
+
+def _deprecate_rule_generation_seeds(
+    db: Any,
+    *,
+    template_id: str,
+    actor: str,
+    reason: str,
+) -> int:
+    """Retire unpublished rule jobs when their Parser source is retired."""
+
+    now = utcnow()
+    rows = (
+        db.query(RuleGenerationJobRecord)
+        .filter(
+            RuleGenerationJobRecord.source_ref == f"parser_template:{template_id}",
+            RuleGenerationJobRecord.status.in_(
+                {"draft", "validating", "pending_approval", "rejected"}
+            ),
+        )
+        .with_for_update()
+        .all()
+    )
+    for row in rows:
+        validation = dict(row.validation_report_json or {})
+        validation["source_asset_lifecycle"] = {
+            "status": "deprecated",
+            "actor": actor,
+            "reason": reason,
+            "at": now.isoformat(),
+        }
+        row.validation_report_json = validation
+        row.status = "deprecated"
+        row.updated_at = now
+        row.completed_at = now
+    return len(rows)
 
 
 class ParserRepository:
@@ -314,32 +448,29 @@ class ParserRepository:
         if snapshot.device_id != device_id:
             raise ValueError("parser candidate device does not match the snapshot")
         raw_text = snapshot.raw_text
+        trusted_sample = (
+            sanitize_parser_sample(raw_text)
+            if source_mode == "parser_validation"
+            else None
+        )
         dataset_id = context["dataset_id"] or dataset_id
         signature = output_signature(raw_text)
         profile = str(profile or model or family or "Generic")
         allowed_profiles = {str(item) for item in (model, family, "Generic") if item}
         if profile not in allowed_profiles:
             raise ValueError("parser candidate profile must match the device model or family")
-        key_parts = [source_mode, job_type, vendor, profile, command]
-        if source_mode == "parser_validation":
-            key_parts.append(signature)
-        else:
-            key_parts.append(str(failure_code or "parser_failure"))
-        key_text = "|".join(key_parts)
-        key = hashlib.sha256(key_text.encode("utf-8")).hexdigest()
+        key = parser_job_asset_key(vendor=vendor, profile=profile, command=command)
         with get_db_session() as db:
+            job_created = False
+            job_reopened = False
             db.execute(
                 text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
                 {"key": key},
             )
             job = (
                 db.query(ParserTemplateJob)
-                .filter(
-                    ParserTemplateJob.idempotency_key == key,
-                    ParserTemplateJob.status.in_(
-                        ["pending", "collecting", "running", "validating"]
-                    ),
-                )
+                .filter(ParserTemplateJob.idempotency_key == key)
+                .order_by(ParserTemplateJob.updated_at.desc(), ParserTemplateJob.id.desc())
                 .first()
             )
             if job is not None:
@@ -352,13 +483,55 @@ class ParserRepository:
                     or db.get(CommandSnapshot, row.snapshot_id) is None
                 ]
                 if invalid_samples:
-                    job.status = "superseded"
-                    job.superseded_at = utcnow()
-                    job.completed_at = utcnow()
-                    job.updated_at = utcnow()
+                    self._delete_job_graph(db, job)
                     db.flush()
                     job = None
+            existing_sample = None
+            if job is not None:
+                existing_sample = (
+                    db.query(ParserJobSample)
+                    .filter(
+                        ParserJobSample.job_id == job.id,
+                        ParserJobSample.snapshot_id == snapshot_id,
+                    )
+                    .first()
+                )
+            if job is not None:
+                # A job represents the target template asset, not one output shape or
+                # failure code or generation cycle. New evidence reopens the same
+                # durable aggregate instead of creating another historical task.
+                if source_mode == "production" and job.source_mode != "production":
+                    job.source_mode = "production"
+                if (
+                    job_type == "REPAIR_TEMPLATE"
+                    and job.job_type != "REPAIR_TEMPLATE"
+                    and (
+                        job.status in {"collecting", "pending"}
+                        or existing_sample is None
+                    )
+                ):
+                    job.job_type = "REPAIR_TEMPLATE"
+                if failure_code:
+                    job.failure_code = failure_code
+                if existing_sample is None and job.status in TERMINAL_JOB_STATUSES:
+                    job_reopened = True
+                    job.status = "collecting"
+                    job.celery_task_id = None
+                    job.dispatched_at = None
+                    job.started_at = None
+                    job.completed_at = None
+                    job.superseded_by_job_id = None
+                    job.superseded_at = None
+                    job.last_error = None
+                    job.best_attempt_id = None
+                    job.agent_state_json = None
+                    job.agent_budget_json = None
+                    job.contract_revision_count = 0
+                    job.template_attempt_count = 0
+                    job.output_signature = signature
+                job.updated_at = utcnow()
             if job is None:
+                job_created = True
                 job = ParserTemplateJob(
                     id=str(uuid.uuid4()),
                     job_type=job_type,
@@ -378,32 +551,8 @@ class ParserRepository:
                 )
                 db.add(job)
                 db.flush()
-                replaced = (
-                    db.query(ParserTemplateJob)
-                    .filter(
-                        ParserTemplateJob.idempotency_key == key,
-                        ParserTemplateJob.id != job.id,
-                        ParserTemplateJob.status.in_(
-                            ["succeeded", "failed", "cancelled", "superseded"]
-                        ),
-                    )
-                    .all()
-                )
-                for old_job in replaced:
-                    if old_job.status != "superseded":
-                        old_job.status = "superseded"
-                    old_job.superseded_by_job_id = job.id
-                    old_job.superseded_at = utcnow()
-                    old_job.updated_at = utcnow()
-            exists = (
-                db.query(ParserJobSample)
-                .filter(
-                    ParserJobSample.job_id == job.id,
-                    ParserJobSample.snapshot_id == snapshot_id,
-                )
-                .first()
-            )
-            if exists is None:
+            sample_added = existing_sample is None
+            if sample_added:
                 db.add(
                     ParserJobSample(
                         id=str(uuid.uuid4()),
@@ -419,7 +568,12 @@ class ParserRepository:
                             else "pending_sanitization"
                         ),
                         sanitization_version=(
-                            "trusted-validation-v1" if source_mode == "parser_validation" else None
+                            trusted_sample.version if trusted_sample else None
+                        ),
+                        sanitized_text=(trusted_sample.text if trusted_sample else None),
+                        sanitized_hash=(trusted_sample.sha256 if trusted_sample else None),
+                        redaction_summary_json=(
+                            trusted_sample.redaction_summary if trusted_sample else None
                         ),
                         sanitized_at=(utcnow() if source_mode == "parser_validation" else None),
                         created_at=utcnow(),
@@ -427,12 +581,18 @@ class ParserRepository:
                 )
                 job.sample_count = int(job.sample_count or 0) + 1
                 job.updated_at = utcnow()
-            self._add_outbox(
-                db,
-                event_type="parser.candidate.discovered",
-                aggregate_id=job.id,
-                payload={"job_id": job.id, "job_type": job_type},
-            )
+            if job_created or job_reopened:
+                self._add_outbox(
+                    db,
+                    event_type="parser.candidate.discovered",
+                    aggregate_id=job.id,
+                    payload={
+                        "job_id": job.id,
+                        "job_type": job.job_type,
+                        "snapshot_id": snapshot_id,
+                        "reopened": job_reopened,
+                    },
+                )
             return job.id
 
     def sanitize_pending_samples(
@@ -447,8 +607,10 @@ class ParserRepository:
                 db.query(ParserJobSample)
                 .join(ParserTemplateJob, ParserTemplateJob.id == ParserJobSample.job_id)
                 .filter(
-                    ParserTemplateJob.source_mode == "production",
-                    ParserJobSample.sanitization_status == "pending_sanitization",
+                    or_(
+                        ParserJobSample.sanitization_status == "pending_sanitization",
+                        ParserJobSample.sanitized_text.is_(None),
+                    )
                 )
             )
             if job_id:
@@ -505,10 +667,43 @@ class ParserRepository:
         status: str = "draft",
         contract_version: int | None = None,
     ) -> str:
-        template_id = str(uuid.uuid4())
         validation = dict(validation or {})
         digest = contract_digest(validation)
         with get_db_session() as db:
+            registration_key = "|".join(
+                (
+                    str(vendor).strip().casefold(),
+                    str(profile).strip().casefold(),
+                    str(command).strip().casefold(),
+                    str(version).strip(),
+                )
+            )
+            db.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+                {"key": registration_key},
+            )
+            existing = (
+                db.query(ParserTemplate)
+                .filter(
+                    ParserTemplate.vendor == vendor,
+                    ParserTemplate.profile == profile,
+                    ParserTemplate.canonical_command == command,
+                    ParserTemplate.version == version,
+                )
+                .first()
+            )
+            if existing is not None:
+                same_registration = (
+                    existing.sha256 == sha256
+                    and existing.asset_path == asset_path
+                    and (existing.source_job_id or None) == (source_job_id or None)
+                )
+                if same_registration:
+                    return existing.id
+                raise ValueError(
+                    "parser template version already belongs to a different immutable asset"
+                )
+
             if contract_version is None:
                 previous = (
                     db.query(ParserTemplate)
@@ -531,6 +726,7 @@ class ParserRepository:
                     contract_version = int(previous.contract_version or 1) + 1
             validation["contract_version"] = int(contract_version)
             validation["contract_sha256"] = digest
+            template_id = str(uuid.uuid4())
             template = ParserTemplate(
                 id=template_id,
                 vendor=vendor,
@@ -592,6 +788,15 @@ class ParserRepository:
                 raise ValueError(
                     "template activation requires a non-empty, fully passing regression set"
                 )
+            agent_gate_errors = generated_template_activation_errors(
+                validation,
+                source_job_id=template.source_job_id,
+            )
+            if not force and agent_gate_errors:
+                raise ValueError(
+                    "template activation blocked by Parser Agent governance: "
+                    + "; ".join(agent_gate_errors)
+                )
             old_active_templates = (
                 db.query(ParserTemplate)
                 .filter(
@@ -613,6 +818,15 @@ class ParserRepository:
                     db,
                     old_template,
                     status="deprecated",
+                )
+                _deprecate_rule_generation_seeds(
+                    db,
+                    template_id=str(old_template.id),
+                    actor=str(approved_by).strip(),
+                    reason=(
+                        f"parser template superseded by {template.id}: "
+                        f"{str(reason).strip()}"
+                    ),
                 )
             db.flush()
             template.status = "active"
@@ -721,12 +935,15 @@ class ParserRepository:
         )
 
     def supersede_legacy_jobs(self) -> int:
-        """Retire jobs whose samples cannot be resolved from PostgreSQL."""
+        """Hard-delete jobs whose samples cannot be resolved from PostgreSQL.
+
+        The method name remains for API compatibility. Invalid historical tasks
+        are deliberately not migrated into a replacement asset aggregate.
+        """
+
         count = 0
         with get_db_session() as db:
-            jobs = (
-                db.query(ParserTemplateJob).filter(ParserTemplateJob.status != "superseded").all()
-            )
+            jobs = db.query(ParserTemplateJob).all()
             for job in jobs:
                 samples = db.query(ParserJobSample).filter(ParserJobSample.job_id == job.id).all()
                 if not samples or not any(
@@ -735,10 +952,7 @@ class ParserRepository:
                     for sample in samples
                 ):
                     continue
-                job.status = "superseded"
-                job.superseded_at = utcnow()
-                job.completed_at = job.completed_at or utcnow()
-                job.updated_at = utcnow()
+                self._delete_job_graph(db, job)
                 count += 1
         return count
 
@@ -822,6 +1036,13 @@ class ParserRepository:
                 row,
                 status="active" if status == "active" else "deprecated",
             )
+            if status in {"deprecated", "rejected"}:
+                _deprecate_rule_generation_seeds(
+                    db,
+                    template_id=str(row.id),
+                    actor=str(actor or "parser-control-plane"),
+                    reason=str(reason or f"parser template marked {status}"),
+                )
 
     def governance_alert_summary(self) -> dict[str, Any]:
         settings = get_settings()
@@ -902,18 +1123,24 @@ class ParserRepository:
                 )
                 .all()
             )
+            # The session commits on context exit and expires ORM attributes.
+            # Project the aggregate while rows are still attached so the
+            # governance endpoint never dereferences detached instances.
+            rule_generation_failures = sum(
+                item.status in {"failed", "validation_failed", "rejected"}
+                for item in rule_jobs
+            )
+            replay_collisions = sum(
+                int(
+                    ((item.validation_report_json or {}).get("replay") or {}).get(
+                        "collision_count"
+                    )
+                    or 0
+                )
+                for item in rule_jobs
+            )
 
         blocked_ratio = float(blocked_results) / float(recent_results) if recent_results else 0.0
-        rule_generation_failures = sum(
-            item.status in {"failed", "validation_failed", "rejected"} for item in rule_jobs
-        )
-        replay_collisions = sum(
-            int(
-                ((item.validation_report_json or {}).get("replay") or {}).get("collision_count")
-                or 0
-            )
-            for item in rule_jobs
-        )
 
         def add(code: str, count: int | float, severity: str, message: str) -> None:
             if count:
@@ -1008,14 +1235,299 @@ class ParserRepository:
         return self.transition_job_status(job_id, "cancelled")
 
     def retry_job(self, job_id: str) -> dict[str, Any]:
-        current = self.get_job(job_id)
-        if not current:
-            raise ParserJobStateError(f"parser job {job_id} not found")
-        if current["status"] not in {"failed", "cancelled"}:
-            raise ParserJobStateError(
-                f"parser job {job_id} cannot be retried from {current['status']}"
+        with get_db_session() as db:
+            job = (
+                db.query(ParserTemplateJob)
+                .filter(ParserTemplateJob.id == job_id)
+                .with_for_update()
+                .one_or_none()
             )
-        return self.transition_job_status(job_id, "pending", clear_dispatch=True)
+            if job is None:
+                raise ParserJobStateError(f"parser job {job_id} not found")
+            retryable_status = job.status in {"failed", "cancelled"}
+            if job.status == "succeeded":
+                generated_templates = (
+                    db.query(ParserTemplate)
+                    .filter(ParserTemplate.source_job_id == job_id)
+                    .with_for_update()
+                    .all()
+                )
+                retryable_status = bool(generated_templates) and all(
+                    template.status in {"deprecated", "rejected"}
+                    for template in generated_templates
+                )
+                if not retryable_status:
+                    raise ParserJobStateError(
+                        "a succeeded parser job can be retried only after every "
+                        "generated candidate is deprecated or rejected"
+                    )
+            if not retryable_status:
+                raise ParserJobStateError(
+                    f"parser job {job_id} cannot be retried from {job.status}"
+                )
+            job.status = "pending"
+            job.last_error = None
+            job.failure_code = None
+            job.celery_task_id = None
+            job.dispatched_at = None
+            job.started_at = None
+            job.completed_at = None
+            # Explicit retry starts a fresh Agent loop. Immutable attempts remain
+            # queryable as history and the next run continues their sequence.
+            job.agent_state_json = None
+            job.agent_budget_json = None
+            job.best_attempt_id = None
+            job.contract_revision_count = 0
+            job.template_attempt_count = 0
+            job.updated_at = utcnow()
+            db.flush()
+            return job.to_dict()
+
+    @staticmethod
+    def _delete_job_graph(db: Any, job: ParserTemplateJob) -> dict[str, int]:
+        """Hard-delete one Parser task and its non-runtime historical artifacts."""
+
+        job_id = str(job.id)
+        template_rows = (
+            db.query(ParserTemplate)
+            .filter(ParserTemplate.source_job_id == job_id)
+            .all()
+        )
+        active_templates = [row for row in template_rows if row.status == "active"]
+        historical_templates = [row for row in template_rows if row.status != "active"]
+        historical_template_ids = [str(row.id) for row in historical_templates]
+
+        for template in active_templates:
+            template.source_job_id = None
+            template.updated_at = utcnow()
+        deleted_rule_jobs = 0
+        deleted_contracts = 0
+        deleted_backfills = 0
+        deleted_parse_results = 0
+        contract_filters = [ObservationContractRecord.source_job_id == job_id]
+        if historical_template_ids:
+            contract_filters.append(
+                ObservationContractRecord.source_template_id.in_(
+                    historical_template_ids
+                )
+            )
+        historical_contracts = (
+            db.query(ObservationContractRecord)
+            .filter(or_(*contract_filters))
+            .all()
+        )
+        historical_template_id_set = set(historical_template_ids)
+        for contract in historical_contracts:
+            if contract.status == "active":
+                if contract.source_job_id == job_id:
+                    contract.source_job_id = None
+                if str(contract.source_template_id or "") in historical_template_id_set:
+                    contract.source_template_id = None
+                contract.updated_at = utcnow()
+            else:
+                db.delete(contract)
+                deleted_contracts += 1
+
+        if historical_template_ids:
+            source_refs = [
+                f"parser_template:{template_id}"
+                for template_id in historical_template_ids
+            ]
+            linked_rule_jobs = (
+                db.query(RuleGenerationJobRecord)
+                .filter(
+                    or_(
+                        RuleGenerationJobRecord.asset_id.in_(historical_template_ids),
+                        RuleGenerationJobRecord.source_ref.in_(source_refs),
+                    )
+                )
+                .all()
+            )
+            for rule_job in linked_rule_jobs:
+                if rule_job.status == "active":
+                    rule_job.source_ref = None
+                    rule_job.asset_ref = None
+                    rule_job.asset_id = None
+                    rule_job.updated_at = utcnow()
+                else:
+                    db.delete(rule_job)
+                    deleted_rule_jobs += 1
+            deleted_backfills = int(
+                db.query(ParserBackfillJobRecord)
+                .filter(ParserBackfillJobRecord.template_id.in_(historical_template_ids))
+                .delete(synchronize_session=False)
+                or 0
+            )
+            deleted_parse_results = int(
+                db.query(SnapshotParseResult)
+                .filter(SnapshotParseResult.template_id.in_(historical_template_ids))
+                .delete(synchronize_session=False)
+                or 0
+            )
+            for template in historical_templates:
+                db.delete(template)
+
+        job.best_attempt_id = None
+        deleted_samples = int(
+            db.query(ParserJobSample)
+            .filter(ParserJobSample.job_id == job_id)
+            .delete(synchronize_session=False)
+            or 0
+        )
+        deleted_attempts = int(
+            db.query(ParserGenerationAttempt)
+            .filter(ParserGenerationAttempt.job_id == job_id)
+            .delete(synchronize_session=False)
+            or 0
+        )
+        deleted_outbox = int(
+            db.query(ParserOutboxEvent)
+            .filter(ParserOutboxEvent.aggregate_id == job_id)
+            .delete(synchronize_session=False)
+            or 0
+        )
+        db.delete(job)
+        return {
+            "deleted_samples": deleted_samples,
+            "deleted_attempts": deleted_attempts,
+            "deleted_outbox_events": deleted_outbox,
+            "deleted_templates": len(historical_templates),
+            "detached_active_templates": len(active_templates),
+            "deleted_rule_jobs": deleted_rule_jobs,
+            "deleted_contracts": deleted_contracts,
+            "deleted_backfills": deleted_backfills,
+            "deleted_parse_results": deleted_parse_results,
+        }
+
+    def purge_duplicate_asset_jobs(
+        self,
+        *,
+        dry_run: bool = True,
+        only_identity: tuple[str, str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Delete duplicate task rows without merging their samples or attempts."""
+
+        status_priority = {
+            "running": 80,
+            "validating": 70,
+            "pending": 60,
+            "collecting": 50,
+            "succeeded": 40,
+            "failed": 30,
+            "cancelled": 20,
+            "superseded": 10,
+        }
+
+        def recency(row: ParserTemplateJob) -> float:
+            value = row.updated_at or row.created_at
+            if value is None:
+                return 0.0
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=timezone.utc)
+            return value.timestamp()
+
+        with get_db_session() as db:
+            if not dry_run:
+                db.execute(text("LOCK TABLE parser_template_jobs IN ACCESS EXCLUSIVE MODE"))
+            rows = (
+                db.query(ParserTemplateJob)
+                .order_by(ParserTemplateJob.updated_at.desc(), ParserTemplateJob.id.desc())
+                .all()
+            )
+            normalized_filter = (
+                parser_job_asset_identity(
+                    vendor=only_identity[0],
+                    profile=only_identity[1],
+                    command=only_identity[2],
+                )
+                if only_identity
+                else None
+            )
+            if normalized_filter is not None:
+                rows = [
+                    row
+                    for row in rows
+                    if parser_job_asset_identity(
+                        vendor=row.vendor,
+                        profile=row.profile,
+                        command=row.canonical_command,
+                    )
+                    == normalized_filter
+                ]
+            active_source_job_ids = {
+                str(source_job_id)
+                for (source_job_id,) in db.query(ParserTemplate.source_job_id)
+                .filter(
+                    ParserTemplate.status == "active",
+                    ParserTemplate.source_job_id.is_not(None),
+                )
+                .all()
+            }
+            groups: dict[tuple[str, str, str], list[ParserTemplateJob]] = {}
+            for row in rows:
+                identity = parser_job_asset_identity(
+                    vendor=row.vendor,
+                    profile=row.profile,
+                    command=row.canonical_command,
+                )
+                groups.setdefault(identity, []).append(row)
+
+            duplicate_groups: list[dict[str, Any]] = []
+            duplicate_ids: set[str] = set()
+            for identity, group in groups.items():
+                if len(group) < 2:
+                    continue
+                keeper = max(
+                    group,
+                    key=lambda row: (
+                        row.status in OPEN_JOB_STATUSES,
+                        status_priority.get(str(row.status), 0),
+                        str(row.id) in active_source_job_ids,
+                        recency(row),
+                        str(row.id),
+                    ),
+                )
+                removed = [str(row.id) for row in group if row.id != keeper.id]
+                duplicate_ids.update(removed)
+                duplicate_groups.append(
+                    {
+                        "vendor": identity[0],
+                        "profile": identity[1],
+                        "canonical_command": identity[2],
+                        "keeper_job_id": str(keeper.id),
+                        "deleted_job_ids": removed,
+                    }
+                )
+
+            deletion_totals: dict[str, int] = {}
+            if not dry_run:
+                for row in rows:
+                    if str(row.id) not in duplicate_ids:
+                        continue
+                    result = self._delete_job_graph(db, row)
+                    for key, value in result.items():
+                        deletion_totals[key] = deletion_totals.get(key, 0) + int(value)
+                db.flush()
+                for row in rows:
+                    if str(row.id) in duplicate_ids:
+                        continue
+                    row.idempotency_key = parser_job_asset_key(
+                        vendor=row.vendor,
+                        profile=row.profile,
+                        command=row.canonical_command,
+                    )
+                    row.updated_at = utcnow()
+
+            return {
+                "dry_run": bool(dry_run),
+                "job_count_before": len(rows),
+                "duplicate_group_count": len(duplicate_groups),
+                "deleted_job_count": len(duplicate_ids) if not dry_run else 0,
+                "would_delete_job_count": len(duplicate_ids),
+                "migrated_sample_count": 0,
+                "deletion_totals": deletion_totals,
+                "groups": duplicate_groups,
+            }
 
     def delete_job(self, job_id: str) -> dict[str, Any]:
         with get_db_session() as db:
@@ -1025,13 +1537,7 @@ class ParserRepository:
             if job.status in OPEN_JOB_STATUSES:
                 raise ParserJobStateError(f"parser job {job_id} must be cancelled before deletion")
             item = job.to_dict()
-            sample_count = (
-                db.query(ParserJobSample)
-                .filter(ParserJobSample.job_id == job_id)
-                .delete(synchronize_session=False)
-            )
-            db.delete(job)
-            return {"job": item, "deleted_samples": int(sample_count or 0)}
+            return {"job": item, **self._delete_job_graph(db, job)}
 
     def delete_jobs(self, job_ids: list[str]) -> dict[str, Any]:
         deleted: list[dict[str, Any]] = []
@@ -1064,9 +1570,9 @@ class ParserRepository:
             output: list[dict[str, Any]] = []
             for job in jobs:
                 samples = db.query(ParserJobSample).filter(ParserJobSample.job_id == job.id).all()
-                if job.source_mode == "production" and (
-                    not samples
-                    or any(sample.sanitization_status != "sanitized" for sample in samples)
+                if not samples or any(
+                    sample.sanitization_status != "sanitized" or not sample.sanitized_text
+                    for sample in samples
                 ):
                     continue
                 recent_samples = [
@@ -1336,7 +1842,238 @@ class ParserRepository:
                 for sample in samples:
                     sample.pop("sanitized_text", None)
             result["samples"] = samples
+            result["attempt_summary"] = {
+                "total": int(
+                    db.query(func.count(ParserGenerationAttempt.id))
+                    .filter(ParserGenerationAttempt.job_id == job_id)
+                    .scalar()
+                    or 0
+                ),
+                "best_attempt_id": job.best_attempt_id,
+                "contract_revisions": int(job.contract_revision_count or 0),
+                "template_attempts": int(job.template_attempt_count or 0),
+            }
+            attempt_rows = (
+                db.query(ParserGenerationAttempt)
+                .filter(ParserGenerationAttempt.job_id == job_id)
+                .order_by(ParserGenerationAttempt.attempt_number)
+                .all()
+            )
+            result["generation_attempts"] = []
+            for attempt in attempt_rows:
+                attempt_data = attempt.to_dict()
+                attempt_data.pop("template_text", None)
+                result["generation_attempts"].append(attempt_data)
             return result
+
+    def get_generation_resume_state(self, job_id: str) -> dict[str, Any]:
+        """Load an internal Agent checkpoint and its best candidate template."""
+
+        with get_db_session() as db:
+            job = db.get(ParserTemplateJob, job_id)
+            if job is None:
+                raise ParserJobStateError(f"parser job {job_id} not found")
+            if not isinstance(job.agent_state_json, dict) or not job.agent_state_json:
+                return {}
+            state = dict(job.agent_state_json)
+            state["job_id"] = job_id
+            state.setdefault("thread_id", f"parser-template:{job_id}")
+            best_attempt_id = state.get("best_attempt_id") or job.best_attempt_id
+            if best_attempt_id:
+                best = db.get(ParserGenerationAttempt, best_attempt_id)
+                if best is not None and best.job_id == job_id and best.template_text:
+                    state["best_attempt_id"] = best.id
+                    state["best_template"] = best.template_text
+                    state["best_rank"] = float(best.candidate_rank or -1.0)
+            if not state.get("parent_attempt_id"):
+                latest = (
+                    db.query(ParserGenerationAttempt)
+                    .filter(ParserGenerationAttempt.job_id == job_id)
+                    .order_by(ParserGenerationAttempt.attempt_number.desc())
+                    .first()
+                )
+                if latest is not None:
+                    state["parent_attempt_id"] = latest.id
+            return state
+
+    def get_latest_valid_contract_attempt(
+        self,
+        job_id: str,
+        *,
+        train_sample_set_hash: str,
+        holdout_sample_set_hash: str,
+    ) -> dict[str, Any] | None:
+        """Return the latest immutable Contract valid for the same corpus."""
+
+        with get_db_session() as db:
+            rows = (
+                db.query(ParserGenerationAttempt)
+                .filter(
+                    ParserGenerationAttempt.job_id == job_id,
+                    ParserGenerationAttempt.stage == "contract",
+                    ParserGenerationAttempt.status == "passed",
+                    ParserGenerationAttempt.train_sample_set_hash
+                    == train_sample_set_hash,
+                    ParserGenerationAttempt.holdout_sample_set_hash
+                    == holdout_sample_set_hash,
+                )
+                .order_by(ParserGenerationAttempt.attempt_number.desc())
+                .all()
+            )
+            for row in rows:
+                report = dict(row.validation_report_json or {})
+                contract = report.get("contract")
+                if report.get("valid") is True and isinstance(contract, dict) and contract:
+                    return {
+                        "attempt_id": str(row.id),
+                        "attempt_number": int(row.attempt_number),
+                        "contract_hash": row.contract_hash,
+                        "contract": dict(contract),
+                    }
+            return None
+
+    def create_generation_attempt(
+        self,
+        *,
+        job_id: str,
+        stage: str,
+        action: str,
+        status: str,
+        textfsm_runtime_version: str,
+        dialect_version: str,
+        dialect_hash: str,
+        validation_report: dict[str, Any],
+        parent_attempt_id: str | None = None,
+        model_provider: str | None = None,
+        model_name: str | None = None,
+        prompt_version: str | None = None,
+        prompt_hash: str | None = None,
+        contract_hash: str | None = None,
+        train_sample_set_hash: str | None = None,
+        holdout_sample_set_hash: str | None = None,
+        template_text: str | None = None,
+        failure_signature: str | None = None,
+        candidate_rank: float | None = None,
+        token_usage: dict[str, Any] | None = None,
+        latency_ms: int | None = None,
+    ) -> dict[str, Any]:
+        if stage not in {"contract", "template", "validation", "holdout", "regression"}:
+            raise ValueError(f"unsupported parser generation stage: {stage}")
+        with get_db_session() as db:
+            job = (
+                db.query(ParserTemplateJob)
+                .filter(ParserTemplateJob.id == job_id)
+                .with_for_update()
+                .one_or_none()
+            )
+            if job is None:
+                raise ParserJobStateError(f"parser job {job_id} not found")
+            number = int(
+                db.query(func.max(ParserGenerationAttempt.attempt_number))
+                .filter(ParserGenerationAttempt.job_id == job_id)
+                .scalar()
+                or 0
+            ) + 1
+            template_sha256 = (
+                hashlib.sha256(template_text.encode("utf-8")).hexdigest()
+                if template_text is not None
+                else None
+            )
+            row = ParserGenerationAttempt(
+                id=str(uuid.uuid4()),
+                job_id=job_id,
+                attempt_number=number,
+                parent_attempt_id=parent_attempt_id,
+                stage=stage,
+                action=action,
+                model_provider=model_provider,
+                model_name=model_name,
+                textfsm_runtime_version=textfsm_runtime_version,
+                dialect_version=dialect_version,
+                dialect_hash=dialect_hash,
+                prompt_version=prompt_version,
+                prompt_hash=prompt_hash,
+                contract_hash=contract_hash,
+                train_sample_set_hash=train_sample_set_hash,
+                holdout_sample_set_hash=holdout_sample_set_hash,
+                template_text=template_text,
+                template_sha256=template_sha256,
+                validation_report_json=dict(validation_report or {}),
+                failure_signature=failure_signature,
+                candidate_rank=candidate_rank,
+                status=status,
+                token_usage_json=dict(token_usage or {}) or None,
+                latency_ms=latency_ms,
+                created_at=utcnow(),
+            )
+            db.add(row)
+            db.flush()
+            if stage == "contract":
+                job.contract_revision_count = int(job.contract_revision_count or 0) + 1
+            if stage in {"template", "validation", "holdout", "regression"}:
+                job.template_attempt_count = int(job.template_attempt_count or 0) + 1
+
+            current_best = (
+                db.get(ParserGenerationAttempt, job.best_attempt_id)
+                if job.best_attempt_id
+                else None
+            )
+            if candidate_rank is not None and (
+                current_best is None
+                or current_best.candidate_rank is None
+                or float(candidate_rank) > float(current_best.candidate_rank)
+            ):
+                job.best_attempt_id = row.id
+            job.updated_at = utcnow()
+            db.flush()
+            return row.to_dict()
+
+    def save_agent_checkpoint(
+        self,
+        job_id: str,
+        *,
+        state: dict[str, Any],
+        budget: dict[str, Any] | None = None,
+        best_attempt_id: str | None = None,
+    ) -> dict[str, Any]:
+        with get_db_session() as db:
+            job = (
+                db.query(ParserTemplateJob)
+                .filter(ParserTemplateJob.id == job_id)
+                .with_for_update()
+                .one_or_none()
+            )
+            if job is None:
+                raise ParserJobStateError(f"parser job {job_id} not found")
+            job.agent_state_json = dict(state or {})
+            job.agent_budget_json = dict(budget or {}) or job.agent_budget_json
+            if best_attempt_id:
+                best = db.get(ParserGenerationAttempt, best_attempt_id)
+                if best is None or best.job_id != job_id:
+                    raise ParserJobStateError("best parser attempt does not belong to the job")
+                job.best_attempt_id = best_attempt_id
+            job.updated_at = utcnow()
+            db.flush()
+            return job.to_dict()
+
+    def list_generation_attempts(
+        self,
+        job_id: str,
+        *,
+        include_template: bool = False,
+    ) -> list[dict[str, Any]]:
+        with get_db_session() as db:
+            rows = (
+                db.query(ParserGenerationAttempt)
+                .filter(ParserGenerationAttempt.job_id == job_id)
+                .order_by(ParserGenerationAttempt.attempt_number)
+                .all()
+            )
+            output = [row.to_dict() for row in rows]
+            if not include_template:
+                for item in output:
+                    item.pop("template_text", None)
+            return output
 
     def save_parse_result(
         self,
@@ -1461,6 +2198,7 @@ class ParserJobRepository:
     retry_job = ParserRepository.retry_job
     delete_job = ParserRepository.delete_job
     delete_jobs = ParserRepository.delete_jobs
+    purge_duplicate_asset_jobs = ParserRepository.purge_duplicate_asset_jobs
     list_dispatchable_jobs = ParserRepository.list_dispatchable_jobs
     list_jobs = ParserRepository.list_jobs
     backlog_summary = ParserRepository.backlog_summary
@@ -1468,6 +2206,12 @@ class ParserJobRepository:
     mark_job_dispatched = ParserRepository.mark_job_dispatched
     fail_stale_jobs = ParserRepository.fail_stale_jobs
     get_job = ParserRepository.get_job
+    get_generation_resume_state = ParserRepository.get_generation_resume_state
+    get_latest_valid_contract_attempt = ParserRepository.get_latest_valid_contract_attempt
+    create_generation_attempt = ParserRepository.create_generation_attempt
+    save_agent_checkpoint = ParserRepository.save_agent_checkpoint
+    list_generation_attempts = ParserRepository.list_generation_attempts
+    _delete_job_graph = staticmethod(ParserRepository._delete_job_graph)
     _add_outbox = staticmethod(ParserRepository._add_outbox)
 
 

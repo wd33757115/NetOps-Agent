@@ -22,7 +22,11 @@ logger = logging.getLogger(__name__)
 def _context_from_params(params: dict[str, Any]) -> ExecutionContext:
     obs = extract_observability_context(params)
     return ExecutionContext(
-        source=str(params.pop("_execution_source", None) or params.pop("execution_source", None) or "celery"),
+        source=str(
+            params.pop("_execution_source", None)
+            or params.pop("execution_source", None)
+            or "celery"
+        ),
         message_id=params.pop("_message_id", None) or params.pop("message_id", None),
         thread_id=params.pop("_thread_id", None) or params.pop("thread_id", None),
         run_id=obs.get("run_id"),
@@ -96,15 +100,15 @@ class SkillRunner:
         from src.core.skills.executor import SkillExecutionError, _execute_skill_impl
 
         params = dict(params or {})
+        obs = extract_observability_context(params)
         if context is None:
             context = _context_from_params(params)
         else:
             params = strip_observability_keys(params)
 
         skill_params = strip_observability_keys(dict(params))
-        obs = extract_observability_context(params)
-        trace_id = obs["trace_id"]
-        run_id = obs["run_id"]
+        trace_id = obs["trace_id"] or context.trace_id
+        run_id = obs["run_id"] or context.run_id
         parent_observation_id = obs["workflow_root_span_id"]
         skill_version = get_skill_version(skill_name)
         user_id = context.user_id or skill_params.get("user_id")
@@ -130,7 +134,8 @@ class SkillRunner:
                     run_id=run_id,
                     parent_observation_id=parent_observation_id,
                     status="failed",
-                    message=ser.message or (ser.error_info.message if ser.error_info else "Skill 失败"),
+                    message=ser.message
+                    or (ser.error_info.message if ser.error_info else "Skill 失败"),
                     input_params=skill_params,
                     output=raw,
                     error=ser.error_info.message if ser.error_info else ser.message,

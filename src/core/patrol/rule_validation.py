@@ -12,7 +12,11 @@ from src.core.patrol.event_rules import (
     default_event_rules,
     load_event_rule_pack,
 )
-
+from src.core.state.observation_applicability import (
+    APPLICABILITY_CONTEXT_KEY,
+    excluded_context_example,
+    validate_applicability,
+)
 
 PRIVATE_CHANGE_FIELDS = {
     "change_id",
@@ -145,17 +149,33 @@ def validate_event_rule_definitions(
     rules = [definition.to_rule() for definition in definitions]
     generated_cases: list[EventRuleValidationCase] = []
     rule_results: list[dict[str, Any]] = []
-    for definition in definitions:
+    isolated_rows: list[dict[str, Any]] = []
+    passed_count = 0
+    failed_count = 0
+    for definition, rule in zip(definitions, rules, strict=True):
         cases = generate_validation_cases_for_rule(definition)
         generated_cases.extend(cases)
+        isolated = validate_event_rule_set(cases, rules=[rule])
+        isolated_rows.extend(isolated["rows"])
+        passed_count += int(isolated["passed_count"])
+        failed_count += int(isolated["failed_count"])
         rule_results.append(
             {
                 "rule_id": definition.rule_id,
                 "event_type": definition.event_type,
-                **validate_event_rule_set(cases, rules=rules),
+                **isolated,
             }
         )
-    generated_result = validate_event_rule_set(generated_cases, rules=rules)
+    total = len(generated_cases)
+    generated_result = {
+        "success": failed_count == 0,
+        "case_count": total,
+        "passed_count": passed_count,
+        "failed_count": failed_count,
+        "pass_rate": (passed_count / total) if total else 1.0,
+        "rows": isolated_rows,
+        "evaluation_scope": "isolated_rule",
+    }
     collision_result = detect_rule_collisions(
         generated_cases,
         rules,
@@ -172,6 +192,10 @@ def validate_event_rule_definitions(
         "rule_results": rule_results,
         "generated_result": generated_result,
         "collision_result": collision_result,
+        "validation_strategy": {
+            "rule_behavior": "isolated",
+            "cross_rule_collisions": "combined",
+        },
     }
 
 
@@ -316,6 +340,70 @@ def generate_validation_cases_for_rule(
                     "field": field,
                     "old": low,
                     "new": recovered - 1,
+                    "change_type": "modified",
+                },
+            )
+        )
+    elif kind in {
+        "threshold_field_gte",
+        "threshold_field_high_recovery",
+        "threshold_field_lte",
+        "threshold_field_low_recovery",
+    }:
+        reference_field = str(condition.get("reference_field") or "reference")
+        reference = 10.0
+        hysteresis = float(condition.get("hysteresis") or 2.0)
+        context = {APPLICABILITY_CONTEXT_KEY: {reference_field: reference}}
+        high_direction = kind in {
+            "threshold_field_gte",
+            "threshold_field_high_recovery",
+        }
+        recovery = kind in {
+            "threshold_field_high_recovery",
+            "threshold_field_low_recovery",
+        }
+        if high_direction and not recovery:
+            old_value, new_value, negative_new = reference - 1, reference, reference - 1
+        elif high_direction:
+            old_value, new_value, negative_new = (
+                reference,
+                reference - hysteresis,
+                reference - hysteresis + 1,
+            )
+        elif not recovery:
+            old_value, new_value, negative_new = reference + 1, reference, reference + 1
+        else:
+            old_value, new_value, negative_new = (
+                reference,
+                reference + hysteresis,
+                reference + hysteresis - 1,
+            )
+        cases.append(
+            EventRuleValidationCase(
+                name=f"{definition.rule_id}-positive-reference-threshold",
+                change={
+                    "entity_type": entity_type,
+                    "entity_key": "entity=1",
+                    "dimensions": context,
+                    "field": field,
+                    "old": old_value,
+                    "new": new_value,
+                    "change_type": "modified",
+                },
+                expected_event_type=definition.event_type,
+                expected_rule_id=definition.rule_id,
+            )
+        )
+        cases.append(
+            EventRuleValidationCase(
+                name=f"{definition.rule_id}-negative-reference-threshold",
+                change={
+                    "entity_type": entity_type,
+                    "entity_key": "entity=1",
+                    "dimensions": context,
+                    "field": field,
+                    "old": old_value,
+                    "new": negative_new,
                     "change_type": "modified",
                 },
             )
@@ -478,11 +566,220 @@ def generate_validation_cases_for_rule(
                 },
             )
         )
+    applicability = condition.get("applicability")
+    if applicability:
+        for case in cases:
+            case.change.setdefault("context", {})
+        excluded_context = excluded_context_example(applicability)
+        positive = next(
+            (case for case in cases if case.expected_event_type is not None),
+            None,
+        )
+        if excluded_context is not None and positive is not None:
+            excluded_change = dict(positive.change)
+            excluded_change["context"] = excluded_context
+            cases.append(
+                EventRuleValidationCase(
+                    name=f"{definition.rule_id}-negative-not-applicable",
+                    change=excluded_change,
+                )
+            )
     return cases
 
 
+def validate_event_rule_condition(condition: dict[str, Any]) -> list[str]:
+    """Validate DSL shape without executing an untrusted candidate predicate."""
+
+    errors: list[str] = []
+    kind = str(condition.get("kind") or "").strip()
+    supported = {
+        "transition",
+        "bgp_transition",
+        "threshold",
+        "threshold_recovery",
+        "threshold_lte",
+        "threshold_low_recovery",
+        "threshold_field_gte",
+        "threshold_field_high_recovery",
+        "threshold_field_lte",
+        "threshold_field_low_recovery",
+        "entity_status_down",
+        "raw_config_hash",
+    }
+    if kind not in supported:
+        return [f"unsupported or missing condition.kind: {kind or '<empty>'}"]
+
+    allowed_keys = {
+        "threshold": {"kind", "entity_types", "fields", "gte", "applicability"},
+        "threshold_recovery": {
+            "kind",
+            "entity_types",
+            "fields",
+            "lt",
+            "applicability",
+        },
+        "threshold_lte": {
+            "kind",
+            "entity_types",
+            "fields",
+            "lte",
+            "applicability",
+        },
+        "threshold_low_recovery": {
+            "kind",
+            "entity_types",
+            "fields",
+            "low",
+            "gt",
+            "hysteresis",
+            "applicability",
+        },
+        "threshold_field_gte": {
+            "kind",
+            "entity_types",
+            "fields",
+            "reference_field",
+            "applicability",
+        },
+        "threshold_field_high_recovery": {
+            "kind",
+            "entity_types",
+            "fields",
+            "reference_field",
+            "hysteresis",
+            "applicability",
+        },
+        "threshold_field_lte": {
+            "kind",
+            "entity_types",
+            "fields",
+            "reference_field",
+            "applicability",
+        },
+        "threshold_field_low_recovery": {
+            "kind",
+            "entity_types",
+            "fields",
+            "reference_field",
+            "hysteresis",
+            "applicability",
+        },
+        "transition": {
+            "kind",
+            "entity_types",
+            "fields",
+            "from_group",
+            "to_group",
+            "allow_initial_target",
+            "applicability",
+        },
+        "bgp_transition": {
+            "kind",
+            "entity_types",
+            "fields",
+            "from_established",
+            "to_established",
+            "allow_initial_target",
+            "applicability",
+        },
+        "entity_status_down": {
+            "kind",
+            "entity_types",
+            "fields",
+            "applicability",
+        },
+        "raw_config_hash": {"kind", "command_markers"},
+    }
+    unknown_keys = sorted(set(condition) - allowed_keys[kind])
+    if unknown_keys:
+        errors.append(
+            f"condition contains unsupported keys for {kind}: "
+            + ", ".join(unknown_keys)
+        )
+
+    def require_list(key: str) -> None:
+        value = condition.get(key)
+        if not isinstance(value, list) or not value:
+            errors.append(f"condition.{key} must be a non-empty list")
+
+    def require_number(key: str) -> None:
+        value = condition.get(key)
+        try:
+            float(value)
+        except (TypeError, ValueError):
+            errors.append(f"condition.{key} must be a number")
+
+    if kind == "raw_config_hash":
+        require_list("command_markers")
+        return errors
+    if condition.get("applicability"):
+        errors.extend(validate_applicability(condition["applicability"]))
+    require_list("fields")
+    if kind == "threshold":
+        require_number("gte")
+    elif kind == "threshold_recovery":
+        require_number("lt")
+    elif kind == "threshold_lte":
+        require_number("lte")
+    elif kind == "threshold_low_recovery":
+        require_number("low")
+        if condition.get("gt") is None and condition.get("hysteresis") is None:
+            errors.append("condition.gt or condition.hysteresis is required")
+        elif condition.get("gt") is not None:
+            require_number("gt")
+        else:
+            require_number("hysteresis")
+    elif kind in {
+        "threshold_field_gte",
+        "threshold_field_lte",
+    }:
+        if not str(condition.get("reference_field") or "").strip():
+            errors.append("condition.reference_field is required")
+    elif kind in {
+        "threshold_field_high_recovery",
+        "threshold_field_low_recovery",
+    }:
+        if not str(condition.get("reference_field") or "").strip():
+            errors.append("condition.reference_field is required")
+        require_number("hysteresis")
+    elif kind == "transition":
+        if str(condition.get("from_group") or "") not in {"up", "down", "other"}:
+            errors.append("condition.from_group must be up, down, or other")
+        if str(condition.get("to_group") or "") not in {"up", "down", "other"}:
+            errors.append("condition.to_group must be up, down, or other")
+    elif kind == "bgp_transition":
+        for key in ("from_established", "to_established"):
+            if not isinstance(condition.get(key), bool):
+                errors.append(f"condition.{key} must be a boolean")
+    return errors
+
+
 def validate_event_rule_definition(definition: EventRuleDefinition) -> dict[str, Any]:
-    return validate_event_rule_definitions([definition])
+    errors = validate_event_rule_condition(dict(definition.condition or {}))
+    if errors:
+        return {
+            "success": False,
+            "errors": errors,
+            "rule_count": 1,
+            "case_count": 1,
+            "passed_count": 0,
+            "failed_count": 1,
+            "pass_rate": 0.0,
+            "rows": [],
+        }
+    try:
+        return validate_event_rule_definitions([definition])
+    except (KeyError, TypeError, ValueError) as exc:
+        return {
+            "success": False,
+            "errors": [f"condition execution failed: {type(exc).__name__}: {exc}"],
+            "rule_count": 1,
+            "case_count": 1,
+            "passed_count": 0,
+            "failed_count": 1,
+            "pass_rate": 0.0,
+            "rows": [],
+        }
 
 
 def validate_event_rule_pack(path: str | None = None) -> dict[str, Any]:

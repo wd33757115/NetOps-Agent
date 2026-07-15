@@ -28,6 +28,7 @@ from src.core.observation.repository import ObservationContractRepository
 from src.core.parser.assets import TemplateAssetStore
 from src.core.parser.backfill import ParserBackfillService
 from src.core.parser.bootstrap import bootstrap_shared_templates
+from src.core.parser.dialect_audit import TextFSMDialectAuditService
 from src.core.parser.discovery_assets import bootstrap_discovery_assets
 from src.core.parser.identity import DeviceIdentity
 from src.core.parser.repository import (
@@ -67,6 +68,7 @@ from src.core.rule_control import (
     RuntimeRuleAssetResolver,
     RuntimeRuleAssetSeedService,
 )
+from src.core.rule_control.bundles import RuleAssetBundleService
 
 router = APIRouter(
     prefix="/api/v1/parser",
@@ -199,6 +201,11 @@ class EventRuleForceActivationRequest(BaseModel):
 
 class RuleAssetGenerationContextRequest(BaseModel):
     context_overrides: dict[str, Any] | None = None
+    context_id: str | None = None
+    dataset_ids: list[str] | None = None
+    max_records: int = 120
+    field_name: str | None = None
+    observation_type: str | None = None
     actor: str | None = None
 
 
@@ -446,6 +453,19 @@ def get_job(job_id: str):
     return item
 
 
+@router.get("/jobs/{job_id}/attempts")
+def list_job_generation_attempts(job_id: str, include_template: bool = False):
+    repository = ParserJobRepository()
+    if not repository.get_job(job_id):
+        raise HTTPException(status_code=404, detail="parser job not found")
+    return {
+        "items": repository.list_generation_attempts(
+            job_id,
+            include_template=include_template,
+        )
+    }
+
+
 @router.post("/jobs/{job_id}/retry")
 def retry_job(job_id: str):
     try:
@@ -680,13 +700,38 @@ def execute_validation_import(payload: ParserImportRequest):
 
 
 @router.get("/datasets")
-def dataset_coverage():
+def dataset_coverage(dataset_ids: str | None = None):
     patrol_repository = PatrolRepository()
+    requested_dataset_ids = sorted(
+        {
+            item.strip()
+            for item in str(dataset_ids or "").split(",")
+            if item.strip()
+        }
+    )
+    if len(requested_dataset_ids) > 50:
+        raise HTTPException(
+            status_code=400,
+            detail="at most 50 dataset_ids may be inspected at once",
+        )
+    datasets = patrol_repository.list_datasets(
+        dataset_ids=requested_dataset_ids or None,
+        mode=None if requested_dataset_ids else "parser_validation",
+    )
+    offline_scopes = patrol_repository.get_offline_dataset_run_scopes(
+        requested_dataset_ids
+    )
     output = []
-    for dataset in patrol_repository.list_datasets(mode="parser_validation"):
-        snapshots = patrol_repository.list_dataset_snapshots(
-            dataset["id"],
-            mode="parser_validation",
+    for dataset in datasets:
+        scope = offline_scopes.get(dataset["id"], {})
+        patrol_run_id = scope.get("patrol_run_id")
+        snapshots = (
+            patrol_repository.list_run_snapshots(patrol_run_id)
+            if patrol_run_id
+            else patrol_repository.list_dataset_snapshots(
+                dataset["id"],
+                mode=None if requested_dataset_ids else "parser_validation",
+            )
         )
         counts = {
             "parsed": 0,
@@ -701,7 +746,7 @@ def dataset_coverage():
                 counts["parsed"] += 1
             elif item.parse_status == "parse_empty":
                 counts["empty"] += 1
-            elif item.parse_status == "ignored":
+            elif item.parse_status in {"ignored", "not_applicable", "raw_hashed"}:
                 counts["ignored"] += 1
             elif item.parse_status == "template_missing":
                 counts["missing"] += 1
@@ -711,10 +756,30 @@ def dataset_coverage():
                 counts["failed"] += 1
         eligible = len(snapshots) - counts["ignored"]
         successful = counts["parsed"] + counts["empty"]
+        parsed_snapshot_ids = [
+            item.snapshot_id for item in snapshots if item.parse_status == "parsed"
+        ]
+        key_stable_snapshot_ids = (
+            patrol_repository.list_snapshots_with_entity_keys(parsed_snapshot_ids)
+            if patrol_run_id
+            else set()
+        )
+        primary_key_stability_rate = (
+            len(key_stable_snapshot_ids) / len(parsed_snapshot_ids)
+            if patrol_run_id and parsed_snapshot_ids
+            else None
+        )
         output.append(
             {
                 **dataset,
                 "dataset_id": dataset["id"],
+                "snapshot_count": len(snapshots),
+                "device_count": len({item.device_id for item in snapshots}),
+                "command_count": len(
+                    {item.command_canonical for item in snapshots}
+                ),
+                "scope_type": "offline_patrol_run" if patrol_run_id else "dataset",
+                **scope,
                 **counts,
                 "eligible_count": eligible,
                 "structured_coverage_rate": (successful / eligible if eligible else 1.0),
@@ -722,10 +787,20 @@ def dataset_coverage():
                 "legal_empty_rate": counts["empty"] / eligible if eligible else 0.0,
                 "missing_template_rate": (counts["missing"] / eligible if eligible else 0.0),
                 "parse_failure_rate": (counts["failed"] / eligible if eligible else 0.0),
-                "primary_key_stability_rate": (successful / eligible if eligible else 1.0),
+                "primary_key_stability_rate": primary_key_stability_rate,
+                "primary_key_evaluated_count": (
+                    len(parsed_snapshot_ids) if patrol_run_id else 0
+                ),
             }
         )
-    return {"items": output}
+    found_ids = {item["dataset_id"] for item in output}
+    return {
+        "items": output,
+        "requested_dataset_ids": requested_dataset_ids,
+        "missing_dataset_ids": [
+            item for item in requested_dataset_ids if item not in found_ids
+        ],
+    }
 
 
 @router.get("/aliases")
@@ -756,6 +831,7 @@ def parser_coverage():
     backlog = jobs_repository.backlog_summary()
     backfills = ParserBackfillService().list_jobs()
     governance = ParserGovernanceProjectionRepository().governance_alert_summary()
+    dialect_audit = TextFSMDialectAuditService().audit()
     return {
         "templates_total": len(templates),
         "templates_active": active,
@@ -767,6 +843,13 @@ def parser_coverage():
         "device_profiles": len(metadata_repository.list_device_profiles()),
         "identity_signatures": len(metadata_repository.list_identity_signatures()),
         "auto_dispatch_enabled": jobs_repository.get_auto_dispatch_enabled(),
+        "dialect_version": dialect_audit["dialect_version"],
+        "dialect_active_templates": dialect_audit["template_count"],
+        "dialect_platform_violations": dialect_audit["platform_violation_count"],
+        "dialect_runtime_blocked": dialect_audit["runtime_blocked_count"],
+        "dialect_regression_evidence_missing": dialect_audit[
+            "regression_evidence_missing_count"
+        ],
         **backlog,
         "backfills_pending_approval": sum(
             item["status"] == "pending_approval" for item in backfills
@@ -776,6 +859,11 @@ def parser_coverage():
         ),
         **governance,
     }
+
+
+@router.get("/dialect-audit")
+def textfsm_dialect_audit(status: str = "active"):
+    return TextFSMDialectAuditService().audit(status=status)
 
 
 @router.get("/rule-generation-jobs")
@@ -791,6 +879,29 @@ def list_rule_generation_jobs(
             limit=limit,
         )
     }
+
+
+@router.get("/rule-asset-bundles")
+def list_rule_asset_bundles(
+    status: str | None = None,
+    search: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+):
+    return RuleAssetBundleService().list_bundles(
+        status=status,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/rule-asset-bundles/{bundle_id}")
+def get_rule_asset_bundle(bundle_id: str):
+    try:
+        return RuleAssetBundleService().get_bundle(bundle_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/replay-reports")
@@ -1042,10 +1153,51 @@ def preview_rule_asset_generation_context(
     payload: RuleAssetGenerationContextRequest | None = None,
 ):
     try:
-        return RuleAssetTemplateActivationService().build_generation_context(
+        request = payload or RuleAssetGenerationContextRequest()
+        overrides = dict(request.context_overrides or {})
+        prepared_dataset = None
+        if request.context_id or request.dataset_ids:
+            from src.core.rule_control.dataset_context import DatasetRuleGenerationContextService
+
+            context_service = DatasetRuleGenerationContextService()
+            prepared_dataset = (
+                context_service.load(context_id=request.context_id, job_id=job_id)
+                if request.context_id
+                else context_service.prepare(
+                    job_id=job_id,
+                    dataset_ids=list(request.dataset_ids or []),
+                    created_by=request.actor,
+                    max_records=request.max_records,
+                    field_name=request.field_name,
+                    observation_type=request.observation_type,
+                )
+            )
+            protected = {
+                "records",
+                "record_groups",
+                "historical_values",
+                "historical_values_by_field",
+                "field_name",
+                "observation_type",
+                "replay_run_ids",
+            }.intersection(overrides)
+            if protected:
+                raise ValueError(
+                    "immutable dataset context cannot override: " + ", ".join(sorted(protected))
+                )
+            overrides = {**prepared_dataset["context"], **overrides}
+        result = RuleAssetTemplateActivationService().build_generation_context(
             job_id,
-            context_overrides=payload.context_overrides if payload else None,
+            context_overrides=overrides,
         )
+        if prepared_dataset:
+            result.update(
+                context_id=prepared_dataset["context_id"],
+                context_digest=prepared_dataset["context_digest"],
+                dataset_ids=prepared_dataset["dataset_ids"],
+                privacy=prepared_dataset["privacy"],
+            )
+        return result
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -1058,10 +1210,49 @@ def start_rule_asset_generation_workflow(
     payload: RuleAssetGenerationContextRequest | None = None,
 ):
     try:
+        request = payload or RuleAssetGenerationContextRequest()
+        overrides = dict(request.context_overrides or {})
+        context_id = request.context_id
+        if context_id or request.dataset_ids:
+            from src.core.rule_control.dataset_context import DatasetRuleGenerationContextService
+
+            context_service = DatasetRuleGenerationContextService()
+            prepared_dataset = (
+                context_service.load(context_id=context_id, job_id=job_id)
+                if context_id
+                else context_service.prepare(
+                    job_id=job_id,
+                    dataset_ids=list(request.dataset_ids or []),
+                    created_by=request.actor,
+                    max_records=request.max_records,
+                    field_name=request.field_name,
+                    observation_type=request.observation_type,
+                )
+            )
+            protected = {
+                "records",
+                "record_groups",
+                "historical_values",
+                "historical_values_by_field",
+                "field_name",
+                "observation_type",
+                "replay_run_ids",
+            }.intersection(overrides)
+            if protected:
+                raise ValueError(
+                    "immutable dataset context cannot override: " + ", ".join(sorted(protected))
+                )
+            overrides = {**prepared_dataset["context"], **overrides}
+            context_id = prepared_dataset["context_id"]
+        generation_kwargs = {
+            "context_overrides": overrides,
+            "actor": request.actor,
+        }
+        if context_id:
+            generation_kwargs["context_id"] = context_id
         return RuleAssetTemplateActivationService().start_generation_workflow(
             job_id,
-            context_overrides=payload.context_overrides if payload else None,
-            actor=payload.actor if payload else None,
+            **generation_kwargs,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

@@ -344,6 +344,7 @@ class WorkflowEngine:
                 error=str(err),
             )
             update_run_status(run_id, "failed", error=str(err))
+            cls._project_source_terminal_state(run_id, run)
             record_workflow_step(
                 _ensure_wf_trace(run_id),
                 step_name=step.step_name,
@@ -427,6 +428,7 @@ class WorkflowEngine:
                     step_index=item.get("step_index"),
                 )
                 update_run_status(run_id, "failed", error=str(err))
+                cls._project_source_terminal_state(run_id)
                 cls._finish_trace(run_id, "failed", str(err))
                 cls._notify_failure(run_id, str(err))
                 return
@@ -450,6 +452,7 @@ class WorkflowEngine:
         if not run:
             return
         update_run_status(run_id, "completed")
+        cls._project_source_terminal_state(run_id, run)
         template = get_template(run.template_name)
         steps = list_workflow_steps(run_id)
         artifacts: dict[str, Any] = {}
@@ -506,6 +509,26 @@ class WorkflowEngine:
             ticket_id=run.ticket_id,
             artifact_keys=list(artifacts.keys()),
         )
+
+    @classmethod
+    def _project_source_terminal_state(cls, run_id: str, run=None) -> None:
+        run = run or get_workflow_run(run_id)
+        context = run.context if run and isinstance(run.context, dict) else {}
+        if not run or (
+            getattr(run, "source", None) != "offline-patrol"
+            and not context.get("offline_job_id")
+        ):
+            return
+        try:
+            from src.core.patrol.offline_jobs import OfflinePatrolJobService
+
+            OfflinePatrolJobService().sync_workflow_terminal_state(run_id)
+        except Exception as exc:
+            log.warning(
+                "offline_patrol_terminal_projection_failed",
+                run_id=run_id,
+                error=str(exc),
+            )
 
     @classmethod
     def _finish_trace(

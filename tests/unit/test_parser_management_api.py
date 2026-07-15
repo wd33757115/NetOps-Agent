@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from src.gateway import parser_api
 
 
@@ -34,6 +36,89 @@ def test_effective_plan_preview_returns_commands(monkeypatch):
 
     assert result["success"] is True
     assert result["commands"] == ["show version"]
+
+
+def test_dataset_coverage_uses_current_offline_patrol_run_scope(monkeypatch):
+    class FakeRepository:
+        def list_datasets(self, *, mode=None, dataset_ids=None):
+            assert mode is None
+            assert dataset_ids == ["offline-job-current"]
+            return [
+                {
+                    "id": "offline-job-current",
+                    "snapshot_count": 99,
+                    "device_count": 9,
+                    "command_count": 9,
+                }
+            ]
+
+        def get_offline_dataset_run_scopes(self, dataset_ids):
+            assert dataset_ids == ["offline-job-current"]
+            return {
+                "offline-job-current": {
+                    "offline_job_id": "offline-job",
+                    "period_role": "current",
+                    "observed_at": "2026-06-26T14:06:14+08:00",
+                    "patrol_run_id": "offline-job-current-attempt-5",
+                    "period_status": "completed",
+                }
+            }
+
+        def list_run_snapshots(self, run_id):
+            assert run_id == "offline-job-current-attempt-5"
+            return [
+                SimpleNamespace(
+                    snapshot_id="snapshot-parsed",
+                    parse_status="parsed",
+                    device_id="device-1",
+                    command_canonical="display interface brief",
+                ),
+                SimpleNamespace(
+                    snapshot_id="snapshot-empty",
+                    parse_status="parse_empty",
+                    device_id="device-1",
+                    command_canonical="display transceiver interface",
+                ),
+                SimpleNamespace(
+                    snapshot_id="snapshot-missing",
+                    parse_status="template_missing",
+                    device_id="device-2",
+                    command_canonical="display vrf",
+                ),
+                SimpleNamespace(
+                    snapshot_id="snapshot-ignored",
+                    parse_status="ignored",
+                    device_id="device-2",
+                    command_canonical="display current-configuration",
+                ),
+            ]
+
+        def list_dataset_snapshots(self, *args, **kwargs):
+            raise AssertionError("offline coverage must not aggregate historical attempts")
+
+        def list_snapshots_with_entity_keys(self, snapshot_ids):
+            assert len(snapshot_ids) == 1
+            return set(snapshot_ids)
+
+    monkeypatch.setattr(parser_api, "PatrolRepository", FakeRepository)
+
+    result = parser_api.dataset_coverage(
+        "offline-job-current,offline-job-current"
+    )
+
+    assert result["missing_dataset_ids"] == []
+    assert len(result["items"]) == 1
+    item = result["items"][0]
+    assert item["scope_type"] == "offline_patrol_run"
+    assert item["patrol_run_id"] == "offline-job-current-attempt-5"
+    assert item["snapshot_count"] == 4
+    assert item["device_count"] == 2
+    assert item["command_count"] == 4
+    assert item["eligible_count"] == 3
+    assert item["structured_coverage_rate"] == 2 / 3
+    assert item["missing_template_rate"] == 1 / 3
+    assert item["primary_key_stability_rate"] == 1.0
+    assert item["primary_key_evaluated_count"] == 1
 
 
 def test_event_rule_bootstrap_endpoint(monkeypatch):

@@ -1,5 +1,6 @@
 # SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
 # SPDX-License-Identifier: Apache-2.0
+# ruff: noqa: E501 - TextFSM rules are intentionally one physical regex line.
 
 """Deterministic TextFSM candidates for common CLI output structures."""
 
@@ -29,6 +30,23 @@ def _sample_text(samples: tuple[HasOutput, ...], limit: int = 3) -> str:
 def expected_min_records(sample_text: str, spec: CategorySpec) -> int | None:
     entity = (spec.entity_type or spec.name or "").lower()
     text = sample_text or ""
+    if entity == "interface_optical":
+        count = len(
+            re.findall(
+                r"(?mi)^\s*\S+\s+transceiver\s+"
+                r"(?:diagnosis|diagnostic)\s+information\s*:",
+                text,
+            )
+        )
+        if not count:
+            count = len(
+                re.findall(
+                    r"(?mi)^\s*\S+\s+transceiver\s+is\s+"
+                    r"(?:present|absent)\b",
+                    text,
+                )
+            )
+        return count or None
     if entity == "fan":
         env_count = len(
             re.findall(
@@ -147,6 +165,86 @@ def expected_min_records(sample_text: str, spec: CategorySpec) -> int | None:
     return None
 
 
+def expected_primary_key_tuples(
+    sample_text: str,
+    spec: CategorySpec,
+) -> set[tuple[str, ...]]:
+    """Extract deterministic entity keys when the CLI exposes stable headers."""
+    entity = (spec.entity_type or spec.name or "").lower()
+    if entity != "interface_optical" or tuple(spec.primary_keys) != ("interface",):
+        return set()
+    return {
+        (match.group("interface"),)
+        for match in re.finditer(
+            r"(?mi)^\s*(?P<interface>\S+)\s+transceiver\s+"
+            r"(?:diagnosis|diagnostic)\s+information\s*:",
+            sample_text or "",
+        )
+    }
+
+
+def _h3c_transceiver_diagnostics_template(
+    sample_text: str,
+) -> SynthesizedTemplate | None:
+    if not re.search(
+        r"(?mi)^\s*\S+\s+transceiver\s+(?:diagnosis|diagnostic)\s+information\s*:",
+        sample_text,
+    ):
+        return None
+    if not re.search(
+        r"(?mi)^\s*(?:Current diagnostic parameters:|The transceiver is absent\.|"
+        r"The transceiver does not support this function\.)",
+        sample_text,
+    ):
+        return None
+    return SynthesizedTemplate(
+        r"""Value interface (\S+)
+Value transceiver_present (absent|present)
+Value dom_supported (does not support)
+Value temperature_celsius (-?\d+(?:\.\d+)?)
+Value voltage_v (-?\d+(?:\.\d+)?)
+Value bias_ma (-?\d+(?:\.\d+)?)
+Value rx_power_dbm (-?\d+(?:\.\d+)?)
+Value tx_power_dbm (-?\d+(?:\.\d+)?)
+Value rx_low_warning_dbm (-?\d+(?:\.\d+)?)
+Value rx_high_warning_dbm (-?\d+(?:\.\d+)?)
+Value tx_low_warning_dbm (-?\d+(?:\.\d+)?)
+Value tx_high_warning_dbm (-?\d+(?:\.\d+)?)
+Value rx_low_alarm_dbm (-?\d+(?:\.\d+)?)
+Value tx_low_alarm_dbm (-?\d+(?:\.\d+)?)
+Value rx_power_channel_1_dbm (-?\d+(?:\.\d+)?)
+Value rx_power_channel_2_dbm (-?\d+(?:\.\d+)?)
+Value rx_power_channel_3_dbm (-?\d+(?:\.\d+)?)
+Value rx_power_channel_4_dbm (-?\d+(?:\.\d+)?)
+Value tx_power_channel_1_dbm (-?\d+(?:\.\d+)?)
+Value tx_power_channel_2_dbm (-?\d+(?:\.\d+)?)
+Value tx_power_channel_3_dbm (-?\d+(?:\.\d+)?)
+Value tx_power_channel_4_dbm (-?\d+(?:\.\d+)?)
+
+Start
+  ^\s*${interface}\s+transceiver\s+(?:diagnosis|diagnostic)\s+information\s*: -> Block
+
+Block
+  ^\s*\S+\s+transceiver\s+(?:diagnosis|diagnostic)\s+information\s*: -> Continue.Record
+  ^\s*${interface}\s+transceiver\s+(?:diagnosis|diagnostic)\s+information\s*:
+  ^The transceiver is ${transceiver_present}\. -> Record Start
+  ^The transceiver ${dom_supported} this function\. -> Record Start
+  ^\s*\[module\]\s+Temp\.\(C\)\s+Voltage\(V\)
+  ^\s*\[channel\]\s+Bias\(mA\)\s+RX power\(dBm\)\s+TX power\(dBm\)
+  ^\s*1\s+-?\d+(?:\.\d+)?\s+${rx_power_channel_1_dbm}\s+${tx_power_channel_1_dbm}\s*$$
+  ^\s*2\s+-?\d+(?:\.\d+)?\s+${rx_power_channel_2_dbm}\s+${tx_power_channel_2_dbm}\s*$$
+  ^\s*3\s+-?\d+(?:\.\d+)?\s+${rx_power_channel_3_dbm}\s+${tx_power_channel_3_dbm}\s*$$
+  ^\s*4\s+-?\d+(?:\.\d+)?\s+${rx_power_channel_4_dbm}\s+${tx_power_channel_4_dbm}\s*$$ -> Record Start
+  ^\s*${temperature_celsius}\s+${voltage_v}\s+${bias_ma}\s+${rx_power_dbm}\s+${tx_power_dbm}\s*$$
+  ^\s*High\s+-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?\s+${rx_high_warning_dbm}\s+${tx_high_warning_dbm}\s*$$
+  ^\s*Low\s+-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?\s+${rx_low_alarm_dbm}\s+${tx_low_alarm_dbm}\s*$$ -> Record Start
+
+EOF
+""",
+        "section_block:h3c_transceiver_diagnostics",
+    )
+
+
 def _slot_fan_block_template(sample_text: str) -> SynthesizedTemplate | None:
     if not re.search(r"(?mi)^\s*Slot\s+\S+\s*:", sample_text):
         return None
@@ -243,6 +341,8 @@ Start
 
 Item
   ^\\s*PID:\\s+${pid}\\s*,\\s*VID:\\s+\\S*\\s*,\\s*SN:\\s*${serial}\\s*$$ -> Record Start
+
+EOF
 """,
         "paired_lines:name_descr_pid_sn",
     )
@@ -619,6 +719,8 @@ def synthesize_template(
         return _h3c_memory_template(text)
     if entity == "interface_l2":
         return _interface_status_template(text)
+    if entity == "interface_optical":
+        return _h3c_transceiver_diagnostics_template(text)
     if entity == "power_supply":
         return (
             _environment_power_template(text)

@@ -23,6 +23,8 @@ interface ParserGovernancePanelProps {
   agentLoopAttempts: ParserAgentLoopAttempt[]
   agentLoopAttemptsLoading: boolean
   datasets: ParserDatasetCoverage[]
+  linkedOfflineJobId: string
+  linkedDatasetIds: string[]
   sourcePath: string
   datasetId: string
   importPreview: ParserImportPreview | null
@@ -32,6 +34,8 @@ interface ParserGovernancePanelProps {
   onDatasetIdChange: (value: string) => void
   onPreviewImport: () => void
   onImport: () => void
+  onClearDatasetFocus: () => void
+  onOpenRuleBundles: () => void
 }
 
 const countMapText = (value?: Record<string, number> | null, emptyText = '-') => {
@@ -50,6 +54,8 @@ const ParserGovernancePanel: React.FC<ParserGovernancePanelProps> = ({
   agentLoopAttempts,
   agentLoopAttemptsLoading,
   datasets,
+  linkedOfflineJobId,
+  linkedDatasetIds,
   sourcePath,
   datasetId,
   importPreview,
@@ -59,6 +65,8 @@ const ParserGovernancePanel: React.FC<ParserGovernancePanelProps> = ({
   onDatasetIdChange,
   onPreviewImport,
   onImport,
+  onClearDatasetFocus,
+  onOpenRuleBundles,
 }) => (
   <Tabs activeKey={activeSubWorkspace} onChange={onSubWorkspaceChange} items={[
     {
@@ -147,9 +155,40 @@ const ParserGovernancePanel: React.FC<ParserGovernancePanelProps> = ({
     },
     {
       key: 'datasets',
-      label: `验证数据集覆盖率 (${datasets.length})`,
+      label: `数据集解析覆盖率 (${datasets.length})`,
       children: (
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          {(linkedOfflineJobId || linkedDatasetIds.length > 0) && (
+            <Alert
+              type={linkedDatasetIds.every((datasetId) =>
+                datasets.some((item) => item.dataset_id === datasetId)) ? 'info' : 'warning'}
+              showIcon
+              message={linkedOfflineJobId ? `离线任务 ${linkedOfflineJobId}` : '已定位离线数据集'}
+              description={(
+                <Space wrap size={[4, 4]}>
+                  {linkedDatasetIds.map((item) => <Tag key={item}>{item}</Tag>)}
+                  {linkedDatasetIds.length > 0 && !linkedDatasetIds.every((datasetId) =>
+                    datasets.some((item) => item.dataset_id === datasetId)) && (
+                    <Typography.Text type="warning">当前覆盖率索引中未找到关联数据集</Typography.Text>
+                  )}
+                </Space>
+              )}
+              action={(
+                <Space wrap>
+                  {linkedOfflineJobId && <Button size="small" onClick={onOpenRuleBundles}>查看规则资产包</Button>}
+                  <Button size="small" onClick={onClearDatasetFocus}>查看全部</Button>
+                </Space>
+              )}
+            />
+          )}
+          <Alert
+            type="info"
+            showIcon
+            message="离线巡检数据统一从设备巡检页导入"
+            description="这里负责查看数据集质量，并为 Parser 模板种子选择数据集、构造脱敏上下文和触发 LLM 规则资产生成。"
+            action={<Button onClick={() => { window.location.href = '/devices?tab=patrol&patrol_view=offline' }}>打开离线巡检</Button>}
+          />
+          <Typography.Text type="secondary">管理员兼容入口：从 FastAPI 所在服务器的本地绝对路径导入。</Typography.Text>
           <Row gutter={[12, 12]}>
             <Col flex="auto"><Input value={sourcePath} onChange={(event) => onSourcePathChange(event.target.value)} placeholder="巡检文件或目录绝对路径" /></Col>
             <Col flex="240px"><Input value={datasetId} onChange={(event) => onDatasetIdChange(event.target.value)} placeholder="数据集 ID，例如 2025Q4" /></Col>
@@ -159,19 +198,42 @@ const ParserGovernancePanel: React.FC<ParserGovernancePanelProps> = ({
           {importPreview && <Alert type={importPreview.parse_failed ? 'warning' : 'info'} showIcon message={`预览：${importPreview.file_count} 个文件，${importPreview.device_count} 台设备，新增 ${importPreview.new_snapshots}，重复 ${importPreview.duplicate_snapshots}`} description={`模板就绪 ${importPreview.ready}；缺模板 ${importPreview.template_missing}；解析失败 ${importPreview.parse_failed}；忽略 ${importPreview.ignored}；身份未知 ${importPreview.identity_unknown}`} />}
           <StandardTableShell<ParserDatasetCoverage>
             rowKey="dataset_id"
-            dataSource={datasets}
-            emptyText="暂无验证数据集"
+            dataSource={linkedDatasetIds.length
+              ? datasets.filter((item) => linkedDatasetIds.includes(item.dataset_id))
+              : datasets}
+            emptyText="暂无关联数据集"
             columns={[
-              { title: '数据集', dataIndex: 'dataset_id', width: 220 },
+              {
+                title: '数据集', dataIndex: 'dataset_id', width: 310,
+                render: (value, row) => (
+                  <Space direction="vertical" size={0}>
+                    <Typography.Text copyable>{value}</Typography.Text>
+                    {row.period_role && <Typography.Text type="secondary">{row.period_role === 'baseline' ? '基线周期' : row.period_role === 'current' ? '当前周期' : row.period_role}</Typography.Text>}
+                  </Space>
+                ),
+              },
+              {
+                title: '统计范围', dataIndex: 'scope_type', width: 300,
+                render: (value, row) => value === 'offline_patrol_run' ? (
+                  <Space direction="vertical" size={0}>
+                    <Tag color="blue">当前任务 Run</Tag>
+                    <Typography.Text type="secondary" copyable>{row.patrol_run_id}</Typography.Text>
+                  </Space>
+                ) : <Tag>数据集累计</Tag>,
+              },
               { title: '设备', dataIndex: 'device_count', width: 70 },
               { title: 'Snapshot', dataIndex: 'snapshot_count', width: 90 },
+              { title: '命令', dataIndex: 'command_count', width: 70 },
               { title: '结构化覆盖率', dataIndex: 'structured_coverage_rate', width: 130, render: (value) => `${(value * 100).toFixed(1)}%` },
               { title: '缺模板率', dataIndex: 'missing_template_rate', width: 110, render: (value) => `${(value * 100).toFixed(1)}%` },
               { title: '解析失败率', dataIndex: 'parse_failure_rate', width: 110, render: (value) => `${(value * 100).toFixed(1)}%` },
-              { title: '主键稳定率', dataIndex: 'primary_key_stability_rate', width: 110, render: (value) => `${(value * 100).toFixed(1)}%` },
+              {
+                title: '主键稳定率', dataIndex: 'primary_key_stability_rate', width: 110,
+                render: (value) => typeof value === 'number' ? `${(value * 100).toFixed(1)}%` : '未评估',
+              },
               { title: '最后导入', dataIndex: 'last_imported_at', width: 190 },
             ]}
-            scroll={{ x: 1100 }}
+            scroll={{ x: 1510 }}
           />
         </Space>
       ),

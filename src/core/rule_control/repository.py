@@ -389,6 +389,21 @@ class RuleGenerationJobRepository:
             db.flush()
             return row.to_dict()
 
+    def update_payload(
+        self,
+        job_id: str,
+        *,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        with get_db_session() as db:
+            row = db.get(RuleGenerationJobRecord, job_id)
+            if row is None:
+                raise KeyError("rule generation job not found")
+            row.payload_json = dict(payload)
+            row.updated_at = utcnow()
+            db.flush()
+            return row.to_dict()
+
     @classmethod
     def _approval_blockers(
         cls,

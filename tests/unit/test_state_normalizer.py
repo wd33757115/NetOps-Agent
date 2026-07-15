@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from src.core.patrol.change_detector import (
+    ExplicitBaselineNotReadyError,
     detect_changes_from_params,
     detect_observation_changes_against_history,
 )
@@ -319,16 +320,27 @@ def test_template_contract_fails_closed_when_snapshot_version_is_missing(monkeyp
         normalizer._template_contract("template-1", contract_version=3)
 
 
-def test_observations_from_snapshot_uses_template_contract(monkeypatch):
-    monkeypatch.setattr(
-        normalizer,
-        "_template_contract",
-        lambda template_id, **_kwargs: {
+def test_observations_from_snapshot_uses_active_semantic_contract_not_parser_version(
+    monkeypatch,
+):
+    calls = []
+
+    def active_contract(template_id, **kwargs):
+        calls.append((template_id, kwargs))
+        return {
+            "contract_id": "contract-active-v7",
+            "contract_sha256": "a" * 64,
+            "schema_id": "template-1",
             "entity_type": "interface_l3",
             "primary_keys": ["interface"],
             "ignore_fields": ["description"],
-            "contract_version": 3,
-        },
+            "contract_version": 7,
+        }
+
+    monkeypatch.setattr(
+        normalizer,
+        "_template_contract",
+        active_contract,
     )
 
     observations = observations_from_snapshot(
@@ -363,11 +375,52 @@ def test_observations_from_snapshot_uses_template_contract(monkeypatch):
     assert [item.field_name for item in observations] == ["protocol", "status"]
     assert observations[0].entity_type == "interface_l3"
     assert observations[0].entity_key == '["Eth1/1"]'
-    assert observations[0].contract_version == 3
+    assert calls == [("template-1", {})]
+    assert observations[0].contract_version == 7
     assert observations[0].source_type == "cli"
     assert observations[0].evidence_id == "ev-cli-test"
     assert observations[0].schema_id == "template-1"
     assert observations[0].metadata["evidence_id"] == "ev-cli-test"
+    assert observations[0].metadata["parser_contract_version"] == 3
+    assert observations[0].metadata["observation_contract_id"] == "contract-active-v7"
+    assert observations[0].metadata["observation_contract_version"] == 7
+    assert observations[0].metadata["observation_contract_digest"] == "a" * 64
+
+
+def test_observations_from_snapshot_can_pin_semantic_contract_for_replay(monkeypatch):
+    calls = []
+
+    def pinned_contract(template_id, **kwargs):
+        calls.append((template_id, kwargs))
+        return {
+            "schema_id": template_id,
+            "entity_type": "device",
+            "primary_keys": [],
+            "contract_version": kwargs["contract_version"],
+        }
+
+    monkeypatch.setattr(normalizer, "_template_contract", pinned_contract)
+
+    observations = observations_from_snapshot(
+        {
+            "id": "snapshot-replay",
+            "run_id": "run-replay",
+            "device_id": "device-1",
+            "canonical_command": "show version",
+            "parser_template_id": "template-1",
+            "contract_version": 3,
+            "observed_at": "2026-06-20T10:00:00+00:00",
+            "structured_json": {"model": "model-1"},
+        },
+        mode="parser_validation",
+        source="test",
+        dataset_id="dataset-1",
+        observation_contract_version=6,
+    )
+
+    assert calls == [("template-1", {"contract_version": 6})]
+    assert observations[0].contract_version == 6
+    assert observations[0].metadata["parser_contract_version"] == 3
 
 
 def test_observations_from_snapshot_applies_validator_semantics(monkeypatch):
@@ -410,6 +463,182 @@ def test_observations_from_snapshot_applies_validator_semantics(monkeypatch):
     assert by_field["ip_address"].semantic_type == "ip_address"
     assert by_field["usage"].unit == "%"
     assert by_field["usage"].semantic_type == "percentage"
+
+
+def test_observations_carry_only_governed_applicability_context(monkeypatch):
+    applicability = {
+        "version": 1,
+        "on_missing_context": "reject",
+        "exclude_when": [
+            {
+                "code": "measurement_not_applicable",
+                "when": {
+                    "all": [
+                        {"field": "bias_ma", "op": "lte", "value": 0},
+                        {
+                            "field": "rx_power_dbm",
+                            "op": "equals_field",
+                            "other_field": "tx_power_dbm",
+                        },
+                    ]
+                },
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        normalizer,
+        "_template_contract",
+        lambda template_id, **_kwargs: {
+            "entity_type": "interface_optical",
+            "primary_keys": ["interface"],
+            "state_semantics": {
+                "rx_power_dbm": {
+                    "semantic_type": "gauge",
+                    "observation_type": "interface.optical.rx_power",
+                    "applicability": applicability,
+                }
+            },
+        },
+    )
+
+    observations = observations_from_snapshot(
+        {
+            "id": "snapshot-optical",
+            "run_id": "run-1",
+            "device_id": "SW1",
+            "canonical_command": "display transceiver diagnosis interface",
+            "parser_template_id": "template-optical",
+            "observed_at": "2026-07-14T00:00:00+00:00",
+            "structured_json": [
+                {
+                    "interface": "Twenty-FiveGigE1/0/21",
+                    "bias_ma": "0.00",
+                    "rx_power_dbm": "-40.00",
+                    "tx_power_dbm": "-40.00",
+                    "description": "must-not-be-copied",
+                }
+            ],
+        },
+        mode="production",
+        source="test",
+        dataset_id=None,
+    )
+
+    rx = next(item for item in observations if item.field_name == "rx_power_dbm")
+    assert rx.metadata["_observation_context"] == {
+        "bias_ma": "0.00",
+        "rx_power_dbm": "-40.00",
+        "tx_power_dbm": "-40.00",
+    }
+    assert "description" not in rx.metadata["_observation_context"]
+
+
+def test_list_values_expand_into_dimensioned_scalar_observations(monkeypatch):
+    monkeypatch.setattr(
+        normalizer,
+        "_template_contract",
+        lambda template_id, **_kwargs: {
+            "entity_type": "measurement_group",
+            "primary_keys": ["name"],
+            "ignore_fields": ["limits"],
+            "validators": {
+                "readings": {"type": "number"},
+                "limits": {"type": "number"},
+            },
+            "state_semantics": {
+                "readings": {
+                    "semantic_type": "gauge",
+                    "observation_type": "measurement.reading",
+                    "applicability": {
+                        "version": 1,
+                        "on_missing_context": "allow",
+                        "exclude_when": [
+                            {
+                                "code": "above_limit",
+                                "when": {"field": "limits", "op": "lte", "value": 0},
+                            }
+                        ],
+                    },
+                }
+            },
+        },
+    )
+
+    observations = observations_from_snapshot(
+        {
+            "id": "snapshot-list",
+            "run_id": "run-1",
+            "device_id": "device-1",
+            "canonical_command": "inspect measurements",
+            "parser_template_id": "template-list",
+            "observed_at": "2026-07-14T00:00:00+00:00",
+            "structured_json": [
+                {
+                    "name": "group-a",
+                    "readings": ["1.5", "2.5"],
+                    "limits": ["10", "20"],
+                }
+            ],
+        },
+        mode="production",
+        source="test",
+        dataset_id=None,
+    )
+
+    assert [item.value_number for item in observations] == [1.5, 2.5]
+    assert len({item.state_key for item in observations}) == 2
+    assert [item.metadata["dimensions"]["value_index"] for item in observations] == [1, 2]
+    assert [item.metadata["_observation_context"]["limits"] for item in observations] == [
+        "10",
+        "20",
+    ]
+    assert all(item.value_type == "string" for item in observations)
+
+
+def test_contract_context_fields_are_copied_for_dynamic_thresholds(monkeypatch):
+    monkeypatch.setattr(
+        normalizer,
+        "_template_contract",
+        lambda template_id, **_kwargs: {
+            "entity_type": "generic_sensor",
+            "primary_keys": ["sensor_id"],
+            "validators": {
+                "measurement": {"type": "number"},
+                "low_reference": {"type": "number"},
+            },
+            "state_semantics": {
+                "measurement": {
+                    "semantic_type": "gauge",
+                    "observation_type": "generic.measurement",
+                    "context_fields": ["low_reference"],
+                }
+            },
+        },
+    )
+
+    observations = observations_from_snapshot(
+        {
+            "id": "snapshot-dynamic-threshold",
+            "run_id": "run-1",
+            "device_id": "device-1",
+            "canonical_command": "inspect sensor",
+            "parser_template_id": "template-sensor",
+            "observed_at": "2026-07-14T00:00:00+00:00",
+            "structured_json": [
+                {
+                    "sensor_id": "sensor-a",
+                    "measurement": "-12.5",
+                    "low_reference": "-10.0",
+                }
+            ],
+        },
+        mode="production",
+        source="test",
+        dataset_id=None,
+    )
+
+    measurement = next(item for item in observations if item.field_name == "measurement")
+    assert measurement.metadata["_observation_context"] == {"low_reference": "-10.0"}
 
 
 def test_observations_from_snapshot_prefers_inventory_device_id(monkeypatch):
@@ -774,8 +1003,9 @@ def test_observation_change_detector_accepts_explicit_previous_run(monkeypatch):
                 }
             ]
 
-        def list_observations_for_runs(self, run_ids):
+        def list_observations_for_runs(self, run_ids, *, baseline_only=False):
             calls["run_ids"] = run_ids
+            calls["baseline_only"] = baseline_only
             return [
                 {
                     "id": "obs-previous",
@@ -810,10 +1040,128 @@ def test_observation_change_detector_accepts_explicit_previous_run(monkeypatch):
     )
 
     assert calls["run_ids"] == ["run-previous"]
+    assert calls["baseline_only"] is False
     assert result["previous_run_id"] == "run-previous"
     assert result["change_count"] == 1
     assert result["changes"][0]["old"] == "old-model"
     assert result["changes"][0]["new"] == "new-model"
+
+
+def test_observation_change_detector_rejects_unnormalized_explicit_baseline(monkeypatch):
+    class FakeStateRepository:
+        def list_run_observations(self, _run_id):
+            return []
+
+    class FakePatrolRepository(_AnalysisPatrolRepository):
+        def get_run(self, run_id):
+            return {
+                "id": run_id,
+                "mode": "production",
+                "analysis_status": "pending" if run_id == "run-previous" else "normalized",
+                "run_purpose": "historical_compare",
+            }
+
+    monkeypatch.setattr("src.core.patrol.change_detector.StateRepository", FakeStateRepository)
+    monkeypatch.setattr("src.core.patrol.change_detector.PatrolRepository", FakePatrolRepository)
+
+    with pytest.raises(ExplicitBaselineNotReadyError, match="complete normalization"):
+        detect_observation_changes_against_history(
+            current_run_id="run-current",
+            previous_run_id="run-previous",
+        )
+
+
+def test_observation_change_detector_requires_explicit_longitudinal_offline_mode(
+    monkeypatch,
+):
+    class FakeStateRepository:
+        def list_run_observations(self, _run_id):
+            return []
+
+        def list_observations_for_runs(self, _run_ids, **_kwargs):
+            return []
+
+    class FakePatrolRepository:
+        def get_run(self, run_id):
+            previous = run_id == "run-q2"
+            return {
+                "id": run_id,
+                "mode": "parser_validation",
+                "analysis_status": "completed",
+                "started_at": (
+                    "2026-04-30T10:00:00+08:00" if previous else "2026-06-26T10:00:00+08:00"
+                ),
+                "metadata_json": {
+                    "offline_job_id": "offline-q2" if previous else "offline-q3",
+                    "period_role": "current",
+                },
+            }
+
+        def list_collection_results(self, _run_id):
+            return []
+
+    monkeypatch.setattr("src.core.patrol.change_detector.StateRepository", FakeStateRepository)
+    monkeypatch.setattr(
+        "src.core.patrol.change_detector.PatrolRepository",
+        FakePatrolRepository,
+    )
+
+    with pytest.raises(ExplicitBaselineNotReadyError, match="different jobs"):
+        detect_observation_changes_against_history(
+            current_run_id="run-q3",
+            previous_run_id="run-q2",
+            persist=False,
+        )
+
+    result = detect_observation_changes_against_history(
+        current_run_id="run-q3",
+        previous_run_id="run-q2",
+        persist=False,
+        allow_longitudinal_offline_comparison=True,
+    )
+
+    assert result["success"] is True
+    assert result["previous_run_id"] == "run-q2"
+
+
+def test_longitudinal_offline_comparison_rejects_reversed_time(monkeypatch):
+    class FakeStateRepository:
+        def list_run_observations(self, _run_id):
+            return []
+
+        def list_observations_for_runs(self, _run_ids, **_kwargs):
+            return []
+
+    class FakePatrolRepository:
+        def get_run(self, run_id):
+            return {
+                "id": run_id,
+                "mode": "parser_validation",
+                "analysis_status": "completed",
+                "started_at": (
+                    "2026-07-01T10:00:00+08:00"
+                    if run_id == "run-previous"
+                    else "2026-06-01T10:00:00+08:00"
+                ),
+                "metadata_json": {
+                    "offline_job_id": run_id,
+                    "period_role": "current",
+                },
+            }
+
+    monkeypatch.setattr("src.core.patrol.change_detector.StateRepository", FakeStateRepository)
+    monkeypatch.setattr(
+        "src.core.patrol.change_detector.PatrolRepository",
+        FakePatrolRepository,
+    )
+
+    with pytest.raises(ExplicitBaselineNotReadyError, match="previous run time"):
+        detect_observation_changes_against_history(
+            current_run_id="run-current",
+            previous_run_id="run-previous",
+            persist=False,
+            allow_longitudinal_offline_comparison=True,
+        )
 
 
 def test_observation_change_detector_uses_active_change_policy(monkeypatch):
@@ -1015,9 +1363,25 @@ def test_observation_change_detector_filters_selected_devices(monkeypatch):
                 }
             ]
 
-        def list_observations_for_runs(self, run_ids, *, device_ids=None):
-            calls["previous"] = (run_ids, device_ids)
-            return []
+        def list_observations_for_runs(self, run_ids, *, device_ids=None, baseline_only=False):
+            calls["previous"] = (run_ids, device_ids, baseline_only)
+            return [
+                {
+                    "id": "obs-previous",
+                    "run_id": run_ids[0],
+                    "snapshot_id": "snapshot-previous",
+                    "mode": "parser_validation",
+                    "device_id": "SW1",
+                    "canonical_command": "show version",
+                    "entity_type": "device",
+                    "entity_key": "__singleton__",
+                    "field_name": "model",
+                    "value_json": "old-model",
+                    "value_number": None,
+                    "observed_at": "2026-06-20T09:00:00+00:00",
+                    "confidence": 1.0,
+                }
+            ]
 
         def list_prior_observations_for_run(self, run_id):
             raise AssertionError("explicit previous_run_id should be used")
@@ -1036,7 +1400,7 @@ def test_observation_change_detector_filters_selected_devices(monkeypatch):
     )
 
     assert calls["current"] == ("run-current", ["SW1"])
-    assert calls["previous"] == (["run-previous"], ["SW1"])
+    assert calls["previous"] == (["run-previous"], ["SW1"], False)
     assert result["device_ids"] == ["SW1"]
 
 

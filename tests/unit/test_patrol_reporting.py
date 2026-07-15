@@ -29,6 +29,18 @@ def test_render_run_report_summarizes_events(monkeypatch):
                 },
             ]
 
+        def list_run_event_facts(self, *, run_id=None, device_id=None):
+            return self.list_events(run_id=run_id, device_id=device_id)
+
+        def summarize_run_events(self, *, run_id=None, device_id=None):
+            return {
+                "created_event_count": 2,
+                "updated_event_count": 0,
+                "recovered_event_count": 0,
+                "open_after_run_count": 2,
+                "current_open_event_count": 2,
+            }
+
     monkeypatch.setattr(reporting, "ChangeEventRepository", FakeRepository)
 
     result = render_run_report(run_id="run-1")
@@ -37,6 +49,7 @@ def test_render_run_report_summarizes_events(monkeypatch):
     assert result["change_count"] == 1
     assert result["event_count"] == 2
     assert result["event_types"] == {"InterfaceDown": 1, "CPUHigh": 1}
+    assert "- New events: 2" in result["markdown"]
     assert "## Event Details" in result["markdown"]
 
 
@@ -56,6 +69,18 @@ def test_render_run_report_writes_html_and_xlsx(monkeypatch, tmp_path):
                     "occurred_at": "2026-06-20T10:00:00+00:00",
                 }
             ]
+
+        def list_run_event_facts(self, *, run_id=None, device_id=None):
+            return self.list_events(run_id=run_id, device_id=device_id)
+
+        def summarize_run_events(self, *, run_id=None, device_id=None):
+            return {
+                "created_event_count": 1,
+                "updated_event_count": 0,
+                "recovered_event_count": 0,
+                "open_after_run_count": 1,
+                "current_open_event_count": 1,
+            }
 
     monkeypatch.setattr(reporting, "ChangeEventRepository", FakeRepository)
     html_path = tmp_path / "report.html"

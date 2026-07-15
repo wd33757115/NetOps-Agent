@@ -245,7 +245,13 @@ class PatrolBatchRecord(Base):
     target_count = Column(Integer, nullable=False, default=0)
     launched_count = Column(Integer, nullable=False, default=0)
     skipped_count = Column(Integer, nullable=False, default=0)
-    archived = Column(Boolean, nullable=False, default=False, server_default=text("false"), index=True)
+    archived = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+        index=True,
+    )
     archived_at = Column(DateTime(timezone=True), nullable=True)
     archive_reason = Column(Text, nullable=True)
     archived_by = Column(String(128), nullable=True)
@@ -767,6 +773,229 @@ class PatrolDataset(Base):
         return {column.name: getattr(self, column.name) for column in self.__table__.columns}
 
 
+class OfflinePatrolJobRecord(Base):
+    """Durable operator-owned offline patrol import or comparison job."""
+
+    __tablename__ = "netops_offline_patrol_jobs"
+
+    id = Column(String(64), primary_key=True)
+    idempotency_key = Column(String(128), nullable=False, unique=True)
+    job_type = Column(String(32), nullable=False)
+    name = Column(String(256), nullable=False)
+    owner_id = Column(String(64), nullable=False)
+    status = Column(
+        String(32),
+        nullable=False,
+        default="draft",
+        server_default="draft",
+    )
+    vendor = Column(String(64), nullable=True)
+    model = Column(String(128), nullable=True)
+    publish_events = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    folder_id = Column(
+        String(64),
+        ForeignKey("netops_storage_folders.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    workflow_run_id = Column(String(64), nullable=True)
+    celery_task_id = Column(String(64), nullable=True)
+    attempt_number = Column(Integer, nullable=False, default=0, server_default="0")
+    execution_idempotency_key = Column(String(128), nullable=True)
+    progress_json = Column(JSON, nullable=False, default=dict)
+    preview_json = Column(JSON, nullable=True)
+    result_json = Column(JSON, nullable=True)
+    artifacts_json = Column(JSON, nullable=True)
+    blockers_json = Column(JSON, nullable=True)
+    error_message = Column(Text, nullable=True)
+    archived = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+    )
+    archived_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_offline_patrol_jobs_idempotency", "idempotency_key"),
+        Index("ix_offline_patrol_jobs_owner_created", "owner_id", "created_at"),
+        Index("ix_offline_patrol_jobs_status_created", "status", "created_at"),
+        Index("ix_offline_patrol_jobs_archived", "archived"),
+        Index("ix_offline_patrol_jobs_workflow", "workflow_run_id"),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class OfflinePatrolPeriodRecord(Base):
+    """One immutable observation period within an offline patrol job."""
+
+    __tablename__ = "netops_offline_patrol_periods"
+
+    id = Column(String(64), primary_key=True)
+    job_id = Column(
+        String(64),
+        ForeignKey("netops_offline_patrol_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    role = Column(String(32), nullable=False)
+    label = Column(String(128), nullable=False)
+    observed_at = Column(DateTime(timezone=True), nullable=False)
+    dataset_id = Column(String(256), nullable=False, unique=True)
+    patrol_run_id = Column(String(128), nullable=True)
+    status = Column(
+        String(32),
+        nullable=False,
+        default="pending",
+        server_default="pending",
+    )
+    result_json = Column(JSON, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index("uq_offline_patrol_period_job_role", "job_id", "role", unique=True),
+        Index("ix_offline_patrol_period_dataset", "dataset_id", unique=True),
+        Index("ix_offline_patrol_period_run", "patrol_run_id"),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class OfflinePatrolSourceFileRecord(Base):
+    """Authorized object-storage source attached to one offline period."""
+
+    __tablename__ = "netops_offline_patrol_source_files"
+
+    id = Column(String(64), primary_key=True)
+    job_id = Column(
+        String(64),
+        ForeignKey("netops_offline_patrol_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    period_role = Column(String(32), nullable=False)
+    file_id = Column(
+        String(64),
+        ForeignKey("netops_file_metadata.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    relative_path = Column(String(1024), nullable=False)
+    sha256 = Column(String(64), nullable=True)
+    size_bytes = Column(Integer, nullable=False, default=0, server_default="0")
+    status = Column(
+        String(32),
+        nullable=False,
+        default="attached",
+        server_default="attached",
+    )
+    error_message = Column(Text, nullable=True)
+    preview_json = Column(JSON, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_offline_patrol_source_job_period_file",
+            "job_id",
+            "period_role",
+            "file_id",
+            unique=True,
+        ),
+        Index("ix_offline_patrol_source_file", "file_id"),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class OfflinePatrolDeviceBindingRecord(Base):
+    """Auditable suggestion or confirmation between imported and inventory identity."""
+
+    __tablename__ = "netops_offline_patrol_device_bindings"
+
+    id = Column(String(64), primary_key=True)
+    job_id = Column(
+        String(64),
+        ForeignKey("netops_offline_patrol_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    period_role = Column(String(32), nullable=False)
+    external_device_id = Column(String(512), nullable=False)
+    device_name = Column(String(256), nullable=False)
+    management_ip = Column(String(64), nullable=True)
+    inventory_device_id = Column(
+        String(64),
+        ForeignKey("netops_devices.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    match_status = Column(
+        String(32),
+        nullable=False,
+        default="unmatched",
+        server_default="unmatched",
+    )
+    confidence = Column(Float, nullable=False, default=0.0, server_default="0")
+    match_reason = Column(String(256), nullable=True)
+    confirmed_by = Column(String(128), nullable=True)
+    confirmed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_offline_patrol_binding_identity",
+            "job_id",
+            "period_role",
+            "external_device_id",
+            unique=True,
+        ),
+        Index("ix_offline_patrol_binding_inventory", "inventory_device_id"),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
 class PatrolRun(Base):
     __tablename__ = "netops_patrol_runs"
 
@@ -917,7 +1146,11 @@ class CommandSnapshot(Base):
     raw_text_hash = Column(String(64), nullable=False, index=True)
     parse_status = Column(String(32), nullable=False, index=True)
     output_status = Column(
-        String(32), nullable=False, default="not_classified", server_default="not_classified", index=True
+        String(32),
+        nullable=False,
+        default="not_classified",
+        server_default="not_classified",
+        index=True,
     )
     snapshot_kind = Column(String(32), nullable=False, default="full")
     source_file_hash = Column(String(64), nullable=True)
@@ -987,7 +1220,11 @@ class PatrolCollectionResult(Base):
         index=True,
     )
     output_status = Column(
-        String(32), nullable=False, default="not_classified", server_default="not_classified", index=True
+        String(32),
+        nullable=False,
+        default="not_classified",
+        server_default="not_classified",
+        index=True,
     )
     fact_status = Column(
         String(32),
@@ -1971,6 +2208,11 @@ class ParserTemplateJob(Base):
     status = Column(String(32), nullable=False, default="pending", index=True)
     sample_count = Column(Integer, default=0)
     attempts = Column(Integer, default=0)
+    contract_revision_count = Column(Integer, nullable=False, default=0, server_default="0")
+    template_attempt_count = Column(Integer, nullable=False, default=0, server_default="0")
+    best_attempt_id = Column(String(64), nullable=True, index=True)
+    agent_state_json = Column(JSON, nullable=True)
+    agent_budget_json = Column(JSON, nullable=True)
     failure_code = Column(String(64), nullable=True)
     last_error = Column(Text, nullable=True)
     celery_task_id = Column(String(64), nullable=True, index=True)
@@ -1988,10 +2230,69 @@ class ParserTemplateJob(Base):
             "superseded_by_job_id",
         ),
         Index(
-            "uq_parser_job_open_key",
+            "uq_parser_job_asset_key",
             "idempotency_key",
             unique=True,
-            postgresql_where=text("status IN ('pending','collecting','running','validating')"),
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class ParserGenerationAttempt(Base):
+    __tablename__ = "parser_generation_attempts"
+
+    id = Column(String(64), primary_key=True)
+    job_id = Column(
+        String(64),
+        ForeignKey("parser_template_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    attempt_number = Column(Integer, nullable=False)
+    parent_attempt_id = Column(
+        String(64),
+        ForeignKey("parser_generation_attempts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    stage = Column(String(32), nullable=False, index=True)
+    action = Column(String(64), nullable=False)
+    model_provider = Column(String(64), nullable=True)
+    model_name = Column(String(128), nullable=True)
+    textfsm_runtime_version = Column(String(32), nullable=False)
+    dialect_version = Column(String(64), nullable=False)
+    dialect_hash = Column(String(64), nullable=False)
+    prompt_version = Column(String(64), nullable=True)
+    prompt_hash = Column(String(64), nullable=True)
+    contract_hash = Column(String(64), nullable=True)
+    train_sample_set_hash = Column(String(64), nullable=True)
+    holdout_sample_set_hash = Column(String(64), nullable=True)
+    template_text = Column(Text, nullable=True)
+    template_sha256 = Column(String(64), nullable=True, index=True)
+    validation_report_json = Column(JSON, nullable=False, default=dict)
+    failure_signature = Column(String(64), nullable=True, index=True)
+    candidate_rank = Column(Float, nullable=True)
+    status = Column(String(32), nullable=False, index=True)
+    token_usage_json = Column(JSON, nullable=True)
+    latency_ms = Column(Integer, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_parser_generation_attempt_number",
+            "job_id",
+            "attempt_number",
+            unique=True,
+        ),
+        Index(
+            "ix_parser_generation_attempt_job_created",
+            "job_id",
+            "created_at",
         ),
     )
 
@@ -2181,6 +2482,45 @@ class RuleGenerationJobRecord(Base):
     completed_at = Column(DateTime, nullable=True)
 
     __table_args__ = (Index("ix_rule_generation_jobs_type_status", "job_type", "status"),)
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class RuleGenerationContextRecord(Base):
+    """Immutable, sanitized dataset context used by one LLM generation seed."""
+
+    __tablename__ = "netops_rule_generation_contexts"
+
+    id = Column(String(64), primary_key=True)
+    job_id = Column(
+        String(64),
+        ForeignKey("netops_rule_generation_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    offline_job_id = Column(
+        String(64),
+        ForeignKey("netops_offline_patrol_jobs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    dataset_ids_json = Column(JSON, nullable=False)
+    observation_type = Column(String(256), nullable=True)
+    field_name = Column(String(256), nullable=True)
+    context_json = Column(JSON, nullable=False)
+    context_digest = Column(String(64), nullable=False, unique=True)
+    privacy_report_json = Column(JSON, nullable=False)
+    created_by = Column(String(128), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index("ix_rule_generation_context_job", "job_id"),
+        Index("ix_rule_generation_context_offline_job", "offline_job_id"),
+        Index("ix_rule_generation_context_digest", "context_digest", unique=True),
+    )
 
     def to_dict(self):
         return {column.name: getattr(self, column.name) for column in self.__table__.columns}

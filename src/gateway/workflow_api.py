@@ -23,6 +23,11 @@ from pydantic import BaseModel, Field
 
 from src.auth.dependencies import get_optional_user, require_role
 from src.auth.models import CurrentUser
+from src.core.patrol.leadership_report import (
+    build_leadership_report,
+    render_leadership_docx,
+    render_leadership_json,
+)
 from src.core.patrol.patrol_report_service import PatrolReportService
 from src.core.workflows.dsl import GenerateOptions, WorkflowDSL
 from src.core.workflows.engine import WorkflowEngine
@@ -42,6 +47,10 @@ from src.core.workflows.patrol_batch_projection import (
 )
 from src.core.workflows.patrol_batch_service import (
     build_patrol_batch_summary,
+    iter_patrol_event_export_rows,
+    iter_patrol_raw_snapshot_rows,
+    list_patrol_raw_output_artifacts,
+    list_patrol_snapshot_run_ids,
 )
 from src.core.workflows.registry import (
     WORKFLOWS_ROOT,
@@ -187,6 +196,7 @@ def _build_patrol_batch_report(patrol_batch_id: str, runs: list[Any]) -> str:
     return MaterializePatrolBatchReportHandler(
         summary_builder=_build_patrol_batch_summary,
         renderer=PatrolReportService.render_markdown,
+        projection_version="patrol-technical-report/v2",
     ).handle(
         patrol_batch_id,
         runs,
@@ -196,6 +206,17 @@ def _build_patrol_batch_report(patrol_batch_id: str, runs: list[Any]) -> str:
 
 def _build_patrol_batch_summary(patrol_batch_id: str, runs: list[Any]) -> dict[str, Any]:
     return build_patrol_batch_summary(patrol_batch_id, runs)
+
+
+def _build_patrol_batch_leadership_report(
+    patrol_batch_id: str, runs: list[Any]
+) -> dict[str, Any]:
+    summary = _build_patrol_batch_summary(patrol_batch_id, runs)
+    return build_leadership_report(
+        patrol_batch_id,
+        summary,
+        generated_at=datetime.now(timezone.utc),
+    )
 
 
 def _list_patrol_batch_runs(patrol_batch_id: str) -> list[Any]:
@@ -224,51 +245,8 @@ def _patrol_batch_manifest_exists(patrol_batch_id: str) -> bool:
         return False
 
 
-def _find_nested_value(value: Any, key: str) -> Any:
-    if isinstance(value, dict):
-        if key in value:
-            return value[key]
-        for child in value.values():
-            found = _find_nested_value(child, key)
-            if found is not None:
-                return found
-    elif isinstance(value, list):
-        for child in value:
-            found = _find_nested_value(child, key)
-            if found is not None:
-                return found
-    return None
-
-
 def _snapshot_run_ids_for_runs(runs: list[Any]) -> list[str]:
-    """Resolve collector run IDs in one query for large patrol batches."""
-    from src.infrastructure.db.models import WorkflowStepRecord
-    from src.infrastructure.db.postgres import get_db_session
-
-    run_ids = [str(run.id) for run in runs]
-    if not run_ids:
-        return []
-    snapshot_ids: list[str] = []
-    seen: set[str] = set()
-    with get_db_session() as db:
-        steps = (
-            db.query(WorkflowStepRecord)
-            .filter(WorkflowStepRecord.run_id.in_(run_ids))
-            .order_by(
-                WorkflowStepRecord.run_id.asc(),
-                WorkflowStepRecord.step_index.asc(),
-            )
-            .all()
-        )
-        for step in steps:
-            if step.run_id in seen:
-                continue
-            snapshot_run_id = _find_nested_value(step.result or {}, "snapshot_run_id")
-            if snapshot_run_id:
-                snapshot_ids.append(str(snapshot_run_id))
-                seen.add(step.run_id)
-    return snapshot_ids
-
+    return list_patrol_snapshot_run_ids([str(run.id) for run in runs])
 
 
 def _retry_existing_run(run, request: WorkflowRetryRequest, user: CurrentUser | None) -> str:
@@ -1144,47 +1122,21 @@ async def export_patrol_batch_raw_data(
     patrol_batch_id: str,
     _user: CurrentUser = Depends(require_role(["admin"])),
 ):
-    from src.infrastructure.db.models import CommandSnapshot
-    from src.infrastructure.db.postgres import get_db_session
-
     runs = _list_patrol_batch_runs(patrol_batch_id)
     if not runs:
         raise HTTPException(status_code=404, detail="patrol batch not found")
     snapshot_run_ids = _snapshot_run_ids_for_runs(runs)
 
     def generate():
-        with get_db_session() as db:
-            query = (
-                db.query(CommandSnapshot)
-                .filter(CommandSnapshot.run_id.in_(snapshot_run_ids))
-                .order_by(
-                    CommandSnapshot.device_name.asc(),
-                    CommandSnapshot.observed_at.asc(),
-                    CommandSnapshot.canonical_command.asc(),
-                )
-                .yield_per(100)
-            )
-            for row in query:
-                yield json.dumps(
-                    {
-                        "patrol_batch_id": patrol_batch_id,
-                        "snapshot_run_id": row.run_id,
-                        "snapshot_id": row.id,
-                        "device_id": row.device_id,
-                        "device_name": row.device_name,
-                        "management_ip": row.management_ip,
-                        "vendor": row.vendor,
-                        "model": row.model,
-                        "command": row.canonical_command,
-                        "observed_at": row.observed_at.isoformat() if row.observed_at else None,
-                        "parse_status": row.parse_status,
-                        "output_status": row.output_status,
-                        "raw_text_hash": row.raw_text_hash,
-                        "raw_text": row.raw_text,
-                    },
+        for row in iter_patrol_raw_snapshot_rows(snapshot_run_ids):
+            yield (
+                json.dumps(
+                    {"patrol_batch_id": patrol_batch_id, **row},
                     ensure_ascii=False,
                     default=str,
-                ) + "\n"
+                )
+                + "\n"
+            )
 
     return StreamingResponse(
         generate(),
@@ -1270,28 +1222,13 @@ async def export_patrol_batch_raw_cli(
     patrol_batch_id: str,
     _user: CurrentUser = Depends(require_role(["admin"])),
 ):
-    from src.infrastructure.db.models import WorkflowStepRecord
-    from src.infrastructure.db.postgres import get_db_session
     from src.infrastructure.storage.minio_client import get_minio_storage
 
     runs = _list_patrol_batch_runs(patrol_batch_id)
     if not runs:
         raise HTTPException(status_code=404, detail="patrol batch not found")
     run_ids = [str(run.id) for run in runs]
-    artifacts_by_run: dict[str, dict[str, Any]] = {}
-    with get_db_session() as db:
-        steps = (
-            db.query(WorkflowStepRecord)
-            .filter(
-                WorkflowStepRecord.run_id.in_(run_ids),
-                WorkflowStepRecord.skill_name == "device-patrol",
-            )
-            .all()
-        )
-        for step in steps:
-            artifact = dict((step.output_artifacts or {}).get("raw_outputs_archive") or {})
-            if artifact:
-                artifacts_by_run[str(step.run_id)] = artifact
+    artifacts_by_run = list_patrol_raw_output_artifacts(run_ids)
     if not artifacts_by_run:
         raise HTTPException(status_code=404, detail="raw CLI archives are unavailable")
 
@@ -1366,14 +1303,6 @@ async def export_patrol_batch_events(
     patrol_batch_id: str,
     _user: CurrentUser = Depends(require_role(["admin"])),
 ):
-    from sqlalchemy import or_
-
-    from src.infrastructure.db.models import (
-        NetworkEventOccurrenceRecord,
-        NetworkEventRecord,
-    )
-    from src.infrastructure.db.postgres import get_db_session
-
     runs = _list_patrol_batch_runs(patrol_batch_id)
     if not runs:
         raise HTTPException(status_code=404, detail="patrol batch not found")
@@ -1400,39 +1329,8 @@ async def export_patrol_batch_events(
     ]
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
-    if snapshot_run_ids:
-        with get_db_session() as db:
-            occurrence_event_ids = db.query(
-                NetworkEventOccurrenceRecord.event_id
-            ).filter(NetworkEventOccurrenceRecord.run_id.in_(snapshot_run_ids))
-            events = (
-                db.query(NetworkEventRecord)
-                .filter(
-                    or_(
-                        NetworkEventRecord.run_id.in_(snapshot_run_ids),
-                        NetworkEventRecord.id.in_(occurrence_event_ids),
-                    )
-                )
-                .order_by(NetworkEventRecord.occurred_at.asc())
-                .all()
-            )
-            for event in events:
-                device_id = str(event.device_id or "")
-                writer.writerow(
-                    {
-                        "patrol_batch_id": patrol_batch_id,
-                        "event_id": event.id,
-                        "device_id": device_id,
-                        "device_name": device_names.get(device_id, ""),
-                        "event_type": event.event_type,
-                        "severity": event.severity,
-                        "entity_type": event.entity_type,
-                        "entity_key": event.entity_key,
-                        "occurred_at": event.occurred_at.isoformat()
-                        if event.occurred_at
-                        else "",
-                    }
-                )
+    for event in iter_patrol_event_export_rows(snapshot_run_ids, device_names):
+        writer.writerow({"patrol_batch_id": patrol_batch_id, **event})
     return Response(
         content=output.getvalue(),
         media_type="text/csv; charset=utf-8",
@@ -1445,13 +1343,50 @@ async def export_patrol_batch_events(
 @router.get("/runs/patrol-batches/{patrol_batch_id}/report.md")
 async def export_patrol_batch_report(patrol_batch_id: str):
     runs = _list_patrol_batch_runs(patrol_batch_id)
-    if not runs:
+    if not runs and not _patrol_batch_manifest_exists(patrol_batch_id):
         raise HTTPException(status_code=404, detail="patrol batch not found")
     markdown = _build_patrol_batch_report(patrol_batch_id, runs)
     return Response(
         content=markdown,
         media_type="text/markdown; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{patrol_batch_id}-report.md"'},
+    )
+
+
+@router.get("/runs/patrol-batches/{patrol_batch_id}/report.docx")
+async def export_patrol_batch_leadership_report(patrol_batch_id: str):
+    runs = _list_patrol_batch_runs(patrol_batch_id)
+    if not runs and not _patrol_batch_manifest_exists(patrol_batch_id):
+        raise HTTPException(status_code=404, detail="patrol batch not found")
+    report = _build_patrol_batch_leadership_report(patrol_batch_id, runs)
+    content = render_leadership_docx(report)
+    return Response(
+        content=content,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ),
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{patrol_batch_id}-leadership-report.docx"'
+            )
+        },
+    )
+
+
+@router.get("/runs/patrol-batches/{patrol_batch_id}/report.json")
+async def export_patrol_batch_leadership_report_json(patrol_batch_id: str):
+    runs = _list_patrol_batch_runs(patrol_batch_id)
+    if not runs and not _patrol_batch_manifest_exists(patrol_batch_id):
+        raise HTTPException(status_code=404, detail="patrol batch not found")
+    report = _build_patrol_batch_leadership_report(patrol_batch_id, runs)
+    return Response(
+        content=render_leadership_json(report),
+        media_type="application/json; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{patrol_batch_id}-leadership-report.json"'
+            )
+        },
     )
 
 

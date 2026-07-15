@@ -1,18 +1,21 @@
-# -*- coding: utf-8 -*-
 # SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
 # SPDX-License-Identifier: Apache-2.0
 
 """
 测试 Skill 语义路由器
 """
+
+import os
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from src.skill_system.router import SemanticRouter, SkillMatch, route_query
 from src.skill_system.loader import SkillLoader
 from src.skill_system.metadata import SkillMetadata
+from src.skill_system.router import SemanticRouter, SkillMatch, route_query
 
 
 def _create_mock_loader():
@@ -22,33 +25,43 @@ def _create_mock_loader():
 
     skills = [
         SkillMetadata(
-            name="device-backup", version="1.0.0",
+            name="device-backup",
+            version="1.0.0",
             description="设备配置备份专家",
-            category="network", tags=["backup", "device"],
+            category="network",
+            tags=["backup", "device"],
             triggers=["备份设备配置", "配置备份", "保存配置"],
         ),
         SkillMetadata(
-            name="device-patrol", version="1.0.0",
+            name="device-patrol",
+            version="1.0.0",
             description="设备巡检专家",
-            category="network", tags=["patrol", "inspection"],
+            category="network",
+            tags=["patrol", "inspection"],
             triggers=["执行巡检", "设备巡检"],
         ),
         SkillMetadata(
-            name="firewall-policy-generator", version="1.0.0",
+            name="firewall-policy-generator",
+            version="1.0.0",
             description="防火墙策略生成专家",
-            category="security", tags=["firewall", "policy"],
+            category="security",
+            tags=["firewall", "policy"],
             triggers=["生成防火墙策略", "防火墙策略生成"],
         ),
         SkillMetadata(
-            name="config-diff-tool", version="1.0.0",
+            name="config-diff-tool",
+            version="1.0.0",
             description="配置对比工具",
-            category="network", tags=["config", "diff"],
+            category="network",
+            tags=["config", "diff"],
             triggers=["配置对比", "配置差异"],
         ),
         SkillMetadata(
-            name="log-analyzer", version="1.0.0",
+            name="log-analyzer",
+            version="1.0.0",
             description="日志分析专家",
-            category="network", tags=["log", "analysis"],
+            category="network",
+            tags=["log", "analysis"],
             triggers=["分析日志", "日志分析"],
         ),
     ]
@@ -138,10 +151,7 @@ def test_route_multiple_candidates():
 def test_skill_match_dataclass():
     """测试 SkillMatch 数据类"""
     match = SkillMatch(
-        skill_name="test-skill",
-        confidence=0.95,
-        match_type="trigger",
-        reason="匹配触发词: 测试"
+        skill_name="test-skill", confidence=0.95, match_type="trigger", reason="匹配触发词: 测试"
     )
     assert match.skill_name == "test-skill"
     assert match.confidence == 0.95
@@ -162,14 +172,15 @@ def test_invalidate_cache():
     print("[OK] test_invalidate_cache")
 
 
+@pytest.mark.skipif(
+    os.getenv("RUN_EMBEDDING_TESTS", "").strip().lower() not in {"1", "true", "yes"},
+    reason="requires the optional sentence-transformers model runtime",
+)
 def test_semantic_match_with_embedding():
     """测试语义匹配（带 embedding）"""
     loader = _create_mock_loader()
     router = SemanticRouter(
-        skill_loader=loader,
-        use_embedding=True,
-        use_llm_judge=False,
-        embedding_model="BAAI/bge-m3"
+        skill_loader=loader, use_embedding=True, use_llm_judge=False, embedding_model="BAAI/bge-m3"
     )
 
     try:

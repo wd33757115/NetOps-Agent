@@ -8,8 +8,11 @@ version: "1.0"
 test:
   context:
     file_path: ""
+    offline_job_id: ""
+    period_role: sample
     dataset_id: dev-test-previous-quarter
     run_id: parser-validation-workflow-test
+    observed_at: "2026-01-01T00:00:00+00:00"
     vendor:
     model:
   required_context:
@@ -21,8 +24,11 @@ steps:
     skill: patrol-raw-ingestor
     inputs:
       file_path: ${context.file_path}
+      offline_job_id: ${context.offline_job_id}
+      period_role: ${context.period_role}
       dataset_id: ${context.dataset_id}
       run_id: ${context.run_id}
+      observed_at: ${context.observed_at}
       vendor: ${context.vendor}
       model: ${context.model}
       mode: parser_validation

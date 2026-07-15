@@ -5,12 +5,15 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from src.core.patrol.event_rules import event_rule_logical_key
 from src.core.rule_control.jobs import RuleGenerationJobStateError
+from src.core.rule_control.replay_gate import evaluate_historical_replay_gate
 from src.infrastructure.db.models import (
     ChangePolicyRecord,
     ChangePolicyVersionRecord,
     EventRuleRecord,
     EventRuleVersionRecord,
+    ObservationContractRecord,
     RuleGenerationJobRecord,
 )
 from src.infrastructure.db.postgres import get_db_session
@@ -51,6 +54,232 @@ def _event_rule_payload(
     }
 
 
+def _event_rule_identity(
+    rule: EventRuleRecord,
+    version: EventRuleVersionRecord,
+) -> str:
+    return event_rule_logical_key(
+        name=str(rule.name or ""),
+        event_type=str(version.event_type or ""),
+        condition=dict(version.condition_json or {}),
+        event_class=str(version.event_class or "fault"),
+    )
+
+
+def _active_event_rule_predecessors(
+    db: Any,
+    *,
+    candidate_rule: EventRuleRecord,
+    candidate_version: EventRuleVersionRecord,
+) -> tuple[str, list[tuple[EventRuleRecord, EventRuleVersionRecord]]]:
+    logical_key = _event_rule_identity(candidate_rule, candidate_version)
+    active_rows = (
+        db.query(EventRuleRecord, EventRuleVersionRecord)
+        .join(
+            EventRuleVersionRecord,
+            EventRuleVersionRecord.rule_id == EventRuleRecord.id,
+        )
+        .filter(
+            EventRuleVersionRecord.status == "active",
+            EventRuleVersionRecord.id != candidate_version.id,
+        )
+        .order_by(EventRuleRecord.name, EventRuleVersionRecord.version)
+        .with_for_update()
+        .all()
+    )
+    predecessors = [
+        (rule, version)
+        for rule, version in active_rows
+        if rule.id == candidate_rule.id or _event_rule_identity(rule, version) == logical_key
+    ]
+    return logical_key, predecessors
+
+
+def _job_asset_is_active(db: Any, job: RuleGenerationJobRecord) -> bool:
+    model = {
+        "OBSERVATION_CONTRACT": ObservationContractRecord,
+        "CHANGE_POLICY": ChangePolicyVersionRecord,
+        "EVENT_RULE": EventRuleVersionRecord,
+    }.get(str(job.job_type or ""))
+    if model is None or not job.asset_version_id:
+        return False
+    row = db.get(model, str(job.asset_version_id))
+    return row is not None and str(row.status or "") == "active"
+
+
+def _bundle_id_from_source_ref(source_ref: str | None) -> str | None:
+    prefix = "rule_asset_bundle:"
+    value = str(source_ref or "")
+    return value[len(prefix) :] if value.startswith(prefix) else None
+
+
+def _supersede_replaced_jobs(
+    db: Any,
+    *,
+    source_job_ids: set[str],
+    replacement_bundle_id: str,
+    now: datetime,
+) -> dict[str, list[dict[str, Any]]]:
+    """Keep control-plane job state aligned with the runtime assets it governs."""
+
+    job_ids = sorted({str(item) for item in source_job_ids if str(item)})
+    jobs = (
+        db.query(RuleGenerationJobRecord)
+        .filter(RuleGenerationJobRecord.id.in_(job_ids))
+        .order_by(RuleGenerationJobRecord.id)
+        .with_for_update()
+        .all()
+        if job_ids
+        else []
+    )
+    changed_jobs: list[dict[str, Any]] = []
+    parent_bundle_ids: set[str] = set()
+    for job in jobs:
+        parent_id = _bundle_id_from_source_ref(job.source_ref)
+        if parent_id and parent_id != replacement_bundle_id:
+            parent_bundle_ids.add(parent_id)
+        if job.status == "active" and not _job_asset_is_active(db, job):
+            changed_jobs.append({"job_id": job.id, "status_before": job.status})
+            job.status = "deprecated"
+            job.validation_report_json = _merge_governance(
+                dict(job.validation_report_json or {}),
+                {
+                    "superseded_by_bundle_id": replacement_bundle_id,
+                    "superseded_at": now.isoformat(),
+                },
+            )
+            job.updated_at = now
+            job.completed_at = now
+
+    changed_bundles: list[dict[str, Any]] = []
+    for parent_id in sorted(parent_bundle_ids):
+        parent = (
+            db.query(RuleGenerationJobRecord)
+            .filter(RuleGenerationJobRecord.id == parent_id)
+            .with_for_update()
+            .first()
+        )
+        if parent is None or parent.status != "active":
+            continue
+        child_ids = [
+            str(item)
+            for item in dict(parent.payload_json or {}).get("child_job_ids") or []
+            if str(item)
+        ]
+        child_jobs = (
+            db.query(RuleGenerationJobRecord)
+            .filter(RuleGenerationJobRecord.id.in_(child_ids))
+            .order_by(RuleGenerationJobRecord.id)
+            .with_for_update()
+            .all()
+            if child_ids
+            else []
+        )
+        if any(_job_asset_is_active(db, child) for child in child_jobs):
+            continue
+        for child in child_jobs:
+            if child.status != "active":
+                continue
+            changed_jobs.append({"job_id": child.id, "status_before": child.status})
+            child.status = "deprecated"
+            child.validation_report_json = _merge_governance(
+                dict(child.validation_report_json or {}),
+                {
+                    "superseded_by_bundle_id": replacement_bundle_id,
+                    "superseded_at": now.isoformat(),
+                },
+            )
+            child.updated_at = now
+            child.completed_at = now
+        changed_bundles.append({"bundle_id": parent.id, "status_before": parent.status})
+        parent.status = "deprecated"
+        parent.validation_report_json = _merge_governance(
+            dict(parent.validation_report_json or {}),
+            {
+                "superseded_by_bundle_id": replacement_bundle_id,
+                "superseded_at": now.isoformat(),
+            },
+        )
+        parent.updated_at = now
+        parent.completed_at = now
+    return {
+        "jobs": list({item["job_id"]: item for item in changed_jobs}.values()),
+        "bundles": changed_bundles,
+    }
+
+
+def _restore_superseded_jobs(
+    db: Any,
+    *,
+    activation_snapshot: dict[str, Any],
+    rolled_back_bundle_id: str,
+    actor: str | None,
+    now: datetime,
+) -> dict[str, list[str]]:
+    restored_jobs: list[str] = []
+    for item in activation_snapshot.get("superseded_jobs") or []:
+        if not isinstance(item, dict) or not item.get("job_id"):
+            continue
+        job = (
+            db.query(RuleGenerationJobRecord)
+            .filter(RuleGenerationJobRecord.id == str(item["job_id"]))
+            .with_for_update()
+            .first()
+        )
+        if job is None or not _job_asset_is_active(db, job):
+            continue
+        job.status = str(item.get("status_before") or "active")
+        job.validation_report_json = _merge_governance(
+            dict(job.validation_report_json or {}),
+            {
+                "restored_by_bundle_rollback": rolled_back_bundle_id,
+                "restored_by": actor,
+                "restored_at": now.isoformat(),
+            },
+        )
+        job.updated_at = now
+        restored_jobs.append(job.id)
+
+    restored_bundles: list[str] = []
+    for item in activation_snapshot.get("superseded_bundles") or []:
+        if not isinstance(item, dict) or not item.get("bundle_id"):
+            continue
+        parent = (
+            db.query(RuleGenerationJobRecord)
+            .filter(RuleGenerationJobRecord.id == str(item["bundle_id"]))
+            .with_for_update()
+            .first()
+        )
+        if parent is None:
+            continue
+        child_ids = [
+            str(value)
+            for value in dict(parent.payload_json or {}).get("child_job_ids") or []
+            if str(value)
+        ]
+        child_jobs = (
+            db.query(RuleGenerationJobRecord)
+            .filter(RuleGenerationJobRecord.id.in_(child_ids))
+            .all()
+            if child_ids
+            else []
+        )
+        if not child_jobs or not all(_job_asset_is_active(db, child) for child in child_jobs):
+            continue
+        parent.status = str(item.get("status_before") or "active")
+        parent.validation_report_json = _merge_governance(
+            dict(parent.validation_report_json or {}),
+            {
+                "restored_by_bundle_rollback": rolled_back_bundle_id,
+                "restored_by": actor,
+                "restored_at": now.isoformat(),
+            },
+        )
+        parent.updated_at = now
+        restored_bundles.append(parent.id)
+    return {"jobs": restored_jobs, "bundles": restored_bundles}
+
+
 class RuleAssetApprovalService:
     """Approve or deprecate generated assets and their governance job atomically."""
 
@@ -63,7 +292,7 @@ class RuleAssetApprovalService:
             return None
         prefix = "event_rule_version:"
         if asset_ref.startswith(prefix):
-            return asset_ref[len(prefix):]
+            return asset_ref[len(prefix) :]
         return None
 
     @staticmethod
@@ -75,8 +304,641 @@ class RuleAssetApprovalService:
             return None
         prefix = "change_policy_version:"
         if asset_ref.startswith(prefix):
-            return asset_ref[len(prefix):]
+            return asset_ref[len(prefix) :]
         return None
+
+    @staticmethod
+    def _bundle_child_ids(job: RuleGenerationJobRecord) -> list[str]:
+        payload = dict(job.payload_json or {})
+        return [str(item) for item in payload.get("child_job_ids") or [] if str(item)]
+
+    @staticmethod
+    def _is_bundle_child(job: RuleGenerationJobRecord) -> bool:
+        return str(job.source_ref or "").startswith("rule_asset_bundle:")
+
+    @classmethod
+    def _assert_direct_action_allowed(cls, job: RuleGenerationJobRecord) -> None:
+        if cls._is_bundle_child(job):
+            bundle_id = str(job.source_ref).split(":", 1)[1]
+            raise RuleGenerationJobStateError(
+                f"bundled rule assets must be governed through bundle {bundle_id}"
+            )
+
+    @staticmethod
+    def _mark_job_active(
+        job: RuleGenerationJobRecord,
+        *,
+        actor: str | None,
+        now: datetime,
+    ) -> None:
+        job.status = "active"
+        job.validation_report_json = _merge_governance(
+            dict(job.validation_report_json or {}),
+            {"approved_by": actor, "approved_at": now.isoformat()},
+        )
+        job.updated_at = now
+        job.completed_at = now
+
+    def _approve_bundle(
+        self,
+        db: Any,
+        bundle: RuleGenerationJobRecord,
+        *,
+        actor: str | None,
+        now: datetime,
+    ) -> dict[str, Any]:
+        if bundle.status != "pending_approval":
+            raise RuleGenerationJobStateError(
+                "rule asset bundle must be pending_approval before approval"
+            )
+        report = dict(bundle.validation_report_json or {})
+        gate = dict(report.get("bundle_gate") or {})
+        context_gate = dict(report.get("context_gate") or {})
+        replay = dict(report.get("historical_replay") or {})
+        replay_gate = evaluate_historical_replay_gate(replay, context_gate)
+        if (
+            report.get("success") is not True
+            or gate.get("success") is not True
+            or context_gate.get("success") is not True
+            or replay_gate.get("success") is not True
+        ):
+            raise RuleGenerationJobStateError(
+                "rule asset bundle cannot be approved before all release gates pass"
+            )
+        child_ids = self._bundle_child_ids(bundle)
+        if not child_ids:
+            raise RuleGenerationJobStateError("rule asset bundle has no child jobs")
+        if len(child_ids) != len(set(child_ids)):
+            raise RuleGenerationJobStateError("rule asset bundle contains duplicate child jobs")
+        children = (
+            db.query(RuleGenerationJobRecord)
+            .filter(RuleGenerationJobRecord.id.in_(child_ids))
+            .order_by(RuleGenerationJobRecord.id)
+            .with_for_update()
+            .all()
+        )
+        if len(children) != len(set(child_ids)):
+            raise RuleGenerationJobStateError("rule asset bundle child jobs are incomplete")
+        expected_source = f"rule_asset_bundle:{bundle.id}"
+        for child in children:
+            if child.source_ref != expected_source:
+                raise RuleGenerationJobStateError("rule asset bundle child ownership mismatch")
+            if child.status != "pending_approval":
+                raise RuleGenerationJobStateError(
+                    f"bundle child {child.id} is not pending_approval"
+                )
+            if (child.validation_report_json or {}).get("success") is not True:
+                raise RuleGenerationJobStateError(
+                    f"bundle child {child.id} validation has not succeeded"
+                )
+
+        by_type: dict[str, list[RuleGenerationJobRecord]] = {}
+        for child in children:
+            by_type.setdefault(str(child.job_type), []).append(child)
+        if (
+            len(by_type.get("OBSERVATION_CONTRACT") or []) != 1
+            or len(by_type.get("CHANGE_POLICY") or []) < 1
+            or len(by_type.get("EVENT_RULE") or []) < 1
+        ):
+            raise RuleGenerationJobStateError(
+                "bundle requires one ObservationContract, one or more ChangePolicies and EventRules"
+            )
+
+        activations: list[dict[str, Any]] = []
+        activation_snapshot: dict[str, Any] = {
+            "captured_at": now.isoformat(),
+            "bundle_id": bundle.id,
+            "assets": [],
+        }
+        replaced_source_job_ids: set[str] = set()
+        contract_job = by_type["OBSERVATION_CONTRACT"][0]
+        contract = (
+            db.query(ObservationContractRecord)
+            .filter(ObservationContractRecord.id == contract_job.asset_version_id)
+            .with_for_update()
+            .first()
+        )
+        if contract is None:
+            raise ValueError("observation contract not found")
+        if str(contract.contract_sha256 or "") != str(contract_job.asset_digest or ""):
+            raise RuleGenerationJobStateError(
+                "observation contract digest no longer matches the approved candidate"
+            )
+        if contract.status not in {"draft", "pending_approval", "active"}:
+            raise RuleGenerationJobStateError(
+                f"observation contract is not releasable from status {contract.status}"
+            )
+        previous_contracts = (
+            db.query(ObservationContractRecord)
+            .filter(
+                ObservationContractRecord.source_type == contract.source_type,
+                ObservationContractRecord.schema_id == contract.schema_id,
+                ObservationContractRecord.status == "active",
+                ObservationContractRecord.id != contract.id,
+            )
+            .order_by(ObservationContractRecord.version)
+            .with_for_update()
+            .all()
+        )
+        activation_snapshot["assets"].append(
+            {
+                "asset_type": "OBSERVATION_CONTRACT",
+                "candidate_version_id": contract.id,
+                "candidate_status_before": contract.status,
+                "logical_key": f"{contract.source_type}:{contract.schema_id}",
+                "previous_active_version_ids": [item.id for item in previous_contracts],
+            }
+        )
+        for previous in previous_contracts:
+            if previous.source_job_id:
+                replaced_source_job_ids.add(str(previous.source_job_id))
+            previous.status = "deprecated"
+            previous.deprecated_at = now
+            previous.updated_at = now
+        if previous_contracts:
+            db.flush()
+        contract.status = "active"
+        contract.activated_at = now
+        contract.deprecated_at = None
+        contract.updated_at = now
+        contract.approval_json = {
+            **dict(contract.approval_json or {}),
+            "approved_by": actor,
+            "approved_at": now.isoformat(),
+            "bundle_id": bundle.id,
+        }
+        activations.append(
+            {
+                "asset_type": "OBSERVATION_CONTRACT",
+                "asset_id": contract.id,
+                "version": contract.version,
+            }
+        )
+
+        for policy_job in by_type["CHANGE_POLICY"]:
+            policy_version = (
+                db.query(ChangePolicyVersionRecord)
+                .filter(ChangePolicyVersionRecord.id == policy_job.asset_version_id)
+                .with_for_update()
+                .first()
+            )
+            if policy_version is None:
+                raise ValueError("change policy version not found")
+            if str(policy_version.digest or "") != str(policy_job.asset_digest or ""):
+                raise RuleGenerationJobStateError(
+                    "change policy digest no longer matches the approved candidate"
+                )
+            if policy_version.status not in {"draft", "pending_approval", "active"}:
+                raise RuleGenerationJobStateError(
+                    f"change policy is not releasable from status {policy_version.status}"
+                )
+            policy = (
+                db.query(ChangePolicyRecord)
+                .filter(ChangePolicyRecord.id == policy_version.policy_id)
+                .with_for_update()
+                .first()
+            )
+            if policy is None:
+                raise ValueError("change policy not found")
+            if str(policy.id) != str(policy_job.asset_id or ""):
+                raise RuleGenerationJobStateError("change policy asset identity mismatch")
+            previous_policy_versions = (
+                db.query(ChangePolicyVersionRecord)
+                .filter(
+                    ChangePolicyVersionRecord.observation_type == policy_version.observation_type,
+                    ChangePolicyVersionRecord.status == "active",
+                    ChangePolicyVersionRecord.id != policy_version.id,
+                )
+                .order_by(ChangePolicyVersionRecord.version)
+                .with_for_update()
+                .all()
+            )
+            activation_snapshot["assets"].append(
+                {
+                    "asset_type": "CHANGE_POLICY",
+                    "candidate_version_id": policy_version.id,
+                    "candidate_status_before": policy_version.status,
+                    "logical_key": policy_version.observation_type,
+                    "previous_active_version_ids": [item.id for item in previous_policy_versions],
+                }
+            )
+            for previous in previous_policy_versions:
+                if previous.source_job_id:
+                    replaced_source_job_ids.add(str(previous.source_job_id))
+                previous.status = "deprecated"
+                previous.deprecated_at = now
+                previous_policy = db.get(ChangePolicyRecord, previous.policy_id)
+                if previous_policy is not None and int(previous_policy.current_version or 0) == int(
+                    previous.version
+                ):
+                    previous_policy.current_version = 0
+                    previous_policy.status = "deprecated"
+                    previous_policy.updated_at = now
+            if previous_policy_versions:
+                db.flush()
+            policy_version.status = "active"
+            policy_version.activated_at = now
+            policy_version.deprecated_at = None
+            policy.status = "active"
+            policy.current_version = int(policy_version.version)
+            activations.append(
+                {
+                    "asset_type": "CHANGE_POLICY",
+                    "asset_id": policy.id,
+                    "version_id": policy_version.id,
+                    "version": policy_version.version,
+                }
+            )
+
+        candidate_event_logical_keys: set[str] = set()
+        for event_job in by_type["EVENT_RULE"]:
+            version = (
+                db.query(EventRuleVersionRecord)
+                .filter(EventRuleVersionRecord.id == event_job.asset_version_id)
+                .with_for_update()
+                .first()
+            )
+            if version is None:
+                raise ValueError("event rule version not found")
+            if str(version.digest or "") != str(event_job.asset_digest or ""):
+                raise RuleGenerationJobStateError(
+                    "event rule digest no longer matches the approved candidate"
+                )
+            if version.status not in {"draft", "pending_approval", "active"}:
+                raise RuleGenerationJobStateError(
+                    f"event rule is not releasable from status {version.status}"
+                )
+            rule = (
+                db.query(EventRuleRecord)
+                .filter(EventRuleRecord.id == version.rule_id)
+                .with_for_update()
+                .first()
+            )
+            if rule is None:
+                raise ValueError("event rule not found")
+            if str(rule.id) != str(event_job.asset_id or ""):
+                raise RuleGenerationJobStateError("event rule asset identity mismatch")
+            logical_key, previous_rule_rows = _active_event_rule_predecessors(
+                db,
+                candidate_rule=rule,
+                candidate_version=version,
+            )
+            if logical_key in candidate_event_logical_keys:
+                raise RuleGenerationJobStateError(
+                    f"bundle contains duplicate EventRule logical slot {logical_key}"
+                )
+            candidate_event_logical_keys.add(logical_key)
+            activation_snapshot["assets"].append(
+                {
+                    "asset_type": "EVENT_RULE",
+                    "candidate_version_id": version.id,
+                    "candidate_status_before": version.status,
+                    "logical_key": logical_key,
+                    "previous_active_version_ids": [
+                        previous_version.id for _, previous_version in previous_rule_rows
+                    ],
+                    "previous_active_assets": [
+                        {
+                            "rule_id": previous_rule.id,
+                            "rule_name": previous_rule.name,
+                            "version_id": previous_version.id,
+                            "version": previous_version.version,
+                        }
+                        for previous_rule, previous_version in previous_rule_rows
+                    ],
+                }
+            )
+            for previous_rule, previous_version in previous_rule_rows:
+                if previous_version.source_job_id:
+                    replaced_source_job_ids.add(str(previous_version.source_job_id))
+                previous_version.status = "deprecated"
+                previous_version.deprecated_at = now
+                if previous_rule.id != rule.id:
+                    previous_rule.current_version = 0
+                    previous_rule.status = "deprecated"
+                    previous_rule.updated_at = now
+            if previous_rule_rows:
+                db.flush()
+            version.status = "active"
+            version.activated_at = now
+            version.deprecated_at = None
+            rule.status = "active"
+            rule.current_version = int(version.version)
+            rule.updated_at = now
+            activations.append(
+                {
+                    "asset_type": "EVENT_RULE",
+                    "asset_id": rule.id,
+                    "version_id": version.id,
+                    "version": version.version,
+                    "event_type": version.event_type,
+                    "logical_key": logical_key,
+                }
+            )
+
+        superseded = _supersede_replaced_jobs(
+            db,
+            source_job_ids=replaced_source_job_ids,
+            replacement_bundle_id=bundle.id,
+            now=now,
+        )
+        activation_snapshot["superseded_jobs"] = superseded["jobs"]
+        activation_snapshot["superseded_bundles"] = superseded["bundles"]
+
+        for child in children:
+            self._mark_job_active(child, actor=actor, now=now)
+        bundle.validation_report_json = _merge_governance(
+            dict(bundle.validation_report_json or {}),
+            {"activation_snapshot": activation_snapshot},
+        )
+        self._mark_job_active(bundle, actor=actor, now=now)
+        db.flush()
+        return {
+            "success": True,
+            "job": bundle.to_dict(),
+            "bundle_id": bundle.id,
+            "child_job_ids": child_ids,
+            "asset_activations": activations,
+            "activation_snapshot": activation_snapshot,
+            "atomic": True,
+        }
+
+    def _deprecate_bundle(
+        self,
+        db: Any,
+        bundle: RuleGenerationJobRecord,
+        *,
+        actor: str | None,
+        reason: str | None,
+        now: datetime,
+    ) -> dict[str, Any]:
+        if bundle.status not in {"pending_approval", "active", "rejected"}:
+            raise RuleGenerationJobStateError(
+                f"invalid rule generation transition: {bundle.status} -> deprecated"
+            )
+        child_ids = self._bundle_child_ids(bundle)
+        children = (
+            db.query(RuleGenerationJobRecord)
+            .filter(RuleGenerationJobRecord.id.in_(child_ids))
+            .order_by(RuleGenerationJobRecord.id)
+            .with_for_update()
+            .all()
+            if child_ids
+            else []
+        )
+        report = dict(bundle.validation_report_json or {})
+        governance = dict(report.get("governance") or {})
+        activation_snapshot = dict(governance.get("activation_snapshot") or {})
+        snapshot_entries = {
+            (str(item.get("asset_type") or ""), str(item.get("candidate_version_id") or "")): item
+            for item in activation_snapshot.get("assets") or []
+            if isinstance(item, dict)
+        }
+        if bundle.status == "active" and not snapshot_entries:
+            raise RuleGenerationJobStateError(
+                "active rule asset bundle cannot be rolled back without an activation snapshot"
+            )
+
+        def snapshot_entry(asset_type: str, version_id: str) -> dict[str, Any]:
+            entry = dict(snapshot_entries.get((asset_type, version_id)) or {})
+            if bundle.status == "active" and not entry:
+                raise RuleGenerationJobStateError(
+                    f"activation snapshot is missing {asset_type} {version_id}"
+                )
+            return entry
+
+        restored: list[dict[str, Any]] = []
+        for child in children:
+            if child.job_type == "OBSERVATION_CONTRACT" and child.asset_version_id:
+                contract = (
+                    db.query(ObservationContractRecord)
+                    .filter(ObservationContractRecord.id == child.asset_version_id)
+                    .with_for_update()
+                    .first()
+                )
+                if contract is not None:
+                    entry = snapshot_entry("OBSERVATION_CONTRACT", contract.id)
+                    was_active = contract.status == "active"
+                    was_active_before = entry.get("candidate_status_before") == "active"
+                    if not (was_active and was_active_before):
+                        contract.status = "deprecated"
+                        contract.deprecated_at = now
+                        contract.updated_at = now
+                    if was_active and not was_active_before:
+                        previous_ids = [
+                            str(item) for item in entry.get("previous_active_version_ids") or []
+                        ]
+                        previous_rows = (
+                            db.query(ObservationContractRecord)
+                            .filter(
+                                ObservationContractRecord.id.in_(previous_ids),
+                            )
+                            .with_for_update()
+                            .all()
+                            if previous_ids
+                            else []
+                        )
+                        if len(previous_rows) != len(set(previous_ids)):
+                            raise RuleGenerationJobStateError(
+                                "rollback snapshot references a missing observation contract"
+                            )
+                        db.flush()
+                        for previous in previous_rows:
+                            previous.status = "active"
+                            previous.activated_at = now
+                            previous.deprecated_at = None
+                            previous.updated_at = now
+                            restored.append(
+                                {
+                                    "asset_type": "OBSERVATION_CONTRACT",
+                                    "asset_version_id": previous.id,
+                                }
+                            )
+            elif child.job_type == "CHANGE_POLICY" and child.asset_version_id:
+                version = (
+                    db.query(ChangePolicyVersionRecord)
+                    .filter(ChangePolicyVersionRecord.id == child.asset_version_id)
+                    .with_for_update()
+                    .first()
+                )
+                if version is not None:
+                    entry = snapshot_entry("CHANGE_POLICY", version.id)
+                    was_active = version.status == "active"
+                    was_active_before = entry.get("candidate_status_before") == "active"
+                    if not (was_active and was_active_before):
+                        version.status = "deprecated"
+                        version.deprecated_at = now
+                    policy = (
+                        db.query(ChangePolicyRecord)
+                        .filter(ChangePolicyRecord.id == version.policy_id)
+                        .with_for_update()
+                        .first()
+                    )
+                    previous_rows: list[ChangePolicyVersionRecord] = []
+                    if was_active and not was_active_before:
+                        previous_ids = [
+                            str(item) for item in entry.get("previous_active_version_ids") or []
+                        ]
+                        previous_rows = (
+                            db.query(ChangePolicyVersionRecord)
+                            .filter(
+                                ChangePolicyVersionRecord.id.in_(previous_ids),
+                            )
+                            .with_for_update()
+                            .all()
+                            if previous_ids
+                            else []
+                        )
+                        if len(previous_rows) != len(set(previous_ids)):
+                            raise RuleGenerationJobStateError(
+                                "rollback snapshot references a missing change policy"
+                            )
+                        db.flush()
+                    for previous in previous_rows:
+                        previous.status = "active"
+                        previous.activated_at = now
+                        previous.deprecated_at = None
+                        restored.append(
+                            {
+                                "asset_type": "CHANGE_POLICY",
+                                "asset_version_id": previous.id,
+                            }
+                        )
+                        previous_policy = db.get(ChangePolicyRecord, previous.policy_id)
+                        if previous_policy is not None:
+                            previous_policy.current_version = int(previous.version)
+                            previous_policy.status = "active"
+                            previous_policy.updated_at = now
+                    if (
+                        policy is not None
+                        and was_active
+                        and not was_active_before
+                        and not previous_rows
+                    ):
+                        policy.current_version = 0
+                        policy.status = "deprecated"
+                        policy.updated_at = now
+            elif child.job_type == "EVENT_RULE" and child.asset_version_id:
+                version = (
+                    db.query(EventRuleVersionRecord)
+                    .filter(EventRuleVersionRecord.id == child.asset_version_id)
+                    .with_for_update()
+                    .first()
+                )
+                if version is not None:
+                    entry = snapshot_entry("EVENT_RULE", version.id)
+                    was_active = version.status == "active"
+                    was_active_before = entry.get("candidate_status_before") == "active"
+                    if not (was_active and was_active_before):
+                        version.status = "deprecated"
+                        version.deprecated_at = now
+                    rule = (
+                        db.query(EventRuleRecord)
+                        .filter(EventRuleRecord.id == version.rule_id)
+                        .with_for_update()
+                        .first()
+                    )
+                    previous_rows: list[EventRuleVersionRecord] = []
+                    if was_active and not was_active_before:
+                        previous_ids = [
+                            str(item) for item in entry.get("previous_active_version_ids") or []
+                        ]
+                        previous_rows = (
+                            db.query(EventRuleVersionRecord)
+                            .filter(
+                                EventRuleVersionRecord.id.in_(previous_ids),
+                            )
+                            .with_for_update()
+                            .all()
+                            if previous_ids
+                            else []
+                        )
+                        if len(previous_rows) != len(set(previous_ids)):
+                            raise RuleGenerationJobStateError(
+                                "rollback snapshot references a missing event rule"
+                            )
+                        db.flush()
+                    for previous in previous_rows:
+                        previous.status = "active"
+                        previous.activated_at = now
+                        previous.deprecated_at = None
+                        previous_rule = (
+                            db.query(EventRuleRecord)
+                            .filter(EventRuleRecord.id == previous.rule_id)
+                            .with_for_update()
+                            .first()
+                        )
+                        if previous_rule is None:
+                            raise RuleGenerationJobStateError(
+                                "rollback snapshot references an event rule without metadata"
+                            )
+                        previous_rule.current_version = int(previous.version)
+                        previous_rule.status = "active"
+                        previous_rule.updated_at = now
+                        restored.append(
+                            {
+                                "asset_type": "EVENT_RULE",
+                                "asset_version_id": previous.id,
+                                "asset_id": previous.rule_id,
+                            }
+                        )
+                    if rule is not None and was_active and not was_active_before:
+                        same_rule_predecessors = [
+                            previous for previous in previous_rows if previous.rule_id == rule.id
+                        ]
+                        if same_rule_predecessors:
+                            previous = max(
+                                same_rule_predecessors,
+                                key=lambda item: item.version,
+                            )
+                            rule.current_version = int(previous.version)
+                            rule.status = "active"
+                        else:
+                            rule.current_version = 0
+                            rule.status = "deprecated"
+                        rule.updated_at = now
+            child.status = "deprecated"
+            child.validation_report_json = _merge_governance(
+                dict(child.validation_report_json or {}),
+                {
+                    "deprecated_by": actor,
+                    "deprecated_at": now.isoformat(),
+                    "reason": reason,
+                    "bundle_id": bundle.id,
+                },
+            )
+            child.updated_at = now
+            child.completed_at = now
+        restored_governance = _restore_superseded_jobs(
+            db,
+            activation_snapshot=activation_snapshot,
+            rolled_back_bundle_id=bundle.id,
+            actor=actor,
+            now=now,
+        )
+        bundle.status = "deprecated"
+        bundle.validation_report_json = _merge_governance(
+            dict(bundle.validation_report_json or {}),
+            {
+                "deprecated_by": actor,
+                "deprecated_at": now.isoformat(),
+                "reason": reason,
+                "restored_assets": restored,
+                "restored_governance": restored_governance,
+            },
+        )
+        bundle.updated_at = now
+        bundle.completed_at = now
+        db.flush()
+        return {
+            "success": True,
+            "job": bundle.to_dict(),
+            "bundle_id": bundle.id,
+            "child_job_ids": child_ids,
+            "restored_assets": restored,
+            "restored_governance": restored_governance,
+            "atomic": True,
+        }
 
     def approve(self, job_id: str, *, actor: str | None = None) -> dict[str, Any]:
         now = _utcnow()
@@ -89,6 +951,9 @@ class RuleAssetApprovalService:
             )
             if job is None:
                 raise KeyError("rule generation job not found")
+            if job.job_type == "RULE_ASSET_BUNDLE":
+                return self._approve_bundle(db, job, actor=actor, now=now)
+            self._assert_direct_action_allowed(job)
             if job.status != "pending_approval":
                 raise RuleGenerationJobStateError(
                     "rule generation job must be pending_approval before approval"
@@ -108,7 +973,8 @@ class RuleAssetApprovalService:
                 version_id = self._event_rule_version_id(job)
                 if not version_id:
                     raise RuleGenerationJobStateError(
-                        "EVENT_RULE jobs require asset_version_id or asset_ref event_rule_version:<id>"
+                        "EVENT_RULE jobs require asset_version_id or asset_ref "
+                        "event_rule_version:<id>"
                     )
                 version = (
                     db.query(EventRuleVersionRecord)
@@ -126,27 +992,33 @@ class RuleAssetApprovalService:
                 )
                 if rule is None:
                     raise ValueError("event rule not found")
-                (
-                    db.query(EventRuleVersionRecord)
-                    .filter(EventRuleVersionRecord.rule_id == rule.id)
-                    .filter(EventRuleVersionRecord.status == "active")
-                    .filter(EventRuleVersionRecord.id != version.id)
-                    .update(
-                        {"status": "deprecated", "deprecated_at": now},
-                        synchronize_session=False,
-                    )
+                _, predecessors = _active_event_rule_predecessors(
+                    db,
+                    candidate_rule=rule,
+                    candidate_version=version,
                 )
+                for previous_rule, previous_version in predecessors:
+                    previous_version.status = "deprecated"
+                    previous_version.deprecated_at = now
+                    if previous_rule.id != rule.id:
+                        previous_rule.current_version = 0
+                        previous_rule.status = "deprecated"
+                        previous_rule.updated_at = now
+                if predecessors:
+                    db.flush()
                 version.status = "active"
                 version.activated_at = now
                 version.deprecated_at = None
                 rule.status = "active"
                 rule.current_version = int(version.version)
+                rule.updated_at = now
                 asset_activation = _event_rule_payload(rule, version)
             elif job.job_type == "CHANGE_POLICY":
                 version_id = self._change_policy_version_id(job)
                 if not version_id:
                     raise RuleGenerationJobStateError(
-                        "CHANGE_POLICY jobs require asset_version_id or asset_ref change_policy_version:<id>"
+                        "CHANGE_POLICY jobs require asset_version_id or asset_ref "
+                        "change_policy_version:<id>"
                     )
                 version = (
                     db.query(ChangePolicyVersionRecord)
@@ -194,9 +1066,7 @@ class RuleAssetApprovalService:
             if asset_activation is not None:
                 job.asset_type = str(job.job_type)
                 job.asset_id = str(
-                    asset_activation.get("rule_id")
-                    or asset_activation.get("policy_id")
-                    or ""
+                    asset_activation.get("rule_id") or asset_activation.get("policy_id") or ""
                 )
                 job.asset_version_id = str(asset_activation.get("version_id") or "")
                 if getattr(version, "digest", None):
@@ -231,6 +1101,49 @@ class RuleAssetApprovalService:
             )
             if job is None:
                 raise KeyError("rule generation job not found")
+            if job.job_type == "RULE_ASSET_BUNDLE":
+                if job.status not in {"draft", "validating", "pending_approval", "rejected"}:
+                    raise RuleGenerationJobStateError(
+                        f"invalid rule generation transition: {job.status} -> rejected"
+                    )
+                child_ids = self._bundle_child_ids(job)
+                children = (
+                    db.query(RuleGenerationJobRecord)
+                    .filter(RuleGenerationJobRecord.id.in_(child_ids))
+                    .with_for_update()
+                    .all()
+                    if child_ids
+                    else []
+                )
+                for child in children:
+                    if child.status in {"draft", "validating", "pending_approval", "rejected"}:
+                        child.status = "rejected"
+                        child.validation_report_json = _merge_governance(
+                            dict(child.validation_report_json or {}),
+                            {
+                                "rejected_by": actor,
+                                "rejected_at": now.isoformat(),
+                                "reason": reason,
+                                "bundle_id": job.id,
+                            },
+                        )
+                        child.updated_at = now
+                        child.completed_at = now
+                job.status = "rejected"
+                job.validation_report_json = _merge_governance(
+                    dict(job.validation_report_json or {}),
+                    {"rejected_by": actor, "rejected_at": now.isoformat(), "reason": reason},
+                )
+                job.updated_at = now
+                job.completed_at = now
+                db.flush()
+                return {
+                    "success": True,
+                    "job": job.to_dict(),
+                    "child_job_ids": child_ids,
+                    "atomic": True,
+                }
+            self._assert_direct_action_allowed(job)
             if job.status not in {"draft", "validating", "pending_approval", "rejected"}:
                 raise RuleGenerationJobStateError(
                     f"invalid rule generation transition: {job.status} -> rejected"
@@ -262,6 +1175,15 @@ class RuleAssetApprovalService:
             )
             if job is None:
                 raise KeyError("rule generation job not found")
+            if job.job_type == "RULE_ASSET_BUNDLE":
+                return self._deprecate_bundle(
+                    db,
+                    job,
+                    actor=actor,
+                    reason=reason,
+                    now=now,
+                )
+            self._assert_direct_action_allowed(job)
             if job.status not in {"pending_approval", "active", "rejected"}:
                 raise RuleGenerationJobStateError(
                     f"invalid rule generation transition: {job.status} -> deprecated"

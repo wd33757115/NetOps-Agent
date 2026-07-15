@@ -146,7 +146,7 @@ def test_record_skill_execution_span(mock_get_client, mock_flush):
     mock_flush.assert_called_once()
 
 
-@patch("src.core.skills.executor.record_skill_execution_span")
+@patch("src.core.skills.runner.record_skill_execution_span")
 @patch("src.core.skills.executor._run_subprocess_skill")
 @patch("src.core.skills.executor.resolve_entry_script")
 def test_execute_skill_records_langfuse_span(mock_resolve, mock_run, mock_record):

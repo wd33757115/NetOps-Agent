@@ -16,6 +16,7 @@ class ChangePolicyProposal:
     ignore_fields: tuple[str, ...] = ()
     deadband: float | None = None
     thresholds: dict[str, float] | None = None
+    threshold_references: dict[str, dict[str, Any]] | None = None
     recovery_threshold: float | None = None
     minimum_duration: str | None = None
     source: str = "deterministic_policy_generator"
@@ -192,6 +193,11 @@ def policy_from_dict(payload: dict[str, Any]) -> ChangePolicyProposal:
             str(key): float(value)
             for key, value in dict(payload.get("thresholds") or {}).items()
         },
+        threshold_references={
+            str(key): dict(value)
+            for key, value in dict(payload.get("threshold_references") or {}).items()
+            if isinstance(value, dict)
+        },
         recovery_threshold=(
             float(payload["recovery_threshold"])
             if payload.get("recovery_threshold") is not None
@@ -226,18 +232,28 @@ def validate_change_policy(policy: ChangePolicyProposal) -> dict[str, Any]:
         errors.append("counter semantic type must use counter_delta")
     if policy.compare_mode == "threshold_and_deadband":
         high = (policy.thresholds or {}).get("high")
-        if high is None:
+        high_reference = (policy.threshold_references or {}).get("high")
+        if high is None and not high_reference:
             errors.append("threshold_and_deadband requires thresholds.high")
         if policy.recovery_threshold is not None and high is not None:
             if policy.recovery_threshold >= high:
                 errors.append("recovery_threshold must be lower than thresholds.high")
     if policy.compare_mode == "threshold_low_and_deadband":
         low = (policy.thresholds or {}).get("low")
-        if low is None:
+        low_reference = (policy.threshold_references or {}).get("low")
+        if low is None and not low_reference:
             errors.append("threshold_low_and_deadband requires thresholds.low")
         if policy.recovery_threshold is not None and low is not None:
             if policy.recovery_threshold <= low:
                 errors.append("recovery_threshold must be higher than thresholds.low")
+    for role, reference in (policy.threshold_references or {}).items():
+        if role not in {"low", "high", "critical_low", "critical_high"}:
+            errors.append(f"unsupported threshold reference role: {role}")
+            continue
+        if not isinstance(reference, dict) or not str(
+            reference.get("field_name") or ""
+        ).strip():
+            errors.append(f"threshold_references.{role}.field_name is required")
     return {
         "success": not errors,
         "errors": errors,

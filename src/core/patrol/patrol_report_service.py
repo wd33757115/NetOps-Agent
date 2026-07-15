@@ -38,6 +38,12 @@ class PatrolReportService:
 
     @staticmethod
     def conclusion(summary: dict[str, Any]) -> dict[str, str]:
+        if "run_count" in summary and not int(summary.get("run_count") or 0):
+            return {
+                "status": "未形成可用巡检结论",
+                "trust": "低",
+                "reason": "未发现已完成的设备巡检运行",
+            }
         failed_runs = sum(
             count
             for status, count in summary["status_counts"].items()
@@ -47,11 +53,19 @@ class PatrolReportService:
         no_event = summary.get("no_event_summary") or {}
         missing_rules = int(no_event.get("missing_rule_count") or 0)
         suspected = int(summary.get("suspected_format_change_count") or 0)
+        current_findings = int(summary.get("current_finding_count") or 0)
+        current_coverage = summary.get("current_state_rule_coverage") or {}
         if failed_runs:
             return {
                 "status": "执行失败",
                 "trust": "低",
                 "reason": "存在未完成的巡检工作流",
+            }
+        if current_findings:
+            return {
+                "status": "发现当前状态异常",
+                "trust": "高" if quality.get("status") == "ready" else "中",
+                "reason": f"{current_findings} 个当前状态命中活动故障规则",
             }
         if summary.get("event_count"):
             return {
@@ -78,10 +92,16 @@ class PatrolReportService:
                 "trust": "高",
                 "reason": "活动规则已完成评估，变化未达到事件触发条件",
             }
+        if current_coverage.get("evaluated_observation_count"):
+            return {
+                "status": "本次覆盖范围内未发现异常",
+                "trust": "高",
+                "reason": "结构化数据完整，当前状态已由活动故障规则评估且未命中",
+            }
         return {
             "status": "未发现变化（健康未判定）",
-            "trust": "高",
-            "reason": "数据完整且无变化或事件；当前值是否健康仍由状态策略判定",
+            "trust": "中",
+            "reason": "无变化或事件，但当前状态缺少可适用的活动故障规则，不能据此认定健康",
         }
 
     @classmethod
@@ -113,11 +133,38 @@ class PatrolReportService:
             "",
             "> Workflow 完成只表示巡检链路执行结束，不等同于设备健康。",
             "",
-            "## 二、设备与执行",
+            "## 二、当前状态异常",
+            "",
+        ]
+        if summary.get("current_findings"):
+            lines.extend(
+                f"- **{_markdown_cell(item.get('severity'))}** "
+                f"{_markdown_cell(item.get('event_type'))}："
+                f"{_markdown_cell(item.get('device_name') or item.get('device_id'))} "
+                f"{_markdown_cell(item.get('entity_type'))}/"
+                f"{_markdown_cell(_display_entity_key(item.get('entity_key')))} "
+                f"{_markdown_cell(item.get('field'))}="
+                f"{_markdown_cell(item.get('value'))}{_markdown_cell(item.get('unit') or '')} "
+                f"（规则 {_markdown_cell(item.get('rule_id'))}）"
+                for item in summary["current_findings"]
+            )
+        else:
+            lines.append("- 未形成当前状态异常项；需结合规则覆盖率判断该结论是否完整。")
+        lines.extend(
+            [
+            "",
+            "### 当前状态规则覆盖",
+            "",
+            f"- 活动故障规则：{(summary.get('current_state_rule_coverage') or {}).get('active_fault_rule_count', 0)}",
+            f"- 已评估当前状态：{(summary.get('current_state_rule_coverage') or {}).get('evaluated_observation_count', 0)}",
+            f"- 规则快照来源：{(summary.get('current_state_rule_coverage') or {}).get('sources', {})}",
+            "",
+            "## 三、设备与执行",
             "",
             "| 设备 | Workflow Run | 状态 | Snapshot Run | 命令 | Observation | Change | Event |",
             "|---|---|---|---|---:|---:|---:|---:|",
-        ]
+            ]
+        )
         for row in summary["runs"]:
             lines.append(
                 "| "
@@ -139,7 +186,7 @@ class PatrolReportService:
         lines.extend(
             [
                 "",
-                "## 三、业务检查项",
+                "## 四、业务检查项",
                 "",
                 "| 设备 | 检查项 | 状态 | Observation | Change | Event | 说明 | 当前值示例 |",
                 "|---|---|---|---:|---:|---:|---|---|",
@@ -167,7 +214,7 @@ class PatrolReportService:
         lines.extend(
             [
                 "",
-                "## 四、数据质量",
+                "## 五、数据质量",
                 "",
                 f"- **数据质量状态**：{quality['status']}",
                 f"- **命令执行**：{quality['execution_success_count']} / {quality['command_count']}",
@@ -206,7 +253,7 @@ class PatrolReportService:
         lines.extend(
             [
                 "",
-                "## 五、事件与规则判定",
+                "## 六、事件与规则判定",
                 "",
                 f"- **事件数**：{summary['event_count']}",
                 f"- **未生成事件的 Change**：{no_event['total']}",
@@ -231,7 +278,7 @@ class PatrolReportService:
         lines.extend(
             [
                 "",
-                "## 六、完整变化明细",
+                "## 七、完整变化明细",
                 "",
                 "| 设备 | 命令 | 实体 | 主键 | 字段 | 旧值 | 新值 | 类型 | 事件状态 | 原因 | 备注 |",
                 "|---|---|---|---|---|---|---|---|---|---|---|",
@@ -261,7 +308,7 @@ class PatrolReportService:
                 )
         else:
             lines.append("| - | - | - | - | - | - | - | - | - | - | 无变化 |")
-        lines.extend(["", "## 七、事件明细", ""])
+        lines.extend(["", "## 八、事件明细", ""])
         if summary["events"]:
             lines.extend(
                 f"- **{_markdown_cell(event['severity'])}** "
@@ -273,12 +320,12 @@ class PatrolReportService:
             )
         else:
             lines.append("- 未生成事件；请结合上一节 no_event 原因判断，不能据此直接认定健康。")
-        lines.extend(["", "## 八、待处理项", ""])
+        lines.extend(["", "## 九、待处理项", ""])
         if summary["action_items"]:
             lines.extend(f"- {item}" for item in summary["action_items"])
         else:
             lines.append("- 无")
-        lines.extend(["", "## 九、证据引用", ""])
+        lines.extend(["", "## 十、证据引用", ""])
         for row in summary["runs"]:
             lines.append(
                 f"- {row['device_name'] or row['device_id']}：Workflow "

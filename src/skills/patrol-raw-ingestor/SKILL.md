@@ -32,8 +32,16 @@ inputs:
     description: production 或 parser_validation，默认 production
   - name: file_path
     type: string
-    required: true
+    required: false
     description: 巡检原始 txt/log 文件或包含这些文件的目录路径
+  - name: offline_job_id
+    type: string
+    required: false
+    description: Durable offline patrol job. Mutually exclusive with file_path.
+  - name: period_role
+    type: string
+    required: false
+    description: sample, baseline, or current when offline_job_id is used.
   - name: run_id
     type: string
     required: false

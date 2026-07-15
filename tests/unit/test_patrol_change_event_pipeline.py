@@ -26,6 +26,7 @@ from src.core.patrol.change_policy import (
 )
 from src.core.patrol.command_splitter import split_cli_capture
 from src.core.patrol.event_builder import build_events_from_changes, build_events_from_params
+from src.core.patrol.event_rules import EventRule, default_event_rule_definitions
 from src.core.patrol.raw_importer import (
     _import_fingerprint,
     _resolve_capture_device,
@@ -37,6 +38,7 @@ from src.core.state.normalizer import normalize_run
 from src.infrastructure.db.models import (
     CommandSnapshot,
     NetworkChangeRecord,
+    NetworkEventOccurrenceRecord,
     NetworkEventOutboxRecord,
     NetworkEventRecord,
     ParserJobSample,
@@ -55,6 +57,28 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 @pytest.fixture(autouse=True)
 def _enable_explicit_builtin_rule_test_interface(monkeypatch):
     monkeypatch.setattr(get_settings(), "EVENT_RULE_ALLOW_BUILTIN_FALLBACK", True)
+    monkeypatch.setattr(
+        "src.core.patrol.event_rules.EventRuleRepository.list_active_rules",
+        lambda _self: [],
+    )
+    monkeypatch.setattr(
+        "src.core.patrol.event_builder.EventRuleRepository.snapshot_active_rules",
+        lambda _self: [
+            {
+                "rule_name": definition.rule_id,
+                "version": definition.version,
+                "event_type": definition.event_type,
+                "severity": definition.severity,
+                "condition": dict(definition.condition),
+                "priority": definition.priority,
+                "exclusive": definition.exclusive,
+                "event_class": definition.event_class,
+                "recovery": dict(definition.recovery or {}),
+                "correlation_keys": list(definition.correlation_keys),
+            }
+            for definition in default_event_rule_definitions()
+        ],
+    )
 
 
 def _cleanup_runs(*run_ids: str) -> None:
@@ -259,6 +283,34 @@ def test_change_detector_uses_latest_fact_for_duplicate_state_key():
     assert observations[0]["value_json"] == "10.10.1.1/24"
 
 
+def test_change_detector_reconstructs_dimensioned_keys_from_persisted_metadata():
+    common = {
+        "device_id": "device-1",
+        "entity_type": "measurement_group",
+        "entity_key": '["group-a"]',
+        "field_name": "readings",
+        "observation_type": "measurement.reading",
+        "observed_at": "2026-07-14T00:00:00+00:00",
+    }
+
+    observations = _deduplicate_current_observations(
+        [
+            {
+                **common,
+                "metadata_json": {"dimensions": {"name": "group-a", "value_index": 1}},
+                "value_json": 1.5,
+            },
+            {
+                **common,
+                "metadata_json": {"dimensions": {"name": "group-a", "value_index": 2}},
+                "value_json": 2.5,
+            },
+        ]
+    )
+
+    assert [item["value_json"] for item in observations] == [1.5, 2.5]
+
+
 def test_duplicate_collection_items_have_distinct_fact_identity_and_safe_authority():
     common = {
         "mode": "production",
@@ -440,6 +492,39 @@ def test_event_builder_suppresses_initial_admin_disabled_interface_state():
     assert build_events_from_changes(initial_disabled) == []
 
 
+def test_event_correlation_never_merges_same_entity_across_devices():
+    rule = EventRule(
+        rule_id="weak-optical-rule",
+        version=1,
+        event_type="rx_power_low",
+        severity="warning",
+        predicate=lambda _change: True,
+        correlation_keys=("interface_name",),
+    )
+    changes = [
+        {
+            "change_id": f"change-{device_id}",
+            "device_id": device_id,
+            "entity_type": "interface_optical",
+            "entity_key": '["Twenty-FiveGigE1/0/16"]',
+            "field": "channel_rx_power_dbm",
+            "old": -2.0,
+            "new": -36.96,
+            "change_type": "modified",
+            "dimensions": {"interface_name": "Twenty-FiveGigE1/0/16"},
+        }
+        for device_id in ("SW1", "SW2")
+    ]
+
+    events = build_events_from_changes(changes, rules=[rule])
+
+    assert len({event.payload["correlation_key"] for event in events}) == 2
+    assert {event.payload["correlation_dimensions"]["device_id"] for event in events} == {
+        "SW1",
+        "SW2",
+    }
+
+
 def test_change_policy_detects_optical_low_crossing_and_recovery():
     policy = ChangePolicyProposal(
         observation_type="interface.optical.rx_power",
@@ -565,6 +650,45 @@ def test_event_repository_dedupes_active_event_and_resolves_recovery():
         recovery_events = build_events_from_changes(recovery_change)
         assert [event.event_type for event in recovery_events] == ["CPURecovered"]
         assert repository.save_events(recovery_events) == 0
+
+        lifecycle = repository.summarize_run_events(run_id=run_id)
+        assert lifecycle["persisted_occurrence_count"] == 3
+        assert lifecycle["created_event_count"] == 1
+        assert lifecycle["updated_event_count"] == 1
+        assert lifecycle["recovered_event_count"] == 1
+        assert lifecycle["unique_event_count"] == 1
+        assert lifecycle["open_after_run_count"] == 0
+        assert lifecycle["current_open_event_count"] == 0
+        assert lifecycle["resolved_event_count"] == 1
+
+        recovery_scope = repository.summarize_run_events(
+            run_id=run_id,
+            source_change_ids={"change-recovered"},
+        )
+        assert recovery_scope["persisted_occurrence_count"] == 1
+        assert recovery_scope["created_event_count"] == 0
+        assert recovery_scope["updated_event_count"] == 0
+        assert recovery_scope["recovered_event_count"] == 1
+        assert recovery_scope["resolved_after_run_count"] == 1
+
+        with get_db_session() as db:
+            opening = (
+                db.query(NetworkEventOccurrenceRecord)
+                .filter(
+                    NetworkEventOccurrenceRecord.run_id == run_id,
+                    NetworkEventOccurrenceRecord.occurrence_kind == "opening",
+                )
+                .one()
+            )
+            payload = dict(opening.payload_json or {})
+            payload.pop("aggregate_status_after_occurrence", None)
+            opening.payload_json = payload
+
+        historical_facts = repository.list_run_event_facts(run_id=run_id)
+        historical_opening = next(
+            item for item in historical_facts if item["occurrence_kind"] == "opening"
+        )
+        assert historical_opening["status_after_occurrence"] == "open"
 
         with get_db_session() as db:
             high = (
@@ -705,10 +829,7 @@ def test_no_event_reason_distinguishes_missing_rules_from_non_match():
     }
 
     assert no_event_reason(change, active_rule_count=0) == "no_active_event_rules"
-    assert (
-        no_event_reason(change, active_rule_count=3)
-        == "active_rules_evaluated_no_match"
-    )
+    assert no_event_reason(change, active_rule_count=3) == "active_rules_evaluated_no_match"
 
 
 def test_import_and_raw_hash_change_roundtrip(tmp_path: Path):
@@ -1034,22 +1155,14 @@ def test_production_import_preserves_evidence_when_parser_fails(tmp_path: Path, 
                 .count()
             )
             assert evidence_count == len(snapshots)
-            jobs = (
-                db.query(ParserTemplateJob)
-                .filter(ParserTemplateJob.id.in_(candidate_ids))
-                .all()
-            )
+            jobs = db.query(ParserTemplateJob).filter(ParserTemplateJob.id.in_(candidate_ids)).all()
             assert jobs
             assert {job.source_mode for job in jobs} == {"production"}
             samples = (
-                db.query(ParserJobSample)
-                .filter(ParserJobSample.job_id.in_(candidate_ids))
-                .all()
+                db.query(ParserJobSample).filter(ParserJobSample.job_id.in_(candidate_ids)).all()
             )
             assert samples
-            assert {sample.sanitization_status for sample in samples} == {
-                "pending_sanitization"
-            }
+            assert {sample.sanitization_status for sample in samples} == {"pending_sanitization"}
             assert all(sample.sanitized_text is None for sample in samples)
             collection_results = (
                 db.query(PatrolCollectionResult)
@@ -1057,13 +1170,9 @@ def test_production_import_preserves_evidence_when_parser_fails(tmp_path: Path, 
                 .all()
             )
             assert {row.execution_status for row in collection_results} == {"complete"}
-            assert {row.fact_status for row in collection_results} == {
-                "blocked_by_parser"
-            }
+            assert {row.fact_status for row in collection_results} == {"blocked_by_parser"}
             assert {
-                row.parser_candidate_id
-                for row in collection_results
-                if row.parser_candidate_id
+                row.parser_candidate_id for row in collection_results if row.parser_candidate_id
             } == candidate_ids
     finally:
         _cleanup_runs(run_id)

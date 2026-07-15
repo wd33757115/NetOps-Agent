@@ -1108,6 +1108,21 @@ body {
   background: #f3f4f6;
 }
 
+.offline-patrol-upload {
+  width: 100%;
+  padding: 12px 0;
+  border-top: 1px solid #ececec;
+  border-bottom: 1px solid #ececec;
+}
+
+.offline-patrol-upload__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
 @media (max-width: 767px) {
   .patrol-history__header {
     flex-direction: column;
@@ -1126,6 +1141,11 @@ body {
   .patrol-history-table__actions .ant-btn-text {
     width: 32px;
     padding-inline: 0;
+  }
+
+  .offline-patrol-upload__header {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 

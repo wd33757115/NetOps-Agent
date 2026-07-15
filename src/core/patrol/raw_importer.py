@@ -145,6 +145,21 @@ def _import_fingerprint(
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _preview_parse_status(parsed: ParserRuntimeResult) -> str:
+    """Project runtime outcomes onto the four user-facing preview buckets."""
+    if parsed.policy_status in {"ignored", "raw"}:
+        return "ignored"
+    if parsed.failure_code == "unsupported_command":
+        return "ignored"
+    if parsed.identity_status != "known":
+        return "identity_unknown"
+    if parsed.parser_status in {"success", "empty"}:
+        return "ready"
+    if parsed.failure_code == "template_missing":
+        return "template_missing"
+    return "parse_failed"
+
+
 def preview_raw_path(
     *,
     file_path: str | Path,
@@ -205,6 +220,7 @@ def preview_raw_path(
         )
         devices.add(device_id)
         statuses: dict[str, int] = {}
+        command_results: list[dict[str, Any]] = []
         for block in blocks:
             commands.add(block.command_canonical)
             fingerprint = _import_fingerprint(
@@ -218,6 +234,14 @@ def preview_raw_path(
             if fingerprint in existing_fingerprints:
                 totals["duplicate_snapshots"] += 1
                 statuses["duplicate"] = statuses.get("duplicate", 0) + 1
+                command_results.append(
+                    {
+                        "command": block.command_canonical,
+                        "status": "duplicate",
+                        "template_id": None,
+                        "failure_code": None,
+                    }
+                )
                 continue
             totals["new_snapshots"] += 1
             parsed = runtime.parse(
@@ -225,27 +249,38 @@ def preview_raw_path(
                 command=block.command_canonical,
                 raw_text=block.raw_output,
             )
-            if parsed.policy_status == "ignored":
-                status = "ignored"
-            elif parsed.identity_status != "known":
-                status = "identity_unknown"
-            elif parsed.parser_status in {"success", "empty"}:
-                status = "ready"
-            elif parsed.failure_code == "template_missing":
-                status = "template_missing"
-            else:
-                status = "parse_failed"
+            status = _preview_parse_status(parsed)
             totals[status] += 1
             statuses[status] = statuses.get(status, 0) + 1
+            command_results.append(
+                {
+                    "command": block.command_canonical,
+                    "status": status,
+                    "template_id": parsed.template_id,
+                    "template_version": parsed.template_version,
+                    "failure_code": parsed.failure_code,
+                    "handling": parsed.handling,
+                    "record_count": (
+                        len(parsed.structured_data)
+                        if isinstance(parsed.structured_data, list)
+                        else 1
+                        if isinstance(parsed.structured_data, dict)
+                        else 0
+                    ),
+                }
+            )
         file_results.append(
             {
                 "file_path": str(candidate),
                 "device_id": device_id,
+                "device_name": resolved_name,
+                "management_ip": resolved_ip,
                 "vendor": identity.vendor,
                 "model": identity.model,
                 "identity_status": identity.status,
                 "command_count": len(blocks),
                 "statuses": statuses,
+                "commands": command_results,
             }
         )
     return {
@@ -865,10 +900,14 @@ def import_raw_path(
     model: str | None = None,
     observed_at: str | None = None,
     metadata: dict[str, Any] | None = None,
+    inventory_bindings: dict[str, str | None] | None = None,
 ) -> dict[str, Any]:
     """Import one capture file or every txt/log capture in a directory."""
     path = Path(file_path)
     if path.is_file():
+        text = _read_text_best_effort(path)
+        resolved_name, resolved_ip, _ = _resolve_capture_device(path=path, text=text)
+        external_id = f"{resolved_name}-{resolved_ip}" if resolved_ip else resolved_name
         return import_raw_capture(
             file_path=path,
             db_path=db_path,
@@ -878,6 +917,7 @@ def import_raw_path(
             model=model,
             observed_at=observed_at,
             metadata=metadata,
+            inventory_device_id=(inventory_bindings or {}).get(external_id),
         )
     if not path.is_dir():
         raise FileNotFoundError(f"巡检数据路径不存在: {path}")
@@ -890,47 +930,120 @@ def import_raw_path(
     if not files:
         raise ValueError(f"目录中未发现 txt/log 巡检文件: {path}")
 
-    rid = run_id
+    from src.core.patrol.run_repository import PatrolRunRepository
+
+    rid = run_id or str(uuid.uuid4())
     dataset_id = _dataset_id(path, metadata)
+    normalized_mode = normalize_patrol_mode(mode)
+    source = str((metadata or {}).get("source") or "imported_file")
+    run_repository = PatrolRunRepository()
+    run_repository.ensure_dataset(
+        dataset_id=dataset_id,
+        name=str((metadata or {}).get("dataset_name") or dataset_id),
+        mode=normalized_mode,
+        source=source,
+        metadata={"source_path": str(path), **(metadata or {})},
+    )
+    run_repository.create_run(
+        run_id=rid,
+        source=source,
+        mode=normalized_mode,
+        dataset_id=dataset_id,
+        metadata={"source_directory": str(path), **(metadata or {})},
+        started_at=observed_at,
+        run_purpose=str((metadata or {}).get("run_purpose") or "scheduled_patrol"),
+    )
     imported: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
     for candidate in files:
-        result = import_raw_capture(
-            file_path=candidate,
-            db_path=db_path,
-            mode=mode,
-            run_id=rid,
-            vendor=vendor,
-            model=model,
-            observed_at=observed_at,
+        try:
+            text = _read_text_best_effort(candidate)
+            resolved_name, resolved_ip, _ = _resolve_capture_device(path=candidate, text=text)
+            external_id = f"{resolved_name}-{resolved_ip}" if resolved_ip else resolved_name
+            result = import_raw_capture(
+                file_path=candidate,
+                db_path=db_path,
+                mode=mode,
+                run_id=rid,
+                vendor=vendor,
+                model=model,
+                observed_at=observed_at,
+                metadata={
+                    "source_directory": str(path),
+                    "dataset_id": dataset_id,
+                    **(metadata or {}),
+                },
+                inventory_device_id=(inventory_bindings or {}).get(external_id),
+                finalize_run=False,
+            )
+            result["source_file"] = str(candidate)
+            imported.append(result)
+        except Exception as exc:
+            failed.append(
+                {
+                    "file_path": str(candidate),
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
+        run_repository.touch_run(
+            rid,
+            lease_seconds=900,
             metadata={
-                "source_directory": str(path),
-                "dataset_id": dataset_id,
-                **(metadata or {}),
+                "processed_file_count": len(imported) + len(failed),
+                "total_file_count": len(files),
+                "failed_file_count": len(failed),
             },
         )
-        rid = result["run_id"]
-        imported.append(result)
+
+    if imported and not failed:
+        collection_status = "completed"
+    elif imported:
+        collection_status = "partial"
+    else:
+        collection_status = "failed"
+    parser_ready = all(
+        item.get("production_parser_ready", True) for item in imported
+    ) and not failed
+    run_repository.finish_run(
+        rid,
+        collection_status=collection_status,
+        parser_readiness_status="ready" if parser_ready else "partial" if imported else "blocked",
+        fact_readiness_status="ready" if parser_ready else "partial" if imported else "blocked",
+        analysis_status="pending" if imported else "failed",
+        baseline_eligible=False,
+        metadata={
+            "processed_file_count": len(imported) + len(failed),
+            "total_file_count": len(files),
+            "failed_files": failed,
+        },
+    )
 
     return {
-        "success": True,
-        "mode": normalize_patrol_mode(mode),
+        "success": not failed,
+        "mode": normalized_mode,
         "run_id": rid,
         "dataset_id": dataset_id,
         "storage": "postgresql",
         "legacy_db_path_ignored": str(db_path) if db_path else None,
         "source_path": str(path),
         "file_count": len(imported),
+        "failed_file_count": len(failed),
         "device_count": len({item["device_id"] for item in imported}),
         "command_count": sum(item["command_count"] for item in imported),
         "snapshot_ids": [snapshot_id for item in imported for snapshot_id in item["snapshot_ids"]],
         "new_snapshot_count": sum(item["new_snapshot_count"] for item in imported),
         "duplicate_snapshot_count": sum(item["duplicate_snapshot_count"] for item in imported),
+        "collection_status": collection_status,
+        "parser_readiness_status": (
+            "ready" if parser_ready else "partial" if imported else "blocked"
+        ),
+        "failed_files": failed,
         "files": [
             {
-                "file_path": str(candidate),
+                "file_path": result["source_file"],
                 "device_id": result["device_id"],
                 "command_count": result["command_count"],
             }
-            for candidate, result in zip(files, imported, strict=True)
+            for result in imported
         ],
     }

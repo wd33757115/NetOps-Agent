@@ -6,6 +6,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import text
+
 from src.core.observation.contracts import (
     ObservationContract,
     build_contract_payload,
@@ -68,6 +70,76 @@ class ObservationContractRepository:
                 category=category,
                 validation=validation,
                 version=version,
+                source_template_id=source_template_id,
+                source_job_id=source_job_id,
+                approval=approval,
+                status=status,
+                compatibility=compatibility,
+            )
+
+    def create_contract_version(
+        self,
+        *,
+        source_type: str,
+        schema_id: str,
+        schema_ref: str | None = None,
+        category: str | None = None,
+        validation: dict[str, Any] | None = None,
+        source_template_id: str | None = None,
+        source_job_id: str | None = None,
+        approval: dict[str, Any] | None = None,
+        status: str = "draft",
+        compatibility: dict[str, Any] | None = None,
+    ) -> ObservationContract:
+        """Reuse an identical digest or allocate the next immutable version."""
+
+        probe = build_contract_payload(
+            source_type=source_type,
+            schema_id=schema_id,
+            schema_ref=schema_ref,
+            category=category,
+            validation=validation,
+            version=1,
+            source_template_id=source_template_id,
+            status=status,
+        )
+        with get_db_session() as db:
+            lock_key = f"observation-contract:{source_type}:{schema_id}"
+            db.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+                {"lock_key": lock_key},
+            )
+            existing = (
+                db.query(ObservationContractRecord)
+                .filter(
+                    ObservationContractRecord.source_type == source_type,
+                    ObservationContractRecord.schema_id == schema_id,
+                    ObservationContractRecord.contract_sha256
+                    == probe["contract_sha256"],
+                )
+                .order_by(ObservationContractRecord.version.desc())
+                .first()
+            )
+            if existing is not None:
+                return _row_to_contract(existing)
+            latest = (
+                db.query(ObservationContractRecord.version)
+                .filter(
+                    ObservationContractRecord.source_type == source_type,
+                    ObservationContractRecord.schema_id == schema_id,
+                )
+                .order_by(ObservationContractRecord.version.desc())
+                .first()
+            )
+            next_version = int(latest[0]) + 1 if latest else 1
+            return self.upsert_contract_row(
+                db,
+                source_type=source_type,
+                schema_id=schema_id,
+                schema_ref=schema_ref,
+                category=category,
+                validation=validation,
+                version=next_version,
                 source_template_id=source_template_id,
                 source_job_id=source_job_id,
                 approval=approval,

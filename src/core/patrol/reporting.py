@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from src.core.patrol.handlers import DetectChangesHandler
 from src.core.patrol.change_event_repository import ChangeEventRepository
+from src.core.patrol.handlers import DetectChangesHandler
 from src.core.patrol.repository import PatrolRepository
 
 
@@ -98,7 +98,11 @@ def render_run_report(
 ) -> dict[str, Any]:
     repository = ChangeEventRepository()
     changes = repository.list_changes(run_id=run_id, device_id=device_id)
-    events = repository.list_events(run_id=run_id, device_id=device_id)
+    events = repository.list_run_event_facts(run_id=run_id, device_id=device_id)
+    event_lifecycle = repository.summarize_run_events(
+        run_id=run_id,
+        device_id=device_id,
+    )
     event_counter = Counter(event["event_type"] for event in events)
     severity_counter = Counter(event["severity"] for event in events)
     quality = build_run_quality_summary(run_id)
@@ -108,7 +112,12 @@ def render_run_report(
         "## Summary",
         "",
         f"- Changes: {len(changes)}",
-        f"- Events: {len(events)}",
+        f"- Event lifecycle facts: {len(events)}",
+        f"- New events: {event_lifecycle['created_event_count']}",
+        f"- Event updates: {event_lifecycle['updated_event_count']}",
+        f"- Recoveries: {event_lifecycle['recovered_event_count']}",
+        f"- Open after this run: {event_lifecycle['open_after_run_count']}",
+        f"- Still open now: {event_lifecycle['current_open_event_count']}",
         f"- Collection status: {quality['collection_status']}",
         f"- Parser ready: {quality['parser_ready_rate']:.1%}",
         f"- Fact ready: {quality['fact_ready_rate']:.1%}",
@@ -171,6 +180,7 @@ def render_run_report(
         "output_format": output_format,
         "change_count": len(changes),
         "event_count": len(events),
+        "event_lifecycle": event_lifecycle,
         "event_types": dict(event_counter),
         "severities": dict(severity_counter),
         "quality": quality,
@@ -289,17 +299,24 @@ def _write_xlsx(
             "[Content_Types].xml",
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="rels" '
+            'ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
             '<Default Extension="xml" ContentType="application/xml"/>'
-            '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-            '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+            '<Override PartName="/xl/workbook.xml" '
+            'ContentType="application/vnd.openxmlformats-officedocument.'
+            'spreadsheetml.sheet.main+xml"/>'
+            '<Override PartName="/xl/worksheets/sheet1.xml" '
+            'ContentType="application/vnd.openxmlformats-officedocument.'
+            'spreadsheetml.worksheet+xml"/>'
             "</Types>",
         )
         archive.writestr(
             "_rels/.rels",
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+            '<Relationship Id="rId1" '
+            'Type="http://schemas.openxmlformats.org/officeDocument/2006/'
+            'relationships/officeDocument" Target="xl/workbook.xml"/>'
             "</Relationships>",
         )
         archive.writestr(
@@ -313,7 +330,9 @@ def _write_xlsx(
             "xl/_rels/workbook.xml.rels",
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+            '<Relationship Id="rId1" '
+            'Type="http://schemas.openxmlformats.org/officeDocument/2006/'
+            'relationships/worksheet" Target="worksheets/sheet1.xml"/>'
             "</Relationships>",
         )
         archive.writestr("xl/worksheets/sheet1.xml", sheet_xml)

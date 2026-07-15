@@ -55,20 +55,21 @@ def bootstrap_skills(
 
     dirs = skill_dirs or get_default_skill_dirs()
 
-    from src.skills.registry import skill_registry
     from src.skill_system import get_skill_system
+    from src.skills.registry import skill_registry
 
     count = skill_registry.sync_skills_from_files(dirs, force_replace=force)
     skill_system = get_skill_system()
     skill_system.reload_all(skill_dirs=dirs, rag_service=rag_service)
 
-    if get_settings().SKILL_CATALOG_ENABLED:
+    settings = get_settings()
+    if settings.SKILL_CATALOG_ENABLED:
         try:
             from src.skill_system.catalog import sync_and_index
 
             catalog_stats = sync_and_index(
                 skill_system.loader.list_all_metadata(),
-                index=True,
+                index=settings.SKILL_CATALOG_INDEX_ON_BOOTSTRAP,
             )
             logger.info("Skill Catalog 同步完成: %s", catalog_stats)
         except Exception as exc:

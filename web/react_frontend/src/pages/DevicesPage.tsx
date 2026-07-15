@@ -1171,7 +1171,7 @@ const DevicesPage: React.FC = () => {
         const url = window.URL.createObjectURL(blob)
         const link = document.createElement('a')
         link.href = url
-        link.download = `${batchId}-report.md`
+        link.download = `${batchId}-leadership-report.docx`
         document.body.appendChild(link)
         link.click()
         link.remove()

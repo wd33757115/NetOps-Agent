@@ -5,7 +5,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SKILL_SCRIPT = PROJECT_ROOT / "src" / "skills" / "event-rule-validator" / "scripts" / "run.py"
 
@@ -105,6 +104,48 @@ def test_event_rule_validator_skill_validates_candidate_rule_list(tmp_path: Path
         item["event_type"]
         for item in result["validation_report"]["rule_results"]
     } == {"CPUHigh", "CPURecovered"}
+
+
+def test_candidate_fault_and_recovery_are_behavior_tested_in_isolation(tmp_path: Path):
+    result = _run_skill(
+        tmp_path,
+        {
+            "mode": "candidates",
+            "candidate_rules": [
+                {
+                    "name": "negative-high",
+                    "event_type": "measurement_high",
+                    "condition": {
+                        "kind": "threshold",
+                        "entity_types": ["sensor"],
+                        "fields": ["measurement"],
+                        "gte": -1,
+                    },
+                },
+                {
+                    "name": "negative-high-recovery",
+                    "event_type": "measurement_high_recovered",
+                    "event_class": "recovery",
+                    "recovery": {"resolves": ["measurement_high"]},
+                    "condition": {
+                        "kind": "threshold_recovery",
+                        "entity_types": ["sensor"],
+                        "fields": ["measurement"],
+                        "lt": -1.5,
+                    },
+                },
+            ],
+        },
+    )
+
+    report = result["validation_report"]
+    assert result["success"] is True
+    assert report["generated_result"]["evaluation_scope"] == "isolated_rule"
+    assert report["collision_result"]["collision_count"] == 0
+    assert report["validation_strategy"] == {
+        "rule_behavior": "isolated",
+        "cross_rule_collisions": "combined",
+    }
 
 
 def test_event_rule_validator_skill_returns_revision_request_on_failure(tmp_path: Path):

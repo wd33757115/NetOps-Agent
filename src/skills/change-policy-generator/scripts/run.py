@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,10 @@ from src.core.patrol.change_policy import (  # noqa: E402
     policy_from_dict,
     validate_change_policy,
 )
+from src.core.rule_control.generation_agent import (  # noqa: E402
+    DEFAULT_RULE_GENERATION_PROVIDERS,
+    RuleGenerationAgent,
+)
 
 
 def _historical_values(params: dict[str, Any]) -> list[Any]:
@@ -27,6 +32,167 @@ def _historical_values(params: dict[str, Any]) -> list[Any]:
     if not isinstance(values, list):
         raise ValueError("historical_values must be a list")
     return values
+
+
+def _target_historical_values(
+    params: dict[str, Any], field_name: str
+) -> list[Any]:
+    by_field = params.get("historical_values_by_field")
+    if isinstance(by_field, dict) and isinstance(by_field.get(field_name), list):
+        return list(by_field[field_name])
+    records = params.get("records") or params.get("structured_records") or []
+    if isinstance(records, list):
+        values = [
+            record.get(field_name)
+            for record in records
+            if isinstance(record, dict) and record.get(field_name) not in (None, "")
+        ]
+        if values:
+            return values
+    return _historical_values(params)
+
+
+def _merge_generated_loops(results: list[dict[str, Any]]) -> dict[str, Any]:
+    attempts: list[dict[str, Any]] = []
+    for result in results:
+        loop = result.get("agent_loop")
+        if not isinstance(loop, dict):
+            continue
+        for attempt in loop.get("attempts") or []:
+            if isinstance(attempt, dict):
+                attempts.append({**attempt, "attempt": len(attempts) + 1})
+    return {
+        "ready_for_approval": all(result.get("success") is True for result in results),
+        "next_action": "submit_for_approval"
+        if all(result.get("success") is True for result in results)
+        else "revise_change_policy",
+        "attempt_count": len(attempts),
+        "attempts": attempts,
+    }
+
+
+def _compile_reference_policy_candidate(
+    candidate: dict[str, Any],
+    approved_references: dict[str, Any],
+) -> dict[str, Any]:
+    if not approved_references:
+        return dict(candidate)
+    output = dict(candidate)
+    runtime_references: dict[str, dict[str, Any]] = {}
+    thresholds = {
+        str(key): float(value)
+        for key, value in dict(output.get("thresholds") or {}).items()
+    }
+    for role, raw in approved_references.items():
+        if not isinstance(raw, dict):
+            continue
+        field_name = str(raw.get("field_name") or "").strip()
+        if not field_name:
+            continue
+        runtime_references[str(role)] = {
+            "field_name": field_name,
+            "level": str(raw.get("level") or "reference"),
+            "source": str(raw.get("source") or "structured_reference"),
+        }
+        profile = dict(raw.get("field_profile") or {})
+        median = profile.get("median")
+        if median is not None:
+            thresholds[str(role)] = float(median)
+    output["threshold_references"] = runtime_references
+    output["thresholds"] = thresholds
+    if "low" in runtime_references and "high" not in runtime_references:
+        output["compare_mode"] = "threshold_low_and_deadband"
+    elif "high" in runtime_references:
+        output["compare_mode"] = "threshold_and_deadband"
+    output["recovery_threshold"] = None
+    output["minimum_duration"] = None
+    output["reason"] = (
+        "Structured per-entity threshold fields from the approved "
+        "ObservationContract are authoritative. Static threshold values are "
+        "dataset medians retained only for deterministic replay and fallback; "
+        f"deadband={output.get('deadband')!r}."
+    )
+    return output
+
+
+def _validate_policy_constraints(policy: Any, constraints: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    allowed_modes = {str(item) for item in constraints.get("allowed_compare_modes") or []}
+    if allowed_modes and policy.compare_mode not in allowed_modes:
+        errors.append(
+            "compare_mode must be one of the policy constraints: "
+            + ", ".join(sorted(allowed_modes))
+        )
+    required_keys = {str(item) for item in constraints.get("required_threshold_keys") or []}
+    missing_keys = sorted(required_keys - set(policy.thresholds))
+    if missing_keys:
+        errors.append("required threshold keys are missing: " + ", ".join(missing_keys))
+    bounds = constraints.get("threshold_bounds") or {}
+    if isinstance(bounds, dict):
+        for key, raw_bound in bounds.items():
+            if key not in policy.thresholds or not isinstance(raw_bound, dict):
+                continue
+            value = float(policy.thresholds[key])
+            if raw_bound.get("min") is not None and value < float(raw_bound["min"]):
+                errors.append(f"threshold {key} is below the allowed minimum")
+            if raw_bound.get("max") is not None and value > float(raw_bound["max"]):
+                errors.append(f"threshold {key} exceeds the allowed maximum")
+    direction = str(constraints.get("recovery_direction") or "").strip()
+    recovery = policy.recovery_threshold
+    if direction and recovery is None:
+        errors.append("recovery_threshold is required by policy constraints")
+    reference_key = str(constraints.get("recovery_reference_threshold") or "").strip()
+    reference = policy.thresholds.get(reference_key) if reference_key else None
+    if recovery is not None and reference is not None:
+        if direction == "above" and float(recovery) <= float(reference):
+            errors.append("recovery_threshold must be above the referenced low threshold")
+        if direction == "below" and float(recovery) >= float(reference):
+            errors.append("recovery_threshold must be below the referenced high threshold")
+        hysteresis = abs(float(recovery) - float(reference))
+        if constraints.get("minimum_hysteresis") is not None and hysteresis < float(
+            constraints["minimum_hysteresis"]
+        ):
+            errors.append("recovery hysteresis is below the required minimum")
+    recovery_bounds = constraints.get("recovery_bounds") or {}
+    if recovery is not None and isinstance(recovery_bounds, dict):
+        if recovery_bounds.get("min") is not None and float(recovery) < float(
+            recovery_bounds["min"]
+        ):
+            errors.append("recovery_threshold is below the allowed minimum")
+        if recovery_bounds.get("max") is not None and float(recovery) > float(
+            recovery_bounds["max"]
+        ):
+            errors.append("recovery_threshold exceeds the allowed maximum")
+    deadband_bounds = constraints.get("deadband_bounds") or {}
+    if policy.deadband is not None and isinstance(deadband_bounds, dict):
+        if deadband_bounds.get("min") is not None and float(policy.deadband) < float(
+            deadband_bounds["min"]
+        ):
+            errors.append("deadband is below the allowed minimum")
+        if deadband_bounds.get("max") is not None and float(policy.deadband) > float(
+            deadband_bounds["max"]
+        ):
+            errors.append("deadband exceeds the allowed maximum")
+    if "allowed_minimum_durations" in constraints:
+        allowed_durations = set(constraints.get("allowed_minimum_durations") or [])
+        if policy.minimum_duration not in allowed_durations:
+            errors.append(
+                "minimum_duration is not supported; allowed values are: "
+                + ", ".join(repr(item) for item in sorted(allowed_durations, key=str))
+            )
+    if constraints.get("evidence_only_reason"):
+        speculative = re.findall(
+            r"(?i)\b(?:likely|maybe|probably|possibly|may\s+represent|might)\b|"
+            r"可能|疑似|推测|大概|或许",
+            str(policy.reason or ""),
+        )
+        if speculative:
+            errors.append(
+                "reason contains unsupported causal speculation: "
+                + ", ".join(sorted(set(speculative)))
+                + "; describe only field semantics, constraints, and measured statistics"
+            )
+    return errors
 
 
 def _agent_loop(
@@ -37,7 +203,11 @@ def _agent_loop(
 ) -> dict[str, Any]:
     policy = result.get("policy") if isinstance(result.get("policy"), dict) else {}
     validation = result.get("validation") if isinstance(result.get("validation"), dict) else {}
-    stats = result.get("historical_stats") if isinstance(result.get("historical_stats"), dict) else {}
+    stats = (
+        result.get("historical_stats")
+        if isinstance(result.get("historical_stats"), dict)
+        else {}
+    )
     errors = [str(item) for item in validation.get("errors") or []]
     success = result.get("success") is True
     revision_request = None
@@ -101,9 +271,106 @@ def _agent_loop(
 
 
 def run_change_policy_generation(params: dict[str, Any]) -> dict[str, Any]:
+    policy_targets = params.get("policy_targets")
+    if isinstance(policy_targets, list) and policy_targets:
+        results: list[dict[str, Any]] = []
+        for index, target in enumerate(policy_targets):
+            if not isinstance(target, dict):
+                raise ValueError(f"policy_targets[{index}] must be an object")
+            field_name = str(target.get("field_name") or "").strip()
+            observation_type = str(target.get("observation_type") or "").strip()
+            field_semantics = dict(target.get("field_semantics") or {})
+            if not field_name or not observation_type:
+                raise ValueError(
+                    f"policy_targets[{index}] requires field_name and observation_type"
+                )
+            child_params = {
+                **params,
+                "policy_targets": None,
+                "field_name": field_name,
+                "observation_type": observation_type,
+                "field_semantics": field_semantics,
+                "historical_values": _target_historical_values(params, field_name),
+                "threshold_references": target.get("threshold_references") or {},
+                "policy_constraints": target.get("policy_constraints")
+                or field_semantics.get("policy_constraints")
+                or (params.get("policy_constraints_by_field") or {}).get(field_name)
+                or params.get("policy_constraints"),
+            }
+            results.append(run_change_policy_generation(child_params))
+        return {
+            "success": all(result.get("success") is True for result in results),
+            "mode": "policy_target_fanout",
+            "policy_count": len(results),
+            "policies": [result.get("policy") for result in results if result.get("policy")],
+            "results": results,
+            "agent_loop": _merge_generated_loops(results),
+            "generation_provider": str(
+                params.get("generation_provider") or "builtin"
+            ).casefold(),
+        }
     mode = str(params.get("mode") or "infer_and_validate").strip().lower()
     values = _historical_values(params)
     proposal_payload = params.get("proposal") or params.get("change_policy")
+    generation_provider = str(params.get("generation_provider") or "").strip().casefold()
+    if generation_provider == "llm" and mode != "validate":
+        observation_type = str(
+            params.get("observation_type") or params.get("field_name") or ""
+        ).strip()
+        field_semantics = dict(params.get("field_semantics") or {})
+        expected_semantic_type = str(field_semantics.get("semantic_type") or "").strip()
+        stats = numeric_stats(values)
+        policy_constraints = dict(params.get("policy_constraints") or {})
+        threshold_references = dict(params.get("threshold_references") or {})
+
+        def validate_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+            compiled_candidate = _compile_reference_policy_candidate(
+                candidate,
+                threshold_references,
+            )
+            policy = policy_from_dict(compiled_candidate)
+            report = dict(validate_change_policy(policy))
+            errors = [str(item) for item in report.get("errors") or []]
+            if policy.observation_type != observation_type:
+                errors.append("observation_type must match the selected target")
+            if expected_semantic_type and policy.semantic_type != expected_semantic_type:
+                errors.append("semantic_type must match the approved field semantics")
+            errors.extend(_validate_policy_constraints(policy, policy_constraints))
+            report["success"] = not errors
+            report["errors"] = errors
+            report["policy"] = policy.to_dict()
+            return report
+
+        agent = RuleGenerationAgent(
+            DEFAULT_RULE_GENERATION_PROVIDERS.create(generation_provider),
+            max_attempts=int(params.get("max_agent_attempts") or 3),
+        )
+        generated = agent.run(
+            stage="change_policy",
+            context={
+                "observation_type": observation_type,
+                "field_name": params.get("field_name"),
+                "field_semantics": field_semantics,
+                "historical_stats": stats,
+                "historical_values": values[:200],
+                "device_role": params.get("device_role"),
+                "policy_intent": params.get("policy_intent"),
+                "policy_constraints": policy_constraints,
+                "threshold_references": threshold_references,
+                "proposal_seed": proposal_payload if isinstance(proposal_payload, dict) else None,
+            },
+            validator=validate_candidate,
+        )
+        validation = dict(generated.get("validation") or {})
+        return {
+            "success": generated.get("success") is True,
+            "mode": "llm_agent_loop",
+            "policy": validation.pop("policy", None) or generated.get("candidate"),
+            "validation": validation,
+            "historical_stats": stats,
+            "agent_loop": generated.get("agent_loop"),
+            "generation_provider": generation_provider,
+        }
     if mode == "infer":
         policy = infer_change_policy(
             observation_type=str(params.get("observation_type") or params.get("field_name") or ""),
@@ -126,7 +393,15 @@ def run_change_policy_generation(params: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(proposal_payload, dict):
             raise ValueError("proposal is required in validate mode")
         policy = policy_from_dict(proposal_payload)
-        validation = validate_change_policy(policy)
+        validation = dict(validate_change_policy(policy))
+        constraint_errors = _validate_policy_constraints(
+            policy, dict(params.get("policy_constraints") or {})
+        )
+        validation["errors"] = [
+            *[str(item) for item in validation.get("errors") or []],
+            *constraint_errors,
+        ]
+        validation["success"] = not validation["errors"]
         result = {
             "success": validation["success"],
             "mode": mode,
@@ -142,7 +417,9 @@ def run_change_policy_generation(params: dict[str, Any]) -> dict[str, Any]:
             policy_from_dict(proposal_payload)
             if isinstance(proposal_payload, dict)
             else infer_change_policy(
-                observation_type=str(params.get("observation_type") or params.get("field_name") or ""),
+                observation_type=str(
+                    params.get("observation_type") or params.get("field_name") or ""
+                ),
                 field_name=params.get("field_name"),
                 field_semantics=dict(params.get("field_semantics") or {}),
                 historical_values=values,
@@ -150,7 +427,15 @@ def run_change_policy_generation(params: dict[str, Any]) -> dict[str, Any]:
                 policy_intent=params.get("policy_intent"),
             )
         )
-        validation = validate_change_policy(policy)
+        validation = dict(validate_change_policy(policy))
+        constraint_errors = _validate_policy_constraints(
+            policy, dict(params.get("policy_constraints") or {})
+        )
+        validation["errors"] = [
+            *[str(item) for item in validation.get("errors") or []],
+            *constraint_errors,
+        ]
+        validation["success"] = not validation["errors"]
         result = {
             "success": validation["success"],
             "mode": mode,

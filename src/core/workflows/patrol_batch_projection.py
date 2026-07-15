@@ -233,12 +233,14 @@ class MaterializePatrolBatchReportHandler:
         repository: PatrolBatchProjectionRepository | None = None,
         object_storage: Any | None = None,
         source_revision_provider: Callable[[list[Any]], str] | None = None,
+        projection_version: str | None = None,
     ) -> None:
         self._summary_builder = summary_builder
         self._renderer = renderer
         self._repository = repository or PatrolBatchProjectionRepository()
         self._object_storage = object_storage
         self._source_revision_provider = source_revision_provider or patrol_batch_fact_revision
+        self._projection_version = projection_version
 
     def handle(
         self,
@@ -247,9 +249,12 @@ class MaterializePatrolBatchReportHandler:
         *,
         generated_at: datetime | None = None,
     ) -> str:
+        fact_revision = self._source_revision_provider(runs)
+        if self._projection_version:
+            fact_revision = f"{self._projection_version}|{fact_revision}"
         source_digest = patrol_batch_source_digest(
             runs,
-            fact_revision=self._source_revision_provider(runs),
+            fact_revision=fact_revision,
         )
         materialized = None
         try:

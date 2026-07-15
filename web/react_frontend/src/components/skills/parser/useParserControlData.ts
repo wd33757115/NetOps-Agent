@@ -26,6 +26,7 @@ interface ParserControlFilters {
   ruleJobAction?: string
   ruleJobAssetType?: string
   ruleJobSearch: string
+  linkedDatasetIds: string[]
 }
 
 const visibleInterval = (milliseconds: number) => () => (
@@ -162,8 +163,11 @@ export const useParserControlData = (filters: ParserControlFilters) => {
     'parser-identity-signatures', parserApi.identitySignatures,
     { ...STATIC_QUERY, enabled: parserAssetsActive },
   )
+  const datasetScopeKey = filters.linkedDatasetIds.join(',')
   const { data: datasets = [], error: datasetsError } = useQuery(
-    'parser-datasets', parserApi.datasets, { ...GOVERNANCE_POLLING, enabled: governanceActive },
+    ['parser-datasets', datasetScopeKey],
+    () => parserApi.datasets(filters.linkedDatasetIds),
+    { ...GOVERNANCE_POLLING, enabled: governanceActive },
   )
   const { data: eventRules = [], error: eventRulesError } = useQuery(
     'parser-event-rules', parserApi.eventRules, { ...RULE_ASSET_POLLING, enabled: ruleAssetsActive },

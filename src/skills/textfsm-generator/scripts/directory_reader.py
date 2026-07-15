@@ -25,6 +25,7 @@ class TemplateSample:
     device_id: str
     command: str
     output: str
+    prompt_output: str | None = None
 
 
 @dataclass(frozen=True)

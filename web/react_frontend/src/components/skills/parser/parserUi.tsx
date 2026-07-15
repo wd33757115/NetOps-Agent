@@ -62,6 +62,20 @@ export const successTag = (success: unknown, okText = '通过', failText = '未�
 
 export const shortDigest = (value?: string | null) => (value ? value.slice(0, 12) : '-')
 
+export const governanceAlertLabel = (code: string, fallback: string) => {
+  const labels: Record<string, string> = {
+    parser_backlog_high: '生产 Parser 待办积压已超过阈值',
+    parser_candidate_stale: '生产 Parser 候选已超过生成时限',
+    parser_approval_stale: '生成的 Parser 模板等待审批时间过长',
+    parser_generation_failed: '过去 24 小时存在生产 Parser 生成失败',
+    template_activation_publish_failed: '模板激活事件投递正在重试',
+    blocked_by_parser_ratio_high: '过去 24 小时因 Parser 阻断的巡检比例超过阈值',
+    rule_generation_failed: '过去 24 小时存在规则资产生成或校验失败',
+    rule_replay_collision: '规则历史回放发现碰撞，审批发布已阻断',
+  }
+  return labels[code] || fallback
+}
+
 export const queryErrorLabel = (error: unknown) => {
   const candidate = error as {
     message?: string

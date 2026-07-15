@@ -1,0 +1,259 @@
+from __future__ import annotations
+
+import uuid
+import zipfile
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+from src.core.patrol.offline_jobs import OfflinePatrolJobService, _offline_job_display_name
+from src.infrastructure.db.models import (
+    OfflinePatrolJobRecord,
+    OfflinePatrolPeriodRecord,
+    WorkflowRun,
+    WorkflowStepRecord,
+)
+from src.infrastructure.db.postgres import get_db_session
+
+
+def test_offline_job_is_idempotent_paginated_and_owner_scoped():
+    service = OfflinePatrolJobService()
+    suffix = uuid.uuid4().hex
+    owner_id = f"offline-test-owner-{suffix}"
+    idempotency_key = f"offline-test-key-{suffix}"
+    baseline = datetime.now(timezone.utc) - timedelta(days=90)
+    current = datetime.now(timezone.utc)
+
+    try:
+        first = service.create_job(
+            owner_id=owner_id,
+            idempotency_key=idempotency_key,
+            job_type="history_compare",
+            name="offline history test",
+            periods=[
+                {"role": "baseline", "label": "Q1", "observed_at": baseline},
+                {"role": "current", "label": "Q2", "observed_at": current},
+            ],
+            folder_id=None,
+        )
+        second = service.create_job(
+            owner_id=owner_id,
+            idempotency_key=idempotency_key,
+            job_type="history_compare",
+            name="this must not create a duplicate",
+            periods=[
+                {"role": "baseline", "label": "Q1", "observed_at": baseline},
+                {"role": "current", "label": "Q2", "observed_at": current},
+            ],
+            folder_id=None,
+        )
+
+        assert first["id"] == second["id"]
+        assert [item["role"] for item in first["periods"]] == ["baseline", "current"]
+        listing = service.list_jobs(owner_id=owner_id, page=1, page_size=1)
+        assert listing["total"] == 1
+        assert listing["items"][0]["id"] == first["id"]
+        with pytest.raises(PermissionError):
+            service.get_job(first["id"], owner_id="another-operator")
+    finally:
+        with get_db_session() as db:
+            db.query(OfflinePatrolJobRecord).filter(
+                OfflinePatrolJobRecord.owner_id == owner_id
+            ).delete(synchronize_session=False)
+
+
+def test_history_compare_requires_strict_period_order():
+    observed_at = datetime.now(timezone.utc)
+    with pytest.raises(ValueError, match="baseline observed_at"):
+        OfflinePatrolJobService().create_job(
+            owner_id="period-order-test",
+            idempotency_key=uuid.uuid4().hex,
+            job_type="history_compare",
+            name="invalid periods",
+            periods=[
+                {"role": "baseline", "observed_at": observed_at},
+                {"role": "current", "observed_at": observed_at},
+            ],
+            folder_id=None,
+        )
+
+
+def test_corrupted_historical_name_gets_a_non_destructive_display_fallback():
+    assert (
+        _offline_job_display_name("?????? Q2?Q3?????????", "history_compare")
+        == "Q2 → Q3 历史周期对比"
+    )
+    assert _offline_job_display_name("季度巡检", "history_compare") == "季度巡检"
+    assert _offline_job_display_name("?????", "parser_validation") == "离线巡检导入"
+
+
+def test_execution_quality_gate_keeps_asset_gaps_as_non_blocking_warnings(monkeypatch):
+    service = OfflinePatrolJobService()
+    monkeypatch.setattr(
+        service,
+        "get_job",
+        lambda _job_id: {
+            "job_type": "history_compare",
+            "source_files": [{"id": "source-1"}],
+            "preview": {"periods": {"baseline": {}, "current": {}}},
+            "blockers": [],
+        },
+    )
+    monkeypatch.setattr(
+        service,
+        "_build_quality_blockers",
+        lambda _job_id, _previews: [
+            {"code": "change_policy_missing", "message": "policy was deprecated"}
+        ],
+    )
+
+    result = service.execution_quality_gate("offline-current-assets")
+
+    assert result["success"] is True
+    assert result["blockers"] == []
+    assert result["warnings"][0]["code"] == "change_policy_missing"
+    assert result["warnings"][0]["severity"] == "warning"
+
+
+def test_execution_quality_gate_still_blocks_ingestion_integrity_failures(monkeypatch):
+    service = OfflinePatrolJobService()
+    monkeypatch.setattr(
+        service,
+        "get_job",
+        lambda _job_id: {
+            "job_type": "history_compare",
+            "source_files": [{"id": "source-1"}],
+            "preview": {"periods": {"baseline": {}, "current": {}}},
+            "blockers": [],
+        },
+    )
+    monkeypatch.setattr(
+        service,
+        "_build_quality_blockers",
+        lambda _job_id, _previews: [
+            {"code": "identity_unknown", "message": "device identity is unknown"}
+        ],
+    )
+
+    result = service.execution_quality_gate("offline-invalid-identity")
+
+    assert result["success"] is False
+    assert result["blockers"][0]["code"] == "identity_unknown"
+    assert result["blockers"][0]["severity"] == "blocking"
+    assert result["warnings"] == []
+
+
+def test_terminal_workflow_is_projected_with_report_artifact():
+    service = OfflinePatrolJobService()
+    suffix = uuid.uuid4().hex
+    owner_id = f"offline-projection-owner-{suffix}"
+    workflow_run_id = f"offline-projection-workflow-{suffix}"
+    baseline = datetime.now(timezone.utc) - timedelta(days=90)
+    current = datetime.now(timezone.utc)
+    job = service.create_job(
+        owner_id=owner_id,
+        idempotency_key=f"offline-projection-key-{suffix}",
+        job_type="history_compare",
+        name="offline terminal projection",
+        periods=[
+            {"role": "baseline", "observed_at": baseline},
+            {"role": "current", "observed_at": current},
+        ],
+        folder_id=None,
+    )
+    report_artifact = {
+        "file_key": f"patrol_reports/{workflow_run_id}/report.md",
+        "download_url": "/api/artifacts/download/?key=report.md",
+        "filename": "report.md",
+        "content_type": "text/markdown; charset=utf-8",
+    }
+
+    try:
+        with get_db_session() as db:
+            row = db.get(OfflinePatrolJobRecord, job["id"])
+            row.status = "running"
+            row.workflow_run_id = workflow_run_id
+            period = (
+                db.query(OfflinePatrolPeriodRecord)
+                .filter(
+                    OfflinePatrolPeriodRecord.job_id == job["id"],
+                    OfflinePatrolPeriodRecord.role == "current",
+                )
+                .one()
+            )
+            period.patrol_run_id = f"patrol-run-{suffix}"
+            db.add(
+                WorkflowRun(
+                    id=workflow_run_id,
+                    template_name="patrol-history-change-event",
+                    source="offline-patrol",
+                    user_id=owner_id,
+                    status="completed",
+                    context={"offline_job_id": job["id"]},
+                    completed_at=current,
+                    created_at=baseline,
+                    updated_at=current,
+                )
+            )
+            db.add(
+                WorkflowStepRecord(
+                    id=f"offline-projection-step-{suffix}",
+                    run_id=workflow_run_id,
+                    step_index=7,
+                    step_name="report_generation",
+                    skill_name="report-generator",
+                    status="completed",
+                    output_artifacts={"report": report_artifact},
+                    result={"success": True},
+                    created_at=current,
+                    completed_at=current,
+                )
+            )
+
+        assert service.sync_workflow_terminal_state(workflow_run_id) == 1
+        projected = service.get_job(job["id"], owner_id=owner_id)
+        assert projected["status"] == "completed"
+        assert projected["progress"] == {"phase": "completed", "percent": 100}
+        assert projected["result"]["run_id"] == f"patrol-run-{suffix}"
+        assert projected["artifacts"]["report"] == report_artifact
+    finally:
+        with get_db_session() as db:
+            db.query(WorkflowStepRecord).filter(
+                WorkflowStepRecord.run_id == workflow_run_id
+            ).delete(synchronize_session=False)
+            db.query(WorkflowRun).filter(WorkflowRun.id == workflow_run_id).delete(
+                synchronize_session=False
+            )
+            db.query(OfflinePatrolJobRecord).filter(
+                OfflinePatrolJobRecord.owner_id == owner_id
+            ).delete(synchronize_session=False)
+
+
+def test_extract_zip_accepts_capture_files_and_ignores_other_assets(tmp_path):
+    archive_path = tmp_path / "captures.zip"
+    target = tmp_path / "output"
+    target.mkdir()
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("Q1/SW1.txt", "<SW1>display interface brief\n")
+        archive.writestr("Q1/SW2.log", "<SW2>display interface brief\n")
+        archive.writestr("Q1/readme.md", "not a CLI capture")
+
+    count, expanded_bytes = OfflinePatrolJobService._extract_zip(archive_path, target)
+
+    assert count == 2
+    assert expanded_bytes > 0
+    assert (target / "Q1" / "SW1.txt").is_file()
+    assert (target / "Q1" / "SW2.log").is_file()
+    assert not (target / "Q1" / "readme.md").exists()
+
+
+@pytest.mark.parametrize("member", ["../outside.txt", "C:/outside.txt"])
+def test_extract_zip_rejects_unsafe_paths(tmp_path, member):
+    archive_path = tmp_path / "unsafe.zip"
+    target = tmp_path / "output"
+    target.mkdir()
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr(member, "untrusted")
+
+    with pytest.raises(ValueError, match="unsafe offline patrol relative path"):
+        OfflinePatrolJobService._extract_zip(archive_path, target)

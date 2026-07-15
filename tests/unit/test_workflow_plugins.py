@@ -34,14 +34,28 @@ def test_load_patrol_change_event_workflow():
         "change-detector",
         "event-builder",
     ]
-    assert (
-        tpl.steps[2].inputs["current_run_id"]
-        == "${steps.patrol.result.snapshot_run_id}"
-    )
+    assert tpl.steps[2].inputs["current_run_id"] == "${steps.patrol.result.snapshot_run_id}"
     assert tpl.steps[1].inputs["run_id"] == "${steps.patrol.result.snapshot_run_id}"
     assert "update_current_state" not in tpl.steps[1].inputs
     assert tpl.steps[2].inputs["use_state_observations"] is True
     assert tpl.steps[3].inputs["run_id"] == "${steps.patrol.result.snapshot_run_id}"
+
+
+def test_load_patrol_history_change_event_uses_normalized_state():
+    load_workflows(force=True)
+    tpl = get_template("patrol-history-change-event")
+
+    assert tpl is not None
+    by_name = {step.name: step for step in tpl.steps}
+    assert by_name["baseline_normalization"].skill_name == "state-normalizer"
+    assert by_name["current_normalization"].skill_name == "state-normalizer"
+    assert by_name["change_detection"].inputs["previous_run_id"] == (
+        "${steps.baseline_ingest.result.run_id}"
+    )
+    assert by_name["change_detection"].inputs["current_run_id"] == (
+        "${steps.current_ingest.result.run_id}"
+    )
+    assert by_name["change_detection"].inputs["use_state_observations"] is True
 
 
 def test_load_rule_asset_generation_workflow():
@@ -51,6 +65,7 @@ def test_load_rule_asset_generation_workflow():
     assert tpl is not None
     assert [step.skill_name for step in tpl.steps] == [
         "observation-contract-generator",
+        "rule-target-planner",
         "change-policy-generator",
         "event-rule-generator",
         "event-rule-validator",
@@ -61,23 +76,16 @@ def test_load_rule_asset_generation_workflow():
     assert tpl.test_required_context == [
         "command",
         "records",
-        "observation_type",
-        "field_name",
     ]
-    assert (
-        tpl.steps[3].inputs["candidate_rules"]
-        == "${steps.event_rule.result.rules}"
-    )
+    assert tpl.steps[4].inputs["candidate_rules"] == "${steps.event_rule.result.rules}"
     assert tpl.steps[0].inputs["proposal"] == "${context.proposal}"
-    assert tpl.steps[3].inputs["mode"] == "candidates"
-    assert (
-        tpl.steps[4].inputs["candidate_rules"]
-        == "${steps.event_rule.result.rules}"
-    )
-    assert tpl.steps[4].inputs["include_active_collisions"] is True
-    assert tpl.steps[5].inputs["contract_result"] == "${steps.observation_contract.result}"
-    assert tpl.steps[5].inputs["event_rule_validation"] == "${steps.event_rule_validation.result}"
-    assert tpl.steps[5].inputs["event_rule_replay"] == "${steps.event_rule_replay.result}"
+    assert tpl.steps[1].inputs["contract"] == "${steps.observation_contract.result.proposal}"
+    assert tpl.steps[4].inputs["mode"] == "candidates"
+    assert tpl.steps[5].inputs["candidate_rules"] == "${steps.event_rule.result.rules}"
+    assert tpl.steps[5].inputs["include_active_collisions"] is True
+    assert tpl.steps[6].inputs["contract_result"] == "${steps.observation_contract.result}"
+    assert tpl.steps[6].inputs["event_rule_validation"] == "${steps.event_rule_validation.result}"
+    assert tpl.steps[6].inputs["event_rule_replay"] == "${steps.event_rule_replay.result}"
 
 
 def test_load_rule_asset_submit_workflow():
@@ -155,10 +163,13 @@ def test_workflow_owns_test_context_contract():
     assert tpl.test_context["dataset_id"] == "dev-test-previous-quarter"
     assert tpl.test_required_context == ["file_path"]
     assert missing_test_context(tpl, tpl.test_context) == ["file_path"]
-    assert missing_test_context(
-        tpl,
-        {**tpl.test_context, "file_path": "C:/captures"},
-    ) == []
+    assert (
+        missing_test_context(
+            tpl,
+            {**tpl.test_context, "file_path": "C:/captures"},
+        )
+        == []
+    )
 
 
 def test_patrol_chat_intent_has_no_ticket_requirement():
@@ -554,11 +565,10 @@ def test_list_patrol_batches_groups_runs(monkeypatch):
             "offset": kwargs.get("offset", 0),
         },
     )
+
     def legacy_page(_self, **kwargs):
         grouped = {
-            batch_id: [
-                run for run in runs if run.context.get("patrol_batch_id") == batch_id
-            ]
+            batch_id: [run for run in runs if run.context.get("patrol_batch_id") == batch_id]
             for batch_id in {run.context["patrol_batch_id"] for run in runs}
         }
         items = [
@@ -591,9 +601,7 @@ def test_list_patrol_batches_groups_runs(monkeypatch):
 
     with_archived = asyncio.run(workflow_api.list_patrol_batches(include_archived=True))
     archived = next(
-        item
-        for item in with_archived["items"]
-        if item["patrol_batch_id"] == "batch-archived"
+        item for item in with_archived["items"] if item["patrol_batch_id"] == "batch-archived"
     )
     assert archived["archived"] is True
     assert archived["archived_count"] == 1
@@ -636,9 +644,7 @@ def test_list_patrol_batches_globally_merges_manifest_and_legacy(monkeypatch):
     assert result["total"] == 3
 
     second_page = asyncio.run(workflow_api.list_patrol_batches(limit=2, offset=2))
-    assert [item["patrol_batch_id"] for item in second_page["items"]] == [
-        "manifest-old"
-    ]
+    assert [item["patrol_batch_id"] for item in second_page["items"]] == ["manifest-old"]
 
 
 def test_archive_patrol_batch_writes_governance_context(monkeypatch):
@@ -1018,7 +1024,7 @@ def test_export_patrol_batch_report_summarizes_changes_and_events(monkeypatch):
     assert "**批次 ID**：`batch-1`" in body
     assert "**总体结论**：发现异常" in body
     assert "Workflow 完成只表示巡检链路执行结束，不等同于设备健康" in body
-    assert "## 六、完整变化明细" in body
+    assert "## 七、完整变化明细" in body
     assert "InterfaceDown" in body
     assert "| SW1 | workflow-1 | completed | snapshot-run-1" in body
 
@@ -1151,7 +1157,8 @@ def test_patrol_batch_summary_exposes_report_counts(monkeypatch):
     assert result["severities"] == {"critical": 1}
     assert result["runs"][0]["snapshot_run_id"] == "snapshot-run-1"
     assert result["sample_events"][0]["id"] == "event-1"
-    assert result["deliverables"]["report_url"].endswith("/batch-1/report.md")
+    assert result["deliverables"]["report_url"].endswith("/batch-1/report.docx")
+    assert result["deliverables"]["technical_report_url"].endswith("/batch-1/report.md")
 
 
 def test_patrol_batch_summary_returns_diagnostic_empty_state_for_manifest_without_runs(
@@ -1222,9 +1229,7 @@ def test_patrol_report_distinguishes_missing_rules_from_evaluated_non_match():
     evaluated = domain_checks(
         observations=[observation],
         command_details=[command],
-        changes=[
-            {**base, "no_event_reason": "active_rules_evaluated_no_match"}
-        ],
+        changes=[{**base, "no_event_reason": "active_rules_evaluated_no_match"}],
         events=[],
     )
 

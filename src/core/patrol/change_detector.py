@@ -28,6 +28,7 @@ from src.core.patrol.repository import (
     AnalysisLeaseHeartbeat,
     PatrolRepository,
 )
+from src.core.state.observation_applicability import APPLICABILITY_CONTEXT_KEY
 from src.core.state.repository import StateRepository
 
 
@@ -78,6 +79,89 @@ def _new_change(**values: Any) -> NetworkChange:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+class ExplicitBaselineNotReadyError(ValueError):
+    """Raised when an explicitly paired baseline is not safe to compare."""
+
+
+_EXPLICIT_COMPARISON_READY_STATUSES = frozenset({"normalized", "completed"})
+
+
+def _validate_explicit_run_pair(
+    patrol_repository: PatrolRepository,
+    *,
+    previous_run_id: str,
+    current_run_id: str,
+    allow_longitudinal_offline_comparison: bool = False,
+) -> None:
+    if previous_run_id == current_run_id:
+        raise ExplicitBaselineNotReadyError("explicit baseline and current run must be different")
+
+    get_run = getattr(patrol_repository, "get_run", None)
+    if not callable(get_run):
+        return
+    previous_run = get_run(previous_run_id)
+    current_run = get_run(current_run_id)
+    if previous_run is None:
+        raise ExplicitBaselineNotReadyError(f"explicit baseline run not found: {previous_run_id}")
+    if current_run is None:
+        raise ExplicitBaselineNotReadyError(f"current run not found: {current_run_id}")
+
+    previous_status = str(previous_run.get("analysis_status") or "").strip().lower()
+    current_status = str(current_run.get("analysis_status") or "").strip().lower()
+    if previous_status and previous_status not in _EXPLICIT_COMPARISON_READY_STATUSES:
+        raise ExplicitBaselineNotReadyError(
+            "explicit baseline must complete normalization before comparison: "
+            f"run={previous_run_id}, analysis_status={previous_status}"
+        )
+    if current_status and current_status not in _EXPLICIT_COMPARISON_READY_STATUSES:
+        raise ExplicitBaselineNotReadyError(
+            "current run must complete normalization before comparison: "
+            f"run={current_run_id}, analysis_status={current_status}"
+        )
+
+    previous_mode = str(previous_run.get("mode") or "").strip()
+    current_mode = str(current_run.get("mode") or "").strip()
+    if previous_mode and current_mode and previous_mode != current_mode:
+        raise ExplicitBaselineNotReadyError(
+            "explicit baseline and current run use different modes: "
+            f"{previous_mode} != {current_mode}"
+        )
+
+    previous_metadata = dict(previous_run.get("metadata_json") or {})
+    current_metadata = dict(current_run.get("metadata_json") or {})
+    previous_job_id = str(previous_metadata.get("offline_job_id") or "").strip()
+    current_job_id = str(current_metadata.get("offline_job_id") or "").strip()
+    different_offline_jobs = bool(
+        previous_job_id and current_job_id and previous_job_id != current_job_id
+    )
+    if different_offline_jobs and not allow_longitudinal_offline_comparison:
+        raise ExplicitBaselineNotReadyError(
+            "explicit offline comparison runs belong to different jobs"
+        )
+    if different_offline_jobs:
+        previous_started_at = _observed_datetime(previous_run.get("started_at"))
+        current_started_at = _observed_datetime(current_run.get("started_at"))
+        if (
+            previous_started_at is None
+            or current_started_at is None
+            or previous_started_at >= current_started_at
+        ):
+            raise ExplicitBaselineNotReadyError(
+                "longitudinal offline comparison requires previous run time before current run"
+            )
+    elif previous_job_id and current_job_id:
+        previous_role = str(previous_metadata.get("period_role") or "").strip()
+        current_role = str(current_metadata.get("period_role") or "").strip()
+        if previous_role and previous_role != "baseline":
+            raise ExplicitBaselineNotReadyError(
+                f"explicit previous run is not the baseline period: {previous_role}"
+            )
+        if current_role and current_role != "current":
+            raise ExplicitBaselineNotReadyError(
+                f"explicit current run is not the current period: {current_role}"
+            )
 
 
 def _observed_datetime(value: Any) -> datetime | None:
@@ -211,6 +295,11 @@ def _number(value: Any) -> float | None:
 
 
 def _state_key(observation: dict[str, Any]) -> str:
+    if observation.get("state_key"):
+        return str(observation["state_key"])
+    metadata = dict(observation.get("metadata_json") or {})
+    dimensions = metadata.get("dimensions")
+    stable_dimensions = dict(dimensions) if isinstance(dimensions, dict) else None
     return json.dumps(
         [
             observation.get("device_id"),
@@ -218,6 +307,7 @@ def _state_key(observation: dict[str, Any]) -> str:
             observation.get("entity_key"),
             observation.get("observation_type")
             or str(observation.get("field_name") or "").strip().lower(),
+            stable_dimensions,
         ],
         ensure_ascii=False,
         sort_keys=True,
@@ -240,11 +330,15 @@ def _deduplicate_current_observations(
         )
         existing_order = (
             (
-                _observed_datetime(existing.get("observed_at"))
-                or datetime.min.replace(tzinfo=timezone.utc)
-            ),
-            str(existing.get("fact_order_key") or ""),
-        ) if existing else None
+                (
+                    _observed_datetime(existing.get("observed_at"))
+                    or datetime.min.replace(tzinfo=timezone.utc)
+                ),
+                str(existing.get("fact_order_key") or ""),
+            )
+            if existing
+            else None
+        )
         if existing_order is None or item_order > existing_order:
             latest_by_key[key] = item
     return list(latest_by_key.values())
@@ -326,11 +420,16 @@ def _observation_dimensions(observation: dict[str, Any]) -> dict[str, Any]:
     metadata = dict(observation.get("metadata_json") or {})
     explicit = metadata.get("dimensions")
     if isinstance(explicit, dict):
-        return dict(explicit)
-    return _entity_dimensions(
-        str(observation.get("entity_key") or ""),
-        tuple(str(key) for key in metadata.get("primary_keys") or ()),
-    )
+        dimensions = dict(explicit)
+    else:
+        dimensions = _entity_dimensions(
+            str(observation.get("entity_key") or ""),
+            tuple(str(key) for key in metadata.get("primary_keys") or ()),
+        )
+    context = metadata.get(APPLICABILITY_CONTEXT_KEY)
+    if isinstance(context, dict):
+        dimensions[APPLICABILITY_CONTEXT_KEY] = dict(context)
+    return dimensions
 
 
 def _observation_to_change(
@@ -665,6 +764,10 @@ def detect_changes_from_params(params: dict[str, Any]) -> dict[str, Any]:
             kwargs["missing_confirmations"] = int(params["missing_confirmations"])
         if "analysis_revision" in params:
             kwargs["analysis_revision"] = str(params.get("analysis_revision") or "original")
+        if "allow_longitudinal_offline_comparison" in params:
+            kwargs["allow_longitudinal_offline_comparison"] = bool(
+                params.get("allow_longitudinal_offline_comparison")
+            )
         return detect_observation_changes_against_history(
             current_run_id=str(params["current_run_id"]),
             previous_run_id=(
@@ -760,6 +863,7 @@ def detect_observation_changes_against_history(
     persist: bool = True,
     missing_confirmations: int = 2,
     analysis_revision: str = "original",
+    allow_longitudinal_offline_comparison: bool = False,
 ) -> dict[str, Any]:
     patrol_repository = PatrolRepository()
     state_repository = StateRepository()
@@ -770,23 +874,20 @@ def detect_observation_changes_against_history(
     else:
         input_observations = state_repository.list_run_observations(current_run_id)
     if previous_run_id:
-        try:
-            prior_observations = (
-                state_repository.list_observations_for_runs(
-                    [previous_run_id], device_ids=device_ids, baseline_only=True
-                )
-                if device_ids
-                else state_repository.list_observations_for_runs(
-                    [previous_run_id], baseline_only=True
-                )
-            )
-        except TypeError:
-            prior_observations = (
-                state_repository.list_observations_for_runs(
-                    [previous_run_id], device_ids=device_ids
-                )
-                if device_ids
-                else state_repository.list_observations_for_runs([previous_run_id])
+        _validate_explicit_run_pair(
+            patrol_repository,
+            previous_run_id=previous_run_id,
+            current_run_id=current_run_id,
+            allow_longitudinal_offline_comparison=allow_longitudinal_offline_comparison,
+        )
+        prior_observations = (
+            state_repository.list_observations_for_runs([previous_run_id], device_ids=device_ids)
+            if device_ids
+            else state_repository.list_observations_for_runs([previous_run_id])
+        )
+        if input_observations and not prior_observations:
+            raise ExplicitBaselineNotReadyError(
+                f"explicit baseline produced no StateObservation records: run={previous_run_id}"
             )
     else:
         prior_observations = state_repository.list_prior_observations_for_run(current_run_id)
@@ -828,6 +929,7 @@ def detect_observation_changes_against_history(
         "persist": bool(persist),
         "input_revision_digest": input_revision_digest,
         "analysis_revision": analysis_revision,
+        "allow_longitudinal_offline_comparison": bool(allow_longitudinal_offline_comparison),
     }
     attempt = patrol_repository.begin_analysis_attempt(
         run_id=current_run_id,
@@ -1021,22 +1123,11 @@ def _detect_observation_changes_against_history_impl(
     if prior_observations is not None:
         pass
     elif previous_run_id:
-        try:
-            prior_observations = (
-                repository.list_observations_for_runs(
-                    [previous_run_id],
-                    device_ids=device_ids,
-                    baseline_only=True,
-                )
-                if device_ids
-                else repository.list_observations_for_runs([previous_run_id], baseline_only=True)
-            )
-        except TypeError:
-            prior_observations = (
-                repository.list_observations_for_runs([previous_run_id], device_ids=device_ids)
-                if device_ids
-                else repository.list_observations_for_runs([previous_run_id])
-            )
+        prior_observations = (
+            repository.list_observations_for_runs([previous_run_id], device_ids=device_ids)
+            if device_ids
+            else repository.list_observations_for_runs([previous_run_id])
+        )
     else:
         prior_observations = repository.list_prior_observations_for_run(current_run_id)
     prior_collections = {_collection_key(item) for item in prior_observations}
@@ -1050,6 +1141,12 @@ def _detect_observation_changes_against_history_impl(
             previous_at = _observed_datetime(previous.get("observed_at"))
             current_at = _observed_datetime(current.get("observed_at"))
             if previous_at and current_at and previous_at > current_at:
+                if previous_run_id:
+                    raise ExplicitBaselineNotReadyError(
+                        "explicit baseline observation is newer than current observation: "
+                        f"state_key={_state_key(current)}, "
+                        f"baseline={previous_at.isoformat()}, current={current_at.isoformat()}"
+                    )
                 previous = None
         if previous is None:
             if _collection_key(current) in prior_collections:

@@ -23,16 +23,21 @@ def _definition_from_candidate(candidate: dict[str, Any], index: int) -> EventRu
     if not isinstance(condition, dict):
         raise ValueError(f"candidate_rules[{index}].condition must be an object")
     return EventRuleDefinition(
-        rule_id=str(
-            candidate.get("rule_id")
-            or candidate.get("name")
-            or f"candidate-rule-{index}"
-        ),
+        rule_id=str(candidate.get("rule_id") or candidate.get("name") or f"candidate-rule-{index}"),
         version=int(candidate.get("version") or 1),
         event_type=str(candidate["event_type"]),
         severity=str(candidate.get("severity") or "warning"),
         condition=dict(condition),
         description=candidate.get("description"),
+        priority=int(candidate.get("priority") or 100),
+        exclusive=bool(candidate.get("exclusive", False)),
+        event_class=str(candidate.get("event_class") or "fault"),
+        recovery=dict(candidate.get("recovery") or {}),
+        correlation_keys=tuple(
+            candidate.get("correlation_keys")
+            or candidate.get("correlation_key")
+            or ("device_id", "entity_type", "entity_key", "field")
+        ),
     )
 
 
@@ -49,10 +54,14 @@ def _candidate_definitions(params: dict[str, Any]) -> list[EventRuleDefinition]:
 
 
 def run_replay(params: dict[str, Any]) -> dict[str, Any]:
+    run_ids = params.get("run_ids")
+    if run_ids is not None and not isinstance(run_ids, list):
+        raise ValueError("run_ids must be an array when provided")
     return replay_event_rule_definitions(
         _candidate_definitions(params),
         limit=int(params.get("limit") or 1000),
         include_active_collisions=params.get("include_active_collisions") is not False,
+        run_ids=run_ids,
     )
 
 

@@ -5,7 +5,12 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
-from src.core.patrol.event_rules import EventRule, EventRuleDefinition, EventRuleRepository
+from src.core.patrol.event_rules import (
+    EventRule,
+    EventRuleDefinition,
+    EventRuleRepository,
+    event_rule_logical_key,
+)
 from src.core.patrol.rule_validation import matched_rules, sanitize_change
 from src.infrastructure.db.models import NetworkChangeRecord
 from src.infrastructure.db.postgres import get_db_session
@@ -19,7 +24,9 @@ def change_record_to_payload(row: NetworkChangeRecord) -> dict[str, Any]:
         "command": row.canonical_command,
         "entity_type": row.entity_type,
         "entity_key": row.entity_key,
+        "dimensions": row.dimensions_json or {},
         "field": row.field,
+        "observation_type": row.observation_type,
         "old": row.old_value_json,
         "new": row.new_value_json,
         "change_type": row.change_type,
@@ -40,14 +47,69 @@ def _candidate_rules(definitions: list[EventRuleDefinition]) -> list[EventRule]:
     return [definition.to_rule() for definition in definitions]
 
 
+def _logical_key(definition: EventRuleDefinition) -> str:
+    return event_rule_logical_key(
+        name=definition.rule_id,
+        event_type=definition.event_type,
+        condition=definition.condition,
+        event_class=definition.event_class,
+    )
+
+
+def _active_definition(row: dict[str, Any]) -> EventRuleDefinition:
+    return EventRuleDefinition(
+        rule_id=str(row.get("rule_name") or row.get("name") or row.get("rule_id") or ""),
+        version=int(row.get("version") or 1),
+        event_type=str(row.get("event_type") or ""),
+        severity=str(row.get("severity") or "warning"),
+        condition=dict(row.get("condition") or {}),
+        description=row.get("description"),
+        priority=int(row.get("priority") or 100),
+        exclusive=bool(row.get("exclusive", False)),
+        event_class=str(row.get("event_class") or "fault"),
+        recovery=dict(row.get("recovery") or {}),
+        correlation_keys=tuple(
+            row.get("correlation_keys") or ("device_id", "entity_type", "entity_key", "field")
+        ),
+    )
+
+
 def replay_event_rule_definitions(
     definitions: list[EventRuleDefinition],
     *,
     limit: int = 1000,
     include_active_collisions: bool = True,
+    run_ids: list[str] | None = None,
 ) -> dict[str, Any]:
+    normalized_run_ids = sorted(
+        {str(run_id).strip() for run_id in (run_ids or []) if str(run_id).strip()}
+    )
+    if run_ids is not None and not normalized_run_ids:
+        raise ValueError("run_ids must contain at least one non-empty run id")
     candidate_rules = _candidate_rules(definitions)
-    active_rules = EventRuleRepository().list_active_rules() if include_active_collisions else []
+    active_definitions = (
+        [
+            _active_definition(row)
+            for row in EventRuleRepository().list_versions(status="active", limit=None)
+        ]
+        if include_active_collisions
+        else []
+    )
+    active_rules = _candidate_rules(active_definitions)
+    candidate_rule_ids = {rule.rule_id for rule in candidate_rules}
+    candidate_logical_keys = {_logical_key(definition) for definition in definitions}
+    active_logical_keys = {
+        definition.rule_id: _logical_key(definition) for definition in active_definitions
+    }
+    replacement_rule_ids = sorted(
+        {
+            rule.rule_id
+            for rule in active_rules
+            if rule.rule_id in candidate_rule_ids
+            or active_logical_keys.get(rule.rule_id) in candidate_logical_keys
+        }
+    )
+    collision_ruleset = [rule for rule in active_rules if rule.rule_id not in replacement_rule_ids]
     matched_change_count = 0
     collision_count = 0
     event_types: Counter[str] = Counter()
@@ -55,15 +117,20 @@ def replay_event_rule_definitions(
     top_devices: Counter[str] = Counter()
     collision_rules: Counter[str] = Counter()
     unexpected_matches: list[dict[str, Any]] = []
+    sampled_run_id_values: set[str] = set()
 
     with get_db_session() as db:
+        query = db.query(NetworkChangeRecord)
+        if run_ids is not None:
+            query = query.filter(NetworkChangeRecord.run_id.in_(normalized_run_ids))
         rows = (
-            db.query(NetworkChangeRecord)
-            .order_by(NetworkChangeRecord.detected_at.desc())
+            query.order_by(NetworkChangeRecord.detected_at.desc())
             .limit(max(1, min(int(limit), 10000)))
             .all()
         )
         for row in rows:
+            if str(row.run_id or "").strip():
+                sampled_run_id_values.add(str(row.run_id).strip())
             change = change_record_to_payload(row)
             candidates = matched_rules(change, candidate_rules)
             if not candidates:
@@ -75,16 +142,14 @@ def replay_event_rule_definitions(
             entity_types[str(row.entity_type or "unknown")] += 1
             if row.device_id:
                 top_devices[str(row.device_id)] += 1
-            active_matches = matched_rules(change, active_rules) if active_rules else []
+            active_matches = matched_rules(change, collision_ruleset) if collision_ruleset else []
             if len(candidates) > 1 or active_matches:
                 collision_count += 1
                 if len(unexpected_matches) < 20:
                     unexpected_matches.append(
                         {
                             "collision_type": (
-                                "candidate_active"
-                                if active_matches
-                                else "candidate_candidate"
+                                "candidate_active" if active_matches else "candidate_candidate"
                             ),
                             "candidate_rule_ids": [rule.rule_id for rule in candidates],
                             "active_rule_ids": [rule.rule_id for rule in active_matches],
@@ -92,6 +157,16 @@ def replay_event_rule_definitions(
                         }
                     )
 
+    sampled_run_ids = sorted(sampled_run_id_values)
+    scope = {
+        "mode": "run_ids" if run_ids is not None else "global_recent",
+        "run_ids": normalized_run_ids,
+        "run_id_count": len(normalized_run_ids),
+        "sampled_run_ids": sampled_run_ids,
+        "sampled_run_id_count": len(sampled_run_ids),
+    }
+    if run_ids is not None:
+        scope["missing_run_ids"] = sorted(set(normalized_run_ids) - set(sampled_run_ids))
     return {
         "success": collision_count == 0,
         "rule_count": len(definitions),
@@ -105,5 +180,15 @@ def replay_event_rule_definitions(
         "collision_count": collision_count,
         "collision_rules": dict(collision_rules.most_common()),
         "unexpected_matches": unexpected_matches,
+        "replacement_rule_ids": replacement_rule_ids,
+        "replacement_logical_keys": sorted(
+            {
+                active_logical_keys[rule_id]
+                for rule_id in replacement_rule_ids
+                if rule_id in active_logical_keys
+            }
+        ),
+        "candidate_logical_keys": sorted(candidate_logical_keys),
         "recovery_pair_coverage": None,
+        "scope": scope,
     }

@@ -17,7 +17,6 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.core.patrol.event_rules import EventRuleDefinition  # noqa: E402
 from src.core.patrol.rule_validation import (  # noqa: E402
     EventRuleValidationCase,
-    validate_builtin_event_rules,
     validate_event_rule_definition,
     validate_event_rule_definitions,
     validate_event_rule_pack,
@@ -39,6 +38,15 @@ def _candidate_definition(payload: dict[str, Any]) -> EventRuleDefinition:
         severity=str(candidate.get("severity") or "warning"),
         condition=dict(condition),
         description=candidate.get("description"),
+        priority=int(candidate.get("priority") or 100),
+        exclusive=bool(candidate.get("exclusive", False)),
+        event_class=str(candidate.get("event_class") or "fault"),
+        recovery=dict(candidate.get("recovery") or {}),
+        correlation_keys=tuple(
+            candidate.get("correlation_keys")
+            or candidate.get("correlation_key")
+            or ("device_id", "entity_type", "entity_key", "field")
+        ),
     )
 
 
@@ -57,6 +65,15 @@ def _definition_from_candidate(candidate: dict[str, Any], index: int = 1) -> Eve
         severity=str(candidate.get("severity") or "warning"),
         condition=dict(condition),
         description=candidate.get("description"),
+        priority=int(candidate.get("priority") or 100),
+        exclusive=bool(candidate.get("exclusive", False)),
+        event_class=str(candidate.get("event_class") or "fault"),
+        recovery=dict(candidate.get("recovery") or {}),
+        correlation_keys=tuple(
+            candidate.get("correlation_keys")
+            or candidate.get("correlation_key")
+            or ("device_id", "entity_type", "entity_key", "field")
+        ),
     )
 
 
@@ -157,15 +174,18 @@ def _agent_loop_advice(report: dict[str, Any]) -> dict[str, Any]:
         actual = row.get("actual_event_type")
         if expected and not actual:
             hints.append(
-                f"{row.get('name')}: expected {expected} but no rule matched; broaden fields, entity_types, or transition condition."
+                f"{row.get('name')}: expected {expected} but no rule matched; "
+                "broaden fields, entity_types, or transition condition."
             )
         elif actual and not expected:
             hints.append(
-                f"{row.get('name')}: unexpected {actual}; narrow entity_types, fields, or initial matching."
+                f"{row.get('name')}: unexpected {actual}; narrow entity_types, "
+                "fields, or initial matching."
             )
         else:
             hints.append(
-                f"{row.get('name')}: expected {expected}, got {actual}; check rule priority and condition semantics."
+                f"{row.get('name')}: expected {expected}, got {actual}; "
+                "check rule priority and condition semantics."
             )
     revision_request = {
         "target_generator": "event-rule-generator",

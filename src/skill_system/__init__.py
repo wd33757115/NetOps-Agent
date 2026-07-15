@@ -59,6 +59,16 @@ __all__ = [
 _skill_system = None
 
 
+def _semantic_routing_enabled(cfg, rag_service=None) -> bool:
+    """Keep metadata catalog use independent from the heavy local embedder."""
+    if rag_service is not None:
+        return True
+    return bool(
+        cfg.SKILL_CATALOG_ENABLED
+        and cfg.SKILL_CATALOG_SEMANTIC_ROUTING_ENABLED
+    )
+
+
 class SkillSystem:
     """
     Skill System 主类
@@ -101,7 +111,7 @@ class SkillSystem:
             "true",
             "yes",
         )
-        use_embedding = rag_service is not None or cfg.SKILL_CATALOG_ENABLED
+        use_embedding = _semantic_routing_enabled(cfg, rag_service)
         self.router = SemanticRouter(
             rag_service=rag_service,
             skill_loader=self.loader,
@@ -226,7 +236,7 @@ class SkillSystem:
             "true",
             "yes",
         )
-        use_embedding = rag_service is not None or cfg.SKILL_CATALOG_ENABLED
+        use_embedding = _semantic_routing_enabled(cfg, rag_service)
         self.router = SemanticRouter(
             rag_service=rag_service,
             skill_loader=self.loader,

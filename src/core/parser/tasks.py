@@ -122,8 +122,17 @@ def publish_parser_outbox():
                         seed_result = RuleAssetTemplateActivationService(
                             parser_repository=parser_repository,
                         ).seed_from_template(template_id)
+                        if seed_result.get("reason") in {
+                            "parser_template_not_active",
+                            "parser_template_not_found",
+                        }:
+                            seed_result = {
+                                **seed_result,
+                                "skipped": True,
+                                "terminal": True,
+                            }
                         rule_asset_seeds.append(seed_result)
-                        if not seed_result.get("success"):
+                        if not seed_result.get("success") and not seed_result.get("terminal"):
                             raise RuntimeError(
                                 str(seed_result.get("reason") or "rule asset seed failed")
                             )
