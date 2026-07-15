@@ -263,6 +263,168 @@ MANU SERIAL NUMBER : <SERIAL>
         )
         self.assertTrue(valid, [item.message for item in diagnostics])
 
+    def test_contract_prunes_hallucinated_optional_binding_without_command_rules(self):
+        sample = """Port1 diagnostic information:
+The module is absent.
+Port2 diagnostic information:
+The module does not support diagnostics.
+"""
+        samples_text = f'<CLI_SAMPLE id="sample-1" sha256="abc">\n{sample}</CLI_SAMPLE>'
+
+        proposal = infer_contract(
+            command="inspect arbitrary modules",
+            samples_text=samples_text,
+            structure_profile=profile_sample_set([("sample-1", sample)]),
+            llm_call=lambda _prompt: """{
+              "category": "module_diagnostics",
+              "entity_type": "module",
+              "primary_keys": ["module"],
+              "required_fields": ["module"],
+              "optional_fields": ["diagnosis_status", "invented_metric"],
+              "validators": {
+                "module": {"type": "text"},
+                "diagnosis_status": {
+                  "type": "regex",
+                  "pattern": "^The module is (absent|does not support diagnostics)\\\\.$"
+                },
+                "invented_metric": {"type": "number"}
+              },
+              "state_semantics": {
+                "invented_metric": {"semantic_type": "gauge", "unit": "count"}
+              },
+              "evidence": {"field_bindings": {
+                "module": [
+                  {"sample_id": "sample-1", "line": 1,
+                   "source_label": "Port1 diagnostic information:", "source_value": "Port1",
+                   "capture_kind": "literal"},
+                  {"sample_id": "sample-1", "line": 3,
+                   "source_label": "Port2 diagnostic information:", "source_value": "Port2",
+                   "capture_kind": "literal"}
+                ],
+                "diagnosis_status": [
+                  {"sample_id": "sample-1", "line": 2,
+                   "source_label": "The module is absent.",
+                   "source_value": "The module is absent.", "capture_kind": "key_value"},
+                  {"sample_id": "sample-1", "line": 4,
+                   "source_label": "The module is absent.",
+                   "source_value": "The module is absent.", "capture_kind": "key_value"},
+                  {"sample_id": "sample-1", "line": 4,
+                   "source_label": "The module does not support diagnostics.",
+                   "source_value": "The module does not support diagnostics.",
+                   "capture_kind": "key_value"}
+                ],
+                "invented_metric": [
+                  {"sample_id": "sample-1", "line": 4,
+                   "source_label": "Metric:", "source_value": "42",
+                   "capture_kind": "key_value"}
+                ]
+              }}
+            }""",
+        )
+
+        status_bindings = proposal.evidence["field_bindings"]["diagnosis_status"]
+        self.assertEqual(len(status_bindings), 2)
+        self.assertEqual(
+            {
+                binding["capture_kind"]
+                for binding in proposal.evidence["field_bindings"]["module"]
+            },
+            {"record_anchor"},
+        )
+        self.assertEqual(
+            proposal.evidence["capture_kind_governance"]["strategy"],
+            "bounded_parser_ir_alias_mapping",
+        )
+        self.assertEqual(proposal.validators["diagnosis_status"], {"type": "text"})
+        self.assertIn(
+            "diagnosis_status",
+            proposal.evidence["validator_evidence_governance"]["fields"],
+        )
+        self.assertNotIn("invented_metric", proposal.optional_fields)
+        self.assertNotIn("invented_metric", proposal.validators)
+        self.assertNotIn("invented_metric", proposal.state_semantics or {})
+        governance = proposal.evidence["literal_evidence_governance"]
+        self.assertEqual(len(governance["removed_bindings"]), 2)
+        self.assertEqual(governance["removed_optional_fields"], ["invented_metric"])
+        valid, diagnostics = validate_contract_candidate(
+            proposal,
+            structure_profile=profile_sample_set([("sample-1", sample)]),
+            samples_text=samples_text,
+        )
+        self.assertTrue(valid, [item.message for item in diagnostics])
+
+    def test_table_binding_normalization_keeps_same_header_in_original_context(self):
+        sample = """Port1 diagnostic information:
+  Current values:
+    Temp(C) Voltage(V)
+    40      3.30
+  Alarm thresholds:
+    Temp(C) Voltage(V)
+    High 80 3.60
+    Low -10 3.00
+Port2 diagnostic information:
+  Current values:
+    Temp(C) Voltage(V)
+    41      3.31
+  Alarm thresholds:
+    Temp(C) Voltage(V)
+    High 81 3.61
+    Low -11 2.99
+"""
+        samples_text = f'<CLI_SAMPLE id="sample-1" sha256="abc">\n{sample}</CLI_SAMPLE>'
+        proposal = infer_contract(
+            command="inspect arbitrary sensor blocks",
+            samples_text=samples_text,
+            structure_profile=profile_sample_set([("sample-1", sample)]),
+            llm_call=lambda _prompt: """{
+              "category": "sensor",
+              "entity_type": "port_sensor",
+              "primary_keys": ["port"],
+              "required_fields": ["port"],
+              "optional_fields": ["temperature_celsius", "voltage_v"],
+              "validators": {
+                "port": {"type": "text"},
+                "temperature_celsius": {"type": "number"},
+                "voltage_v": {"type": "number"}
+              },
+              "evidence": {"field_bindings": {
+                "port": [
+                  {"sample_id": "sample-1", "line": 1,
+                   "source_label": "Port1 diagnostic information:", "source_value": "Port1",
+                   "capture_kind": "record_anchor"},
+                  {"sample_id": "sample-1", "line": 9,
+                   "source_label": "Port2 diagnostic information:", "source_value": "Port2",
+                   "capture_kind": "record_anchor"}
+                ],
+                "temperature_celsius": [
+                  {"sample_id": "sample-1", "line": 4,
+                   "source_label": "Temp", "source_value": "40", "capture_kind": "column"},
+                  {"sample_id": "sample-1", "line": 12,
+                   "source_label": "Temp", "source_value": "41", "capture_kind": "column"}
+                ],
+                "voltage_v": [
+                  {"sample_id": "sample-1", "line": 4,
+                   "source_label": "Voltage", "source_value": "3.30", "capture_kind": "column"},
+                  {"sample_id": "sample-1", "line": 12,
+                   "source_label": "Voltage", "source_value": "3.31", "capture_kind": "column"}
+                ]
+              }}
+            }""",
+        )
+
+        temperatures = {
+            binding["source_value"]
+            for binding in proposal.evidence["field_bindings"]["temperature_celsius"]
+        }
+        voltages = {
+            binding["source_value"]
+            for binding in proposal.evidence["field_bindings"]["voltage_v"]
+        }
+        self.assertEqual(temperatures, {"40", "41"})
+        self.assertEqual(voltages, {"3.30", "3.31"})
+        self.assertNotIn("80", temperatures)
+        self.assertNotIn("3.60", voltages)
+
     def test_contract_rejects_mutually_exclusive_sibling_anchor_keys(self):
         sample = """Slot 1 CPU 0:
 DEVICE_NAME: Switch

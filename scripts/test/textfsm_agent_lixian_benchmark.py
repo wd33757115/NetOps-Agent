@@ -93,6 +93,9 @@ def _generate_command(
     reports_dir: Path,
     period: str,
     command: str,
+    expected_source_sample_count: int = 2,
+    max_expected_retries: int = 0,
+    require_generic_provider: bool = True,
 ) -> dict[str, Any]:
     result = generate_templates(
         {
@@ -119,9 +122,20 @@ def _generate_command(
     _assert_equal(len(reports), 1, f"{period}.{command}.reports")
     report = reports[0]
     _assert_equal(report.get("accepted"), True, f"{period}.{command}.accepted")
-    _assert_equal(report.get("sample_count"), 2, f"{period}.{command}.samples")
-    _assert_equal(report.get("passed_samples"), 2, f"{period}.{command}.passed")
-    _assert_equal(report.get("retry_count"), 0, f"{period}.{command}.retries")
+    _assert_equal(report.get("validation_pass_rate"), 1.0, f"{period}.{command}.report_pass_rate")
+    _assert_equal(
+        report.get("source_sample_count"),
+        expected_source_sample_count,
+        f"{period}.{command}.source_samples",
+    )
+    _assert_equal(
+        report.get("passed_samples"), report.get("sample_count"), f"{period}.{command}.passed"
+    )
+    retry_count = int(report.get("retry_count") or 0)
+    if retry_count > max_expected_retries:
+        raise AssertionError(
+            f"{period}.{command}.retries: expected <= {max_expected_retries}, got {retry_count}"
+        )
     _assert_equal(report.get("validation_score"), 100, f"{period}.{command}.validation")
     if int(report.get("record_count") or 0) <= 0:
         raise AssertionError(f"{period}.{command}: no records parsed")
@@ -133,9 +147,15 @@ def _generate_command(
         f"{period}.{command}.template_attempts",
     )
     provider = str(agent_loop.get("best_candidate_provider") or "")
-    if not provider.startswith("generic_"):
+    if require_generic_provider and not provider.startswith("generic_"):
         raise AssertionError(
             f"{period}.{command}: automatic path used non-generic provider {provider!r}"
+        )
+    if not require_generic_provider and not (
+        provider.startswith("generic_") or provider == "llm"
+    ):
+        raise AssertionError(
+            f"{period}.{command}: automatic path used unsupported provider {provider!r}"
         )
     hard_gates = (
         (agent_loop.get("validation_report") or {}).get("hard_gates") or {}
@@ -149,6 +169,9 @@ def _generate_command(
     _assert_equal(failed_gates, [], f"{period}.{command}.hard_gates")
     return {
         "sample_count": report.get("sample_count"),
+        "source_sample_count": report.get("source_sample_count"),
+        "unique_sample_count": report.get("unique_sample_count"),
+        "duplicate_sample_count": report.get("duplicate_sample_count"),
         "passed_samples": report.get("passed_samples"),
         "record_count": report.get("record_count"),
         "retry_count": report.get("retry_count"),
@@ -177,10 +200,30 @@ def run_benchmark(*, source_root: Path, reports_dir: Path) -> dict[str, Any]:
             "preview": _preview_period(source_path, period),
             "commands": command_results,
         }
+    corpus_results = {
+        command: _generate_command(
+            source_path=source_root,
+            reports_dir=reports_dir,
+            period="CORPUS",
+            command=command,
+            expected_source_sample_count=sum(
+                baseline["device_count"] for baseline in PERIOD_BASELINES.values()
+            ),
+            max_expected_retries=2,
+            require_generic_provider=False,
+        )
+        for command in GOLDEN_COMMANDS
+    }
     return {
         "success": True,
         "source_root": str(source_root),
         "periods": periods,
+        "canonical_corpus": {
+            "sample_count": sum(
+                baseline["device_count"] for baseline in PERIOD_BASELINES.values()
+            ),
+            "commands": corpus_results,
+        },
     }
 
 

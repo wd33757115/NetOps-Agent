@@ -166,6 +166,53 @@ _SAMPLE_BLOCK_RE = re.compile(
 )
 
 
+def _normalize_capture_kind_aliases(proposal: ContractProposal) -> ContractProposal:
+    """Map common model vocabulary onto the four governed Parser IR kinds."""
+
+    evidence = json.loads(json.dumps(dict(proposal.evidence or {})))
+    field_bindings = evidence.get("field_bindings")
+    if not isinstance(field_bindings, dict):
+        return proposal
+    primary_keys = set(proposal.primary_keys)
+    aliases = {
+        "table": "column",
+        "table_column": "column",
+        "column_value": "column",
+        "kv": "key_value",
+        "key-value": "key_value",
+        "label_value": "key_value",
+        "anchor": "record_anchor",
+        "entity_header": "record_anchor",
+        "record_header": "record_anchor",
+        "computed": "derived",
+        "inferred": "derived",
+        "normalized": "derived",
+    }
+    normalized: list[dict[str, str]] = []
+    for field_name, raw in field_bindings.items():
+        bindings = raw if isinstance(raw, list) else [raw]
+        for binding in bindings:
+            if not isinstance(binding, dict):
+                continue
+            original = str(binding.get("capture_kind") or "").strip().casefold()
+            target = aliases.get(original)
+            if original in {"literal", "direct", "value"}:
+                target = "record_anchor" if field_name in primary_keys else "key_value"
+            if not target or target == original:
+                continue
+            binding["capture_kind"] = target
+            normalized.append(
+                {"field": str(field_name), "from": original, "to": target}
+            )
+    if not normalized:
+        return proposal
+    evidence["capture_kind_governance"] = {
+        "strategy": "bounded_parser_ir_alias_mapping",
+        "normalizations": normalized,
+    }
+    return replace(proposal, evidence=evidence)
+
+
 def _normalize_binding_lines(
     proposal: ContractProposal,
     *,
@@ -245,6 +292,125 @@ def _normalize_binding_lines(
             "corrections": corrections,
         }
     return replace(proposal, evidence=evidence)
+
+
+def _prune_unverifiable_field_bindings(
+    proposal: ContractProposal,
+    *,
+    samples_text: str,
+) -> ContractProposal:
+    """Remove optional schema claims that have no literal sample evidence.
+
+    A weak model may cite the right record family but attach one sibling's label
+    to another sibling's line. Line reconciliation can repair unambiguous drift;
+    anything still absent after that pass is not evidence and must not reach the
+    template compiler. Required fields remain declared so validation continues to
+    block when pruning exposes a real identity or completeness gap.
+    """
+
+    evidence = json.loads(json.dumps(dict(proposal.evidence or {})))
+    raw_bindings = evidence.get("field_bindings")
+    if not isinstance(raw_bindings, dict):
+        return proposal
+    samples = {
+        match.group("sample_id"): match.group("body").splitlines()
+        for match in _SAMPLE_BLOCK_RE.finditer(samples_text or "")
+    }
+    if not samples:
+        return proposal
+
+    optional = list(proposal.optional_fields)
+    required = set(proposal.required_fields)
+    primary = set(proposal.primary_keys)
+    validators = json.loads(json.dumps(dict(proposal.validators or {})))
+    semantics = json.loads(json.dumps(dict(proposal.state_semantics or {})))
+    removed_bindings: list[dict[str, Any]] = []
+    removed_fields: list[str] = []
+
+    for field_name in tuple((*proposal.required_fields, *proposal.optional_fields)):
+        raw = raw_bindings.get(field_name)
+        bindings = raw if isinstance(raw, list) else [raw]
+        kept: list[dict[str, Any]] = []
+        seen_bindings: set[tuple[str, int, str, str, str]] = set()
+        for binding in bindings:
+            if not isinstance(binding, dict):
+                kept.append(binding)
+                continue
+            sample_id = str(binding.get("sample_id") or "").strip()
+            lines = samples.get(sample_id)
+            line_value = binding.get("line") or binding.get("line_number")
+            try:
+                line_number = int(line_value)
+            except (TypeError, ValueError):
+                kept.append(binding)
+                continue
+            if lines is None or line_number < 1 or line_number > len(lines):
+                kept.append(binding)
+                continue
+            source_label = str(binding.get("source_label") or "").strip()
+            source_value = str(binding.get("source_value") or "").strip()
+            line = lines[line_number - 1]
+            if (
+                (source_label and literal_occurs(line, source_label))
+                or (source_value and literal_occurs(line, source_value))
+            ):
+                signature = (
+                    sample_id,
+                    line_number,
+                    str(binding.get("capture_kind") or "").strip().casefold(),
+                    source_label.casefold(),
+                    source_value.casefold(),
+                )
+                if signature in seen_bindings:
+                    removed_bindings.append(
+                        {
+                            "field": field_name,
+                            "sample_id": sample_id,
+                            "line": line_number,
+                            "reason": "duplicate_evidence_binding",
+                        }
+                    )
+                    continue
+                seen_bindings.add(signature)
+                kept.append(binding)
+                continue
+            removed_bindings.append(
+                {
+                    "field": field_name,
+                    "sample_id": sample_id,
+                    "line": line_number,
+                    "reason": "literal_absent_from_referenced_line",
+                }
+            )
+
+        if kept:
+            raw_bindings[field_name] = kept
+            continue
+        if field_name in required or field_name in primary:
+            raw_bindings[field_name] = []
+            continue
+        raw_bindings.pop(field_name, None)
+        if field_name in optional:
+            optional.remove(field_name)
+        validators.pop(field_name, None)
+        semantics.pop(field_name, None)
+        removed_fields.append(field_name)
+
+    if not removed_bindings and not removed_fields:
+        return proposal
+    evidence["field_bindings"] = raw_bindings
+    evidence["literal_evidence_governance"] = {
+        "strategy": "discard_unverifiable_model_claims",
+        "removed_bindings": removed_bindings,
+        "removed_optional_fields": removed_fields,
+    }
+    return replace(
+        proposal,
+        optional_fields=tuple(optional),
+        validators=validators,
+        state_semantics=semantics or None,
+        evidence=evidence,
+    )
 
 
 def _validator_accepts(value: str, rules: dict[str, Any]) -> bool:
@@ -331,6 +497,58 @@ def _normalize_validator_from_values(
     return normalized, False
 
 
+def _normalize_evidence_bound_validators(
+    proposal: ContractProposal,
+) -> ContractProposal:
+    """Make lexical validators accept every directly evidenced sample value.
+
+    Regex and enum validators are often useful model suggestions, but a validator
+    that rejects its own cited literal is self-contradictory. The correction stays
+    conservative: numeric and typed validators are never relaxed here, while an
+    over-fitted lexical regex falls back to text and enums are extended only to a
+    bounded observed domain.
+    """
+
+    evidence = json.loads(json.dumps(dict(proposal.evidence or {})))
+    field_bindings = dict(evidence.get("field_bindings") or {})
+    validators = json.loads(json.dumps(dict(proposal.validators or {})))
+    normalized_fields: dict[str, dict[str, Any]] = {}
+    missing_markers = {"none", "n/a", "na", "--", "unknown", "unavailable"}
+    for field_name, rules in tuple(validators.items()):
+        raw = field_bindings.get(field_name) or []
+        bindings = raw if isinstance(raw, list) else [raw]
+        values = list(
+            dict.fromkeys(
+                value
+                for item in bindings
+                if isinstance(item, dict)
+                and str(item.get("capture_kind") or "").strip().casefold() != "derived"
+                and (value := str(item.get("source_value") or "").strip())
+                and value.casefold() not in missing_markers
+                and runtime_pattern_for_redacted_value(value) is None
+            )
+        )
+        if not values:
+            continue
+        normalized, changed = _normalize_validator_from_values(dict(rules or {}), values)
+        if not changed:
+            continue
+        validators[field_name] = normalized
+        normalized_fields[field_name] = {
+            "reason": "validator_rejected_literal_evidence",
+            "previous": dict(rules or {}),
+            "normalized": normalized,
+            "evidence_value_count": len(values),
+        }
+    if not normalized_fields:
+        return proposal
+    evidence["validator_evidence_governance"] = {
+        "strategy": "bounded_literal_domain_reconciliation",
+        "fields": normalized_fields,
+    }
+    return replace(proposal, validators=validators, evidence=evidence)
+
+
 def _header_field_spans(
     header: str,
     fields: tuple[str, ...],
@@ -375,6 +593,28 @@ def _header_field_spans(
     }
 
 
+def _table_region_context_signature(lines: list[str], region: Any) -> tuple[str, str]:
+    """Describe a table by its header and nearest enclosing section heading."""
+
+    header = re.sub(
+        r"\s+",
+        " ",
+        re.sub(r"[-+]?\d+(?:\.\d+)?", "<n>", lines[region.header_line_number - 1].casefold()),
+    ).strip()
+    context = ""
+    lower_bound = max(0, region.header_line_number - 8)
+    for index in range(region.header_line_number - 2, lower_bound - 1, -1):
+        candidate = lines[index].strip()
+        if candidate.endswith(":"):
+            context = re.sub(
+                r"\s+",
+                " ",
+                re.sub(r"[-+]?\d+(?:\.\d+)?", "<n>", candidate.casefold()),
+            ).strip()
+            break
+    return context, header
+
+
 def _normalize_table_column_bindings(
     proposal: ContractProposal,
     *,
@@ -397,9 +637,36 @@ def _normalize_table_column_bindings(
     normalized_validator_fields: set[str] = set()
     all_regions: set[tuple[str, int]] = set()
     layouts: set[str] = set()
+    plans = {
+        sample_id: profile_cli_structure("\n".join(lines), sample_id=sample_id)
+        for sample_id, lines in samples.items()
+    }
+    original_region_signatures: dict[str, set[tuple[str, str]]] = {
+        field: set() for field in declared
+    }
+    for field, raw in bindings.items():
+        items = raw if isinstance(raw, list) else [raw]
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            sample_id = str(item.get("sample_id") or "").strip()
+            lines = samples.get(sample_id)
+            plan = plans.get(sample_id)
+            try:
+                line_number = int(item.get("line") or item.get("line_number"))
+            except (TypeError, ValueError):
+                continue
+            if not lines or plan is None:
+                continue
+            for region in plan.table_regions:
+                if region.first_row_line_number <= line_number <= region.last_row_line_number:
+                    original_region_signatures.setdefault(str(field), set()).add(
+                        _table_region_context_signature(lines, region)
+                    )
+                    break
 
     for sample_id, lines in samples.items():
-        plan = profile_cli_structure("\n".join(lines), sample_id=sample_id)
+        plan = plans[sample_id]
         layouts.add(plan.layout_kind)
         for region in plan.table_regions:
             region_key = (sample_id, region.header_line_number)
@@ -408,6 +675,13 @@ def _normalize_table_column_bindings(
             spans = _header_field_spans(header, declared)
             ordered_starts = sorted({start for start, _end, _label in spans.values()})
             for field, (start, _match_end, label) in spans.items():
+                allowed_signatures = original_region_signatures.get(field) or set()
+                if (
+                    allowed_signatures
+                    and _table_region_context_signature(lines, region)
+                    not in allowed_signatures
+                ):
+                    continue
                 next_starts = [value for value in ordered_starts if value > start]
                 end = next_starts[0] if next_starts else None
                 column_values = [
@@ -915,16 +1189,21 @@ Use an empty primary_keys list only when every sample proves a singleton entity.
         )
 
     proposal = _normalize_capture_requirements(
-        _normalize_binding_lines(
+        _prune_unverifiable_field_bindings(
             _normalize_table_column_bindings(
-                proposal,
+                _normalize_binding_lines(
+                    _normalize_capture_kind_aliases(proposal),
+                    samples_text=samples_text,
+                ),
                 samples_text=samples_text,
             ),
             samples_text=samples_text,
         ),
         structure_profile=structure_profile,
     )
-    proposal = _normalize_redacted_value_validators(proposal)
+    proposal = _normalize_redacted_value_validators(
+        _normalize_evidence_bound_validators(proposal)
+    )
     if catalog_match:
         conflicts = _catalog_compatibility_errors(proposal, catalog_match)
         if conflicts:
@@ -982,13 +1261,18 @@ variant, or propose separate contracts when the variants cannot share a schema.
         source="llm_revision",
     )
     proposal = _normalize_capture_requirements(
-        _normalize_binding_lines(
+        _prune_unverifiable_field_bindings(
             _normalize_table_column_bindings(
-                proposal,
+                _normalize_binding_lines(
+                    _normalize_capture_kind_aliases(proposal),
+                    samples_text=samples_text,
+                ),
                 samples_text=samples_text,
             ),
             samples_text=samples_text,
         ),
         structure_profile=structure_profile,
     )
-    return _normalize_redacted_value_validators(proposal)
+    return _normalize_redacted_value_validators(
+        _normalize_evidence_bound_validators(proposal)
+    )

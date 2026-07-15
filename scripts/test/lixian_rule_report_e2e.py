@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import re
 import sys
 from collections import Counter
 from datetime import datetime, timezone
@@ -22,12 +23,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.core.parser.contract_inference import infer_contract  # noqa: E402
 from src.core.patrol.change_policy import (  # noqa: E402
     compare_with_policy,
     policy_from_dict,
 )
-from src.core.patrol.command_splitter import split_cli_capture  # noqa: E402
 from src.core.patrol.event_rules import condition_matches  # noqa: E402
 from src.core.patrol.leadership_report import (  # noqa: E402
     build_leadership_report,
@@ -35,7 +34,6 @@ from src.core.patrol.leadership_report import (  # noqa: E402
     render_leadership_markdown,
 )
 from src.core.patrol.raw_importer import (  # noqa: E402
-    _read_text_best_effort,
     preview_raw_path,
 )
 from src.core.rule_control.dataset_context import (  # noqa: E402
@@ -54,7 +52,12 @@ ASSET_SPECS = (
     {
         "key": "interface",
         "command": "display interface brief",
-        "target_fields": ("status",),
+        "observation_targets": (
+            {
+                "canonical_field": "status",
+                "observation_type": "interface.oper_status",
+            },
+        ),
         "policy_intent": (
             "接口运行状态仅比较状态迁移；UP 到 DOWN 形成故障，DOWN 到 UP 形成恢复。"
             "首次采集的 DOWN 不直接判定故障，管理关闭状态不得误报。"
@@ -80,7 +83,16 @@ ASSET_SPECS = (
     {
         "key": "optical",
         "command": "display transceiver diagnosis interface",
-        "target_fields": ("rx_power_dbm", "tx_power_dbm"),
+        "observation_targets": (
+            {
+                "canonical_field": "rx_power_dbm",
+                "observation_type": "interface.optical.rx_power",
+            },
+            {
+                "canonical_field": "tx_power_dbm",
+                "observation_type": "interface.optical.tx_power",
+            },
+        ),
         "policy_intent": (
             "光功率采用 dBm。低于或等于 -17 dBm 为 warning，低于或等于 -20 dBm 为 critical，"
             "恢复阈值为 -15 dBm；空值、DOM 不支持和模块缺失不按低光功率处理。"
@@ -149,23 +161,31 @@ def _latest_parser_report(
     return report
 
 
-def _split_snapshot_groups(
-    report: dict[str, Any], period: str
-) -> list[dict[str, Any]]:
+def _period_from_file_path(file_path: str) -> str:
+    match = re.search(r"(?:^|[\\/])(Q[123])(?:[\\/]|$)", str(file_path), re.IGNORECASE)
+    if not match:
+        raise AssertionError(f"Parser sample path has no Q1/Q2/Q3 period: {file_path}")
+    return match.group(1).upper()
+
+
+def _split_snapshot_groups(report: dict[str, Any]) -> list[dict[str, Any]]:
     parsed = list(report.get("parsed_records") or [])
     groups: list[dict[str, Any]] = []
     offset = 0
+    period_ordinals: Counter[str] = Counter()
     for index, sample in enumerate(report.get("sample_results") or []):
         count = int(sample.get("record_count") or 0)
         records = parsed[offset : offset + count]
         offset += count
         if len(records) != count:
             raise AssertionError("Parser report record groups do not match sample counts")
+        period = _period_from_file_path(str(sample.get("file_path") or ""))
+        period_ordinals[period] += 1
         groups.append(
             {
                 "period": period,
                 "device_id": str(sample.get("device_id") or f"device-{index + 1}"),
-                "group_id": f"snapshot-{period.lower()}-{index + 1}",
+                "group_id": f"snapshot-{period.lower()}-{period_ordinals[period]}",
                 "records": records,
             }
         )
@@ -312,16 +332,55 @@ def _sanitized_generation_context(
     }
 
 
-def _raw_semantic_evidence(source_root: Path, command: str) -> str:
-    samples: list[str] = []
-    for period in PERIODS:
-        for path in sorted((source_root / period).glob("*.txt")):
-            for block in split_cli_capture(_read_text_best_effort(path)):
-                if block.command_canonical == command:
-                    samples.append(block.raw_output)
-    if not samples:
-        raise AssertionError(f"no raw semantic evidence found for {command}")
-    return "\n\n".join(samples)
+def _canonical_parser_contract(report: dict[str, Any]) -> dict[str, Any]:
+    loop = dict(report.get("agent_loop") or {})
+    contract = dict(loop.get("contract") or {})
+    if loop.get("status") != "passed" or not contract:
+        raise AssertionError("canonical Parser Agent report has no passed Contract")
+    declared = {
+        str(field)
+        for field in [
+            *(contract.get("required_fields") or []),
+            *(contract.get("optional_fields") or []),
+        ]
+    }
+    emitted = {
+        str(field)
+        for record in report.get("parsed_records") or []
+        if isinstance(record, dict)
+        for field in record
+    }
+    if not emitted or emitted - declared:
+        raise AssertionError(
+            "canonical Parser Contract does not own every emitted field: "
+            + ", ".join(sorted(emitted - declared))
+        )
+    return contract
+
+
+def _sampling_target_fields(
+    contract: dict[str, Any], spec: dict[str, Any]
+) -> tuple[str, ...]:
+    desired = {
+        str(item["observation_type"]) for item in spec["observation_targets"]
+    }
+    semantics = dict(contract.get("state_semantics") or {})
+    direct = [
+        field
+        for field, raw in semantics.items()
+        if isinstance(raw, dict) and str(raw.get("observation_type") or "") in desired
+    ]
+    if direct:
+        return tuple(direct)
+    comparable = [
+        field
+        for field, raw in semantics.items()
+        if isinstance(raw, dict)
+        and str(raw.get("semantic_type") or "").casefold()
+        in {"state", "gauge", "counter", "percentage"}
+        and raw.get("ignore") is not True
+    ]
+    return tuple(comparable or contract.get("required_fields") or ())
 
 
 def _event_constraints(
@@ -351,7 +410,11 @@ def _event_constraints(
             ],
             "max_rule_count": 3,
         }
-    direction = "Rx" if field_name.startswith("rx_") else "Tx"
+    direction = (
+        "Rx"
+        if observation_type.endswith(".rx_power") or "rx_power" in field_name.casefold()
+        else "Tx"
+    )
     low = f"Optical{direction}PowerLow"
     critical = f"Optical{direction}PowerCritical"
     recovered = "OpticalRecovered"
@@ -391,29 +454,23 @@ def _event_constraints(
 def _generate_asset_bundle(
     *,
     spec: dict[str, Any],
-    source_root: Path,
     reports_root: Path,
     max_records: int,
 ) -> dict[str, Any]:
-    reports = {
-        period: _latest_parser_report(reports_root, period, spec["command"])
-        for period in PERIODS
-    }
-    groups = [
-        group
-        for period in PERIODS
-        for group in _split_snapshot_groups(reports[period], period)
-    ]
+    canonical_report = _latest_parser_report(reports_root, "CORPUS", spec["command"])
+    seed = _canonical_parser_contract(canonical_report)
+    groups = _split_snapshot_groups(canonical_report)
+    period_counts = Counter(str(group["period"]) for group in groups)
+    expected_period_counts = {period: 2 for period in PERIODS}
+    if dict(period_counts) != expected_period_counts:
+        raise AssertionError(
+            f"canonical Parser corpus has wrong period coverage: {dict(period_counts)}"
+        )
     safe = _sanitized_generation_context(
         groups,
-        target_fields=spec["target_fields"],
+        target_fields=_sampling_target_fields(seed, spec),
         max_records=max_records,
     )
-    seed = infer_contract(
-        command=spec["command"],
-        samples_text=_raw_semantic_evidence(source_root, spec["command"]),
-        use_manual_profile=True,
-    ).to_dict()
     contract_result = OBSERVATION_SKILL.run_contract_generation(
         {
             "mode": "infer_and_validate",
@@ -425,6 +482,8 @@ def _generate_asset_bundle(
             "proposal": seed,
             "policy_intent": spec["policy_intent"],
             "event_intent": spec["event_intent"],
+            "observation_targets": list(spec["observation_targets"]),
+            "strict_observation_targets": True,
             "generation_provider": "llm",
             "max_agent_attempts": 5,
         }
@@ -438,13 +497,14 @@ def _generate_asset_bundle(
     semantics = dict(contract.get("state_semantics") or {})
     targets: list[dict[str, Any]] = []
     constraints_by_observation: dict[str, dict[str, Any]] = {}
-    for field_name in spec["target_fields"]:
-        field_semantics = dict(semantics.get(field_name) or {})
+    desired_observation_types = {
+        str(item["observation_type"]) for item in spec["observation_targets"]
+    }
+    for field_name, raw_semantics in semantics.items():
+        field_semantics = dict(raw_semantics or {})
         observation_type = str(field_semantics.get("observation_type") or "")
-        if not observation_type:
-            raise AssertionError(
-                f"governed observation_type is missing for {spec['command']}:{field_name}"
-            )
+        if observation_type not in desired_observation_types:
+            continue
         targets.append(
             {
                 "field_name": field_name,
@@ -455,6 +515,12 @@ def _generate_asset_bundle(
         )
         constraints_by_observation[observation_type] = _event_constraints(
             spec, observation_type, field_name
+        )
+    observed_targets = {str(target["observation_type"]) for target in targets}
+    if observed_targets != desired_observation_types:
+        raise AssertionError(
+            f"governed observation targets for {spec['command']} are incomplete: "
+            f"expected={sorted(desired_observation_types)}, actual={sorted(observed_targets)}"
         )
     policy_result = POLICY_SKILL.run_change_policy_generation(
         {
@@ -505,7 +571,7 @@ def _generate_asset_bundle(
     return {
         "key": spec["key"],
         "command": spec["command"],
-        "reports": reports,
+        "reports": {"CORPUS": canonical_report},
         "groups": groups,
         "privacy": safe["privacy"],
         "contract": contract,
@@ -569,7 +635,10 @@ def _domain_observations(
                         "unit": semantic.get("unit"),
                         "observation_type": observation_type,
                         "command": bundle["command"],
-                        "observed_at": f"2026-{ {'Q1': '01', 'Q2': '04', 'Q3': '07'}[period] }-01T00:00:00+00:00",
+                        "observed_at": (
+                            f"2026-{ {'Q1': '01', 'Q2': '04', 'Q3': '07'}[period] }"
+                            "-01T00:00:00+00:00"
+                        ),
                         "contract_version": "llm-candidate",
                         "context": context,
                         "dimensions": (
@@ -852,7 +921,6 @@ def run_acceptance(
     bundles = [
         _generate_asset_bundle(
             spec=dict(spec),
-            source_root=source_root,
             reports_root=parser_reports_root,
             max_records=max_records,
         )

@@ -429,7 +429,7 @@ def test_llm_loop_cannot_replace_approved_parser_contract(monkeypatch):
     assert result["proposal"]["state_semantics"]["status"]["observation_type"] == (
         "interface.oper_status"
     )
-    assert result["agent_loop"]["attempt_count"] == 2
+    assert result["agent_loop"]["attempt_count"] == 1
 
 
 def test_llm_loop_requires_explicit_policy_target_decisions(monkeypatch):
@@ -521,3 +521,188 @@ def test_llm_loop_requires_explicit_policy_target_decisions(monkeypatch):
         "interface.oper_status"
     )
     assert result["proposal"]["state_semantics"]["protocol"]["monitor"] is False
+
+
+def test_llm_loop_inherits_approved_parser_schema_when_model_keeps_rewriting_it(monkeypatch):
+    module = _load_skill_module()
+
+    class SemanticOnlyProvider:
+        name = "weak-test-model"
+
+        def propose(
+            self,
+            *,
+            stage,
+            context,
+            attempt,
+            previous_candidate,
+            validator_feedback,
+        ):
+            assert stage == "observation_contract"
+            return ProviderResult(
+                candidate={
+                    "category": "invented_category",
+                    "entity_type": "invented_entity",
+                    "primary_keys": ["status"],
+                    "required_fields": ["interface"],
+                    "optional_fields": ["status"],
+                    "validators": {"ip_address": {"type": "text"}},
+                    "state_semantics": {
+                        "interface": {"semantic_type": "identity"},
+                        "status": {
+                            "semantic_type": "state",
+                            "observation_type": "interface.oper_status",
+                        },
+                        "protocol": {
+                            "semantic_type": "state",
+                            "comparison_role": "metadata",
+                            "monitor": False,
+                        },
+                        "ip_address": {
+                            "semantic_type": "text",
+                            "comparison_role": "metadata",
+                            "monitor": False,
+                        },
+                    },
+                },
+                provider=self.name,
+                model_name="mock",
+            )
+
+    monkeypatch.setitem(
+        module.DEFAULT_RULE_GENERATION_PROVIDERS._factories,
+        "llm",
+        SemanticOnlyProvider,
+    )
+    records = [
+        {
+            "interface": "GE1/0/1",
+            "status": "UP",
+            "protocol": "UP",
+            "ip_address": "192.0.2.1",
+        }
+    ]
+    seed = {
+        "category": "interface_oper",
+        "entity_type": "interface",
+        "primary_keys": ["interface"],
+        "required_fields": ["interface", "status"],
+        "optional_fields": ["protocol", "ip_address"],
+        "validators": {
+            "ip_address": {"type": "regex", "pattern": "^\\d+(?:\\.\\d+){3}$"}
+        },
+        "allow_empty": False,
+        "empty_patterns": [],
+        "ignore_fields": [],
+        "state_semantics": {
+            "interface": {"semantic_type": "identity"},
+            "status": {
+                "semantic_type": "state",
+                "observation_type": "interface.oper_status",
+            },
+        },
+    }
+
+    result = module.run_contract_generation(
+        {
+            "mode": "infer_and_validate",
+            "command": "inspect arbitrary interfaces",
+            "records": records,
+            "record_groups": [{"group_id": "snapshot-1", "records": records}],
+            "proposal": seed,
+            "generation_provider": "llm",
+            "max_agent_attempts": 3,
+        }
+    )
+
+    assert result["success"] is True
+    assert result["agent_loop"]["attempt_count"] == 1
+    assert result["proposal"]["category"] == seed["category"]
+    assert result["proposal"]["entity_type"] == seed["entity_type"]
+    assert list(result["proposal"]["primary_keys"]) == seed["primary_keys"]
+    assert set(result["proposal"]["required_fields"]) == set(seed["required_fields"])
+    assert result["proposal"]["validators"] == seed["validators"]
+    governance = result["proposal"]["evidence"]["asset_generation_governance"]
+    assert governance["schema_source"] == "approved_parser_contract"
+    assert "validators" in governance["immutable_fields"]
+
+
+def test_llm_loop_binds_policy_owned_observation_namespace(monkeypatch):
+    module = _load_skill_module()
+
+    class FreeNamingProvider:
+        name = "weak-test-model"
+
+        def propose(self, **_kwargs):
+            return ProviderResult(
+                candidate={
+                    "category": "network",
+                    "entity_type": "interface",
+                    "primary_keys": ["interface"],
+                    "required_fields": ["interface", "link"],
+                    "optional_fields": ["protocol"],
+                    "state_semantics": {
+                        "interface": {"semantic_type": "identity"},
+                        "link": {
+                            "semantic_type": "state",
+                            "observation_type": "interface.link_state",
+                            "monitor": True,
+                        },
+                        "protocol": {
+                            "semantic_type": "state",
+                            "observation_type": "interface.protocol_state",
+                            "monitor": True,
+                        },
+                    },
+                },
+                provider=self.name,
+                model_name="mock",
+            )
+
+    monkeypatch.setitem(
+        module.DEFAULT_RULE_GENERATION_PROVIDERS._factories,
+        "llm",
+        FreeNamingProvider,
+    )
+    records = [{"interface": "GE1/0/1", "link": "UP", "protocol": "UP"}]
+    seed = {
+        "category": "network",
+        "entity_type": "interface",
+        "primary_keys": ["interface"],
+        "required_fields": ["interface", "link"],
+        "optional_fields": ["protocol"],
+        "validators": {},
+        "state_semantics": {
+            "interface": {"semantic_type": "identity"},
+            "link": {"semantic_type": "state"},
+            "protocol": {"semantic_type": "state"},
+        },
+    }
+
+    result = module.run_contract_generation(
+        {
+            "mode": "infer_and_validate",
+            "command": "inspect arbitrary interfaces",
+            "records": records,
+            "record_groups": [{"group_id": "snapshot-1", "records": records}],
+            "proposal": seed,
+            "observation_targets": [
+                {
+                    "canonical_field": "status",
+                    "observation_type": "interface.oper_status",
+                }
+            ],
+            "strict_observation_targets": True,
+            "generation_provider": "llm",
+            "max_agent_attempts": 2,
+        }
+    )
+
+    assert result["success"] is True
+    semantics = result["proposal"]["state_semantics"]
+    assert semantics["link"]["observation_type"] == "interface.oper_status"
+    assert semantics["link"]["monitor"] is True
+    assert "observation_type" not in semantics["protocol"]
+    assert semantics["protocol"]["monitor"] is False
+    governance = result["proposal"]["evidence"]["observation_target_governance"]
+    assert governance["resolved"] == {"interface.oper_status": "link"}

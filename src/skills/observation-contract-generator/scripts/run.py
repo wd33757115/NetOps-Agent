@@ -21,6 +21,9 @@ from src.core.parser.contract_validation import (  # noqa: E402
     proposal_from_dict,
 )
 from src.core.parser.semantic_catalog import (  # noqa: E402
+    canonical_field_for_name,
+)
+from src.core.parser.semantic_catalog import (
     field_semantics as catalog_field_semantics,
 )
 from src.core.rule_control.generation_agent import (  # noqa: E402
@@ -89,6 +92,8 @@ def _validate_contract_by_group(
     field_inventory: list[str],
     contract_seed: dict[str, Any] | None = None,
     require_policy_targets: bool = False,
+    observation_targets: list[dict[str, Any]] | None = None,
+    strict_observation_targets: bool = False,
 ) -> dict[str, Any]:
     declared = {
         str(item)
@@ -110,6 +115,8 @@ def _validate_contract_by_group(
         field_inventory=field_inventory,
         contract_seed=contract_seed,
         require_policy_targets=require_policy_targets,
+        observation_targets=observation_targets,
+        strict_observation_targets=strict_observation_targets,
         field_profiles=profile_fields(
             all_records,
             field_inventory=field_inventory,
@@ -231,12 +238,134 @@ def _apply_governed_semantic_hints(
     return output
 
 
+def _inherit_approved_parser_schema(
+    candidate: dict[str, Any],
+    contract_seed: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Bind an untrusted semantic proposal to the approved Parser schema.
+
+    Parser activation has already established record identity, field presence,
+    validators and empty-output behavior. Regenerating those facts in an LLM loop
+    creates drift without adding information, so the model is allowed to enrich
+    semantics while the structural contract is inherited verbatim.
+    """
+
+    seed = dict(contract_seed or {})
+    if not seed:
+        return dict(candidate)
+    output = json.loads(json.dumps(dict(candidate or {})))
+    immutable_fields = (
+        "category",
+        "entity_type",
+        "primary_keys",
+        "required_fields",
+        "optional_fields",
+        "validators",
+        "allow_empty",
+        "empty_patterns",
+        "ignore_fields",
+    )
+    inherited: list[str] = []
+    for field in immutable_fields:
+        if field not in seed:
+            continue
+        output[field] = json.loads(json.dumps(seed[field]))
+        inherited.append(field)
+    evidence = dict(output.get("evidence") or {})
+    evidence["asset_generation_governance"] = {
+        "schema_source": "approved_parser_contract",
+        "immutable_fields": inherited,
+        "model_scope": "state_semantics_and_policy_intent",
+    }
+    output["evidence"] = evidence
+    return output
+
+
+def _target_field_matches(
+    field_inventory: list[str],
+    target: dict[str, Any],
+    semantics: dict[str, Any],
+) -> list[str]:
+    expected = str(target.get("canonical_field") or "").strip().casefold()
+    observation_type = str(target.get("observation_type") or "").strip()
+    matches: list[str] = []
+    for field in field_inventory:
+        normalized = str(field).strip().casefold()
+        if re.search(r"(?:^|_)(?:alarm|warning|threshold|high|low)(?:_|$)", normalized):
+            if not re.search(
+                r"(?:^|_)(?:alarm|warning|threshold|high|low)(?:_|$)", expected
+            ):
+                continue
+        canonical = canonical_field_for_name(field) or normalized
+        if canonical == expected or normalized == expected:
+            matches.append(field)
+    preferred = [
+        field
+        for field in matches
+        if str((semantics.get(field) or {}).get("observation_type") or "")
+        == observation_type
+    ]
+    return preferred if len(preferred) == 1 else matches
+
+
+def _apply_observation_target_constraints(
+    candidate: dict[str, Any],
+    *,
+    field_inventory: list[str],
+    observation_targets: list[dict[str, Any]],
+    strict: bool,
+) -> dict[str, Any]:
+    """Assign policy-owned observation namespaces to model-selected semantics."""
+
+    if not observation_targets:
+        return candidate
+    output = json.loads(json.dumps(dict(candidate)))
+    semantics = dict(output.get("state_semantics") or {})
+    resolved: dict[str, str] = {}
+    for target in observation_targets:
+        observation_type = str(target.get("observation_type") or "").strip()
+        matches = _target_field_matches(field_inventory, target, semantics)
+        if not observation_type or len(matches) != 1:
+            continue
+        field = matches[0]
+        metadata = dict(semantics.get(field) or {})
+        metadata["observation_type"] = observation_type
+        metadata["comparison_role"] = "observation"
+        metadata["monitor"] = True
+        semantics[field] = metadata
+        resolved[observation_type] = field
+    if strict:
+        target_fields = set(resolved.values())
+        for field, raw in tuple(semantics.items()):
+            if field in target_fields or not isinstance(raw, dict):
+                continue
+            metadata = dict(raw)
+            semantic_type = str(metadata.get("semantic_type") or "").strip().casefold()
+            if semantic_type not in COMPARABLE_SEMANTIC_TYPES:
+                continue
+            metadata.pop("observation_type", None)
+            metadata["comparison_role"] = "metadata"
+            metadata["monitor"] = False
+            semantics[field] = metadata
+    evidence = dict(output.get("evidence") or {})
+    evidence["observation_target_governance"] = {
+        "strategy": "policy_owned_namespace_binding",
+        "strict": strict,
+        "resolved": resolved,
+    }
+    output["state_semantics"] = semantics
+    output["evidence"] = evidence
+    return output
+
+
 def _contract_governance_errors(
     candidate: dict[str, Any],
     *,
     field_inventory: list[str],
     contract_seed: dict[str, Any] | None,
     require_policy_targets: bool = False,
+    observation_targets: list[dict[str, Any]] | None = None,
+    strict_observation_targets: bool = False,
     field_profiles: dict[str, dict[str, Any]] | None = None,
 ) -> list[str]:
     errors: list[str] = []
@@ -335,6 +464,30 @@ def _contract_governance_errors(
                 f"observation_type {observation_type} maps to multiple fields: "
                 + ", ".join(sorted(fields))
             )
+    expected_observation_types: set[str] = set()
+    for target in observation_targets or []:
+        observation_type = str(target.get("observation_type") or "").strip()
+        if not observation_type:
+            errors.append("observation target requires observation_type")
+            continue
+        expected_observation_types.add(observation_type)
+        matches = _target_field_matches(field_inventory, target, semantics)
+        if len(matches) != 1:
+            errors.append(
+                f"observation target {observation_type} must resolve to exactly one field; "
+                f"matched={matches}"
+            )
+            continue
+        field = matches[0]
+        if str((semantics.get(field) or {}).get("observation_type") or "") != observation_type:
+            errors.append(
+                f"state_semantics.{field}.observation_type must match governed value "
+                f"{observation_type!r}"
+            )
+    if strict_observation_targets:
+        extras = sorted(set(observation_fields) - expected_observation_types)
+        if extras:
+            errors.append("contract exposes unapproved observation types: " + ", ".join(extras))
     for field, expected in _governed_semantic_hints(field_inventory, seed).items():
         actual = semantics.get(field)
         if not isinstance(actual, dict):
@@ -451,11 +604,29 @@ def run_contract_generation(params: dict[str, Any]) -> dict[str, Any]:
             field_inventory,
             proposal_payload if isinstance(proposal_payload, dict) else None,
         )
+        observation_targets = [
+            dict(item)
+            for item in params.get("observation_targets") or []
+            if isinstance(item, dict)
+        ]
+        strict_observation_targets = bool(
+            params.get("strict_observation_targets", bool(observation_targets))
+        )
 
         def validate_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
-            governed = _apply_governed_semantic_hints(candidate, governed_hints)
+            schema_bound = _inherit_approved_parser_schema(
+                candidate,
+                proposal_payload if isinstance(proposal_payload, dict) else None,
+            )
+            governed = _apply_governed_semantic_hints(schema_bound, governed_hints)
+            target_bound = _apply_observation_target_constraints(
+                governed,
+                field_inventory=field_inventory,
+                observation_targets=observation_targets,
+                strict=strict_observation_targets,
+            )
             enriched = enrich_contract_reference_semantics(
-                contract=governed,
+                contract=target_bound,
                 records=records,
             )
             return _validate_contract_by_group(
@@ -465,6 +636,8 @@ def run_contract_generation(params: dict[str, Any]) -> dict[str, Any]:
                 field_inventory=field_inventory,
                 contract_seed=(proposal_payload if isinstance(proposal_payload, dict) else None),
                 require_policy_targets=True,
+                observation_targets=observation_targets,
+                strict_observation_targets=strict_observation_targets,
             )
 
         context = {
@@ -481,10 +654,22 @@ def run_contract_generation(params: dict[str, Any]) -> dict[str, Any]:
             "contract_seed": proposal_payload if isinstance(proposal_payload, dict) else None,
             "contract_constraints": {
                 key: proposal_payload.get(key)
-                for key in ("category", "entity_type", "primary_keys", "required_fields")
+                for key in (
+                    "category",
+                    "entity_type",
+                    "primary_keys",
+                    "required_fields",
+                    "optional_fields",
+                    "validators",
+                    "allow_empty",
+                    "empty_patterns",
+                    "ignore_fields",
+                )
                 if isinstance(proposal_payload, dict) and proposal_payload.get(key) is not None
             },
             "governed_semantic_hints": governed_hints,
+            "observation_targets": observation_targets,
+            "strict_observation_targets": strict_observation_targets,
             "policy_intent": params.get("policy_intent"),
             "event_intent": params.get("event_intent"),
         }

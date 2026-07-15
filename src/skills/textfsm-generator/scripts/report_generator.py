@@ -36,6 +36,9 @@ class GenerationReport:
     entity_type: str | None = None
     primary_keys: list[str] | None = None
     sample_count: int = 1
+    source_sample_count: int | None = None
+    unique_sample_count: int | None = None
+    duplicate_sample_count: int | None = None
     passed_samples: int = 0
     validation_pass_rate: float = 0.0
     sample_results: list[dict[str, Any]] | None = None

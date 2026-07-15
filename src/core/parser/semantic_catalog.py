@@ -254,3 +254,14 @@ def canonical_field_for_label(
         }
     }
     return next(iter(matches)) if len(matches) == 1 else None
+
+
+def canonical_field_for_name(
+    field_name: str,
+    *,
+    catalog_path: str | Path = CATALOG_PATH,
+) -> str | None:
+    """Resolve a governed field from a qualified machine identifier."""
+
+    catalog = load_semantic_catalog(catalog_path)
+    return _canonical_field_for_name(field_name, catalog=catalog)

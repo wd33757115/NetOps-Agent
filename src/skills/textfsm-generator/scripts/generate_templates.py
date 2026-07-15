@@ -749,6 +749,18 @@ def _process_candidate(
         candidate.samples[ref.index] for ref in sample_partition.negative
     )
     positive_samples = tuple([*positive_trigger_samples, *regression_samples])
+    negative_hashes = {ref.content_sha256 for ref in sample_partition.negative}
+    replay_positive_samples = tuple(
+        [
+            *(
+                sample
+                for sample in candidate.samples
+                if hashlib.sha256(sample.output.encode("utf-8")).hexdigest()
+                not in negative_hashes
+            ),
+            *regression_samples,
+        ]
+    )
     sample_roles = {
         **{ref.content_sha256: "train" for ref in sample_partition.train},
         **{ref.content_sha256: "holdout" for ref in sample_partition.holdout},
@@ -973,7 +985,7 @@ def _process_candidate(
     retry_count = max(0, int(agent_result.get("template_attempt") or 0) - 1)
     validations, sample_results = _validate_samples(
         template_text,
-        positive_samples,
+        replay_positive_samples,
         spec,
         field_bindings=dict((proposal.evidence or {}).get("field_bindings") or {}),
     ) if template_text else ([], [])
@@ -1013,7 +1025,7 @@ def _process_candidate(
             # counts remain available for evidence-volume auditing below.
             "sample_count": total_validation_samples,
             "source_sample_count": len(validation_candidate.samples),
-            "unique_sample_count": total_validation_samples,
+            "unique_sample_count": len(positive_samples) + len(negative_results),
             "sample_partition": sample_partition.to_dict(),
             "structure_profile": parse_plan,
             "trigger_sample_count": trigger_sample_count,
@@ -1124,7 +1136,10 @@ def _process_candidate(
         else None,
         parsed_records=all_records or None,
         mode=mode,
-        sample_count=len(validation_candidate.samples),
+        sample_count=total_validation_samples,
+        source_sample_count=len(validation_candidate.samples),
+        unique_sample_count=len(positive_samples) + len(negative_results),
+        duplicate_sample_count=sample_partition.duplicate_sample_count,
         passed_samples=passed_samples,
         validation_pass_rate=pass_rate,
         sample_results=sample_results,
