@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from 'react-query'
 import { MemoryRouter } from 'react-router-dom'
-import { vi } from 'vitest'
+import { afterEach, vi } from 'vitest'
 import OfflinePatrolPanel, {
   buildOfflineAssetControlUrl,
   buildOfflineRuleBundleUrl,
@@ -11,7 +11,7 @@ import OfflinePatrolPanel, {
   offlineJobDisplayName,
 } from './OfflinePatrolPanel'
 
-const { list } = vi.hoisted(() => ({
+const { list, breakpoint } = vi.hoisted(() => ({
   list: vi.fn().mockResolvedValue({
     items: [
       {
@@ -34,6 +34,7 @@ const { list } = vi.hoisted(() => ({
     page: 1,
     page_size: 25,
   }),
+  breakpoint: { mobile: false },
 }))
 
 vi.mock('../../services/api', async (importOriginal) => {
@@ -64,7 +65,11 @@ vi.mock('../../services/api', async (importOriginal) => {
   }
 })
 
-vi.mock('../../hooks/useBreakpoint', () => ({ useIsMobile: () => false }))
+vi.mock('../../hooks/useBreakpoint', () => ({ useIsMobile: () => breakpoint.mobile }))
+
+afterEach(() => {
+  breakpoint.mobile = false
+})
 
 const renderPanel = () => {
   const queryClient = new QueryClient({
@@ -145,5 +150,16 @@ describe('OfflinePatrolPanel', () => {
     await user.click(screen.getByRole('button', { name: /对比两个周期/ }))
     expect(await screen.findByText('双周期变化分析')).toBeInTheDocument()
     expect(screen.getByText('事件发布')).toBeInTheDocument()
+  })
+
+  it('renders mobile tasks as actionable records instead of a horizontally clipped table', async () => {
+    breakpoint.mobile = true
+    renderPanel()
+
+    expect(await screen.findByText('Q1 Parser 验证')).toBeInTheDocument()
+    expect(screen.getByText('共 10001 个任务')).toBeInTheDocument()
+    expect(screen.queryByRole('columnheader', { name: '任务 / 创建时间' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /详情/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '更多操作' })).toBeInTheDocument()
   })
 })

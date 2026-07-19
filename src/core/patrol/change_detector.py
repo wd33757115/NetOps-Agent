@@ -28,6 +28,7 @@ from src.core.patrol.repository import (
     AnalysisLeaseHeartbeat,
     PatrolRepository,
 )
+from src.core.patrol.unstructured_diff import build_unstructured_diff
 from src.core.state.observation_applicability import APPLICABILITY_CONTEXT_KEY
 from src.core.state.repository import StateRepository
 
@@ -79,6 +80,22 @@ def _new_change(**values: Any) -> NetworkChange:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _snapshot_unstructured_diff(
+    previous: SnapshotRecord,
+    current: SnapshotRecord,
+    *,
+    profile_name: str | None = None,
+) -> dict[str, Any]:
+    metadata = dict(current.metadata or {})
+    selected_profile = profile_name or str(metadata.get("comparison_profile") or "") or None
+    return build_unstructured_diff(
+        previous.raw_text,
+        current.raw_text,
+        command=current.command_canonical,
+        profile_name=selected_profile,
+    )
 
 
 class ExplicitBaselineNotReadyError(ValueError):
@@ -259,13 +276,21 @@ def _policy_compare_result(
         old=old,
         new=new,
         field=str(current.get("field_name") or ""),
+        context=dict(
+            (current.get("metadata_json") or {}).get(APPLICABILITY_CONTEXT_KEY)
+            or {}
+        ),
     )
     result["policy_id"] = active.get("policy_id")
     result["policy_version_id"] = active.get("version_id")
     result["observation_type"] = observation_type
     result["comparison_type"] = policy_payload.get("compare_mode")
     result["decision_reason"] = (
-        "change_policy_matched" if result.get("changed") else "change_policy_suppressed"
+        "threshold_unknown"
+        if result.get("threshold_status") == "threshold_unknown"
+        else "change_policy_matched"
+        if result.get("changed")
+        else "change_policy_suppressed"
     )
     result["policy_snapshot"] = policy_payload
     return result
@@ -432,6 +457,36 @@ def _observation_dimensions(observation: dict[str, Any]) -> dict[str, Any]:
     return dimensions
 
 
+def _observation_unstructured_diff(
+    previous: dict[str, Any] | None,
+    current: dict[str, Any] | None,
+    repository: PatrolRepository,
+) -> dict[str, Any] | None:
+    basis = current or previous or {}
+    if (
+        _observation_type(basis) != "raw.command.hash"
+        and str(basis.get("field_name") or "") != "raw_text_hash"
+    ):
+        return None
+    if previous is None or current is None:
+        return None
+    previous_snapshot_id = str(previous.get("snapshot_id") or "")
+    current_snapshot_id = str(current.get("snapshot_id") or "")
+    if not previous_snapshot_id or not current_snapshot_id:
+        return None
+    previous_snapshot = repository.get_snapshot(previous_snapshot_id)
+    current_snapshot = repository.get_snapshot(current_snapshot_id)
+    if previous_snapshot is None or current_snapshot is None:
+        return None
+    metadata = dict(current.get("metadata_json") or {})
+    comparison = dict(metadata.get("unstructured_comparison") or {})
+    return _snapshot_unstructured_diff(
+        previous_snapshot,
+        current_snapshot,
+        profile_name=str(comparison.get("profile") or "") or None,
+    )
+
+
 def _observation_to_change(
     *,
     previous: dict[str, Any] | None,
@@ -441,17 +496,21 @@ def _observation_to_change(
     detected_at: str,
     policy_result: dict[str, Any] | None = None,
     decision_reason: str | None = None,
+    unstructured_diff: dict[str, Any] | None = None,
 ) -> NetworkChange:
     basis = current or previous or {}
     old = previous.get("value_json") if previous else None
     new = current.get("value_json") if current else None
+    dimensions = _observation_dimensions(basis)
+    if unstructured_diff is not None:
+        dimensions["unstructured_diff"] = dict(unstructured_diff)
     return _new_change(
         run_id=run_id,
         device_id=basis.get("device_id"),
         command=basis.get("canonical_command"),
         entity_type=str(basis.get("entity_type") or "record"),
         entity_key=str(basis.get("entity_key") or ""),
-        dimensions=_observation_dimensions(basis),
+        dimensions=dimensions,
         field=str(basis.get("field_name") or ""),
         old_value=old,
         new_value=new,
@@ -479,9 +538,14 @@ def _observation_to_change(
         observation_type=_observation_type(basis),
         change_policy_id=(policy_result or {}).get("policy_id"),
         change_policy_version_id=(policy_result or {}).get("policy_version_id"),
-        comparison_type=(policy_result or {}).get("comparison_type") or "exact_diff",
+        comparison_type=(
+            f"unstructured_{unstructured_diff.get('comparison_mode')}"
+            if unstructured_diff is not None
+            else (policy_result or {}).get("comparison_type") or "exact_diff"
+        ),
         decision_reason=decision_reason
         or (policy_result or {}).get("decision_reason")
+        or ("unstructured_output_changed" if unstructured_diff is not None else None)
         or change_type,
         policy_snapshot=(policy_result or {}).get("policy_snapshot"),
         observed_at=str(basis.get("observed_at") or detected_at),
@@ -584,13 +648,15 @@ def detect_changes_between_snapshots(
     entity_type: str = "record",
     primary_keys: list[str] | None = None,
 ) -> list[NetworkChange]:
-    if (
+    raw_comparison = (
         previous.parse_status == "raw_hashed"
         or current.parse_status == "raw_hashed"
-        or previous.structured_json is None
-        or current.structured_json is None
-    ):
-        if previous.raw_text_hash == current.raw_text_hash:
+        or str((previous.metadata or {}).get("handling") or "") == "raw_hash_diff"
+        or str((current.metadata or {}).get("handling") or "") == "raw_hash_diff"
+    )
+    if raw_comparison:
+        diff = _snapshot_unstructured_diff(previous, current)
+        if not diff.get("changed"):
             return []
         return [
             _new_change(
@@ -599,7 +665,10 @@ def detect_changes_between_snapshots(
                 command=current.command_canonical,
                 entity_type="raw_command_output",
                 entity_key=current.command_canonical,
-                dimensions={"command": current.command_canonical},
+                dimensions={
+                    "command": current.command_canonical,
+                    "unstructured_diff": diff,
+                },
                 field="raw_text_hash",
                 old_value=previous.raw_text_hash,
                 new_value=current.raw_text_hash,
@@ -607,9 +676,19 @@ def detect_changes_between_snapshots(
                 previous_snapshot_id=previous.snapshot_id,
                 current_snapshot_id=current.snapshot_id,
                 detected_at=_now(),
-                confidence=0.5,
+                confidence=0.9,
+                observation_type="raw.command.hash",
+                comparison_type=f"unstructured_{diff.get('comparison_mode')}",
+                decision_reason="unstructured_output_changed",
+                policy_snapshot={
+                    "profile": diff.get("profile"),
+                    "profile_version": diff.get("profile_version"),
+                    "policy_digest": diff.get("policy_digest"),
+                },
             )
         ]
+    if previous.structured_json is None or current.structured_json is None:
+        return []
     resolved_entity_type = entity_type
     resolved_primary_keys = primary_keys
     if primary_keys is None:
@@ -752,6 +831,18 @@ def detect_changes_from_params(params: dict[str, Any]) -> dict[str, Any]:
     persist = bool(params.get("persist", True))
     use_versioned = bool(params.get("use_versioned_parser_results", False))
     use_state_observations = bool(params.get("use_state_observations", False))
+    supplied_policy_bundle: list[dict[str, Any]] | None = None
+    if params.get("runtime_asset_manifest"):
+        from src.core.patrol.runtime_manifest import validate_patrol_runtime_manifest
+
+        manifest = validate_patrol_runtime_manifest(
+            dict(params.get("runtime_asset_manifest") or {})
+        )
+        supplied_policy_bundle = list(
+            dict(manifest.get("rule_assets") or {})
+            .get("change_policies", {})
+            .values()
+        )
 
     if params.get("current_run_id") and use_state_observations:
         device_ids = params.get("device_ids")
@@ -768,6 +859,8 @@ def detect_changes_from_params(params: dict[str, Any]) -> dict[str, Any]:
             kwargs["allow_longitudinal_offline_comparison"] = bool(
                 params.get("allow_longitudinal_offline_comparison")
             )
+        if supplied_policy_bundle is not None:
+            kwargs["policy_bundle"] = supplied_policy_bundle
         return detect_observation_changes_against_history(
             current_run_id=str(params["current_run_id"]),
             previous_run_id=(
@@ -864,6 +957,7 @@ def detect_observation_changes_against_history(
     missing_confirmations: int = 2,
     analysis_revision: str = "original",
     allow_longitudinal_offline_comparison: bool = False,
+    policy_bundle: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     patrol_repository = PatrolRepository()
     state_repository = StateRepository()
@@ -918,8 +1012,13 @@ def detect_observation_changes_against_history(
             current_observations=input_observations,
             prior_observations=prior_observations,
             analysis_revision=analysis_revision,
+            policy_bundle=policy_bundle,
         )
-    frozen_policies = ChangePolicyRepository().list_active_policies()
+    frozen_policies = (
+        ChangePolicyRepository().list_active_policies()
+        if policy_bundle is None
+        else policy_bundle
+    )
     frozen_policies = json.loads(json.dumps(frozen_policies, default=str))
     scope = {
         "device_ids": sorted({str(item) for item in device_ids or []}),
@@ -1186,6 +1285,22 @@ def _detect_observation_changes_against_history_impl(
         compared_observations += 1
         old = previous.get("value_json")
         new = current.get("value_json")
+        unstructured_diff = _observation_unstructured_diff(
+            previous,
+            current,
+            patrol_repository,
+        )
+        if unstructured_diff is not None and not unstructured_diff.get("changed"):
+            decisions.append(
+                _change_decision(
+                    run_id=current_run_id,
+                    previous=previous,
+                    current=current,
+                    decision="suppressed",
+                    reason="unstructured_noise_only",
+                )
+            )
+            continue
         policy_result = _policy_compare_result(
             resolver=policy_resolver,
             current=current,
@@ -1217,6 +1332,7 @@ def _detect_observation_changes_against_history_impl(
                 change_type="modified",
                 detected_at=detected_at,
                 policy_result=policy_result,
+                unstructured_diff=unstructured_diff,
             )
         )
         if policy_result is not None:

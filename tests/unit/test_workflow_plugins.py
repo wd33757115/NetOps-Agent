@@ -1235,3 +1235,41 @@ def test_patrol_report_distinguishes_missing_rules_from_evaluated_non_match():
 
     assert missing[0]["status"] == "规则缺失"
     assert evaluated[0]["status"] == "有变化，未触发事件"
+
+
+def test_patrol_report_does_not_treat_recovery_event_as_current_fault():
+    from src.core.workflows.patrol_batch_service import domain_checks
+
+    observation = {
+        "device_id": "device-1",
+        "entity_type": "interface",
+        "entity_key": '["GE1/0/1"]',
+        "field": "link",
+        "value": "UP",
+        "command": "display interface brief",
+    }
+    checks = domain_checks(
+        observations=[observation],
+        command_details=[
+            {"command": "display interface brief", "parse_status": "parsed"}
+        ],
+        changes=[],
+        events=[
+            {
+                **observation,
+                "event_type": "InterfaceUp",
+                "event_class": "recovery",
+                "status_after_occurrence": "resolved",
+            }
+        ],
+        current_findings=[],
+        rule_coverage={
+            "available": True,
+            "by_domain": {"interface": {"evaluated_observation_count": 1}},
+        },
+    )
+
+    assert checks[0]["status"] == "本次覆盖范围内未发现当前异常"
+    assert checks[0]["current_risk_count"] == 0
+    assert checks[0]["unresolved_fault_event_count"] == 0
+    assert "恢复事件" in checks[0]["reason"]

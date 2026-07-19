@@ -284,7 +284,11 @@ def generate_validation_cases_for_rule(
             )
         )
     elif kind == "threshold_lte":
-        threshold = float(condition.get("lte") or -17)
+        # The fallback only constructs a synthetic validator case. It must not
+        # resemble a product or optic runtime default.
+        threshold = float(
+            condition["lte"] if condition.get("lte") is not None else 0.0
+        )
         cases.append(
             EventRuleValidationCase(
                 name=f"{definition.rule_id}-positive-low-threshold",
@@ -314,7 +318,9 @@ def generate_validation_cases_for_rule(
             )
         )
     elif kind == "threshold_low_recovery":
-        low = float(condition.get("low") or -17)
+        low = float(
+            condition["low"] if condition.get("low") is not None else 0.0
+        )
         recovered = float(condition.get("gt") or low + 2)
         cases.append(
             EventRuleValidationCase(
@@ -639,6 +645,7 @@ def validate_event_rule_condition(condition: dict[str, Any]) -> list[str]:
             "entity_types",
             "fields",
             "reference_field",
+            "fallback_reference_fields",
             "applicability",
         },
         "threshold_field_high_recovery": {
@@ -646,6 +653,7 @@ def validate_event_rule_condition(condition: dict[str, Any]) -> list[str]:
             "entity_types",
             "fields",
             "reference_field",
+            "fallback_reference_fields",
             "hysteresis",
             "applicability",
         },
@@ -654,6 +662,7 @@ def validate_event_rule_condition(condition: dict[str, Any]) -> list[str]:
             "entity_types",
             "fields",
             "reference_field",
+            "fallback_reference_fields",
             "applicability",
         },
         "threshold_field_low_recovery": {
@@ -661,6 +670,7 @@ def validate_event_rule_condition(condition: dict[str, Any]) -> list[str]:
             "entity_types",
             "fields",
             "reference_field",
+            "fallback_reference_fields",
             "hysteresis",
             "applicability",
         },
@@ -751,6 +761,20 @@ def validate_event_rule_condition(condition: dict[str, Any]) -> list[str]:
         for key in ("from_established", "to_established"):
             if not isinstance(condition.get(key), bool):
                 errors.append(f"condition.{key} must be a boolean")
+    if kind.startswith("threshold_field_") and "fallback_reference_fields" in condition:
+        fallback_fields = condition.get("fallback_reference_fields")
+        if (
+            not isinstance(fallback_fields, list)
+            or not fallback_fields
+            or any(not str(item).strip() for item in fallback_fields)
+        ):
+            errors.append(
+                "condition.fallback_reference_fields must be a non-empty string list"
+            )
+        elif len({str(item).strip() for item in fallback_fields}) != len(
+            fallback_fields
+        ):
+            errors.append("condition.fallback_reference_fields must not contain duplicates")
     return errors
 
 

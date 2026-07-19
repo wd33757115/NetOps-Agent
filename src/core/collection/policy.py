@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import hashlib
-import json
 from typing import Any
 
 from src.infrastructure.db.models import (
     CollectionExecutionPlanRecord,
+    CollectionProfileBindingRecord,
     CommandProfileRecord,
     CommandProfileVersionRecord,
 )
-from src.infrastructure.db.models import CollectionProfileBindingRecord
 from src.infrastructure.db.postgres import get_db_session
 
 
@@ -194,6 +194,8 @@ class ExecutionPlanRepository:
             row.patrol_batch_id = patrol_batch_id or row.patrol_batch_id
             row.workflow_run_id = workflow_run_id
             row.celery_task_id = celery_task_id
+            row.failure_code = None
+            row.error = None
             row.launched_at = now
             row.updated_at = now
             db.flush()

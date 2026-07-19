@@ -474,6 +474,7 @@ class OfflinePatrolJobService:
                     "template_missing",
                     "parse_failed",
                     "ignored",
+                    "raw_compare",
                     "identity_unknown",
                     "duplicate_snapshots",
                     "new_snapshots",
@@ -1262,6 +1263,8 @@ class OfflinePatrolJobService:
                 "active_fault_rule_count": 0,
                 "latest_observation_count": len(observations),
                 "evaluated_observation_count": 0,
+                "threshold_unknown_observation_count": 0,
+                "partial_threshold_observation_count": 0,
                 "finding_count": 0,
                 "severity_counts": {},
                 "by_domain": {},
@@ -1455,6 +1458,8 @@ class OfflinePatrolJobService:
             else:
                 device_assessment = {
                     "available": False,
+                    "threshold_unknown_observation_count": 0,
+                    "partial_threshold_observation_count": 0,
                     "by_domain": {},
                     "findings": [],
                     "error": rule_error,

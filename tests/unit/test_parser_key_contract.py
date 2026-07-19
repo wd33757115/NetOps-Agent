@@ -330,6 +330,123 @@ def test_table_evidence_preserves_ip_semantics_when_missing_markers_exist():
     assert proposal.validators["address"] == {"type": "ip_or_unassigned"}
 
 
+def test_table_evidence_aligns_punctuation_separated_header_fields():
+    body = (
+        "Interface           Physical Protocol IP address/Mask    VPN instance Description\n"
+        "GE2/0/0             up       up       192.0.2.1/30       --           uplink\n"
+        "Loop0               up       up(s)    192.0.2.2/32       --           --"
+    )
+    samples = f'<CLI_SAMPLE id="sample-1" sha256="abc">\n{body}\n</CLI_SAMPLE>'
+    plan = profile_sample_set([("sample-1", body)])
+    proposal = infer_contract(
+        command="inspect routed interfaces",
+        samples_text=samples,
+        structure_profile=plan,
+        llm_call=lambda _prompt: """{
+          "category": "interface",
+          "entity_type": "interface",
+          "primary_keys": ["interface"],
+          "required_fields": ["interface", "physical", "protocol"],
+          "optional_fields": ["ip_address_mask"],
+          "validators": {
+            "interface": {"type": "regex", "pattern": "^[A-Za-z0-9/]+$"},
+            "physical": {"type": "enum", "values": ["up", "down"]},
+            "protocol": {"type": "enum", "values": ["up", "down"]},
+            "ip_address_mask": {
+              "type": "regex",
+              "pattern": "^([0-9]{1,3}\\\\.){3}[0-9]{1,3}/[0-9]{1,2}|--$"
+            }
+          },
+          "evidence": {"field_bindings": {
+            "interface": [{"sample_id":"sample-1","line":2,
+              "source_label":"Interface","source_value":"GE2/0/0","capture_kind":"column"}],
+            "physical": [{"sample_id":"sample-1","line":2,
+              "source_label":"Physical","source_value":"up","capture_kind":"column"}],
+            "protocol": [{"sample_id":"sample-1","line":2,
+              "source_label":"Protocol",
+              "source_value":"up       192.0.2.1/30       --           uplink",
+              "capture_kind":"column"}],
+            "ip_address_mask": [{"sample_id":"sample-1","line":2,
+              "source_label":"192.0.2.1/30","source_value":"192.0.2.1/30","capture_kind":"column"}]
+          }}
+        }""",
+    )
+
+    valid, diagnostics = validate_contract_candidate(
+        proposal,
+        structure_profile=plan,
+        samples_text=samples,
+    )
+
+    assert valid, diagnostics
+    bindings = proposal.evidence["field_bindings"]
+    assert bindings["protocol"][0]["source_value"] == "up"
+    assert bindings["ip_address_mask"][0] == {
+        "sample_id": "sample-1",
+        "line": 2,
+        "header_line": 1,
+        "source_label": "IP address/Mask",
+        "source_value": "192.0.2.1/30",
+        "capture_kind": "column",
+    }
+    assert "up(s)" in proposal.validators["protocol"]["values"]
+
+
+def test_duplicate_literals_are_reconciled_with_nearest_section_context():
+    body = (
+        "Item A diagnostics:\n"
+        "Alarm thresholds:\n"
+        "Metric\n"
+        "Low 1\n"
+        "Warning thresholds:\n"
+        "Metric\n"
+        "Low 1\n"
+        "Item B diagnostics:\n"
+        "Unavailable"
+    )
+    samples = f'<CLI_SAMPLE id="sample-1" sha256="abc">\n{body}\n</CLI_SAMPLE>'
+    plan = profile_sample_set([("sample-1", body)])
+    proposal = infer_contract(
+        command="inspect repeated sensor sections",
+        samples_text=samples,
+        structure_profile=plan,
+        llm_call=lambda _prompt: """{
+          "category": "sensor",
+          "entity_type": "sensor",
+          "primary_keys": ["item"],
+          "required_fields": ["item"],
+          "optional_fields": ["alarm_low_metric", "warning_low_metric"],
+          "validators": {
+            "item": {"type": "regex", "pattern": "^[A-Z]$"},
+            "alarm_low_metric": {"type": "number"},
+            "warning_low_metric": {"type": "number"}
+          },
+          "evidence": {"field_bindings": {
+            "item": [
+              {"sample_id":"sample-1","line":1,
+               "source_label":"Item A diagnostics:","source_value":"A",
+               "capture_kind":"record_anchor"},
+              {"sample_id":"sample-1","line":8,
+               "source_label":"Item B diagnostics:","source_value":"B",
+               "capture_kind":"record_anchor"}
+            ],
+            "alarm_low_metric": [
+              {"sample_id":"sample-1","line":7,"source_label":"1","source_value":"1","capture_kind":"column"}
+            ],
+            "warning_low_metric": [
+              {"sample_id":"sample-1","line":4,"source_label":"1","source_value":"1","capture_kind":"column"}
+            ]
+          }}
+        }""",
+    )
+
+    bindings = proposal.evidence["field_bindings"]
+    assert bindings["alarm_low_metric"][0]["line"] == 4
+    assert bindings["warning_low_metric"][0]["line"] == 7
+    corrections = proposal.evidence["line_normalization"]["corrections"]
+    assert {item["strategy"] for item in corrections} == {"section_context_match"}
+
+
 def test_collection_requires_explicit_primary_keys():
     result = validate_entity_keys([{"slot": "1"}, {"slot": "2"}], [])
 
@@ -700,7 +817,7 @@ def test_repeated_block_non_key_requirement_is_reclassified_without_domain_rules
     ]
 
 
-def test_contract_validator_rejects_regex_that_excludes_evidenced_key_value():
+def test_contract_inference_repairs_regex_that_excludes_evidenced_key_value():
     samples = (
         '<CLI_SAMPLE id="sample-1" sha256="abc">\n'
         "Item-A details:\nState: ready\n"
@@ -743,8 +860,15 @@ def test_contract_validator_rejects_regex_that_excludes_evidenced_key_value():
         samples_text=samples,
     )
 
-    assert not valid
-    assert "validator rejects evidenced value" in diagnostics[0].message
+    assert valid, diagnostics
+    assert proposal.validators["item"] == {"type": "text"}
+    governance = proposal.evidence["validator_evidence_governance"]
+    assert governance["fields"]["item"] == {
+        "reason": "validator_rejected_literal_evidence",
+        "previous": {"type": "regex", "pattern": "^[A-Za-z]+$"},
+        "normalized": {"type": "text"},
+        "evidence_value_count": 1,
+    }
 
 
 def test_evidence_line_reconciliation_does_not_confuse_numeric_substrings():

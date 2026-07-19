@@ -159,6 +159,46 @@ def _check_celery_worker() -> ServiceCheckResult:
         )
 
 
+def _check_celery_beat() -> ServiceCheckResult:
+    t0 = time.perf_counter()
+    try:
+        from src.core.celery_tasks.beat_health import read_celery_beat_heartbeat
+
+        heartbeat = read_celery_beat_heartbeat()
+        detail = heartbeat.to_dict()
+        if heartbeat.status == "ok":
+            return ServiceCheckResult(
+                id="celery_beat",
+                name="Celery Beat",
+                status="ok",
+                message=f"调度心跳正常，最近一次为 {heartbeat.age_seconds:.1f} 秒前",
+                latency_ms=_ms(t0),
+                detail=detail,
+            )
+        if heartbeat.status == "stale":
+            message = f"调度心跳已过期（{heartbeat.age_seconds:.1f} 秒）"
+        elif heartbeat.status == "invalid":
+            message = "调度心跳格式无效"
+        else:
+            message = "尚未收到调度心跳；Celery Beat 或 netops.health Worker 未运行"
+        return ServiceCheckResult(
+            id="celery_beat",
+            name="Celery Beat",
+            status="down",
+            message=message,
+            latency_ms=_ms(t0),
+            detail=detail,
+        )
+    except Exception as exc:
+        return ServiceCheckResult(
+            id="celery_beat",
+            name="Celery Beat",
+            status="down",
+            message=str(exc)[:200],
+            latency_ms=_ms(t0),
+        )
+
+
 def _check_minio() -> ServiceCheckResult:
     t0 = time.perf_counter()
     settings = get_settings()
@@ -252,6 +292,7 @@ def run_diagnostics() -> DiagnosticsResponse:
         _check_redis(),
         _check_celery_broker(),
         _check_celery_worker(),
+        _check_celery_beat(),
         _check_minio(),
         _check_qdrant(),
         _check_rag(),

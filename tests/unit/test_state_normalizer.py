@@ -16,6 +16,7 @@ from src.core.state.normalizer import (
     normalize_snapshot,
     observations_from_snapshot,
 )
+from src.core.state.observation_applicability import APPLICABILITY_CONTEXT_KEY
 from src.core.state.repository import StateRepository
 
 
@@ -121,7 +122,11 @@ def test_raw_hash_diff_normalizes_only_the_digest():
             "structured_json": [{"raw_text_hash": "a" * 64}],
             "parser_template_id": None,
             "parser_version": None,
-            "metadata_json": {"handling": "raw_hash_diff"},
+            "metadata_json": {
+                "handling": "raw_hash_diff",
+                "comparison_profile": "configuration",
+                "comparison_profile_version": 1,
+            },
         },
         mode="production",
         source="test",
@@ -132,6 +137,90 @@ def test_raw_hash_diff_normalizes_only_the_digest():
     assert observations[0].field_name == "raw_text_hash"
     assert observations[0].value == "a" * 64
     assert observations[0].parser_template_id is None
+    assert observations[0].metadata["unstructured_comparison"] == {
+        "profile": "configuration",
+        "profile_version": 1,
+    }
+
+
+def test_optical_observation_carries_authoritative_device_threshold_context(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        normalizer,
+        "_template_contract",
+        lambda *_args, **_kwargs: {
+            "contract_id": "contract-optical",
+            "contract_sha256": "a" * 64,
+            "entity_type": "interface_optical",
+            "primary_keys": ["interface"],
+            "contract_version": 1,
+            "state_semantics": {
+                "rx_power_dbm": {
+                    "semantic_type": "gauge",
+                    "unit": "dbm",
+                    "observation_type": "interface.optical.rx_power",
+                    "context_fields": [
+                        "rx_low_warning_dbm",
+                        "rx_low_alarm_dbm",
+                    ],
+                    "threshold_references": {
+                        "low": {
+                            "field_name": "rx_low_warning_dbm",
+                            "context_key": "threshold.low",
+                        },
+                        "critical_low": {
+                            "field_name": "rx_low_alarm_dbm",
+                            "context_key": "threshold.critical_low",
+                        },
+                    },
+                }
+            },
+            "validators": {
+                "rx_power_dbm": {"type": "number"},
+                "rx_low_warning_dbm": {"type": "number"},
+                "rx_low_alarm_dbm": {"type": "number"},
+            },
+        },
+    )
+
+    observations = observations_from_snapshot(
+        {
+            "id": "snapshot-optical",
+            "run_id": "run-1",
+            "device_id": "SW1",
+            "vendor": "H3C",
+            "model": "S5130S-54S-HI-G",
+            "canonical_command": "display transceiver diagnosis interface",
+            "parser_template_id": "template-optical",
+            "parser_version": "1",
+            "observed_at": "2026-07-18T00:00:00+00:00",
+            "structured_json": [
+                {
+                    "interface": "Ten-GigabitEthernet1/0/49",
+                    "rx_power_dbm": "-15.50",
+                    "rx_low_warning_dbm": "-15.00",
+                    "rx_low_alarm_dbm": "-18.01",
+                }
+            ],
+        },
+        mode="production",
+        source="test",
+        dataset_id=None,
+    )
+
+    rx = next(item for item in observations if item.field_name == "rx_power_dbm")
+    context = rx.metadata[APPLICABILITY_CONTEXT_KEY]
+    assert context["rx_low_warning_dbm"] == -15.0
+    assert context["rx_low_alarm_dbm"] == -18.01
+    assert context["threshold.low"] == -15.0
+    assert context["threshold.critical_low"] == -18.01
+    assert context["threshold_source"] == "device_output"
+    assert context["threshold_confidence"] == "authoritative"
+    assert context["threshold_fields"] == [
+        "threshold.critical_low",
+        "threshold.low",
+    ]
 
 
 def _state_observation(observed_at: str, value: str = "up") -> StateObservation:
@@ -589,10 +678,10 @@ def test_list_values_expand_into_dimensioned_scalar_observations(monkeypatch):
     assert len({item.state_key for item in observations}) == 2
     assert [item.metadata["dimensions"]["value_index"] for item in observations] == [1, 2]
     assert [item.metadata["_observation_context"]["limits"] for item in observations] == [
-        "10",
-        "20",
+        10.0,
+        20.0,
     ]
-    assert all(item.value_type == "string" for item in observations)
+    assert all(item.value_type == "number" for item in observations)
 
 
 def test_contract_context_fields_are_copied_for_dynamic_thresholds(monkeypatch):
@@ -638,7 +727,7 @@ def test_contract_context_fields_are_copied_for_dynamic_thresholds(monkeypatch):
     )
 
     measurement = next(item for item in observations if item.field_name == "measurement")
-    assert measurement.metadata["_observation_context"] == {"low_reference": "-10.0"}
+    assert measurement.metadata["_observation_context"] == {"low_reference": -10.0}
 
 
 def test_observations_from_snapshot_prefers_inventory_device_id(monkeypatch):

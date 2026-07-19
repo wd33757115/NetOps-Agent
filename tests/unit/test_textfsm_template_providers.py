@@ -119,6 +119,46 @@ MGE0/0/1            down     down     --              --           --
     assert result.records[0]["ip_address"] == "10.34.2.145"
 
 
+def test_generic_table_provider_handles_unknown_multivalue_trailing_columns():
+    text = """Interface           Physical Protocol IP address/Mask    VPN instance Description
+GE2/0/0             up       up       192.0.2.1/30       --           to remote router
+Loop0               up       up(s)    192.0.2.2/32       --           --
+MGE0                up       up       192.0.2.3/25       MGT
+"""
+    spec = CategorySpec(
+        name="interface",
+        required_fields=["interface", "physical", "protocol"],
+        optional_fields=["ip_address_mask"],
+        entity_type="interface",
+        primary_keys=["interface"],
+        validators={
+            "physical": {"type": "enum", "values": ["up", "down"]},
+            "protocol": {"type": "enum", "values": ["up", "down", "up(s)"]},
+            "ip_address_mask": {"type": "text"},
+        },
+    )
+
+    candidate = GenericTableProvider().propose(_context(text, spec))
+
+    assert candidate is not None
+    expected_keys = expected_primary_key_tuples_from_tables(text, spec)
+    result = validate_template(
+        candidate.template_text,
+        text,
+        spec.required_fields,
+        spec.validators,
+        primary_keys=spec.primary_keys,
+        expected_min_records=3,
+        expected_primary_keys=expected_keys,
+    )
+    assert result.is_valid, result.errors
+    assert {record["interface"] for record in result.records} == {
+        "GE2/0/0",
+        "Loop0",
+        "MGE0",
+    }
+
+
 def test_multi_table_provider_scopes_each_row_shape_to_its_header():
     text = """Brief information on interfaces in route mode:
 Interface            Link Protocol Primary IP        Description
@@ -510,6 +550,106 @@ End
     ).records
     assert records[0]["current"] == ["10", "11"]
     assert records[1]["current"] == ["12"]
+
+
+def test_evidence_ir_scopes_identical_rows_by_nearest_section_heading():
+    text = """Port A diagnostics:
+Current values:
+RX
+-5
+Alarm thresholds:
+RX
+Low -18
+Warning thresholds:
+RX
+Low -15
+Port B diagnostics:
+Unavailable
+"""
+    spec = CategorySpec(
+        name="sensor",
+        required_fields=["port"],
+        optional_fields=["current_rx", "alarm_low_rx", "warning_low_rx"],
+        entity_type="sensor",
+        primary_keys=["port"],
+        validators={
+            "port": {"type": "regex", "pattern": "^[A-Z]$"},
+            "current_rx": {"type": "number"},
+            "alarm_low_rx": {"type": "number"},
+            "warning_low_rx": {"type": "number"},
+        },
+    )
+    context = ProviderContext(
+        command="unknown vendor command",
+        samples=(Sample(text),),
+        spec=spec,
+        structure_profile={"dominant_layout": "repeated_block"},
+        field_bindings={
+            "port": [
+                {
+                    "sample_id": "sample-1",
+                    "line": 1,
+                    "source_value": "A",
+                    "capture_kind": "record_anchor",
+                },
+                {
+                    "sample_id": "sample-1",
+                    "line": 11,
+                    "source_value": "B",
+                    "capture_kind": "record_anchor",
+                },
+            ],
+            "current_rx": [
+                {"sample_id": "sample-1", "line": 4, "source_value": "-5", "capture_kind": "column"}
+            ],
+            "alarm_low_rx": [
+                {
+                    "sample_id": "sample-1",
+                    "line": 7,
+                    "source_value": "-18",
+                    "capture_kind": "column",
+                }
+            ],
+            "warning_low_rx": [
+                {
+                    "sample_id": "sample-1",
+                    "line": 10,
+                    "source_value": "-15",
+                    "capture_kind": "column",
+                }
+            ],
+        },
+        evidence_samples={"sample-1": text},
+    )
+
+    candidate = EvidenceRepeatedBlockProvider().propose(context)
+
+    assert candidate is not None
+    assert "Context1" in candidate.template_text
+    result = validate_template(
+        candidate.template_text,
+        text,
+        spec.required_fields,
+        spec.validators,
+        primary_keys=spec.primary_keys,
+        expected_min_records=2,
+        expected_record_count=2,
+    )
+    assert result.is_valid, result.errors
+    assert result.records == [
+        {
+            "port": "A",
+            "current_rx": "-5",
+            "alarm_low_rx": "-18",
+            "warning_low_rx": "-15",
+        },
+        {
+            "port": "B",
+            "current_rx": "",
+            "alarm_low_rx": "",
+            "warning_low_rx": "",
+        },
+    ]
 
 
 def test_evidence_ir_compiles_redacted_placeholder_as_runtime_capture():

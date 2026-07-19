@@ -37,6 +37,7 @@ from src.core.device_ops.readiness_projection import (
 )
 from src.core.device_ops.repository import DeviceRepository, normalize_device_status
 from src.core.evidence import evidence_id_for_command_snapshot
+from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
 from src.core.patrol.handlers import StartPatrolCommand, StartPatrolHandler
 from src.core.patrol.modes import PRODUCTION_MODE, normalize_patrol_mode
 from src.core.rule_control import RuntimeRuleAssetResolver
@@ -70,6 +71,16 @@ from src.infrastructure.db.postgres import get_db_session
 from src.observability.read_metrics import observe_read
 
 logger = logging.getLogger(__name__)
+
+
+def _enqueue_patrol_batch_dispatch(patrol_batch_id: str) -> str:
+    from src.core.celery_tasks.tasks import dispatch_patrol_batch_task
+
+    task = dispatch_patrol_batch_task.apply_async(
+        args=[patrol_batch_id],
+        queue="netops.patrol",
+    )
+    return str(task.id)
 
 router = APIRouter(
     prefix="/api/v1/devices",
@@ -673,7 +684,13 @@ def _runtime_rule_asset_health(
     coverage: list[dict[str, Any]],
 ) -> dict[str, Any]:
     if normalize_patrol_mode(mode) != PRODUCTION_MODE:
-        return {"status": "not_required", "ready": True}
+        return {
+            "status": "not_required",
+            "ready": True,
+            "collection_ready": True,
+            "analysis_ready": True,
+            "event_evaluation_ready": True,
+        }
     schemas = []
     for item in coverage:
         template_id = str(item.get("template_id") or "").strip()
@@ -687,6 +704,9 @@ def _runtime_rule_asset_health(
         return {
             "status": "not_required",
             "ready": True,
+            "collection_ready": True,
+            "analysis_ready": True,
+            "event_evaluation_ready": True,
             "reason": "no ready parser templates require runtime rule asset checks",
         }
     try:
@@ -702,6 +722,9 @@ def _runtime_rule_asset_health(
         return {
             "status": "error",
             "ready": False,
+            "collection_ready": True,
+            "analysis_ready": False,
+            "event_evaluation_ready": False,
             "error": str(exc),
             "observation_schemas": [f"{source}:{schema}" for source, schema in schemas],
         }
@@ -710,7 +733,11 @@ def _runtime_rule_asset_health(
     )
     return {
         **bundle,
-        "status": "ready" if bundle.get("ready") else "blocked",
+        "status": (
+            "ready"
+            if bundle.get("analysis_ready") and bundle.get("event_evaluation_ready")
+            else "degraded"
+        ),
         "missing_count": missing_count,
     }
 
@@ -772,7 +799,6 @@ def _coverage_summary(
     elif (
         plan_violations
         or connection_issues
-        or (runtime_asset_health or {}).get("status") in {"blocked", "error"}
     ):
         status = "blocked"
     elif blocking:
@@ -2648,16 +2674,15 @@ def _patrol_launch_preview(
                 coverage=parser_coverage,
             )
             connection_issues = _connection_preflight(device)
-            runtime_asset_blocked = runtime_asset_health.get("status") in {"blocked", "error"}
             # Parser coverage is a data-quality warning, not a collection precondition.
             # Preserve the diagnostics without losing the raw CLI snapshot.
-            if plan_violations or connection_issues or runtime_asset_blocked:
+            if plan_violations or connection_issues:
                 failure_code = (
                     "collector_preflight_failed"
                     if connection_issues
                     else "command_profile_not_ready"
                     if plan_violations
-                    else "runtime_rule_assets_not_ready"
+                    else "command_profile_not_ready"
                 )
                 if connection_issues and device.get("device_id"):
                     issue_code, issue_message = _first_issue(connection_issues)
@@ -3190,6 +3215,8 @@ def launch_device_patrol(payload: DevicePatrolLaunchRequest, request: Request):
     try:
         result = StartPatrolHandler(
             plan_repository=ExecutionPlanRepository(),
+            batch_repository=PatrolBatchManifestRepository(),
+            batch_dispatcher=_enqueue_patrol_batch_dispatch,
         ).handle(
             StartPatrolCommand(
                 rows=preview["rows"],
@@ -3205,18 +3232,6 @@ def launch_device_patrol(payload: DevicePatrolLaunchRequest, request: Request):
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    launched = result["runs"] or result["tasks"]
-    try:
-        from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
-
-        PatrolBatchManifestRepository().record_launch(
-            result=result,
-            ready_rows=preview["rows"],
-            skipped_errors=preview["errors"],
-            target_snapshot=_patrol_target_snapshot(payload),
-        )
-    except Exception:
-        logger.exception("failed to persist patrol batch manifest", extra={"patrol_batch_id": result["patrol_batch_id"]})
     _audit_device_action(
         request,
         "device_patrol_launch",
@@ -3230,7 +3245,9 @@ def launch_device_patrol(payload: DevicePatrolLaunchRequest, request: Request):
             "target_count": result["target_count"],
             "launched_count": result["launched_count"],
             "skipped_count": result["skipped_count"],
-            "device_ids": [item.get("device_id") for item in launched[:50]],
+            "queued_count": result.get("queued_count", 0),
+            "dispatch_status": result.get("dispatch_status"),
+            "device_ids": [item.get("device_id") for item in preview["rows"][:50]],
         },
     )
     return result

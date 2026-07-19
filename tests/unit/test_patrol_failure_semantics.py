@@ -9,6 +9,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import pytest
+
 from src.core.celery_tasks import tasks as celery_tasks
 from src.core.collection import CollectionItem, ExecutionPlan
 from src.core.device_ops.tools import DeviceFilter, PatrolTool
@@ -18,7 +20,11 @@ from src.core.ingestion.adapters.cli import (
     load_command_collection_manifest,
 )
 from src.core.patrol.change_event_repository import ChangeEventRepository
-from src.core.patrol.concurrency import DistributedPatrolSemaphore
+from src.core.patrol.concurrency import (
+    DistributedPatrolSemaphore,
+    PatrolConcurrencyLeaseLostError,
+    PatrolConcurrencyUnavailableError,
+)
 from src.core.patrol.event_builder import (
     build_events_from_changes,
     publish_event_outbox,
@@ -210,6 +216,26 @@ def test_distributed_patrol_lease_can_be_renewed(monkeypatch):
     assert semaphore.renew(lease) is True
     semaphore.release(lease)
     assert calls[-1] == ("zrem", lease.key, lease.token)
+
+
+def test_distributed_patrol_concurrency_fails_closed_when_redis_is_unavailable(monkeypatch):
+    monkeypatch.setattr("src.core.patrol.concurrency.get_redis", lambda: None)
+    semaphore = DistributedPatrolSemaphore(
+        limit=2,
+        lease_seconds=30,
+        wait_seconds=1,
+        fail_closed=True,
+    )
+
+    with pytest.raises(PatrolConcurrencyUnavailableError):
+        semaphore.acquire()
+
+
+def test_distributed_patrol_lease_guard_stops_remaining_commands():
+    lease = SimpleNamespace(lost=True)
+
+    with pytest.raises(PatrolConcurrencyLeaseLostError):
+        DistributedPatrolSemaphore.assert_lease(lease)
 
 
 def test_patrol_batch_is_bounded_and_isolates_device_lease_failure():

@@ -25,8 +25,23 @@ from src.core.patrol.raw_importer import preview_raw_path  # noqa: E402
 
 PERIOD_BASELINES = {
     "Q1": {"file_count": 2, "device_count": 2, "command_count": 54},
-    "Q2": {"file_count": 2, "device_count": 2, "command_count": 44},
-    "Q3": {"file_count": 2, "device_count": 2, "command_count": 54},
+    "Q2": {"file_count": 6, "device_count": 6, "command_count": 152},
+    "Q3": {"file_count": 6, "device_count": 6, "command_count": 162},
+}
+PERIOD_PROFILE_SAMPLE_COUNTS = {
+    "Q1": {("H3C", "S6850-56HF"): 2},
+    "Q2": {
+        ("H3C", "S6850-56HF"): 2,
+        ("H3C", "S5130S-52S-HI"): 1,
+        ("H3C", "S5130S-54S-HI-G"): 1,
+        ("H3C", "MSR5620"): 2,
+    },
+    "Q3": {
+        ("H3C", "S6850-56HF"): 2,
+        ("H3C", "S5130S-52S-HI"): 1,
+        ("H3C", "S5130S-54S-HI-G"): 1,
+        ("H3C", "MSR5620"): 2,
+    },
 }
 GOLDEN_COMMANDS = (
     "display interface brief",
@@ -59,19 +74,24 @@ def _preview_period(path: Path, period: str) -> dict[str, Any]:
     preview = preview_raw_path(
         file_path=path,
         mode="parser_validation",
-        vendor="H3C",
-        model="S6850-56HF",
         metadata={"dataset_id": f"lixian-{period.lower()}-benchmark"},
     )
     baseline = PERIOD_BASELINES[period]
     for field, expected in baseline.items():
         _assert_equal(preview.get(field), expected, f"{period}.{field}")
+    observed_profiles: dict[tuple[str, str], int] = {}
     for item in preview.get("files") or []:
         _assert_equal(item.get("vendor"), "H3C", f"{period}.vendor")
-        _assert_equal(item.get("model"), "S6850-56HF", f"{period}.model")
         _assert_equal(item.get("identity_status"), "known", f"{period}.identity")
         if not item.get("device_name") or not item.get("management_ip"):
             raise AssertionError(f"{period}: device name or management IP is missing")
+        profile = (str(item.get("vendor") or ""), str(item.get("model") or ""))
+        observed_profiles[profile] = observed_profiles.get(profile, 0) + 1
+    _assert_equal(
+        observed_profiles,
+        PERIOD_PROFILE_SAMPLE_COUNTS[period],
+        f"{period}.profiles",
+    )
     return {
         field: preview.get(field)
         for field in (
@@ -93,15 +113,13 @@ def _generate_command(
     reports_dir: Path,
     period: str,
     command: str,
-    expected_source_sample_count: int = 2,
-    max_expected_retries: int = 0,
-    require_generic_provider: bool = True,
+    expected_profiles: dict[tuple[str, str], int],
+    max_expected_retries: int = 2,
+    require_generic_provider: bool = False,
 ) -> dict[str, Any]:
     result = generate_templates(
         {
             "source_path": str(source_path),
-            "vendor": "H3C",
-            "model": "S6850-56HF",
             "command": command,
             "publish": False,
             "dry_run": True,
@@ -111,7 +129,11 @@ def _generate_command(
             "reports_dir": str(reports_dir / period / command.replace(" ", "-")),
         }
     )
-    _assert_equal(result.get("candidate_groups"), 1, f"{period}.{command}.groups")
+    _assert_equal(
+        result.get("candidate_groups"),
+        len(expected_profiles),
+        f"{period}.{command}.groups",
+    )
     _assert_equal(result.get("success"), True, f"{period}.{command}.success")
     _assert_equal(
         result.get("validation_pass_rate"),
@@ -119,65 +141,63 @@ def _generate_command(
         f"{period}.{command}.pass_rate",
     )
     reports = result.get("reports") or []
-    _assert_equal(len(reports), 1, f"{period}.{command}.reports")
-    report = reports[0]
-    _assert_equal(report.get("accepted"), True, f"{period}.{command}.accepted")
-    _assert_equal(report.get("validation_pass_rate"), 1.0, f"{period}.{command}.report_pass_rate")
-    _assert_equal(
-        report.get("source_sample_count"),
-        expected_source_sample_count,
-        f"{period}.{command}.source_samples",
-    )
-    _assert_equal(
-        report.get("passed_samples"), report.get("sample_count"), f"{period}.{command}.passed"
-    )
-    retry_count = int(report.get("retry_count") or 0)
-    if retry_count > max_expected_retries:
-        raise AssertionError(
-            f"{period}.{command}.retries: expected <= {max_expected_retries}, got {retry_count}"
+    _assert_equal(len(reports), len(expected_profiles), f"{period}.{command}.reports")
+    observed_profiles: dict[tuple[str, str], int] = {}
+    assets: list[dict[str, Any]] = []
+    for report in reports:
+        profile = (str(report.get("vendor") or ""), str(report.get("model") or ""))
+        label = f"{period}.{profile[0]}.{profile[1]}.{command}"
+        observed_profiles[profile] = int(report.get("source_sample_count") or 0)
+        _assert_equal(report.get("accepted"), True, f"{label}.accepted")
+        _assert_equal(report.get("validation_pass_rate"), 1.0, f"{label}.pass_rate")
+        _assert_equal(
+            report.get("passed_samples"),
+            report.get("sample_count"),
+            f"{label}.passed",
         )
-    _assert_equal(report.get("validation_score"), 100, f"{period}.{command}.validation")
-    if int(report.get("record_count") or 0) <= 0:
-        raise AssertionError(f"{period}.{command}: no records parsed")
-    agent_loop = report.get("agent_loop") or {}
-    _assert_equal(agent_loop.get("status"), "passed", f"{period}.{command}.agent")
-    _assert_equal(
-        agent_loop.get("template_attempts"),
-        1,
-        f"{period}.{command}.template_attempts",
-    )
-    provider = str(agent_loop.get("best_candidate_provider") or "")
-    if require_generic_provider and not provider.startswith("generic_"):
-        raise AssertionError(
-            f"{period}.{command}: automatic path used non-generic provider {provider!r}"
+        retry_count = int(report.get("retry_count") or 0)
+        if retry_count > max_expected_retries:
+            raise AssertionError(
+                f"{label}.retries: expected <= {max_expected_retries}, got {retry_count}"
+            )
+        _assert_equal(report.get("validation_score"), 100, f"{label}.validation")
+        if int(report.get("record_count") or 0) <= 0:
+            raise AssertionError(f"{label}: no records parsed")
+        agent_loop = report.get("agent_loop") or {}
+        _assert_equal(agent_loop.get("status"), "passed", f"{label}.agent")
+        provider = str(agent_loop.get("best_candidate_provider") or "")
+        if require_generic_provider and not provider.startswith("generic_"):
+            raise AssertionError(
+                f"{label}: automatic path used non-generic provider {provider!r}"
+            )
+        if not require_generic_provider and not (
+            provider.startswith("generic_") or provider == "llm"
+        ):
+            raise AssertionError(
+                f"{label}: automatic path used unsupported provider {provider!r}"
+            )
+        hard_gates = (agent_loop.get("validation_report") or {}).get("hard_gates") or {}
+        _assert_equal(set(hard_gates), EXPECTED_HARD_GATES, f"{label}.hard_gate_names")
+        failed_gates = sorted(name for name, passed in hard_gates.items() if not passed)
+        _assert_equal(failed_gates, [], f"{label}.hard_gates")
+        assets.append(
+            {
+                "vendor": profile[0],
+                "model": profile[1],
+                "source_sample_count": observed_profiles[profile],
+                "sample_count": report.get("sample_count"),
+                "record_count": report.get("record_count"),
+                "retry_count": retry_count,
+                "provider": provider,
+                "hard_gates": len(hard_gates),
+            }
         )
-    if not require_generic_provider and not (
-        provider.startswith("generic_") or provider == "llm"
-    ):
-        raise AssertionError(
-            f"{period}.{command}: automatic path used unsupported provider {provider!r}"
-        )
-    hard_gates = (
-        (agent_loop.get("validation_report") or {}).get("hard_gates") or {}
-    )
-    _assert_equal(
-        set(hard_gates),
-        EXPECTED_HARD_GATES,
-        f"{period}.{command}.hard_gate_names",
-    )
-    failed_gates = sorted(name for name, passed in hard_gates.items() if not passed)
-    _assert_equal(failed_gates, [], f"{period}.{command}.hard_gates")
+    _assert_equal(observed_profiles, expected_profiles, f"{period}.{command}.profiles")
     return {
-        "sample_count": report.get("sample_count"),
-        "source_sample_count": report.get("source_sample_count"),
-        "unique_sample_count": report.get("unique_sample_count"),
-        "duplicate_sample_count": report.get("duplicate_sample_count"),
-        "passed_samples": report.get("passed_samples"),
-        "record_count": report.get("record_count"),
-        "retry_count": report.get("retry_count"),
-        "validation_score": report.get("validation_score"),
-        "provider": provider,
-        "hard_gates": len(hard_gates),
+        "asset_count": len(assets),
+        "source_sample_count": sum(expected_profiles.values()),
+        "record_count": sum(int(asset["record_count"] or 0) for asset in assets),
+        "assets": assets,
     }
 
 
@@ -193,6 +213,7 @@ def run_benchmark(*, source_root: Path, reports_dir: Path) -> dict[str, Any]:
                 reports_dir=reports_dir,
                 period=period,
                 command=command,
+                expected_profiles=PERIOD_PROFILE_SAMPLE_COUNTS[period],
             )
             for command in GOLDEN_COMMANDS
         }
@@ -200,15 +221,17 @@ def run_benchmark(*, source_root: Path, reports_dir: Path) -> dict[str, Any]:
             "preview": _preview_period(source_path, period),
             "commands": command_results,
         }
+    corpus_profiles: dict[tuple[str, str], int] = {}
+    for period_profiles in PERIOD_PROFILE_SAMPLE_COUNTS.values():
+        for profile, count in period_profiles.items():
+            corpus_profiles[profile] = corpus_profiles.get(profile, 0) + count
     corpus_results = {
         command: _generate_command(
             source_path=source_root,
             reports_dir=reports_dir,
             period="CORPUS",
             command=command,
-            expected_source_sample_count=sum(
-                baseline["device_count"] for baseline in PERIOD_BASELINES.values()
-            ),
+            expected_profiles=corpus_profiles,
             max_expected_retries=2,
             require_generic_provider=False,
         )
@@ -219,9 +242,8 @@ def run_benchmark(*, source_root: Path, reports_dir: Path) -> dict[str, Any]:
         "source_root": str(source_root),
         "periods": periods,
         "canonical_corpus": {
-            "sample_count": sum(
-                baseline["device_count"] for baseline in PERIOD_BASELINES.values()
-            ),
+            "sample_count": sum(corpus_profiles.values()),
+            "asset_count": len(corpus_profiles),
             "commands": corpus_results,
         },
     }

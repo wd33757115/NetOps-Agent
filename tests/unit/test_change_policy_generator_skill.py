@@ -9,6 +9,7 @@ from pathlib import Path
 from src.core.patrol.change_policy import (
     compare_with_policy,
     infer_change_policy,
+    policy_from_dict,
     validate_change_policy,
 )
 
@@ -68,6 +69,76 @@ def test_change_policy_infers_percent_threshold_and_deadband():
     assert policy.recovery_threshold < policy.thresholds["high"]
     assert compare_with_policy(policy, old=20, new=23)["changed"] is False
     assert compare_with_policy(policy, old=20, new=95)["crossed_high"] is True
+
+
+def test_change_policy_uses_per_observation_threshold_before_dataset_fallback():
+    policy = policy_from_dict(
+        {
+            "observation_type": "interface.optical.rx_power",
+            "semantic_type": "gauge",
+            "compare_mode": "threshold_low_and_deadband",
+            "thresholds": {"low": -17.0},
+            "threshold_references": {
+                "low": {"field_name": "rx_low_warning_dbm"}
+            },
+            "deadband": 2.0,
+        }
+    )
+
+    result = compare_with_policy(
+        policy,
+        old=-11.0,
+        new=-12.5,
+        field="rx_power_dbm",
+        context={"rx_low_warning_dbm": -12.0},
+    )
+
+    assert result["changed"] is True
+    assert result["crossed_low_roles"] == ["low"]
+    assert result["threshold_sources"] == {
+        "low": "context:rx_low_warning_dbm"
+    }
+
+
+def test_optical_policy_without_structured_reference_does_not_invent_thresholds():
+    policy = infer_change_policy(
+        observation_type="interface.optical.rx_power",
+        field_name="rx_power_dbm",
+        field_semantics={"semantic_type": "gauge", "unit": "dbm"},
+    )
+
+    assert policy.compare_mode == "numeric_delta"
+    assert policy.thresholds == {}
+    assert policy.threshold_references == {}
+    assert "threshold_status=threshold_unknown" in policy.reason
+
+
+def test_missing_dynamic_threshold_does_not_use_profile_median_as_fallback():
+    policy = policy_from_dict(
+        {
+            "observation_type": "interface.optical.rx_power",
+            "semantic_type": "gauge",
+            "compare_mode": "threshold_low_and_deadband",
+            "thresholds": {"low": -17.0},
+            "threshold_references": {
+                "low": {"field_name": "rx_low_warning_dbm"}
+            },
+            "deadband": 2.0,
+        }
+    )
+
+    result = compare_with_policy(
+        policy,
+        old=-11.0,
+        new=-18.0,
+        field="rx_power_dbm",
+        context={},
+    )
+
+    assert result["threshold_status"] == "threshold_unknown"
+    assert result["threshold_sources"] == {}
+    assert result["missing_threshold_references"] == ["rx_low_warning_dbm"]
+    assert result["crossed_low"] is False
 
 
 def test_change_policy_rejects_counter_as_threshold_policy():
@@ -151,6 +222,7 @@ def test_change_policy_compiler_preserves_structured_threshold_references():
         {
             "low": {
                 "field_name": "low_reference",
+                "context_key": "threshold.low",
                 "level": "alarm",
                 "source": "structured_reference",
                 "field_profile": {"median": -12.0},
@@ -165,14 +237,16 @@ def test_change_policy_compiler_preserves_structured_threshold_references():
     )
 
     assert compiled["compare_mode"] == "threshold_and_deadband"
-    assert compiled["thresholds"] == {"low": -12.0, "high": 2.0}
+    assert compiled["thresholds"] == {}
+    assert compiled["allow_static_threshold_fallback"] is False
     assert compiled["recovery_threshold"] is None
     assert compiled["minimum_duration"] is None
     assert compiled["threshold_references"] == {
         "low": {
-            "field_name": "low_reference",
+            "field_name": "threshold.low",
             "level": "alarm",
             "source": "structured_reference",
+            "source_field_name": "low_reference",
         },
         "high": {
             "field_name": "high_reference",
@@ -180,6 +254,43 @@ def test_change_policy_compiler_preserves_structured_threshold_references():
             "source": "structured_reference",
         },
     }
+
+
+def test_change_policy_compiler_supports_alarm_only_dynamic_reference():
+    module = _load_skill_module()
+    compiled = module._compile_reference_policy_candidate(
+        {
+            "observation_type": "interface.optical.rx_power",
+            "semantic_type": "gauge",
+            "compare_mode": "numeric_delta",
+            "thresholds": {},
+            "deadband": 2,
+        },
+        {
+            "critical_low": {
+                "field_name": "rx_low_alarm_dbm",
+                "level": "alarm",
+                "source": "structured_reference",
+                "field_profile": {"median": -18.01},
+            }
+        },
+    )
+
+    assert compiled["compare_mode"] == "threshold_low_and_deadband"
+    assert compiled["thresholds"] == {}
+    assert compiled["source"] == "structured_threshold_reference"
+    assert validate_change_policy(
+        module.policy_from_dict(compiled)
+    )["success"] is True
+    assert module._validate_policy_constraints(
+        module.policy_from_dict(compiled),
+        {
+            "require_structured_threshold_references": True,
+            "required_threshold_reference_any": ["low", "critical_low"],
+            "recovery_direction": "above",
+            "minimum_hysteresis": 2,
+        },
+    ) == []
 
 
 def test_change_policy_constraints_bound_recovery_threshold(tmp_path: Path):

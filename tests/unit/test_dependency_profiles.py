@@ -97,7 +97,7 @@ def test_compose_runtime_roles_use_separate_dependencies_and_queues():
     )
     assert "-Q netops.patrol" in services["celery-patrol"]["command"]
     assert "netops.ai" not in services["celery-patrol"]["command"]
-    assert "-Q netops.default,netops.firewall" in services["celery-control"]["command"]
+    assert "-Q netops.default,netops.firewall,netops.health" in services["celery-control"]["command"]
 
     ai_overlay = yaml.safe_load(
         Path("deployment/docker-compose.ai.yml").read_text(encoding="utf-8")

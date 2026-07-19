@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from src.common.config import get_settings
@@ -121,14 +122,29 @@ class WorkflowEngine:
         thread_id: str | None = None,
         parent_run_id: str | None = None,
         parent_trace_id: str | None = None,
+        run_id: str | None = None,
     ) -> str:
         load_workflows()
         template = get_template(template_name)
         if not template:
             raise ValueError(f"未知 Workflow 模板: {template_name}")
 
+        requested_run_id = str(run_id) if run_id else None
+        existing_run = get_workflow_run(requested_run_id) if requested_run_id else None
+        if existing_run:
+            if existing_run.template_name != template_name:
+                raise ValueError(
+                    f"Workflow run {requested_run_id} already belongs to "
+                    f"{existing_run.template_name}"
+                )
+            existing_steps = list_workflow_steps(requested_run_id)
+            if existing_run.status in TERMINAL_WORKFLOW_STATUSES:
+                return requested_run_id
+            if existing_steps and str(existing_steps[0].status or "pending") != "pending":
+                return requested_run_id
+
         ticket_id = context.get("ticket_id")
-        ctx = dict(context or {})
+        ctx = dict(existing_run.context or context or {}) if existing_run else dict(context or {})
         enforce_workflow_modules_enabled(template_name, ctx)
         if parent_run_id:
             ctx["parent_run_id"] = parent_run_id
@@ -141,9 +157,10 @@ class WorkflowEngine:
             source=source,
             user_id=user_id,
             thread_id=thread_id,
+            run_id=requested_run_id,
         )
 
-        wf_trace = start_workflow_trace(
+        wf_trace = None if existing_run else start_workflow_trace(
             run_id=run_id,
             template_name=template_name,
             ticket_id=ticket_id,
@@ -268,6 +285,12 @@ class WorkflowEngine:
         dispatch_parallel_batch_task.apply_async(
             args=[run_id, indices],
             queue=coordinator_queue,
+            task_id=str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"workflow-parallel-dispatch|{run_id}|{','.join(map(str, indices))}",
+                )
+            ),
         )
         log.info(
             "workflow_parallel_batch_dispatched",
@@ -301,6 +324,12 @@ class WorkflowEngine:
         async_result = dispatch_workflow_step_task.apply_async(
             args=[run_id, step_index],
             queue=queue,
+            task_id=str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"workflow-step-dispatch|{run_id}|{step_index}",
+                )
+            ),
         )
         mark_step_queued(step.id, async_result.id)
         log.info(
@@ -362,6 +391,7 @@ class WorkflowEngine:
             cls._finish_trace(run_id, "failed", str(err))
             cls._notify_failure(run_id, str(err))
             failed_run = get_workflow_run(run_id)
+            cls._request_patrol_batch_report_if_terminal(failed_run)
             log.error(
                 "workflow_run_failed",
                 run_id=run_id,
@@ -486,22 +516,7 @@ class WorkflowEngine:
             run_id, "completed", message, output={"artifacts": list(artifacts.keys())}
         )
         cls._notify_success(run_id, template, env, artifacts)
-        context = dict(run.context or {})
-        patrol_batch_id = str(context.get("patrol_batch_id") or "").strip()
-        if run.template_name == "patrol-change-event" and patrol_batch_id:
-            try:
-                from src.core.celery_tasks.tasks import (
-                    materialize_patrol_batch_report_task,
-                )
-
-                materialize_patrol_batch_report_task.delay(patrol_batch_id)
-            except Exception as exc:
-                log.warning(
-                    "patrol_batch_report_materialization_dispatch_failed",
-                    run_id=run_id,
-                    patrol_batch_id=patrol_batch_id,
-                    error=str(exc),
-                )
+        cls._request_patrol_batch_report_if_terminal(get_workflow_run(run_id) or run)
         log.info(
             "workflow_run_completed",
             run_id=run_id,
@@ -509,6 +524,49 @@ class WorkflowEngine:
             ticket_id=run.ticket_id,
             artifact_keys=list(artifacts.keys()),
         )
+
+    @classmethod
+    def _request_patrol_batch_report_if_terminal(cls, run: Any | None) -> None:
+        if run is None or run.template_name != "patrol-change-event":
+            return
+        context = dict(run.context or {})
+        patrol_batch_id = str(context.get("patrol_batch_id") or "").strip()
+        if not patrol_batch_id:
+            return
+        try:
+            from src.core.celery_tasks.tasks import materialize_patrol_batch_report_task
+            from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
+
+            repository = PatrolBatchManifestRepository()
+            if not repository.request_terminal_report(patrol_batch_id):
+                return
+            materialize_patrol_batch_report_task.apply_async(
+                args=[patrol_batch_id],
+                queue="netops.patrol",
+                task_id=str(
+                    uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        f"patrol-final-report|{patrol_batch_id}",
+                    )
+                ),
+            )
+        except Exception as exc:
+            try:
+                from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
+
+                PatrolBatchManifestRepository().mark_report_status(
+                    patrol_batch_id,
+                    "not_requested",
+                    error=str(exc),
+                )
+            except Exception:
+                pass
+            log.warning(
+                "patrol_batch_report_materialization_dispatch_failed",
+                run_id=getattr(run, "id", None),
+                patrol_batch_id=patrol_batch_id,
+                error=str(exc),
+            )
 
     @classmethod
     def _project_source_terminal_state(cls, run_id: str, run=None) -> None:

@@ -74,42 +74,57 @@ def _merge_generated_loops(results: list[dict[str, Any]]) -> dict[str, Any]:
 def _compile_reference_policy_candidate(
     candidate: dict[str, Any],
     approved_references: dict[str, Any],
+    constraints: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not approved_references:
         return dict(candidate)
     output = dict(candidate)
     runtime_references: dict[str, dict[str, Any]] = {}
-    thresholds = {
-        str(key): float(value)
-        for key, value in dict(output.get("thresholds") or {}).items()
+    allowed_modes = {
+        str(item)
+        for item in dict(constraints or {}).get("allowed_compare_modes") or []
     }
+    allowed_roles = {"low", "critical_low", "high", "critical_high"}
+    if allowed_modes == {"threshold_low_and_deadband"}:
+        allowed_roles = {"low", "critical_low"}
     for role, raw in approved_references.items():
         if not isinstance(raw, dict):
             continue
-        field_name = str(raw.get("field_name") or "").strip()
-        if not field_name:
+        if str(role) not in allowed_roles:
+            continue
+        source_field_name = str(raw.get("field_name") or "").strip()
+        runtime_field_name = str(
+            raw.get("context_key") or source_field_name
+        ).strip()
+        if not runtime_field_name:
             continue
         runtime_references[str(role)] = {
-            "field_name": field_name,
+            "field_name": runtime_field_name,
             "level": str(raw.get("level") or "reference"),
             "source": str(raw.get("source") or "structured_reference"),
         }
-        profile = dict(raw.get("field_profile") or {})
-        median = profile.get("median")
-        if median is not None:
-            thresholds[str(role)] = float(median)
+        if source_field_name and source_field_name != runtime_field_name:
+            runtime_references[str(role)]["source_field_name"] = source_field_name
     output["threshold_references"] = runtime_references
-    output["thresholds"] = thresholds
-    if "low" in runtime_references and "high" not in runtime_references:
+    # Dataset medians describe the samples; they are not safe runtime defaults for
+    # a different optic. A manually-authored policy can still provide static
+    # thresholds through the retained builtin/validation interface.
+    output["thresholds"] = {}
+    output["allow_static_threshold_fallback"] = False
+    has_low = bool({"low", "critical_low"}.intersection(runtime_references))
+    has_high = bool({"high", "critical_high"}.intersection(runtime_references))
+    if has_low and not has_high:
         output["compare_mode"] = "threshold_low_and_deadband"
-    elif "high" in runtime_references:
+    elif has_high:
         output["compare_mode"] = "threshold_and_deadband"
     output["recovery_threshold"] = None
     output["minimum_duration"] = None
+    output["source"] = "structured_threshold_reference"
+    output["confidence"] = max(float(output.get("confidence") or 0), 0.95)
     output["reason"] = (
         "Structured per-entity threshold fields from the approved "
-        "ObservationContract are authoritative. Static threshold values are "
-        "dataset medians retained only for deterministic replay and fallback; "
+        "ObservationContract are authoritative. Dataset medians are profiling "
+        "evidence only and are never used as runtime threshold fallbacks; "
         f"deadband={output.get('deadband')!r}."
     )
     return output
@@ -127,6 +142,21 @@ def _validate_policy_constraints(policy: Any, constraints: dict[str, Any]) -> li
     missing_keys = sorted(required_keys - set(policy.thresholds))
     if missing_keys:
         errors.append("required threshold keys are missing: " + ", ".join(missing_keys))
+    references = dict(policy.threshold_references or {})
+    if constraints.get("require_structured_threshold_references") is True:
+        if not references or policy.source != "structured_threshold_reference":
+            errors.append(
+                "policy must use approved structured threshold references"
+            )
+    required_reference_any = {
+        str(item)
+        for item in constraints.get("required_threshold_reference_any") or []
+    }
+    if required_reference_any and not required_reference_any.intersection(references):
+        errors.append(
+            "policy requires at least one threshold reference role: "
+            + ", ".join(sorted(required_reference_any))
+        )
     bounds = constraints.get("threshold_bounds") or {}
     if isinstance(bounds, dict):
         for key, raw_bound in bounds.items():
@@ -139,7 +169,8 @@ def _validate_policy_constraints(policy: Any, constraints: dict[str, Any]) -> li
                 errors.append(f"threshold {key} exceeds the allowed maximum")
     direction = str(constraints.get("recovery_direction") or "").strip()
     recovery = policy.recovery_threshold
-    if direction and recovery is None:
+    dynamic_recovery = bool(references) and policy.deadband is not None
+    if direction and recovery is None and not dynamic_recovery:
         errors.append("recovery_threshold is required by policy constraints")
     reference_key = str(constraints.get("recovery_reference_threshold") or "").strip()
     reference = policy.thresholds.get(reference_key) if reference_key else None
@@ -150,6 +181,11 @@ def _validate_policy_constraints(policy: Any, constraints: dict[str, Any]) -> li
             errors.append("recovery_threshold must be below the referenced high threshold")
         hysteresis = abs(float(recovery) - float(reference))
         if constraints.get("minimum_hysteresis") is not None and hysteresis < float(
+            constraints["minimum_hysteresis"]
+        ):
+            errors.append("recovery hysteresis is below the required minimum")
+    elif dynamic_recovery and constraints.get("minimum_hysteresis") is not None:
+        if abs(float(policy.deadband or 0)) < float(
             constraints["minimum_hysteresis"]
         ):
             errors.append("recovery hysteresis is below the required minimum")
@@ -327,6 +363,7 @@ def run_change_policy_generation(params: dict[str, Any]) -> dict[str, Any]:
             compiled_candidate = _compile_reference_policy_candidate(
                 candidate,
                 threshold_references,
+                policy_constraints,
             )
             policy = policy_from_dict(compiled_candidate)
             report = dict(validate_change_policy(policy))
@@ -372,13 +409,20 @@ def run_change_policy_generation(params: dict[str, Any]) -> dict[str, Any]:
             "generation_provider": generation_provider,
         }
     if mode == "infer":
-        policy = infer_change_policy(
+        inferred = infer_change_policy(
             observation_type=str(params.get("observation_type") or params.get("field_name") or ""),
             field_name=params.get("field_name"),
             field_semantics=dict(params.get("field_semantics") or {}),
             historical_values=values,
             device_role=params.get("device_role"),
             policy_intent=params.get("policy_intent"),
+        )
+        policy = policy_from_dict(
+            _compile_reference_policy_candidate(
+                inferred.to_dict(),
+                dict(params.get("threshold_references") or {}),
+                dict(params.get("policy_constraints") or {}),
+            )
         )
         result = {
             "success": True,
@@ -413,8 +457,8 @@ def run_change_policy_generation(params: dict[str, Any]) -> dict[str, Any]:
             result["agent_loop"] = _agent_loop(mode=mode, result=result, params=params)
         return result
     if mode == "infer_and_validate":
-        policy = (
-            policy_from_dict(proposal_payload)
+        candidate = (
+            dict(proposal_payload)
             if isinstance(proposal_payload, dict)
             else infer_change_policy(
                 observation_type=str(
@@ -425,6 +469,13 @@ def run_change_policy_generation(params: dict[str, Any]) -> dict[str, Any]:
                 historical_values=values,
                 device_role=params.get("device_role"),
                 policy_intent=params.get("policy_intent"),
+            ).to_dict()
+        )
+        policy = policy_from_dict(
+            _compile_reference_policy_candidate(
+                candidate,
+                dict(params.get("threshold_references") or {}),
+                dict(params.get("policy_constraints") or {}),
             )
         )
         validation = dict(validate_change_policy(policy))

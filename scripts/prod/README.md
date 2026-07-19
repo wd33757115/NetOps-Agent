@@ -108,6 +108,6 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ## 故障排查
 
 1. `check_env.ps1` / `check_env.sh` — 密钥与 DEBUG 开关  
-2. `curl http://127.0.0.1:8001/api/health/diagnostics/` — Celery / PG / MinIO  
-3. `docker compose logs celery --tail 100` — Workflow 步骤  
+2. `curl http://127.0.0.1:8001/api/health/diagnostics/` — Celery Worker / Beat 心跳 / PG / MinIO
+3. `docker compose logs celery-patrol celery-control celery-beat --tail 100` — Workflow 与周期调度
 4. 详见 [docs/11_运维技术手册 & 故障排查.md](../../docs/11_运维技术手册%20&%20故障排查.md)

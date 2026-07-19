@@ -190,6 +190,28 @@ def to_float(value: Any) -> float | None:
         return None
 
 
+def resolve_threshold_reference(
+    condition: dict[str, Any], context: dict[str, Any] | None
+) -> tuple[str | None, float | None]:
+    """Resolve the first available approved per-observation threshold field."""
+
+    fields = [
+        str(condition.get("reference_field") or ""),
+        *(
+            str(item)
+            for item in condition.get("fallback_reference_fields") or []
+        ),
+    ]
+    values = dict(context or {})
+    for field_name in fields:
+        if not field_name:
+            continue
+        value = to_float(values.get(field_name))
+        if value is not None:
+            return field_name, value
+    return None, None
+
+
 def is_down(value: Any) -> bool:
     return norm(value) in {
         "down",
@@ -445,8 +467,7 @@ def condition_matches(condition: dict[str, Any], change: dict[str, Any]) -> bool
         if norm_field(change.get("field")) not in fields:
             return False
         context = context_from_change(change)
-        reference_field = str(condition.get("reference_field") or "")
-        reference = to_float((context or {}).get(reference_field))
+        _reference_field, reference = resolve_threshold_reference(condition, context)
         old_value = to_float(change.get("old"))
         new_value = to_float(change.get("new"))
         if reference is None or new_value is None:

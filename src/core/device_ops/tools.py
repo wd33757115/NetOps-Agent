@@ -258,6 +258,7 @@ class PatrolTool:
             lease_seconds=settings.PATROL_CONCURRENCY_LEASE_SECONDS,
             wait_seconds=settings.PATROL_CONCURRENCY_WAIT_SECONDS,
             enabled=settings.PATROL_DISTRIBUTED_CONCURRENCY_ENABLED,
+            fail_closed=settings.PATROL_CONCURRENCY_FAIL_CLOSED,
         )
 
     @staticmethod
@@ -282,6 +283,7 @@ class PatrolTool:
         save_baseline: bool = False,
         mode: str = PRODUCTION_MODE,
         execution_plan: ExecutionPlan | None = None,
+        concurrency_lease: Any | None = None,
     ) -> dict[str, Any]:
         try:
             mode = normalize_patrol_mode(mode)
@@ -296,6 +298,10 @@ class PatrolTool:
                     for item in self._production_coverage(device, plan.command_texts())
                     if item["policy_status"] == "eligible" and item["coverage_status"] != "ready"
                 ]
+            if concurrency_lease is not None:
+                self.cli_collector.continuation_guard = lambda: (
+                    self.distributed_semaphore.assert_lease(concurrency_lease)
+                )
             output_file = await asyncio.to_thread(
                 self.cli_collector.collect_command_outputs,
                 device=device,
@@ -377,7 +383,12 @@ class PatrolTool:
                     try:
                         lease = await asyncio.to_thread(self.distributed_semaphore.acquire)
                         with self.distributed_semaphore.maintain(lease):
-                            result = await self.patrol_device(device, save_baseline, mode=mode)
+                            result = await self.patrol_device(
+                                device,
+                                save_baseline,
+                                mode=mode,
+                                concurrency_lease=lease,
+                            )
                         result["concurrency_mode"] = lease.effective_mode
                     except Exception as exc:
                         result = {
@@ -431,6 +442,7 @@ class PatrolTool:
                     save_baseline,
                     mode=execution_plan.mode,
                     execution_plan=execution_plan,
+                    concurrency_lease=lease,
                 )
             result["concurrency_mode"] = lease.effective_mode
         except Exception as exc:

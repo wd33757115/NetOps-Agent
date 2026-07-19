@@ -15,7 +15,7 @@ from src.core.patrol.raw_importer import _preview_parse_status
         ("eligible", "known", "unavailable", "template_missing", "template_missing"),
         ("eligible", "known", "failed", "textfsm_error", "parse_failed"),
         ("eligible", "known", "unavailable", "unsupported_command", "ignored"),
-        ("raw", "known", "not_required", None, "ignored"),
+        ("raw", "known", "not_required", None, "raw_compare"),
         ("ignored", "known", "unavailable", None, "ignored"),
         ("eligible", "unknown", "unavailable", None, "identity_unknown"),
     ],

@@ -1474,6 +1474,7 @@ class PatrolSnapshotRepository(_PatrolRepositoryBase):
             schema_id=row.parser_template_id,
             execution_item_id=row.execution_item_id,
             output_status=row.output_status,
+            metadata=dict(row.metadata_json or {}),
         )
 
 

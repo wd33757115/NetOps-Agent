@@ -199,4 +199,24 @@ describe('RuleAssetBundleWorkspace', () => {
     expect(await screen.findByText(/正在查看离线任务 offline-job-1/)).toBeVisible()
     expect(listBundles).toHaveBeenCalledWith(expect.objectContaining({ search: 'offline-job-1' }))
   })
+
+  it('routes an empty linked result to asset-chain inspection', async () => {
+    const user = userEvent.setup()
+    const inspectAssetChain = vi.fn()
+    listBundles.mockResolvedValueOnce({ items: [], total: 0, limit: 20, offset: 0 })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <RuleAssetBundleWorkspace
+          initialSearch="offline-job-empty"
+          onInspectAssetChain={inspectAssetChain}
+        />
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByText('当前离线任务没有待治理的候选资产包')).toBeVisible()
+    expect(screen.getByText(/没有候选包不代表运行时资产缺失/)).toBeVisible()
+    await user.click(screen.getByRole('button', { name: '检查资产链' }))
+    expect(inspectAssetChain).toHaveBeenCalledTimes(1)
+  })
 })

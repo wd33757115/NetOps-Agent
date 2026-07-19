@@ -6,6 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from src.core.patrol.event_rule_compiler import compile_event_rule_intents
 from src.core.patrol.event_rule_generation import generate_and_validate_event_rules
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -34,6 +35,109 @@ def _load_skill_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_event_rule_compiler_keeps_alarm_only_reference_critical():
+    compiled = compile_event_rule_intents(
+        candidate_rules=[
+            {
+                "event_type": "OpticalRxPowerAlarm",
+                "trigger_role": "critical_low",
+                "severity": "warning",
+            }
+        ],
+        contract={
+            "entity_type": "interface_optical",
+            "primary_keys": ["interface"],
+            "required_fields": ["interface"],
+            "optional_fields": ["rx_power_dbm", "rx_low_alarm_dbm"],
+            "state_semantics": {
+                "rx_power_dbm": {
+                    "semantic_type": "gauge",
+                    "observation_type": "interface.optical.rx_power",
+                }
+            },
+        },
+        change_policy={
+            "observation_type": "interface.optical.rx_power",
+            "semantic_type": "gauge",
+            "compare_mode": "threshold_low_and_deadband",
+            "thresholds": {"critical_low": -18.01},
+            "threshold_references": {
+                "critical_low": {"field_name": "rx_low_alarm_dbm"}
+            },
+            "deadband": 2,
+        },
+    )
+
+    assert compiled["success"] is True
+    assert [rule["trigger_role"] for rule in compiled["rules"]] == [
+        "critical_low",
+        "low_recovery",
+    ]
+    fault, recovery = compiled["rules"]
+    assert fault["severity"] == "critical"
+    assert fault["condition"]["reference_field"] == "rx_low_alarm_dbm"
+    assert recovery["condition"] == {
+        "kind": "threshold_field_low_recovery",
+        "entity_types": ["interface_optical"],
+        "fields": ["rx_power_dbm"],
+        "reference_field": "rx_low_alarm_dbm",
+        "hysteresis": 2.0,
+    }
+    assert recovery["recovery"]["resolves"] == ["OpticalRxPowerAlarm"]
+
+
+def test_event_rule_compiler_adds_alarm_fallback_to_warning_recovery():
+    compiled = compile_event_rule_intents(
+        candidate_rules=[
+            {
+                "event_type": "OpticalRxPowerLow",
+                "trigger_role": "low",
+                "severity": "warning",
+            },
+            {
+                "event_type": "OpticalRxPowerCritical",
+                "trigger_role": "critical_low",
+                "severity": "critical",
+            },
+        ],
+        contract={
+            "entity_type": "interface_optical",
+            "primary_keys": ["interface"],
+            "required_fields": ["interface"],
+            "optional_fields": [
+                "rx_power_dbm",
+                "rx_low_warning_dbm",
+                "rx_low_alarm_dbm",
+            ],
+            "state_semantics": {
+                "rx_power_dbm": {
+                    "semantic_type": "gauge",
+                    "observation_type": "interface.optical.rx_power",
+                }
+            },
+        },
+        change_policy={
+            "observation_type": "interface.optical.rx_power",
+            "semantic_type": "gauge",
+            "compare_mode": "threshold_low_and_deadband",
+            "thresholds": {"low": -15.0, "critical_low": -18.01},
+            "threshold_references": {
+                "low": {"field_name": "rx_low_warning_dbm"},
+                "critical_low": {"field_name": "rx_low_alarm_dbm"},
+            },
+            "deadband": 2,
+        },
+    )
+
+    recovery = next(
+        rule for rule in compiled["rules"] if rule["trigger_role"] == "low_recovery"
+    )
+    assert recovery["condition"]["reference_field"] == "rx_low_warning_dbm"
+    assert recovery["condition"]["fallback_reference_fields"] == [
+        "rx_low_alarm_dbm"
+    ]
 
 
 def test_event_rule_generator_builds_interface_rules():
@@ -157,11 +261,13 @@ def test_event_rule_generator_builds_optical_low_threshold_candidates():
     assert tx_result["success"] is True
     assert {rule["event_type"] for rule in rx_result["rules"]} == {
         "OpticalRxPowerLow",
-        "OpticalRecovered",
+        "OpticalRxPowerCritical",
+        "OpticalRxPowerRecovered",
     }
     assert {rule["event_type"] for rule in tx_result["rules"]} == {
         "OpticalTxPowerLow",
-        "OpticalRecovered",
+        "OpticalTxPowerCritical",
+        "OpticalTxPowerRecovered",
     }
     assert {rule["condition"]["kind"] for rule in [*rx_result["rules"], *tx_result["rules"]]} == {
         "threshold_lte",
@@ -196,6 +302,57 @@ def test_event_rule_generator_does_not_classify_unknown_gauge_as_cpu():
     assert result["success"] is False
     assert result["generated_rule_count"] == 0
     assert result["rules"] == []
+
+
+def test_builtin_optical_rules_bind_to_per_observation_alarm_threshold():
+    result = generate_and_validate_event_rules(
+        contract={
+            "entity_type": "interface_optical",
+            "required_fields": ["interface"],
+            "optional_fields": ["rx_power_dbm", "rx_low_alarm_dbm"],
+            "primary_keys": ["interface"],
+            "state_semantics": {
+                "interface": {"semantic_type": "identity"},
+                "rx_power_dbm": {
+                    "semantic_type": "gauge",
+                    "observation_type": "interface.optical.rx_power",
+                    "unit": "dbm",
+                },
+            },
+        },
+        change_policy={
+            "observation_type": "interface.optical.rx_power",
+            "semantic_type": "gauge",
+            "compare_mode": "threshold_low_and_deadband",
+            "thresholds": {},
+            "threshold_references": {
+                "critical_low": {
+                    "field_name": "rx_low_alarm_dbm",
+                    "level": "alarm",
+                }
+            },
+            "deadband": 2,
+        },
+    )
+
+    assert result["success"] is True
+    assert {rule["event_type"] for rule in result["rules"]} == {
+        "OpticalRxPowerCritical",
+        "OpticalRxPowerRecovered",
+    }
+    fault = next(rule for rule in result["rules"] if rule["event_class"] == "fault")
+    recovery = next(
+        rule for rule in result["rules"] if rule["event_class"] == "recovery"
+    )
+    assert fault["condition"] == {
+        "kind": "threshold_field_lte",
+        "entity_types": ["interface_optical"],
+        "fields": ["rx_power_dbm"],
+        "reference_field": "rx_low_alarm_dbm",
+    }
+    assert recovery["condition"]["kind"] == "threshold_field_low_recovery"
+    assert recovery["condition"]["reference_field"] == "rx_low_alarm_dbm"
+    assert recovery["recovery"]["resolves"] == ["OpticalRxPowerCritical"]
 
 
 def test_event_rule_generator_skill(tmp_path: Path):
@@ -275,11 +432,14 @@ def test_event_rule_generator_fans_out_multiple_change_policies(tmp_path: Path):
     )
 
     assert result["success"] is True
-    assert result["generated_rule_count"] == 4
+    assert result["generated_rule_count"] == 6
     assert {item["event_type"] for item in result["rules"]} == {
         "OpticalRxPowerLow",
+        "OpticalRxPowerCritical",
+        "OpticalRxPowerRecovered",
         "OpticalTxPowerLow",
-        "OpticalRecovered",
+        "OpticalTxPowerCritical",
+        "OpticalTxPowerRecovered",
     }
 
 

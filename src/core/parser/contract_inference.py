@@ -229,6 +229,18 @@ def _normalize_binding_lines(
         for match in _SAMPLE_BLOCK_RE.finditer(samples_text or "")
     }
     corrections: list[dict[str, Any]] = []
+
+    def context_overlap(field_name: str, lines: list[str], line_number: int) -> int:
+        field_tokens = set(re.findall(r"[a-z0-9]+", field_name.casefold()))
+        lower_bound = max(0, line_number - 10)
+        for index in range(line_number - 2, lower_bound - 1, -1):
+            heading = lines[index].strip()
+            if not heading.endswith(":"):
+                continue
+            heading_tokens = set(re.findall(r"[a-z0-9]+", heading.casefold()))
+            return len(field_tokens.intersection(heading_tokens))
+        return 0
+
     for field_name, raw_bindings in field_bindings.items():
         bindings = raw_bindings if isinstance(raw_bindings, list) else [raw_bindings]
         for binding in bindings:
@@ -251,8 +263,6 @@ def _normalize_binding_lines(
                     or (source_value and literal_occurs(line, source_value))
                 )
 
-            if 1 <= requested <= len(lines) and present(lines[requested - 1]):
-                continue
             label_matches = [
                 index
                 for index, line in enumerate(lines, 1)
@@ -266,9 +276,28 @@ def _normalize_binding_lines(
             matches = label_matches or value_matches
             if not matches:
                 continue
+            contextual = [
+                (context_overlap(str(field_name), lines, index), index)
+                for index in matches
+            ]
+            best_overlap = max((overlap for overlap, _index in contextual), default=0)
+            if best_overlap > 0:
+                matches = [
+                    index for overlap, index in contextual if overlap == best_overlap
+                ]
+            if (
+                1 <= requested <= len(lines)
+                and present(lines[requested - 1])
+                and requested in matches
+            ):
+                continue
             if len(matches) == 1:
                 resolved = matches[0]
-                strategy = "unique_literal_match"
+                strategy = (
+                    "section_context_match"
+                    if best_overlap > 0
+                    else "unique_literal_match"
+                )
             else:
                 ranked = sorted((abs(index - requested), index) for index in matches)
                 if len(ranked) > 1 and ranked[0][0] == ranked[1][0]:
@@ -567,7 +596,7 @@ def _header_field_spans(
                     continue
                 pattern = (
                     r"(?<![A-Za-z0-9])"
-                    + r"\s+".join(re.escape(word) for word in words)
+                    + r"[^A-Za-z0-9]+".join(re.escape(word) for word in words)
                     + r"(?![A-Za-z0-9])"
                 )
                 for match in re.finditer(pattern, header, re.IGNORECASE):
@@ -593,6 +622,35 @@ def _header_field_spans(
     }
 
 
+def _stable_table_column_starts(lines: list[str], region: Any) -> tuple[int, ...]:
+    """Infer fixed-width boundaries from repeated row whitespace.
+
+    A weak Contract may omit trailing columns, so declared field spans alone
+    cannot safely determine where its final field ends. Repeated row starts are
+    structural evidence and remain useful even when header labels contain
+    punctuation, multiple words, or fields unknown to the semantic catalog.
+    """
+
+    counts: dict[int, int] = {}
+    row_count = 0
+    for line_number in range(
+        region.first_row_line_number,
+        region.last_row_line_number + 1,
+    ):
+        line = lines[line_number - 1]
+        starts = {
+            match.start("value")
+            for match in re.finditer(r"(?:^|\s{2,})(?P<value>\S)", line)
+        }
+        if not starts:
+            continue
+        row_count += 1
+        for start in starts:
+            counts[start] = counts.get(start, 0) + 1
+    minimum_support = max(1, (row_count + 1) // 2)
+    return tuple(sorted(start for start, count in counts.items() if count >= minimum_support))
+
+
 def _table_region_context_signature(lines: list[str], region: Any) -> tuple[str, str]:
     """Describe a table by its header and nearest enclosing section heading."""
 
@@ -613,6 +671,22 @@ def _table_region_context_signature(lines: list[str], region: Any) -> tuple[str,
             ).strip()
             break
     return context, header
+
+
+def _table_context_role(context: str) -> str | None:
+    """Classify table sections whose identical headers carry different semantics."""
+
+    normalized = str(context or "").casefold()
+    role_markers = (
+        ("warning", ("warning", "warn")),
+        ("alarm", ("alarm", "critical")),
+        ("threshold", ("threshold", "limit")),
+        ("current", ("current", "actual", "measured", "reading", "value")),
+    )
+    for role, markers in role_markers:
+        if any(marker in normalized for marker in markers):
+            return role
+    return None
 
 
 def _normalize_table_column_bindings(
@@ -673,11 +747,21 @@ def _normalize_table_column_bindings(
             all_regions.add(region_key)
             header = lines[region.header_line_number - 1]
             spans = _header_field_spans(header, declared)
-            ordered_starts = sorted({start for start, _end, _label in spans.values()})
+            ordered_starts = sorted(
+                {
+                    *(start for start, _end, _label in spans.values()),
+                    *_stable_table_column_starts(lines, region),
+                }
+            )
             for field, (start, _match_end, label) in spans.items():
                 allowed_signatures = original_region_signatures.get(field) or set()
+                governed_roles = {
+                    role
+                    for context, _header in allowed_signatures
+                    if (role := _table_context_role(context)) is not None
+                }
                 if (
-                    allowed_signatures
+                    governed_roles
                     and _table_region_context_signature(lines, region)
                     not in allowed_signatures
                 ):

@@ -15,6 +15,7 @@ from .identity import DeviceIdentity
 from .key_contract import validate_entity_keys
 from .output_classifier import OutputClassifier
 from .policy import CategorySpec, ParserPolicy
+from .textfsm_input import prepare_textfsm_input
 
 try:
     import textfsm
@@ -41,6 +42,8 @@ class ParserRuntimeResult:
     capability: str | None = None
     capability_status: str = "unknown"
     template_profile: str | None = None
+    comparison_profile: str | None = None
+    comparison_profile_version: int | None = None
 
 
 class ParserRuntime:
@@ -102,6 +105,8 @@ class ParserRuntime:
             "template_id": None,
             "template_version": None,
             "failure_code": None,
+            "comparison_profile": decision.comparison_profile,
+            "comparison_profile_version": decision.comparison_profile_version,
         }
         if not decision.enabled:
             if decision.handling == "raw_hash_diff":
@@ -181,6 +186,8 @@ class ParserRuntime:
                     capability=decision.capability,
                     capability_status=decision.capability_status,
                     template_profile=decision.template_profile,
+                    comparison_profile=decision.comparison_profile,
+                    comparison_profile_version=decision.comparison_profile_version,
                 )
             return ParserRuntimeResult(
                 policy_status="ignored",
@@ -262,7 +269,7 @@ class ParserRuntime:
         try:
             content = Path(template.asset_path).read_text(encoding="utf-8")
             parser = textfsm.TextFSM(io.StringIO(content))
-            values = parser.ParseText(raw_text or "")
+            values = parser.ParseText(prepare_textfsm_input(content, raw_text or ""))
             records = [dict(zip(parser.header, row, strict=False)) for row in values]
         except Exception:
             return self._failed(decision, identity, template, "template_parse_error", evidence)

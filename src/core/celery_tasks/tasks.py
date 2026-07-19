@@ -16,7 +16,11 @@ sys.path.insert(0, BASE_DIR)
 from src.common.config import get_settings
 from src.core.backup.runner import DeviceBackupRunner, DeviceBackupRunRequest
 from src.core.logging import get_logger
-from src.core.patrol.handlers import ExecutePatrolCommand, ExecutePatrolHandler
+from src.core.patrol.handlers import (
+    DispatchPatrolBatchHandler,
+    ExecutePatrolCommand,
+    ExecutePatrolHandler,
+)
 from src.core.patrol.run_coordinator import PatrolRunCoordinator
 from src.core.patrol.runner import PatrolPlatformError
 from src.core.patrol.runner import (
@@ -27,29 +31,135 @@ settings = get_settings()
 log = get_logger(__name__)
 
 
-@celery.task(name="materialize_patrol_batch_report", max_retries=2, retry_backoff=5)
+@celery.task(
+    bind=True,
+    name="record_celery_beat_heartbeat",
+    autoretry_for=(Exception,),
+    max_retries=2,
+    retry_backoff=2,
+)
+def record_celery_beat_heartbeat_task(self) -> dict[str, object]:
+    from src.core.celery_tasks.beat_health import record_celery_beat_heartbeat
+
+    return record_celery_beat_heartbeat(
+        worker_id=str(getattr(self.request, "hostname", None) or "unknown"),
+    )
+
+
+@celery.task(name="cleanup_expired_patrol_outputs")
+def cleanup_expired_patrol_outputs_task() -> dict[str, Any]:
+    from src.core.execution.artifacts import cleanup_expired_output_captures
+    from src.core.ingestion.adapters.cli import OUTPUT_ROOT
+
+    return {
+        "success": True,
+        **cleanup_expired_output_captures(
+            OUTPUT_ROOT,
+            retention_hours=settings.PATROL_LOCAL_OUTPUT_RETENTION_HOURS,
+        ),
+    }
+
+
+@celery.task(name="dispatch_patrol_batch", max_retries=3, retry_backoff=5)
+def dispatch_patrol_batch_task(patrol_batch_id: str) -> dict[str, Any]:
+    return DispatchPatrolBatchHandler().handle(patrol_batch_id)
+
+
+@celery.task(name="reconcile_patrol_batch_dispatches")
+def reconcile_patrol_batch_dispatches_task() -> dict[str, Any]:
+    from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
+
+    batch_ids = PatrolBatchManifestRepository().pending_dispatch_batch_ids(limit=100)
+    dispatched = 0
+    for patrol_batch_id in batch_ids:
+        dispatch_patrol_batch_task.apply_async(
+            args=[patrol_batch_id],
+            queue="netops.patrol",
+            task_id=str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"patrol-batch-dispatch|{patrol_batch_id}|{datetime.utcnow():%Y%m%d%H%M}",
+                )
+            ),
+        )
+        dispatched += 1
+    return {"success": True, "candidate_count": len(batch_ids), "dispatched_count": dispatched}
+
+
+@celery.task(name="reconcile_patrol_batch_reports")
+def reconcile_patrol_batch_reports_task() -> dict[str, Any]:
+    from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
+
+    repository = PatrolBatchManifestRepository()
+    batch_ids = repository.terminal_report_candidate_ids(limit=100)
+    requested = 0
+    failed = 0
+    for patrol_batch_id in batch_ids:
+        if not repository.request_terminal_report(patrol_batch_id):
+            continue
+        try:
+            materialize_patrol_batch_report_task.apply_async(
+                args=[patrol_batch_id],
+                queue="netops.patrol",
+                task_id=str(
+                    uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        f"patrol-final-report|{patrol_batch_id}",
+                    )
+                ),
+            )
+        except Exception as exc:
+            repository.mark_report_status(
+                patrol_batch_id,
+                "not_requested",
+                error=str(exc),
+            )
+            failed += 1
+            log.warning(
+                "patrol_batch_report_reconciliation_dispatch_failed",
+                patrol_batch_id=patrol_batch_id,
+                error=str(exc),
+            )
+            continue
+        requested += 1
+    return {
+        "success": failed == 0,
+        "candidate_count": len(batch_ids),
+        "requested_count": requested,
+        "failed_count": failed,
+    }
+
+
+@celery.task(
+    name="materialize_patrol_batch_report",
+    autoretry_for=(Exception,),
+    max_retries=2,
+    retry_backoff=5,
+)
 def materialize_patrol_batch_report_task(patrol_batch_id: str) -> dict[str, Any]:
+    from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
     from src.core.patrol.patrol_report_service import PatrolReportService
     from src.core.workflows.patrol_batch_projection import (
         MaterializePatrolBatchReportHandler,
     )
     from src.core.workflows.patrol_batch_service import build_patrol_batch_summary
-    from src.core.workflows.repository import list_workflow_runs
     from src.infrastructure.storage.minio_client import get_minio_storage
 
-    runs = list_workflow_runs(
-        limit=1000,
-        template_name="patrol-change-event",
-        source="device-management",
-        patrol_batch_id=patrol_batch_id,
-    )
-    if not runs:
+    repository = PatrolBatchManifestRepository()
+    runs = repository.workflow_runs(patrol_batch_id)
+    if runs is None:
         return {"success": False, "patrol_batch_id": patrol_batch_id, "reason": "not_found"}
-    markdown = MaterializePatrolBatchReportHandler(
-        summary_builder=build_patrol_batch_summary,
-        renderer=PatrolReportService.render_markdown,
-        object_storage=get_minio_storage(),
-    ).handle(patrol_batch_id, runs)
+    repository.mark_report_status(patrol_batch_id, "generating")
+    try:
+        markdown = MaterializePatrolBatchReportHandler(
+            summary_builder=build_patrol_batch_summary,
+            renderer=PatrolReportService.render_markdown,
+            object_storage=get_minio_storage(),
+        ).handle(patrol_batch_id, runs)
+    except Exception as exc:
+        repository.mark_report_status(patrol_batch_id, "failed", error=str(exc))
+        raise
+    repository.mark_report_status(patrol_batch_id, "completed")
     return {
         "success": True,
         "patrol_batch_id": patrol_batch_id,

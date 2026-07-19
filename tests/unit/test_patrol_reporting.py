@@ -1,13 +1,47 @@
 from __future__ import annotations
 
+from zipfile import ZipFile
+
 from src.core.patrol import reporting
 from src.core.patrol.reporting import render_run_report
+
+
+def _raw_change():
+    return {
+        "change_id": "raw-change-1",
+        "device_id": "SW1",
+        "command": "show running-config",
+        "previous_snapshot_id": "snapshot-before",
+        "current_snapshot_id": "snapshot-after",
+        "dimensions": {
+            "unstructured_diff": {
+                "changed": True,
+                "profile": "configuration",
+                "profile_label": "Configuration",
+                "added_line_count": 1,
+                "removed_line_count": 1,
+                "changed_line_count": 2,
+                "similarity_ratio": 0.5,
+                "categories": [
+                    {"name": "security", "label": "Security", "line_count": 2}
+                ],
+                "preview": [
+                    {
+                        "operation": "added",
+                        "category": "security",
+                        "category_label": "Security",
+                        "text": "snmp-agent community <redacted> ro",
+                    }
+                ],
+            }
+        },
+    }
 
 
 def test_render_run_report_summarizes_events(monkeypatch):
     class FakeRepository:
         def list_changes(self, *, run_id=None, device_id=None):
-            return [{"change_id": "change-1"}]
+            return [_raw_change()]
 
         def list_events(self, *, run_id=None, device_id=None):
             return [
@@ -49,14 +83,17 @@ def test_render_run_report_summarizes_events(monkeypatch):
     assert result["change_count"] == 1
     assert result["event_count"] == 2
     assert result["event_types"] == {"InterfaceDown": 1, "CPUHigh": 1}
+    assert result["unstructured_comparison"]["changed_output_count"] == 1
     assert "- New events: 2" in result["markdown"]
     assert "## Event Details" in result["markdown"]
+    assert "## Non-structured Output Changes" in result["markdown"]
+    assert "<redacted>" in result["markdown"]
 
 
 def test_render_run_report_writes_html_and_xlsx(monkeypatch, tmp_path):
     class FakeRepository:
         def list_changes(self, *, run_id=None, device_id=None):
-            return [{"change_id": "change-1"}]
+            return [_raw_change()]
 
         def list_events(self, *, run_id=None, device_id=None):
             return [
@@ -98,6 +135,12 @@ def test_render_run_report_writes_html_and_xlsx(monkeypatch, tmp_path):
     )
 
     assert "<table>" in html_result["content"]
+    assert "Non-structured Output Changes" in html_result["content"]
+    assert "&lt;redacted&gt;" in html_result["content"]
     assert html_path.read_text(encoding="utf-8").startswith("<!doctype html>")
     assert xlsx_result["output_path"] == str(xlsx_path)
     assert xlsx_path.read_bytes().startswith(b"PK")
+    with ZipFile(xlsx_path) as archive:
+        sheet = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
+    assert "Non-structured Output Changes" in sheet
+    assert "&lt;redacted&gt;" in sheet

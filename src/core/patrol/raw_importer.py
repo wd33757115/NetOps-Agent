@@ -146,8 +146,10 @@ def _import_fingerprint(
 
 
 def _preview_parse_status(parsed: ParserRuntimeResult) -> str:
-    """Project runtime outcomes onto the four user-facing preview buckets."""
-    if parsed.policy_status in {"ignored", "raw"}:
+    """Project runtime outcomes onto the user-facing preview buckets."""
+    if parsed.policy_status == "raw":
+        return "raw_compare"
+    if parsed.policy_status == "ignored":
         return "ignored"
     if parsed.failure_code == "unsupported_command":
         return "ignored"
@@ -195,6 +197,7 @@ def preview_raw_path(
         "template_missing": 0,
         "parse_failed": 0,
         "ignored": 0,
+        "raw_compare": 0,
         "identity_unknown": 0,
         "duplicate_snapshots": 0,
         "new_snapshots": 0,
@@ -260,6 +263,8 @@ def preview_raw_path(
                     "template_version": parsed.template_version,
                     "failure_code": parsed.failure_code,
                     "handling": parsed.handling,
+                    "comparison_profile": parsed.comparison_profile,
+                    "comparison_profile_version": parsed.comparison_profile_version,
                     "record_count": (
                         len(parsed.structured_data)
                         if isinstance(parsed.structured_data, list)
@@ -693,6 +698,8 @@ def import_raw_capture(
                 "collection_item_id": command_collection.get("collection_item_id"),
                 "command_ordinal": command_collection.get("command_ordinal"),
                 "handling": parsed.handling,
+                "comparison_profile": parsed.comparison_profile,
+                "comparison_profile_version": parsed.comparison_profile_version,
                 "output_status": parsed.output_status,
                 "capability": parsed.capability,
                 "capability_status": parsed.capability_status,

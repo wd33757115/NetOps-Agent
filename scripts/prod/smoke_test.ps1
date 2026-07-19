@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
 # SPDX-License-Identifier: Apache-2.0
 
-# 生产冒烟测试（BFF 健康 / 鉴权 / 诊断 / Workflow 模板 / viewer RBAC）
+# Production smoke tests: BFF health, auth, diagnostics, workflows, and RBAC.
 param(
     [string]$BffBase = "http://127.0.0.1:8001",
     [string]$AdminUser = "admin",
@@ -50,12 +50,19 @@ Write-Host "  NetOps Production - Smoke Test" -ForegroundColor Cyan
 Write-Host "  BFF: $BffBase" -ForegroundColor Gray
 Write-Host "============================================================" -ForegroundColor Cyan
 
-# Docker 容器（可选）
+# Docker containers (optional).
 if (-not $SkipDockerCheck) {
     try {
         $ps = docker compose -f (Join-Path $PSScriptRoot "../../deployment/docker-compose.yml") ps --format json 2>$null | ConvertFrom-Json
         $names = @($ps | ForEach-Object { $_.Name })
-        foreach ($svc in @("netops-celery", "netops-fastapi", "netops-django", "netops-react")) {
+        foreach ($svc in @(
+            "netops-celery-patrol",
+            "netops-celery-control",
+            "netops-celery-beat",
+            "netops-fastapi",
+            "netops-django",
+            "netops-react"
+        )) {
             $up = $names -contains $svc -and ($ps | Where-Object { $_.Name -eq $svc }).State -match "running"
             Assert-Ok "Docker $svc running" $up
         }
@@ -72,7 +79,7 @@ try {
     Assert-Ok "BFF /api/health/" $false $_.Exception.Message
 }
 
-# 2. Diagnostics（含 Celery Worker / Broker）
+# 2. Diagnostics, including Celery workers and broker.
 try {
     $d = Invoke-BffJson -Path "/api/health/diagnostics/"
     Assert-Ok "BFF /api/health/diagnostics/" ($d.success -eq $true)
@@ -83,6 +90,12 @@ try {
             Assert-Ok "Celery Worker (diagnostics)" ($celeryW.status -eq "ok") $celeryW.message
         } else {
             Assert-Ok "Celery Worker (diagnostics)" $false "check missing"
+        }
+        $celeryBeat = $checks | Where-Object { $_.id -eq "celery_beat" } | Select-Object -First 1
+        if ($celeryBeat) {
+            Assert-Ok "Celery Beat (diagnostics)" ($celeryBeat.status -eq "ok") $celeryBeat.message
+        } else {
+            Assert-Ok "Celery Beat (diagnostics)" $false "check missing"
         }
         $pg = $checks | Where-Object { $_.id -eq "postgres" } | Select-Object -First 1
         if ($pg) {
@@ -136,7 +149,7 @@ if ($token) {
     }
 }
 
-# 4. Viewer RBAC（Skills 写操作应拒绝；列表可读视配置）
+# 4. Viewer RBAC: privileged writes are denied.
 if (-not $SkipViewerTest) {
     try {
         $vLogin = Invoke-BffJson -Method POST -Path "/api/auth/login/" -Body @{
@@ -160,7 +173,7 @@ if (-not $SkipViewerTest) {
     }
 }
 
-# 5. React 静态（经 prod bind 127.0.0.1:3000）
+# 5. React static application.
 try {
     $webBase = $BffBase -replace ":8001", ":3000"
     if ($webBase -eq $BffBase) { $webBase = "http://127.0.0.1:3000" }

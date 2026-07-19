@@ -263,10 +263,10 @@ services:
       - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
       - CELERY_WORKER_ROLE=control
-      - CELERY_WORKER_QUEUES=netops.default,netops.firewall
+      - CELERY_WORKER_QUEUES=netops.default,netops.firewall,netops.health
       - DEBUG=false
       - TZ=Asia/Shanghai
-    command: celery -A src.core.celery_tasks.celery_app worker --loglevel=info -Q netops.default,netops.firewall -c 2
+    command: celery -A src.core.celery_tasks.celery_app worker --loglevel=info -Q netops.default,netops.firewall,netops.health -c 2
     depends_on:
       postgres:
         condition: service_healthy

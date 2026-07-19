@@ -509,110 +509,146 @@ def _cross_asset_rule_errors(
         if fields and not fields.intersection(target_fields):
             errors.append(f"rule {rule.get('name')} does not target the ChangePolicy field")
     if compare_mode == "threshold_low_and_deadband":
-        low = (change_policy.get("thresholds") or {}).get("low")
-        critical_low = (change_policy.get("thresholds") or {}).get("critical_low")
-        low_reference = dict(threshold_references.get("low") or {})
-        matching_faults = [
-            rule
-            for rule in fault_rules
-            if (rule.get("condition") or {}).get("kind")
-            == ("threshold_field_lte" if low_reference else "threshold_lte")
-            and target_fields.intersection((rule.get("condition") or {}).get("fields") or [])
+        threshold_values = dict(change_policy.get("thresholds") or {})
+        low_specs = [
+            (
+                role,
+                threshold_values.get(role),
+                dict(threshold_references.get(role) or {}),
+            )
+            for role in ("low", "critical_low")
+            if threshold_values.get(role) is not None or threshold_references.get(role)
         ]
-        if not matching_faults:
-            errors.append("low-threshold policy requires a threshold_lte fault rule")
-        elif low_reference and not any(
-            str((rule.get("condition") or {}).get("reference_field") or "")
-            == str(low_reference.get("field_name") or "")
-            for rule in matching_faults
-        ):
-            errors.append("fault rule reference must match ChangePolicy low reference")
-        elif (
-            not low_reference
-            and low is not None
-            and not any(
-                _numbers_equal((rule.get("condition") or {}).get("lte"), low)
-                for rule in matching_faults
-            )
-        ):
-            errors.append("fault rule threshold must match ChangePolicy thresholds.low")
-        critical_reference = dict(threshold_references.get("critical_low") or {})
-        if (critical_low is not None or critical_reference) and not any(
-            (rule.get("condition") or {}).get("kind")
-            == ("threshold_field_lte" if critical_reference else "threshold_lte")
-            and target_fields.intersection((rule.get("condition") or {}).get("fields") or [])
-            and (
-                str((rule.get("condition") or {}).get("reference_field") or "")
-                == str(critical_reference.get("field_name") or "")
-                if critical_reference
-                else _numbers_equal((rule.get("condition") or {}).get("lte"), critical_low)
-            )
-            for rule in fault_rules
-        ):
-            errors.append(
-                "critical low threshold requires a fault rule matching "
-                "ChangePolicy thresholds.critical_low"
-            )
+        if not low_specs:
+            errors.append("low-threshold policy has no usable low threshold")
+        for role, value, reference in low_specs:
+            expected_kind = "threshold_field_lte" if reference else "threshold_lte"
+            matching_faults = [
+                rule
+                for rule in fault_rules
+                if (rule.get("condition") or {}).get("kind") == expected_kind
+                and target_fields.intersection(
+                    (rule.get("condition") or {}).get("fields") or []
+                )
+            ]
+            if reference:
+                matched = any(
+                    str((rule.get("condition") or {}).get("reference_field") or "")
+                    == str(reference.get("field_name") or "")
+                    for rule in matching_faults
+                )
+            else:
+                matched = any(
+                    _numbers_equal((rule.get("condition") or {}).get("lte"), value)
+                    for rule in matching_faults
+                )
+            if not matched:
+                errors.append(f"fault rule must match ChangePolicy {role} threshold")
+        primary_role, primary_value, primary_reference = next(
+            (item for item in low_specs if item[0] == "low"),
+            low_specs[0] if low_specs else ("low", None, {}),
+        )
         recovery_threshold = change_policy.get("recovery_threshold")
-        if recovery_threshold is not None or (low_reference and change_policy.get("deadband")):
+        deadband = change_policy.get("deadband")
+        expected_recovery = (
+            recovery_threshold
+            if recovery_threshold is not None
+            else float(primary_value) + float(deadband)
+            if primary_value is not None and deadband
+            else None
+        )
+        if expected_recovery is not None or (primary_reference and deadband):
             matching_recovery = [
                 rule
                 for rule in recovery_rules
                 if (rule.get("condition") or {}).get("kind")
-                == ("threshold_field_low_recovery" if low_reference else "threshold_low_recovery")
+                == (
+                    "threshold_field_low_recovery"
+                    if primary_reference
+                    else "threshold_low_recovery"
+                )
             ]
             if not matching_recovery:
                 errors.append("low-threshold policy with hysteresis requires a recovery rule")
-            elif low_reference and not any(
+            elif primary_reference and not any(
                 str((rule.get("condition") or {}).get("reference_field") or "")
-                == str(low_reference.get("field_name") or "")
+                == str(primary_reference.get("field_name") or "")
                 for rule in matching_recovery
             ):
                 errors.append("recovery rule reference must match the ChangePolicy")
-            elif not low_reference and not any(
-                _numbers_equal((rule.get("condition") or {}).get("low"), low)
-                and _numbers_equal((rule.get("condition") or {}).get("gt"), recovery_threshold)
+            elif not primary_reference and not any(
+                _numbers_equal((rule.get("condition") or {}).get("low"), primary_value)
+                and _numbers_equal(
+                    (rule.get("condition") or {}).get("gt"), expected_recovery
+                )
                 for rule in matching_recovery
             ):
                 errors.append("recovery rule thresholds must match the ChangePolicy")
     elif compare_mode == "threshold_and_deadband":
-        high = (change_policy.get("thresholds") or {}).get("high")
-        high_reference = dict(threshold_references.get("high") or {})
-        matching_faults = [
-            rule
-            for rule in fault_rules
-            if (rule.get("condition") or {}).get("kind")
-            == ("threshold_field_gte" if high_reference else "threshold")
-            and target_fields.intersection((rule.get("condition") or {}).get("fields") or [])
-        ]
-        if not matching_faults:
-            errors.append("high-threshold policy requires a threshold fault rule")
-        elif high_reference and not any(
-            str((rule.get("condition") or {}).get("reference_field") or "")
-            == str(high_reference.get("field_name") or "")
-            for rule in matching_faults
-        ):
-            errors.append("fault rule reference must match ChangePolicy high reference")
-        elif (
-            not high_reference
-            and high is not None
-            and not any(
-                _numbers_equal((rule.get("condition") or {}).get("gte"), high)
-                for rule in matching_faults
+        threshold_values = dict(change_policy.get("thresholds") or {})
+        high_specs = [
+            (
+                role,
+                threshold_values.get(role),
+                dict(threshold_references.get(role) or {}),
             )
-        ):
-            errors.append("fault rule threshold must match ChangePolicy thresholds.high")
+            for role in ("high", "critical_high")
+            if threshold_values.get(role) is not None or threshold_references.get(role)
+        ]
+        if not high_specs:
+            errors.append("high-threshold policy has no usable high threshold")
+        for role, value, reference in high_specs:
+            expected_kind = "threshold_field_gte" if reference else "threshold"
+            matching_faults = [
+                rule
+                for rule in fault_rules
+                if (rule.get("condition") or {}).get("kind") == expected_kind
+                and target_fields.intersection(
+                    (rule.get("condition") or {}).get("fields") or []
+                )
+            ]
+            if reference:
+                matched = any(
+                    str((rule.get("condition") or {}).get("reference_field") or "")
+                    == str(reference.get("field_name") or "")
+                    for rule in matching_faults
+                )
+            else:
+                matched = any(
+                    _numbers_equal((rule.get("condition") or {}).get("gte"), value)
+                    for rule in matching_faults
+                )
+            if not matched:
+                errors.append(f"fault rule must match ChangePolicy {role} threshold")
+        _primary_role, primary_value, primary_reference = next(
+            (item for item in high_specs if item[0] == "high"),
+            high_specs[0] if high_specs else ("high", None, {}),
+        )
         recovery_threshold = change_policy.get("recovery_threshold")
+        deadband = change_policy.get("deadband")
+        expected_recovery = (
+            recovery_threshold
+            if recovery_threshold is not None
+            else float(primary_value) - float(deadband)
+            if primary_value is not None and deadband
+            else None
+        )
         if (
-            recovery_threshold is not None or (high_reference and change_policy.get("deadband"))
+            expected_recovery is not None or (primary_reference and deadband)
         ) and not any(
             (rule.get("condition") or {}).get("kind")
-            == ("threshold_field_high_recovery" if high_reference else "threshold_recovery")
+            == (
+                "threshold_field_high_recovery"
+                if primary_reference
+                else "threshold_recovery"
+            )
             and (
                 str((rule.get("condition") or {}).get("reference_field") or "")
-                == str(high_reference.get("field_name") or "")
-                if high_reference
-                else _numbers_equal((rule.get("condition") or {}).get("lt"), recovery_threshold)
+                == str(primary_reference.get("field_name") or "")
+                if primary_reference
+                else _numbers_equal(
+                    (rule.get("condition") or {}).get("lt"), expected_recovery
+                )
             )
             for rule in recovery_rules
         ):

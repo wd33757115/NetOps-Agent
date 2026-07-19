@@ -22,6 +22,8 @@ from src.core.parser.contract_validation import (  # noqa: E402
 )
 from src.core.parser.semantic_catalog import (  # noqa: E402
     canonical_field_for_name,
+    rebind_applicability,
+    rebound_field_applicability,
 )
 from src.core.parser.semantic_catalog import (
     field_semantics as catalog_field_semantics,
@@ -103,7 +105,12 @@ def _validate_contract_by_group(
         ]
     }
     semantic_fields = {str(item) for item in (candidate.get("state_semantics") or {})}
-    unknown_fields = sorted((declared | semantic_fields) - set(field_inventory))
+    seed_optional = {
+        str(item) for item in (contract_seed or {}).get("optional_fields") or []
+    }
+    unknown_fields = sorted(
+        (declared | semantic_fields) - set(field_inventory) - seed_optional
+    )
     all_records = [
         record
         for group in groups
@@ -201,18 +208,46 @@ def _governed_semantic_hints(
     hints: dict[str, dict[str, Any]] = {}
     primary_keys = {str(item) for item in (contract_seed or {}).get("primary_keys") or []}
     ignored = {str(item) for item in (contract_seed or {}).get("ignore_fields") or []}
-    for field in field_inventory:
+    seed_fields = [
+        str(item)
+        for item in [
+            *((contract_seed or {}).get("required_fields") or []),
+            *((contract_seed or {}).get("optional_fields") or []),
+        ]
+    ]
+    observed_fields = set(field_inventory)
+    for field in dict.fromkeys([*field_inventory, *seed_fields]):
         expected: dict[str, Any] = {}
         catalog_hint = catalog_field_semantics(field)
         if isinstance(catalog_hint, dict):
             expected.update(catalog_hint)
+        rebound_applicability = rebound_field_applicability(
+            field,
+            field_inventory=field_inventory,
+        )
+        if rebound_applicability:
+            expected["applicability"] = rebound_applicability
         if isinstance(seed_semantics.get(field), dict):
             expected.update(seed_semantics[field])
+        if "applicability" in expected:
+            compiled_applicability = rebind_applicability(
+                expected.get("applicability"),
+                field_inventory=field_inventory,
+            )
+            if compiled_applicability:
+                expected["applicability"] = compiled_applicability
+            else:
+                expected.pop("applicability", None)
         if field in primary_keys:
             expected["semantic_type"] = "identity"
         elif field in ignored:
             expected.setdefault("semantic_type", "text")
             expected["ignore"] = True
+        elif field not in observed_fields:
+            expected.setdefault("semantic_type", "text")
+            expected.pop("observation_type", None)
+            expected["comparison_role"] = "metadata"
+            expected["monitor"] = False
         if expected:
             hints[field] = expected
     return hints
@@ -226,6 +261,19 @@ def _apply_governed_semantic_hints(
 
     output = dict(candidate)
     semantics = dict(output.get("state_semantics") or {})
+    declared = {
+        str(item)
+        for item in [
+            *(output.get("required_fields") or []),
+            *(output.get("optional_fields") or []),
+        ]
+    }
+    removed_fields = sorted(str(field) for field in semantics if str(field) not in declared)
+    semantics = {
+        str(field): raw
+        for field, raw in semantics.items()
+        if str(field) in declared
+    }
     for field, raw in tuple(semantics.items()):
         actual = dict(raw or {}) if isinstance(raw, dict) else {}
         if "applicability" not in hints.get(str(field), {}):
@@ -235,6 +283,13 @@ def _apply_governed_semantic_hints(
         actual = dict(semantics.get(field) or {})
         semantics[field] = {**actual, **governed}
     output["state_semantics"] = semantics
+    if removed_fields:
+        evidence = dict(output.get("evidence") or {})
+        evidence["semantic_field_governance"] = {
+            "strategy": "approved_parser_schema_only",
+            "removed_fields": removed_fields,
+        }
+        output["evidence"] = evidence
     return output
 
 

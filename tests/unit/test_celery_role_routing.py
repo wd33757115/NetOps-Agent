@@ -69,7 +69,9 @@ def test_workflow_dispatch_routes_patrol_step_to_patrol_worker(monkeypatch):
 
     WorkflowEngine.dispatch_step("run-1", 0)
 
-    assert dispatched == [{"args": ["run-1", 0], "queue": "netops.patrol"}]
+    assert dispatched[0]["args"] == ["run-1", 0]
+    assert dispatched[0]["queue"] == "netops.patrol"
+    assert dispatched[0]["task_id"]
     assert run_updates == [(('run-1', 0), {"status": "queued"})]
     assert queued_steps == [("step-1", "task-1")]
     assert events[0][1]["status"] == "queued"
@@ -77,11 +79,40 @@ def test_workflow_dispatch_routes_patrol_step_to_patrol_worker(monkeypatch):
 
 def test_local_worker_scripts_consume_role_queues():
     root = Path(__file__).resolve().parents[2]
-    required = {"netops.patrol", "netops.ai"}
+    required = {"netops.patrol", "netops.ai", "netops.health"}
 
     for relative_path in ["scripts/test/start.ps1", "scripts/test/celery_worker.ps1"]:
         content = (root / relative_path).read_text(encoding="utf-8")
         assert all(queue in content for queue in required), relative_path
+
+
+def test_production_start_enables_core_profile_and_verifies_beat():
+    root = Path(__file__).resolve().parents[2]
+    powershell_start = (root / "scripts/prod/start.ps1").read_text(encoding="utf-8")
+    shell_start = (root / "scripts/prod/start.sh").read_text(encoding="utf-8")
+    powershell_smoke = (root / "scripts/prod/smoke_test.ps1").read_text(encoding="utf-8")
+    shell_smoke = (root / "scripts/prod/smoke_test.sh").read_text(encoding="utf-8")
+
+    assert powershell_start.isascii()
+    assert powershell_smoke.isascii()
+    assert '"--profile", "core", "up", "-d"' in powershell_start
+    assert "--profile core up -d" in shell_start
+    assert "-SkipDockerCheck" not in powershell_start
+    assert "SKIP_DOCKER_CHECK=1" not in shell_start
+    assert "netops-celery-beat" in powershell_smoke
+    assert "netops-celery-beat" in shell_smoke
+    assert 'id -eq "celery_beat"' in powershell_smoke
+    assert "c.get('id') == 'celery_beat'" in shell_smoke
+
+
+def test_beat_schedule_publishes_expiring_heartbeat_to_health_queue():
+    from src.core.celery_tasks.celery_app import celery
+
+    entry = celery.conf.beat_schedule["celery-beat-heartbeat"]
+
+    assert entry["task"] == "record_celery_beat_heartbeat"
+    assert entry["options"]["queue"] == "netops.health"
+    assert entry["options"]["expires"] >= entry["schedule"]
 
 
 def test_terminal_workflow_ignores_late_celery_delivery(monkeypatch):
@@ -102,3 +133,41 @@ def test_terminal_workflow_ignores_late_celery_delivery(monkeypatch):
 
     assert result["ignored"] is True
     assert result["error"] == "workflow already failed"
+
+
+def test_report_reconciler_restores_retryable_state_when_enqueue_fails(monkeypatch):
+    from src.core.celery_tasks import tasks
+    from src.core.patrol import batch_manifest
+
+    status_updates = []
+
+    class FakeRepository:
+        def terminal_report_candidate_ids(self, *, limit):
+            assert limit == 100
+            return ["batch-report"]
+
+        def request_terminal_report(self, patrol_batch_id):
+            assert patrol_batch_id == "batch-report"
+            return True
+
+        def mark_report_status(self, patrol_batch_id, status, *, error=None):
+            status_updates.append((patrol_batch_id, status, error))
+
+    monkeypatch.setattr(batch_manifest, "PatrolBatchManifestRepository", FakeRepository)
+    monkeypatch.setattr(
+        tasks.materialize_patrol_batch_report_task,
+        "apply_async",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("broker unavailable")),
+    )
+
+    result = tasks.reconcile_patrol_batch_reports_task.run()
+
+    assert result == {
+        "success": False,
+        "candidate_count": 1,
+        "requested_count": 0,
+        "failed_count": 1,
+    }
+    assert status_updates == [
+        ("batch-report", "not_requested", "broker unavailable"),
+    ]

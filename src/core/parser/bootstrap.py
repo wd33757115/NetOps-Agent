@@ -197,7 +197,9 @@ def _contract_defaults(command: str) -> dict[str, Any]:
                 "tx_low_warning_dbm",
                 "tx_high_warning_dbm",
                 "rx_low_alarm_dbm",
+                "rx_high_alarm_dbm",
                 "tx_low_alarm_dbm",
+                "tx_high_alarm_dbm",
             ],
             "state_semantics": {
                 "transceiver_present": {

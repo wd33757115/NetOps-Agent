@@ -14,6 +14,14 @@ from src.auth.token_store import get_redis, invalidate_redis_client
 
 logger = logging.getLogger(__name__)
 
+
+class PatrolConcurrencyUnavailableError(RuntimeError):
+    """Raised when the global SSH safety limit cannot be enforced."""
+
+
+class PatrolConcurrencyLeaseLostError(RuntimeError):
+    """Raised before more commands run after a distributed lease is lost."""
+
 _ACQUIRE_SCRIPT = """
 local key = KEYS[1]
 local now = tonumber(ARGV[1])
@@ -65,18 +73,24 @@ class DistributedPatrolSemaphore:
         wait_seconds: int,
         key: str = "netops:patrol:ssh:global",
         enabled: bool = True,
+        fail_closed: bool = True,
     ) -> None:
         self.limit = max(1, int(limit))
         self.lease_seconds = max(5, int(lease_seconds))
         self.wait_seconds = max(1, int(wait_seconds))
         self.key = key
         self.enabled = enabled
+        self.fail_closed = bool(fail_closed)
 
     def acquire(self) -> ConcurrencyLease:
         if not self.enabled:
             return ConcurrencyLease(self.key, None, "local_only")
         client = get_redis()
         if client is None:
+            if self.fail_closed:
+                raise PatrolConcurrencyUnavailableError(
+                    "global patrol concurrency control is unavailable"
+                )
             return ConcurrencyLease(self.key, None, "degraded_local_fallback")
         token = str(uuid.uuid4())
         deadline = time.monotonic() + self.wait_seconds
@@ -95,6 +109,10 @@ class DistributedPatrolSemaphore:
                 )
             except Exception as exc:
                 invalidate_redis_client(exc)
+                if self.fail_closed:
+                    raise PatrolConcurrencyUnavailableError(
+                        "global patrol concurrency control failed"
+                    ) from exc
                 return ConcurrencyLease(
                     self.key, None, "degraded_local_fallback", last_error=str(exc)
                 )
@@ -124,6 +142,13 @@ class DistributedPatrolSemaphore:
             lease.last_error = str(exc)
             return False
         return int(renewed or 0) == 1
+
+    @staticmethod
+    def assert_lease(lease: ConcurrencyLease) -> None:
+        if lease.lost:
+            raise PatrolConcurrencyLeaseLostError(
+                "global patrol concurrency lease was lost; remaining commands were stopped"
+            )
 
     @contextmanager
     def maintain(self, lease: ConcurrencyLease) -> Iterator[ConcurrencyLease]:

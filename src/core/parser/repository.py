@@ -1678,7 +1678,27 @@ class ParserRepository:
             if status:
                 query = query.filter(ParserTemplateJob.status == status)
             rows = query.order_by(ParserTemplateJob.updated_at.desc()).all()
-            return [row.to_dict() for row in rows]
+            job_ids = [row.id for row in rows]
+            variant_counts = (
+                dict(
+                    db.query(
+                        ParserJobSample.job_id,
+                        func.count(func.distinct(ParserJobSample.output_signature)),
+                    )
+                    .filter(ParserJobSample.job_id.in_(job_ids))
+                    .group_by(ParserJobSample.job_id)
+                    .all()
+                )
+                if job_ids
+                else {}
+            )
+            return [
+                {
+                    **row.to_dict(),
+                    "structure_variant_count": int(variant_counts.get(row.id) or 0),
+                }
+                for row in rows
+            ]
 
     def backlog_summary(self) -> dict[str, int]:
         with get_db_session() as db:
@@ -1842,6 +1862,20 @@ class ParserRepository:
                 for sample in samples:
                     sample.pop("sanitized_text", None)
             result["samples"] = samples
+            structure_signatures = sorted(
+                {
+                    str(sample.get("output_signature") or "")
+                    for sample in samples
+                    if str(sample.get("output_signature") or "")
+                }
+            )
+            result["structure_variant_count"] = len(structure_signatures)
+            result["structure_signatures"] = structure_signatures
+            result["compatibility_scope"] = (
+                "family"
+                if job.family and str(job.profile).casefold() == str(job.family).casefold()
+                else "model"
+            )
             result["attempt_summary"] = {
                 "total": int(
                     db.query(func.count(ParserGenerationAttempt.id))

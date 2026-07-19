@@ -119,6 +119,40 @@ def test_dynamic_reference_threshold_and_recovery_conditions():
     )
 
 
+def test_dynamic_recovery_uses_alarm_reference_when_warning_is_absent():
+    condition = {
+        "kind": "threshold_field_low_recovery",
+        "entity_types": ["interface_optical"],
+        "fields": ["rx_power_dbm"],
+        "reference_field": "rx_low_warning_dbm",
+        "fallback_reference_fields": ["rx_low_alarm_dbm"],
+        "hysteresis": 2.0,
+    }
+    change = {
+        "entity_type": "interface_optical",
+        "field": "rx_power_dbm",
+        "old": -18.5,
+        "new": -14.5,
+        "dimensions": {
+            "_observation_context": {"rx_low_alarm_dbm": -16.99}
+        },
+    }
+
+    assert condition_matches(condition, change)
+    report = validate_event_rule_definition(
+        EventRuleDefinition(
+            rule_id="optical-rx-recovery",
+            version=1,
+            event_type="OpticalRxPowerRecovered",
+            severity="info",
+            condition=condition,
+            event_class="recovery",
+            recovery={"resolves": ["OpticalRxPowerLow"]},
+        )
+    )
+    assert report["success"] is True
+
+
 def test_threshold_condition_matches_memory_high():
     assert condition_matches(
         {

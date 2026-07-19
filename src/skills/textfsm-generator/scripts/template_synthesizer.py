@@ -12,6 +12,8 @@ from typing import Protocol
 
 from config_loader import CategorySpec
 
+from src.core.parser.textfsm_input import TEXTFSM_END_OF_INPUT
+
 
 class HasOutput(Protocol):
     output: str
@@ -197,8 +199,7 @@ def _h3c_transceiver_diagnostics_template(
         sample_text,
     ):
         return None
-    return SynthesizedTemplate(
-        r"""Value interface (\S+)
+    template = r"""Value interface (\S+)
 Value transceiver_present (absent|present)
 Value dom_supported (does not support)
 Value temperature_celsius (-?\d+(?:\.\d+)?)
@@ -211,7 +212,9 @@ Value rx_high_warning_dbm (-?\d+(?:\.\d+)?)
 Value tx_low_warning_dbm (-?\d+(?:\.\d+)?)
 Value tx_high_warning_dbm (-?\d+(?:\.\d+)?)
 Value rx_low_alarm_dbm (-?\d+(?:\.\d+)?)
+Value rx_high_alarm_dbm (-?\d+(?:\.\d+)?)
 Value tx_low_alarm_dbm (-?\d+(?:\.\d+)?)
+Value tx_high_alarm_dbm (-?\d+(?:\.\d+)?)
 Value rx_power_channel_1_dbm (-?\d+(?:\.\d+)?)
 Value rx_power_channel_2_dbm (-?\d+(?:\.\d+)?)
 Value rx_power_channel_3_dbm (-?\d+(?:\.\d+)?)
@@ -223,24 +226,68 @@ Value tx_power_channel_4_dbm (-?\d+(?:\.\d+)?)
 
 Start
   ^\s*${interface}\s+transceiver\s+(?:diagnosis|diagnostic)\s+information\s*: -> Block
+  ^\s*${interface}\s+transceiver\s+is\s+${transceiver_present}\s*$$ -> Record
 
 Block
+  ^__NETOPS_END_MARKER__\s*$$ -> Record EOF
   ^\s*\S+\s+transceiver\s+(?:diagnosis|diagnostic)\s+information\s*: -> Continue.Record
   ^\s*${interface}\s+transceiver\s+(?:diagnosis|diagnostic)\s+information\s*:
+  ^\s*\S+\s+transceiver\s+is\s+(?:absent|present)\s*$$ -> Continue.Record
+  ^\s*${interface}\s+transceiver\s+is\s+${transceiver_present}\s*$$ -> Record Start
   ^The transceiver is ${transceiver_present}\. -> Record Start
   ^The transceiver ${dom_supported} this function\. -> Record Start
+  ^\s*(?:RX|Rx|Receive)\s+(?:power|Power).*?:\s*${rx_power_dbm}\s*dBm\s*$$
+  ^\s*(?:TX|Tx|Transmit)\s+(?:power|Power).*?:\s*${tx_power_dbm}\s*dBm\s*$$
+  ^\s*Rx\s+low\s+warning.*?:\s*${rx_low_warning_dbm}\s*dBm\s*$$
+  ^\s*Rx\s+high\s+warning.*?:\s*${rx_high_warning_dbm}\s*dBm\s*$$
+  ^\s*Tx\s+low\s+warning.*?:\s*${tx_low_warning_dbm}\s*dBm\s*$$
+  ^\s*Tx\s+high\s+warning.*?:\s*${tx_high_warning_dbm}\s*dBm\s*$$
+  ^\s*Rx\s+low\s+alarm.*?:\s*${rx_low_alarm_dbm}\s*dBm\s*$$
+  ^\s*Rx\s+high\s+alarm.*?:\s*${rx_high_alarm_dbm}\s*dBm\s*$$
+  ^\s*Tx\s+low\s+alarm.*?:\s*${tx_low_alarm_dbm}\s*dBm\s*$$
+  ^\s*Tx\s+high\s+alarm.*?:\s*${tx_high_alarm_dbm}\s*dBm\s*$$
   ^\s*\[module\]\s+Temp\.\(C\)\s+Voltage\(V\)
   ^\s*\[channel\]\s+Bias\(mA\)\s+RX power\(dBm\)\s+TX power\(dBm\)
+  ^\s*${temperature_celsius}\s+${voltage_v}\s*$$
   ^\s*1\s+-?\d+(?:\.\d+)?\s+${rx_power_channel_1_dbm}\s+${tx_power_channel_1_dbm}\s*$$
   ^\s*2\s+-?\d+(?:\.\d+)?\s+${rx_power_channel_2_dbm}\s+${tx_power_channel_2_dbm}\s*$$
   ^\s*3\s+-?\d+(?:\.\d+)?\s+${rx_power_channel_3_dbm}\s+${tx_power_channel_3_dbm}\s*$$
-  ^\s*4\s+-?\d+(?:\.\d+)?\s+${rx_power_channel_4_dbm}\s+${tx_power_channel_4_dbm}\s*$$ -> Record Start
+  ^\s*4\s+-?\d+(?:\.\d+)?\s+${rx_power_channel_4_dbm}\s+${tx_power_channel_4_dbm}\s*$$
   ^\s*${temperature_celsius}\s+${voltage_v}\s+${bias_ma}\s+${rx_power_dbm}\s+${tx_power_dbm}\s*$$
+  ^\s*Alarm thresholds\s*: -> Alarm
+  ^\s*Warning thresholds\s*: -> Warning
+
+Alarm
+  ^__NETOPS_END_MARKER__\s*$$ -> Record EOF
+  ^\s*\S+\s+transceiver\s+(?:diagnosis|diagnostic)\s+information\s*: -> Continue.Record
+  ^\s*${interface}\s+transceiver\s+(?:diagnosis|diagnostic)\s+information\s*: -> Block
+  ^\s*\S+\s+transceiver\s+is\s+(?:absent|present)\s*$$ -> Continue.Record
+  ^\s*${interface}\s+transceiver\s+is\s+${transceiver_present}\s*$$ -> Record Start
+  ^\s*Warning thresholds\s*: -> Warning
+  ^\s*High\s+-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?\s+${rx_high_alarm_dbm}\s+${tx_high_alarm_dbm}\s*$$
+  ^\s*Low\s+-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?\s+${rx_low_alarm_dbm}\s+${tx_low_alarm_dbm}\s*$$ -> AfterAlarm
+
+AfterAlarm
+  ^__NETOPS_END_MARKER__\s*$$ -> Record EOF
+  ^\s*Warning thresholds\s*: -> Warning
+  ^\s*\S+\s+transceiver\s+(?:diagnosis|diagnostic)\s+information\s*: -> Continue.Record
+  ^\s*${interface}\s+transceiver\s+(?:diagnosis|diagnostic)\s+information\s*: -> Block
+  ^\s*\S+\s+transceiver\s+is\s+(?:absent|present)\s*$$ -> Continue.Record
+  ^\s*${interface}\s+transceiver\s+is\s+${transceiver_present}\s*$$ -> Record Start
+
+Warning
+  ^__NETOPS_END_MARKER__\s*$$ -> Record EOF
+  ^\s*\S+\s+transceiver\s+(?:diagnosis|diagnostic)\s+information\s*: -> Continue.Record
+  ^\s*${interface}\s+transceiver\s+(?:diagnosis|diagnostic)\s+information\s*: -> Block
+  ^\s*\S+\s+transceiver\s+is\s+(?:absent|present)\s*$$ -> Continue.Record
+  ^\s*${interface}\s+transceiver\s+is\s+${transceiver_present}\s*$$ -> Record Start
   ^\s*High\s+-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?\s+${rx_high_warning_dbm}\s+${tx_high_warning_dbm}\s*$$
-  ^\s*Low\s+-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?\s+${rx_low_alarm_dbm}\s+${tx_low_alarm_dbm}\s*$$ -> Record Start
+  ^\s*Low\s+-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?\s+${rx_low_warning_dbm}\s+${tx_low_warning_dbm}\s*$$ -> Record Start
 
 EOF
-""",
+""".replace("__NETOPS_END_MARKER__", TEXTFSM_END_OF_INPUT)
+    return SynthesizedTemplate(
+        template,
         "section_block:h3c_transceiver_diagnostics",
     )
 

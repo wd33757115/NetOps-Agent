@@ -62,6 +62,55 @@ def test_offline_job_is_idempotent_paginated_and_owner_scoped():
             ).delete(synchronize_session=False)
 
 
+def test_offline_job_pagination_reaches_the_tail_of_ten_thousand_records():
+    service = OfflinePatrolJobService()
+    suffix = uuid.uuid4().hex
+    owner_id = f"offline-scale-owner-{suffix}"
+    created_at = datetime.now(timezone.utc) - timedelta(days=1)
+    record_count = 10_005
+
+    try:
+        with get_db_session() as db:
+            db.bulk_insert_mappings(
+                OfflinePatrolJobRecord,
+                [
+                    {
+                        "id": f"offline-scale-{suffix}-{index:05d}",
+                        "idempotency_key": f"offline-scale-key-{suffix}-{index:05d}",
+                        "job_type": "parser_validation",
+                        "name": f"Scale patrol {index:05d}",
+                        "owner_id": owner_id,
+                        "status": "completed",
+                        "publish_events": False,
+                        "attempt_number": 1,
+                        "progress_json": {"phase": "completed", "percent": 100},
+                        "archived": False,
+                        "created_at": created_at + timedelta(microseconds=index),
+                        "updated_at": created_at + timedelta(microseconds=index),
+                    }
+                    for index in range(record_count)
+                ],
+            )
+
+        first_page = service.list_jobs(owner_id=owner_id, page=1, page_size=25)
+        last_page = service.list_jobs(owner_id=owner_id, page=401, page_size=25)
+
+        assert first_page["total"] == record_count
+        assert first_page["page_size"] == 25
+        assert len(first_page["items"]) == 25
+        assert first_page["items"][0]["id"].endswith("10004")
+        assert len(last_page["items"]) == 5
+        assert last_page["items"][-1]["id"].endswith("00000")
+        assert {item["id"] for item in first_page["items"]}.isdisjoint(
+            item["id"] for item in last_page["items"]
+        )
+    finally:
+        with get_db_session() as db:
+            db.query(OfflinePatrolJobRecord).filter(
+                OfflinePatrolJobRecord.owner_id == owner_id
+            ).delete(synchronize_session=False)
+
+
 def test_history_compare_requires_strict_period_order():
     observed_at = datetime.now(timezone.utc)
     with pytest.raises(ValueError, match="baseline observed_at"):

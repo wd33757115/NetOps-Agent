@@ -148,6 +148,103 @@ def field_semantics(
     return None
 
 
+def rebound_field_applicability(
+    field_name: str,
+    *,
+    field_inventory: list[str] | tuple[str, ...] | set[str],
+    catalog_path: str | Path = CATALOG_PATH,
+) -> dict[str, Any] | None:
+    """Bind canonical applicability predicates to an approved Parser schema.
+
+    Generated schemas often qualify canonical names (for example, a lane-level
+    measurement may add a ``channel_`` prefix). Applicability remains portable
+    only when every field reference in an exclusion branch resolves uniquely in
+    the current schema. Unresolved branches are dropped, which can only reduce
+    suppression and therefore fails toward observation rather than silence.
+    """
+
+    catalog = load_semantic_catalog(catalog_path)
+    normalized = str(field_name or "").strip().casefold()
+    canonical = _canonical_field_for_name(normalized, catalog=catalog) or normalized
+    exact = dict((catalog.get("field_semantics") or {}).get("exact") or {})
+    source = dict(exact.get(canonical) or {})
+    return rebind_applicability(
+        source.get("applicability"),
+        field_inventory=field_inventory,
+        catalog_path=catalog_path,
+    )
+
+
+def rebind_applicability(
+    applicability: Any,
+    *,
+    field_inventory: list[str] | tuple[str, ...] | set[str],
+    catalog_path: str | Path = CATALOG_PATH,
+) -> dict[str, Any] | None:
+    """Compile applicability references against one approved Parser schema.
+
+    Each exclusion is independent. A branch that cannot bind all referenced
+    fields is removed instead of leaving an invalid or silently rejecting guard.
+    """
+
+    if not isinstance(applicability, dict):
+        return None
+    catalog = load_semantic_catalog(catalog_path)
+    inventory = [str(item) for item in field_inventory if str(item).strip()]
+
+    def resolve(reference: str) -> str | None:
+        target = str(reference or "").strip().casefold()
+        matches = [
+            item
+            for item in inventory
+            if item.casefold() == target
+            or _canonical_field_for_name(item, catalog=catalog) == target
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+    def bind_predicate(value: Any) -> dict[str, Any] | None:
+        if not isinstance(value, dict):
+            return None
+        output = deepcopy(value)
+        for key in ("all", "any"):
+            if key not in output:
+                continue
+            nested = [bind_predicate(item) for item in output.get(key) or []]
+            if not nested or any(item is None for item in nested):
+                return None
+            output[key] = nested
+            return output
+        if "not" in output:
+            nested = bind_predicate(output.get("not"))
+            if nested is None:
+                return None
+            output["not"] = nested
+            return output
+        for key in ("field", "other_field"):
+            if key not in output:
+                continue
+            resolved = resolve(str(output.get(key) or ""))
+            if resolved is None:
+                return None
+            output[key] = resolved
+        return output
+
+    exclusions = []
+    for raw in applicability.get("exclude_when") or []:
+        if not isinstance(raw, dict):
+            continue
+        predicate = bind_predicate(raw.get("when"))
+        if predicate is None:
+            continue
+        exclusions.append({**deepcopy(raw), "when": predicate})
+    if not exclusions:
+        return None
+    return {
+        **deepcopy(applicability),
+        "exclude_when": exclusions,
+    }
+
+
 def _normalize_field_label(value: str) -> str:
     text = re.sub(r"\([^)]*\)", "", str(value or "").casefold())
     return re.sub(r"[^a-z0-9]+", "", text)

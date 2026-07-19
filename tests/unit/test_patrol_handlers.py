@@ -3,6 +3,7 @@ from pathlib import Path
 from src.core.patrol.handlers import (
     BuildEventsHandler,
     DetectChangesHandler,
+    DispatchPatrolBatchHandler,
     ExecutePatrolCommand,
     ExecutePatrolHandler,
     GenerateReportHandler,
@@ -28,6 +29,44 @@ class _Plans:
     def mark_failed(self, execution_plan_id, **kwargs):
         self.failed.append((execution_plan_id, kwargs))
 
+    def get_plan(self, plan_id):
+        if plan_id != "plan-1":
+            return None
+        plan = self.created[0][0] if self.created else {"commands": ["show version"]}
+        return {"execution_plan_id": plan_id, "plan_json": plan}
+
+
+class _Batches:
+    def __init__(self):
+        self.created = []
+        self.enqueued_errors = []
+        self.claims = []
+        self.dispatched = []
+        self.failed = []
+        self.final_status = "completed"
+
+    def create_pending_batch(self, **kwargs):
+        self.created.append(kwargs)
+
+    def note_dispatch_enqueue_error(self, patrol_batch_id, error):
+        self.enqueued_errors.append((patrol_batch_id, error))
+
+    def claim_dispatch_targets(self, patrol_batch_id, **_kwargs):
+        if not self.claims:
+            return []
+        return self.claims.pop(0)
+
+    def mark_target_dispatched(self, target_id, **kwargs):
+        self.dispatched.append((target_id, kwargs))
+        return True
+
+    def mark_target_dispatch_failed(self, target_id, **kwargs):
+        self.failed.append((target_id, kwargs))
+        return True
+
+    def finalize_dispatch(self, _patrol_batch_id, **_kwargs):
+        return self.final_status
+
 
 def _command(launch_mode="workflow"):
     return StartPatrolCommand(
@@ -45,66 +84,98 @@ def _command(launch_mode="workflow"):
     )
 
 
-def test_start_patrol_handler_dispatches_workflow_with_persisted_plan():
+def test_start_patrol_handler_persists_batch_before_enqueuing_dispatch():
     plans = _Plans()
-    contexts = []
+    batches = _Batches()
+    enqueued = []
     handler = StartPatrolHandler(
         plan_repository=plans,
-        workflow_starter=lambda name, context, **kwargs: contexts.append(
-            (name, context, kwargs)
-        ) or "run-1",
+        batch_repository=batches,
+        batch_dispatcher=lambda batch_id: enqueued.append(batch_id) or "dispatch-1",
         batch_id_factory=lambda: "batch-1",
     )
 
     result = handler.handle(_command())
 
-    assert result["runs"][0]["workflow_run_id"] == "run-1"
-    assert contexts[0][1]["execution_plan_id"] == "plan-1"
-    assert contexts[0][1]["update_current_state"] is True
-    assert plans.launched[0][1]["workflow_run_id"] == "run-1"
+    assert result["dispatch_status"] == "queued"
+    assert result["queued_count"] == 1
+    assert result["launched_count"] == 0
+    assert batches.created[0]["planned_rows"][0]["execution_plan_id"] == "plan-1"
+    assert enqueued == ["batch-1"]
 
 
-def test_start_patrol_handler_dispatches_direct_task_through_same_plan_lifecycle():
+def test_dispatch_patrol_batch_starts_idempotent_workflow_and_marks_target():
     plans = _Plans()
-    task_payloads = []
-    handler = StartPatrolHandler(
+    batches = _Batches()
+    batches.claims = [[{
+        "target_id": "target-1",
+        "claim_token": "claim-1",
+        "patrol_batch_id": "batch-1",
+        "device_id": "device-1",
+        "device_name": "core-1",
+        "execution_plan_id": "plan-1",
+        "workflow_name": "patrol-change-event",
+        "launch_mode": "workflow",
+        "mode": "production",
+        "save_baseline": False,
+        "ticket_id": None,
+        "target_snapshot": {},
+    }]]
+    contexts = []
+    handler = DispatchPatrolBatchHandler(
         plan_repository=plans,
-        task_launcher=lambda **kwargs: task_payloads.append(kwargs) or "task-1",
-        batch_id_factory=lambda: "batch-1",
+        batch_repository=batches,
+        workflow_starter=lambda name, context, **kwargs: contexts.append(
+            (name, context, kwargs)
+        ) or kwargs["run_id"],
     )
 
-    result = handler.handle(_command("direct"))
+    result = handler.handle("batch-1")
 
-    assert result["tasks"][0]["celery_task_id"] == "task-1"
-    assert task_payloads[0]["execution_plan_id"] == "plan-1"
-    assert plans.launched[0][1]["celery_task_id"] == "task-1"
+    assert result["dispatched_count"] == 1
+    assert contexts[0][1]["execution_plan_id"] == "plan-1"
+    assert contexts[0][1]["update_current_state"] is True
+    assert contexts[0][2]["run_id"]
+    assert batches.dispatched[0][1]["workflow_run_id"] == contexts[0][2]["run_id"]
 
 
-def test_start_patrol_handler_marks_plan_failed_when_dispatch_fails():
+def test_dispatch_patrol_batch_marks_plan_and_target_failed_when_launch_fails():
     plans = _Plans()
+    batches = _Batches()
+    batches.claims = [[{
+        "target_id": "target-1",
+        "claim_token": "claim-1",
+        "patrol_batch_id": "batch-1",
+        "device_id": "device-1",
+        "device_name": "core-1",
+        "execution_plan_id": "plan-1",
+        "workflow_name": "patrol-change-event",
+        "launch_mode": "workflow",
+        "mode": "production",
+        "save_baseline": False,
+        "ticket_id": None,
+        "target_snapshot": {},
+    }]]
 
     def fail(*_args, **_kwargs):
         raise ValueError("workflow missing")
 
-    handler = StartPatrolHandler(
+    handler = DispatchPatrolBatchHandler(
         plan_repository=plans,
+        batch_repository=batches,
         workflow_starter=fail,
-        batch_id_factory=lambda: "batch-1",
     )
 
-    try:
-        handler.handle(_command())
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("expected dispatch failure")
+    result = handler.handle("batch-1")
 
+    assert result["failed_count"] == 1
     assert plans.failed == [
         (
             "plan-1",
             {"failure_code": "workflow_launch_failed", "error": "workflow missing"},
         )
     ]
+    assert batches.failed[0][0] == "target-1"
 
 
 def test_deterministic_patrol_handlers_copy_adapter_input_and_delegate_once():

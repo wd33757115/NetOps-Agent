@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -226,10 +227,12 @@ class CLICommandCollector(IngestionAdapter):
         output_root: Path = OUTPUT_ROOT,
         connector: Callable[[dict[str, Any]], Any] = connect_cli_device,
         progress_callback: Callable[..., Any] | None = None,
+        continuation_guard: Callable[[], Any] | None = None,
     ) -> None:
         self.output_root = output_root
         self.connector = connector
         self.progress_callback = progress_callback
+        self.continuation_guard = continuation_guard
 
     def collect(self, plan: CLICollectionPlan) -> IngestionResult:
         effective_device = device_with_plan_context(plan.device, plan.execution_plan)
@@ -252,8 +255,11 @@ class CLICommandCollector(IngestionAdapter):
         execution_plan: ExecutionPlan,
     ) -> Path:
         device_name = str(device.get("device_name") or "unknown")
-        timestamp = datetime.now(BEIJING_TZ).strftime("%Y%m%d%H%M%S")
-        output_dir = self.output_root / execution_plan.action / timestamp / device_name
+        timestamp = datetime.now(BEIJING_TZ).strftime("%Y%m%d%H%M%S_%f")
+        capture_id = uuid.uuid4().hex
+        output_dir = (
+            self.output_root / execution_plan.action / timestamp / device_name / capture_id
+        )
         output_dir.mkdir(parents=True, exist_ok=True)
         output_file = output_dir / f"{device_name}_{device.get('ip')}_{timestamp}.txt"
 
@@ -287,6 +293,8 @@ class CLICommandCollector(IngestionAdapter):
         try:
             with output_file.open("a", encoding="utf-8", newline="\n") as report:
                 for index, item in enumerate(collection_items):
+                    if self.continuation_guard is not None:
+                        self.continuation_guard()
                     command = item.command
                     execution_item_id = item.collection_item_id or hashlib.sha256(
                         (

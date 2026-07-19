@@ -210,9 +210,11 @@ export const ParserJobDetailDrawer: React.FC<
           <Descriptions.Item label="任务类型">{job.job_type}</Descriptions.Item>
           <Descriptions.Item label="状态"><Tag color={statusColor(job.status)}>{job.status}</Tag></Descriptions.Item>
           <Descriptions.Item label="厂商">{job.vendor}</Descriptions.Item>
-          <Descriptions.Item label="设备">{job.profile}</Descriptions.Item>
+          <Descriptions.Item label="兼容域">{job.profile}</Descriptions.Item>
+          <Descriptions.Item label="作用域">{job.compatibility_scope === 'family' ? '设备族' : '精确型号'}</Descriptions.Item>
           <Descriptions.Item label="命令" span={2}>{job.canonical_command}</Descriptions.Item>
           <Descriptions.Item label="样本数">{job.sample_count}</Descriptions.Item>
+          <Descriptions.Item label="结构变体">{job.structure_variant_count ?? 0}</Descriptions.Item>
           <Descriptions.Item label="任务执行次数">{job.attempts}</Descriptions.Item>
           <Descriptions.Item label="Contract 修订">{job.attempt_summary?.contract_revisions || 0}</Descriptions.Item>
           <Descriptions.Item label="模板尝试">{job.attempt_summary?.template_attempts || 0}</Descriptions.Item>

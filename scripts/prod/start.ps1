@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
 # SPDX-License-Identifier: Apache-2.0
 
-# 生产环境 - 一键启动（Compose + 迁移 + 种子用户 + 冒烟）
+# Production startup: Compose, migrations, seed users, and smoke tests.
 param(
     [string]$ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
     [switch]$Dev,
@@ -40,9 +40,9 @@ if (-not (Test-Path $envFile)) {
     $example = Join-Path $ProjectRoot ".env.example"
     if (Test-Path $example) {
         Copy-Item $example $envFile
-        Write-Warn "已从 .env.example 复制 .env，请修改密钥后再上公网"
+        Write-Warn "Copied .env.example to .env; review secrets before deployment."
     } else {
-        throw ".env 不存在且无 .env.example"
+        throw ".env and .env.example are both missing"
     }
 }
 
@@ -59,7 +59,7 @@ if ($UseSupervisorV1) {
 }
 
 Write-Step ("Docker compose up USE_SUPERVISOR_V2=" + $env:USE_SUPERVISOR_V2)
-$upArgs = @("compose") + $composeArgs + @("up", "-d")
+$upArgs = @("compose") + $composeArgs + @("--profile", "core", "up", "-d")
 if (-not $SkipBuild) { $upArgs += "--build" }
 docker @upArgs
 Write-Ok "Containers started"
@@ -70,7 +70,7 @@ Start-Sleep -Seconds $WaitSeconds
 Write-Step "Django migrate"
 docker compose @composeArgs exec -T django python manage.py migrate --noinput 2>$null
 if ($LASTEXITCODE -ne 0) {
-    Write-Warn "migrate 可能需容器就绪后重试"
+    Write-Warn "Migration failed; retry after containers become healthy."
 } else {
     Write-Ok "migrate done"
 }
@@ -81,18 +81,18 @@ if (-not $SkipSeed) {
     if ($LASTEXITCODE -eq 0) {
         Write-Ok "seed_auth_users done"
     } else {
-        Write-Warn "seed_auth_users skipped or failed (可能已存在用户)"
+        Write-Warn "seed_auth_users skipped or failed; users may already exist."
     }
 }
 
 Write-Step "Container status"
-docker compose @composeArgs ps
+docker compose @composeArgs --profile core ps
 
 if (-not $SkipSmoke) {
     Write-Step "Smoke test"
-    & (Join-Path $PSScriptRoot "smoke_test.ps1") -SkipDockerCheck
+    & (Join-Path $PSScriptRoot "smoke_test.ps1")
     if ($LASTEXITCODE -ne 0) {
-        Write-Warn "冒烟未全部通过，请检查日志：docker compose logs celery --tail 80"
+        Write-Warn "Smoke tests failed; inspect celery-patrol, celery-control, and celery-beat logs."
         exit $LASTEXITCODE
     }
 }

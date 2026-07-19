@@ -328,11 +328,17 @@ class DevicePatrolRunner:
         minio_storage_factory: Callable[[], Any] | None = None,
         snapshot_persister: Callable[..., dict[str, Any]] = persist_patrol_snapshots,
         runtime_bundle_factory: Callable[[Any], Any | None] | None = None,
+        runtime_manifest_factory: Callable[[Any | None], dict[str, Any]] | None = None,
     ) -> None:
         self._tools_loader = tools_loader
         self._minio_storage_factory = minio_storage_factory or get_minio_storage
         self._snapshot_persister = snapshot_persister
         self._runtime_bundle_factory = runtime_bundle_factory or _build_parser_runtime_bundle
+        if runtime_manifest_factory is None:
+            from src.core.patrol.runtime_manifest import build_patrol_runtime_manifest
+
+            runtime_manifest_factory = build_patrol_runtime_manifest
+        self._runtime_manifest_factory = runtime_manifest_factory
 
     def run(self, request: DevicePatrolRunRequest) -> dict[str, Any]:
         execution_start = datetime.now(timezone.utc)
@@ -369,6 +375,7 @@ class DevicePatrolRunner:
             else None
         )
         runtime_bundle_data = runtime_bundle.to_dict() if runtime_bundle is not None else None
+        runtime_asset_manifest = self._runtime_manifest_factory(runtime_bundle)
         owner_token = request.owner_token or uuid.uuid4().hex
         if streaming_persistence:
             from src.core.patrol.run_repository import PatrolRunRepository
@@ -383,6 +390,8 @@ class DevicePatrolRunner:
                     "parser_runtime_bundle_digest": (
                         runtime_bundle.digest if runtime_bundle is not None else None
                     ),
+                    "runtime_asset_manifest_digest": runtime_asset_manifest.get("digest"),
+                    "runtime_asset_manifest": runtime_asset_manifest,
                 },
                 run_purpose=run_purpose,
                 started_at=collection_started_at,
@@ -505,6 +514,7 @@ class DevicePatrolRunner:
             output_files=result.output_files or [],
             ticket_id=request.ticket_id,
         )
+        archive_status = "completed" if raw_outputs_url else "unavailable"
         if streaming_persistence:
             from src.core.patrol.run_repository import PatrolRunRepository
 
@@ -519,8 +529,9 @@ class DevicePatrolRunner:
                     "successful_device_count": snapshot_result["snapshot_devices"],
                     "failed_device_count": snapshot_result["failed_devices"],
                     "snapshot_health": snapshot_result["snapshot_health"],
-                    "archive_status": "completed",
+                    "archive_status": archive_status,
                     "raw_outputs_archive": raw_outputs_url,
+                    "runtime_asset_manifest_digest": runtime_asset_manifest.get("digest"),
                 },
                 owner_token=owner_token,
             )
@@ -550,8 +561,11 @@ class DevicePatrolRunner:
                 "parser_runtime_bundle_digest": (
                     runtime_bundle.digest if runtime_bundle is not None else None
                 ),
+                "runtime_asset_manifest": runtime_asset_manifest,
+                "runtime_asset_manifest_digest": runtime_asset_manifest.get("digest"),
                 "raw_outputs_url": raw_outputs_url,
                 "raw_outputs_archive": raw_outputs_url,
+                "raw_outputs_archive_status": archive_status,
                 **snapshot_result,
             },
         )
@@ -566,6 +580,7 @@ class DevicePatrolRunner:
             ticket_id=ticket_id,
             minio_storage_factory=self._minio_storage_factory,
             spec=PATROL_ARCHIVE_SPEC,
+            cleanup_after_upload=True,
         )
 
 

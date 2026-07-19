@@ -252,8 +252,14 @@ def enrich_contract_reference_semantics(
             if not directional:
                 continue
             primary = directional[0]
-            compiled[direction] = {
+            primary_role = (
+                f"critical_{direction}"
+                if primary.get("level") == "alarm"
+                else direction
+            )
+            compiled[primary_role] = {
                 "field_name": primary["field_name"],
+                "context_key": f"threshold.{primary_role}",
                 "level": primary["level"],
                 "source": "structured_reference",
             }
@@ -268,6 +274,7 @@ def enrich_contract_reference_semantics(
             if alarm:
                 compiled[f"critical_{direction}"] = {
                     "field_name": alarm["field_name"],
+                    "context_key": f"threshold.critical_{direction}",
                     "level": alarm["level"],
                     "source": "structured_reference",
                 }
@@ -292,6 +299,7 @@ def enrich_contract_reference_semantics(
                 monitor=False,
                 target_field=target,
                 threshold_role=role,
+                context_key=relation["context_key"],
                 threshold_direction="low" if "low" in role else "high",
                 threshold_level=relation["level"],
             )

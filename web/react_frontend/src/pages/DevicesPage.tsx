@@ -1068,12 +1068,11 @@ const DevicesPage: React.FC = () => {
           batch_search: undefined,
           batch_status: undefined,
         })
-        setMonitorRunId(result.runs?.[0]?.workflow_run_id || null)
+        setMonitorRunId(null)
         refetchActiveBatchRuns()
         refetchPatrolBatches()
           message.success(
-            '已发起 ' + result.launched_count + ' 个巡检'
-            + (result.launch_mode === 'workflow' ? ' Workflow' : '任务')
+            '巡检批次已创建，' + result.queued_count + ' 台设备等待分发'
             + ((result.skipped_count || 0) ? '，跳过 ' + result.skipped_count + ' 台未就绪设备' : ''),
           )
       },
@@ -3320,9 +3319,9 @@ const DevicesPage: React.FC = () => {
           {patrolLaunch && (
             <Space direction="vertical" size={8} style={{ width: '100%' }}>
               <Alert
-                type="success"
+                type={patrolLaunch.dispatch_status === 'pending' ? 'warning' : 'info'}
                 showIcon
-                message={`已启动 ${patrolLaunch.launched_count} 个巡检${patrolLaunch.launch_mode === 'workflow' ? ' Workflow' : '任务'}${(patrolLaunch.skipped_count || 0) ? `，跳过 ${patrolLaunch.skipped_count} 台未就绪设备` : ''}`}
+                message={`批次已创建，${patrolLaunch.queued_count} 台设备${patrolLaunch.dispatch_status === 'pending' ? '等待调度恢复' : '等待后台分发'}${(patrolLaunch.skipped_count || 0) ? `，跳过 ${patrolLaunch.skipped_count} 台未就绪设备` : ''}`}
               />
               {(patrolLaunch.skipped_count || 0) > 0 && (
                 <Alert

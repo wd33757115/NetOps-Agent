@@ -53,7 +53,7 @@ fi
 
 echo ""
 echo "==> Docker compose up"
-UP_ARGS=(compose "${COMPOSE_ARGS[@]}" up -d)
+UP_ARGS=(compose "${COMPOSE_ARGS[@]}" --profile core up -d)
 if [[ "$SKIP_BUILD" != "1" ]]; then
     UP_ARGS+=(--build)
 fi
@@ -78,13 +78,13 @@ fi
 
 echo ""
 echo "==> Container status"
-docker compose "${COMPOSE_ARGS[@]}" ps
+docker compose "${COMPOSE_ARGS[@]}" --profile core ps
 
 if [[ "$SKIP_SMOKE" != "1" ]]; then
     echo ""
     echo "==> Smoke test"
-    SKIP_DOCKER_CHECK=1 bash "$SCRIPT_DIR/smoke_test.sh" || {
-        echo "  [WARN] 冒烟未全部通过，请检查: docker compose logs celery --tail 80"
+    bash "$SCRIPT_DIR/smoke_test.sh" || {
+        echo "  [WARN] 冒烟未全部通过，请检查 celery-patrol、celery-control 和 celery-beat 日志"
         exit 1
     }
 fi

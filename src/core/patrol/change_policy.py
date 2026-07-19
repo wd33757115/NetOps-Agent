@@ -17,6 +17,7 @@ class ChangePolicyProposal:
     deadband: float | None = None
     thresholds: dict[str, float] | None = None
     threshold_references: dict[str, dict[str, Any]] | None = None
+    allow_static_threshold_fallback: bool = False
     recovery_threshold: float | None = None
     minimum_duration: str | None = None
     source: str = "deterministic_policy_generator"
@@ -110,16 +111,34 @@ def infer_change_policy(
         )
     if semantic_type == "gauge":
         thresholds: dict[str, float] = {}
+        threshold_references = {
+            str(role): dict(reference)
+            for role, reference in dict(
+                semantics.get("threshold_references") or {}
+            ).items()
+            if isinstance(reference, dict)
+            and str(reference.get("field_name") or "").strip()
+        }
         recovery_threshold = None
         deadband = 0.0
         lowered = " ".join([field, observation_type, policy_intent or ""]).lower()
         if unit.lower() == "dbm" or any(
             token in lowered for token in ("optical", "rx_power", "tx_power", "dbm")
         ):
-            thresholds["low"] = -17.0
-            thresholds["critical_low"] = -20.0
-            recovery_threshold = -15.0
             deadband = 2.0
+            low_roles = {"low", "critical_low"}.intersection(
+                threshold_references
+            )
+            high_roles = {"high", "critical_high"}.intersection(
+                threshold_references
+            )
+            if low_roles and not high_roles:
+                compare_mode = "threshold_low_and_deadband"
+            elif threshold_references:
+                compare_mode = "threshold_and_deadband"
+            else:
+                compare_mode = "numeric_delta"
+                reason_parts.append("threshold_status=threshold_unknown")
         elif unit == "percent" or any(token in lowered for token in ("cpu", "memory", "usage")):
             p99 = stats.get("p99")
             high = max(90.0, float(p99 or 0))
@@ -127,20 +146,24 @@ def infer_change_policy(
             recovery_threshold = max(0.0, round(high - 5.0, 2))
             thresholds["high"] = high
             deadband = 5.0
+            compare_mode = "threshold_and_deadband"
+        else:
+            compare_mode = "numeric_delta"
         return ChangePolicyProposal(
             observation_type=observation_type,
             semantic_type=semantic_type,
-            compare_mode=(
-                "threshold_low_and_deadband"
-                if "low" in thresholds
-                else "threshold_and_deadband"
-                if thresholds
-                else "numeric_delta"
-            ),
+            compare_mode=compare_mode,
             deadband=deadband,
             thresholds=thresholds,
+            threshold_references=threshold_references,
             recovery_threshold=recovery_threshold,
             minimum_duration="0s",
+            source=(
+                "structured_threshold_reference"
+                if threshold_references
+                else "deterministic_policy_generator"
+            ),
+            confidence=0.95 if threshold_references else 0.85,
             reason="; ".join(
                 [
                     *reason_parts,
@@ -198,6 +221,9 @@ def policy_from_dict(payload: dict[str, Any]) -> ChangePolicyProposal:
             for key, value in dict(payload.get("threshold_references") or {}).items()
             if isinstance(value, dict)
         },
+        allow_static_threshold_fallback=bool(
+            payload.get("allow_static_threshold_fallback", False)
+        ),
         recovery_threshold=(
             float(payload["recovery_threshold"])
             if payload.get("recovery_threshold") is not None
@@ -233,16 +259,34 @@ def validate_change_policy(policy: ChangePolicyProposal) -> dict[str, Any]:
     if policy.compare_mode == "threshold_and_deadband":
         high = (policy.thresholds or {}).get("high")
         high_reference = (policy.threshold_references or {}).get("high")
-        if high is None and not high_reference:
-            errors.append("threshold_and_deadband requires thresholds.high")
+        critical_high = (policy.thresholds or {}).get("critical_high")
+        critical_high_reference = (policy.threshold_references or {}).get("critical_high")
+        if (
+            high is None
+            and not high_reference
+            and critical_high is None
+            and not critical_high_reference
+        ):
+            errors.append(
+                "threshold_and_deadband requires a high or critical_high threshold"
+            )
         if policy.recovery_threshold is not None and high is not None:
             if policy.recovery_threshold >= high:
                 errors.append("recovery_threshold must be lower than thresholds.high")
     if policy.compare_mode == "threshold_low_and_deadband":
         low = (policy.thresholds or {}).get("low")
         low_reference = (policy.threshold_references or {}).get("low")
-        if low is None and not low_reference:
-            errors.append("threshold_low_and_deadband requires thresholds.low")
+        critical_low = (policy.thresholds or {}).get("critical_low")
+        critical_low_reference = (policy.threshold_references or {}).get("critical_low")
+        if (
+            low is None
+            and not low_reference
+            and critical_low is None
+            and not critical_low_reference
+        ):
+            errors.append(
+                "threshold_low_and_deadband requires a low or critical_low threshold"
+            )
         if policy.recovery_threshold is not None and low is not None:
             if policy.recovery_threshold <= low:
                 errors.append("recovery_threshold must be higher than thresholds.low")
@@ -267,6 +311,7 @@ def compare_with_policy(
     old: Any,
     new: Any,
     field: str | None = None,
+    context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if field and field in policy.ignore_fields:
         return {"changed": False, "reason": "ignored_field"}
@@ -295,27 +340,102 @@ def compare_with_policy(
         if old_num is None or new_num is None:
             return {"changed": old != new, "reason": "non_numeric_fallback"}
         deadband = float(policy.deadband or 0)
-        crossed_high = False
-        crossed_low = False
-        recovered_low = False
-        high = (policy.thresholds or {}).get("high")
-        if high is not None:
-            crossed_high = old_num < high <= new_num
-        low = (policy.thresholds or {}).get("low")
-        recovery = policy.recovery_threshold
-        if low is not None:
-            crossed_low = old_num > low >= new_num
-            if recovery is not None:
-                recovered_low = old_num <= low and new_num >= float(recovery)
+        threshold_sources: dict[str, str] = {}
+
+        def threshold(role: str) -> float | None:
+            reference = dict((policy.threshold_references or {}).get(role) or {})
+            reference_field = str(reference.get("field_name") or "")
+            referenced_value = _number(dict(context or {}).get(reference_field))
+            if referenced_value is not None:
+                threshold_sources[role] = f"context:{reference_field}"
+                return referenced_value
+            if reference and not policy.allow_static_threshold_fallback:
+                return None
+            static_value = _number((policy.thresholds or {}).get(role))
+            if static_value is not None:
+                threshold_sources[role] = (
+                    "policy_fallback" if reference else "policy_static"
+                )
+            return static_value
+
+        high_thresholds = {
+            role: value
+            for role in ("high", "critical_high")
+            if (value := threshold(role)) is not None
+        }
+        low_thresholds = {
+            role: value
+            for role in ("low", "critical_low")
+            if (value := threshold(role)) is not None
+        }
+        crossed_high_roles = [
+            role
+            for role, value in high_thresholds.items()
+            if old_num < value <= new_num
+        ]
+        crossed_low_roles = [
+            role
+            for role, value in low_thresholds.items()
+            if old_num > value >= new_num
+        ]
+        recovered_high_roles = [
+            role
+            for role, value in high_thresholds.items()
+            if old_num >= value and new_num <= value - deadband
+        ]
+        recovered_low_roles = []
+        for role, value in low_thresholds.items():
+            recovery_boundary = (
+                float(policy.recovery_threshold)
+                if role == "low" and policy.recovery_threshold is not None
+                else value + deadband
+            )
+            if old_num <= value and new_num >= recovery_boundary:
+                recovered_low_roles.append(role)
+        configured_reference_fields = {
+            role: str(reference.get("field_name") or "")
+            for role, reference in (policy.threshold_references or {}).items()
+            if isinstance(reference, dict)
+            and str(reference.get("field_name") or "").strip()
+        }
+        missing_threshold_references = sorted(
+            field_name
+            for role, field_name in configured_reference_fields.items()
+            if role not in threshold_sources
+        )
+        threshold_status = (
+            "threshold_unknown"
+            if configured_reference_fields
+            and not high_thresholds
+            and not low_thresholds
+            else "resolved"
+            if high_thresholds or low_thresholds
+            else "not_configured"
+        )
         return {
-            "changed": crossed_high
-            or crossed_low
-            or recovered_low
+            "changed": bool(
+                crossed_high_roles
+                or crossed_low_roles
+                or recovered_high_roles
+                or recovered_low_roles
+            )
             or abs(new_num - old_num) > deadband,
             "delta": new_num - old_num,
-            "crossed_high": crossed_high,
-            "crossed_low": crossed_low,
-            "recovered_low": recovered_low,
-            "reason": policy.compare_mode,
+            "crossed_high": bool(crossed_high_roles),
+            "crossed_low": bool(crossed_low_roles),
+            "recovered_high": bool(recovered_high_roles),
+            "recovered_low": bool(recovered_low_roles),
+            "crossed_high_roles": crossed_high_roles,
+            "crossed_low_roles": crossed_low_roles,
+            "recovered_high_roles": recovered_high_roles,
+            "recovered_low_roles": recovered_low_roles,
+            "threshold_sources": threshold_sources,
+            "missing_threshold_references": missing_threshold_references,
+            "threshold_status": threshold_status,
+            "reason": (
+                "threshold_unknown"
+                if threshold_status == "threshold_unknown"
+                else policy.compare_mode
+            ),
         }
     return {"changed": old != new, "reason": "fallback"}

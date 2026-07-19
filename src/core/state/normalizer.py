@@ -61,11 +61,18 @@ def _normalize_observation_value(
     validator: dict[str, Any] | None = None,
 ) -> Any:
     field = str(field_name).strip().lower()
+    validator_type = str((validator or {}).get("type") or "").lower()
     if isinstance(value, str):
         text = value.strip()
         if field in PLACEHOLDER_NORMALIZED_FIELDS and text.lower() in EMPTY_PLACEHOLDERS:
             return ""
-        if str((validator or {}).get("type") or "").lower() == "ip_or_unassigned":
+        if validator_type in {"number", "percent"}:
+            numeric_text = text.rstrip("%").strip()
+            try:
+                return float(numeric_text)
+            except ValueError:
+                return text
+        if validator_type == "ip_or_unassigned":
             if text.lower() in {"unassigned", "unset", "none", "n/a", "--", "-"}:
                 return text.lower()
             try:
@@ -254,6 +261,45 @@ def observations_from_snapshot(
                     context_value,
                     validator=context_validator,
                 )
+            threshold_fields = sorted(
+                {
+                    str(reference.get("field_name") or "")
+                    for reference in dict(
+                        field_semantics.get("threshold_references") or {}
+                    ).values()
+                    if isinstance(reference, dict)
+                    and str(reference.get("field_name") or "").strip()
+                }
+            )
+            runtime_threshold_fields: list[str] = []
+            for role, raw_reference in dict(
+                field_semantics.get("threshold_references") or {}
+            ).items():
+                if not isinstance(raw_reference, dict):
+                    continue
+                source_field = str(raw_reference.get("field_name") or "").strip()
+                context_key = str(
+                    raw_reference.get("context_key") or source_field
+                ).strip()
+                if not source_field or not context_key:
+                    continue
+                source_value = observation_context.get(source_field)
+                if source_value in (None, ""):
+                    continue
+                observation_context[context_key] = source_value
+                runtime_threshold_fields.append(context_key)
+            populated_thresholds = [
+                field
+                for field in threshold_fields
+                if observation_context.get(field) not in (None, "")
+            ]
+            populated_thresholds = sorted(
+                set(runtime_threshold_fields or populated_thresholds)
+            )
+            if populated_thresholds:
+                observation_context["threshold_source"] = "device_output"
+                observation_context["threshold_confidence"] = "authoritative"
+                observation_context["threshold_fields"] = populated_thresholds
         value_text, value_number, value_type = _value_parts(value)
         observation_type = (
             str(field_semantics.get("observation_type"))
@@ -372,6 +418,17 @@ def observations_from_snapshot(
                     "observation_contract_id": contract.get("contract_id"),
                     "observation_contract_version": contract.get("contract_version"),
                     "observation_contract_digest": contract.get("contract_sha256"),
+                    "unstructured_comparison": {
+                        "profile": (snapshot.get("metadata_json") or {}).get(
+                            "comparison_profile"
+                        ),
+                        "profile_version": (snapshot.get("metadata_json") or {}).get(
+                            "comparison_profile_version"
+                        ),
+                    }
+                    if (snapshot.get("metadata_json") or {}).get("handling")
+                    == "raw_hash_diff"
+                    else None,
                     "semantics": field_semantics,
                     "dimensions": dimensions,
                     "value_index": value_index + 1 if value_index is not None else None,

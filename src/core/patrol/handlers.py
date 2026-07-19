@@ -20,6 +20,18 @@ class PlanRepository(Protocol):
     def create_plan(self, plan: dict[str, Any], **kwargs: Any) -> dict[str, Any]: ...
     def mark_failed(self, execution_plan_id: str, **kwargs: Any) -> Any: ...
     def mark_launched(self, execution_plan_id: str, **kwargs: Any) -> Any: ...
+    def get_plan(self, plan_id: str) -> dict[str, Any] | None: ...
+
+
+class BatchManifestRepository(Protocol):
+    def create_pending_batch(self, **kwargs: Any) -> None: ...
+    def note_dispatch_enqueue_error(self, patrol_batch_id: str, error: str) -> None: ...
+    def claim_dispatch_targets(
+        self, patrol_batch_id: str, **kwargs: Any
+    ) -> list[dict[str, Any]]: ...
+    def mark_target_dispatched(self, target_id: str, **kwargs: Any) -> bool: ...
+    def mark_target_dispatch_failed(self, target_id: str, **kwargs: Any) -> bool: ...
+    def finalize_dispatch(self, patrol_batch_id: str, **kwargs: Any) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -36,124 +48,239 @@ class StartPatrolCommand:
 
 
 class StartPatrolHandler:
-    """Persist execution plans and dispatch patrol work through one use case."""
+    """Persist the complete batch intent, then enqueue durable dispatch."""
 
     def __init__(
         self,
         *,
         plan_repository: PlanRepository | None = None,
-        workflow_starter: Callable[..., str] | None = None,
-        task_launcher: Callable[..., str] | None = None,
+        batch_repository: BatchManifestRepository | None = None,
+        batch_dispatcher: Callable[[str], str] | None = None,
         batch_id_factory: Callable[[], str] | None = None,
     ) -> None:
         self._plans = plan_repository or ExecutionPlanRepository()
-        self._workflow_starter = workflow_starter or self._start_workflow
-        self._task_launcher = task_launcher or self._launch_task
+        if batch_repository is None:
+            from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
+
+            batch_repository = PatrolBatchManifestRepository()
+        self._batches = batch_repository
+        self._batch_dispatcher = batch_dispatcher or self._enqueue_batch_dispatch
         self._batch_id_factory = batch_id_factory or (lambda: f"patrol-batch-{uuid.uuid4()}")
 
     def handle(self, command: StartPatrolCommand) -> dict[str, Any]:
         if command.launch_mode not in {"workflow", "direct"}:
             raise ValueError("launch_mode must be workflow or direct")
         patrol_batch_id = self._batch_id_factory()
-        launched = [self._launch_row(command, row, patrol_batch_id) for row in command.rows]
+        planned_rows: list[dict[str, Any]] = []
+        try:
+            for row in command.rows:
+                plan_record = self._plans.create_plan(
+                    row["plan"],
+                    launch_source=command.launch_mode,
+                    patrol_batch_id=patrol_batch_id,
+                )
+                planned_rows.append(
+                    {**row, "execution_plan_id": str(plan_record["execution_plan_id"])}
+                )
+            self._batches.create_pending_batch(
+                patrol_batch_id=patrol_batch_id,
+                workflow_name=command.workflow_name,
+                launch_mode=command.launch_mode,
+                patrol_mode=command.mode,
+                save_baseline=command.save_baseline,
+                ticket_id=command.ticket_id,
+                target_count=command.target_count,
+                planned_rows=planned_rows,
+                skipped_errors=command.skipped_errors,
+                target_snapshot=dict(command.target_snapshot or {}),
+            )
+        except Exception as exc:
+            for row in planned_rows:
+                self._plans.mark_failed(
+                    str(row["execution_plan_id"]),
+                    failure_code="batch_manifest_persist_failed",
+                    error=str(exc),
+                )
+            raise
+
+        dispatch_task_id = None
+        try:
+            dispatch_task_id = self._batch_dispatcher(patrol_batch_id)
+        except Exception as exc:
+            self._batches.note_dispatch_enqueue_error(patrol_batch_id, str(exc))
         return {
             "success": True,
             "target_count": command.target_count,
-            "launched_count": len(launched),
+            "queued_count": len(planned_rows),
+            "launched_count": 0,
             "mode": command.mode,
             "save_baseline": command.save_baseline,
             "ticket_id": command.ticket_id,
             "patrol_batch_id": patrol_batch_id,
             "launch_mode": command.launch_mode,
             "workflow_name": command.workflow_name,
-            "runs": launched if command.launch_mode == "workflow" else [],
-            "tasks": launched if command.launch_mode == "direct" else [],
+            "dispatch_status": "queued" if dispatch_task_id else "pending",
+            "dispatch_task_id": dispatch_task_id,
+            "runs": [],
+            "tasks": [],
             "skipped_count": len(command.skipped_errors),
             "skipped_errors": command.skipped_errors,
         }
 
-    def _launch_row(
-        self,
-        command: StartPatrolCommand,
-        row: dict[str, Any],
-        patrol_batch_id: str,
-    ) -> dict[str, Any]:
-        plan_record = self._plans.create_plan(
-            row["plan"],
-            launch_source=command.launch_mode,
-            patrol_batch_id=patrol_batch_id,
-        )
-        plan_id = str(plan_record["execution_plan_id"])
-        try:
-            if command.launch_mode == "workflow":
-                dispatch_id = self._workflow_starter(
-                    command.workflow_name,
-                    self._workflow_context(command, row, plan_id, patrol_batch_id),
-                    source="device-management",
-                )
-                launch_fields = {"workflow_run_id": dispatch_id}
-                result_field = "workflow_run_id"
-            else:
-                dispatch_id = self._task_launcher(
-                    execution_plan=row["plan"],
-                    execution_plan_id=plan_id,
-                    ticket_id=command.ticket_id,
-                    save_baseline=command.save_baseline,
-                    mode=command.mode,
-                    patrol_batch_id=patrol_batch_id,
-                )
-                launch_fields = {"celery_task_id": dispatch_id}
-                result_field = "celery_task_id"
-        except Exception as exc:
-            self._plans.mark_failed(
-                plan_id,
-                failure_code=(
-                    "workflow_launch_failed"
-                    if command.launch_mode == "workflow"
-                    else "celery_launch_failed"
-                ),
-                error=str(exc),
-            )
-            raise
-        self._plans.mark_launched(
-            plan_id,
-            launch_source=command.launch_mode,
-            patrol_batch_id=patrol_batch_id,
-            **launch_fields,
-        )
-        result = {
-            "device_id": row["device_id"],
-            "device_name": row["device_name"],
-            "ip": row["ip"],
-            "execution_plan_id": plan_id,
-            result_field: dispatch_id,
-            "patrol_batch_id": patrol_batch_id,
-            "command_count": row["command_count"],
-        }
-        if command.launch_mode == "workflow":
-            result["workflow_name"] = command.workflow_name
-        return result
-
     @staticmethod
     def _workflow_context(
-        command: StartPatrolCommand,
-        row: dict[str, Any],
-        plan_id: str,
+        *,
+        execution_plan: dict[str, Any],
+        execution_plan_id: str,
         patrol_batch_id: str,
+        ticket_id: str | None,
+        save_baseline: bool,
+        mode: str,
+        target_snapshot: dict[str, Any],
+        device_id: str,
+        device_name: str | None,
     ) -> dict[str, Any]:
         return {
-            "execution_plan": row["plan"],
-            "execution_plan_id": plan_id,
+            "execution_plan": execution_plan,
+            "execution_plan_id": execution_plan_id,
             "filter_params": {},
-            "ticket_id": command.ticket_id,
-            "save_baseline": command.save_baseline,
-            "mode": command.mode,
-            "update_current_state": normalize_patrol_mode(command.mode) == PRODUCTION_MODE,
+            "ticket_id": ticket_id,
+            "save_baseline": save_baseline,
+            "mode": mode,
+            "update_current_state": normalize_patrol_mode(mode) == PRODUCTION_MODE,
             "publish_events": False,
             "patrol_batch_id": patrol_batch_id,
-            "patrol_target": dict(command.target_snapshot or {}),
-            "device_id": row["device_id"],
-            "device_name": row["device_name"],
+            "patrol_target": dict(target_snapshot or {}),
+            "device_id": device_id,
+            "device_name": device_name,
+        }
+
+    @staticmethod
+    def _enqueue_batch_dispatch(patrol_batch_id: str) -> str:
+        from src.core.celery_tasks.tasks import dispatch_patrol_batch_task
+
+        task = dispatch_patrol_batch_task.apply_async(
+            args=[patrol_batch_id],
+            queue="netops.patrol",
+        )
+        return str(task.id)
+
+
+class DispatchPatrolBatchHandler:
+    """Idempotently dispatch the persisted targets of one patrol batch."""
+
+    def __init__(
+        self,
+        *,
+        plan_repository: PlanRepository | None = None,
+        batch_repository: BatchManifestRepository | None = None,
+        workflow_starter: Callable[..., str] | None = None,
+        task_launcher: Callable[..., str] | None = None,
+    ) -> None:
+        self._plans = plan_repository or ExecutionPlanRepository()
+        if batch_repository is None:
+            from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
+
+            batch_repository = PatrolBatchManifestRepository()
+        self._batches = batch_repository
+        self._workflow_starter = workflow_starter or self._start_workflow
+        self._task_launcher = task_launcher or self._launch_task
+
+    def handle(self, patrol_batch_id: str, *, chunk_size: int = 100) -> dict[str, Any]:
+        dispatched = 0
+        failed = 0
+        while True:
+            targets = self._batches.claim_dispatch_targets(
+                patrol_batch_id,
+                limit=chunk_size,
+            )
+            if not targets:
+                break
+            for target in targets:
+                plan_id = str(target.get("execution_plan_id") or "")
+                try:
+                    plan = self._plans.get_plan(plan_id)
+                    if plan is None:
+                        raise ValueError(f"execution plan not found: {plan_id}")
+                    plan_json = dict(plan.get("plan_json") or {})
+                    if target["launch_mode"] == "workflow":
+                        workflow_run_id = str(
+                            uuid.uuid5(
+                                uuid.NAMESPACE_URL,
+                                f"patrol-workflow|{patrol_batch_id}|{target['device_id']}",
+                            )
+                        )
+                        dispatch_id = self._workflow_starter(
+                            str(target["workflow_name"]),
+                            StartPatrolHandler._workflow_context(
+                                execution_plan=plan_json,
+                                execution_plan_id=plan_id,
+                                patrol_batch_id=patrol_batch_id,
+                                ticket_id=target.get("ticket_id"),
+                                save_baseline=bool(target.get("save_baseline")),
+                                mode=str(target.get("mode") or PRODUCTION_MODE),
+                                target_snapshot=dict(target.get("target_snapshot") or {}),
+                                device_id=str(target["device_id"]),
+                                device_name=target.get("device_name"),
+                            ),
+                            source="device-management",
+                            run_id=workflow_run_id,
+                        )
+                        launch_fields = {"workflow_run_id": dispatch_id}
+                    else:
+                        task_id = str(
+                            uuid.uuid5(
+                                uuid.NAMESPACE_URL,
+                                f"patrol-task|{patrol_batch_id}|{target['device_id']}",
+                            )
+                        )
+                        dispatch_id = self._task_launcher(
+                            task_id=task_id,
+                            execution_plan=plan_json,
+                            execution_plan_id=plan_id,
+                            ticket_id=target.get("ticket_id"),
+                            save_baseline=bool(target.get("save_baseline")),
+                            mode=str(target.get("mode") or PRODUCTION_MODE),
+                            patrol_batch_id=patrol_batch_id,
+                        )
+                        launch_fields = {"celery_task_id": dispatch_id}
+                    self._plans.mark_launched(
+                        plan_id,
+                        launch_source=str(target["launch_mode"]),
+                        patrol_batch_id=patrol_batch_id,
+                        **launch_fields,
+                    )
+                    self._batches.mark_target_dispatched(
+                        str(target["target_id"]),
+                        claim_token=str(target["claim_token"]),
+                        **launch_fields,
+                    )
+                    dispatched += 1
+                except Exception as exc:
+                    failure_code = f"{target['launch_mode']}_launch_failed"
+                    if plan_id:
+                        try:
+                            self._plans.mark_failed(
+                                plan_id,
+                                failure_code=failure_code,
+                                error=str(exc),
+                            )
+                        except Exception:
+                            pass
+                    self._batches.mark_target_dispatch_failed(
+                        str(target["target_id"]),
+                        claim_token=str(target["claim_token"]),
+                        failure_code=failure_code,
+                        error=str(exc),
+                    )
+                    failed += 1
+        status = self._batches.finalize_dispatch(patrol_batch_id)
+        return {
+            "success": status in {"completed", "pending"},
+            "patrol_batch_id": patrol_batch_id,
+            "dispatch_status": status,
+            "dispatched_count": dispatched,
+            "failed_count": failed,
         }
 
     @staticmethod
@@ -166,9 +293,11 @@ class StartPatrolHandler:
     def _launch_task(**kwargs: Any) -> str:
         from src.core.celery_tasks.tasks import execute_device_patrol_task
 
+        task_id = str(kwargs.pop("task_id"))
         task = execute_device_patrol_task.apply_async(
             kwargs=kwargs,
             queue="netops.patrol",
+            task_id=task_id,
         )
         return str(task.id)
 

@@ -1318,11 +1318,14 @@ async def export_patrol_batch_events(
     output = io.StringIO()
     fieldnames = [
         "patrol_batch_id",
+        "occurrence_id",
+        "occurrence_kind",
         "event_id",
         "device_id",
         "device_name",
         "event_type",
         "severity",
+        "status",
         "entity_type",
         "entity_key",
         "occurred_at",
@@ -1341,7 +1344,10 @@ async def export_patrol_batch_events(
 
 
 @router.get("/runs/patrol-batches/{patrol_batch_id}/report.md")
-async def export_patrol_batch_report(patrol_batch_id: str):
+async def export_patrol_batch_report(
+    patrol_batch_id: str,
+    _user: CurrentUser = Depends(require_role(["admin", "operator"])),
+):
     runs = _list_patrol_batch_runs(patrol_batch_id)
     if not runs and not _patrol_batch_manifest_exists(patrol_batch_id):
         raise HTTPException(status_code=404, detail="patrol batch not found")
@@ -1354,7 +1360,10 @@ async def export_patrol_batch_report(patrol_batch_id: str):
 
 
 @router.get("/runs/patrol-batches/{patrol_batch_id}/report.docx")
-async def export_patrol_batch_leadership_report(patrol_batch_id: str):
+async def export_patrol_batch_leadership_report(
+    patrol_batch_id: str,
+    _user: CurrentUser = Depends(require_role(["admin", "operator"])),
+):
     runs = _list_patrol_batch_runs(patrol_batch_id)
     if not runs and not _patrol_batch_manifest_exists(patrol_batch_id):
         raise HTTPException(status_code=404, detail="patrol batch not found")
@@ -1374,7 +1383,10 @@ async def export_patrol_batch_leadership_report(patrol_batch_id: str):
 
 
 @router.get("/runs/patrol-batches/{patrol_batch_id}/report.json")
-async def export_patrol_batch_leadership_report_json(patrol_batch_id: str):
+async def export_patrol_batch_leadership_report_json(
+    patrol_batch_id: str,
+    _user: CurrentUser = Depends(require_role(["admin", "operator"])),
+):
     runs = _list_patrol_batch_runs(patrol_batch_id)
     if not runs and not _patrol_batch_manifest_exists(patrol_batch_id):
         raise HTTPException(status_code=404, detail="patrol batch not found")

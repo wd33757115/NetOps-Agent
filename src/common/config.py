@@ -36,8 +36,11 @@ class Settings(BaseSettings):
     CELERY_MAX_RETRIES: int = 3
     # 空字符串表示自动：Windows → solo，Linux/macOS → prefork
     CELERY_WORKER_POOL: str = ""
-    CELERY_WORKER_QUEUES: str = "netops.default,netops.firewall,netops.patrol,netops.ai"
+    CELERY_WORKER_QUEUES: str = "netops.default,netops.firewall,netops.health,netops.patrol,netops.ai"
     CELERY_WORKER_ROLE: str = "all"
+    CELERY_BEAT_HEARTBEAT_INTERVAL_SECONDS: int = 15
+    CELERY_BEAT_HEARTBEAT_STALE_AFTER_SECONDS: int = 45
+    CELERY_BEAT_HEARTBEAT_TTL_SECONDS: int = 180
 
     MINIO_ENDPOINT: str = "localhost:9000"
     MINIO_ACCESS_KEY: str = "minioadmin"
@@ -135,9 +138,11 @@ class Settings(BaseSettings):
     # 巡检并发与规则运行时治理
     PATROL_MAX_CONCURRENCY: int = 50
     PATROL_DISTRIBUTED_CONCURRENCY_ENABLED: bool = True
+    PATROL_CONCURRENCY_FAIL_CLOSED: bool = True
     PATROL_CONCURRENCY_LEASE_SECONDS: int = 180
     PATROL_CONCURRENCY_WAIT_SECONDS: int = 60
     PATROL_RUN_LEASE_SECONDS: int = 900
+    PATROL_LOCAL_OUTPUT_RETENTION_HOURS: int = 72
     REDIS_RECONNECT_BACKOFF_SECONDS: int = 5
     EVENT_RULE_ALLOW_BUILTIN_FALLBACK: bool = False
     PRODUCTION_PARSER_BACKLOG_ENABLED: bool = True

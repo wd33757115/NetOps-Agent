@@ -23,6 +23,7 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
 
 from src.core.patrol.event_rules import is_down
+from src.core.patrol.unstructured_diff import summarize_unstructured_changes
 from src.skills.official_document.docx_format import (
     add_styled_paragraph,
     apply_fixed_line_spacing,
@@ -126,15 +127,46 @@ def _format_cn_date(value: Any) -> str:
 
 
 def _display_entity_key(value: Any) -> str:
+    def compact(item: Any) -> str:
+        text = str(item)
+        replacements = (
+            ("Twenty-FiveGigE", "25GE"),
+            ("TwentyFiveGigE", "25GE"),
+            ("HundredGigE", "100GE"),
+            ("FortyGigE", "40GE"),
+            ("Ten-GigabitEthernet", "10GE"),
+            ("TenGigabitEthernet", "10GE"),
+            ("GigabitEthernet", "GE"),
+        )
+        for source, target in replacements:
+            if text.startswith(source):
+                return target + text[len(source) :]
+        return text
+
     if not isinstance(value, str):
-        return str(value or "-")
+        return compact(value or "-")
     try:
         decoded = json.loads(value)
     except (TypeError, ValueError):
-        return value or "-"
+        return compact(value or "-")
     if isinstance(decoded, list):
-        return "/".join(str(item) for item in decoded) or "-"
-    return str(decoded or "-")
+        return "/".join(compact(item) for item in decoded) or "-"
+    return compact(decoded or "-")
+
+
+def _stable_risk_dimensions(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        str(key): value
+        for key, value in dict(item.get("dimensions") or {}).items()
+        if not str(key).startswith("_")
+    }
+
+
+def _display_risk_entity(item: dict[str, Any]) -> str:
+    label = _display_entity_key(item.get("entity_key"))
+    dimensions = _stable_risk_dimensions(item)
+    lane = dimensions.get("value_index") or dimensions.get("channel")
+    return f"{label} / 通道 {lane}" if lane not in (None, "") else label
 
 
 def _severity(value: Any) -> str:
@@ -150,6 +182,10 @@ def _event_type_label(value: Any) -> str:
 def _canonical_interface(value: Any) -> str:
     text = _display_entity_key(value).strip().casefold().replace(" ", "")
     aliases = (
+        ("25ge", "wge"),
+        ("100ge", "hge"),
+        ("40ge", "fge"),
+        ("10ge", "xge"),
         ("twenty-five-gigabitethernet", "wge"),
         ("twentyfivegigabitethernet", "wge"),
         ("twenty-fivegige", "wge"),
@@ -357,7 +393,7 @@ def _aggregate_risk_groups(risks: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "device_name": device_name,
                 "count": len(items),
                 "objects": _compact_entities(
-                    [_display_entity_key(item.get("entity_key")) for item in items]
+                    [_display_risk_entity(item) for item in items]
                 ),
                 "current_values": _value_summary(items),
                 "criterion": _criteria_summary(items),
@@ -373,17 +409,24 @@ def _aggregate_risk_groups(risks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     )
 
 
-def _risk_key(item: dict[str, Any]) -> tuple[str, str, str, str]:
+def _risk_key(item: dict[str, Any]) -> tuple[str, str, str, str, str]:
     return (
         str(item.get("event_type") or "unknown"),
         str(item.get("device_id") or ""),
         str(item.get("entity_type") or ""),
         str(item.get("entity_key") or ""),
+        json.dumps(
+            _stable_risk_dimensions(item),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ),
     )
 
 
 def _build_risks(summary: dict[str, Any]) -> list[dict[str, Any]]:
-    risks: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    risks: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
     for finding in summary.get("current_findings") or []:
         row = {
             "source": "current_state",
@@ -402,6 +445,7 @@ def _build_risks(summary: dict[str, Any]) -> list[dict[str, Any]]:
             "observed_at": finding.get("observed_at"),
             "evidence_id": finding.get("observation_id"),
             "condition": dict(finding.get("condition") or {}),
+            "dimensions": dict(finding.get("dimensions") or {}),
             "reference_field": finding.get("reference_field"),
             "reference_value": finding.get("reference_value"),
             "evidence_chain": {
@@ -449,6 +493,7 @@ def _build_risks(summary: dict[str, Any]) -> list[dict[str, Any]]:
             "observed_at": event.get("occurred_at"),
             "evidence_id": event.get("id"),
             "condition": dict(event.get("condition") or {}),
+            "dimensions": dict(event.get("dimensions") or {}),
             "reference_field": event.get("reference_field"),
             "reference_value": event.get("reference_value"),
             "evidence_chain": dict(event.get("evidence_chain") or {}),
@@ -457,6 +502,11 @@ def _build_risks(summary: dict[str, Any]) -> list[dict[str, Any]]:
         current = risks.get(key)
         if current is None or SEVERITY_RANK[row["severity"]] > SEVERITY_RANK[current["severity"]]:
             risks[key] = row
+        elif current is not None:
+            current["evidence_chain"] = {
+                **dict(row.get("evidence_chain") or {}),
+                **dict(current.get("evidence_chain") or {}),
+            }
     return sorted(
         risks.values(),
         key=lambda item: (
@@ -607,7 +657,11 @@ def _aggregate_domains(summary: dict[str, Any]) -> list[dict[str, Any]]:
                     "device_count": 0,
                     "observation_count": 0,
                     "evaluated_observation_count": 0,
+                    "threshold_unknown_observation_count": 0,
+                    "partial_threshold_observation_count": 0,
                     "current_finding_count": 0,
+                    "unresolved_fault_event_count": 0,
+                    "current_risk_count": 0,
                     "change_count": 0,
                     "event_count": 0,
                     "statuses": Counter(),
@@ -617,7 +671,21 @@ def _aggregate_domains(summary: dict[str, Any]) -> list[dict[str, Any]]:
             row["device_count"] += 1
             row["observation_count"] += int(check.get("observation_count") or 0)
             row["evaluated_observation_count"] += int(check.get("evaluated_observation_count") or 0)
+            row["threshold_unknown_observation_count"] += int(
+                check.get("threshold_unknown_observation_count") or 0
+            )
+            row["partial_threshold_observation_count"] += int(
+                check.get("partial_threshold_observation_count") or 0
+            )
             row["current_finding_count"] += int(check.get("current_finding_count") or 0)
+            row["unresolved_fault_event_count"] += int(
+                check.get("unresolved_fault_event_count") or 0
+            )
+            row["current_risk_count"] += int(
+                check.get("current_risk_count")
+                if check.get("current_risk_count") is not None
+                else check.get("current_finding_count") or 0
+            )
             row["change_count"] += int(check.get("change_count") or 0)
             row["event_count"] += int(check.get("event_count") or 0)
             row["statuses"].update([str(check.get("status") or "无法判断")])
@@ -695,7 +763,8 @@ def _assessment(
             "status": "发现重大网络风险" if top in {"critical", "major"} else "发现网络异常",
             "trust": "中" if partial else "高",
             "basis": (
-                f"识别 {len(risks)} 项当前异常或故障事件；"
+                f"识别 {len(risks)} 项当前风险（由当前状态规则命中或尚未恢复的"
+                "周期变化事件形成）；"
                 f"最高等级为{SEVERITY_LABEL[top]}"
                 + (
                     f"；另有 {len(correlated_evidence)} 项信号作为主故障关联证据，不重复计数"
@@ -824,6 +893,27 @@ def _recommendations(
                 "deadline": "3 个工作日",
             }
         )
+    unstructured = dict(summary.get("unstructured_comparison") or {})
+    unstructured_changed = int(unstructured.get("changed_output_count") or 0)
+    if unstructured_changed:
+        categories = "、".join(
+            str(item)
+            for item in list((unstructured.get("by_category") or {}).keys())[:4]
+        )
+        result.append(
+            {
+                "priority": "P1"
+                if int((unstructured.get("by_profile") or {}).get("配置输出") or 0)
+                else "P2",
+                "action": (
+                    f"复核 {unstructured_changed} 项非结构化输出变化"
+                    + (f"（主要涉及{categories}）" if categories else "")
+                    + "，核对变更单、配置备份或日志上下文"
+                ),
+                "owner": "网络运维组",
+                "deadline": "1 个工作日",
+            }
+        )
     if correlated_evidence:
         result.append(
             {
@@ -866,9 +956,17 @@ def build_leadership_report(
     independent_domains = {str(item.get("domain") or "") for item in risks}
     correlated_domains = {str(item.get("domain") or "") for item in correlated_evidence}
     for domain in domains:
+        domain_name = str(domain.get("domain") or "")
+        domain["independent_risk_count"] = sum(
+            str(item.get("domain") or "") == domain_name for item in risks
+        )
+        domain["correlated_evidence_count"] = sum(
+            str(item.get("domain") or "") == domain_name
+            for item in correlated_evidence
+        )
         if (
-            domain.get("domain") in correlated_domains
-            and domain.get("domain") not in independent_domains
+            domain_name in correlated_domains
+            and domain_name not in independent_domains
             and domain.get("status") == "异常"
         ):
             domain["status"] = "需复核"
@@ -878,13 +976,25 @@ def build_leadership_report(
     scope = dict(summary.get("scope") or {})
     quality = dict(summary.get("quality") or {})
     coverage = dict(summary.get("current_state_rule_coverage") or {})
+    parser_ready_count = int(quality.get("parser_ready_count") or 0)
+    parser_eligible_count = int(quality.get("parser_eligible_count") or 0)
     parse_status_counts = dict(quality.get("parse_status_counts") or {})
+    unstructured = dict(summary.get("unstructured_comparison") or {})
+    if not unstructured:
+        unstructured = summarize_unstructured_changes(
+            list(summary.get("changes") or []),
+            collected_output_count=int(parse_status_counts.get("raw_hashed") or 0),
+        )
     template_missing_count = int(
         quality.get("template_missing_count") or parse_status_counts.get("template_missing") or 0
     )
     parse_failed_count = int(
         quality.get("parse_failed_count") or parse_status_counts.get("parse_failed") or 0
     )
+    if not parser_eligible_count:
+        parser_eligible_count = (
+            parser_ready_count + template_missing_count + parse_failed_count
+        )
     events = list(summary.get("events") or [])
     recovery_event_count = sum(
         str(item.get("event_class") or "fault") == "recovery" for item in events
@@ -896,6 +1006,12 @@ def build_leadership_report(
     )
     state_improvement_count = recovery_event_count - resolved_prior_fault_count
     fault_event_count = len(events) - recovery_event_count
+    unresolved_fault_event_count = sum(
+        str(item.get("event_class") or "fault") != "recovery"
+        and str(item.get("status_after_occurrence") or "open").casefold()
+        not in {"resolved", "closed", "cancelled"}
+        for item in events
+    )
     recovery_by_type = Counter(
         str(item.get("event_type") or "unknown")
         for item in events
@@ -935,6 +1051,11 @@ def build_leadership_report(
         limitations.append(
             "以下检查域尚不能形成完整健康判断：" + "、".join(incomplete_domain_labels) + "。"
         )
+    if unstructured.get("changed_output_count"):
+        limitations.append(
+            "非结构化输出变化仅表示文本事实发生改变；未经活动事件规则判定的项目"
+            "不自动等同于故障，报告只展示脱敏摘要，完整原文以受控原始输出为准。"
+        )
     evidence_rows = []
     for evidence_kind, items in (
         ("independent_risk", risks),
@@ -950,6 +1071,7 @@ def build_leadership_report(
                     "device_name": item.get("device_name"),
                     "entity_type": item.get("entity_type"),
                     "entity_key": item.get("entity_key"),
+                    "dimensions": dict(item.get("dimensions") or {}),
                     "chain": dict(item.get("evidence_chain") or {}),
                 }
             )
@@ -969,8 +1091,8 @@ def build_leadership_report(
             "failed_device_count": int(scope.get("failed_count") or 0),
             "skipped_device_count": int(scope.get("skipped_count") or 0),
             "command_count": int(quality.get("command_count") or 0),
-            "parser_eligible_count": int(quality.get("parser_eligible_count") or 0),
-            "parser_ready_count": int(quality.get("parser_ready_count") or 0),
+            "parser_eligible_count": parser_eligible_count,
+            "parser_ready_count": parser_ready_count,
             "parser_ready_rate": float(quality.get("parser_ready_rate") or 0),
             "template_missing_count": template_missing_count,
             "parse_failed_count": parse_failed_count,
@@ -980,7 +1102,25 @@ def build_leadership_report(
             "event_count": int(summary.get("event_count") or 0),
             "fault_event_count": fault_event_count,
             "recovery_event_count": recovery_event_count,
+            "current_state_finding_count": len(summary.get("current_findings") or []),
+            "unresolved_fault_event_count": unresolved_fault_event_count,
+            "current_risk_count": len(risks),
             "current_finding_count": len(risks),
+            "unstructured_collected_count": int(
+                unstructured.get("collected_output_count") or 0
+            ),
+            "unstructured_compared_count": int(
+                unstructured.get("compared_output_count") or 0
+            ),
+            "unstructured_changed_count": int(
+                unstructured.get("changed_output_count") or 0
+            ),
+            "unstructured_added_line_count": int(
+                unstructured.get("added_line_count") or 0
+            ),
+            "unstructured_removed_line_count": int(
+                unstructured.get("removed_line_count") or 0
+            ),
         },
         "risk_summary": {
             "total": len(risks),
@@ -1005,7 +1145,13 @@ def build_leadership_report(
         "domains": domains,
         "data_quality": quality,
         "rule_coverage": coverage,
-        "recommendations": _recommendations(assessment, summary, risks, correlated_evidence),
+        "unstructured_comparison": unstructured,
+        "recommendations": _recommendations(
+            assessment,
+            {**summary, "unstructured_comparison": unstructured},
+            risks,
+            correlated_evidence,
+        ),
         "limitations": limitations,
         "evidence": {
             "workflow_run_id": summary.get("workflow_run_id"),
@@ -1023,6 +1169,32 @@ def build_leadership_report(
             "technical_report_url": (summary.get("deliverables") or {}).get("technical_report_url"),
         },
     }
+
+
+def _domain_threshold_coverage_text(row: dict[str, Any]) -> str | None:
+    unknown = int(row.get("threshold_unknown_observation_count") or 0)
+    partial = int(row.get("partial_threshold_observation_count") or 0)
+    if not unknown and not partial:
+        return None
+    total = int(row.get("observation_count") or 0)
+    evaluated = int(row.get("evaluated_observation_count") or 0)
+    details = []
+    if partial:
+        details.append(f"{partial} 条仅具备部分阈值层级")
+    if unknown:
+        details.append(f"{unknown} 条无可用设备阈值")
+    return (
+        f"判定完整性：{row.get('label') or row.get('domain')}共 {total} 条结构化观测，"
+        f"{evaluated} 条可按设备阈值评估；{'，'.join(details)}，未据此扩大健康结论。"
+    )
+
+
+def _unstructured_preview_text(item: dict[str, Any], *, limit: int = 2) -> str:
+    values = []
+    for row in list(item.get("preview") or [])[:limit]:
+        operation = "+" if row.get("operation") == "added" else "-"
+        values.append(f"{operation} {row.get('text') or '-'}")
+    return "；".join(values) or "详见变化证据"
 
 
 def render_leadership_markdown(report: dict[str, Any]) -> str:
@@ -1056,10 +1228,14 @@ def render_leadership_markdown(report: dict[str, Any]) -> str:
             f"{metrics['parse_failed_count']}"
         ),
         (
-            f"- 事件事实：{metrics['event_count']} 条，其中独立当前风险 "
-            f"{metrics['current_finding_count']} 条、关联证据 "
-            f"{report['risk_summary']['correlated_evidence_count']} 条、恢复类 "
+            f"- 事件事实：{metrics['event_count']} 条，其中恢复类 "
             f"{metrics['recovery_event_count']} 条"
+        ),
+        (
+            f"- 风险归并：当前状态规则命中 {metrics['current_state_finding_count']} 条，"
+            f"尚未恢复故障事件 {metrics['unresolved_fault_event_count']} 条；按对象去重并"
+            f"归并关联信号后，形成独立当前风险 {metrics['current_risk_count']} 条、"
+            f"关联证据 {report['risk_summary']['correlated_evidence_count']} 条"
         ),
         "",
         "## 三、主要风险",
@@ -1102,7 +1278,7 @@ def render_leadership_markdown(report: dict[str, Any]) -> str:
                 "",
                 "### 三期趋势",
                 "",
-                f"相邻周期原始文件 SHA-256 集合完全一致，已串联 {trend['period_count']} 个"
+                f"相邻周期已通过设备身份与采集清单连续性校验，串联 {trend['period_count']} 个"
                 f"采集周期（{period_labels}）。当前新增异常证据 {trend['new_evidence_count']} 项、"
                 f"持续异常证据 {trend['persistent_evidence_count']} 项、已恢复异常证据 "
                 f"{trend['resolved_evidence_count']} 项。",
@@ -1131,23 +1307,59 @@ def render_leadership_markdown(report: dict[str, Any]) -> str:
     for row in report["domains"]:
         lines.append(
             f"- {row['label']}：{row['status']}，Observation {row['observation_count']}，"
-            f"当前异常 {row['current_finding_count']}，Change {row['change_count']}，"
+            f"独立风险 {row['independent_risk_count']}，关联证据 "
+            f"{row['correlated_evidence_count']}，Change {row['change_count']}，"
             f"Event {row['event_count']}。"
         )
-    lines.extend(["", "## 五、处置建议", ""])
+    for row in report["domains"]:
+        coverage_text = _domain_threshold_coverage_text(row)
+        if coverage_text:
+            lines.append(f"- {coverage_text}")
+    unstructured = dict(report.get("unstructured_comparison") or {})
+    lines.extend(["", "## 五、非结构化输出变化", ""])
+    if not unstructured.get("collected_output_count"):
+        lines.append("本批次未采集配置、日志等已启用非结构化对比的命令输出。")
+    elif not unstructured.get("changed_output_count"):
+        lines.append(
+            f"本批次采集 {unstructured.get('collected_output_count')} 项非结构化输出，"
+            "未检测到相对基线的有效文本变化。"
+        )
+    else:
+        lines.append(
+            f"共采集 {unstructured.get('collected_output_count')} 项、比较 "
+            f"{unstructured.get('compared_output_count')} 项，检测到 "
+            f"{unstructured.get('changed_output_count')} 项有效变化；新增 "
+            f"{unstructured.get('added_line_count')} 行、删除 "
+            f"{unstructured.get('removed_line_count')} 行。以下仅展示脱敏摘要。"
+        )
+        for item in list(unstructured.get("items") or [])[:10]:
+            categories = "、".join(
+                str(row.get("label") or row.get("name") or "其他变化")
+                for row in item.get("categories") or []
+            )
+            lines.append(
+                f"- [{item.get('profile_label')}] {item.get('device_name')} / "
+                f"`{item.get('command')}`：+{item.get('added_line_count')} / "
+                f"-{item.get('removed_line_count')} 行"
+                + (f"，{categories}" if categories else "")
+                + f"；{_unstructured_preview_text(item)}"
+            )
+        if len(unstructured.get("items") or []) > 10:
+            lines.append("- 其余变化详见技术报告和原始输出证据包。")
+    lines.extend(["", "## 六、处置建议", ""])
     for item in report["recommendations"]:
         lines.append(
             f"- {item['priority']}：{item['action']}"
             f"（责任：{item['owner']}；时限：{item['deadline']}）"
         )
-    lines.extend(["", "## 六、结论边界", ""])
+    lines.extend(["", "## 七、结论边界", ""])
     lines.extend(f"- {item}" for item in report["limitations"])
     evidence = report["evidence"]
     analysis = evidence.get("analysis") or {}
     lines.extend(
         [
             "",
-            "## 七、证据索引",
+            "## 八、证据索引",
             "",
             f"- Workflow Run：{evidence.get('workflow_run_id') or '-'}",
             f"- 分析尝试：{analysis.get('attempt_id') or '-'}",
@@ -1184,7 +1396,14 @@ def _set_cell_text(cell: Any, value: Any, *, bold: bool = False) -> None:
     cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
 
 
-def _add_table(doc: Any, headers: list[str], rows: list[list[Any]], widths: list[float]) -> Any:
+def _add_table(
+    doc: Any,
+    headers: list[str],
+    rows: list[list[Any]],
+    widths: list[float],
+    *,
+    keep_rows_together: bool = False,
+) -> Any:
     table = doc.add_table(rows=1, cols=len(headers))
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     table.style = "Table Grid"
@@ -1205,6 +1424,11 @@ def _add_table(doc: Any, headers: list[str], rows: list[list[Any]], widths: list
         for index, value in enumerate(values):
             _set_cell_text(cells[index], value)
             cells[index].width = Cm(widths[index])
+    if keep_rows_together:
+        for row in table.rows[:-1]:
+            for cell in row.cells:
+                for paragraph in cell.paragraphs:
+                    paragraph.paragraph_format.keep_with_next = True
     doc.add_paragraph().paragraph_format.space_after = Pt(0)
     return table
 
@@ -1220,12 +1444,12 @@ def _add_section(doc: Any, title: str) -> None:
 def _add_compact_paragraph(doc: Any, text: str, *, bold: bool = False) -> Any:
     paragraph = doc.add_paragraph()
     paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
-    paragraph.paragraph_format.line_spacing = Pt(16)
+    paragraph.paragraph_format.line_spacing = Pt(11)
     paragraph.paragraph_format.space_before = Pt(0)
-    paragraph.paragraph_format.space_after = Pt(3)
+    paragraph.paragraph_format.space_after = Pt(1)
     run = paragraph.add_run(text)
     run.font.name = "仿宋_GB2312"
-    run.font.size = Pt(10)
+    run.font.size = Pt(8)
     run.font.bold = bold
     run._element.rPr.rFonts.set(qn("w:eastAsia"), "仿宋_GB2312")
     return paragraph
@@ -1342,9 +1566,11 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
             f"{metrics['parser_eligible_count']}（{metrics['parser_ready_rate']:.1%}）；"
             f"缺少模板 {metrics['template_missing_count']} 条，解析失败 "
             f"{metrics['parse_failed_count']} 条。事件事实 {metrics['event_count']} 条，"
-            f"其中独立当前风险 {metrics['current_finding_count']} 条、关联证据 "
-            f"{report['risk_summary']['correlated_evidence_count']} 条、恢复类 "
-            f"{metrics['recovery_event_count']} 条。"
+            f"其中恢复类 {metrics['recovery_event_count']} 条。当前状态规则命中 "
+            f"{metrics['current_state_finding_count']} 条，尚未恢复故障事件 "
+            f"{metrics['unresolved_fault_event_count']} 条；按对象去重并归并关联信号后，"
+            f"形成独立当前风险 {metrics['current_risk_count']} 条、关联证据 "
+            f"{report['risk_summary']['correlated_evidence_count']} 条。"
         ),
         first_line_indent=0.74,
     )
@@ -1403,7 +1629,7 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
                 doc,
                 ["关联信号", "设备", "对象", "当前值", "设备判据", "数量"],
                 correlated_rows,
-                [2.5, 2.8, 3.0, 1.8, 4.0, 0.9],
+                [2.4, 1.3, 4.8, 2.0, 3.5, 0.8],
             )
     if metrics.get("recovery_event_count"):
         recovery_items = []
@@ -1428,7 +1654,7 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
         )
         add_styled_paragraph(
             doc,
-            f"三期趋势：相邻周期原始文件 SHA-256 集合完全一致，已串联 "
+            f"三期趋势：相邻周期已通过设备身份与采集清单连续性校验，已串联 "
             f"{trend['period_count']} 个采集周期（{period_labels}）。当前新增异常证据 "
             f"{trend['new_evidence_count']} 项、持续异常证据 "
             f"{trend['persistent_evidence_count']} 项、已恢复异常证据 "
@@ -1479,7 +1705,7 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
             row["status"],
             row["device_count"],
             row["observation_count"],
-            row["current_finding_count"],
+            f"{row['independent_risk_count']} / {row['correlated_evidence_count']}",
             row["change_count"],
             row["event_count"],
         ]
@@ -1488,14 +1714,78 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
     if domain_rows:
         _add_table(
             doc,
-            ["检查域", "结论", "设备", "结构化观测", "当前异常", "状态变化", "事件"],
+            ["检查域", "结论", "设备", "结构化观测", "风险/证据", "状态变化", "事件"],
             domain_rows,
             [2.5, 4.1, 1.4, 2.1, 1.8, 1.7, 1.7],
+            keep_rows_together=True,
         )
+        for row in report["domains"]:
+            coverage_text = _domain_threshold_coverage_text(row)
+            if coverage_text:
+                add_styled_paragraph(
+                    doc,
+                    coverage_text,
+                    first_line_indent=0.74,
+                )
     else:
         add_styled_paragraph(doc, "未形成可用的分域检查结果。", first_line_indent=0.74)
 
-    _add_section(doc, "五、处置建议")
+    _add_section(doc, "五、非结构化输出变化")
+    unstructured = dict(report.get("unstructured_comparison") or {})
+    if not unstructured.get("collected_output_count"):
+        add_styled_paragraph(
+            doc,
+            "本批次未采集配置、日志等已启用非结构化对比的命令输出。",
+            first_line_indent=0.74,
+        )
+    elif not unstructured.get("changed_output_count"):
+        add_styled_paragraph(
+            doc,
+            f"本批次采集 {unstructured.get('collected_output_count')} 项非结构化输出，"
+            "未检测到相对基线的有效文本变化。",
+            first_line_indent=0.74,
+        )
+    else:
+        add_styled_paragraph(
+            doc,
+            f"共采集 {unstructured.get('collected_output_count')} 项、比较 "
+            f"{unstructured.get('compared_output_count')} 项，检测到 "
+            f"{unstructured.get('changed_output_count')} 项有效变化；新增 "
+            f"{unstructured.get('added_line_count')} 行、删除 "
+            f"{unstructured.get('removed_line_count')} 行。下表按变化规模列示重点输出，"
+            "完整脱敏差异见技术报告，原文以受控原始输出为准。",
+            first_line_indent=0.74,
+        )
+        unstructured_rows = []
+        for item in list(unstructured.get("items") or [])[:8]:
+            categories = "、".join(
+                str(row.get("label") or row.get("name") or "其他变化")
+                for row in item.get("categories") or []
+            )
+            unstructured_rows.append(
+                [
+                    item.get("profile_label"),
+                    item.get("device_name"),
+                    item.get("command"),
+                    f"+{item.get('added_line_count')} / -{item.get('removed_line_count')}",
+                    categories or "其他变化",
+                ]
+            )
+        _add_table(
+            doc,
+            ["类型", "设备", "命令", "增/删行", "变化分类"],
+            unstructured_rows,
+            [2.2, 2.8, 4.2, 2.0, 4.3],
+        )
+        if len(unstructured.get("items") or []) > 8:
+            add_styled_paragraph(
+                doc,
+                f"其余 {len(unstructured.get('items') or []) - 8} 项变化详见技术报告；"
+                "领导报告不展开长日志正文，避免将滚动日志记录误读为独立故障。",
+                first_line_indent=0.74,
+            )
+
+    _add_section(doc, "六、处置建议")
     for index, item in enumerate(report["recommendations"], start=1):
         add_styled_paragraph(
             doc,
@@ -1504,7 +1794,7 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
             first_line_indent=0.74,
         )
 
-    _add_section(doc, "六、数据可信度与结论边界")
+    _add_section(doc, "七、数据可信度与结论边界")
     coverage = report["rule_coverage"]
     digests = [str(item) for item in coverage.get("bundle_digests") or []]
     digest_summary = "、".join(f"{item[:12]}…" for item in digests) or "未形成"
@@ -1532,27 +1822,25 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
         ordinal = chinese_ordinals[index] if index < len(chinese_ordinals) else str(index + 1)
         add_styled_paragraph(doc, f"（{ordinal}）{item}", first_line_indent=0.74)
 
-    _add_section(doc, "七、证据与附件")
+    _add_section(doc, "八、证据与附件")
     evidence = report["evidence"]
     analysis = dict(evidence.get("analysis") or {})
+    attempt_id = str(analysis.get("attempt_id") or "-")
+    attempt_summary = f"{attempt_id[:14]}…" if len(attempt_id) > 14 else attempt_id
     add_styled_paragraph(
         doc,
-        f"本报告关联 Workflow {evidence.get('workflow_run_id') or '-'}、设备巡检执行记录 "
-        f"{evidence['workflow_run_count']} 份、命令快照 {evidence['snapshot_count']} 条。"
-        "原始输出、设备清单、失败设备清单、变化清单、事件清单和技术明细报告由平台"
-        "按同一批次编号提供，作为本报告附件和复核依据。",
+        f"本报告关联 Workflow {evidence.get('workflow_run_id') or '-'}"
+        f"（设备执行 {evidence['workflow_run_count']} 份、命令快照 "
+        f"{evidence['snapshot_count']} 条），交付物均按批次号提供。事实锁定 Analysis "
+        f"{attempt_summary} / {analysis.get('revision') or '-'}（权威 Change "
+        f"{analysis.get('source_change_count') or 0} 条），后续分析不改写。",
         first_line_indent=0.74,
     )
     add_styled_paragraph(
         doc,
-        f"报告事实锁定分析尝试 {analysis.get('attempt_id') or '-'}，分析版本 "
-        f"{analysis.get('revision') or '-'}，权威 Change "
-        f"{analysis.get('source_change_count') or 0} 条，规则包摘要 "
-        f"{analysis.get('rule_bundle_digest') or '-'}。后续重新分析不会改写本报告证据范围。",
-        first_line_indent=0.74,
+        f"{report['issuer']}\n{_format_cn_date(report['generated_at'])}",
+        right=True,
     )
-    add_styled_paragraph(doc, report["issuer"], right=True)
-    add_styled_paragraph(doc, _format_cn_date(report["generated_at"]), right=True)
 
     risk_chains = list(evidence.get("risk_chains") or [])
     if risk_chains:
@@ -1594,7 +1882,7 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
                 (
                     f"{index}. [{kind}] {item.get('event_label') or item.get('event_type')} | "
                     f"{item.get('device_name') or item.get('device_id')} | "
-                    f"{_display_entity_key(item.get('entity_key'))}"
+                    f"{_display_risk_entity(item)}"
                 ),
                 bold=True,
             )
@@ -1612,7 +1900,7 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
                 f"Observation={_evidence_value(chain, 'current_observation_id')}；"
                 f"Parser={_evidence_value(chain, 'parser_template_id')} / "
                 f"{_evidence_value(chain, 'parser_version')}；"
-                f"Contract={_evidence_value(chain, 'observation_contract_id')} / v"
+                f"Contract={_evidence_value(chain, 'observation_contract_id')} / "
                 f"{_evidence_value(chain, 'observation_contract_version')}。",
             )
             collection_evidence.paragraph_format.keep_together = True
@@ -1629,7 +1917,7 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
                 f"Occurrence={_evidence_value(chain, 'event_occurrence_id')}。",
             )
             change_event_evidence.paragraph_format.keep_together = True
-            change_event_evidence.paragraph_format.space_after = Pt(6)
+            change_event_evidence.paragraph_format.space_after = Pt(3)
 
     footer = section.footer.paragraphs[0]
     footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -1644,4 +1932,10 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
 
 
 def render_leadership_json(report: dict[str, Any]) -> bytes:
-    return json.dumps(report, ensure_ascii=False, indent=2, default=str).encode("utf-8")
+    return json.dumps(
+        report,
+        ensure_ascii=False,
+        indent=2,
+        default=str,
+        allow_nan=False,
+    ).encode("utf-8")

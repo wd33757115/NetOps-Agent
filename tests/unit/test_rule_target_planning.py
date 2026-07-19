@@ -139,11 +139,17 @@ def test_rule_target_compiler_links_structured_reference_thresholds_generically(
 
     assert result["success"] is True
     target = result["policy_targets"][0]
-    assert target["threshold_references"]["low"]["field_name"] == (
+    assert target["threshold_references"]["critical_low"]["field_name"] == (
         "alarm_low_signal_dbm"
     )
-    assert target["threshold_references"]["high"]["field_name"] == (
+    assert target["threshold_references"]["critical_low"]["context_key"] == (
+        "threshold.critical_low"
+    )
+    assert target["threshold_references"]["critical_high"]["field_name"] == (
         "alarm_high_signal_dbm"
+    )
+    assert target["threshold_references"]["critical_high"]["context_key"] == (
+        "threshold.critical_high"
     )
     semantics = result["contract"]["state_semantics"]
     assert semantics["measured_signal_dbm"]["context_fields"] == [
@@ -152,3 +158,46 @@ def test_rule_target_compiler_links_structured_reference_thresholds_generically(
     ]
     assert semantics["alarm_low_signal_dbm"]["comparison_role"] == "threshold"
     assert semantics["alarm_low_signal_dbm"]["target_field"] == "measured_signal_dbm"
+
+
+def test_rule_target_compiler_keeps_alarm_only_reference_critical():
+    result = compile_rule_targets(
+        contract={
+            "required_fields": ["sensor_id"],
+            "optional_fields": ["signal_dbm", "alarm_low_signal_dbm"],
+            "state_semantics": {
+                "sensor_id": {"semantic_type": "identity"},
+                "signal_dbm": {
+                    "semantic_type": "gauge",
+                    "unit": "dbm",
+                    "observation_type": "generic.signal.level",
+                },
+                "alarm_low_signal_dbm": {
+                    "semantic_type": "gauge",
+                    "unit": "dbm",
+                },
+            },
+        },
+        records=[
+            {
+                "sensor_id": "one",
+                "signal_dbm": -10.0,
+                "alarm_low_signal_dbm": -18.0,
+            }
+        ],
+    )
+
+    target = result["policy_targets"][0]
+    assert "low" not in target["threshold_references"]
+    critical = target["threshold_references"]["critical_low"]
+    assert critical["field_name"] == "alarm_low_signal_dbm"
+    assert critical["context_key"] == "threshold.critical_low"
+    assert critical["level"] == "alarm"
+    assert critical["source"] == "structured_reference"
+    assert critical["field_profile"]["numeric_count"] == 1
+    assert (
+        result["contract"]["state_semantics"]["alarm_low_signal_dbm"][
+            "threshold_role"
+        ]
+        == "critical_low"
+    )

@@ -58,6 +58,8 @@ class PolicyDecision:
     template_scope: str = "model"
     template_profile: str | None = None
     empty_semantics: dict[str, Any] | None = None
+    comparison_profile: str | None = None
+    comparison_profile_version: int | None = None
 
 
 def load_yaml(path: str | Path) -> dict[str, Any]:
@@ -148,6 +150,9 @@ class ParserPolicy:
                 **dict(capability_metadata.get("empty_semantics") or {}),
                 **dict(global_metadata.get("empty_semantics") or {}),
             }
+            comparison_profile, comparison_profile_version = self._comparison_profile(
+                global_metadata.get("comparison_profile")
+            )
             return PolicyDecision(
                 enabled=enabled,
                 canonical_command=canonical,
@@ -165,12 +170,48 @@ class ParserPolicy:
                     else model
                 ),
                 empty_semantics=empty_semantics,
+                comparison_profile=comparison_profile,
+                comparison_profile_version=comparison_profile_version,
+            )
+        raw_rule = self._matching_unstructured_rule(canonical)
+        if raw_rule is not None:
+            comparison_profile, comparison_profile_version = self._comparison_profile(
+                raw_rule.get("profile")
+            )
+            return PolicyDecision(
+                enabled=False,
+                canonical_command=canonical,
+                handling=str(raw_rule.get("handling") or "raw_hash_diff"),
+                comparison_profile=comparison_profile,
+                comparison_profile_version=comparison_profile_version,
             )
         return PolicyDecision(
             enabled=False,
             canonical_command=canonical,
             handling="raw_only",
         )
+
+    def _comparison_profile(self, value: Any) -> tuple[str | None, int | None]:
+        name = str(value or "").strip()
+        if not name:
+            return None, None
+        profiles = dict(
+            (self.policy.get("unstructured_comparison") or {}).get("profiles") or {}
+        )
+        profile = profiles.get(name)
+        if not isinstance(profile, dict):
+            raise ValueError(f"unstructured comparison profile not found: {name}")
+        return name, int(profile.get("version") or 1)
+
+    def _matching_unstructured_rule(self, canonical: str) -> dict[str, Any] | None:
+        rules = (self.policy.get("unstructured_comparison") or {}).get("rules") or []
+        for rule in rules:
+            if not isinstance(rule, dict):
+                continue
+            pattern = str(rule.get("command_pattern") or "").strip()
+            if pattern and re.search(pattern, canonical, re.IGNORECASE):
+                return dict(rule)
+        return None
 
     @staticmethod
     def _capability_status(

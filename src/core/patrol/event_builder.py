@@ -171,6 +171,8 @@ def no_event_reason(
     *,
     active_rule_count: int | None = None,
 ) -> str:
+    if change.get("decision_reason") == "threshold_unknown":
+        return "threshold_unknown"
     if change.get("change_type") == "missing":
         return "presence_confirmation_pending"
     if change.get("change_type") == "initial" and change.get("new") is None:
@@ -323,9 +325,24 @@ def build_events_from_params(params: dict[str, Any]) -> dict[str, Any]:
         PatrolRepository,
     )
 
+    supplied_rule_snapshot: list[dict[str, Any]] | None = None
+    if params.get("runtime_asset_manifest"):
+        from src.core.patrol.runtime_manifest import validate_patrol_runtime_manifest
+
+        manifest = validate_patrol_runtime_manifest(
+            dict(params.get("runtime_asset_manifest") or {})
+        )
+        supplied_rule_snapshot = list(
+            dict(manifest.get("rule_assets") or {}).get("event_rules") or []
+        )
     run_id = params.get("run_id")
     if not run_id:
-        return _build_events_from_params_impl(params, rules=None)
+        rules = (
+            event_rules_from_snapshot(supplied_rule_snapshot)
+            if supplied_rule_snapshot is not None
+            else None
+        )
+        return _build_events_from_params_impl(params, rules=rules)
     patrol_repository = PatrolRepository()
     supplied_changes = (
         list(params.get("changes") or [])
@@ -340,8 +357,19 @@ def build_events_from_params(params: dict[str, Any]) -> dict[str, Any]:
             if str(change.get("analysis_revision") or "original") == requested_revision
         ]
     if not params.get("persist", True):
-        return _build_events_from_params_impl({**params, "changes": supplied_changes}, rules=None)
-    frozen_rules = EventRuleRepository().snapshot_active_rules()
+        rules = (
+            event_rules_from_snapshot(supplied_rule_snapshot)
+            if supplied_rule_snapshot is not None
+            else None
+        )
+        return _build_events_from_params_impl(
+            {**params, "changes": supplied_changes}, rules=rules
+        )
+    frozen_rules = (
+        EventRuleRepository().snapshot_active_rules()
+        if supplied_rule_snapshot is None
+        else supplied_rule_snapshot
+    )
     frozen_rules = json.loads(json.dumps(frozen_rules, default=str))
     input_revision_digest = hashlib.sha256(
         json.dumps(

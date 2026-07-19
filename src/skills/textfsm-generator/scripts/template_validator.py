@@ -15,6 +15,7 @@ from src.core.parser.evidence_utils import literal_occurs
 from src.core.parser.generation_diagnostics import ParserDiagnostic
 from src.core.parser.key_contract import validate_entity_keys
 from src.core.parser.textfsm_dialect import lint_textfsm_template
+from src.core.parser.textfsm_input import prepare_textfsm_input
 
 try:
     import textfsm
@@ -164,7 +165,7 @@ def parse_with_template(
         return [], ["textfsm is not installed"]
     try:
         fsm = textfsm.TextFSM(io.StringIO(template_text))
-        rows = fsm.ParseText(cli_output)
+        rows = fsm.ParseText(prepare_textfsm_input(template_text, cli_output))
         return [dict(zip(fsm.header, row)) for row in rows], []
     except Exception as exc:
         return [], [f"parse failed: {exc}"]

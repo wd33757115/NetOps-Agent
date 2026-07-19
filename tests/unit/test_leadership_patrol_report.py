@@ -7,10 +7,16 @@ from datetime import datetime, timezone
 from docx import Document
 
 from src.core.patrol.leadership_report import (
+    _domain_threshold_coverage_text,
     build_leadership_report,
     render_leadership_docx,
+    render_leadership_markdown,
 )
-from src.core.workflows.patrol_batch_service import evaluate_current_state, report_domain
+from src.core.workflows.patrol_batch_service import (
+    domain_checks,
+    evaluate_current_state,
+    report_domain,
+)
 
 
 def _summary(*, findings=None, completed=2, target=2, quality="ready", evaluated=2):
@@ -54,6 +60,95 @@ def _summary(*, findings=None, completed=2, target=2, quality="ready", evaluated
             "technical_report_url": "/report.md",
         },
     }
+
+
+def _unstructured_change():
+    return {
+        "change_id": "raw-change-1",
+        "device_id": "sw-1",
+        "device_name": "SW1",
+        "command": "show running-config",
+        "entity_type": "raw_command_output",
+        "entity_key": "show running-config",
+        "field": "raw_text_hash",
+        "event_status": "no_event",
+        "previous_snapshot_id": "snapshot-before",
+        "current_snapshot_id": "snapshot-after",
+        "dimensions": {
+            "unstructured_diff": {
+                "changed": True,
+                "profile": "configuration",
+                "profile_label": "配置输出",
+                "added_line_count": 1,
+                "removed_line_count": 1,
+                "changed_line_count": 2,
+                "similarity_ratio": 0.8,
+                "categories": [
+                    {"name": "security", "label": "安全策略", "line_count": 2}
+                ],
+                "preview": [
+                    {
+                        "operation": "added",
+                        "category": "security",
+                        "category_label": "安全策略",
+                        "text": "snmp-agent community <redacted> ro",
+                    }
+                ],
+            }
+        },
+    }
+
+
+def test_non_structured_domain_reports_change_without_requiring_state_rule():
+    change = _unstructured_change()
+    checks = domain_checks(
+        observations=[
+            {
+                "entity_type": "raw_command_output",
+                "field": "raw_text_hash",
+                "command": "show running-config",
+            }
+        ],
+        command_details=[
+            {"command": "show running-config", "parse_status": "raw_hashed"}
+        ],
+        changes=[change],
+        events=[],
+        current_findings=[],
+        rule_coverage={"available": True, "by_domain": {}},
+    )
+
+    raw = next(item for item in checks if item["domain"] == "raw")
+    assert raw["status"] == "有变化，未触发事件"
+    assert "规则缺失" not in raw["reason"]
+
+
+def test_leadership_report_includes_safe_non_structured_change_summary():
+    summary = _summary()
+    summary["quality"]["parse_status_counts"] = {"raw_hashed": 2}
+    summary["changes"] = [_unstructured_change()]
+    summary["change_count"] = 1
+
+    report = build_leadership_report("batch-unstructured", summary)
+    markdown = render_leadership_markdown(report)
+    document = Document(io.BytesIO(render_leadership_docx(report)))
+    document_text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+
+    assert report["metrics"]["unstructured_collected_count"] == 2
+    assert report["metrics"]["unstructured_changed_count"] == 1
+    assert any("非结构化输出变化" in item["action"] for item in report["recommendations"])
+    assert "## 五、非结构化输出变化" in markdown
+    assert "<redacted>" in markdown
+    assert "非结构化输出变化" in document_text
+    assert "public-community" not in markdown
+    unstructured_table = next(
+        table
+        for table in document.tables
+        if [cell.text for cell in table.rows[0].cells]
+        == ["类型", "设备", "命令", "增/删行", "变化分类"]
+    )
+    assert len(unstructured_table.rows) == 2
+    assert all(len(cell.text) < 120 for row in unstructured_table.rows for cell in row.cells)
 
 
 def test_current_state_uses_initial_fault_semantics_and_suppresses_admin_down():
@@ -141,6 +236,112 @@ def test_current_optical_value_is_evaluated_without_waiting_for_a_change():
     assert result["findings"][0]["rule_bundle_digest"] == "abc"
 
 
+def test_current_state_evaluates_list_lanes_as_independent_dimensions():
+    result = evaluate_current_state(
+        [
+            {
+                "id": "obs-lane-1",
+                "device_id": "sw-1",
+                "entity_type": "interface_optical",
+                "entity_key": '["GE1/0/1"]',
+                "field": "rx_power_dbm",
+                "value": -18.2,
+                "dimensions": {"interface": "GE1/0/1", "value_index": 1},
+                "command": "display transceiver diagnosis interface",
+            },
+            {
+                "id": "obs-lane-2",
+                "device_id": "sw-1",
+                "entity_type": "interface_optical",
+                "entity_key": '["GE1/0/1"]',
+                "field": "rx_power_dbm",
+                "value": -2.1,
+                "dimensions": {"interface": "GE1/0/1", "value_index": 2},
+                "command": "display transceiver diagnosis interface",
+            },
+        ],
+        [
+            {
+                "rule_id": "optical-rx-low",
+                "event_type": "OpticalRxPowerLow",
+                "severity": "major",
+                "event_class": "fault",
+                "condition": {
+                    "kind": "threshold_lte",
+                    "entity_types": ["interface_optical"],
+                    "fields": ["rx_power_dbm"],
+                    "lte": -17,
+                },
+            }
+        ],
+        rule_source="test",
+    )
+
+    assert result["evaluated_observation_count"] == 2
+    assert result["finding_count"] == 1
+    assert result["findings"][0]["dimensions"]["value_index"] == 1
+
+
+def test_domain_checks_keep_list_lanes_as_independent_observations():
+    observations = [
+        {
+            "entity_type": "interface_optical",
+            "entity_key": '["GE1/0/1"]',
+            "field": "rx_power_dbm",
+            "value": -18.2,
+            "dimensions": {"interface": "GE1/0/1", "value_index": 1},
+            "command": "display transceiver diagnosis interface",
+        },
+        {
+            "entity_type": "interface_optical",
+            "entity_key": '["GE1/0/1"]',
+            "field": "rx_power_dbm",
+            "value": -2.1,
+            "dimensions": {"interface": "GE1/0/1", "value_index": 2},
+            "command": "display transceiver diagnosis interface",
+        },
+    ]
+
+    checks = domain_checks(
+        observations=observations,
+        command_details=[],
+        changes=[],
+        events=[],
+        current_findings=[],
+        rule_coverage={
+            "available": True,
+            "by_domain": {
+                "optical": {
+                    "evaluated_observation_count": 2,
+                    "threshold_unknown_observation_count": 0,
+                    "partial_threshold_observation_count": 0,
+                }
+            },
+        },
+    )
+
+    optical = next(item for item in checks if item["domain"] == "optical")
+    assert optical["observation_count"] == 2
+    assert optical["evaluated_observation_count"] == 2
+
+
+def test_threshold_coverage_text_distinguishes_partial_from_unknown():
+    text = _domain_threshold_coverage_text(
+        {
+            "label": "光模块与光功率",
+            "observation_count": 164,
+            "evaluated_observation_count": 152,
+            "partial_threshold_observation_count": 148,
+            "threshold_unknown_observation_count": 12,
+        }
+    )
+
+    assert text is not None
+    assert "152 条可按设备阈值评估" in text
+    assert "148 条仅具备部分阈值层级" in text
+    assert "12 条无可用设备阈值" in text
+
+
 def test_current_optical_value_uses_device_reference_threshold():
     result = evaluate_current_state(
         [
@@ -178,7 +379,124 @@ def test_current_optical_value_uses_device_reference_threshold():
     assert result["findings"][0]["condition"]["reference_field"] == (
         "alarm_low_rx_power_dbm"
     )
-    assert result["findings"][0]["reference_value"] == "-14.10"
+    assert result["findings"][0]["reference_value"] == -14.1
+
+
+def test_current_optical_state_reports_unknown_when_device_threshold_is_missing():
+    observation = {
+        "id": "obs-rx-no-threshold",
+        "device_id": "sw-1",
+        "entity_type": "interface_optical",
+        "entity_key": '["Ten-GigabitEthernet1/0/49"]',
+        "field": "rx_power_dbm",
+        "observation_type": "interface.optical.rx_power",
+        "value": -12.0,
+        "unit": "dBm",
+        "command": "display transceiver diagnosis interface",
+        "context": {},
+    }
+    rules = [
+        {
+            "rule_id": "interface-optical-rx-power.low",
+            "event_type": "OpticalRxPowerLow",
+            "severity": "warning",
+            "event_class": "fault",
+            "condition": {
+                "kind": "threshold_field_lte",
+                "entity_types": ["interface_optical"],
+                "fields": ["rx_power_dbm"],
+                "reference_field": "rx_low_warning_dbm",
+            },
+        }
+    ]
+
+    assessment = evaluate_current_state([observation], rules, rule_source="test")
+    checks = domain_checks(
+        observations=[observation],
+        command_details=[],
+        changes=[],
+        events=[],
+        current_findings=assessment["findings"],
+        rule_coverage=assessment,
+    )
+
+    assert assessment["evaluated_observation_count"] == 0
+    assert assessment["threshold_unknown_observation_count"] == 1
+    assert assessment["partial_threshold_observation_count"] == 0
+    assert assessment["finding_count"] == 0
+    optical = next(item for item in checks if item["domain"] == "optical")
+    assert optical["status"] == "数据不完整"
+    assert "不能据此判定健康" in optical["reason"]
+
+
+def test_alarm_only_optic_is_partially_evaluated_without_claiming_health():
+    result = evaluate_current_state(
+        [
+            {
+                "id": "obs-rx-alarm-only",
+                "device_id": "sw-1",
+                "entity_type": "interface_optical",
+                "entity_key": '["Ten-GigabitEthernet1/0/49"]',
+                "field": "rx_power_dbm",
+                "observation_type": "interface.optical.rx_power",
+                "value": -12.0,
+                "command": "display transceiver diagnosis interface",
+                "context": {"rx_low_alarm_dbm": -16.99},
+            }
+        ],
+        [
+            {
+                "rule_id": "interface-optical-rx-power.low",
+                "event_type": "OpticalRxPowerLow",
+                "severity": "warning",
+                "event_class": "fault",
+                "condition": {
+                    "kind": "threshold_field_lte",
+                    "entity_types": ["interface_optical"],
+                    "fields": ["rx_power_dbm"],
+                    "reference_field": "rx_low_warning_dbm",
+                },
+            },
+            {
+                "rule_id": "interface-optical-rx-power.critical-low",
+                "event_type": "OpticalRxPowerCritical",
+                "severity": "critical",
+                "event_class": "fault",
+                "condition": {
+                    "kind": "threshold_field_lte",
+                    "entity_types": ["interface_optical"],
+                    "fields": ["rx_power_dbm"],
+                    "reference_field": "rx_low_alarm_dbm",
+                },
+            },
+        ],
+        rule_source="test",
+    )
+
+    assert result["evaluated_observation_count"] == 1
+    assert result["threshold_unknown_observation_count"] == 0
+    assert result["partial_threshold_observation_count"] == 1
+    assert result["finding_count"] == 0
+
+    checks = domain_checks(
+        observations=[
+            {
+                "entity_type": "interface_optical",
+                "entity_key": '["Ten-GigabitEthernet1/0/49"]',
+                "field": "rx_power_dbm",
+                "value": -12.0,
+                "command": "display transceiver diagnosis interface",
+            }
+        ],
+        command_details=[],
+        changes=[],
+        events=[],
+        current_findings=result["findings"],
+        rule_coverage=result,
+    )
+    optical = next(item for item in checks if item["domain"] == "optical")
+    assert optical["status"] == "需复核"
+    assert "已按可用设备阈值完成部分判定" in optical["reason"]
 
 
 def test_leadership_report_never_claims_health_for_partial_scope():
@@ -215,11 +533,56 @@ def test_leadership_report_marks_current_fault_and_renders_valid_docx():
 
     assert report["assessment"]["code"] == "abnormal"
     assert report["risk_summary"]["total"] == 1
+    assert report["metrics"]["current_state_finding_count"] == 1
+    assert report["metrics"]["unresolved_fault_event_count"] == 0
+    assert report["metrics"]["current_risk_count"] == 1
     assert content.startswith(b"PK")
     assert "发现重大网络风险" in text
     assert "巡检流程执行完成" in text
     assert round(document.sections[0].page_width.cm, 1) == 21.0
     assert round(document.sections[0].page_height.cm, 1) == 29.7
+
+
+def test_leadership_report_keeps_independent_lanes_as_distinct_risks():
+    findings = [
+        {
+            "event_type": "OpticalRxPowerLow",
+            "severity": "major",
+            "device_id": "sw-1",
+            "device_name": "SW1",
+            "domain": "optical",
+            "entity_type": "interface_optical",
+            "entity_key": '["HGE1/0/1"]',
+            "field": "rx_power_dbm",
+            "value": value,
+            "unit": "dBm",
+            "rule_id": "optical-rx-low",
+            "dimensions": {"interface": "HGE1/0/1", "value_index": lane},
+        }
+        for lane, value in ((1, -18.1), (2, -19.2))
+    ]
+
+    report = build_leadership_report("batch-lanes", _summary(findings=findings))
+
+    assert report["risk_summary"]["total"] == 2
+    assert report["risk_groups"][0]["count"] == 2
+    assert "通道 1" in report["risk_groups"][0]["objects"]
+    assert "通道 2" in report["risk_groups"][0]["objects"]
+
+
+def test_leadership_report_recovers_missing_parser_eligible_denominator():
+    summary = _summary()
+    summary["quality"].update(
+        {
+            "parser_ready_count": 8,
+            "template_missing_count": 1,
+            "parse_failed_count": 1,
+        }
+    )
+
+    report = build_leadership_report("batch-parser-denominator", summary)
+
+    assert report["metrics"]["parser_eligible_count"] == 10
 
 
 def test_leadership_report_uses_frozen_analysis_time_and_is_reproducible():

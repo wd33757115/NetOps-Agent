@@ -245,6 +245,33 @@ class PatrolBatchRecord(Base):
     target_count = Column(Integer, nullable=False, default=0)
     launched_count = Column(Integer, nullable=False, default=0)
     skipped_count = Column(Integer, nullable=False, default=0)
+    save_baseline = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+    )
+    dispatch_status = Column(
+        String(32),
+        nullable=False,
+        default="pending",
+        server_default="pending",
+        index=True,
+    )
+    dispatch_requested_at = Column(DateTime(timezone=True), nullable=True)
+    dispatch_started_at = Column(DateTime(timezone=True), nullable=True)
+    dispatch_completed_at = Column(DateTime(timezone=True), nullable=True)
+    dispatch_error = Column(Text, nullable=True)
+    report_status = Column(
+        String(32),
+        nullable=False,
+        default="not_requested",
+        server_default="not_requested",
+        index=True,
+    )
+    report_requested_at = Column(DateTime(timezone=True), nullable=True)
+    report_completed_at = Column(DateTime(timezone=True), nullable=True)
+    report_error = Column(Text, nullable=True)
     archived = Column(
         Boolean,
         nullable=False,
@@ -292,6 +319,24 @@ class PatrolBatchDeviceRecord(Base):
     failure_code = Column(String(128), nullable=True, index=True)
     error_message = Column(Text, nullable=True)
     workflow_run_id = Column(String(64), nullable=True, index=True)
+    execution_plan_id = Column(
+        String(64),
+        ForeignKey("netops_collection_execution_plans.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    celery_task_id = Column(String(128), nullable=True, index=True)
+    dispatch_status = Column(
+        String(32),
+        nullable=False,
+        default="pending",
+        server_default="pending",
+        index=True,
+    )
+    dispatch_attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    dispatch_claim_token = Column(String(64), nullable=True, index=True)
+    dispatch_lease_until = Column(DateTime(timezone=True), nullable=True, index=True)
+    dispatched_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False)
     updated_at = Column(DateTime(timezone=True), nullable=False)
 
@@ -390,6 +435,10 @@ class WorkflowStepRecord(Base):
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("uq_netops_workflow_step_run_index", "run_id", "step_index", unique=True),
+    )
 
 
 class Notification(Base):

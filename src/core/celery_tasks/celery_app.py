@@ -73,6 +73,11 @@ _celery_conf: dict = {
         "src.core.celery_tasks.tasks.execute_firewall_policy_task": {"queue": "netops.firewall"},
         "src.core.celery_tasks.tasks.execute_config_backup_task": {"queue": "netops.patrol"},
         "src.core.celery_tasks.tasks.execute_device_patrol_task": {"queue": "netops.patrol"},
+        "dispatch_patrol_batch": {"queue": "netops.patrol"},
+        "reconcile_patrol_batch_dispatches": {"queue": "netops.patrol"},
+        "reconcile_patrol_batch_reports": {"queue": "netops.patrol"},
+        "record_celery_beat_heartbeat": {"queue": "netops.health"},
+        "cleanup_expired_patrol_outputs": {"queue": "netops.patrol"},
         "materialize_patrol_batch_report": {"queue": "netops.patrol"},
         "publish_network_event_outbox": {"queue": "netops.patrol"},
         "reconcile_patrol_runs": {"queue": "netops.patrol"},
@@ -94,7 +99,24 @@ logger.info(
     worker_queues=settings.CELERY_WORKER_QUEUES,
 )
 
+_beat_heartbeat_interval = max(
+    5,
+    int(settings.CELERY_BEAT_HEARTBEAT_INTERVAL_SECONDS),
+)
+_beat_heartbeat_expires = max(
+    _beat_heartbeat_interval * 2,
+    int(settings.CELERY_BEAT_HEARTBEAT_STALE_AFTER_SECONDS),
+)
+
 celery.conf.beat_schedule = {
+    "celery-beat-heartbeat": {
+        "task": "record_celery_beat_heartbeat",
+        "schedule": float(_beat_heartbeat_interval),
+        "options": {
+            "queue": "netops.health",
+            "expires": _beat_heartbeat_expires,
+        },
+    },
     "archive-skill-executions-monthly": {
         "task": "src.core.celery_tasks.tasks.archive_skill_executions_task",
         "schedule": 30 * 24 * 3600.0,
@@ -128,6 +150,21 @@ celery.conf.beat_schedule = {
     "reconcile-patrol-runs": {
         "task": "reconcile_patrol_runs",
         "schedule": 60.0,
+        "options": {"queue": "netops.patrol"},
+    },
+    "reconcile-patrol-batch-dispatches": {
+        "task": "reconcile_patrol_batch_dispatches",
+        "schedule": 15.0,
+        "options": {"queue": "netops.patrol"},
+    },
+    "cleanup-expired-patrol-outputs": {
+        "task": "cleanup_expired_patrol_outputs",
+        "schedule": 3600.0,
+        "options": {"queue": "netops.patrol"},
+    },
+    "reconcile-patrol-batch-reports": {
+        "task": "reconcile_patrol_batch_reports",
+        "schedule": 30.0,
         "options": {"queue": "netops.patrol"},
     },
 }

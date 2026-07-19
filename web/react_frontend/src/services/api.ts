@@ -187,6 +187,7 @@ export interface ParserImportPreview {
   template_missing: number
   parse_failed: number
   ignored: number
+  raw_compare?: number
   identity_unknown: number
   duplicate_snapshots: number
   new_snapshots: number
@@ -202,6 +203,9 @@ export interface ParserJobItem {
   status: string
   source_mode: 'parser_validation' | 'production'
   sample_count: number
+  structure_variant_count?: number
+  structure_signatures?: string[]
+  compatibility_scope?: 'model' | 'family'
   attempts: number
   contract_revision_count?: number
   template_attempt_count?: number
@@ -1173,7 +1177,10 @@ export interface DevicePatrolPreview {
 export interface DevicePatrolLaunchResult {
   success: boolean
   target_count: number
+  queued_count: number
   launched_count: number
+  dispatch_status: 'queued' | 'pending' | 'dispatching' | 'completed' | 'partial'
+  dispatch_task_id?: string
   mode: string
   save_baseline: boolean
   ticket_id?: string

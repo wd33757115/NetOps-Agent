@@ -35,6 +35,21 @@ def test_parser_job_asset_key_ignores_sample_and_failure_dimensions():
     assert first == second
 
 
+def test_parser_job_asset_key_separates_models_for_the_same_command():
+    first = parser_job_asset_key(
+        vendor="H3C",
+        profile="S5130S-52S-HI",
+        command="display transceiver diagnosis interface",
+    )
+    second = parser_job_asset_key(
+        vendor="H3C",
+        profile="S5130S-54S-HI-G",
+        command="display transceiver diagnosis interface",
+    )
+
+    assert first != second
+
+
 def test_duplicate_asset_cleanup_hard_deletes_history_without_merging():
     token = uuid.uuid4().hex
     historical_id = f"historical-{token}"

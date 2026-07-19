@@ -25,6 +25,8 @@ _ROLE_ALIASES = {
     "lower": "low",
     "critical_low": "critical_low",
     "critical-low": "critical_low",
+    "critical_high": "critical_high",
+    "critical-high": "critical_high",
     "high_recovery": "high_recovery",
     "recovery_high": "high_recovery",
     "high-recovery": "high_recovery",
@@ -102,9 +104,12 @@ def expected_rule_roles(
         high = _number(thresholds.get("high"))
         low = _number(thresholds.get("low"))
         critical_low = _number(thresholds.get("critical_low"))
+        critical_high = _number(thresholds.get("critical_high"))
         high_reference = threshold_references.get("high")
         low_reference = threshold_references.get("low")
         critical_low_reference = threshold_references.get("critical_low")
+        critical_high_reference = threshold_references.get("critical_high")
+        high_fault_roles: list[str] = []
         if high is not None or high_reference:
             high_condition = (
                 {
@@ -123,20 +128,63 @@ def expected_rule_roles(
                     "warning",
                 )
             )
+            high_fault_roles.append("high")
+        critical_high_is_distinct = bool(
+            critical_high_reference
+            and (
+                not high_reference
+                or critical_high_reference["field_name"] != high_reference["field_name"]
+            )
+        ) or bool(
+            critical_high is not None and (high is None or critical_high != high)
+        )
+        if critical_high_is_distinct:
+            critical_high_condition = (
+                {
+                    "kind": "threshold_field_gte",
+                    **base,
+                    "reference_field": critical_high_reference["field_name"],
+                }
+                if critical_high_reference
+                else {"kind": "threshold", **base, "gte": critical_high}
+            )
+            roles.append(
+                RuleRole(
+                    "critical_high",
+                    "fault",
+                    critical_high_condition,
+                    "critical",
+                )
+            )
+            high_fault_roles.append("critical_high")
+        effective_high = high if high is not None else critical_high
+        effective_high_reference = high_reference or critical_high_reference
+        if high_fault_roles:
             recovery_high = (
                 explicit_recovery
-                if high is not None and explicit_recovery is not None and explicit_recovery < high
-                else high - deadband
-                if high is not None and deadband
+                if effective_high is not None
+                and explicit_recovery is not None
+                and explicit_recovery < effective_high
+                else effective_high - deadband
+                if effective_high is not None and deadband
                 else None
             )
-            if high_reference and deadband:
+            if effective_high_reference and deadband:
                 high_recovery_condition = {
                     "kind": "threshold_field_high_recovery",
                     **base,
-                    "reference_field": high_reference["field_name"],
+                    "reference_field": effective_high_reference["field_name"],
                     "hysteresis": deadband,
                 }
+                fallback_fields = [
+                    str(reference.get("field_name") or "")
+                    for reference in (critical_high_reference,)
+                    if reference
+                    and str(reference.get("field_name") or "")
+                    != str(effective_high_reference.get("field_name") or "")
+                ]
+                if fallback_fields:
+                    high_recovery_condition["fallback_reference_fields"] = fallback_fields
             elif recovery_high is not None:
                 high_recovery_condition = {
                     "kind": "threshold_recovery",
@@ -152,9 +200,10 @@ def expected_rule_roles(
                         "recovery",
                         high_recovery_condition,
                         "info",
-                        ("high",),
+                        tuple(high_fault_roles),
                     )
                 )
+        low_fault_roles: list[str] = []
         if low is not None or low_reference:
             low_condition = (
                 {
@@ -173,63 +222,79 @@ def expected_rule_roles(
                     "warning",
                 )
             )
-            if critical_low_reference or (critical_low is not None and critical_low != low):
-                critical_condition = (
-                    {
-                        "kind": "threshold_field_lte",
-                        **base,
-                        "reference_field": critical_low_reference["field_name"],
-                    }
-                    if critical_low_reference
-                    else {"kind": "threshold_lte", **base, "lte": critical_low}
+            low_fault_roles.append("low")
+        critical_low_is_distinct = bool(
+            critical_low_reference
+            and (
+                not low_reference
+                or critical_low_reference["field_name"] != low_reference["field_name"]
+            )
+        ) or bool(critical_low is not None and (low is None or critical_low != low))
+        if critical_low_is_distinct:
+            critical_condition = (
+                {
+                    "kind": "threshold_field_lte",
+                    **base,
+                    "reference_field": critical_low_reference["field_name"],
+                }
+                if critical_low_reference
+                else {"kind": "threshold_lte", **base, "lte": critical_low}
+            )
+            roles.append(
+                RuleRole(
+                    "critical_low",
+                    "fault",
+                    critical_condition,
+                    "critical",
                 )
-                roles.append(
-                    RuleRole(
-                        "critical_low",
-                        "fault",
-                        critical_condition,
-                        "critical",
-                    )
-                )
+            )
+            low_fault_roles.append("critical_low")
+        effective_low = low if low is not None else critical_low
+        effective_low_reference = low_reference or critical_low_reference
+        if low_fault_roles:
             recovery_low = (
                 explicit_recovery
                 if compare_mode == "threshold_low_and_deadband"
-                and low is not None
+                and effective_low is not None
                 and explicit_recovery is not None
-                and explicit_recovery > low
-                else low + deadband
-                if low is not None and deadband
+                and explicit_recovery > effective_low
+                else effective_low + deadband
+                if effective_low is not None and deadband
                 else None
             )
-            if low_reference and deadband:
+            if effective_low_reference and deadband:
                 low_recovery_condition = {
                     "kind": "threshold_field_low_recovery",
                     **base,
-                    "reference_field": low_reference["field_name"],
+                    "reference_field": effective_low_reference["field_name"],
                     "hysteresis": deadband,
                 }
+                fallback_fields = [
+                    str(reference.get("field_name") or "")
+                    for reference in (critical_low_reference,)
+                    if reference
+                    and str(reference.get("field_name") or "")
+                    != str(effective_low_reference.get("field_name") or "")
+                ]
+                if fallback_fields:
+                    low_recovery_condition["fallback_reference_fields"] = fallback_fields
             elif recovery_low is not None:
                 low_recovery_condition = {
                     "kind": "threshold_low_recovery",
                     **base,
-                    "low": low,
+                    "low": effective_low,
                     "gt": recovery_low,
                 }
             else:
                 low_recovery_condition = None
             if low_recovery_condition:
-                resolves = (
-                    ("low", "critical_low")
-                    if critical_low_reference or critical_low is not None
-                    else ("low",)
-                )
                 roles.append(
                     RuleRole(
                         "low_recovery",
                         "recovery",
                         low_recovery_condition,
                         "info",
-                        resolves,
+                        tuple(low_fault_roles),
                     )
                 )
         if not roles:
@@ -285,8 +350,11 @@ def _infer_role(rule: dict[str, Any]) -> str | None:
     is_critical_low = any(
         word in text for word in ("critical_low", "loss_of_light", "signal_loss", "los")
     )
+    is_critical_high = "critical_high" in text
     is_low = is_critical_low or any(word in text for word in ("_low", "low_", "below", "under"))
-    is_high = any(word in text for word in ("_high", "high_", "above", "over"))
+    is_high = is_critical_high or any(
+        word in text for word in ("_high", "high_", "above", "over")
+    )
     if recovery and is_low:
         return "low_recovery"
     if recovery and is_high:
@@ -295,6 +363,8 @@ def _infer_role(rule: dict[str, Any]) -> str | None:
         return "up"
     if is_critical_low:
         return "critical_low"
+    if is_critical_high:
+        return "critical_high"
     if is_low:
         return "low"
     if is_high:
@@ -382,6 +452,8 @@ def compile_event_rule_intents(
             "severity": (
                 "info"
                 if role.event_class == "recovery"
+                else role.default_severity
+                if role.name in {"critical_low", "critical_high"}
                 else str(source.get("severity") or role.default_severity)
             ),
             "description": str(

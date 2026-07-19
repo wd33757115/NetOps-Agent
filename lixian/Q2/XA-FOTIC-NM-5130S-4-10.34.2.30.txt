@@ -1,0 +1,3512 @@
+命令: screen-length disable
+输出:
+******************************************************************************
+* Copyright (c) 2004-2021 New H3C Technologies Co., Ltd. All rights reserved.*
+* Without the owner's prior written consent,                                 *
+* no decompiling or reverse-engineering shall be allowed.                    *
+******************************************************************************
+
+<XA-FOTIC-NM-5130S-4>
+<XA-FOTIC-NM-5130S-4>screen-length disable
+--------------------------------------------------
+命令: display version
+输出:
+H3C Comware Software, Version 7.1.070, Release 6328P03
+Copyright (c) 2004-2021 New H3C Technologies Co., Ltd. All rights reserved.
+H3C S5130S-52S-HI uptime is 22 weeks, 1 day, 3 hours, 15 minutes
+Last reboot reason : Cold reboot
+
+Boot image: flash:/s5130s_hi-cmw710-boot-r6328p03.bin
+Boot image version: 7.1.070, Release 6328P03
+  Compiled Jul 12 2021 11:00:00
+System image: flash:/s5130s_hi-cmw710-system-r6328p03.bin
+System image version: 7.1.070, Release 6328P03
+  Compiled Jul 12 2021 11:00:00
+
+
+Slot 1:
+Uptime is 22 weeks,1 day,3 hours,15 minutes
+S5130S-52S-HI with 1 Processor
+BOARD TYPE:         S5130S-52S-HI
+DRAM:               512M bytes
+FLASH:              256M bytes
+PCB 1 Version:      VER.B
+Bootrom Version:    141
+CPLD 1 Version:     001
+Release Version:    H3C S5130S-52S-HI-6328P03
+Patch Version  :    None
+Reboot Cause  :     ColdReboot
+[SubSlot 0] 48GE+4SFP Plus
+--------------------------------------------------
+命令: display clock
+输出:
+14:46:09.652 GMT Mon 03/23/2026
+Time Zone : GMT add 08:00:00
+--------------------------------------------------
+命令: dis device manuinfo
+输出:
+ Slot 1 CPU 0:
+DEVICE_NAME          : S5130S-52S-HI
+DEVICE_SERIAL_NUMBER : 219801A12T9224Q0019T
+MAC_ADDRESS          : 90F7-B2CD-069F
+MANUFACTURING_DATE   : 2022-04-10
+VENDOR_NAME          : H3C
+Fan 1:
+The operation is not supported on the specified fan.
+Power 1:
+DEVICE_NAME          : LSPM2150A
+DEVICE_SERIAL_NUMBER : 210231A1U0H2240C02S5
+MANUFACTURING_DATE   : 2022-04-22
+VENDOR_NAME          : H3C
+Power 2:
+DEVICE_NAME          : LSPM2150A
+DEVICE_SERIAL_NUMBER : 210231A1U0H2240C032Y
+MANUFACTURING_DATE   : 2022-04-22
+VENDOR_NAME          : H3C
+--------------------------------------------------
+命令: dis device manuinfo
+输出:
+ Slot 1 CPU 0:
+DEVICE_NAME          : S5130S-52S-HI
+DEVICE_SERIAL_NUMBER : 219801A12T9224Q0019T
+MAC_ADDRESS          : 90F7-B2CD-069F
+MANUFACTURING_DATE   : 2022-04-10
+VENDOR_NAME          : H3C
+Fan 1:
+The operation is not supported on the specified fan.
+Power 1:
+DEVICE_NAME          : LSPM2150A
+DEVICE_SERIAL_NUMBER : 210231A1U0H2240C02S5
+MANUFACTURING_DATE   : 2022-04-22
+VENDOR_NAME          : H3C
+Power 2:
+DEVICE_NAME          : LSPM2150A
+DEVICE_SERIAL_NUMBER : 210231A1U0H2240C032Y
+MANUFACTURING_DATE   : 2022-04-22
+VENDOR_NAME          : H3C
+--------------------------------------------------
+命令: display power
+输出:
+ Slot 1:
+ PowerID State    Mode   Current(A)  Voltage(V)  Power(W)
+ 1       Normal   AC        --          --          --
+ 2       Normal   AC        --          --          --
+
+--------------------------------------------------
+命令: display fan
+输出:
+ Slot 1:
+ Fan 1: 
+ State    : Normal
+
+
+--------------------------------------------------
+命令: display environment
+输出:
+ System temperature information (degree centigrade):
+ ----------------------------------------------------------------------
+ Slot  Sensor    Temperature  Lower  Warning  Alarm  Shutdown
+ 1     hotspot 1  48           0      84       98     105     
+ 1     hotspot 2  52           0      84       98     105     
+ 1     hotspot 3  54           0      100      110    NA      
+ 1     hotspot 4  59           0      100      110    NA      
+ 1     hotspot 5  56           0      100      110    NA      
+ 1     hotspot 6  44           0      100      110    NA      
+ 1     hotspot 7  31           0      100      110    NA      
+ 1     hotspot 8  31           0      100      110    NA      
+--------------------------------------------------
+命令: dis transceiver diagnosis interface
+输出:
+Ten-GigabitEthernet1/0/49 transceiver diagnostic information:
+The transceiver is absent.
+Ten-GigabitEthernet1/0/50 transceiver diagnostic information:
+The transceiver is absent.
+Ten-GigabitEthernet1/0/51 transceiver diagnostic information:
+  Current diagnostic parameters:
+    Temp.(C) Voltage(V)  Bias(mA)  RX power(dBm)  TX power(dBm)  
+    31         3.33        5.65      -8.07          -4.45          
+  Alarm thresholds:
+          Temp.(C) Voltage(V)  Bias(mA)  RX power(dBm)  TX power(dBm)  
+    High  73         3.80        12.00     0.00           0.00           
+    Low   -3         2.81        1.00      -16.99         -12.50         
+Ten-GigabitEthernet1/0/52 transceiver diagnostic information:
+  Current diagnostic parameters:
+    Temp.(C) Voltage(V)  Bias(mA)  RX power(dBm)  TX power(dBm)  
+    32         3.36        5.44      -15.07         -5.11          
+  Alarm thresholds:
+          Temp.(C) Voltage(V)  Bias(mA)  RX power(dBm)  TX power(dBm)  
+    High  73         3.80        12.00     0.00           0.00           
+    Low   -3         2.81        1.00      -16.99         -12.50         
+--------------------------------------------------
+命令: display interface
+输出:
+Bridge-Aggregation412
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06df
+Description: Bridge-Aggregation412 Interface
+Bandwidth: 2000000 kbps
+2Gbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+PVID: 1
+Port link-type: Trunk
+ VLAN Passing:   702-704
+ VLAN permitted: 2-4094
+ Trunk port encapsulation: IEEE 802.1q
+Last clearing of counters: Never
+Last 300 seconds input:  217 packets/sec 199412 bytes/sec 0%
+Last 300 seconds output:  103 packets/sec 35588 bytes/sec 0%
+Input (total):  3784832847 packets, 3862163233977 bytes
+	2818127251 unicasts, 86695521 broadcasts, 880010075 multicasts, 0 pauses
+Input (normal):  3784832847 packets, - bytes
+	2818127251 unicasts, 86695521 broadcasts, 880010075 multicasts, 0 pauses
+Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	0 CRC, 0 frame, - overruns, 0 aborts
+	- ignored, - parity errors
+Output (total): 1523217718 packets, 452404730882 bytes
+	1520188239 unicasts, 547843 broadcasts, 2481636 multicasts, 0 pauses
+Output (normal): 1523217718 packets, - bytes
+	1520188239 unicasts, 547843 broadcasts, 2481636 multicasts, 0 pauses
+Output: 0 output errors, - underruns, - buffer failures
+	0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	0 lost carrier, - no carrier
+
+GigabitEthernet1/0/1
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06ad
+Description: To_XiaoJin-BigData-Server19
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+1000Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 22 weeks 0 days 23 hours 8 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:28 GMT+08:00:00
+Last time when physical state changed to up:2025-10-19 15:42:26 GMT+08:00:00
+Last time when physical state changed to down:2025-10-19 15:42:10 GMT+08:00:00
+ Peak input rate: 13362 bytes/sec, at 2026-01-23 17:14:35 
+ Peak output rate: 13654 bytes/sec, at 2026-01-23 17:12:30 
+ Last 300 seconds input: 0 packets/sec 4 bytes/sec 0%
+ Last 300 seconds output: 1 packets/sec 234 bytes/sec 0%
+ Input (total):  1038704 packets, 124381939 bytes
+	 1020702 unicasts, 18002 broadcasts, 0 multicasts, 0 pauses
+ Input (normal):  1038704 packets, - bytes
+	 1020702 unicasts, 18002 broadcasts, 0 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 26283654 packets, 3251488374 bytes
+	 1048685 unicasts, 657933 broadcasts, 24577036 multicasts, 0 pauses
+ Output (normal): 26283654 packets, - bytes
+	 1048685 unicasts, 657933 broadcasts, 24577036 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/2
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06ae
+Description: To_XiaoJin-BigData-Server20
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+1000Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 21 weeks 3 days 21 hours 50 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:28 GMT+08:00:00
+Last time when physical state changed to up:2025-10-23 17:00:00 GMT+08:00:00
+Last time when physical state changed to down:2025-10-23 16:59:57 GMT+08:00:00
+ Peak input rate: 12631 bytes/sec, at 2026-01-23 17:06:05 
+ Peak output rate: 13108 bytes/sec, at 2026-01-23 17:08:44 
+ Last 300 seconds input: 0 packets/sec 31 bytes/sec 0%
+ Last 300 seconds output: 1 packets/sec 243 bytes/sec 0%
+ Input (total):  3873304 packets, 649586990 bytes
+	 3625024 unicasts, 43 broadcasts, 248237 multicasts, 0 pauses
+ Input (normal):  3873304 packets, - bytes
+	 3625024 unicasts, 43 broadcasts, 248237 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 28592329 packets, 3541551828 bytes
+	 3587643 unicasts, 675892 broadcasts, 24328794 multicasts, 0 pauses
+ Output (normal): 28592329 packets, - bytes
+	 3587643 unicasts, 675892 broadcasts, 24328794 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/3
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06af
+Description: To_XiaoJin-BigData-Server21
+Bandwidth: 100000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+100Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 22 weeks 1 days 3 hours 13 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:28 GMT+08:00:00
+Last time when physical state changed to up:2013-01-01 08:01:07 GMT+08:00:00
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 21 bytes/sec, at 2025-10-19 11:41:13 
+ Peak output rate: 163818 bytes/sec, at 2026-01-23 17:04:06 
+ Last 300 seconds input: 0 packets/sec 9 bytes/sec 0%
+ Last 300 seconds output: 1 packets/sec 222 bytes/sec 0%
+ Input (total):  325991 packets, 125342994 bytes
+	 77820 unicasts, 1 broadcasts, 248170 multicasts, 0 pauses
+ Input (normal):  325991 packets, - bytes
+	 77820 unicasts, 1 broadcasts, 248170 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 25977312 packets, 3075282231 bytes
+	 972497 unicasts, 675929 broadcasts, 24328886 multicasts, 0 pauses
+ Output (normal): 25977312 packets, - bytes
+	 972497 unicasts, 675929 broadcasts, 24328886 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/4
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06b0
+Description: To_JiShuZhongTai-BOC-Node1
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+1000Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 21 weeks 4 days 3 hours 51 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:28 GMT+08:00:00
+Last time when physical state changed to up:2025-10-23 10:59:50 GMT+08:00:00
+Last time when physical state changed to down:2025-10-23 10:59:47 GMT+08:00:00
+ Peak input rate: 27004 bytes/sec, at 2026-02-06 09:10:53 
+ Peak output rate: 164022 bytes/sec, at 2026-01-23 22:38:02 
+ Last 300 seconds input: 0 packets/sec 6 bytes/sec 0%
+ Last 300 seconds output: 1 packets/sec 237 bytes/sec 0%
+ Input (total):  1214526 packets, 218945453 bytes
+	 1211507 unicasts, 3015 broadcasts, 4 multicasts, 0 pauses
+ Input (normal):  1214526 packets, - bytes
+	 1211507 unicasts, 3015 broadcasts, 4 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 27313758 packets, 3359120973 bytes
+	 2068156 unicasts, 672164 broadcasts, 24573438 multicasts, 0 pauses
+ Output (normal): 27313758 packets, - bytes
+	 2068156 unicasts, 672164 broadcasts, 24573438 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/5
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06b1
+Description: To_JiShuZhongTai-BOC-Node2
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+1000Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 21 weeks 4 days 22 hours 9 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:28 GMT+08:00:00
+Last time when physical state changed to up:2025-10-22 16:41:53 GMT+08:00:00
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 102708 bytes/sec, at 2025-10-24 10:21:03 
+ Peak output rate: 14775 bytes/sec, at 2026-01-23 17:09:46 
+ Last 300 seconds input: 0 packets/sec 20 bytes/sec 0%
+ Last 300 seconds output: 1 packets/sec 233 bytes/sec 0%
+ Input (total):  2158910 packets, 428064448 bytes
+	 1937078 unicasts, 218253 broadcasts, 3579 multicasts, 0 pauses
+ Input (normal):  2158910 packets, - bytes
+	 1937078 unicasts, 218253 broadcasts, 3579 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 25779669 packets, 3110502730 bytes
+	 1402192 unicasts, 330099 broadcasts, 24047378 multicasts, 0 pauses
+ Output (normal): 25779669 packets, - bytes
+	 1402192 unicasts, 330099 broadcasts, 24047378 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/6
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06b2
+Description: To_XiaoJin-BigData-Server22
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+1000Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 21 weeks 5 days 1 hours 18 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:28 GMT+08:00:00
+Last time when physical state changed to up:2025-10-22 13:32:32 GMT+08:00:00
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 12952 bytes/sec, at 2026-01-23 17:02:35 
+ Peak output rate: 12982 bytes/sec, at 2026-01-23 17:03:55 
+ Last 300 seconds input: 0 packets/sec 117 bytes/sec 0%
+ Last 300 seconds output: 2 packets/sec 258 bytes/sec 0%
+ Input (total):  10615122 packets, 1377632036 bytes
+	 10614587 unicasts, 527 broadcasts, 8 multicasts, 0 pauses
+ Input (normal):  10615122 packets, - bytes
+	 10614587 unicasts, 527 broadcasts, 8 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 26697002 packets, 3383167695 bytes
+	 2071425 unicasts, 555041 broadcasts, 24070536 multicasts, 0 pauses
+ Output (normal): 26697002 packets, - bytes
+	 2071425 unicasts, 555041 broadcasts, 24070536 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/7
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06b3
+Description: To_XiaoJin-BigData-Server23
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+1000Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 21 weeks 5 days 0 hours 37 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:29 GMT+08:00:00
+Last time when physical state changed to up:2025-10-22 14:13:35 GMT+08:00:00
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 15715 bytes/sec, at 2025-12-02 15:20:15 
+ Peak output rate: 13046 bytes/sec, at 2026-01-23 17:03:26 
+ Last 300 seconds input: 2 packets/sec 667 bytes/sec 0%
+ Last 300 seconds output: 3 packets/sec 376 bytes/sec 0%
+ Input (total):  27402673 packets, 8310571419 bytes
+	 27401965 unicasts, 704 broadcasts, 4 multicasts, 0 pauses
+ Input (normal):  27402673 packets, - bytes
+	 27401965 unicasts, 704 broadcasts, 4 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 45955386 packets, 5001059331 bytes
+	 21335315 unicasts, 553938 broadcasts, 24066133 multicasts, 0 pauses
+ Output (normal): 45955386 packets, - bytes
+	 21335315 unicasts, 553938 broadcasts, 24066133 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/8
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06b4
+Description: To_XiaoJin-BigData-Server24
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+1000Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 21 weeks 4 days 0 hours 1 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:29 GMT+08:00:00
+Last time when physical state changed to up:2025-10-23 14:49:25 GMT+08:00:00
+Last time when physical state changed to down:2025-10-23 14:46:15 GMT+08:00:00
+ Peak input rate: 40853 bytes/sec, at 2025-12-02 15:40:28 
+ Peak output rate: 13101 bytes/sec, at 2026-01-23 17:08:32 
+ Last 300 seconds input: 1 packets/sec 110 bytes/sec 0%
+ Last 300 seconds output: 2 packets/sec 252 bytes/sec 0%
+ Input (total):  13997512 packets, 1356383733 bytes
+	 13996993 unicasts, 514 broadcasts, 5 multicasts, 0 pauses
+ Input (normal):  13997512 packets, - bytes
+	 13996993 unicasts, 514 broadcasts, 5 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 26434610 packets, 3309632526 bytes
+	 1816223 unicasts, 553805 broadcasts, 24064582 multicasts, 0 pauses
+ Output (normal): 26434610 packets, - bytes
+	 1816223 unicasts, 553805 broadcasts, 24064582 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/9
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06b5
+Description: To_XiaoJin-BigData-Server25
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+1000Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 21 weeks 5 days 0 hours 22 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:29 GMT+08:00:00
+Last time when physical state changed to up:2025-10-22 14:28:47 GMT+08:00:00
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 24902 bytes/sec, at 2025-12-24 17:29:22 
+ Peak output rate: 36551 bytes/sec, at 2026-01-23 22:43:31 
+ Last 300 seconds input: 0 packets/sec 38 bytes/sec 0%
+ Last 300 seconds output: 1 packets/sec 260 bytes/sec 0%
+ Input (total):  2926081 packets, 562458974 bytes
+	 2925887 unicasts, 186 broadcasts, 8 multicasts, 0 pauses
+ Input (normal):  2926081 packets, - bytes
+	 2925887 unicasts, 186 broadcasts, 8 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 26653382 packets, 3438723835 bytes
+	 2034767 unicasts, 554125 broadcasts, 24064490 multicasts, 0 pauses
+ Output (normal): 26653382 packets, - bytes
+	 2034767 unicasts, 554125 broadcasts, 24064490 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/10
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06b6
+Description: To_XA-SMARTX-ChaoRongHe-Server1
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+1000Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 21 weeks 5 days 0 hours 16 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:29 GMT+08:00:00
+Last time when physical state changed to up:2025-10-22 14:34:48 GMT+08:00:00
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 26245 bytes/sec, at 2025-12-24 16:55:10 
+ Peak output rate: 164121 bytes/sec, at 2026-01-23 22:38:03 
+ Last 300 seconds input: 0 packets/sec 1 bytes/sec 0%
+ Last 300 seconds output: 1 packets/sec 233 bytes/sec 0%
+ Input (total):  1783400 packets, 536748771 bytes
+	 1783386 unicasts, 6 broadcasts, 8 multicasts, 0 pauses
+ Input (normal):  1783400 packets, - bytes
+	 1783386 unicasts, 6 broadcasts, 8 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 27126457 packets, 3354618435 bytes
+	 2508455 unicasts, 554166 broadcasts, 24063836 multicasts, 0 pauses
+ Output (normal): 27126457 packets, - bytes
+	 2508455 unicasts, 554166 broadcasts, 24063836 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/11
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06b7
+Description: To_XA-SMARTX-ChaoRongHe-Server2
+Bandwidth: 100000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+100Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 21 weeks 4 days 4 hours 35 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:29 GMT+08:00:00
+Last time when physical state changed to up:2025-10-23 10:15:29 GMT+08:00:00
+Last time when physical state changed to down:2025-10-23 10:15:27 GMT+08:00:00
+ Peak input rate: 7160 bytes/sec, at 2026-01-23 17:06:16 
+ Peak output rate: 110270 bytes/sec, at 2026-01-23 17:08:38 
+ Last 300 seconds input: 0 packets/sec 27 bytes/sec 0%
+ Last 300 seconds output: 1 packets/sec 226 bytes/sec 0%
+ Input (total):  1513785 packets, 413905174 bytes
+	 834359 unicasts, 2 broadcasts, 679424 multicasts, 0 pauses
+ Input (normal):  1513785 packets, - bytes
+	 834359 unicasts, 2 broadcasts, 679424 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 25647929 packets, 3094203417 bytes
+	 1426533 unicasts, 525276 broadcasts, 23696120 multicasts, 0 pauses
+ Output (normal): 25647929 packets, - bytes
+	 1426533 unicasts, 525276 broadcasts, 23696120 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/12
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06b8
+Description: To_XA-SMARTX-ChaoRongHe-Server3
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+1000Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 21 weeks 3 days 23 hours 16 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:29 GMT+08:00:00
+Last time when physical state changed to up:2025-10-23 15:34:20 GMT+08:00:00
+Last time when physical state changed to down:2025-10-23 15:34:12 GMT+08:00:00
+ Peak input rate: 14159410 bytes/sec, at 2026-03-05 18:06:11 
+ Peak output rate: 3066701 bytes/sec, at 2026-02-06 14:47:50 
+ Last 300 seconds input: 89 packets/sec 31853 bytes/sec 0%
+ Last 300 seconds output: 140 packets/sec 191928 bytes/sec 0%
+ Input (total):  1387835724 packets, 417496009187 bytes
+	 1387021317 unicasts, 271610 broadcasts, 542776 multicasts, 21 pauses
+ Input (normal):  1387835703 packets, - bytes
+	 1387021317 unicasts, 271610 broadcasts, 542776 multicasts, 21 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 2752657614 packets, 3755678453058 bytes
+	 2728607763 unicasts, 248125 broadcasts, 23801726 multicasts, 0 pauses
+ Output (normal): 2752657614 packets, - bytes
+	 2728607763 unicasts, 248125 broadcasts, 23801726 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/13
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06b9
+Description: To_XiaoJin-BigData-Server34-10.34.43.52
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+1000Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 21 weeks 4 days 0 hours 20 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:29 GMT+08:00:00
+Last time when physical state changed to up:2025-10-23 14:30:46 GMT+08:00:00
+Last time when physical state changed to down:2025-10-19 12:27:15 GMT+08:00:00
+ Peak input rate: 9216 bytes/sec, at 2025-11-03 15:16:15 
+ Peak output rate: 161910 bytes/sec, at 2026-01-23 17:08:44 
+ Last 300 seconds input: 0 packets/sec 1 bytes/sec 0%
+ Last 300 seconds output: 1 packets/sec 235 bytes/sec 0%
+ Input (total):  473846 packets, 81804111 bytes
+	 462959 unicasts, 10887 broadcasts, 0 multicasts, 0 pauses
+ Input (normal):  473846 packets, - bytes
+	 462959 unicasts, 10887 broadcasts, 0 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 25765270 packets, 3169741180 bytes
+	 1346081 unicasts, 508861 broadcasts, 23910328 multicasts, 0 pauses
+ Output (normal): 25765270 packets, - bytes
+	 1346081 unicasts, 508861 broadcasts, 23910328 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/14
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06ba
+Description: To_XiaoJin-BigData-Server35-10.34.43.53
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+1000Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 21 weeks 4 days 0 hours 19 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:29 GMT+08:00:00
+Last time when physical state changed to up:2025-10-23 14:31:01 GMT+08:00:00
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 9914 bytes/sec, at 2026-01-08 11:15:40 
+ Peak output rate: 162461 bytes/sec, at 2026-01-23 17:08:32 
+ Last 300 seconds input: 0 packets/sec 2 bytes/sec 0%
+ Last 300 seconds output: 1 packets/sec 235 bytes/sec 0%
+ Input (total):  404853 packets, 60730476 bytes
+	 404852 unicasts, 1 broadcasts, 0 multicasts, 0 pauses
+ Input (normal):  404853 packets, - bytes
+	 404852 unicasts, 1 broadcasts, 0 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 25717410 packets, 3153257557 bytes
+	 1287409 unicasts, 519722 broadcasts, 23910279 multicasts, 0 pauses
+ Output (normal): 25717410 packets, - bytes
+	 1287409 unicasts, 519722 broadcasts, 23910279 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/15
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06bb
+Description: To_XiaoJin-BigData-Server36-10.34.43.54
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+1000Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 21 weeks 3 days 21 hours 55 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:29 GMT+08:00:00
+Last time when physical state changed to up:2025-10-23 16:55:22 GMT+08:00:00
+Last time when physical state changed to down:2025-10-23 16:53:23 GMT+08:00:00
+ Peak input rate: 17609 bytes/sec, at 2025-10-23 15:20:10 
+ Peak output rate: 153870 bytes/sec, at 2026-01-23 17:12:42 
+ Last 300 seconds input: 0 packets/sec 0 bytes/sec 0%
+ Last 300 seconds output: 1 packets/sec 232 bytes/sec 0%
+ Input (total):  228557 packets, 23222507 bytes
+	 224906 unicasts, 3 broadcasts, 3648 multicasts, 0 pauses
+ Input (normal):  228557 packets, - bytes
+	 224906 unicasts, 3 broadcasts, 3648 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 25353629 packets, 3104713739 bytes
+	 927614 unicasts, 519701 broadcasts, 23906314 multicasts, 0 pauses
+ Output (normal): 25353629 packets, - bytes
+	 927614 unicasts, 519701 broadcasts, 23906314 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/16
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06bc
+Description: To_XiaoJin-BigData-Server37-10.34.43.55
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+1000Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 21 weeks 3 days 21 hours 53 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:29 GMT+08:00:00
+Last time when physical state changed to up:2025-10-23 16:57:02 GMT+08:00:00
+Last time when physical state changed to down:2025-10-23 16:55:26 GMT+08:00:00
+ Peak input rate: 36821 bytes/sec, at 2026-01-21 11:01:41 
+ Peak output rate: 14309 bytes/sec, at 2026-01-23 17:12:36 
+ Last 300 seconds input: 0 packets/sec 1 bytes/sec 0%
+ Last 300 seconds output: 1 packets/sec 233 bytes/sec 0%
+ Input (total):  389653 packets, 106672240 bytes
+	 389644 unicasts, 1 broadcasts, 8 multicasts, 0 pauses
+ Input (normal):  389653 packets, - bytes
+	 389644 unicasts, 1 broadcasts, 8 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 24784401 packets, 3076270406 bytes
+	 354627 unicasts, 519710 broadcasts, 23910064 multicasts, 0 pauses
+ Output (normal): 24784401 packets, - bytes
+	 354627 unicasts, 519710 broadcasts, 23910064 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/17
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06bd
+Description: To_XiaoJin-BigData-Server38-10.34.43.56
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+1000Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 21 weeks 4 days 0 hours 19 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:29 GMT+08:00:00
+Last time when physical state changed to up:2025-10-23 14:31:31 GMT+08:00:00
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 12953 bytes/sec, at 2026-01-23 17:01:50 
+ Peak output rate: 12983 bytes/sec, at 2026-01-23 17:05:08 
+ Last 300 seconds input: 0 packets/sec 109 bytes/sec 0%
+ Last 300 seconds output: 2 packets/sec 256 bytes/sec 0%
+ Input (total):  10632471 packets, 1387301145 bytes
+	 10632471 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input (normal):  10632471 packets, - bytes
+	 10632471 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 26511183 packets, 3367836849 bytes
+	 2081265 unicasts, 519706 broadcasts, 23910212 multicasts, 0 pauses
+ Output (normal): 26511183 packets, - bytes
+	 2081265 unicasts, 519706 broadcasts, 23910212 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/18
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06be
+Description: To_XiaoJin-BigData-Server39-10.34.43.57
+Bandwidth: 100000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+100Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 21 weeks 4 days 0 hours 19 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:29 GMT+08:00:00
+Last time when physical state changed to up:2025-10-23 14:31:39 GMT+08:00:00
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 5220 bytes/sec, at 2026-01-23 17:03:55 
+ Peak output rate: 119954 bytes/sec, at 2026-01-23 17:03:55 
+ Last 300 seconds input: 1 packets/sec 523 bytes/sec 0%
+ Last 300 seconds output: 2 packets/sec 308 bytes/sec 0%
+ Input (total):  1166234 packets, 240579778 bytes
+	 924610 unicasts, 0 broadcasts, 241624 multicasts, 0 pauses
+ Input (normal):  1166234 packets, - bytes
+	 924610 unicasts, 0 broadcasts, 241624 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 25768185 packets, 3105567160 bytes
+	 1579907 unicasts, 519705 broadcasts, 23668573 multicasts, 0 pauses
+ Output (normal): 25768185 packets, - bytes
+	 1579907 unicasts, 519705 broadcasts, 23668573 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/19
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06bf
+Description: GigabitEthernet1/0/19 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+1000Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 21 weeks 4 days 0 hours 19 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:29 GMT+08:00:00
+Last time when physical state changed to up:2025-10-23 14:31:47 GMT+08:00:00
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 12618 bytes/sec, at 2026-01-23 17:02:47 
+ Peak output rate: 12901 bytes/sec, at 2026-01-23 17:03:55 
+ Last 300 seconds input: 0 packets/sec 154 bytes/sec 0%
+ Last 300 seconds output: 2 packets/sec 275 bytes/sec 0%
+ Input (total):  1449358 packets, 220089172 bytes
+	 1014514 unicasts, 3 broadcasts, 434841 multicasts, 0 pauses
+ Input (normal):  1449358 packets, - bytes
+	 1014514 unicasts, 3 broadcasts, 434841 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 25450688 packets, 3186082769 bytes
+	 1020811 unicasts, 519693 broadcasts, 23910184 multicasts, 0 pauses
+ Output (normal): 25450688 packets, - bytes
+	 1020811 unicasts, 519693 broadcasts, 23910184 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/20
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06c0
+Description: GigabitEthernet1/0/20 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+1000Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 22 weeks 1 days 2 hours 23 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:29 GMT+08:00:00
+Last time when physical state changed to up:2025-10-19 12:27:18 GMT+08:00:00
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 13887 bytes/sec, at 2026-01-23 17:12:36 
+ Peak output rate: 14180 bytes/sec, at 2026-01-23 17:12:30 
+ Last 300 seconds input: 0 packets/sec 4 bytes/sec 0%
+ Last 300 seconds output: 1 packets/sec 236 bytes/sec 0%
+ Input (total):  1067754 packets, 144081434 bytes
+	 1050411 unicasts, 17343 broadcasts, 0 multicasts, 0 pauses
+ Input (normal):  1067754 packets, - bytes
+	 1050411 unicasts, 17343 broadcasts, 0 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 26245810 packets, 3254533435 bytes
+	 1014447 unicasts, 657863 broadcasts, 24573500 multicasts, 0 pauses
+ Output (normal): 26245810 packets, - bytes
+	 1014447 unicasts, 657863 broadcasts, 24573500 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/21
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06c1
+Description: GigabitEthernet1/0/21 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+1000Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 22 weeks 0 days 23 hours 53 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:29 GMT+08:00:00
+Last time when physical state changed to up:2025-10-19 14:57:58 GMT+08:00:00
+Last time when physical state changed to down:2025-10-19 14:57:47 GMT+08:00:00
+ Peak input rate: 12638 bytes/sec, at 2026-01-23 17:06:11 
+ Peak output rate: 13122 bytes/sec, at 2026-01-23 17:08:44 
+ Last 300 seconds input: 0 packets/sec 26 bytes/sec 0%
+ Last 300 seconds output: 1 packets/sec 239 bytes/sec 0%
+ Input (total):  3367066 packets, 568966462 bytes
+	 3119025 unicasts, 41 broadcasts, 248000 multicasts, 0 pauses
+ Input (normal):  3367066 packets, - bytes
+	 3119025 unicasts, 41 broadcasts, 248000 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 28071607 packets, 3464475540 bytes
+	 3085168 unicasts, 671054 broadcasts, 24315385 multicasts, 0 pauses
+ Output (normal): 28071607 packets, - bytes
+	 3085168 unicasts, 671054 broadcasts, 24315385 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/22
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06c2
+Description: GigabitEthernet1/0/22 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+1000Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 21 weeks 3 days 4 hours 32 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:29 GMT+08:00:00
+Last time when physical state changed to up:2025-10-24 10:18:03 GMT+08:00:00
+Last time when physical state changed to down:2025-10-24 10:18:00 GMT+08:00:00
+ Peak input rate: 22671 bytes/sec, at 2025-10-23 09:20:12 
+ Peak output rate: 36500 bytes/sec, at 2026-01-23 22:43:37 
+ Last 300 seconds input: 0 packets/sec 6 bytes/sec 0%
+ Last 300 seconds output: 1 packets/sec 239 bytes/sec 0%
+ Input (total):  1168725 packets, 193473066 bytes
+	 1166134 unicasts, 2587 broadcasts, 4 multicasts, 0 pauses
+ Input (normal):  1168725 packets, - bytes
+	 1166134 unicasts, 2587 broadcasts, 4 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 26598432 packets, 3312305186 bytes
+	 1374095 unicasts, 666978 broadcasts, 24557359 multicasts, 0 pauses
+ Output (normal): 26598432 packets, - bytes
+	 1374095 unicasts, 666978 broadcasts, 24557359 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/23
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06c3
+Description: GigabitEthernet1/0/23 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+1000Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 3 weeks 6 days 4 hours 26 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:29 GMT+08:00:00
+Last time when physical state changed to up:2026-02-24 10:20:29 GMT+08:00:00
+Last time when physical state changed to down:2026-02-24 10:20:01 GMT+08:00:00
+ Peak input rate: 14139 bytes/sec, at 2026-01-23 17:14:35 
+ Peak output rate: 13867 bytes/sec, at 2026-01-23 17:12:19 
+ Last 300 seconds input: 2 packets/sec 623 bytes/sec 0%
+ Last 300 seconds output: 3 packets/sec 378 bytes/sec 0%
+ Input (total):  27171348 packets, 8200263827 bytes
+	 27171342 unicasts, 1 broadcasts, 5 multicasts, 0 pauses
+ Input (normal):  27171348 packets, - bytes
+	 27171342 unicasts, 1 broadcasts, 5 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 45530506 packets, 4962091769 bytes
+	 21101005 unicasts, 519675 broadcasts, 23909826 multicasts, 0 pauses
+ Output (normal): 45530506 packets, - bytes
+	 21101005 unicasts, 519675 broadcasts, 23909826 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/24
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06c4
+Description: GigabitEthernet1/0/24 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+1000Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 21 weeks 4 days 0 hours 18 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:29 GMT+08:00:00
+Last time when physical state changed to up:2025-10-23 14:32:13 GMT+08:00:00
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 40494 bytes/sec, at 2026-01-20 12:22:10 
+ Peak output rate: 13117 bytes/sec, at 2026-01-23 17:03:55 
+ Last 300 seconds input: 0 packets/sec 50 bytes/sec 0%
+ Last 300 seconds output: 1 packets/sec 246 bytes/sec 0%
+ Input (total):  13207776 packets, 1161999117 bytes
+	 13207776 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input (normal):  13207776 packets, - bytes
+	 13207776 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 26179630 packets, 3273592250 bytes
+	 1749809 unicasts, 519687 broadcasts, 23910134 multicasts, 0 pauses
+ Output (normal): 26179630 packets, - bytes
+	 1749809 unicasts, 519687 broadcasts, 23910134 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/25
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06c5
+Description: To_XA-FOTIC-WAN-NPATCH-1_MGT
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+1000Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 21 weeks 4 days 0 hours 18 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:29 GMT+08:00:00
+Last time when physical state changed to up:2025-10-23 14:32:02 GMT+08:00:00
+Last time when physical state changed to down:2025-10-23 14:31:28 GMT+08:00:00
+ Peak input rate: 20439 bytes/sec, at 2025-12-24 17:44:29 
+ Peak output rate: 164584 bytes/sec, at 2026-01-23 22:38:03 
+ Last 300 seconds input: 0 packets/sec 33 bytes/sec 0%
+ Last 300 seconds output: 1 packets/sec 256 bytes/sec 0%
+ Input (total):  3323518 packets, 607672313 bytes
+	 3322973 unicasts, 537 broadcasts, 8 multicasts, 0 pauses
+ Input (normal):  3323518 packets, - bytes
+	 3322973 unicasts, 537 broadcasts, 8 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 27809316 packets, 3533885271 bytes
+	 3026489 unicasts, 583282 broadcasts, 24199545 multicasts, 0 pauses
+ Output (normal): 27809316 packets, - bytes
+	 3026489 unicasts, 583282 broadcasts, 24199545 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/26
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06c6
+Description: GigabitEthernet1/0/26 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+1000Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 20 weeks 6 days 22 hours 9 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:29 GMT+08:00:00
+Last time when physical state changed to up:2025-10-27 16:40:53 GMT+08:00:00
+Last time when physical state changed to down:2025-10-27 16:40:50 GMT+08:00:00
+ Peak input rate: 18998 bytes/sec, at 2025-12-24 17:52:13 
+ Peak output rate: 164506 bytes/sec, at 2026-01-23 22:38:03 
+ Last 300 seconds input: 0 packets/sec 2 bytes/sec 0%
+ Last 300 seconds output: 1 packets/sec 234 bytes/sec 0%
+ Input (total):  479572 packets, 93714690 bytes
+	 476545 unicasts, 13 broadcasts, 3014 multicasts, 0 pauses
+ Input (normal):  479572 packets, - bytes
+	 476545 unicasts, 13 broadcasts, 3014 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 26134491 packets, 3201818632 bytes
+	 1354337 unicasts, 583782 broadcasts, 24196372 multicasts, 0 pauses
+ Output (normal): 26134491 packets, - bytes
+	 1354337 unicasts, 583782 broadcasts, 24196372 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/27
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06c7
+Description: GigabitEthernet1/0/27 Interface
+Bandwidth: 100000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+100Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 19 weeks 5 days 4 hours 58 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:29 GMT+08:00:00
+Last time when physical state changed to up:2025-11-05 09:52:36 GMT+08:00:00
+Last time when physical state changed to down:2025-11-05 09:52:34 GMT+08:00:00
+ Peak input rate: 6861 bytes/sec, at 2026-01-23 17:07:02 
+ Peak output rate: 113082 bytes/sec, at 2026-01-23 17:08:33 
+ Last 300 seconds input: 1 packets/sec 524 bytes/sec 0%
+ Last 300 seconds output: 2 packets/sec 299 bytes/sec 0%
+ Input (total):  1403015 packets, 347345415 bytes
+	 1161378 unicasts, 6 broadcasts, 241631 multicasts, 0 pauses
+ Input (normal):  1403015 packets, - bytes
+	 1161378 unicasts, 6 broadcasts, 241631 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 26210454 packets, 3136005663 bytes
+	 1671897 unicasts, 583150 broadcasts, 23955407 multicasts, 0 pauses
+ Output (normal): 26210454 packets, - bytes
+	 1671897 unicasts, 583150 broadcasts, 23955407 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/28
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06c8
+Description: GigabitEthernet1/0/28 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+1000Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 21 weeks 3 days 23 hours 31 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:29 GMT+08:00:00
+Last time when physical state changed to up:2025-10-23 15:19:20 GMT+08:00:00
+Last time when physical state changed to down:2025-10-23 14:32:07 GMT+08:00:00
+ Peak input rate: 10092 bytes/sec, at 2025-10-28 17:23:55 
+ Peak output rate: 8947 bytes/sec, at 2025-10-23 19:07:41 
+ Last 300 seconds input: 0 packets/sec 24 bytes/sec 0%
+ Last 300 seconds output: 2 packets/sec 255 bytes/sec 0%
+ Input (total):  537291 packets, 71351612 bytes
+	 536701 unicasts, 584 broadcasts, 6 multicasts, 0 pauses
+ Input (normal):  537291 packets, - bytes
+	 536701 unicasts, 584 broadcasts, 6 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 25214449 packets, 3127245069 bytes
+	 435037 unicasts, 582485 broadcasts, 24196927 multicasts, 0 pauses
+ Output (normal): 25214449 packets, - bytes
+	 435037 unicasts, 582485 broadcasts, 24196927 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/29
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06c9
+Description: GigabitEthernet1/0/29 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+1000Mbps-speed mode, full-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 21 weeks 3 days 23 hours 29 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:29 GMT+08:00:00
+Last time when physical state changed to up:2025-10-23 15:21:23 GMT+08:00:00
+Last time when physical state changed to down:2025-10-23 14:31:49 GMT+08:00:00
+ Peak input rate: 63036 bytes/sec, at 2026-01-28 18:50:22 
+ Peak output rate: 163753 bytes/sec, at 2026-01-23 17:04:01 
+ Last 300 seconds input: 0 packets/sec 101 bytes/sec 0%
+ Last 300 seconds output: 2 packets/sec 264 bytes/sec 0%
+ Input (total):  2087432 packets, 861300943 bytes
+	 2087260 unicasts, 171 broadcasts, 1 multicasts, 0 pauses
+ Input (normal):  2087432 packets, - bytes
+	 2087260 unicasts, 171 broadcasts, 1 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 26446438 packets, 3330961207 bytes
+	 1668155 unicasts, 582587 broadcasts, 24195696 multicasts, 0 pauses
+ Output (normal): 26446438 packets, - bytes
+	 1668155 unicasts, 582587 broadcasts, 24195696 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/30
+Current state: DOWN
+Line protocol state: DOWN
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06ca
+Description: GigabitEthernet1/0/30 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+Unknown-speed mode, unknown-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 21 weeks 4 days 0 hours 19 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:29 GMT+08:00:00
+Last time when physical state changed to up:2025-10-21 17:25:44 GMT+08:00:00
+Last time when physical state changed to down:2025-10-23 14:31:53 GMT+08:00:00
+ Peak input rate: 163504 bytes/sec, at 2025-10-23 10:57:00 
+ Peak output rate: 2943 bytes/sec, at 2025-10-23 11:02:00 
+ Last 300 seconds input: 0 packets/sec 0 bytes/sec -%
+ Last 300 seconds output: 0 packets/sec 0 bytes/sec -%
+ Input (total):  256222 packets, 317682844 bytes
+	 255868 unicasts, 346 broadcasts, 8 multicasts, 0 pauses
+ Input (normal):  256222 packets, - bytes
+	 255868 unicasts, 346 broadcasts, 8 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 823629 packets, 96071566 bytes
+	 82025 unicasts, 151680 broadcasts, 589924 multicasts, 0 pauses
+ Output (normal): 823629 packets, - bytes
+	 82025 unicasts, 151680 broadcasts, 589924 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/31
+Current state: DOWN
+Line protocol state: DOWN
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06cb
+Description: GigabitEthernet1/0/31 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+Unknown-speed mode, unknown-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: 21 weeks 4 days 0 hours 19 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:29 GMT+08:00:00
+Last time when physical state changed to up:2025-10-21 17:52:02 GMT+08:00:00
+Last time when physical state changed to down:2025-10-23 14:31:41 GMT+08:00:00
+ Peak input rate: 244 bytes/sec, at 2025-10-22 16:56:45 
+ Peak output rate: 402 bytes/sec, at 2025-10-22 16:08:35 
+ Last 300 seconds input: 0 packets/sec 0 bytes/sec -%
+ Last 300 seconds output: 0 packets/sec 0 bytes/sec -%
+ Input (total):  12013 packets, 1180317 bytes
+	 12009 unicasts, 4 broadcasts, 0 multicasts, 0 pauses
+ Input (normal):  12013 packets, - bytes
+	 12009 unicasts, 4 broadcasts, 0 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 362168 packets, 38844601 bytes
+	 11714 unicasts, 63579 broadcasts, 286875 multicasts, 0 pauses
+ Output (normal): 362168 packets, - bytes
+	 11714 unicasts, 63579 broadcasts, 286875 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/32
+Current state: DOWN
+Line protocol state: DOWN
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06cc
+Description: GigabitEthernet1/0/32 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+Unknown-speed mode, unknown-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: Never
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:30 GMT+08:00:00
+Last time when physical state changed to up:-
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Peak output rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Last 300 seconds input: 0 packets/sec 0 bytes/sec -%
+ Last 300 seconds output: 0 packets/sec 0 bytes/sec -%
+ Input (total):  0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input (normal):  0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output (normal): 0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/33
+Current state: DOWN
+Line protocol state: DOWN
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06cd
+Description: GigabitEthernet1/0/33 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+Unknown-speed mode, unknown-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: Never
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:30 GMT+08:00:00
+Last time when physical state changed to up:-
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Peak output rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Last 300 seconds input: 0 packets/sec 0 bytes/sec -%
+ Last 300 seconds output: 0 packets/sec 0 bytes/sec -%
+ Input (total):  0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input (normal):  0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output (normal): 0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/34
+Current state: DOWN
+Line protocol state: DOWN
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06ce
+Description: GigabitEthernet1/0/34 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+Unknown-speed mode, unknown-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: Never
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:30 GMT+08:00:00
+Last time when physical state changed to up:-
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Peak output rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Last 300 seconds input: 0 packets/sec 0 bytes/sec -%
+ Last 300 seconds output: 0 packets/sec 0 bytes/sec -%
+ Input (total):  0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input (normal):  0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output (normal): 0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/35
+Current state: DOWN
+Line protocol state: DOWN
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06cf
+Description: GigabitEthernet1/0/35 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+Unknown-speed mode, unknown-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: Never
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:30 GMT+08:00:00
+Last time when physical state changed to up:-
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Peak output rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Last 300 seconds input: 0 packets/sec 0 bytes/sec -%
+ Last 300 seconds output: 0 packets/sec 0 bytes/sec -%
+ Input (total):  0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input (normal):  0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output (normal): 0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/36
+Current state: DOWN
+Line protocol state: DOWN
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06d0
+Description: GigabitEthernet1/0/36 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+Unknown-speed mode, unknown-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: Never
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:30 GMT+08:00:00
+Last time when physical state changed to up:-
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Peak output rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Last 300 seconds input: 0 packets/sec 0 bytes/sec -%
+ Last 300 seconds output: 0 packets/sec 0 bytes/sec -%
+ Input (total):  0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input (normal):  0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output (normal): 0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/37
+Current state: DOWN
+Line protocol state: DOWN
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06d1
+Description: GigabitEthernet1/0/37 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+Unknown-speed mode, unknown-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: Never
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:30 GMT+08:00:00
+Last time when physical state changed to up:-
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Peak output rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Last 300 seconds input: 0 packets/sec 0 bytes/sec -%
+ Last 300 seconds output: 0 packets/sec 0 bytes/sec -%
+ Input (total):  0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input (normal):  0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output (normal): 0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/38
+Current state: DOWN
+Line protocol state: DOWN
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06d2
+Description: GigabitEthernet1/0/38 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+Unknown-speed mode, unknown-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: Never
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:30 GMT+08:00:00
+Last time when physical state changed to up:-
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Peak output rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Last 300 seconds input: 0 packets/sec 0 bytes/sec -%
+ Last 300 seconds output: 0 packets/sec 0 bytes/sec -%
+ Input (total):  0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input (normal):  0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output (normal): 0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/39
+Current state: DOWN
+Line protocol state: DOWN
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06d3
+Description: GigabitEthernet1/0/39 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+Unknown-speed mode, unknown-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: Never
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:30 GMT+08:00:00
+Last time when physical state changed to up:-
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Peak output rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Last 300 seconds input: 0 packets/sec 0 bytes/sec -%
+ Last 300 seconds output: 0 packets/sec 0 bytes/sec -%
+ Input (total):  0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input (normal):  0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output (normal): 0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/40
+Current state: DOWN
+Line protocol state: DOWN
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06d4
+Description: GigabitEthernet1/0/40 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+Unknown-speed mode, unknown-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: Never
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:30 GMT+08:00:00
+Last time when physical state changed to up:-
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Peak output rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Last 300 seconds input: 0 packets/sec 0 bytes/sec -%
+ Last 300 seconds output: 0 packets/sec 0 bytes/sec -%
+ Input (total):  0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input (normal):  0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output (normal): 0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/41
+Current state: DOWN
+Line protocol state: DOWN
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06d5
+Description: GigabitEthernet1/0/41 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+Unknown-speed mode, unknown-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: Never
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:30 GMT+08:00:00
+Last time when physical state changed to up:-
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Peak output rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Last 300 seconds input: 0 packets/sec 0 bytes/sec -%
+ Last 300 seconds output: 0 packets/sec 0 bytes/sec -%
+ Input (total):  0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input (normal):  0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output (normal): 0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/42
+Current state: DOWN
+Line protocol state: DOWN
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06d6
+Description: GigabitEthernet1/0/42 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+Unknown-speed mode, unknown-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: Never
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:30 GMT+08:00:00
+Last time when physical state changed to up:-
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Peak output rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Last 300 seconds input: 0 packets/sec 0 bytes/sec -%
+ Last 300 seconds output: 0 packets/sec 0 bytes/sec -%
+ Input (total):  0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input (normal):  0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output (normal): 0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/43
+Current state: DOWN
+Line protocol state: DOWN
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06d7
+Description: GigabitEthernet1/0/43 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+Unknown-speed mode, unknown-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: Never
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:30 GMT+08:00:00
+Last time when physical state changed to up:-
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Peak output rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Last 300 seconds input: 0 packets/sec 0 bytes/sec -%
+ Last 300 seconds output: 0 packets/sec 0 bytes/sec -%
+ Input (total):  0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input (normal):  0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output (normal): 0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/44
+Current state: DOWN
+Line protocol state: DOWN
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06d8
+Description: GigabitEthernet1/0/44 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+Unknown-speed mode, unknown-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: Never
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:30 GMT+08:00:00
+Last time when physical state changed to up:-
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Peak output rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Last 300 seconds input: 0 packets/sec 0 bytes/sec -%
+ Last 300 seconds output: 0 packets/sec 0 bytes/sec -%
+ Input (total):  0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input (normal):  0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output (normal): 0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/45
+Current state: DOWN
+Line protocol state: DOWN
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06d9
+Description: GigabitEthernet1/0/45 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+Unknown-speed mode, unknown-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: Never
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:30 GMT+08:00:00
+Last time when physical state changed to up:-
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Peak output rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Last 300 seconds input: 0 packets/sec 0 bytes/sec -%
+ Last 300 seconds output: 0 packets/sec 0 bytes/sec -%
+ Input (total):  0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input (normal):  0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output (normal): 0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/46
+Current state: DOWN
+Line protocol state: DOWN
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06da
+Description: GigabitEthernet1/0/46 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+Unknown-speed mode, unknown-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: Never
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:30 GMT+08:00:00
+Last time when physical state changed to up:-
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Peak output rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Last 300 seconds input: 0 packets/sec 0 bytes/sec -%
+ Last 300 seconds output: 0 packets/sec 0 bytes/sec -%
+ Input (total):  0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input (normal):  0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output (normal): 0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/47
+Current state: DOWN
+Line protocol state: DOWN
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06db
+Description: GigabitEthernet1/0/47 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+Unknown-speed mode, unknown-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: Never
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:30 GMT+08:00:00
+Last time when physical state changed to up:-
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Peak output rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Last 300 seconds input: 0 packets/sec 0 bytes/sec -%
+ Last 300 seconds output: 0 packets/sec 0 bytes/sec -%
+ Input (total):  0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input (normal):  0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output (normal): 0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+GigabitEthernet1/0/48
+Current state: DOWN
+Line protocol state: DOWN
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06dc
+Description: GigabitEthernet1/0/48 Interface
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is twisted pair
+Port hardware type is 1000_BASE_T
+Unknown-speed mode, unknown-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 703
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 703
+Port priority: 0
+Last link flapping: Never
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:30 GMT+08:00:00
+Last time when physical state changed to up:-
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Peak output rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Last 300 seconds input: 0 packets/sec 0 bytes/sec -%
+ Last 300 seconds output: 0 packets/sec 0 bytes/sec -%
+ Input (total):  0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input (normal):  0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output (normal): 0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+InLoopBack0
+Current state: UP
+Line protocol state: UP(spoofing)
+Description: InLoopBack0 Interface
+Maximum transmission unit: 1536
+Physical: InLoopBack
+Last 300 seconds input rate: 0 bytes/sec, 0 bits/sec, 0 packets/sec
+Last 300 seconds output rate: 0 bytes/sec, 0 bits/sec, 0 packets/sec
+Input: 0 packets, 0 bytes, 0 drops
+Output: 0 packets, 0 bytes, 0 drops
+
+M-GigabitEthernet0/0/0
+Current state: DOWN
+Line protocol state: DOWN
+Description: M-GigabitEthernet0/0/0 Interface
+Bandwidth: 100000 kbps
+Maximum transmission unit: 1500
+Internet protocol processing: Disabled
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06a3
+IPv6 packet frame type: Ethernet II, hardware address: 90f7-b2cd-06a3
+Last link flapping: Never
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:30 GMT+08:00:00
+Last time when physical state changed to up:-
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+Media type is twisted pair, loopback not set
+Port hardware type is 100_BASE_T
+Unknown-speed mode, unknown-duplex mode
+Input:   0 packets, - bytes 
+         0 unicast, 0 broadcasts,0 multicasts 
+Input:   0 input errors,- runts,- giants,- throttles,- CRC 
+         - frame,- overruns,- aborts,- ignored,- parity errors 
+Output:  0 packets, - bytes 
+         - broadcasts,- multicasts 
+Output:  0 output errors,0 underruns,- buffer failures 
+         0 aborts,- deferred,0 collisions,- late collisions 
+         - lost carrier,- no carrier 
+
+
+NULL0
+Current state: UP
+Line protocol state: UP(spoofing)
+Description: NULL0 Interface
+Bandwidth: 1000000 kbps
+Maximum transmission unit: 1500
+Internet protocol processing: Disabled
+Physical: NULL DEV, baudrate: 1000000 kbps
+Last clearing of counters: Never
+Last 300 seconds input rate: 0 bytes/sec, 0 bits/sec, 0 packets/sec
+Last 300 seconds output rate: 0 bytes/sec, 0 bits/sec, 0 packets/sec
+Input: 0 packets, 0 bytes, 0 drops
+Output: 0 packets, 0 bytes, 0 drops
+
+Ten-GigabitEthernet1/0/49
+Current state: DOWN
+Line protocol state: DOWN
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06dd
+Description: Ten-GigabitEthernet1/0/49 Interface
+Bandwidth: 10000000 kbps
+Loopback is not set
+Media type is not sure, Port hardware type is no connector
+Unknown-speed mode, unknown-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 1
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 1
+Port priority: 0
+Last link flapping: Never
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:30 GMT+08:00:00
+Last time when physical state changed to up:-
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Peak output rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Last 300 seconds input: 0 packets/sec 0 bytes/sec -%
+ Last 300 seconds output: 0 packets/sec 0 bytes/sec -%
+ Input (total):  0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input (normal):  0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output (normal): 0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+Ten-GigabitEthernet1/0/50
+Current state: DOWN
+Line protocol state: DOWN
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06de
+Description: Ten-GigabitEthernet1/0/50 Interface
+Bandwidth: 10000000 kbps
+Loopback is not set
+Media type is not sure, Port hardware type is no connector
+Unknown-speed mode, unknown-duplex mode
+Link speed type is autonegotiation, link duplex type is autonegotiation
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 1
+MDI type: Automdix
+Port link-type: Access
+ Tagged VLANs:   None
+ Untagged VLANs: 1
+Port priority: 0
+Last link flapping: Never
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:30 GMT+08:00:00
+Last time when physical state changed to up:-
+Last time when physical state changed to down:2013-01-01 08:00:25 GMT+08:00:00
+ Peak input rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Peak output rate: 0 bytes/sec, at 2013-01-01 08:01:11 
+ Last 300 seconds input: 0 packets/sec 0 bytes/sec -%
+ Last 300 seconds output: 0 packets/sec 0 bytes/sec -%
+ Input (total):  0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input (normal):  0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 0 packets, 0 bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output (normal): 0 packets, - bytes
+	 0 unicasts, 0 broadcasts, 0 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+Ten-GigabitEthernet1/0/51
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06df
+Description: uT:[XA-FOTIC-Core-N9364C-1]-ETH1/18
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is optical fiber, Port hardware type is 1000_BASE_SX_SFP
+1000Mbps-speed mode, full-duplex mode
+Link speed type is force link, link duplex type is force link
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 1
+MDI type: Automdix
+Port link-type: Trunk
+ VLAN Passing:   702-704
+ VLAN permitted: 2-4094
+ Trunk port encapsulation: IEEE 802.1q
+Port priority: 0
+Last link flapping: 21 weeks 4 days 3 hours 43 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:30 GMT+08:00:00
+Last time when physical state changed to up:2025-10-23 11:07:38 GMT+08:00:00
+Last time when physical state changed to down:2025-10-23 11:07:22 GMT+08:00:00
+ Peak input rate: 1746247 bytes/sec, at 2025-12-31 14:37:57 
+ Peak output rate: 7459523 bytes/sec, at 2026-02-01 13:53:23 
+ Last 300 seconds input: 69 packets/sec 26349 bytes/sec 0%
+ Last 300 seconds output: 12 packets/sec 2980 bytes/sec 0%
+ Input (total):  2026042810 packets, 1899130416014 bytes
+	 1376694543 unicasts, 51136405 broadcasts, 598211862 multicasts, 0 pauses
+ Input (normal):  2026042810 packets, - bytes
+	 1376694543 unicasts, 51136405 broadcasts, 598211862 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 688896710 packets, 150263153780 bytes
+	 686849390 unicasts, 20585 broadcasts, 2026735 multicasts, 0 pauses
+ Output (normal): 688896710 packets, - bytes
+	 686849390 unicasts, 20585 broadcasts, 2026735 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+Ten-GigabitEthernet1/0/52
+Current state: UP
+Line protocol state: UP
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06e0
+Description: uT:[XA-FOTIC-Core-N9364C-2]-ETH1/18
+Bandwidth: 1000000 kbps
+Loopback is not set
+Media type is optical fiber, Port hardware type is 1000_BASE_SX_SFP
+1000Mbps-speed mode, full-duplex mode
+Link speed type is force link, link duplex type is force link
+Flow-control is not enabled
+Maximum frame length: 10240
+Allow jumbo frames to pass
+Broadcast max-ratio: 100%
+Multicast max-ratio: 100%
+Unicast max-ratio: 100%
+PVID: 1
+MDI type: Automdix
+Port link-type: Trunk
+ VLAN Passing:   702-704
+ VLAN permitted: 2-4094
+ Trunk port encapsulation: IEEE 802.1q
+Port priority: 0
+Last link flapping: 21 weeks 4 days 22 hours 42 minutes
+Last clearing of counters: Never
+Current system time:2026-03-23 14:46:30 GMT+08:00:00
+Last time when physical state changed to up:2025-10-22 16:08:43 GMT+08:00:00
+Last time when physical state changed to down:2025-10-22 16:08:39 GMT+08:00:00
+ Peak input rate: 1907641 bytes/sec, at 2025-10-19 11:41:53 
+ Peak output rate: 14031528 bytes/sec, at 2026-03-05 18:06:06 
+ Last 300 seconds input: 148 packets/sec 173063 bytes/sec 0%
+ Last 300 seconds output: 91 packets/sec 32608 bytes/sec 0%
+ Input (total):  1758790037 packets, 1963032817963 bytes
+	 1441432708 unicasts, 35559116 broadcasts, 281798213 multicasts, 0 pauses
+ Input (normal):  1758790037 packets, - bytes
+	 1441432708 unicasts, 35559116 broadcasts, 281798213 multicasts, 0 pauses
+ Input:  0 input errors, 0 runts, 0 giants, 0 throttles
+	 0 CRC, 0 frame, - overruns, 0 aborts
+	 - ignored, - parity errors
+ Output (total): 834321008 packets, 302141577102 bytes
+	 833338849 unicasts, 527258 broadcasts, 454901 multicasts, 0 pauses
+ Output (normal): 834321008 packets, - bytes
+	 833338849 unicasts, 527258 broadcasts, 454901 multicasts, 0 pauses
+ Output: 0 output errors, - underruns, - buffer failures
+	 0 aborts, 0 deferred, 0 collisions, 0 late collisions
+	 0 lost carrier, - no carrier
+
+Vlan-interface1
+Current state: DOWN
+Line protocol state: DOWN
+Description: Vlan-interface1 Interface
+Bandwidth: 10000000 kbps
+Maximum transmission unit: 1500
+Internet protocol processing: Disabled
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06aa
+IPv6 packet frame type: Ethernet II, hardware address: 90f7-b2cd-06aa
+Last clearing of counters: Never
+
+Vlan-interface702
+Current state: UP
+Line protocol state: UP
+Description: Vlan-interface702 Interface
+Bandwidth: 10000000 kbps
+Maximum transmission unit: 1500
+Internet address: 10.34.2.30/27 (primary)
+IP packet frame type: Ethernet II, hardware address: 90f7-b2cd-06ab
+IPv6 packet frame type: Ethernet II, hardware address: 90f7-b2cd-06ab
+Last clearing of counters: Never
+
+--------------------------------------------------
+命令: display interface brief
+输出:
+Brief information on interfaces in route mode:
+Link: ADM - administratively down; Stby - standby
+Protocol: (s) - spoofing
+Interface            Link Protocol Primary IP      Description                
+InLoop0              UP   UP(s)    --              
+MGE0/0/0             DOWN DOWN     --              
+NULL0                UP   UP(s)    --              
+Vlan1                DOWN DOWN     --              
+Vlan702              UP   UP       10.34.2.30      
+
+Brief information on interfaces in bridge mode:
+Link: ADM - administratively down; Stby - standby
+Speed: (a) - auto
+Duplex: (a)/A - auto; H - half; F - full
+Type: A - access; T - trunk; H - hybrid
+Interface            Link Speed   Duplex Type PVID Description                
+BAGG412              UP   2G(a)   F(a)   T    1    
+GE1/0/1              UP   1G(a)   F(a)   A    703  To_XiaoJin-BigData-Server19
+GE1/0/2              UP   1G(a)   F(a)   A    703  To_XiaoJin-BigData-Server20
+GE1/0/3              UP   100M(a) F(a)   A    703  To_XiaoJin-BigData-Server21
+GE1/0/4              UP   1G(a)   F(a)   A    703  To_JiShuZhongTai-BOC-Node1
+GE1/0/5              UP   1G(a)   F(a)   A    703  To_JiShuZhongTai-BOC-Node2
+GE1/0/6              UP   1G(a)   F(a)   A    703  To_XiaoJin-BigData-Server22
+GE1/0/7              UP   1G(a)   F(a)   A    703  To_XiaoJin-BigData-Server23
+GE1/0/8              UP   1G(a)   F(a)   A    703  To_XiaoJin-BigData-Server24
+GE1/0/9              UP   1G(a)   F(a)   A    703  To_XiaoJin-BigData-Server25
+GE1/0/10             UP   1G(a)   F(a)   A    703  To_XA-SMARTX-ChaoRongHe-Ser
+GE1/0/11             UP   100M(a) F(a)   A    703  To_XA-SMARTX-ChaoRongHe-Ser
+GE1/0/12             UP   1G(a)   F(a)   A    703  To_XA-SMARTX-ChaoRongHe-Ser
+GE1/0/13             UP   1G(a)   F(a)   A    703  To_XiaoJin-BigData-Server34
+GE1/0/14             UP   1G(a)   F(a)   A    703  To_XiaoJin-BigData-Server35
+GE1/0/15             UP   1G(a)   F(a)   A    703  To_XiaoJin-BigData-Server36
+GE1/0/16             UP   1G(a)   F(a)   A    703  To_XiaoJin-BigData-Server37
+GE1/0/17             UP   1G(a)   F(a)   A    703  To_XiaoJin-BigData-Server38
+GE1/0/18             UP   100M(a) F(a)   A    703  To_XiaoJin-BigData-Server39
+GE1/0/19             UP   1G(a)   F(a)   A    703  
+GE1/0/20             UP   1G(a)   F(a)   A    703  
+GE1/0/21             UP   1G(a)   F(a)   A    703  
+GE1/0/22             UP   1G(a)   F(a)   A    703  
+GE1/0/23             UP   1G(a)   F(a)   A    703  
+GE1/0/24             UP   1G(a)   F(a)   A    703  
+GE1/0/25             UP   1G(a)   F(a)   A    703  To_XA-FOTIC-WAN-NPATCH-1_MG
+GE1/0/26             UP   1G(a)   F(a)   A    703  
+GE1/0/27             UP   100M(a) F(a)   A    703  
+GE1/0/28             UP   1G(a)   F(a)   A    703  
+GE1/0/29             UP   1G(a)   F(a)   A    703  
+GE1/0/30             DOWN auto    A      A    703  
+GE1/0/31             DOWN auto    A      A    703  
+GE1/0/32             DOWN auto    A      A    703  
+GE1/0/33             DOWN auto    A      A    703  
+GE1/0/34             DOWN auto    A      A    703  
+GE1/0/35             DOWN auto    A      A    703  
+GE1/0/36             DOWN auto    A      A    703  
+GE1/0/37             DOWN auto    A      A    703  
+GE1/0/38             DOWN auto    A      A    703  
+GE1/0/39             DOWN auto    A      A    703  
+GE1/0/40             DOWN auto    A      A    703  
+GE1/0/41             DOWN auto    A      A    703  
+GE1/0/42             DOWN auto    A      A    703  
+GE1/0/43             DOWN auto    A      A    703  
+GE1/0/44             DOWN auto    A      A    703  
+GE1/0/45             DOWN auto    A      A    703  
+GE1/0/46             DOWN auto    A      A    703  
+GE1/0/47             DOWN auto    A      A    703  
+GE1/0/48             DOWN auto    A      A    703  
+XGE1/0/49            DOWN auto    A      A    1    
+XGE1/0/50            DOWN auto    A      A    1    
+XGE1/0/51            UP   1G      F      T    1    uT:[XA-FOTIC-Core-N9364C-1]
+XGE1/0/52            UP   1G      F      T    1    uT:[XA-FOTIC-Core-N9364C-2]
+
+--------------------------------------------------
+命令: display cpu
+输出:
+Slot 1 CPU 0 CPU usage:
+      42% in last 5 seconds
+      15% in last 1 minute
+      13% in last 5 minutes
+
+--------------------------------------------------
+命令: display memory
+输出:
+Memory statistics are measured in KB:
+Slot 1: 
+             Total      Used      Free    Shared   Buffers    Cached   FreeRatio
+Mem:        506412    327468    178944         0         0    114844       35.8%
+-/+ Buffers/Cache:    212624    293788
+Swap:            0         0         0
+
+--------------------------------------------------
+命令: display debugging
+输出:
+
+--------------------------------------------------
+命令: display ip interface brief
+输出:
+*down: administratively down
+(s): spoofing  (l): loopback
+Interface           Physical Protocol IP address      VPN instance Description  
+MGE0/0/0            down     down     --              --           --
+Vlan1               down     down     --              --           --
+Vlan702             up       up       10.34.2.30      --           --
+--------------------------------------------------
+命令: display logbuffer level 0
+输出:
+Log buffer: Enabled
+Max buffer size: 1024
+Actual buffer size: 512
+Dropped messages: 0
+Overwritten messages: 364
+Current messages: 512
+--------------------------------------------------
+命令: display logbuffer level 1
+输出:
+Log buffer: Enabled
+Max buffer size: 1024
+Actual buffer size: 512
+Dropped messages: 0
+Overwritten messages: 365
+Current messages: 512
+--------------------------------------------------
+命令: display logbuffer level 2
+输出:
+Log buffer: Enabled
+Max buffer size: 1024
+Actual buffer size: 512
+Dropped messages: 0
+Overwritten messages: 366
+Current messages: 512
+--------------------------------------------------
+命令: display logbuffer level 3
+输出:
+Log buffer: Enabled
+Max buffer size: 1024
+Actual buffer size: 512
+Dropped messages: 0
+Overwritten messages: 367
+Current messages: 512
+%Oct 23 10:14:23:906 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to down.
+%Oct 23 10:14:26:257 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to up.
+%Oct 23 10:15:25:986 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/11 changed to up.
+%Oct 23 10:15:27:346 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to down.
+%Oct 23 10:15:27:473 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/11 changed to down.
+%Oct 23 10:15:29:232 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/11 changed to up.
+%Oct 23 10:15:56:103 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to up.
+%Oct 23 10:15:56:153 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to down.
+%Oct 23 10:16:24:030 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to up.
+%Oct 23 10:19:31:367 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to down.
+%Oct 23 10:19:59:378 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to up.
+%Oct 23 10:19:59:741 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to down.
+%Oct 23 10:20:25:161 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to up.
+%Oct 23 10:20:28:204 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to down.
+%Oct 23 10:21:01:836 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to up.
+%Oct 23 10:21:02:987 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to down.
+%Oct 23 10:21:06:163 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to up.
+%Oct 23 10:21:10:923 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to down.
+%Oct 23 10:21:14:073 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to up.
+%Oct 23 10:21:14:810 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to down.
+%Oct 23 10:21:17:204 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to up.
+%Oct 23 10:21:17:957 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to down.
+%Oct 23 10:21:20:401 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to up.
+%Oct 23 10:21:21:140 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to down.
+%Oct 23 10:21:48:675 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to up.
+%Oct 23 10:21:48:764 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to down.
+%Oct 23 10:22:18:774 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to up.
+%Oct 23 10:23:12:181 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to down.
+%Oct 23 10:23:14:602 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to up.
+%Oct 23 10:23:18:459 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to down.
+%Oct 23 10:23:21:218 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to up.
+%Oct 23 10:23:21:976 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to down.
+%Oct 23 10:23:49:969 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to up.
+%Oct 23 10:32:26:074 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to down.
+%Oct 23 10:32:54:225 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to up.
+%Oct 23 10:33:06:367 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to down.
+%Oct 23 10:33:34:548 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to up.
+%Oct 23 10:33:49:820 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to down.
+%Oct 23 10:33:52:253 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to up.
+%Oct 23 10:45:01:879 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to down.
+%Oct 23 10:45:04:498 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to up.
+%Oct 23 10:51:04:743 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to down.
+%Oct 23 10:51:07:985 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to up.
+%Oct 23 10:59:47:613 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to down.
+%Oct 23 10:59:50:300 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/4 changed to up.
+%Oct 23 11:07:22:544 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface Ten-GigabitEthernet1/0/51 changed to down.
+%Oct 23 11:07:38:080 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface Ten-GigabitEthernet1/0/51 changed to up.
+%Oct 23 14:30:35:557 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/12 changed to up.
+%Oct 23 14:30:46:397 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/13 changed to up.
+%Oct 23 14:31:01:110 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/14 changed to up.
+%Oct 23 14:31:12:987 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/15 changed to up.
+%Oct 23 14:31:16:643 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/16 changed to up.
+%Oct 23 14:31:28:140 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/25 changed to down.
+%Oct 23 14:31:31:773 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/17 changed to up.
+%Oct 23 14:31:35:491 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/26 changed to down.
+%Oct 23 14:31:39:013 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/18 changed to up.
+%Oct 23 14:31:41:363 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/31 changed to down.
+%Oct 23 14:31:47:899 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/19 changed to up.
+%Oct 23 14:31:49:230 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/29 changed to down.
+%Oct 23 14:31:53:818 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/30 changed to down.
+%Oct 23 14:32:01:242 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/26 changed to up.
+%Oct 23 14:32:02:153 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/25 changed to up.
+%Oct 23 14:32:03:122 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/27 changed to down.
+%Oct 23 14:32:07:752 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/23 changed to up.
+%Oct 23 14:32:07:784 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/28 changed to down.
+%Oct 23 14:32:13:387 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/24 changed to up.
+%Oct 23 14:46:15:173 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/8 changed to down.
+%Oct 23 14:49:25:551 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/8 changed to up.
+%Oct 23 14:56:26:302 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/27 changed to up.
+%Oct 23 14:56:28:395 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/27 changed to down.
+%Oct 23 14:56:30:051 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/27 changed to up.
+%Oct 23 14:59:03:488 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/27 changed to down.
+%Oct 23 15:00:05:141 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/27 changed to up.
+%Oct 23 15:00:07:039 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/27 changed to down.
+%Oct 23 15:00:08:753 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/27 changed to up.
+%Oct 23 15:19:20:486 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/28 changed to up.
+%Oct 23 15:21:23:709 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/29 changed to up.
+%Oct 23 15:34:12:620 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/12 changed to down.
+%Oct 23 15:34:20:346 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/12 changed to up.
+%Oct 23 16:49:49:865 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/15 changed to down.
+%Oct 23 16:50:37:708 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/15 changed to up.
+%Oct 23 16:53:23:965 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/15 changed to down.
+%Oct 23 16:55:22:475 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/15 changed to up.
+%Oct 23 16:55:26:208 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/16 changed to down.
+%Oct 23 16:57:02:489 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/16 changed to up.
+%Oct 23 16:59:50:811 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/2 changed to down.
+%Oct 23 16:59:54:036 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/2 changed to up.
+%Oct 23 16:59:57:193 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/2 changed to down.
+%Oct 23 17:00:00:818 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/2 changed to up.
+%Oct 24 10:18:00:327 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/22 changed to down.
+%Oct 24 10:18:03:404 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/22 changed to up.
+%Oct 27 16:36:49:244 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/26 changed to down.
+%Oct 27 16:37:05:203 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/26 changed to up.
+%Oct 27 16:37:09:404 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/26 changed to down.
+%Oct 27 16:37:11:907 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/26 changed to up.
+%Oct 27 16:37:48:335 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/26 changed to down.
+%Oct 27 16:37:51:254 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/26 changed to up.
+%Oct 27 16:38:02:209 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/26 changed to down.
+%Oct 27 16:38:05:110 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/26 changed to up.
+%Oct 27 16:38:50:627 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/26 changed to down.
+%Oct 27 16:38:53:706 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/26 changed to up.
+%Oct 27 16:39:40:937 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/26 changed to down.
+%Oct 27 16:39:43:727 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/26 changed to up.
+%Oct 27 16:40:50:458 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/26 changed to down.
+%Oct 27 16:40:53:545 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/26 changed to up.
+%Nov  5 09:52:32:794 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/27 changed to down.
+%Nov  5 09:52:34:496 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/27 changed to up.
+%Nov  5 09:52:34:520 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/27 changed to down.
+%Nov  5 09:52:36:174 2025 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/27 changed to up.
+%Feb 24 10:16:22:355 2026 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/23 changed to down.
+%Feb 24 10:18:49:548 2026 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/23 changed to up.
+%Feb 24 10:20:01:840 2026 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/23 changed to down.
+%Feb 24 10:20:29:381 2026 XA-FOTIC-NM-5130S-4 IFNET/3/PHY_UPDOWN: Physical state on the interface GigabitEthernet1/0/23 changed to up.
+--------------------------------------------------
+命令: display logbuffer level 4
+输出:
+Log buffer: Enabled
+Max buffer size: 1024
+Actual buffer size: 512
+Dropped messages: 0
+Overwritten messages: 368
+Current messages: 512
+%Dec 16 10:10:07:346 2025 XA-FOTIC-NM-5130S-4 SHELL/4/SHELL_CMD_MATCHFAIL: -User=admin-IPAddr=10.34.37.64; Command L%5P8l~kcG$m in view shell failed to be matched.
+%Dec 16 10:10:42:845 2025 XA-FOTIC-NM-5130S-4 SHELL/4/SHELL_CMD_MATCHFAIL: -User=admin-IPAddr=10.34.37.64; Command login as: admin in view shell failed to be matched.
+%Dec 16 10:10:42:848 2025 XA-FOTIC-NM-5130S-4 SHELL/4/SHELL_CMD_MATCHFAIL: -User=admin-IPAddr=10.34.37.64; Command admin@10.34.2.30's password: in view shell failed to be matched.
+%Dec 16 10:10:42:854 2025 XA-FOTIC-NM-5130S-4 SHELL/4/SHELL_CMD_MATCHFAIL: -User=admin-IPAddr=10.34.37.64; Command ****************************************************************************** in view shell failed to be matched.
+%Dec 16 10:10:42:863 2025 XA-FOTIC-NM-5130S-4 SHELL/4/SHELL_CMD_MATCHFAIL: -User=admin-IPAddr=10.34.37.64; Command * Copyright (c) 2004-2021 New H3C Technologies Co., Ltd. All rights reserved.* in view shell failed to be matched.
+%Dec 16 10:10:42:872 2025 XA-FOTIC-NM-5130S-4 SHELL/4/SHELL_CMD_MATCHFAIL: -User=admin-IPAddr=10.34.37.64; Command * Without the owner's prior written consent,                                 * in view shell failed to be matched.
+%Dec 16 10:10:42:881 2025 XA-FOTIC-NM-5130S-4 SHELL/4/SHELL_CMD_MATCHFAIL: -User=admin-IPAddr=10.34.37.64; Command * no decompiling or reverse-engineering shall be allowed.                    * in view shell failed to be matched.
+%Dec 16 10:10:42:892 2025 XA-FOTIC-NM-5130S-4 SHELL/4/SHELL_CMD_MATCHFAIL: -User=admin-IPAddr=10.34.37.64; Command ****************************************************************************** in view shell failed to be matched.
+%Dec 16 10:10:42:897 2025 XA-FOTIC-NM-5130S-4 SHELL/4/SHELL_CMD_MATCHFAIL: -User=admin-IPAddr=10.34.37.64; Command <XA-FOTIC-NM-5130S-4> in view shell failed to be matched.
+%Dec 16 10:10:42:905 2025 XA-FOTIC-NM-5130S-4 SHELL/4/SHELL_CMD_MATCHFAIL: -User=admin-IPAddr=10.34.37.64; Command <XA-FOTIC-NM-5130S-4> in view shell failed to be matched.
+%Dec 16 10:10:42:907 2025 XA-FOTIC-NM-5130S-4 SHELL/4/SHELL_CMD_MATCHFAIL: -User=admin-IPAddr=10.34.37.64; Command <XA-FOTIC-NM-5130S-4>L%5P8l~kcG$m in view shell failed to be matched.
+%Dec 16 10:10:42:913 2025 XA-FOTIC-NM-5130S-4 SHELL/4/SHELL_CMD_MATCHFAIL: -User=admin-IPAddr=10.34.37.64; Command                      ^ in view shell failed to be matched.
+%Dec 16 10:10:42:920 2025 XA-FOTIC-NM-5130S-4 SHELL/4/SHELL_CMD_MATCHFAIL: -User=admin-IPAddr=10.34.37.64; Command  % Unrecognized command found at '^' position. in view shell failed to be matched.
+%Dec 16 10:10:42:928 2025 XA-FOTIC-NM-5130S-4 SHELL/4/SHELL_CMD_MATCHFAIL: -User=admin-IPAddr=10.34.37.64; Command <XA-FOTIC-NM-5130S-4> in view shell failed to be matched.
+%Dec 24 14:38:39:151 2025 XA-FOTIC-NM-5130S-4 SHELL/4/SHELL_CMD_MATCHFAIL: -User=admin-IPAddr=10.34.37.64; Command display  irf-port in view shell failed to be matched.
+--------------------------------------------------
+命令: dis vrrp statistics
+输出:
+VRRP4 is not configured.
+--------------------------------------------------
+命令: display IRF
+输出:
+MemberID    Role    Priority  CPU-Mac         Description
+ *+1        Master  1         f010-90db-7402  ---
+--------------------------------------------------
+ * indicates the device is the master.
+ + indicates the device through which the user logs in.
+
+ The bridge MAC of the IRF is: 90f7-b2cd-069f
+ Auto upgrade                : yes
+ Mac persistent              : 6 min
+ Domain ID                   : 0
+--------------------------------------------------
+命令: display m-lag system
+输出:
+                             ^
+ % Unrecognized command found at '^' position.
+--------------------------------------------------
+命令: dis startup
+输出:
+MainBoard:
+ Current startup saved-configuration file: flash:/startup.cfg(*)
+ Next main startup saved-configuration file: flash:/startup.cfg
+ Next backup startup saved-configuration file: NULL
+--------------------------------------------------
+命令: dis current-configuration
+输出:
+#
+ version 7.1.070, Release 6328P03
+#
+ sysname XA-FOTIC-NM-5130S-4
+#
+ clock timezone GMT add 08:00:00
+ clock protocol ntp
+#
+ irf mac-address persistent timer
+ irf auto-update enable
+ undo irf link-delay
+ irf member 1 priority 1
+#
+ lldp global enable
+#
+ password-recovery enable
+#
+vlan 1
+#
+vlan 702
+ name MGT_Nei
+#
+vlan 703
+ name MGT_Wai
+#
+vlan 704
+ name MGT_Svr
+#
+ stp global enable
+#
+interface Bridge-Aggregation412
+ port link-type trunk
+ undo port trunk permit vlan 1
+ port trunk permit vlan 2 to 4094
+ undo stp enable
+#
+interface NULL0
+#
+interface Vlan-interface1
+ ip address dhcp-alloc
+ dhcp client identifier ascii 90f7b2cd069f-VLAN0001
+#
+interface Vlan-interface702
+ ip address 10.34.2.30 255.255.255.224
+#
+interface GigabitEthernet1/0/1
+ description To_XiaoJin-BigData-Server19
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/2
+ description To_XiaoJin-BigData-Server20
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/3
+ description To_XiaoJin-BigData-Server21
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/4
+ description To_JiShuZhongTai-BOC-Node1
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/5
+ description To_JiShuZhongTai-BOC-Node2
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/6
+ description To_XiaoJin-BigData-Server22
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/7
+ description To_XiaoJin-BigData-Server23
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/8
+ description To_XiaoJin-BigData-Server24
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/9
+ description To_XiaoJin-BigData-Server25
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/10
+ description To_XA-SMARTX-ChaoRongHe-Server1
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/11
+ description To_XA-SMARTX-ChaoRongHe-Server2
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/12
+ description To_XA-SMARTX-ChaoRongHe-Server3
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/13
+ description To_XiaoJin-BigData-Server34-10.34.43.52
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/14
+ description To_XiaoJin-BigData-Server35-10.34.43.53
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/15
+ description To_XiaoJin-BigData-Server36-10.34.43.54
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/16
+ description To_XiaoJin-BigData-Server37-10.34.43.55
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/17
+ description To_XiaoJin-BigData-Server38-10.34.43.56
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/18
+ description To_XiaoJin-BigData-Server39-10.34.43.57
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/19
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/20
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/21
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/22
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/23
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/24
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/25
+ description To_XA-FOTIC-WAN-NPATCH-1_MGT
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/26
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/27
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/28
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/29
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/30
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/31
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/32
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/33
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/34
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/35
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/36
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/37
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/38
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/39
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/40
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/41
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/42
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/43
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/44
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/45
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/46
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/47
+ port access vlan 703
+ stp edged-port
+#
+interface GigabitEthernet1/0/48
+ port access vlan 703
+ stp edged-port
+#
+interface M-GigabitEthernet0/0/0
+#
+interface Ten-GigabitEthernet1/0/49
+#
+interface Ten-GigabitEthernet1/0/50
+#
+interface Ten-GigabitEthernet1/0/51
+ description uT:[XA-FOTIC-Core-N9364C-1]-ETH1/18
+ port link-type trunk
+ undo port trunk permit vlan 1
+ port trunk permit vlan 2 to 4094
+ speed 1000 
+ duplex full
+ port link-aggregation group 412
+#
+interface Ten-GigabitEthernet1/0/52
+ description uT:[XA-FOTIC-Core-N9364C-2]-ETH1/18
+ port link-type trunk
+ undo port trunk permit vlan 1
+ port trunk permit vlan 2 to 4094
+ speed 1000 
+ duplex full
+ port link-aggregation group 412
+#
+ scheduler logfile size 16
+#
+line class aux
+ user-role network-admin
+#
+line class usb
+ user-role network-admin
+#
+line class vty
+ user-role network-operator
+#
+line aux 0
+ authentication-mode password
+ user-role 15
+ user-role network-admin
+ set authentication password hash $h$6$f8CgaLX3+IazABq9$VY1meGeJYvc73Ae6xSyIK/u9jAKif9iUrGeWOLSxcRBmmRMRNNuQsS1dg5KOffuKoOV21Y0Hx0JdasGRyEYo8Q==
+ idle-timeout 5 0
+#
+line vty 0 4
+ authentication-mode scheme
+ user-role 15
+ user-role network-admin
+ protocol inbound ssh
+ idle-timeout 5 0
+#
+line vty 5 63
+ user-role network-admin
+ idle-timeout 5 0
+#
+ ip route-static 0.0.0.0 0 10.34.2.1
+#
+ info-center loghost source Vlan-interface702
+ info-center loghost 10.34.37.37
+ info-center loghost 10.34.37.41
+#
+ snmp-agent
+ snmp-agent local-engineid 800063A28090F7B2CD06A300000001
+ snmp-agent community read F0tic-XA
+ snmp-agent sys-info version all 
+ snmp-agent target-host trap address udp-domain 10.34.37.12 params securityname F0tic-XA
+ snmp-agent trap enable arp 
+ snmp-agent trap enable radius 
+ snmp-agent trap enable stp 
+ snmp-agent trap enable syslog 
+#
+ ssh server enable
+#
+ ntp-service enable
+ ntp-service unicast-server 10.34.37.253
+#
+ undo password-control aging enable 
+ password-control length 8
+ password-control composition type-number 3 type-length 1
+ password-control login idle-time 0
+ password-control complexity same-character check
+ undo password-control change-password first-login enable
+#
+radius scheme system
+ user-name-format without-domain
+#
+domain system
+#
+ domain default enable system
+#
+role name level-0
+ description Predefined level-0 role
+#
+role name level-1
+ description Predefined level-1 role
+#
+role name level-2
+ description Predefined level-2 role
+#
+role name level-3
+ description Predefined level-3 role
+#
+role name level-4
+ description Predefined level-4 role
+#
+role name level-5
+ description Predefined level-5 role
+#
+role name level-6
+ description Predefined level-6 role
+#
+role name level-7
+ description Predefined level-7 role
+#
+role name level-8
+ description Predefined level-8 role
+#
+role name level-9
+ description Predefined level-9 role
+#
+role name level-10
+ description Predefined level-10 role
+#
+role name level-11
+ description Predefined level-11 role
+#
+role name level-12
+ description Predefined level-12 role
+#
+role name level-13
+ description Predefined level-13 role
+#
+role name level-14
+ description Predefined level-14 role
+#
+user-group system
+#
+local-user admin class manage
+ password hash $h$6$cLYIp43CmtX+8sF5$mFcy6HOit+bg/n4RjXGp2VvgawYrVGpQShKCA0CB/5EcsN6oFyTlt5OiQwRPz/oOfHFwTkHciYwhoLm9CgeB0Q==
+ service-type ssh terminal
+ authorization-attribute user-role 15
+ authorization-attribute user-role network-admin
+#
+return
+--------------------------------------------------
+命令: dis arp
+输出:
+  Type: S-Static   D-Dynamic   O-Openflow   R-Rule   M-Multiport  I-Invalid
+IP address      MAC address    VLAN/VSI name Interface                Aging Type
+10.34.2.1       0000-0c9f-f2be 702           BAGG412                  353   D   
+10.34.2.2       706d-156f-c987 702           BAGG412                  254   D   
+10.34.2.3       f80f-6fc9-8e25 702           BAGG412                  256   D   
+10.34.2.5       d4ad-7193-8241 702           BAGG412                  371   D   
+10.34.2.6       cc70-ed95-3fc1 702           BAGG412                  387   D   
+10.34.2.7       c064-e487-f7c1 702           BAGG412                  417   D   
+10.34.2.11      90f7-b2b1-0540 702           BAGG412                  353   D   
+10.34.2.12      90f7-b2ab-1928 702           BAGG412                  323   D   
+10.34.2.13      eccd-4cc0-d481 702           BAGG412                  356   D   
+10.34.2.14      eccd-4cc0-e6c1 702           BAGG412                  138   D   
+10.34.2.29      6ce2-d38c-ec27 702           BAGG412                  139   D   
+--------------------------------------------------
+命令: dis mac-address
+输出:
+MAC Address      VLAN ID    State            Port/Nickname            Aging
+0000-0c9f-f2be   702        Learned          BAGG412                  Y
+0026-f19c-0000   702        Learned          BAGG412                  Y
+706d-156f-c987   702        Learned          BAGG412                  Y
+f80f-6fc9-8e25   702        Learned          BAGG412                  Y
+0000-0c9f-f2bf   703        Learned          BAGG412                  Y
+000d-487a-a0c6   703        Learned          GE1/0/15                 Y
+0010-f37b-a430   703        Learned          GE1/0/6                  Y
+0010-f389-d283   703        Learned          GE1/0/17                 Y
+001c-54e1-3e75   703        Learned          GE1/0/13                 Y
+001c-54ff-2575   703        Learned          GE1/0/14                 Y
+0026-f19c-0000   703        Learned          BAGG412                  Y
+003a-9c85-2a20   703        Learned          GE1/0/19                 Y
+0080-e102-372c   703        Learned          GE1/0/5                  Y
+0094-a165-9f82   703        Learned          GE1/0/9                  Y
+0094-a18f-e602   703        Learned          GE1/0/25                 Y
+0094-a190-5102   703        Learned          GE1/0/26                 Y
+0094-a190-5c82   703        Learned          GE1/0/10                 Y
+2c0b-e9da-5eb9   703        Learned          GE1/0/11                 Y
+3c41-0e7c-9e39   703        Learned          GE1/0/18                 Y
+706d-156f-c987   703        Learned          BAGG412                  Y
+9830-0011-d494   703        Learned          GE1/0/28                 Y
+9830-0011-f8bc   703        Learned          GE1/0/29                 Y
+9830-0036-8370   703        Learned          GE1/0/7                  Y
+9830-0036-83d0   703        Learned          GE1/0/23                 Y
+9cc2-c442-1f15   703        Learned          GE1/0/12                 Y
+9cc2-c442-1f19   703        Learned          GE1/0/12                 Y
+a069-d998-9619   703        Learned          GE1/0/20                 Y
+a069-d998-961c   703        Learned          GE1/0/1                  Y
+a453-0e0e-b0ff   703        Learned          GE1/0/21                 Y
+a8b4-56d0-a22f   703        Learned          GE1/0/2                  Y
+b44b-d652-2b89   703        Learned          GE1/0/24                 Y
+b456-b90f-0005   703        Learned          GE1/0/5                  Y
+cc70-ed95-7839   703        Learned          GE1/0/3                  Y
+d4ad-7193-8139   703        Learned          GE1/0/27                 Y
+ecd6-8a20-eab7   703        Learned          GE1/0/8                  Y
+ecd6-8a61-c514   703        Learned          GE1/0/16                 Y
+f80f-6fa1-d8c9   703        Learned          GE1/0/4                  Y
+f80f-6fa1-e161   703        Learned          GE1/0/22                 Y
+f80f-6fc9-8e25   703        Learned          BAGG412                  Y
+0000-0c9f-f2c0   704        Learned          BAGG412                  Y
+0026-f19c-0000   704        Learned          BAGG412                  Y
+0894-ef1a-6ef4   704        Learned          BAGG412                  Y
+0894-ef1a-6f34   704        Learned          BAGG412                  Y
+0894-ef1a-8954   704        Learned          BAGG412                  Y
+0894-ef68-0949   704        Learned          BAGG412                  Y
+0894-ef68-09e5   704        Learned          BAGG412                  Y
+0894-ef69-c63d   704        Learned          BAGG412                  Y
+3868-dd01-d56d   704        Learned          BAGG412                  Y
+3868-dd01-d5ad   704        Learned          BAGG412                  Y
+3868-dda0-88dd   704        Learned          BAGG412                  Y
+40f2-e9db-63b6   704        Learned          BAGG412                  Y
+4cd9-8f34-796a   704        Learned          BAGG412                  Y
+4cd9-8f34-7f58   704        Learned          BAGG412                  Y
+6c92-bfc3-ee6d   704        Learned          BAGG412                  Y
+6c92-bfc3-f0ad   704        Learned          BAGG412                  Y
+6c92-bfc3-f0d7   704        Learned          BAGG412                  Y
+6c92-bfc3-f227   704        Learned          BAGG412                  Y
+6c92-bfc3-f30b   704        Learned          BAGG412                  Y
+6c92-bfc3-f455   704        Learned          BAGG412                  Y
+6c92-bfc3-f467   704        Learned          BAGG412                  Y
+6c92-bfc3-f4a3   704        Learned          BAGG412                  Y
+6c92-bfc3-f509   704        Learned          BAGG412                  Y
+6c92-bfc3-f50f   704        Learned          BAGG412                  Y
+6c92-bfc3-f533   704        Learned          BAGG412                  Y
+6c92-bfc3-f53f   704        Learned          BAGG412                  Y
+6cab-05c2-5e60   704        Learned          BAGG412                  Y
+6cae-8b61-3a4e   704        Learned          BAGG412                  Y
+7cd3-0a68-c85d   704        Learned          BAGG412                  Y
+7cd3-0a68-ddbd   704        Learned          BAGG412                  Y
+8894-7147-8858   704        Learned          BAGG412                  Y
+8894-71a9-7e04   704        Learned          BAGG412                  Y
+9cc2-c404-db78   704        Learned          BAGG412                  Y
+9cc2-c40b-38b8   704        Learned          BAGG412                  Y
+9cc2-c40b-f944   704        Learned          BAGG412                  Y
+9cc2-c43e-6c3d   704        Learned          BAGG412                  Y
+9cc2-c44e-d052   704        Learned          BAGG412                  Y
+9cc2-c44e-f0fe   704        Learned          BAGG412                  Y
+9cc2-c44e-f260   704        Learned          BAGG412                  Y
+9cc2-c44e-f31c   704        Learned          BAGG412                  Y
+9cc2-c44e-fc2c   704        Learned          BAGG412                  Y
+9cc2-c44f-073c   704        Learned          BAGG412                  Y
+ac1f-6b61-173b   704        Learned          BAGG412                  Y
+b04f-a615-ad01   704        Learned          BAGG412                  Y
+b04f-a62f-0e7e   704        Learned          BAGG412                  Y
+b04f-a635-7491   704        Learned          BAGG412                  Y
+b405-5d12-65c8   704        Learned          BAGG412                  Y
+b405-5d6f-40fa   704        Learned          BAGG412                  Y
+b405-5d7f-9eda   704        Learned          BAGG412                  Y
+b405-5ded-57b2   704        Learned          BAGG412                  Y
+b405-5ded-61fa   704        Learned          BAGG412                  Y
+c407-78de-0d18   704        Learned          BAGG412                  Y
+d478-9b45-a2c0   704        Learned          BAGG412                  Y
+e861-1a4d-f5fd   704        Learned          BAGG412                  Y
+f80f-6fc9-8e25   704        Learned          BAGG412                  Y
+--------------------------------------------------

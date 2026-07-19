@@ -29,9 +29,12 @@ def create_workflow_run(
     source: str = "chat",
     user_id: str | None = None,
     thread_id: str | None = None,
+    run_id: str | None = None,
 ) -> str:
-    run_id = str(uuid.uuid4())
+    run_id = str(run_id or uuid.uuid4())
     with get_db_session() as db:
+        if db.get(WorkflowRun, run_id) is not None:
+            return run_id
         run = WorkflowRun(
             id=run_id,
             template_name=template_name,
@@ -51,9 +54,17 @@ def create_workflow_run(
 def create_workflow_steps(run_id: str, steps: list[dict[str, Any]]) -> list[WorkflowStepRecord]:
     records: list[WorkflowStepRecord] = []
     with get_db_session() as db:
+        existing = (
+            db.query(WorkflowStepRecord)
+            .filter(WorkflowStepRecord.run_id == run_id)
+            .order_by(WorkflowStepRecord.step_index)
+            .all()
+        )
+        if existing:
+            return existing
         for idx, step in enumerate(steps):
             rec = WorkflowStepRecord(
-                id=str(uuid.uuid4()),
+                id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"workflow-step|{run_id}|{idx}")),
                 run_id=run_id,
                 step_index=idx,
                 step_name=step["name"],
@@ -149,8 +160,15 @@ def mark_step_queued(step_id: str, celery_task_id: str) -> bool:
 
 def mark_step_running(step_id: str, celery_task_id: str) -> bool:
     with get_db_session() as db:
-        step = db.query(WorkflowStepRecord).filter(WorkflowStepRecord.id == step_id).first()
+        step = (
+            db.query(WorkflowStepRecord)
+            .filter(WorkflowStepRecord.id == step_id)
+            .with_for_update()
+            .first()
+        )
         if not step:
+            return False
+        if str(step.status or "pending") not in {"pending", "queued"}:
             return False
         run = db.query(WorkflowRun).filter(WorkflowRun.id == step.run_id).first()
         if not run or run.status in TERMINAL_WORKFLOW_STATUSES:
@@ -222,7 +240,9 @@ def create_notification(
     return nid
 
 
-def list_notifications(user_id: str, *, unread_only: bool = False, limit: int = 50) -> list[Notification]:
+def list_notifications(
+    user_id: str, *, unread_only: bool = False, limit: int = 50
+) -> list[Notification]:
     with get_db_session() as db:
         q = db.query(Notification).filter(Notification.user_id == str(user_id))
         if unread_only:

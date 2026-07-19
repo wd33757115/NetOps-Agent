@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react'
 import {
-  Alert, Button, Descriptions, Drawer, Dropdown, Input, Progress, Segmented, Select,
-  Space, Steps, Switch, Table, Tabs, Tag, Typography, message,
+  Alert, Button, Descriptions, Drawer, Dropdown, Input, List, Pagination, Progress,
+  Segmented, Select, Space, Steps, Switch, Table, Tabs, Tag, Typography, message,
 } from 'antd'
 import {
   CloudUploadOutlined, DeleteOutlined, DownloadOutlined, EyeOutlined, FolderOpenOutlined,
@@ -40,6 +40,16 @@ const statusColor = (status: string) => {
   if (status === 'cancelled') return 'orange'
   if (ACTIVE.has(status)) return 'blue'
   return 'default'
+}
+
+const jobTypeLabel = (jobType: OfflinePatrolJobType) =>
+  jobType === 'parser_validation' ? '单周期解析验证' : '双周期变化分析'
+
+const jobScaleLabel = (job: OfflinePatrolJob) => {
+  const totals = job.preview_totals || {}
+  return totals.command_count
+    ? `${totals.device_count || 0} 台 · ${totals.file_count || 0} 文件 · ${totals.command_count || 0} 命令`
+    : '等待预览'
 }
 
 const localDateTimeValue = (date: Date) => {
@@ -395,22 +405,85 @@ const OfflinePatrolPanel: React.FC = () => {
         <Switch checked={archived} onChange={(checked) => { setArchived(checked); setPage(1) }} checkedChildren="归档" unCheckedChildren="当前" />
       </div>
 
-      <Table<OfflinePatrolJob>
-        className="patrol-history-table"
-        rowKey="id"
-        size="small"
-        loading={listQuery.isLoading}
-        dataSource={listQuery.data?.items || []}
-        columns={columns}
-        scroll={{ x: 1014 }}
-        pagination={{
-          current: page, pageSize, total: listQuery.data?.total || 0,
-          showSizeChanger: !isMobile, showQuickJumper: !isMobile,
-          pageSizeOptions: PAGE_SIZE_OPTIONS,
-          showTotal: (total, range) => `第 ${range[0]}-${range[1]} 条，共 ${total} 个任务`,
-          onChange: (next, size) => { setPage(size === pageSize ? next : 1); setPageSize(size) },
-        }}
-      />
+      {isMobile ? (
+        <div className="offline-patrol-mobile-list">
+          <Typography.Text type="secondary">
+            共 {listQuery.data?.total || 0} 个任务
+          </Typography.Text>
+          <List<OfflinePatrolJob>
+            loading={listQuery.isLoading}
+            dataSource={listQuery.data?.items || []}
+            locale={{ emptyText: '暂无离线巡检任务' }}
+            renderItem={(row) => (
+              <List.Item key={row.id}>
+                <div className="offline-patrol-mobile-list__item">
+                  <div className="offline-patrol-mobile-list__header">
+                    <Typography.Text strong>{offlineJobDisplayName(row)}</Typography.Text>
+                    <Space size={4} wrap>
+                      <Tag color={statusColor(row.status)}>{statusLabel[row.status] || row.status}</Tag>
+                      {row.blocker_count > 0 && <Tag color="red">{row.blocker_count} 个阻断项</Tag>}
+                    </Space>
+                  </div>
+                  <Typography.Text copyable code className="offline-patrol-mobile-list__id">
+                    {row.id}
+                  </Typography.Text>
+                  <div className="offline-patrol-mobile-list__meta">
+                    <span>{jobTypeLabel(row.job_type)}</span>
+                    <span>{jobScaleLabel(row)}</span>
+                  </div>
+                  {ACTIVE.has(row.status) && (
+                    <Progress size="small" percent={row.progress?.percent || 0} showInfo={false} />
+                  )}
+                  <div className="offline-patrol-mobile-list__footer">
+                    <Typography.Text type="secondary">
+                      {new Date(row.created_at).toLocaleString()}
+                    </Typography.Text>
+                    <Space className="patrol-history-table__actions" size={2}>
+                      <Button type="text" size="small" icon={<EyeOutlined />} onClick={() => openDetail(row.id)}>
+                        详情
+                      </Button>
+                      <Dropdown trigger={['click']} menu={{ items: [
+                        ...(ACTIVE.has(row.status) ? [{ key: 'cancel', label: '取消任务' }] : []),
+                        ...(['failed', 'cancelled'].includes(row.status) ? [{ key: 'retry', label: '准备重试' }] : []),
+                        { key: row.archived ? 'restore' : 'archive', label: row.archived ? '恢复记录' : '归档记录' },
+                      ], onClick: ({ key }) => jobAction.mutate({ id: row.id, action: key as any }) }}>
+                        <Button type="text" size="small" aria-label="更多操作" icon={<MoreOutlined />} />
+                      </Dropdown>
+                    </Space>
+                  </div>
+                </div>
+              </List.Item>
+            )}
+          />
+          {(listQuery.data?.total || 0) > pageSize && (
+            <Pagination
+              simple
+              current={page}
+              pageSize={pageSize}
+              total={listQuery.data?.total || 0}
+              showSizeChanger={false}
+              onChange={(next) => setPage(next)}
+            />
+          )}
+        </div>
+      ) : (
+        <Table<OfflinePatrolJob>
+          className="patrol-history-table"
+          rowKey="id"
+          size="small"
+          loading={listQuery.isLoading}
+          dataSource={listQuery.data?.items || []}
+          columns={columns}
+          scroll={{ x: 1014 }}
+          pagination={{
+            current: page, pageSize, total: listQuery.data?.total || 0,
+            showSizeChanger: true, showQuickJumper: true,
+            pageSizeOptions: PAGE_SIZE_OPTIONS,
+            showTotal: (total, range) => `第 ${range[0]}-${range[1]} 条，共 ${total} 个任务`,
+            onChange: (next, size) => { setPage(size === pageSize ? next : 1); setPageSize(size) },
+          }}
+        />
+      )}
 
       <input ref={fileInputRef} hidden type="file" multiple accept=".txt,.log,.zip" onChange={(event) => uploadFiles(pendingRole.current, Array.from(event.target.files || []))} />
       <input ref={folderInputRef} hidden type="file" multiple accept=".txt,.log" {...({ webkitdirectory: '', directory: '' } as any)} onChange={(event) => uploadFiles(pendingRole.current, Array.from(event.target.files || []))} />

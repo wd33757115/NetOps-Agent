@@ -706,3 +706,209 @@ def test_llm_loop_binds_policy_owned_observation_namespace(monkeypatch):
     assert semantics["protocol"]["monitor"] is False
     governance = result["proposal"]["evidence"]["observation_target_governance"]
     assert governance["resolved"] == {"interface.oper_status": "link"}
+
+
+def test_llm_loop_rebinds_portable_applicability_to_qualified_fields(monkeypatch):
+    module = _load_skill_module()
+
+    class WeakOpticalProvider:
+        name = "weak-test-model"
+
+        def propose(self, **_kwargs):
+            return ProviderResult(
+                candidate={
+                    "category": "record",
+                    "entity_type": "diagnostic_record",
+                    "primary_keys": ["interface"],
+                    "required_fields": ["interface"],
+                    "optional_fields": [
+                        "channel_bias_ma",
+                        "channel_rx_power_dbm",
+                        "channel_tx_power_dbm",
+                    ],
+                    "state_semantics": {
+                        "interface": {"semantic_type": "identity"},
+                        "channel_bias_ma": {"semantic_type": "gauge"},
+                        "channel_rx_power_dbm": {
+                            "semantic_type": "gauge",
+                            "monitor": True,
+                        },
+                        "channel_tx_power_dbm": {
+                            "semantic_type": "gauge",
+                            "monitor": True,
+                        },
+                    },
+                },
+                provider=self.name,
+                model_name="mock",
+            )
+
+    monkeypatch.setitem(
+        module.DEFAULT_RULE_GENERATION_PROVIDERS._factories,
+        "llm",
+        WeakOpticalProvider,
+    )
+    records = [
+        {
+            "interface": "GE1/0/1",
+            "channel_bias_ma": ["0.00", "6.20"],
+            "channel_rx_power_dbm": ["-40.00", "-2.10"],
+            "channel_tx_power_dbm": ["-40.00", "-1.90"],
+        }
+    ]
+    seed = {
+        "category": "record",
+        "entity_type": "diagnostic_record",
+        "primary_keys": ["interface"],
+        "required_fields": ["interface"],
+        "optional_fields": [
+            "channel_bias_ma",
+            "channel_rx_power_dbm",
+            "channel_tx_power_dbm",
+        ],
+        "validators": {
+            "channel_bias_ma": {"type": "number"},
+            "channel_rx_power_dbm": {"type": "number"},
+            "channel_tx_power_dbm": {"type": "number"},
+        },
+    }
+
+    result = module.run_contract_generation(
+        {
+            "mode": "infer_and_validate",
+            "command": "inspect portable optical diagnostics",
+            "records": records,
+            "record_groups": [{"group_id": "snapshot-1", "records": records}],
+            "proposal": seed,
+            "observation_targets": [
+                {
+                    "canonical_field": "rx_power_dbm",
+                    "observation_type": "interface.optical.rx_power",
+                },
+                {
+                    "canonical_field": "tx_power_dbm",
+                    "observation_type": "interface.optical.tx_power",
+                },
+            ],
+            "strict_observation_targets": True,
+            "generation_provider": "llm",
+            "max_agent_attempts": 1,
+        }
+    )
+
+    assert result["success"] is True
+    rx = result["proposal"]["state_semantics"]["channel_rx_power_dbm"]
+    applicability = rx["applicability"]
+    assert applicability["exclude_when"] == [
+        {
+            "code": "measurement_not_applicable",
+            "when": {
+                "all": [
+                    {"field": "channel_bias_ma", "op": "lte", "value": 0},
+                    {
+                        "field": "channel_rx_power_dbm",
+                        "op": "equals_field",
+                        "other_field": "channel_tx_power_dbm",
+                    },
+                    {
+                        "field": "channel_rx_power_dbm",
+                        "op": "lte",
+                        "value": -40,
+                    },
+                ]
+            },
+        }
+    ]
+
+
+def test_governed_hints_drop_applicability_branches_missing_from_parser_schema():
+    module = _load_skill_module()
+    applicability = {
+        "version": 1,
+        "on_missing_context": "reject",
+        "exclude_when": [
+            {
+                "code": "transceiver_absent",
+                "when": {
+                    "field": "transceiver_present",
+                    "op": "in_ci",
+                    "values": ["absent"],
+                },
+            },
+            {
+                "code": "measurement_not_applicable",
+                "when": {
+                    "all": [
+                        {"field": "bias_ma", "op": "lte", "value": 0},
+                        {
+                            "field": "rx_power_dbm",
+                            "op": "equals_field",
+                            "other_field": "tx_power_dbm",
+                        },
+                    ]
+                },
+            },
+        ],
+    }
+
+    hints = module._governed_semantic_hints(
+        ["interface", "rx_power_dbm", "tx_power_dbm"],
+        {
+            "primary_keys": ["interface"],
+            "state_semantics": {
+                "rx_power_dbm": {
+                    "semantic_type": "gauge",
+                    "unit": "dbm",
+                    "applicability": applicability,
+                }
+            },
+        },
+    )
+
+    assert "applicability" not in hints["rx_power_dbm"]
+
+
+def test_schema_compiler_preserves_unobserved_optional_and_removes_phantom_field():
+    module = _load_skill_module()
+    seed = {
+        "category": "record",
+        "entity_type": "transceiver_diagnosis",
+        "primary_keys": ["interface"],
+        "required_fields": ["interface"],
+        "optional_fields": ["absent"],
+        "validators": {"absent": {"type": "enum", "values": ["true"]}},
+        "state_semantics": {
+            "interface": {"semantic_type": "identity"},
+            "absent": {
+                "semantic_type": "text",
+                "description": "The transceiver is absent.",
+            },
+        },
+    }
+    hints = module._governed_semantic_hints(["interface"], seed)
+    candidate = module._apply_governed_semantic_hints(
+        {
+            **seed,
+            "state_semantics": {
+                "interface": {"semantic_type": "identity"},
+                "phantom_value": {"semantic_type": "state"},
+            },
+        },
+        hints,
+    )
+
+    validation = module._validate_contract_by_group(
+        command="inspect transceiver",
+        groups=[{"group_id": "sample-1", "records": [{"interface": "GE1/0/1"}]}],
+        candidate=candidate,
+        field_inventory=["interface"],
+        contract_seed=seed,
+    )
+
+    assert validation["success"] is True
+    assert validation["unknown_fields"] == []
+    assert candidate["state_semantics"]["absent"]["monitor"] is False
+    assert "phantom_value" not in candidate["state_semantics"]
+    assert candidate["evidence"]["semantic_field_governance"]["removed_fields"] == [
+        "phantom_value"
+    ]

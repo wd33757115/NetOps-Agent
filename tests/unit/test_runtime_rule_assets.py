@@ -44,18 +44,16 @@ class FakeEventRuleRepository:
     def __init__(self):
         self.calls = []
 
-    def list_versions(self, *, status=None):
-        self.calls.append(status)
-        if status == "active":
-            return [
-                {
-                    "rule_id": "InterfaceDown",
-                    "version_id": "rule-version-1",
-                    "event_type": "InterfaceDown",
-                    "version_status": "active",
-                }
-            ]
-        raise AssertionError("runtime resolver must only read active event rules")
+    def snapshot_active_rules(self):
+        self.calls.append("snapshot_active_rules")
+        return [
+            {
+                "rule_id": "InterfaceDown",
+                "version_id": "rule-version-1",
+                "event_type": "InterfaceDown",
+                "version_status": "active",
+            }
+        ]
 
 
 def test_runtime_rule_asset_resolver_reports_active_assets_and_missing_gaps():
@@ -93,10 +91,11 @@ def test_runtime_rule_asset_resolver_reports_active_assets_and_missing_gaps():
         ("cli", "template-missing"),
     ]
     assert policies.calls == ["interface.oper_status", "device.cpu.utilization"]
-    assert rules.calls == ["active"]
+    assert rules.calls == ["snapshot_active_rules"]
 
     payload = bundle.to_dict()
     assert payload["ready"] is False
+    assert payload["digest"]
     assert payload["counts"] == {
         "observation_contracts": 1,
         "change_policies": 1,

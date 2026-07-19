@@ -7,8 +7,11 @@ assets are available before falling back to degraded deterministic behavior.
 
 from __future__ import annotations
 
+import hashlib
+import json
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any
 
 from src.core.observation.repository import ObservationContractRepository
 from src.core.patrol.change_policy_repository import ChangePolicyRepository
@@ -24,14 +27,32 @@ class RuntimeRuleAssetBundle:
     event_rules: list[dict[str, Any]] = field(default_factory=list)
     missing_observation_contracts: list[str] = field(default_factory=list)
     missing_change_policies: list[str] = field(default_factory=list)
+    digest: str = ""
 
     @property
     def ready(self) -> bool:
+        """Backward-compatible alias for analysis readiness."""
         return not self.missing_observation_contracts and not self.missing_change_policies
+
+    @property
+    def collection_ready(self) -> bool:
+        return not self.missing_observation_contracts
+
+    @property
+    def analysis_ready(self) -> bool:
+        return self.ready
+
+    @property
+    def event_evaluation_ready(self) -> bool:
+        return bool(self.event_rules)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "ready": self.ready,
+            "collection_ready": self.collection_ready,
+            "analysis_ready": self.analysis_ready,
+            "event_evaluation_ready": self.event_evaluation_ready,
+            "digest": self.digest,
             "observation_contracts": self.observation_contracts,
             "change_policies": self.change_policies,
             "event_rules": self.event_rules,
@@ -93,17 +114,33 @@ class RuntimeRuleAssetResolver:
                 policies[observation_type] = active
 
         event_rules = (
-            self.event_rule_repository.list_versions(status="active")
+            self.event_rule_repository.snapshot_active_rules()
             if include_event_rules
             else []
         )
-
+        payload = {
+            "observation_contracts": contracts,
+            "change_policies": policies,
+            "event_rules": event_rules,
+            "missing_observation_contracts": missing_contracts,
+            "missing_change_policies": missing_policies,
+        }
+        digest = hashlib.sha256(
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ).encode("utf-8")
+        ).hexdigest()
         return RuntimeRuleAssetBundle(
             observation_contracts=contracts,
             change_policies=policies,
             event_rules=event_rules,
             missing_observation_contracts=missing_contracts,
             missing_change_policies=missing_policies,
+            digest=digest,
         )
 
 

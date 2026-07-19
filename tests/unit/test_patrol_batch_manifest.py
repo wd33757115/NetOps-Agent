@@ -243,3 +243,99 @@ def test_batch_history_searches_all_devices_and_filters_aggregate_status(monkeyp
     assert [item["patrol_batch_id"] for item in completed] == ["batch-completed"]
     assert by_name[0]["patrol_batch_id"] == "batch-failed"
     assert by_ip[0]["patrol_batch_id"] == "batch-failed"
+
+
+def test_final_report_is_requested_once_only_after_all_runs_are_terminal(monkeypatch):
+    session_scope = _session_factory(monkeypatch)
+    now = datetime.now(timezone.utc)
+    with session_scope() as db:
+        db.add(
+            PatrolBatchRecord(
+                patrol_batch_id="batch-report",
+                workflow_name="patrol-change-event",
+                launch_mode="workflow",
+                patrol_mode="production",
+                target_type="group",
+                target_label="core",
+                selector_json={},
+                target_count=2,
+                launched_count=2,
+                skipped_count=0,
+                dispatch_status="completed",
+                report_status="not_requested",
+                archived=False,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        for index, status in enumerate(("completed", "running")):
+            run_id = f"report-run-{index}"
+            db.add(
+                WorkflowRun(
+                    id=run_id,
+                    template_name="patrol-change-event",
+                    source="device-management",
+                    status=status,
+                    context={"patrol_batch_id": "batch-report"},
+                    created_at=now,
+                )
+            )
+            db.add(
+                PatrolBatchDeviceRecord(
+                    id=f"report-target-{index}",
+                    patrol_batch_id="batch-report",
+                    device_id=f"device-{index}",
+                    selection_status="launched",
+                    preflight_status="ready",
+                    dispatch_status="dispatched",
+                    workflow_run_id=run_id,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    repository = PatrolBatchManifestRepository()
+    assert repository.request_terminal_report("batch-report") is False
+
+    with session_scope() as db:
+        db.get(WorkflowRun, "report-run-1").status = "failed"
+
+    assert repository.request_terminal_report("batch-report") is True
+    assert repository.request_terminal_report("batch-report") is False
+
+
+def test_terminal_report_candidates_only_include_dispatched_workflow_batches(monkeypatch):
+    session_scope = _session_factory(monkeypatch)
+    now = datetime.now(timezone.utc)
+    with session_scope() as db:
+        for batch_id, launch_mode, dispatch_status, report_status in (
+            ("eligible-complete", "workflow", "completed", "not_requested"),
+            ("eligible-partial", "workflow", "partial", "not_requested"),
+            ("still-dispatching", "workflow", "dispatching", "not_requested"),
+            ("already-queued", "workflow", "completed", "queued"),
+            ("direct-mode", "direct", "completed", "not_requested"),
+        ):
+            db.add(
+                PatrolBatchRecord(
+                    patrol_batch_id=batch_id,
+                    workflow_name="patrol-change-event",
+                    launch_mode=launch_mode,
+                    patrol_mode="production",
+                    target_type="group",
+                    target_label="core",
+                    selector_json={},
+                    target_count=1,
+                    launched_count=1,
+                    skipped_count=0,
+                    dispatch_status=dispatch_status,
+                    report_status=report_status,
+                    archived=False,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    assert PatrolBatchManifestRepository().terminal_report_candidate_ids() == [
+        "eligible-complete",
+        "eligible-partial",
+    ]

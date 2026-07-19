@@ -830,13 +830,26 @@ def test_no_event_reason_distinguishes_missing_rules_from_non_match():
 
     assert no_event_reason(change, active_rule_count=0) == "no_active_event_rules"
     assert no_event_reason(change, active_rule_count=3) == "active_rules_evaluated_no_match"
+    assert (
+        no_event_reason(
+            {**change, "decision_reason": "threshold_unknown"},
+            active_rule_count=3,
+        )
+        == "threshold_unknown"
+    )
 
 
 def test_import_and_raw_hash_change_roundtrip(tmp_path: Path):
     file1 = tmp_path / "SW2-10.0.0.2_2025-12-24_16-24-15.log"
     file2 = tmp_path / "SW2-10.0.0.2_2025-12-24_16-29-15.log"
-    file1.write_text(CISCO_SAMPLE, encoding="utf-8")
-    file2.write_text(CISCO_SAMPLE.replace("24%/0%", "95%/0%"), encoding="utf-8")
+    baseline = (
+        CISCO_SAMPLE
+        + "SW2#show running-config\n"
+        + "hostname SW2\ninterface Gi1/0/1\n description server\n"
+    )
+    current = baseline.replace(" description server", " shutdown")
+    file1.write_text(baseline, encoding="utf-8")
+    file2.write_text(current, encoding="utf-8")
     run1 = f"test-{uuid.uuid4()}"
     run2 = f"test-{uuid.uuid4()}"
     dataset_id = f"test-{uuid.uuid4()}"
@@ -855,8 +868,8 @@ def test_import_and_raw_hash_change_roundtrip(tmp_path: Path):
             vendor="Cisco",
             metadata={"dataset_id": dataset_id},
         )
-        assert r1["command_count"] == 3
-        assert r2["command_count"] == 3
+        assert r1["command_count"] == 4
+        assert r2["command_count"] == 4
 
         result = detect_changes_from_params(
             {
@@ -868,6 +881,9 @@ def test_import_and_raw_hash_change_roundtrip(tmp_path: Path):
 
         assert result["change_count"] == 1
         assert result["changes"][0]["field"] == "raw_text_hash"
+        assert result["changes"][0]["dimensions"]["unstructured_diff"][
+            "changed"
+        ] is True
     finally:
         _cleanup_runs(run1, run2)
 
@@ -1241,7 +1257,10 @@ interface Gi1/0/1
         event_result = build_events_from_changes(change_result["changes"])
 
         assert change_result["compared_snapshots"] == 2
-        assert change_result["change_count"] == 2
+        # ``show version`` is a structured command. A missing/failed Parser may
+        # not silently downgrade it to a raw diff; only the governed config
+        # command participates in non-structured comparison.
+        assert change_result["change_count"] == 1
         assert [event.event_type for event in event_result] == ["ConfigChanged"]
     finally:
         _cleanup_runs(run1, run2)

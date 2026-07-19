@@ -20,6 +20,7 @@ from src.core.parser.parser_ir import (
 )
 from src.core.parser.sanitization import runtime_pattern_for_redacted_value
 from src.core.parser.semantic_catalog import field_aliases
+from src.core.parser.textfsm_input import TEXTFSM_END_OF_INPUT
 
 
 class HasOutput(Protocol):
@@ -170,7 +171,7 @@ def _mapped_header(
         return None
     max_phrase_tokens = max(
         (
-            len(re.findall(r"\S+", alias))
+            len(re.findall(r"[A-Za-z0-9]+", alias))
             for field in spec.fields
             for alias in (
                 field,
@@ -207,7 +208,12 @@ def _mapped_header(
 
 
 def _row_pattern(mapped: list[str | None]) -> str:
-    tokens = [f"${{{field}}}" if field else r"\S+" for field in mapped]
+    tokens = [
+        f"${{{field}}}"
+        if field
+        else (r"\S(?:.*\S)?" if index == len(mapped) - 1 else r"\S+")
+        for index, field in enumerate(mapped)
+    ]
     return r"^\s*" + r"\s+".join(tokens) + r"\s*$$"
 
 
@@ -224,7 +230,7 @@ def _row_rules(mapped: list[str | None], spec: CategorySpec) -> list[str]:
     while current:
         variants.append(_row_rule(current))
         trailing = current[-1]
-        if trailing is None or trailing in required:
+        if trailing in required:
             break
         current = current[:-1]
     return variants
@@ -478,6 +484,38 @@ def _evidence_row_pattern(
     return r"^\s*" + r"\s+".join(expressions) + r"\s*$$", tuple(captured)
 
 
+def _nearest_block_section(
+    *,
+    sample_id: str,
+    line_number: int,
+    blocks: list[tuple[str, int, int]],
+    evidence_samples: dict[str, str],
+    anchor_matchers: list[re.Pattern[str]],
+) -> str | None:
+    """Return the nearest non-entity section heading for an evidenced row."""
+
+    block = next(
+        (
+            (start_line, end_line)
+            for block_sample, start_line, end_line in blocks
+            if block_sample == sample_id and start_line <= line_number <= end_line
+        ),
+        None,
+    )
+    if block is None:
+        return None
+    start_line, _end_line = block
+    lines = str(evidence_samples.get(sample_id) or "").splitlines()
+    for index in range(line_number - 2, start_line - 1, -1):
+        candidate = lines[index].strip()
+        if not candidate.endswith(":"):
+            continue
+        if any(pattern.match(lines[index]) for pattern in anchor_matchers):
+            return None
+        return candidate
+    return None
+
+
 class EvidenceRepeatedBlockProvider:
     """Compile a repeated-block state machine from Contract line evidence."""
 
@@ -560,6 +598,7 @@ class EvidenceRepeatedBlockProvider:
 
         body_rules: list[ParserRule] = []
         body_rule_fields: list[tuple[str, tuple[str, ...]]] = []
+        body_rule_contexts: list[str | None] = []
         seen_rules: set[tuple[str, str | None]] = set()
         used_fields: set[str] = {key}
         all_lines = set(line_bindings) | block_ends
@@ -590,7 +629,14 @@ class EvidenceRepeatedBlockProvider:
                 )
             except ValueError:
                 continue
-            signature = (pattern, None)
+            section = _nearest_block_section(
+                sample_id=sample_id,
+                line_number=line_number,
+                blocks=blocks,
+                evidence_samples=context.evidence_samples,
+                anchor_matchers=anchor_matchers,
+            )
+            signature = (pattern, section)
             if signature in seen_rules:
                 continue
             seen_rules.add(signature)
@@ -598,9 +644,11 @@ class EvidenceRepeatedBlockProvider:
             body_rule_fields.append(
                 (pattern, tuple(capture.field for capture in captures if capture.field))
             )
+            body_rule_contexts.append(section)
 
         inferred_rules: list[ParserRule] = []
         inferred_rule_fields: list[tuple[str, tuple[str, ...]]] = []
+        inferred_rule_contexts: list[str | None] = []
         for sample_id, start_line, end_line in blocks:
             lines = str(context.evidence_samples[sample_id]).splitlines()
             for header_index in range(start_line, end_line):
@@ -654,48 +702,77 @@ class EvidenceRepeatedBlockProvider:
                     )
                     if not fields:
                         continue
-                    signature = (pattern, None)
+                    section = _nearest_block_section(
+                        sample_id=sample_id,
+                        line_number=row_index + 1,
+                        blocks=blocks,
+                        evidence_samples=context.evidence_samples,
+                        anchor_matchers=anchor_matchers,
+                    )
+                    signature = (pattern, section)
                     if signature in seen_rules:
                         continue
                     seen_rules.add(signature)
                     inferred_rules.append(ParserRule(pattern))
                     inferred_rule_fields.append((pattern, fields))
+                    inferred_rule_contexts.append(section)
                     used_fields.update(fields)
 
-        evidence_pairs = sorted(
-            zip(body_rules, body_rule_fields, strict=True),
-            key=lambda pair: -len(pair[1][1]),
+        evidence_entries = sorted(
+            zip(body_rules, body_rule_fields, body_rule_contexts, strict=True),
+            key=lambda entry: (-len(entry[1][1]), -len(entry[0].pattern)),
         )
-        body_rules = [pair[0] for pair in evidence_pairs]
-        body_rule_fields = [pair[1] for pair in evidence_pairs]
+        body_rules = [entry[0] for entry in evidence_entries]
+        body_rule_fields = [entry[1] for entry in evidence_entries]
+        body_rule_contexts = [entry[2] for entry in evidence_entries]
 
         # Merge schema-derived and evidence-derived rules, then prefer the rule
         # that captures the most fields. A sparse rule that also matches a full
         # row must never consume that row before its richer sibling.
         body_rules = [*inferred_rules, *body_rules]
         body_rule_fields = [*inferred_rule_fields, *body_rule_fields]
-        body_rules, body_rule_fields = _prioritize_capture_rules(
-            body_rules,
-            body_rule_fields,
+        body_rule_contexts = [*inferred_rule_contexts, *body_rule_contexts]
+        prioritized_entries = sorted(
+            zip(body_rules, body_rule_fields, body_rule_contexts, strict=True),
+            key=lambda entry: (-len(entry[1][1]), -len(entry[0].pattern)),
         )
+        body_rules = [entry[0] for entry in prioritized_entries]
+        body_rule_fields = [entry[1] for entry in prioritized_entries]
+        body_rule_contexts = [entry[2] for entry in prioritized_entries]
 
         if not blocks:
             return None
         repeated_fields: set[str] = set()
-        for pattern, fields in body_rule_fields:
+        for (pattern, fields), rule_context in zip(
+            body_rule_fields,
+            body_rule_contexts,
+            strict=True,
+        ):
             if not fields:
                 continue
             matcher = _python_rule(pattern, field_patterns)
-            if any(
-                sum(
-                    bool(matcher.match(line))
-                    for line in str(context.evidence_samples[sample_id]).splitlines()[
-                        start_line:end_line
-                    ]
+            is_repeated = False
+            for sample_id, start_line, end_line in blocks:
+                lines = str(context.evidence_samples[sample_id]).splitlines()
+                match_count = sum(
+                    bool(matcher.match(lines[line_number - 1]))
+                    and (
+                        rule_context is None
+                        or _nearest_block_section(
+                            sample_id=sample_id,
+                            line_number=line_number,
+                            blocks=blocks,
+                            evidence_samples=context.evidence_samples,
+                            anchor_matchers=anchor_matchers,
+                        )
+                        == rule_context
+                    )
+                    for line_number in range(start_line + 1, end_line + 1)
                 )
-                > 1
-                for sample_id, start_line, end_line in blocks
-            ):
+                if match_count > 1:
+                    is_repeated = True
+                    break
+            if is_repeated:
                 repeated_fields.update(fields)
         values = tuple(
             ParserValue(
@@ -708,15 +785,83 @@ class EvidenceRepeatedBlockProvider:
         )
         boundary_rules: list[ParserRule] = []
         for boundary, capture in zip(boundary_patterns, anchor_patterns, strict=False):
-            boundary_rules.extend((ParserRule(boundary, "Continue.Record"), ParserRule(capture)))
+            boundary_rules.extend(
+                (
+                    ParserRule(boundary, "Continue.Record"),
+                    ParserRule(capture, "Start"),
+                )
+            )
+        section_names = list(
+            dict.fromkeys(section for section in body_rule_contexts if section)
+        )
+        section_states = {
+            section: f"Context{index + 1}"
+            for index, section in enumerate(section_names)
+        }
+        section_transitions = [
+            ParserRule(_literal_line_pattern(section), state_name)
+            for section, state_name in section_states.items()
+        ]
+        flush_rules = (
+            [
+                ParserRule(
+                    rf"^\s*{re.escape(TEXTFSM_END_OF_INPUT)}\s*$$",
+                    "Record EOF",
+                )
+            ]
+            if section_states
+            else []
+        )
+        common_rules = [
+            rule
+            for rule, section in zip(body_rules, body_rule_contexts, strict=True)
+            if section is None
+        ]
+        states = [
+            ParserState(
+                "Start",
+                tuple(
+                    [
+                        *boundary_rules,
+                        *section_transitions,
+                        *flush_rules,
+                        *common_rules,
+                    ]
+                ),
+            )
+        ]
+        for section, state_name in section_states.items():
+            contextual_rules = [
+                rule
+                for rule, rule_section in zip(
+                    body_rules,
+                    body_rule_contexts,
+                    strict=True,
+                )
+                if rule_section == section
+            ]
+            states.append(
+                ParserState(
+                    state_name,
+                    tuple(
+                        [
+                            *boundary_rules,
+                            *section_transitions,
+                            *flush_rules,
+                            *contextual_rules,
+                            *common_rules,
+                        ]
+                    ),
+                )
+            )
         ir = ParserIR(
             values=values,
             # One state plus TextFSM's implicit EOF record gives a uniform
             # lifecycle: a new sibling anchor commits the previous block and
             # end-of-input commits the final block. No field label needs to be
             # guessed as the terminal line for every entity variant.
-            states=(ParserState("Start", tuple([*boundary_rules, *body_rules])),),
-            explicit_eof=False,
+            states=tuple(states),
+            explicit_eof=bool(section_states),
             record_grain="repeated_entity",
         )
         return ProviderCandidate(

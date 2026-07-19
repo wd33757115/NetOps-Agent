@@ -49,7 +49,7 @@ echo "============================================================"
 
 if [[ "$SKIP_DOCKER_CHECK" != "1" ]]; then
     if docker compose -f "$COMPOSE_FILE" ps --format json >/dev/null 2>&1; then
-        for svc in netops-celery netops-fastapi netops-django netops-react; do
+        for svc in netops-celery-patrol netops-celery-control netops-celery-beat netops-fastapi netops-django netops-react; do
             state="$(docker compose -f "$COMPOSE_FILE" ps --format '{{.Name}} {{.State}}' 2>/dev/null | awk -v n="$svc" '$1==n {print $2}')"
             if [[ "$state" == "running" ]]; then
                 assert_ok "Docker $svc running" 1
@@ -91,6 +91,19 @@ for c in (d.get('data') or {}).get('checks') or []:
         assert_ok "Celery Worker (diagnostics)" "$([[ "$celery_status" == "ok" ]] && echo 1 || echo 0)" "$celery_status"
     else
         assert_ok "Celery Worker (diagnostics)" 0 "check missing"
+    fi
+    celery_beat_status="$(echo "$d" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for c in (d.get('data') or {}).get('checks') or []:
+    if c.get('id') == 'celery_beat':
+        print(c.get('status', ''))
+        break
+" 2>/dev/null || true)"
+    if [[ -n "$celery_beat_status" ]]; then
+        assert_ok "Celery Beat (diagnostics)" "$([[ "$celery_beat_status" == "ok" ]] && echo 1 || echo 0)" "$celery_beat_status"
+    else
+        assert_ok "Celery Beat (diagnostics)" 0 "check missing"
     fi
     pg_status="$(echo "$d" | python3 -c "
 import sys, json

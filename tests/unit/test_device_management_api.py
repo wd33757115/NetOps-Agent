@@ -24,6 +24,23 @@ def _disable_agent_module_guard(monkeypatch):
     monkeypatch.setattr(devices_api, "_agent_module_control_violations", lambda module_ids: [])
 
 
+@pytest.fixture(autouse=True)
+def _isolate_patrol_batch_dispatch(monkeypatch):
+    class MemoryBatchRepository:
+        def create_pending_batch(self, **_kwargs):
+            return None
+
+        def note_dispatch_enqueue_error(self, *_args, **_kwargs):
+            return None
+
+    monkeypatch.setattr(devices_api, "PatrolBatchManifestRepository", MemoryBatchRepository)
+    monkeypatch.setattr(
+        devices_api,
+        "_enqueue_patrol_batch_dispatch",
+        lambda _patrol_batch_id: "dispatch-task-1",
+    )
+
+
 def test_list_devices_redacts_password(monkeypatch):
     class FakeRepository:
         def get_devices_by_filter(self, **kwargs):
@@ -391,7 +408,7 @@ def test_list_devices_uses_one_projection_batch_for_500_warm_rows(monkeypatch):
     assert len(projection_reads[0][0]) == 500
 
 
-def test_list_devices_patrol_readiness_blocks_missing_runtime_rule_assets(monkeypatch):
+def test_list_devices_separates_collection_from_missing_analysis_assets(monkeypatch):
     class FakeRepository:
         def get_devices_by_filter(self, **kwargs):
             return [
@@ -459,10 +476,10 @@ def test_list_devices_patrol_readiness_blocks_missing_runtime_rule_assets(monkey
     )
 
     readiness = result["items"][0]["patrol_readiness"]
-    assert readiness["status"] == "blocked"
+    assert readiness["status"] == "ready"
     assert readiness["ready_count"] == 1
     assert readiness["blocked_count"] == 0
-    assert readiness["runtime_asset_health"]["status"] == "blocked"
+    assert readiness["runtime_asset_health"]["status"] == "degraded"
     assert readiness["runtime_asset_health"]["missing_change_policies"] == ["interface.oper_status"]
 
 
@@ -1523,7 +1540,7 @@ def test_preview_device_patrol_launch_warns_without_blocking_missing_parser_cove
     assert result["rows"][0]["coverage_violations"][0]["canonical_command"] == "show inventory"
 
 
-def test_preview_device_patrol_launch_blocks_missing_runtime_rule_assets(monkeypatch):
+def test_preview_device_patrol_launch_preserves_missing_analysis_asset_diagnostics(monkeypatch):
     class FakeRepository:
         def get_devices_by_filter(self, **kwargs):
             return [
@@ -1603,12 +1620,11 @@ def test_preview_device_patrol_launch_blocks_missing_runtime_rule_assets(monkeyp
         devices_api.DevicePatrolLaunchRequest(device_ids=["device-1"], mode="production")
     )
 
-    assert result["success"] is False
-    assert result["ready_count"] == 0
-    assert result["error_count"] == 1
-    assert result["errors"][0]["failure_code"] == "runtime_rule_assets_not_ready"
-    assert result["errors"][0]["runtime_asset_health"]["status"] == "blocked"
-    assert result["errors"][0]["runtime_asset_health"]["missing_change_policies"] == [
+    assert result["success"] is True
+    assert result["ready_count"] == 1
+    assert result["error_count"] == 0
+    assert result["rows"][0]["runtime_asset_health"]["status"] == "degraded"
+    assert result["rows"][0]["runtime_asset_health"]["missing_change_policies"] == [
         "interface.oper_status"
     ]
 
@@ -2047,32 +2063,12 @@ def test_launch_device_patrol_submits_one_task_per_plan(monkeypatch):
     )
 
     assert result["success"] is True
-    assert result["launched_count"] == 1
+    assert result["queued_count"] == 1
+    assert result["launched_count"] == 0
+    assert result["dispatch_status"] == "queued"
     assert result["patrol_batch_id"].startswith("patrol-batch-")
-    assert result["tasks"][0]["celery_task_id"] == "task-1"
-    assert result["tasks"][0]["patrol_batch_id"] == result["patrol_batch_id"]
-    assert result["tasks"][0]["execution_plan_id"] == "plan-1"
-    assert submitted == [
-        (
-            {
-                "execution_plan": {
-                    "device_id": "device-1",
-                    "action": "patrol",
-                    "mode": "production",
-                    "profile_version_id": "profile-version-1",
-                    "profile_name": "site-patrol",
-                    "policy_source": "profile_binding",
-                    "collection_items": [{"command": "show version", "action": "patrol"}],
-                },
-                "execution_plan_id": "plan-1",
-                "ticket_id": "PATROL-1",
-                "save_baseline": True,
-                "mode": "production",
-                "patrol_batch_id": result["patrol_batch_id"],
-            },
-            "netops.patrol",
-        )
-    ]
+    assert result["tasks"] == []
+    assert submitted == []
 
 
 def test_launch_device_patrol_starts_workflow_by_default(monkeypatch):
@@ -2154,17 +2150,11 @@ def test_launch_device_patrol_starts_workflow_by_default(monkeypatch):
     assert result["success"] is True
     assert result["launch_mode"] == "workflow"
     assert result["patrol_batch_id"].startswith("patrol-batch-")
-    assert result["runs"][0]["workflow_run_id"] == "workflow-run-1"
-    assert result["runs"][0]["patrol_batch_id"] == result["patrol_batch_id"]
-    assert result["runs"][0]["execution_plan_id"] == "plan-1"
+    assert result["queued_count"] == 1
+    assert result["launched_count"] == 0
+    assert result["runs"] == []
     assert result["tasks"] == []
-    assert started[0][0] == "patrol-change-event"
-    assert started[0][1]["execution_plan"]["device_id"] == "device-1"
-    assert started[0][1]["execution_plan_id"] == "plan-1"
-    assert started[0][1]["ticket_id"] == "PATROL-1"
-    assert started[0][1]["save_baseline"] is True
-    assert started[0][1]["patrol_batch_id"] == result["patrol_batch_id"]
-    assert started[0][2] == "device-management"
+    assert started == []
 
 
 def test_launch_device_patrol_skips_failed_preflight_when_some_devices_ready(monkeypatch):
@@ -2257,7 +2247,8 @@ def test_launch_device_patrol_skips_failed_preflight_when_some_devices_ready(mon
     )
 
     assert result["success"] is True
-    assert result["launched_count"] == 1
+    assert result["queued_count"] == 1
+    assert result["launched_count"] == 0
     assert result["skipped_count"] == 1
     assert result["skipped_errors"][0]["device_id"] == "device-blocked"
-    assert started[0][1]["device_id"] == "device-ready"
+    assert started == []

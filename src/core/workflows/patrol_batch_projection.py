@@ -8,7 +8,6 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from src.infrastructure.db.models import (
@@ -131,15 +130,22 @@ def patrol_batch_fact_revision(runs: list[Any]) -> str:
             NetworkEventOccurrenceRecord.occurrence_kind,
             NetworkEventOccurrenceRecord.severity,
             NetworkEventOccurrenceRecord.observed_at,
+            NetworkEventOccurrenceRecord.payload_json,
         ).filter(NetworkEventOccurrenceRecord.run_id.in_(snapshot_run_ids)).order_by(
             NetworkEventOccurrenceRecord.id
         ).all()
         payload["event_occurrences"] = occurrences
         event_ids = sorted({str(row.event_id) for row in occurrences if row.event_id})
-        event_filters = [NetworkEventRecord.run_id.in_(snapshot_run_ids)]
         if event_ids:
-            event_filters.append(NetworkEventRecord.id.in_(event_ids))
-        payload["events"] = db.query(
+            payload["event_identities"] = db.query(
+                NetworkEventRecord.id,
+                NetworkEventRecord.event_type,
+                NetworkEventRecord.device_id,
+                NetworkEventRecord.entity_type,
+                NetworkEventRecord.entity_key,
+                NetworkEventRecord.correlation_key,
+            ).filter(NetworkEventRecord.id.in_(event_ids)).order_by(NetworkEventRecord.id).all()
+        legacy_query = db.query(
             NetworkEventRecord.id,
             NetworkEventRecord.status,
             NetworkEventRecord.severity,
@@ -147,7 +153,10 @@ def patrol_batch_fact_revision(runs: list[Any]) -> str:
             NetworkEventRecord.last_seen_at,
             NetworkEventRecord.latest_change_id,
             NetworkEventRecord.payload_json,
-        ).filter(or_(*event_filters)).order_by(NetworkEventRecord.id).all()
+        ).filter(NetworkEventRecord.run_id.in_(snapshot_run_ids))
+        if event_ids:
+            legacy_query = legacy_query.filter(~NetworkEventRecord.id.in_(event_ids))
+        payload["legacy_events"] = legacy_query.order_by(NetworkEventRecord.id).all()
     return _stable_digest(payload)
 
 

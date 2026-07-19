@@ -1027,6 +1027,33 @@ def _process_candidate(
             "source_sample_count": len(validation_candidate.samples),
             "unique_sample_count": len(positive_samples) + len(negative_results),
             "sample_partition": sample_partition.to_dict(),
+            "compatibility": {
+                "manifest_version": 1,
+                "vendor": candidate.vendor,
+                "profile": target_profile,
+                "scope": (
+                    "family"
+                    if candidate.family
+                    and target_profile.casefold() == candidate.family.casefold()
+                    else "model"
+                ),
+                "model": candidate.model,
+                "family": candidate.family,
+                "canonical_command": candidate.command,
+                "structure_variant_count": len(
+                    {
+                        ref.layout_signature
+                        for ref in (*sample_partition.train, *sample_partition.holdout)
+                    }
+                ),
+                "structure_signatures": sorted(
+                    {
+                        ref.layout_signature
+                        for ref in (*sample_partition.train, *sample_partition.holdout)
+                    }
+                ),
+                "all_variants_required": True,
+            },
             "structure_profile": parse_plan,
             "trigger_sample_count": trigger_sample_count,
             "unique_trigger_sample_count": sample_partition.unique_sample_count,

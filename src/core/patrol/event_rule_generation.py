@@ -5,11 +5,13 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from src.core.patrol.change_policy import ChangePolicyProposal, policy_from_dict
+from src.core.patrol.change_policy import (
+    ChangePolicyProposal,
+    policy_from_dict,
+)
 from src.core.patrol.event_rules import EventRuleDefinition
 from src.core.patrol.rule_validation import validate_event_rule_definition
 from src.core.state.observation_applicability import attach_governed_applicability
-
 
 INTERFACE_ENTITY_TYPES = {
     "interface",
@@ -197,7 +199,11 @@ def generate_event_rule_definitions(
         high = float((policy.thresholds or {}).get("high") or 90)
         lowered = " ".join([observation_type, *fields]).lower()
         is_cpu = observation_type == "device.cpu.utilization" or "cpu" in lowered
-        is_memory = observation_type == "device.memory.utilization" or "memory" in lowered or "mem" in lowered
+        is_memory = (
+            observation_type == "device.memory.utilization"
+            or "memory" in lowered
+            or "mem" in lowered
+        )
         if not is_cpu and not is_memory:
             return definitions
         definitions.append(
@@ -237,73 +243,114 @@ def generate_event_rule_definitions(
         lowered = " ".join([observation_type, *fields, entity_type]).lower()
         if "optical" not in lowered and "rx_power" not in lowered and "tx_power" not in lowered:
             return definitions
-        low = float((policy.thresholds or {}).get("low") or -17)
-        recovered = float(policy.recovery_threshold or (low + float(policy.deadband or 2)))
+        thresholds = dict(policy.thresholds or {})
+        references = dict(policy.threshold_references or {})
+        fault_roles = [
+            (role, thresholds.get(role), dict(references.get(role) or {}))
+            for role in ("low", "critical_low")
+            if thresholds.get(role) is not None or references.get(role)
+        ]
+        if not fault_roles:
+            return definitions
+        primary_role = next(
+            (item for item in fault_roles if item[0] == "low"),
+            fault_roles[0],
+        )
+        deadband = abs(float(policy.deadband or 0))
         scoped_entity_types = [entity_type] if entity_type else ["interface_optical"]
         for field in fields:
             normalized_field = field.lower()
-            if "rx_power" in normalized_field:
+            direction = (
+                "Rx"
+                if "rx_power" in normalized_field
+                else "Tx"
+                if "tx_power" in normalized_field
+                else None
+            )
+            if not direction:
+                continue
+            fault_event_types: list[str] = []
+            for role, threshold, reference in fault_roles:
+                critical = role == "critical_low"
+                event_type = (
+                    f"Optical{direction}PowerCritical"
+                    if critical
+                    else f"Optical{direction}PowerLow"
+                )
+                condition = {
+                    "kind": "threshold_field_lte",
+                    "entity_types": scoped_entity_types,
+                    "fields": [field],
+                    "reference_field": reference["field_name"],
+                } if reference else {
+                    "kind": "threshold_lte",
+                    "entity_types": scoped_entity_types,
+                    "fields": [field],
+                    "lte": float(threshold),
+                }
                 definitions.append(
                     EventRuleDefinition(
-                        rule_id="optical-rx-power-low",
+                        rule_id=f"optical-{direction.lower()}-power-{role.replace('_', '-')}",
                         version=1,
-                        event_type="OpticalRxPowerLow",
-                        severity="warning",
-                        description="Generated optical Rx low-power rule candidate.",
-                        condition={
-                            "kind": "threshold_lte",
-                            "entity_types": scoped_entity_types,
-                            "fields": [field],
-                            "lte": low,
-                        },
+                        event_type=event_type,
+                        severity="critical" if critical else "warning",
+                        description=(
+                            f"Generated optical {direction} "
+                            f"{'critical' if critical else 'low-power'} rule candidate."
+                        ),
+                        condition=condition,
+                        priority=200 if critical else 100,
+                        exclusive=critical,
                     )
                 )
+                fault_event_types.append(event_type)
+
+            _role, primary_threshold, primary_reference = primary_role
+            if primary_reference and deadband:
+                recovery_condition = {
+                    "kind": "threshold_field_low_recovery",
+                    "entity_types": scoped_entity_types,
+                    "fields": [field],
+                    "reference_field": primary_reference["field_name"],
+                    "hysteresis": deadband,
+                }
+                fallback_fields = [
+                    str(reference.get("field_name") or "")
+                    for role, _threshold, reference in fault_roles
+                    if role == "critical_low"
+                    and reference
+                    and reference.get("field_name")
+                    != primary_reference.get("field_name")
+                ]
+                if fallback_fields:
+                    recovery_condition["fallback_reference_fields"] = fallback_fields
+            elif primary_threshold is not None:
+                low = float(primary_threshold)
+                recovered = (
+                    float(policy.recovery_threshold)
+                    if policy.recovery_threshold is not None
+                    else low + deadband
+                )
+                recovery_condition = {
+                    "kind": "threshold_low_recovery",
+                    "entity_types": scoped_entity_types,
+                    "fields": [field],
+                    "low": low,
+                    "gt": recovered,
+                }
+            else:
+                recovery_condition = None
+            if recovery_condition is not None:
                 definitions.append(
                     EventRuleDefinition(
-                        rule_id="optical-rx-power-recovered",
+                        rule_id=f"optical-{direction.lower()}-power-recovered",
                         version=1,
-                        event_type="OpticalRecovered",
+                        event_type=f"Optical{direction}PowerRecovered",
                         severity="info",
-                        description="Generated optical Rx recovery rule candidate.",
-                        condition={
-                            "kind": "threshold_low_recovery",
-                            "entity_types": scoped_entity_types,
-                            "fields": [field],
-                            "low": low,
-                            "gt": recovered,
-                        },
-                    )
-                )
-            if "tx_power" in normalized_field:
-                definitions.append(
-                    EventRuleDefinition(
-                        rule_id="optical-tx-power-low",
-                        version=1,
-                        event_type="OpticalTxPowerLow",
-                        severity="warning",
-                        description="Generated optical Tx low-power rule candidate.",
-                        condition={
-                            "kind": "threshold_lte",
-                            "entity_types": scoped_entity_types,
-                            "fields": [field],
-                            "lte": low,
-                        },
-                    )
-                )
-                definitions.append(
-                    EventRuleDefinition(
-                        rule_id="optical-tx-power-recovered",
-                        version=1,
-                        event_type="OpticalRecovered",
-                        severity="info",
-                        description="Generated optical Tx recovery rule candidate.",
-                        condition={
-                            "kind": "threshold_low_recovery",
-                            "entity_types": scoped_entity_types,
-                            "fields": [field],
-                            "low": low,
-                            "gt": recovered,
-                        },
+                        description=f"Generated optical {direction} recovery rule candidate.",
+                        condition=recovery_condition,
+                        event_class="recovery",
+                        recovery={"resolves": fault_event_types},
                     )
                 )
     elif policy.compare_mode == "hash_diff":

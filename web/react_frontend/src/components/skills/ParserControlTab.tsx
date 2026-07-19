@@ -294,10 +294,10 @@ const ParserControlTab: React.FC = () => {
     setSearchParams(next, { replace: true })
   }
 
-  const openLinkedRuleBundles = () => {
+  const openLinkedAssetChain = () => {
     const next = new URLSearchParams(searchParams)
-    next.set('workspace', 'today')
-    next.set('subtab', 'rule-generation')
+    next.set('workspace', 'rule-assets')
+    next.set('subtab', 'asset-chain')
     setSearchParams(next, { replace: true })
   }
 
@@ -817,9 +817,11 @@ const ParserControlTab: React.FC = () => {
 
   const jobColumns = [
     { title: '类型', dataIndex: 'job_type', width: 150 },
-    { title: '设备', dataIndex: 'profile', width: 180 },
+    { title: '厂商', dataIndex: 'vendor', width: 90 },
+    { title: '兼容域', dataIndex: 'profile', width: 180 },
     { title: '命令', dataIndex: 'canonical_command' },
     { title: '样本', dataIndex: 'sample_count', width: 70 },
+    { title: '结构变体', dataIndex: 'structure_variant_count', width: 90 },
     { title: '尝试', dataIndex: 'attempts', width: 70 },
     { title: '状态', dataIndex: 'status', width: 120,
       render: (value: string) => <Tag color={statusColor(value)}>{statusLabel(value)}</Tag> },
@@ -1265,7 +1267,7 @@ const ParserControlTab: React.FC = () => {
         onPreviewImport={() => importPreviewMutation.mutate()}
         onImport={() => importMutation.mutate()}
         onClearDatasetFocus={clearDatasetContext}
-        onOpenRuleBundles={openLinkedRuleBundles}
+        onOpenAssetChain={openLinkedAssetChain}
       />
     ) : (
       <Tabs activeKey={activeSubWorkspace} onChange={changeSubWorkspace} items={[
@@ -1361,6 +1363,7 @@ const ParserControlTab: React.FC = () => {
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           <RuleAssetBundleWorkspace
             onAssetsChanged={refresh}
+            onInspectAssetChain={openLinkedAssetChain}
             initialSearch={linkedOfflineJobId}
           />
           <Divider orientation="left" plain>兼容与专家任务</Divider>

@@ -19,32 +19,169 @@ from src.core.events.streams import (
     IDEMPOTENCY_PREFIX,
     IDEMPOTENCY_PROCESSING_PREFIX,
 )
+from src.core.parser.repository import ParserRepository
+from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
 from src.core.patrol.change_detector import NetworkChange
 from src.core.patrol.change_event_repository import (
     ChangeEventRepository,
     deterministic_change_id,
 )
 from src.core.patrol.change_policy_repository import ChangePolicyRepository
-from src.core.patrol.repository import PatrolRepository
 from src.core.patrol.event_builder import NetworkEvent
-from src.core.parser.repository import ParserRepository
+from src.core.patrol.repository import PatrolRepository
+from src.core.workflows.patrol_batch_service import iter_patrol_event_export_rows
 from src.core.workflows.repository import create_notification
 from src.gateway.audit_service import write_audit_log
 from src.infrastructure.db.models import (
     AuditLogRecord,
     ChangePolicyRecord,
     ChangePolicyVersionRecord,
-    ParserJobSample,
     NetworkChangeRecord,
+    NetworkEventOccurrenceRecord,
     NetworkEventRecord,
     Notification,
+    ParserJobSample,
     ParserOutboxEvent,
     ParserTemplateJob,
+    PatrolBatchDeviceRecord,
+    PatrolBatchRecord,
     PatrolRun,
 )
 from src.infrastructure.db.postgres import get_db_session
 
 pytestmark = pytest.mark.integration
+
+
+def test_patrol_batch_targets_are_claimed_once_across_concurrent_dispatchers(
+    postgres_available,
+):
+    del postgres_available
+    suffix = uuid.uuid4().hex
+    batch_id = f"dispatch-fault-{suffix}"
+    now = datetime.now(timezone.utc)
+    with get_db_session() as db:
+        db.add(
+            PatrolBatchRecord(
+                patrol_batch_id=batch_id,
+                workflow_name="patrol-change-event",
+                launch_mode="workflow",
+                patrol_mode="production",
+                target_type="manual",
+                target_label="fault injection",
+                selector_json={},
+                target_count=40,
+                launched_count=0,
+                skipped_count=0,
+                dispatch_status="pending",
+                dispatch_requested_at=now,
+                report_status="not_requested",
+                archived=False,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        db.flush()
+        for index in range(40):
+            db.add(
+                PatrolBatchDeviceRecord(
+                    id=str(uuid.uuid4()),
+                    patrol_batch_id=batch_id,
+                    device_id=f"{suffix}-device-{index}",
+                    selection_status="selected",
+                    preflight_status="ready",
+                    dispatch_status="pending",
+                    dispatch_attempts=0,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            claims = list(
+                executor.map(
+                    lambda _index: PatrolBatchManifestRepository().claim_dispatch_targets(
+                        batch_id,
+                        limit=40,
+                    ),
+                    range(2),
+                )
+            )
+        target_ids = [str(item["target_id"]) for batch in claims for item in batch]
+        assert len(target_ids) == 40
+        assert len(set(target_ids)) == 40
+    finally:
+        with get_db_session() as db:
+            db.query(PatrolBatchDeviceRecord).filter_by(patrol_batch_id=batch_id).delete()
+            db.query(PatrolBatchRecord).filter_by(patrol_batch_id=batch_id).delete()
+
+
+def test_patrol_event_export_remains_bound_to_immutable_occurrence(postgres_available):
+    del postgres_available
+    suffix = uuid.uuid4().hex
+    event_id = f"event-{suffix}"
+    occurrence_id = f"occurrence-{suffix}"
+    run_id = f"snapshot-{suffix}"
+    observed_at = datetime.now(timezone.utc)
+    with get_db_session() as db:
+        db.add(
+            NetworkEventRecord(
+                id=event_id,
+                idempotency_key=f"event-key-{suffix}",
+                event_type="InterfaceDown",
+                severity="low",
+                device_id=f"device-{suffix}",
+                entity_type="interface_l2",
+                entity_key="GigabitEthernet1/0/1",
+                correlation_key=f"correlation-{suffix}",
+                run_id=run_id,
+                occurred_at=observed_at,
+                first_seen_at=observed_at,
+                last_seen_at=observed_at,
+                last_seen_order_key="2",
+                occurrence_count=2,
+                status="resolved",
+                payload_json={"new": "up"},
+                created_at=observed_at,
+            )
+        )
+        db.flush()
+        db.add(
+            NetworkEventOccurrenceRecord(
+                id=occurrence_id,
+                idempotency_key=f"occurrence-key-{suffix}",
+                event_id=event_id,
+                run_id=run_id,
+                source_change_id=f"change-{suffix}",
+                observed_at=observed_at,
+                severity="high",
+                occurrence_kind="opening",
+                payload_json={
+                    "event_type": "InterfaceDown",
+                    "severity": "high",
+                    "device_id": f"device-{suffix}",
+                    "entity_type": "interface_l2",
+                    "entity_key": "GigabitEthernet1/0/1",
+                    "new": "down",
+                    "aggregate_status_after_occurrence": "open",
+                },
+                created_at=observed_at,
+            )
+        )
+    try:
+        rows = list(
+            iter_patrol_event_export_rows(
+                [run_id],
+                {f"device-{suffix}": "SW-1"},
+            )
+        )
+        assert len(rows) == 1
+        assert rows[0]["occurrence_id"] == occurrence_id
+        assert rows[0]["status"] == "open"
+        assert rows[0]["severity"] == "high"
+    finally:
+        with get_db_session() as db:
+            db.query(NetworkEventOccurrenceRecord).filter_by(id=occurrence_id).delete()
+            db.query(NetworkEventRecord).filter_by(id=event_id).delete()
 
 
 def _redis_or_skip():

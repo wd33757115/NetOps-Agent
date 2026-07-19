@@ -35,7 +35,7 @@ interface ParserGovernancePanelProps {
   onPreviewImport: () => void
   onImport: () => void
   onClearDatasetFocus: () => void
-  onOpenRuleBundles: () => void
+  onOpenAssetChain: () => void
 }
 
 const countMapText = (value?: Record<string, number> | null, emptyText = '-') => {
@@ -66,7 +66,7 @@ const ParserGovernancePanel: React.FC<ParserGovernancePanelProps> = ({
   onPreviewImport,
   onImport,
   onClearDatasetFocus,
-  onOpenRuleBundles,
+  onOpenAssetChain,
 }) => (
   <Tabs activeKey={activeSubWorkspace} onChange={onSubWorkspaceChange} items={[
     {
@@ -175,7 +175,7 @@ const ParserGovernancePanel: React.FC<ParserGovernancePanelProps> = ({
               )}
               action={(
                 <Space wrap>
-                  {linkedOfflineJobId && <Button size="small" onClick={onOpenRuleBundles}>查看规则资产包</Button>}
+                  {linkedOfflineJobId && <Button size="small" onClick={onOpenAssetChain}>检查资产链</Button>}
                   <Button size="small" onClick={onClearDatasetFocus}>查看全部</Button>
                 </Space>
               )}

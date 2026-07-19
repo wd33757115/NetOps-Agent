@@ -28,6 +28,7 @@ import { governanceStatusLabel, shortDigest } from './parserUi'
 
 interface RuleAssetBundleWorkspaceProps {
   onAssetsChanged?: () => void
+  onInspectAssetChain?: () => void
   initialSearch?: string
 }
 
@@ -103,7 +104,11 @@ const compactMetrics = (values?: Record<string, number>, limit = 8) => {
   }
 }
 
-const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({ onAssetsChanged, initialSearch = '' }) => {
+const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
+  onAssetsChanged,
+  onInspectAssetChain,
+  initialSearch = '',
+}) => {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState(initialSearch)
   const [status, setStatus] = useState<string | undefined>()
@@ -186,6 +191,17 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({ onA
 
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      {initialSearch && !query.isLoading && Number(query.data?.total || 0) === 0 && (
+        <Alert
+          type="info"
+          showIcon
+          message="当前离线任务没有待治理的候选资产包"
+          description="没有候选包不代表运行时资产缺失。请先检查 Contract、Policy 与 EventRule 资产链；只有存在缺口时才需要生成或补齐。"
+          action={onInspectAssetChain && (
+            <Button size="small" onClick={onInspectAssetChain}>检查资产链</Button>
+          )}
+        />
+      )}
       <Alert
         type="info"
         showIcon

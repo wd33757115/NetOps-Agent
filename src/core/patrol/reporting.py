@@ -11,6 +11,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from src.core.patrol.change_event_repository import ChangeEventRepository
 from src.core.patrol.handlers import DetectChangesHandler
 from src.core.patrol.repository import PatrolRepository
+from src.core.patrol.unstructured_diff import summarize_unstructured_changes
 
 
 def build_run_quality_summary(run_id: str) -> dict[str, Any]:
@@ -106,6 +107,10 @@ def render_run_report(
     event_counter = Counter(event["event_type"] for event in events)
     severity_counter = Counter(event["severity"] for event in events)
     quality = build_run_quality_summary(run_id)
+    unstructured = summarize_unstructured_changes(
+        changes,
+        collected_output_count=int(quality["raw_hash_diff_count"]),
+    )
     lines = [
         f"# Patrol Report: {run_id}",
         "",
@@ -128,6 +133,11 @@ def render_run_report(
         f"- Unverified empty outputs: {quality['empty_unverified_count']}",
         f"- Unsupported commands: {quality['unsupported_command_count']}",
         f"- Raw hash comparisons: {quality['raw_hash_diff_count']}",
+        f"- Non-structured outputs changed: {unstructured['changed_output_count']}",
+        (
+            "- Non-structured changed lines: "
+            f"+{unstructured['added_line_count']} / -{unstructured['removed_line_count']}"
+        ),
     ]
     if event_counter:
         lines.extend(["", "## Events By Type", ""])
@@ -150,6 +160,26 @@ def render_run_report(
                 f"{event.get('device_id') or '-'} "
                 f"{event.get('entity_key') or ''}"
             )
+    if unstructured["items"]:
+        lines.extend(["", "## Non-structured Output Changes", ""])
+        for item in unstructured["items"]:
+            categories = ", ".join(
+                str(category.get("label") or category.get("name") or "other")
+                for category in item.get("categories") or []
+            ) or "uncategorized"
+            lines.append(
+                "- "
+                f"{item.get('device_name') or '-'} · "
+                f"`{item.get('command') or '-'}` · "
+                f"+{item['added_line_count']} / -{item['removed_line_count']} · "
+                f"{categories}"
+            )
+            for preview in item.get("preview") or []:
+                marker = "+" if preview.get("operation") == "added" else "-"
+                lines.append(
+                    f"  - `{marker}` {preview.get('category_label') or 'other'}: "
+                    f"`{preview.get('text') or ''}`"
+                )
     markdown = "\n".join(lines) + "\n"
     output_format = str(output_format or "markdown").lower()
     rendered = markdown
@@ -161,13 +191,14 @@ def render_run_report(
             event_counter,
             severity_counter,
             quality,
+            unstructured,
         )
     written_path = None
     if output_path:
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         if output_format == "xlsx":
-            _write_xlsx(path, run_id, changes, events, quality)
+            _write_xlsx(path, run_id, changes, events, quality, unstructured)
             rendered = ""
         elif output_format == "html":
             path.write_text(rendered, encoding="utf-8")
@@ -184,6 +215,7 @@ def render_run_report(
         "event_types": dict(event_counter),
         "severities": dict(severity_counter),
         "quality": quality,
+        "unstructured_comparison": unstructured,
         "markdown": markdown,
         "content": rendered,
         "output_path": written_path,
@@ -197,6 +229,7 @@ def _render_html(
     event_counter: Counter,
     severity_counter: Counter,
     quality: dict[str, Any],
+    unstructured: dict[str, Any],
 ) -> str:
     rows = "\n".join(
         "<tr>"
@@ -207,6 +240,17 @@ def _render_html(
         f"<td>{escape(str(event.get('entity_key') or ''))}</td>"
         "</tr>"
         for event in events
+    )
+    unstructured_rows = "\n".join(
+        "<tr>"
+        f"<td>{escape(str(item.get('device_name') or ''))}</td>"
+        f"<td>{escape(str(item.get('command') or ''))}</td>"
+        f"<td>{item.get('added_line_count') or 0}</td>"
+        f"<td>{item.get('removed_line_count') or 0}</td>"
+        f"<td>{escape(_unstructured_categories(item))}</td>"
+        f"<td>{escape(_unstructured_preview(item))}</td>"
+        "</tr>"
+        for item in unstructured.get("items") or []
     )
     return f"""<!doctype html>
 <html>
@@ -233,7 +277,10 @@ def _render_html(
   <p>Valid empty outputs: {quality["valid_empty_count"]}<br>
   Unverified empty outputs: {quality["empty_unverified_count"]}<br>
   Unsupported commands: {quality["unsupported_command_count"]}<br>
-  Raw hash comparisons: {quality["raw_hash_diff_count"]}</p>
+  Raw hash comparisons: {quality["raw_hash_diff_count"]}<br>
+  Non-structured outputs changed: {unstructured["changed_output_count"]}<br>
+  Non-structured changed lines:
+  +{unstructured["added_line_count"]} / -{unstructured["removed_line_count"]}</p>
   <h2>Events By Type</h2>
   <ul>{"".join(f"<li>{escape(k)}: {v}</li>" for k, v in sorted(event_counter.items()))}</ul>
   <h2>Events By Severity</h2>
@@ -242,6 +289,12 @@ def _render_html(
   <table>
     <thead><tr><th>Time</th><th>Severity</th><th>Type</th><th>Device</th><th>Entity</th></tr></thead>
     <tbody>{rows}</tbody>
+  </table>
+  <h2>Non-structured Output Changes</h2>
+  <table>
+    <thead><tr><th>Device</th><th>Command</th><th>Added</th><th>Removed</th>
+    <th>Categories</th><th>Safe Preview</th></tr></thead>
+    <tbody>{unstructured_rows}</tbody>
   </table>
 </body>
 </html>
@@ -254,6 +307,7 @@ def _write_xlsx(
     changes: list[dict[str, Any]],
     events: list[dict[str, Any]],
     quality: dict[str, Any],
+    unstructured: dict[str, Any],
 ) -> None:
     rows = [
         ["Run ID", run_id],
@@ -269,6 +323,9 @@ def _write_xlsx(
         ["Unverified empty outputs", str(quality["empty_unverified_count"])],
         ["Unsupported commands", str(quality["unsupported_command_count"])],
         ["Raw hash comparisons", str(quality["raw_hash_diff_count"])],
+        ["Non-structured outputs changed", str(unstructured["changed_output_count"])],
+        ["Non-structured lines added", str(unstructured["added_line_count"])],
+        ["Non-structured lines removed", str(unstructured["removed_line_count"])],
         [],
         ["Time", "Severity", "Event Type", "Device", "Entity"],
     ]
@@ -281,6 +338,24 @@ def _write_xlsx(
             str(event.get("entity_key") or ""),
         ]
         for event in events
+    )
+    rows.extend(
+        [
+            [],
+            ["Non-structured Output Changes"],
+            ["Device", "Command", "Added", "Removed", "Categories", "Safe Preview"],
+        ]
+    )
+    rows.extend(
+        [
+            str(item.get("device_name") or ""),
+            str(item.get("command") or ""),
+            str(item.get("added_line_count") or 0),
+            str(item.get("removed_line_count") or 0),
+            _unstructured_categories(item),
+            _unstructured_preview(item),
+        ]
+        for item in unstructured.get("items") or []
     )
     sheet_rows = []
     for index, row in enumerate(rows, start=1):
@@ -336,6 +411,21 @@ def _write_xlsx(
             "</Relationships>",
         )
         archive.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+
+
+def _unstructured_categories(item: dict[str, Any]) -> str:
+    return ", ".join(
+        str(category.get("label") or category.get("name") or "other")
+        for category in item.get("categories") or []
+    ) or "uncategorized"
+
+
+def _unstructured_preview(item: dict[str, Any]) -> str:
+    return " | ".join(
+        f"{'+' if row.get('operation') == 'added' else '-'} "
+        f"{row.get('text') or ''}"
+        for row in item.get("preview") or []
+    )
 
 
 def _xlsx_col(index: int) -> str:
