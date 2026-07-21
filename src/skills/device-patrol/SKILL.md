@@ -6,7 +6,7 @@ category: network
 tags: [patrol, inspect, device, network, monitoring]
 author: NetOps Team
 domain: network
-celery_queue: netops.device
+celery_queue: netops.patrol
 min_permission_level: user
 rollout_status: stable
 enabled_ratio: 100

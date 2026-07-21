@@ -15,6 +15,8 @@ from .policy import CategorySpec
 from .sanitization import runtime_pattern_for_redacted_value
 from .semantic_catalog import (
     SemanticCatalogMatch,
+    canonical_field_for_label,
+    canonical_schema_field,
     field_aliases,
     resolve_semantic_contract,
 )
@@ -104,6 +106,16 @@ def _govern_field_semantics(proposal: ContractProposal) -> ContractProposal:
             governed[field] = {**semantics, **dict(proposed[field])}
 
     declared = {*proposal.required_fields, *proposal.optional_fields}
+    corrected_primary_keys: dict[str, dict[str, Any]] = {}
+    for field in proposal.primary_keys:
+        previous = dict(governed.get(field) or {})
+        if previous != {"semantic_type": "identity"}:
+            corrected_primary_keys[field] = {
+                "reason": "primary_key_requires_identity_semantics",
+                "previous": previous,
+            }
+        governed[field] = {"semantic_type": "identity"}
+
     removed_applicability: dict[str, dict[str, Any]] = {}
     removed_units: dict[str, dict[str, Any]] = {}
     for field, metadata in tuple(governed.items()):
@@ -130,8 +142,10 @@ def _govern_field_semantics(proposal: ContractProposal) -> ContractProposal:
                 }
 
     evidence = json.loads(json.dumps(dict(proposal.evidence or {})))
-    if removed_applicability or removed_units:
+    if corrected_primary_keys or removed_applicability or removed_units:
         governance = dict(evidence.get("semantic_reference_governance") or {})
+        if corrected_primary_keys:
+            governance["corrected_primary_key_semantics"] = corrected_primary_keys
         if removed_applicability:
             governance["removed_applicability"] = removed_applicability
         if removed_units:
@@ -147,7 +161,13 @@ def _govern_field_semantics(proposal: ContractProposal) -> ContractProposal:
 def govern_contract_candidate(proposal: ContractProposal) -> ContractProposal:
     """Reapply current deterministic governance to a persisted Contract."""
 
-    return _govern_field_semantics(proposal)
+    return _govern_field_semantics(
+        _normalize_redacted_value_validators(
+            _normalize_evidence_bound_validators(
+                _normalize_semantic_field_aliases(proposal)
+            )
+        )
+    )
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -475,6 +495,33 @@ def _validator_accepts(value: str, rules: dict[str, Any]) -> bool:
     return True
 
 
+def _is_literal_only_regex(pattern: str) -> bool:
+    """Identify exact-value regexes that encode one observed sample literal."""
+
+    source = str(pattern or "").strip()
+    if source.startswith(r"\A"):
+        source = source[2:]
+    elif source.startswith("^"):
+        source = source[1:]
+    if source.endswith(r"\Z"):
+        source = source[:-2]
+    elif source.endswith("$") and not source.endswith(r"\$"):
+        source = source[:-1]
+    if not source:
+        return False
+    index = 0
+    while index < len(source):
+        character = source[index]
+        if character == "\\":
+            index += 1
+            if index >= len(source) or source[index].isalnum():
+                return False
+        elif character in ".+*?{}[]()|^$":
+            return False
+        index += 1
+    return True
+
+
 def _normalize_validator_from_values(
     rules: dict[str, Any],
     values: list[str],
@@ -482,10 +529,14 @@ def _normalize_validator_from_values(
     """Make weak-model validators cover every value in a proven table column."""
 
     normalized = dict(rules or {})
+    rule_type = str(normalized.get("type") or "").strip().casefold()
+    if rule_type == "regex" and _is_literal_only_regex(
+        str(normalized.get("pattern") or "")
+    ):
+        return {"type": "text"}, True
     invalid = [value for value in values if not _validator_accepts(value, normalized)]
     if not invalid:
         return normalized, False
-    rule_type = str(normalized.get("type") or "").strip().casefold()
     if rule_type == "enum":
         observed = list(
             dict.fromkeys(
@@ -845,10 +896,226 @@ def _normalize_table_column_bindings(
     )
 
 
+def _normalize_semantic_field_aliases(proposal: ContractProposal) -> ContractProposal:
+    """Rename fields through governed evidence and schema-name semantics.
+
+    Literal source labels remain authoritative. A qualified machine field name is
+    used only when no direct label resolves, which lets weaker models describe
+    contextual measurements without making the runtime schema model-dependent.
+    """
+
+    evidence = json.loads(json.dumps(dict(proposal.evidence or {})))
+    field_bindings = dict(evidence.get("field_bindings") or {})
+    declared = [*proposal.required_fields, *proposal.optional_fields]
+    declared_set = set(declared)
+    primary = set(proposal.primary_keys)
+    candidates: dict[str, str] = {}
+    resolution_sources: dict[str, str] = {}
+    for field in declared:
+        # Primary keys are the public entity identity; renaming them through a
+        # generic label alias (e.g. a "Name" column matching description's
+        # aliases) would silently change identity semantics. Keys stay stable.
+        if field in primary:
+            continue
+        raw = field_bindings.get(field) or []
+        bindings = raw if isinstance(raw, list) else [raw]
+        canonical_fields = {
+            canonical
+            for item in bindings
+            if isinstance(item, dict)
+            and str(item.get("capture_kind") or "") not in {"derived", "record_anchor"}
+            and (canonical := canonical_field_for_label(str(item.get("source_label") or "")))
+        }
+        if len(canonical_fields) > 1:
+            continue
+        if canonical_fields:
+            canonical = next(iter(canonical_fields))
+            source = "literal_label"
+        else:
+            canonical = canonical_schema_field(field)
+            source = "qualified_field_name"
+        if not canonical:
+            continue
+        if canonical != field:
+            candidates[field] = canonical
+            resolution_sources[field] = source
+
+    target_counts: dict[str, int] = {}
+    for target in candidates.values():
+        target_counts[target] = target_counts.get(target, 0) + 1
+    collisions = {
+        source: target
+        for source, target in candidates.items()
+        if target_counts[target] > 1 or target in declared_set - {source}
+    }
+    mapping = {
+        source: target
+        for source, target in candidates.items()
+        if source not in collisions
+    }
+    if not mapping and not collisions:
+        return proposal
+
+    def resolve(field: str) -> str:
+        return mapping.get(str(field), str(field))
+
+    def unique_fields(fields: tuple[str, ...]) -> tuple[str, ...]:
+        return tuple(dict.fromkeys(resolve(field) for field in fields))
+
+    def remap_references(value: Any) -> Any:
+        if isinstance(value, list):
+            return [remap_references(item) for item in value]
+        if not isinstance(value, dict):
+            return value
+        return {
+            key: (
+                resolve(str(item))
+                if key in {"field", "other_field", "field_name"}
+                and isinstance(item, str)
+                else remap_references(item)
+            )
+            for key, item in value.items()
+        }
+
+    required = unique_fields(proposal.required_fields)
+    required_set = set(required)
+    optional = tuple(
+        field
+        for field in unique_fields(proposal.optional_fields)
+        if field not in required_set
+    )
+    validators = {
+        resolve(str(field)): dict(rules or {})
+        for field, rules in dict(proposal.validators or {}).items()
+    }
+    state_semantics = {
+        resolve(str(field)): remap_references(dict(metadata or {}))
+        for field, metadata in dict(proposal.state_semantics or {}).items()
+    }
+    evidence["field_bindings"] = {
+        resolve(str(field)): bindings
+        for field, bindings in field_bindings.items()
+    }
+    evidence = remap_references(evidence)
+    evidence["semantic_field_normalization"] = {
+        "strategy": "evidence_first_semantic_catalog",
+        "mapping": mapping,
+        "skipped_collisions": collisions,
+        "resolution_sources": {
+            source: resolution_sources[source]
+            for source in (*mapping, *collisions)
+        },
+    }
+    return replace(
+        proposal,
+        primary_keys=unique_fields(proposal.primary_keys),
+        required_fields=required,
+        optional_fields=optional,
+        validators=validators,
+        ignore_fields=unique_fields(proposal.ignore_fields),
+        state_semantics=state_semantics or None,
+        evidence=evidence,
+    )
+
+
+def contract_has_singleton_scope(
+    proposal: ContractProposal,
+    *,
+    structure_profile: dict[str, Any] | None,
+    samples_text: str,
+) -> bool:
+    """Prove that required fields describe a snapshot-level singleton region.
+
+    Some commands contain a stable device-level preamble followed by repeated
+    component sections. A global structure label such as ``repeated_block`` must
+    not force those preamble fields into a row-level entity contract. The proof
+    is intentionally conservative: every required field must have direct evidence
+    in every sample, before that sample's first repeated entity boundary.
+    """
+
+    if proposal.primary_keys or not proposal.required_fields:
+        return False
+    samples = {
+        match.group("sample_id"): match.group("body").splitlines()
+        for match in _SAMPLE_BLOCK_RE.finditer(samples_text or "")
+    }
+    if not samples:
+        return False
+    plans = list((structure_profile or {}).get("samples") or [])
+    if not plans:
+        return False
+
+    plans_by_sample: dict[str, dict[str, Any]] = {}
+    unresolved_plans: list[dict[str, Any]] = []
+    for plan in plans:
+        sample_ids = {
+            str(item.get("sample_id") or "").strip()
+            for item in [*(plan.get("evidence") or []), *(plan.get("table_regions") or [])]
+            if isinstance(item, dict) and str(item.get("sample_id") or "").strip()
+        }
+        if sample_ids:
+            for sample_id in sample_ids:
+                plans_by_sample[sample_id] = plan
+        else:
+            unresolved_plans.append(plan)
+    missing_sample_ids = [sample_id for sample_id in samples if sample_id not in plans_by_sample]
+    if len(missing_sample_ids) == len(unresolved_plans):
+        plans_by_sample.update(zip(missing_sample_ids, unresolved_plans, strict=True))
+    if set(samples) - set(plans_by_sample):
+        return False
+
+    evidence = dict(proposal.evidence or {})
+    field_bindings = dict(evidence.get("field_bindings") or {})
+    for sample_id, lines in samples.items():
+        plan = plans_by_sample[sample_id]
+        estimated_entities = int(plan.get("estimated_entities") or 0)
+        repeated_boundaries = [
+            int(item.get("line_number") or 0)
+            for item in plan.get("evidence") or []
+            if isinstance(item, dict)
+            and item.get("role") == "entity_header"
+            and int(item.get("line_number") or 0) > 0
+        ]
+        repeated_boundaries.extend(
+            int(item.get("first_row_line_number") or item.get("header_line_number") or 0)
+            for item in plan.get("table_regions") or []
+            if isinstance(item, dict)
+            and int(item.get("first_row_line_number") or item.get("header_line_number") or 0) > 0
+        )
+        first_repeated_line = min(repeated_boundaries, default=0)
+        if estimated_entities > 1 and not first_repeated_line:
+            return False
+
+        for field_name in proposal.required_fields:
+            raw_bindings = field_bindings.get(field_name) or []
+            bindings = raw_bindings if isinstance(raw_bindings, list) else [raw_bindings]
+            sample_bindings = [
+                item
+                for item in bindings
+                if isinstance(item, dict)
+                and str(item.get("sample_id") or "").strip() == sample_id
+            ]
+            if not sample_bindings:
+                return False
+            for binding in sample_bindings:
+                if str(binding.get("capture_kind") or "").strip() == "derived":
+                    return False
+                try:
+                    line_number = int(binding.get("line") or binding.get("line_number"))
+                except (TypeError, ValueError):
+                    return False
+                if line_number < 1 or line_number > len(lines):
+                    return False
+                if first_repeated_line and line_number >= first_repeated_line:
+                    return False
+    return True
+
+
 def _normalize_capture_requirements(
     proposal: ContractProposal,
     *,
     structure_profile: dict[str, Any] | None = None,
+    samples_text: str = "",
 ) -> ContractProposal:
     """Keep required fields only where every entity can expose them directly."""
 
@@ -858,6 +1125,11 @@ def _normalize_capture_requirements(
     optional = list(proposal.optional_fields)
     primary = set(proposal.primary_keys)
     plans = list((structure_profile or {}).get("samples") or [])
+    singleton_scope = contract_has_singleton_scope(
+        proposal,
+        structure_profile=structure_profile,
+        samples_text=samples_text,
+    )
     multi_entity_layouts = {
         str(plan.get("layout_kind") or "")
         for plan in plans
@@ -877,7 +1149,9 @@ def _normalize_capture_requirements(
             and kinds == {"column"}
         )
         unsupported_requirement = kinds == {"derived"} or (
-            bool(multi_entity_layouts) and not table_column_proven
+            bool(multi_entity_layouts)
+            and not table_column_proven
+            and not singleton_scope
         )
         if field_name in primary or not kinds or not unsupported_requirement:
             continue
@@ -885,8 +1159,13 @@ def _normalize_capture_requirements(
         if field_name not in optional:
             optional.append(field_name)
         reclassified.append(field_name)
+    if singleton_scope:
+        evidence["entity_scope_governance"] = {
+            "strategy": "required_bindings_before_repeated_entities",
+            "scope": "singleton",
+        }
     if not reclassified:
-        return proposal
+        return replace(proposal, evidence=evidence) if singleton_scope else proposal
     evidence["capture_normalization"] = {
         "strategy": "required_fields_must_be_directly_available_per_entity",
         "reclassified_fields": reclassified,
@@ -1274,16 +1553,19 @@ Use an empty primary_keys list only when every sample proves a singleton entity.
 
     proposal = _normalize_capture_requirements(
         _prune_unverifiable_field_bindings(
-            _normalize_table_column_bindings(
-                _normalize_binding_lines(
-                    _normalize_capture_kind_aliases(proposal),
+            _normalize_semantic_field_aliases(
+                _normalize_table_column_bindings(
+                    _normalize_binding_lines(
+                        _normalize_capture_kind_aliases(proposal),
+                        samples_text=samples_text,
+                    ),
                     samples_text=samples_text,
                 ),
-                samples_text=samples_text,
             ),
             samples_text=samples_text,
         ),
         structure_profile=structure_profile,
+        samples_text=samples_text,
     )
     proposal = _normalize_redacted_value_validators(
         _normalize_evidence_bound_validators(proposal)
@@ -1295,7 +1577,7 @@ Use an empty primary_keys list only when every sample proves a singleton entity.
                 catalog_match,
                 llm_fallback_reason="; ".join(conflicts),
             )
-    return proposal
+    return govern_contract_candidate(proposal)
 
 
 def revise_contract(
@@ -1346,17 +1628,22 @@ variant, or propose separate contracts when the variants cannot share a schema.
     )
     proposal = _normalize_capture_requirements(
         _prune_unverifiable_field_bindings(
-            _normalize_table_column_bindings(
-                _normalize_binding_lines(
-                    _normalize_capture_kind_aliases(proposal),
+            _normalize_semantic_field_aliases(
+                _normalize_table_column_bindings(
+                    _normalize_binding_lines(
+                        _normalize_capture_kind_aliases(proposal),
+                        samples_text=samples_text,
+                    ),
                     samples_text=samples_text,
                 ),
-                samples_text=samples_text,
             ),
             samples_text=samples_text,
         ),
         structure_profile=structure_profile,
+        samples_text=samples_text,
     )
-    return _normalize_redacted_value_validators(
-        _normalize_evidence_bound_validators(proposal)
+    return govern_contract_candidate(
+        _normalize_redacted_value_validators(
+            _normalize_evidence_bound_validators(proposal)
+        )
     )

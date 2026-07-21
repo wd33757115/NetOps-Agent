@@ -26,6 +26,7 @@ from src.core.patrol.statuses import (
 from src.infrastructure.db.models import (
     CommandSnapshot,
     NetworkDevice,
+    OfflinePatrolJobRecord,
     OfflinePatrolPeriodRecord,
     ParserTemplate,
     PatrolAnalysisAttemptRecord,
@@ -1269,19 +1270,27 @@ class PatrolSnapshotRepository(_PatrolRepositoryBase):
             return {}
         with get_db_session() as db:
             rows = (
-                db.query(OfflinePatrolPeriodRecord)
+                db.query(
+                    OfflinePatrolPeriodRecord,
+                    OfflinePatrolJobRecord.purpose,
+                )
+                .join(
+                    OfflinePatrolJobRecord,
+                    OfflinePatrolJobRecord.id == OfflinePatrolPeriodRecord.job_id,
+                )
                 .filter(OfflinePatrolPeriodRecord.dataset_id.in_(normalized))
                 .all()
             )
             return {
-                row.dataset_id: {
-                    "offline_job_id": row.job_id,
-                    "period_role": row.role,
-                    "observed_at": _iso(row.observed_at),
-                    "patrol_run_id": row.patrol_run_id,
-                    "period_status": row.status,
+                period.dataset_id: {
+                    "offline_job_id": period.job_id,
+                    "job_purpose": purpose,
+                    "period_role": period.role,
+                    "observed_at": _iso(period.observed_at),
+                    "patrol_run_id": period.patrol_run_id,
+                    "period_status": period.status,
                 }
-                for row in rows
+                for period, purpose in rows
             }
 
     def list_snapshots_with_entity_keys(self, snapshot_ids: list[str]) -> set[str]:

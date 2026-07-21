@@ -3,7 +3,6 @@ import {
   Alert,
   Button,
   Input,
-  Popconfirm,
   Select,
   Space,
   Steps,
@@ -14,6 +13,7 @@ import {
 import {
   CheckOutlined,
   CloseOutlined,
+  EditOutlined,
   ReloadOutlined,
   StopOutlined,
 } from '@ant-design/icons'
@@ -24,7 +24,9 @@ import {
   type ParserRuleAssetBundleStep,
 } from '../../../services/api'
 import StandardTableShell from './StandardTableShell'
+import LifecycleActionDialog from './LifecycleActionDialog'
 import { governanceStatusLabel, shortDigest } from './parserUi'
+import RuleAssetEngineeringReviewDrawer from './RuleAssetEngineeringReviewDrawer'
 
 interface RuleAssetBundleWorkspaceProps {
   onAssetsChanged?: () => void
@@ -53,6 +55,7 @@ const stepLabel: Record<string, string> = {
   rules: '事件规则',
   replay: '历史回放',
   release: '审批发布',
+  review: '工程师复核',
 }
 
 const assetTypeLabel: Record<string, string> = {
@@ -73,6 +76,7 @@ const blockerText: Record<string, string> = {
   'historical replay run_ids do not match immutable context': '历史回放 Run 范围与不可变上下文不一致',
   'historical replay run_id_count is inconsistent': '历史回放 Run 数量与范围明细不一致',
   'immutable sanitized context gate failed': '不可变脱敏上下文未通过隐私或一致性门禁',
+  'engineering review has not accepted the generated candidates': '候选资产尚未通过工程师复核',
 }
 
 const displayBlocker = (value: string) => blockerText[value] || value
@@ -112,6 +116,11 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState(initialSearch)
   const [status, setStatus] = useState<string | undefined>()
+  const [lifecycleRequest, setLifecycleRequest] = useState<{
+    action: 'approve' | 'reject' | 'deprecate'
+    row: ParserRuleAssetBundle
+  } | null>(null)
+  const [engineeringBundle, setEngineeringBundle] = useState<ParserRuleAssetBundle | null>(null)
   const pageSize = 20
   const query = useQuery(
     ['parser-rule-asset-bundles', page, search, status],
@@ -128,14 +137,15 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
     setPage(1)
   }, [initialSearch])
   const lifecycle = useMutation(
-    ({ action, id }: { action: 'approve' | 'reject' | 'deprecate'; id: string }) => {
-      if (action === 'approve') return parserApi.approveRuleGenerationJob(id, { actor: 'ui' })
-      if (action === 'reject') return parserApi.rejectRuleGenerationJob(id, { actor: 'ui' })
-      return parserApi.deprecateRuleGenerationJob(id, { actor: 'ui', reason: 'manual rollback from control plane' })
+    ({ action, id, reason }: { action: 'approve' | 'reject' | 'deprecate'; id: string; reason: string }) => {
+      if (action === 'approve') return parserApi.approveRuleGenerationJob(id, { reason })
+      if (action === 'reject') return parserApi.rejectRuleGenerationJob(id, { reason })
+      return parserApi.deprecateRuleGenerationJob(id, { reason })
     },
     {
       onSuccess: async (_result, variables) => {
         message.success(variables.action === 'approve' ? '规则资产包已原子发布' : variables.action === 'reject' ? '候选资产包已拒绝' : '资产包已废弃并执行版本回退')
+        setLifecycleRequest(null)
         await query.refetch()
         onAssetsChanged?.()
       },
@@ -147,44 +157,44 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
     <Space size={4} wrap>
       {row.status === 'pending_approval' && (
         <>
-          <Popconfirm
-            title="整包审批并发布？"
-            description="Contract、Policy 和全部 EventRule 将在同一事务内激活；任一步失败都会整体回滚。"
-            okText="审批发布"
-            cancelText="取消"
+          <Button
+            size="small"
+            icon={<EditOutlined />}
+            onClick={() => setEngineeringBundle(row)}
+          >
+            复核候选
+          </Button>
+          <Button
+            size="small"
+            type="primary"
+            icon={<CheckOutlined />}
             disabled={!row.release_ready}
-            onConfirm={() => lifecycle.mutate({ action: 'approve', id: row.id })}
+            onClick={() => setLifecycleRequest({ action: 'approve', row })}
           >
-            <Button
-              size="small"
-              type="primary"
-              icon={<CheckOutlined />}
-              disabled={!row.release_ready}
-              loading={lifecycle.isLoading}
-            >
-              审批发布
-            </Button>
-          </Popconfirm>
-          <Popconfirm
-            title="拒绝整套候选资产？"
-            okText="拒绝"
-            cancelText="取消"
-            onConfirm={() => lifecycle.mutate({ action: 'reject', id: row.id })}
+            审批发布
+          </Button>
+          <Button
+            size="small"
+            icon={<CloseOutlined />}
+            onClick={() => setLifecycleRequest({ action: 'reject', row })}
           >
-            <Button size="small" icon={<CloseOutlined />} loading={lifecycle.isLoading}>拒绝</Button>
-          </Popconfirm>
+            拒绝
+          </Button>
         </>
       )}
+      {row.status === 'rejected' && (
+        <Button size="small" icon={<EditOutlined />} onClick={() => setEngineeringBundle(row)}>
+          修订候选
+        </Button>
+      )}
       {row.status === 'active' && (
-        <Popconfirm
-          title="废弃并回退整套资产？"
-          description="当前 Bundle 的全部 active 版本将一起废弃，并恢复各资产最近的上一版本。"
-          okText="确认回退"
-          cancelText="取消"
-          onConfirm={() => lifecycle.mutate({ action: 'deprecate', id: row.id })}
+        <Button
+          size="small"
+          icon={<StopOutlined />}
+          onClick={() => setLifecycleRequest({ action: 'deprecate', row })}
         >
-          <Button size="small" icon={<StopOutlined />} loading={lifecycle.isLoading}>回退</Button>
-        </Popconfirm>
+          回退
+        </Button>
       )}
     </Space>
   )
@@ -195,7 +205,7 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
         <Alert
           type="info"
           showIcon
-          message="当前离线任务没有待治理的候选资产包"
+          message="当前样本任务没有待治理的候选资产包"
           description="没有候选包不代表运行时资产缺失。请先检查 Contract、Policy 与 EventRule 资产链；只有存在缺口时才需要生成或补齐。"
           action={onInspectAssetChain && (
             <Button size="small" onClick={onInspectAssetChain}>检查资产链</Button>
@@ -212,8 +222,8 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
         <Alert
           type="info"
           showIcon
-          message={`正在查看离线任务 ${initialSearch} 的规则资产包`}
-          description="列表通过不可变生成上下文关联离线任务，不依赖资产名称或命令文本猜测。"
+          message={`正在查看样本任务 ${initialSearch} 的规则资产包`}
+          description="列表通过不可变生成上下文关联样本任务，不依赖资产名称或命令文本猜测。"
         />
       )}
       <Space wrap>
@@ -310,11 +320,18 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
             ),
           },
           {
-            title: '阻断',
+            title: '复核 / 阻断',
             width: 250,
-            render: (_: unknown, row) => row.blockers.length
-              ? <Typography.Text type="danger">{displayBlockers(row.blockers)}</Typography.Text>
-              : <Typography.Text type="secondary">全部门禁已通过</Typography.Text>,
+            render: (_: unknown, row) => (
+              <Space direction="vertical" size={2}>
+                <Tag color={row.engineering_review?.decision === 'accepted' ? 'green' : 'orange'}>
+                  {row.engineering_review?.decision === 'accepted' ? '工程师已接受' : '等待工程师复核'}
+                </Tag>
+                {row.blockers.length
+                  ? <Typography.Text type="danger">{displayBlockers(row.blockers)}</Typography.Text>
+                  : <Typography.Text type="secondary">全部门禁已通过</Typography.Text>}
+              </Space>
+            ),
           },
           { title: '操作', width: 180, render: (_: unknown, row) => renderActions(row) },
         ]}
@@ -371,6 +388,23 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
                 </Tag>
                 <Tag>预估每日事件 {String(row.replay.estimated_daily_event_count ?? '-')}</Tag>
               </Space>
+              {row.replay.representativeness && (
+                <Space wrap size={[8, 4]}>
+                  <Typography.Text strong>回放代表性</Typography.Text>
+                  <Tag>
+                    覆盖 {String(row.replay.representativeness.sampled_change_count ?? '-')}/
+                    {String(row.replay.representativeness.total_change_count ?? '-')} 条历史变化
+                  </Tag>
+                  <Tag>窗口 {String(row.replay.representativeness.window_days ?? '-')} 天</Tag>
+                  <Tag>
+                    变化形态 {String(row.replay.representativeness.matched_change_shape_count ?? '-')}/
+                    {String(row.replay.representativeness.change_shape_count ?? '-')} 种命中
+                  </Tag>
+                  {row.replay.representativeness.sparse_history && (
+                    <Tag color="orange">历史稀疏：碰撞=0 说服力有限，建议扩大回放窗口</Tag>
+                  )}
+                </Space>
+              )}
               {Object.keys(row.replay.event_types || {}).length > 0 && (() => {
                 const metrics = compactMetrics(row.replay.event_types)
                 return (
@@ -412,7 +446,7 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
                 )}
                 {(row.offline_job_ids || (row.offline_job_id ? [row.offline_job_id] : [])).length > 0 && (
                   <Typography.Text type="secondary" copyable>
-                    离线任务：{(row.offline_job_ids || [row.offline_job_id!]).join('、')}
+                    样本任务：{(row.offline_job_ids || [row.offline_job_id!]).join('、')}
                   </Typography.Text>
                 )}
                 {(row.dataset_ids || []).length > 0 && (
@@ -440,6 +474,45 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
           ),
         }}
         scroll={{ x: 1500 }}
+      />
+      <LifecycleActionDialog
+        open={Boolean(lifecycleRequest)}
+        title={lifecycleRequest?.action === 'approve'
+          ? '审批并发布规则资产包'
+          : lifecycleRequest?.action === 'reject'
+            ? '拒绝候选规则资产包'
+            : '废弃并回退规则资产包'}
+        actionLabel={lifecycleRequest?.action === 'approve'
+          ? '审批发布'
+          : lifecycleRequest?.action === 'reject'
+            ? '确认拒绝'
+            : '确认回退'}
+        resourceName={lifecycleRequest?.row.observation_type || lifecycleRequest?.row.id || '规则资产包'}
+        impact={lifecycleRequest?.action === 'approve'
+          ? 'Contract、Policy 和全部 EventRule 将在同一事务内激活；任一步失败都会整体回滚。'
+          : lifecycleRequest?.action === 'reject'
+            ? '整套候选资产将被拒绝，不会进入生产运行时；候选内容和验证证据仍会保留。'
+            : '当前资产包的全部 active 版本将一起废弃，并尝试恢复各资产最近的上一版本。'}
+        blockers={lifecycleRequest?.action === 'approve' && !lifecycleRequest.row.release_ready
+          ? lifecycleRequest.row.blockers.map(displayBlocker)
+          : []}
+        danger={lifecycleRequest?.action !== 'approve'}
+        loading={lifecycle.isLoading}
+        onCancel={() => setLifecycleRequest(null)}
+        onConfirm={(reason) => lifecycleRequest && lifecycle.mutate({
+          action: lifecycleRequest.action,
+          id: lifecycleRequest.row.id,
+          reason,
+        })}
+      />
+      <RuleAssetEngineeringReviewDrawer
+        open={Boolean(engineeringBundle)}
+        bundle={engineeringBundle}
+        onClose={() => setEngineeringBundle(null)}
+        onChanged={async () => {
+          await query.refetch()
+          onAssetsChanged?.()
+        }}
       />
     </Space>
   )

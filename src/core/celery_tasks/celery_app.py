@@ -51,6 +51,7 @@ celery = Celery(
         "src.core.parser.tasks",
         "src.core.patrol.tasks",
         "src.core.patrol.offline_tasks",
+        "src.core.rule_control.engineering_revision_async",
     ],
 )
 
@@ -81,11 +82,13 @@ _celery_conf: dict = {
         "materialize_patrol_batch_report": {"queue": "netops.patrol"},
         "publish_network_event_outbox": {"queue": "netops.patrol"},
         "reconcile_patrol_runs": {"queue": "netops.patrol"},
-        "preview_offline_patrol_job": {"queue": "netops.patrol"},
+        "preview_offline_patrol_job": {"queue": "netops.ai"},
         "dispatch_parser_jobs": {"queue": "netops.ai"},
         "publish_parser_outbox": {"queue": "netops.ai"},
         "sanitize_parser_samples": {"queue": "netops.ai"},
         "reconcile_parser_jobs": {"queue": "netops.ai"},
+        "validate_rule_asset_engineering_revision": {"queue": "netops.ai"},
+        "promote_parser_gap_ledger": {"queue": "netops.ai"},
     },
     "task_default_queue": "netops.default",
 }
@@ -145,6 +148,11 @@ celery.conf.beat_schedule = {
     "reconcile-parser-jobs": {
         "task": "reconcile_parser_jobs",
         "schedule": 60.0,
+        "options": {"queue": "netops.ai"},
+    },
+    "promote-parser-gap-ledger": {
+        "task": "promote_parser_gap_ledger",
+        "schedule": 3600.0,
         "options": {"queue": "netops.ai"},
     },
     "reconcile-patrol-runs": {

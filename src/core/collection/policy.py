@@ -9,7 +9,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import or_
+
 from src.infrastructure.db.models import (
+    AuditLogRecord,
     CollectionExecutionPlanRecord,
     CollectionProfileBindingRecord,
     CommandProfileRecord,
@@ -427,6 +430,35 @@ class CollectionPolicyResolver:
         return True
 
 class CommandProfileRepository:
+    @staticmethod
+    def _record_lifecycle_audit(
+        db,
+        *,
+        action: str,
+        profile_version_id: str,
+        actor: str,
+        reason: str,
+        detail: dict[str, Any] | None = None,
+        occurred_at: datetime | None = None,
+    ) -> None:
+        normalized_actor = str(actor or "").strip()
+        normalized_reason = str(reason or "").strip()
+        if not normalized_actor or not normalized_reason:
+            raise ValueError("command profile lifecycle action requires actor and reason")
+        db.add(
+            AuditLogRecord(
+                id=str(uuid.uuid4()),
+                user_id=normalized_actor,
+                username=normalized_actor,
+                action=action,
+                resource_type="command_profile_version",
+                resource_id=profile_version_id,
+                detail={"reason": normalized_reason, **dict(detail or {})},
+                status="success",
+                created_at=occurred_at or datetime.now(timezone.utc),
+            )
+        )
+
     def get_profile_version(self, profile_version_id: str) -> dict[str, Any] | None:
         with get_db_session() as db:
             row = (
@@ -478,6 +510,63 @@ class CommandProfileRepository:
                 for profile, version in rows
             ]
 
+    def list_profiles_page(
+        self,
+        *,
+        status: str | None = None,
+        search: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        page_size = max(1, min(int(limit), 200))
+        page_offset = max(0, int(offset))
+        with get_db_session() as db:
+            query = db.query(CommandProfileRecord, CommandProfileVersionRecord).outerjoin(
+                CommandProfileVersionRecord,
+                CommandProfileVersionRecord.profile_id == CommandProfileRecord.id,
+            )
+            if status:
+                query = query.filter(CommandProfileVersionRecord.status == status)
+            pattern = f"%{str(search).strip()}%" if str(search or "").strip() else None
+            if pattern:
+                query = query.filter(
+                    or_(
+                        CommandProfileRecord.name.ilike(pattern),
+                        CommandProfileRecord.description.ilike(pattern),
+                        CommandProfileVersionRecord.created_by.ilike(pattern),
+                    )
+                )
+            total = query.order_by(None).count()
+            rows = (
+                query.order_by(
+                    CommandProfileRecord.name,
+                    CommandProfileVersionRecord.version.desc(),
+                    CommandProfileRecord.id,
+                )
+                .offset(page_offset)
+                .limit(page_size)
+                .all()
+            )
+            return {
+                "items": [self._profile_payload(profile, version) for profile, version in rows],
+                "total": total,
+                "limit": page_size,
+                "offset": page_offset,
+            }
+
+    @staticmethod
+    def _profile_payload(profile, version) -> dict[str, Any]:
+        return {
+            **profile.to_dict(),
+            "profile_id": profile.id,
+            "profile_name": profile.name,
+            "profile_version_id": version.id if version else None,
+            "version": version.version if version else None,
+            "version_status": version.status if version else None,
+            "items": version.items_json if version else [],
+            "coverage": version.coverage_json if version else None,
+        }
+
     def list_bindings(self) -> list[dict[str, Any]]:
         with get_db_session() as db:
             rows = (
@@ -514,15 +603,84 @@ class CommandProfileRepository:
                 for binding, profile, version in rows
             ]
 
+    def list_bindings_page(
+        self,
+        *,
+        status: str | None = None,
+        search: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        page_size = max(1, min(int(limit), 200))
+        page_offset = max(0, int(offset))
+        with get_db_session() as db:
+            query = (
+                db.query(
+                    CollectionProfileBindingRecord,
+                    CommandProfileRecord,
+                    CommandProfileVersionRecord,
+                )
+                .join(
+                    CommandProfileVersionRecord,
+                    CommandProfileVersionRecord.id
+                    == CollectionProfileBindingRecord.profile_version_id,
+                )
+                .join(
+                    CommandProfileRecord,
+                    CommandProfileRecord.id == CommandProfileVersionRecord.profile_id,
+                )
+            )
+            if status:
+                query = query.filter(CollectionProfileBindingRecord.status == status)
+            pattern = f"%{str(search).strip()}%" if str(search or "").strip() else None
+            if pattern:
+                query = query.filter(
+                    or_(
+                        CollectionProfileBindingRecord.id.ilike(pattern),
+                        CommandProfileRecord.name.ilike(pattern),
+                        CommandProfileVersionRecord.id.ilike(pattern),
+                    )
+                )
+            total = query.order_by(None).count()
+            rows = (
+                query.order_by(
+                    CollectionProfileBindingRecord.status,
+                    CollectionProfileBindingRecord.priority.asc(),
+                    CommandProfileRecord.name,
+                    CollectionProfileBindingRecord.id,
+                )
+                .offset(page_offset)
+                .limit(page_size)
+                .all()
+            )
+            return {
+                "items": [
+                    {
+                        **binding.to_dict(),
+                        "binding_id": binding.id,
+                        "profile_id": profile.id,
+                        "profile_name": profile.name,
+                        "profile_version": version.version,
+                        "version_status": version.status,
+                    }
+                    for binding, profile, version in rows
+                ],
+                "total": total,
+                "limit": page_size,
+                "offset": page_offset,
+            }
+
     def upsert_binding(
         self,
         *,
         profile_version_id: str,
         selector: dict[str, Any],
         priority: int = 100,
-        status: str = "active",
+        status: str = "disabled",
     ) -> str:
         selector = dict(selector or {})
+        if status not in {"disabled", "active"}:
+            raise ValueError("binding status must be active or disabled")
         with get_db_session() as db:
             version = db.get(CommandProfileVersionRecord, profile_version_id)
             if version is None:
@@ -547,15 +705,38 @@ class CommandProfileRepository:
             existing.status = status
             return existing.id
 
-    def set_binding_status(self, binding_id: str, status: str) -> dict[str, Any]:
+    def set_binding_status(
+        self,
+        binding_id: str,
+        status: str,
+        *,
+        actor: str,
+        reason: str,
+    ) -> dict[str, Any]:
         if status not in {"active", "disabled"}:
             raise ValueError("binding status must be active or disabled")
         with get_db_session() as db:
             row = db.get(CollectionProfileBindingRecord, binding_id)
             if row is None:
                 raise ValueError(f"command profile binding not found: {binding_id}")
+            previous_status = row.status
             row.status = status
-            row.updated_at = datetime.now(timezone.utc)
+            now = datetime.now(timezone.utc)
+            row.updated_at = now
+            self._record_lifecycle_audit(
+                db,
+                action=f"command_profile_binding_{status}",
+                profile_version_id=row.profile_version_id,
+                actor=actor,
+                reason=reason,
+                detail={
+                    "binding_id": binding_id,
+                    "from_status": previous_status,
+                    "to_status": status,
+                    "selector": dict(row.selector_json or {}),
+                },
+                occurred_at=now,
+            )
             return row.to_dict()
 
     def create_profile_version(
@@ -614,7 +795,13 @@ class CommandProfileRepository:
             db.add(version)
             return version.id
 
-    def activate_profile_version(self, profile_version_id: str) -> dict[str, Any]:
+    def activate_profile_version(
+        self,
+        profile_version_id: str,
+        *,
+        actor: str = "system",
+        reason: str = "system command profile activation",
+    ) -> dict[str, Any]:
         now = datetime.now(timezone.utc)
         with get_db_session() as db:
             version = db.get(CommandProfileVersionRecord, profile_version_id)
@@ -634,6 +821,15 @@ class CommandProfileRepository:
             profile.status = "active"
             profile.current_version = version.version
             profile.updated_at = now
+            self._record_lifecycle_audit(
+                db,
+                action="command_profile_activate",
+                profile_version_id=version.id,
+                actor=actor,
+                reason=reason,
+                detail={"profile_id": profile.id, "profile_name": profile.name},
+                occurred_at=now,
+            )
             return {
                 **profile.to_dict(),
                 "profile_id": profile.id,
@@ -654,7 +850,13 @@ class CommandProfileRepository:
             if not coverage:
                 raise ValueError("command profile impact evidence is required before activation")
 
-    def delete_profile_version(self, profile_version_id: str) -> dict[str, Any]:
+    def delete_profile_version(
+        self,
+        profile_version_id: str,
+        *,
+        actor: str = "system",
+        reason: str = "system command profile deletion",
+    ) -> dict[str, Any]:
         with get_db_session() as db:
             version = db.get(CommandProfileVersionRecord, profile_version_id)
             if version is None:
@@ -664,6 +866,14 @@ class CommandProfileRepository:
             profile = db.get(CommandProfileRecord, version.profile_id)
             profile_id = version.profile_id
             deleted_version = version.to_dict()
+            self._record_lifecycle_audit(
+                db,
+                action="command_profile_delete",
+                profile_version_id=profile_version_id,
+                actor=actor,
+                reason=reason,
+                detail={"profile_id": profile_id, "version": version.version},
+            )
             db.delete(version)
             db.flush()
             remaining_count = (
@@ -710,7 +920,13 @@ class CommandProfileRepository:
                 "coverage": version.coverage_json,
             }
 
-    def deprecate_profile_version(self, profile_version_id: str) -> dict[str, Any]:
+    def deprecate_profile_version(
+        self,
+        profile_version_id: str,
+        *,
+        actor: str = "system",
+        reason: str = "system command profile deprecation",
+    ) -> dict[str, Any]:
         now = datetime.now(timezone.utc)
         with get_db_session() as db:
             version = db.get(CommandProfileVersionRecord, profile_version_id)
@@ -738,10 +954,29 @@ class CommandProfileRepository:
                     profile.status = "deprecated"
                     profile.current_version = 0
                     profile.updated_at = now
+            self._record_lifecycle_audit(
+                db,
+                action="command_profile_deprecate",
+                profile_version_id=version.id,
+                actor=actor,
+                reason=reason,
+                detail={"profile_id": version.profile_id},
+                occurred_at=now,
+            )
             return version.to_dict()
 
-    def rollback_profile_version(self, profile_version_id: str) -> dict[str, Any]:
-        return self.activate_profile_version(profile_version_id)
+    def rollback_profile_version(
+        self,
+        profile_version_id: str,
+        *,
+        actor: str = "system",
+        reason: str = "system command profile rollback",
+    ) -> dict[str, Any]:
+        return self.activate_profile_version(
+            profile_version_id,
+            actor=actor,
+            reason=reason,
+        )
 
     def upsert_active_profile(
         self,
@@ -758,5 +993,9 @@ class CommandProfileRepository:
             created_by=created_by,
             status="draft",
         )
-        self.activate_profile_version(version_id)
+        self.activate_profile_version(
+            version_id,
+            actor=created_by or "system",
+            reason="upsert active command profile",
+        )
         return version_id

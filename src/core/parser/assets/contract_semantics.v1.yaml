@@ -34,24 +34,40 @@ field_aliases:
   pvid: [pvid, vlan]
   vlan: [vlan, pvid]
   vpn_instance: [vpn instance, vrf]
-  transceiver_present: [transceiver present, module present, present]
+  transceiver_present:
+    [transceiver present, transceiver presence, module present, present,
+     the transceiver is absent, transceiver is absent, transceiver absent]
   dom_supported: [dom supported, diagnostic supported, diagnostics supported]
-  rx_power_dbm: [rx power, receive power, receiver power, rx optical power]
-  tx_power_dbm: [tx power, transmit power, transmitter power, tx optical power]
-  rx_low_warning_dbm: [rx low warning, receive low warning]
-  rx_high_warning_dbm: [rx high warning, receive high warning]
-  tx_low_warning_dbm: [tx low warning, transmit low warning]
-  tx_high_warning_dbm: [tx high warning, transmit high warning]
-  rx_low_alarm_dbm: [rx low alarm, receive low alarm]
-  rx_high_alarm_dbm: [rx high alarm, receive high alarm]
-  tx_low_alarm_dbm: [tx low alarm, transmit low alarm]
-  tx_high_alarm_dbm: [tx high alarm, transmit high alarm]
+  rx_power_dbm: [rx power, receive power, receiver power, rx optical power, current rx power]
+  tx_power_dbm: [tx power, transmit power, transmitter power, tx optical power, current tx power]
+  rx_low_warning_dbm: [rx low warning, receive low warning, warning low rx power]
+  rx_high_warning_dbm: [rx high warning, receive high warning, warning high rx power]
+  tx_low_warning_dbm: [tx low warning, transmit low warning, warning low tx power]
+  tx_high_warning_dbm: [tx high warning, transmit high warning, warning high tx power]
+  rx_low_alarm_dbm: [rx low alarm, receive low alarm, alarm low rx power]
+  rx_high_alarm_dbm: [rx high alarm, receive high alarm, alarm high rx power]
+  tx_low_alarm_dbm: [tx low alarm, transmit low alarm, alarm low tx power]
+  tx_high_alarm_dbm: [tx high alarm, transmit high alarm, alarm high tx power]
   temperature_celsius: [temperature, temp]
   voltage_v: [voltage]
   bias_ma: [bias, bias current]
   serial: [serial, serial number, device serial number]
   component: [component, slot, device name]
   model: [model, product id, pid, device name]
+
+# Exact generated-schema aliases. Unlike human-readable field_aliases, this list
+# is intentionally narrow because entries here are allowed to rename API fields.
+schema_field_aliases:
+  rx_power_dbm: [current_rx_power_dbm, measured_rx_power_dbm]
+  tx_power_dbm: [current_tx_power_dbm, measured_tx_power_dbm]
+  rx_low_warning_dbm: [warning_low_rx_power_dbm]
+  rx_high_warning_dbm: [warning_high_rx_power_dbm]
+  tx_low_warning_dbm: [warning_low_tx_power_dbm]
+  tx_high_warning_dbm: [warning_high_tx_power_dbm]
+  rx_low_alarm_dbm: [alarm_low_rx_power_dbm]
+  rx_high_alarm_dbm: [alarm_high_rx_power_dbm]
+  tx_low_alarm_dbm: [alarm_low_tx_power_dbm]
+  tx_high_alarm_dbm: [alarm_high_tx_power_dbm]
 
 # This catalog is semantic, not vendor/model specific. Profiles are selected from
 # canonical command and sample evidence; adding a vendor never requires Python code.

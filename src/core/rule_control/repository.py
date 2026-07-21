@@ -6,15 +6,21 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import func, or_
+
 from src.core.rule_control.jobs import (
+    JOB_TRANSITIONS,
     RULE_GENERATION_JOB_TYPES,
     RULE_GENERATION_STATUSES,
-    JOB_TRANSITIONS,
     RuleGenerationJobStateError,
 )
-from src.infrastructure.db.models import RuleGenerationJobRecord
+from src.infrastructure.db.models import (
+    RuleAgentLoopAttemptRecord,
+    RuleApprovalAuditRecord,
+    RuleGenerationJobRecord,
+    RuleReplayReportRecord,
+)
 from src.infrastructure.db.postgres import get_db_session
-
 
 TERMINAL_RULE_GENERATION_STATUSES = {"active", "rejected", "deprecated"}
 PRIVATE_OR_LARGE_PAYLOAD_KEYS = {
@@ -84,12 +90,36 @@ class RuleGenerationJobRepository:
             db.flush()
             return row.to_dict()
 
+    def update_job(
+        self,
+        job_id: str,
+        *,
+        payload_json: dict[str, Any] | None = None,
+        validation_report_json: dict[str, Any] | None = None,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        with get_db_session() as db:
+            row = db.get(RuleGenerationJobRecord, job_id)
+            if row is None:
+                raise KeyError("rule generation job not found")
+            if payload_json is not None:
+                row.payload_json = dict(payload_json)
+            if validation_report_json is not None:
+                row.validation_report_json = dict(validation_report_json)
+            if status is not None:
+                if status not in RULE_GENERATION_STATUSES:
+                    raise ValueError(f"unsupported rule generation status: {status}")
+                row.status = status
+            row.updated_at = utcnow()
+            db.flush()
+            return row.to_dict()
+
     def list_jobs(
         self,
         *,
         job_type: str | None = None,
         status: str | None = None,
-        limit: int = 200,
+        limit: int | None = 200,
     ) -> list[dict[str, Any]]:
         with get_db_session() as db:
             query = db.query(RuleGenerationJobRecord)
@@ -104,73 +134,371 @@ class RuleGenerationJobRepository:
             )
             return [row.to_dict() for row in rows]
 
+    def list_jobs_page(
+        self,
+        *,
+        job_type: str | None = None,
+        status: str | None = None,
+        action: str | None = None,
+        asset_type: str | None = None,
+        search: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        page_size = max(1, min(int(limit), 200))
+        page_offset = max(0, int(offset))
+        with get_db_session() as db:
+            query = db.query(RuleGenerationJobRecord)
+            if job_type:
+                query = query.filter(RuleGenerationJobRecord.job_type == job_type)
+            if status:
+                query = query.filter(RuleGenerationJobRecord.status == status)
+            if asset_type:
+                query = query.filter(
+                    or_(
+                        RuleGenerationJobRecord.asset_type == asset_type,
+                        RuleGenerationJobRecord.job_type == asset_type,
+                    )
+                )
+            if action:
+                action_statuses = {
+                    "approval": {"pending_approval"},
+                    "active": {"active"},
+                    "revision": {"draft", "validating", "failed"},
+                    "submit": {"validating"},
+                }
+                statuses = action_statuses.get(action)
+                if statuses:
+                    query = query.filter(RuleGenerationJobRecord.status.in_(statuses))
+            pattern = f"%{str(search).strip()}%" if str(search or "").strip() else None
+            if pattern:
+                query = query.filter(
+                    or_(
+                        RuleGenerationJobRecord.id.ilike(pattern),
+                        RuleGenerationJobRecord.job_type.ilike(pattern),
+                        RuleGenerationJobRecord.status.ilike(pattern),
+                        RuleGenerationJobRecord.source_ref.ilike(pattern),
+                        RuleGenerationJobRecord.asset_ref.ilike(pattern),
+                        RuleGenerationJobRecord.asset_type.ilike(pattern),
+                        RuleGenerationJobRecord.asset_id.ilike(pattern),
+                        RuleGenerationJobRecord.created_by.ilike(pattern),
+                    )
+                )
+            total = query.order_by(None).count()
+            rows = (
+                query.order_by(
+                    RuleGenerationJobRecord.updated_at.desc(),
+                    RuleGenerationJobRecord.id.desc(),
+                )
+                .offset(page_offset)
+                .limit(page_size)
+                .all()
+            )
+            return {
+                "items": [row.to_dict() for row in rows],
+                "total": total,
+                "limit": page_size,
+                "offset": page_offset,
+            }
+
+    def status_counts(self) -> dict[str, int]:
+        with get_db_session() as db:
+            return {
+                str(status): int(count)
+                for status, count in db.query(
+                    RuleGenerationJobRecord.status,
+                    func.count(RuleGenerationJobRecord.id),
+                )
+                .group_by(RuleGenerationJobRecord.status)
+                .all()
+            }
+
+    def list_replay_reports_page(
+        self,
+        *,
+        success: bool | None = None,
+        asset_type: str | None = None,
+        search: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        page_size = max(1, min(int(limit), 200))
+        page_offset = max(0, int(offset))
+        with get_db_session() as db:
+            query = db.query(
+                RuleReplayReportRecord,
+                RuleGenerationJobRecord,
+            ).join(
+                RuleGenerationJobRecord,
+                RuleGenerationJobRecord.id == RuleReplayReportRecord.job_id,
+            )
+            if success is not None:
+                query = query.filter(RuleReplayReportRecord.success.is_(success))
+            if asset_type:
+                query = query.filter(RuleGenerationJobRecord.asset_type == asset_type)
+            pattern = f"%{str(search).strip()}%" if str(search or "").strip() else None
+            if pattern:
+                query = query.filter(
+                    or_(
+                        RuleGenerationJobRecord.id.ilike(pattern),
+                        RuleGenerationJobRecord.asset_type.ilike(pattern),
+                        RuleGenerationJobRecord.asset_id.ilike(pattern),
+                        RuleGenerationJobRecord.source_ref.ilike(pattern),
+                        RuleGenerationJobRecord.created_by.ilike(pattern),
+                    )
+                )
+            total = query.order_by(None).count()
+            rows = (
+                query.order_by(
+                    RuleReplayReportRecord.updated_at.desc().nullslast(),
+                    RuleGenerationJobRecord.id.desc(),
+                )
+                .offset(page_offset)
+                .limit(page_size)
+                .all()
+            )
+            return {
+                "items": [self._replay_projection(record, job) for record, job in rows],
+                "total": total,
+                "limit": page_size,
+                "offset": page_offset,
+            }
+
+    def list_approval_audit_page(
+        self,
+        *,
+        action: str | None = None,
+        asset_type: str | None = None,
+        actor: str | None = None,
+        search: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        expected_actions = {"approved", "rejected", "deprecated"}
+        if action and action not in expected_actions:
+            raise ValueError(f"unsupported approval audit action: {action}")
+        page_size = max(1, min(int(limit), 200))
+        page_offset = max(0, int(offset))
+        with get_db_session() as db:
+            query = db.query(
+                RuleApprovalAuditRecord,
+                RuleGenerationJobRecord,
+            ).join(
+                RuleGenerationJobRecord,
+                RuleGenerationJobRecord.id == RuleApprovalAuditRecord.job_id,
+            )
+            if action:
+                query = query.filter(RuleApprovalAuditRecord.action == action)
+            if asset_type:
+                query = query.filter(RuleGenerationJobRecord.asset_type == asset_type)
+            if actor:
+                query = query.filter(RuleApprovalAuditRecord.actor == actor)
+            pattern = f"%{str(search).strip()}%" if str(search or "").strip() else None
+            if pattern:
+                query = query.filter(
+                    or_(
+                        RuleGenerationJobRecord.id.ilike(pattern),
+                        RuleGenerationJobRecord.asset_type.ilike(pattern),
+                        RuleGenerationJobRecord.asset_id.ilike(pattern),
+                        RuleApprovalAuditRecord.actor.ilike(pattern),
+                        RuleApprovalAuditRecord.reason.ilike(pattern),
+                    )
+                )
+            total = query.order_by(None).count()
+            rows = (
+                query.order_by(
+                    RuleApprovalAuditRecord.occurred_at.desc().nullslast(),
+                    RuleApprovalAuditRecord.updated_at.desc().nullslast(),
+                    RuleApprovalAuditRecord.id.desc(),
+                )
+                .offset(page_offset)
+                .limit(page_size)
+                .all()
+            )
+            return {
+                "items": [self._approval_projection(record, job) for record, job in rows],
+                "total": total,
+                "limit": page_size,
+                "offset": page_offset,
+            }
+
+    def list_agent_loop_attempts_page(
+        self,
+        *,
+        asset_type: str | None = None,
+        stage: str | None = None,
+        success: bool | None = None,
+        search: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        page_size = max(1, min(int(limit), 200))
+        page_offset = max(0, int(offset))
+        with get_db_session() as db:
+            query = db.query(
+                RuleAgentLoopAttemptRecord,
+                RuleGenerationJobRecord,
+            ).join(
+                RuleGenerationJobRecord,
+                RuleGenerationJobRecord.id == RuleAgentLoopAttemptRecord.job_id,
+            )
+            if asset_type:
+                query = query.filter(RuleGenerationJobRecord.asset_type == asset_type)
+            if stage:
+                query = query.filter(RuleAgentLoopAttemptRecord.stage == stage)
+            if success is not None:
+                query = query.filter(RuleAgentLoopAttemptRecord.success.is_(success))
+            pattern = f"%{str(search).strip()}%" if str(search or "").strip() else None
+            if pattern:
+                query = query.filter(
+                    or_(
+                        RuleGenerationJobRecord.id.ilike(pattern),
+                        RuleGenerationJobRecord.asset_type.ilike(pattern),
+                        RuleGenerationJobRecord.asset_id.ilike(pattern),
+                        RuleGenerationJobRecord.source_ref.ilike(pattern),
+                        RuleGenerationJobRecord.created_by.ilike(pattern),
+                        RuleAgentLoopAttemptRecord.stage.ilike(pattern),
+                        RuleAgentLoopAttemptRecord.model_name.ilike(pattern),
+                        RuleAgentLoopAttemptRecord.generator.ilike(pattern),
+                    )
+                )
+            total = query.order_by(None).count()
+            rows = (
+                query.order_by(
+                    RuleAgentLoopAttemptRecord.updated_at.desc().nullslast(),
+                    RuleGenerationJobRecord.id.desc(),
+                    RuleAgentLoopAttemptRecord.attempt_ordinal.desc(),
+                )
+                .offset(page_offset)
+                .limit(page_size)
+                .all()
+            )
+            return {
+                "items": [self._attempt_projection(record, job) for record, job in rows],
+                "total": total,
+                "limit": page_size,
+                "offset": page_offset,
+            }
+
+    @staticmethod
+    def _iso(value: datetime | None) -> str | None:
+        return value.isoformat() if value else None
+
+    @classmethod
+    def _replay_projection(
+        cls,
+        record: RuleReplayReportRecord,
+        job: RuleGenerationJobRecord,
+    ) -> dict[str, Any]:
+        return {
+            "id": f"{job.id}:historical_replay",
+            "job_id": job.id,
+            "job_type": job.job_type,
+            "job_status": job.status,
+            "asset_type": job.asset_type,
+            "asset_id": job.asset_id,
+            "asset_version_id": job.asset_version_id,
+            "asset_digest": job.asset_digest,
+            "source_ref": job.source_ref,
+            "created_by": job.created_by,
+            "created_at": cls._iso(job.created_at),
+            "updated_at": cls._iso(job.updated_at),
+            "success": record.success,
+            "sampled_change_count": record.sampled_change_count,
+            "matched_change_count": record.matched_change_count,
+            "estimated_daily_event_count": record.estimated_daily_event_count,
+            "collision_count": record.collision_count,
+            "event_types": dict(record.event_types_json or {}),
+            "matched_entity_types": dict(record.matched_entity_types_json or {}),
+            "top_devices": dict(record.top_devices_json or {}),
+            "collision_rules": dict(record.collision_rules_json or {}),
+            "unexpected_matches": list(record.unexpected_matches_json or []),
+            "recovery_pair_coverage": record.recovery_pair_coverage_json,
+            "report_json": dict(record.report_json or {}),
+        }
+
+    @classmethod
+    def _approval_projection(
+        cls,
+        record: RuleApprovalAuditRecord,
+        job: RuleGenerationJobRecord,
+    ) -> dict[str, Any]:
+        return {
+            "id": f"{job.id}:{record.action}",
+            "job_id": job.id,
+            "job_type": job.job_type,
+            "job_status": job.status,
+            "action": record.action,
+            "actor": record.actor,
+            "reason": record.reason,
+            "occurred_at": cls._iso(record.occurred_at),
+            "asset_type": job.asset_type,
+            "asset_id": job.asset_id,
+            "asset_version_id": job.asset_version_id,
+            "asset_ref": job.asset_ref,
+            "asset_digest": job.asset_digest,
+            "source_ref": job.source_ref,
+            "validation_success": record.validation_success,
+            "synthetic_success": record.synthetic_success,
+            "replay_success": record.replay_success,
+            "created_by": job.created_by,
+            "created_at": cls._iso(job.created_at),
+            "updated_at": cls._iso(job.updated_at),
+            "governance": dict(record.governance_json or {}),
+        }
+
+    @classmethod
+    def _attempt_projection(
+        cls,
+        record: RuleAgentLoopAttemptRecord,
+        job: RuleGenerationJobRecord,
+    ) -> dict[str, Any]:
+        return {
+            "id": record.id,
+            "job_id": job.id,
+            "job_type": job.job_type,
+            "job_status": job.status,
+            "asset_type": job.asset_type,
+            "asset_id": job.asset_id,
+            "asset_version_id": job.asset_version_id,
+            "asset_ref": job.asset_ref,
+            "asset_digest": job.asset_digest,
+            "source_ref": job.source_ref,
+            "attempt": record.attempt_number,
+            "stage": record.stage,
+            "generator": record.generator,
+            "model_name": record.model_name,
+            "mode": record.mode,
+            "success": record.success,
+            "input_summary": dict(record.input_summary_json or {}),
+            "output_summary": dict(record.output_summary_json or {}),
+            "validator_feedback": dict(record.validator_feedback_json or {}),
+            "revision_request": (
+                dict(record.revision_request_json)
+                if isinstance(record.revision_request_json, dict)
+                else None
+            ),
+            "ready_for_approval": record.ready_for_approval,
+            "next_action": record.next_action,
+            "created_by": job.created_by,
+            "created_at": cls._iso(job.created_at),
+            "updated_at": cls._iso(job.updated_at),
+        }
+
     def list_replay_reports(
         self,
         *,
         success: bool | None = None,
         asset_type: str | None = None,
-        limit: int = 200,
+        limit: int | None = 200,
     ) -> list[dict[str, Any]]:
-        with get_db_session() as db:
-            query = db.query(RuleGenerationJobRecord)
-            if asset_type:
-                query = query.filter(RuleGenerationJobRecord.asset_type == asset_type)
-            rows = (
-                query.order_by(RuleGenerationJobRecord.updated_at.desc())
-                .limit(max(1, min(int(limit) * 5, 5000)))
-                .all()
-            )
-
-            reports: list[dict[str, Any]] = []
-            for row in rows:
-                replay = self._extract_historical_replay(row.validation_report_json)
-                if not replay:
-                    continue
-                replay_success = replay.get("success")
-                if success is not None and bool(replay_success) is not success:
-                    continue
-                reports.append(
-                    {
-                        "id": f"{row.id}:historical_replay",
-                        "job_id": row.id,
-                        "job_type": row.job_type,
-                        "job_status": row.status,
-                        "asset_type": row.asset_type,
-                        "asset_id": row.asset_id,
-                        "asset_version_id": row.asset_version_id,
-                        "asset_digest": row.asset_digest,
-                        "source_ref": row.source_ref,
-                        "created_by": row.created_by,
-                        "created_at": row.created_at.isoformat()
-                        if row.created_at
-                        else None,
-                        "updated_at": row.updated_at.isoformat()
-                        if row.updated_at
-                        else None,
-                        "success": replay_success,
-                        "sampled_change_count": replay.get(
-                            "sampled_change_count", 0
-                        ),
-                        "matched_change_count": replay.get("matched_change_count", 0),
-                        "estimated_daily_event_count": replay.get(
-                            "estimated_daily_event_count", 0
-                        ),
-                        "collision_count": replay.get("collision_count", 0),
-                        "event_types": replay.get("event_types") or {},
-                        "matched_entity_types": replay.get("matched_entity_types")
-                        or {},
-                        "top_devices": replay.get("top_devices") or {},
-                        "collision_rules": replay.get("collision_rules") or {},
-                        "unexpected_matches": replay.get("unexpected_matches") or [],
-                        "recovery_pair_coverage": replay.get(
-                            "recovery_pair_coverage"
-                        ),
-                        "report_json": replay,
-                    }
-                )
-                if len(reports) >= max(1, min(int(limit), 1000)):
-                    break
-            return reports
+        page_size = 1000 if limit is None else max(1, min(int(limit), 1000))
+        return self.list_replay_reports_page(
+            success=success,
+            asset_type=asset_type,
+            limit=min(page_size, 200),
+            offset=0,
+        )["items"]
 
     def list_approval_audit(
         self,
@@ -178,31 +506,16 @@ class RuleGenerationJobRepository:
         action: str | None = None,
         asset_type: str | None = None,
         actor: str | None = None,
-        limit: int = 200,
+        limit: int | None = 200,
     ) -> list[dict[str, Any]]:
-        expected_actions = {"approved", "rejected", "deprecated"}
-        if action and action not in expected_actions:
-            raise ValueError(f"unsupported approval audit action: {action}")
-        with get_db_session() as db:
-            query = db.query(RuleGenerationJobRecord)
-            if asset_type:
-                query = query.filter(RuleGenerationJobRecord.asset_type == asset_type)
-            rows = (
-                query.order_by(RuleGenerationJobRecord.updated_at.desc())
-                .limit(max(1, min(int(limit) * 5, 5000)))
-                .all()
-            )
-
-            events: list[dict[str, Any]] = []
-            for row in rows:
-                for event in self._approval_events_from_job(row):
-                    if action and event["action"] != action:
-                        continue
-                    if actor and event.get("actor") != actor:
-                        continue
-                    events.append(event)
-            events.sort(key=lambda item: str(item.get("occurred_at") or ""), reverse=True)
-            return events[: max(1, min(int(limit), 1000))]
+        page_size = 200 if limit is None else max(1, min(int(limit), 200))
+        return self.list_approval_audit_page(
+            action=action,
+            asset_type=asset_type,
+            actor=actor,
+            limit=page_size,
+            offset=0,
+        )["items"]
 
     def list_agent_loop_attempts(
         self,
@@ -210,34 +523,16 @@ class RuleGenerationJobRepository:
         asset_type: str | None = None,
         stage: str | None = None,
         success: bool | None = None,
-        limit: int = 200,
+        limit: int | None = 200,
     ) -> list[dict[str, Any]]:
-        with get_db_session() as db:
-            query = db.query(RuleGenerationJobRecord)
-            if asset_type:
-                query = query.filter(RuleGenerationJobRecord.asset_type == asset_type)
-            rows = (
-                query.order_by(RuleGenerationJobRecord.updated_at.desc())
-                .limit(max(1, min(int(limit) * 5, 5000)))
-                .all()
-            )
-
-            attempts: list[dict[str, Any]] = []
-            for row in rows:
-                for item in self._agent_loop_attempts_from_job(row):
-                    if stage and item.get("stage") != stage:
-                        continue
-                    if success is not None and bool(item.get("success")) is not success:
-                        continue
-                    attempts.append(item)
-            attempts.sort(
-                key=lambda item: (
-                    str(item.get("updated_at") or ""),
-                    int(item.get("attempt") or 0),
-                ),
-                reverse=True,
-            )
-            return attempts[: max(1, min(int(limit), 1000))]
+        page_size = 200 if limit is None else max(1, min(int(limit), 200))
+        return self.list_agent_loop_attempts_page(
+            asset_type=asset_type,
+            stage=stage,
+            success=success,
+            limit=page_size,
+            offset=0,
+        )["items"]
 
     def get_job(self, job_id: str) -> dict[str, Any] | None:
         with get_db_session() as db:
@@ -270,11 +565,7 @@ class RuleGenerationJobRepository:
             if isinstance(job.get("validation_report_json"), dict)
             else {}
         )
-        payload = (
-            job.get("payload_json")
-            if isinstance(job.get("payload_json"), dict)
-            else {}
-        )
+        payload = job.get("payload_json") if isinstance(job.get("payload_json"), dict) else {}
         replay = self._extract_historical_replay(report)
         agent_loop = self._first_agent_loop_report(report)
         candidate = self._extract_candidate_preview(payload, report)
@@ -431,11 +722,7 @@ class RuleGenerationJobRepository:
             if isinstance(report.get("synthetic_validation"), dict)
             else {}
         )
-        validation = (
-            report.get("validation")
-            if isinstance(report.get("validation"), dict)
-            else {}
-        )
+        validation = report.get("validation") if isinstance(report.get("validation"), dict) else {}
         errors = report.get("errors")
         if not isinstance(errors, list):
             errors = validation.get("errors") if isinstance(validation.get("errors"), list) else []
@@ -456,13 +743,13 @@ class RuleGenerationJobRepository:
             "success": replay.get("success"),
             "sampled_change_count": replay.get("sampled_change_count", 0),
             "matched_change_count": replay.get("matched_change_count", 0),
+            "total_change_count": replay.get("total_change_count"),
             "collision_count": replay.get("collision_count", 0),
-            "estimated_daily_event_count": replay.get(
-                "estimated_daily_event_count", 0
-            ),
+            "estimated_daily_event_count": replay.get("estimated_daily_event_count", 0),
             "event_types": replay.get("event_types") or {},
             "matched_entity_types": replay.get("matched_entity_types") or {},
             "recovery_pair_coverage": replay.get("recovery_pair_coverage"),
+            "representativeness": replay.get("representativeness"),
         }
 
     @classmethod
@@ -477,7 +764,9 @@ class RuleGenerationJobRepository:
     def _agent_loop_summary(agent_loop: dict[str, Any] | None) -> dict[str, Any] | None:
         if not agent_loop:
             return None
-        attempts = agent_loop.get("attempts") if isinstance(agent_loop.get("attempts"), list) else []
+        attempts = (
+            agent_loop.get("attempts") if isinstance(agent_loop.get("attempts"), list) else []
+        )
         last_attempt = attempts[-1] if attempts and isinstance(attempts[-1], dict) else {}
         return {
             "ready_for_approval": agent_loop.get("ready_for_approval"),
@@ -553,13 +842,8 @@ class RuleGenerationJobRepository:
             return safe
         if isinstance(value, list):
             return [
-                cls._safe_json(item, depth=depth + 1, max_depth=max_depth)
-                for item in value[:20]
-            ] + (
-                [{"truncated": True, "remaining": len(value) - 20}]
-                if len(value) > 20
-                else []
-            )
+                cls._safe_json(item, depth=depth + 1, max_depth=max_depth) for item in value[:20]
+            ] + ([{"truncated": True, "remaining": len(value) - 20}] if len(value) > 20 else [])
         if isinstance(value, str) and len(value) > 500:
             return {"type": "string", "length": len(value), "truncated": True}
         return value
@@ -688,12 +972,8 @@ class RuleGenerationJobRepository:
                         else None
                     ),
                     "created_by": row.created_by,
-                    "created_at": row.created_at.isoformat()
-                    if row.created_at
-                    else None,
-                    "updated_at": row.updated_at.isoformat()
-                    if row.updated_at
-                    else None,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                    "updated_at": row.updated_at.isoformat() if row.updated_at else None,
                     "governance": governance,
                 }
             )
@@ -766,12 +1046,8 @@ class RuleGenerationJobRepository:
                         "ready_for_approval": loop.get("ready_for_approval"),
                         "next_action": loop.get("next_action"),
                         "created_by": row.created_by,
-                        "created_at": row.created_at.isoformat()
-                        if row.created_at
-                        else None,
-                        "updated_at": row.updated_at.isoformat()
-                        if row.updated_at
-                        else None,
+                        "created_at": row.created_at.isoformat() if row.created_at else None,
+                        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
                     }
                 )
         return attempts

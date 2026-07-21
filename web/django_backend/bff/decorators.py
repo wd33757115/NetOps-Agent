@@ -108,6 +108,57 @@ def require_role(*allowed_roles: str):
     return decorator
 
 
+_READ_ONLY_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+def require_role_with_viewer_readonly(*write_roles: str):
+    """角色校验：write_roles 拥有全部方法；viewer 只读（GET/HEAD/OPTIONS）。
+
+    审计场景（领导看巡检报告、规则资产状态）用 viewer 角色即可，
+    不再被迫发放 operator 权限。
+    """
+
+    allowed_write = {r.lower() for r in write_roles}
+
+    def _check(request):
+        user = getattr(request, "user", None)
+        if not user or not getattr(user, "is_authenticated", False):
+            return bff_error("Authentication credentials were not provided.", 401)
+        if getattr(user, "is_superuser", False):
+            return None
+        role = _request_role(request)
+        if role in allowed_write:
+            return None
+        if role == "viewer":
+            if request.method in _READ_ONLY_METHODS:
+                return None
+            return bff_error("viewer 角色仅有只读权限", 403)
+        return bff_error(f"角色 {role} 无权访问", 403)
+
+    def decorator(view_func):
+        if asyncio.iscoroutinefunction(view_func):
+
+            @wraps(view_func)
+            async def async_wrapper(request, *args, **kwargs):
+                denied = _check(request)
+                if denied is not None:
+                    return denied
+                return await view_func(request, *args, **kwargs)
+
+            return async_wrapper
+
+        @wraps(view_func)
+        def sync_wrapper(request, *args, **kwargs):
+            denied = _check(request)
+            if denied is not None:
+                return denied
+            return view_func(request, *args, **kwargs)
+
+        return sync_wrapper
+
+    return decorator
+
+
 def require_jwt(view_func=None, *, strict: bool | None = None):
     """BFF JWT 鉴权：兼容同步/异步视图。
 

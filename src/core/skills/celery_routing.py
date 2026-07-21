@@ -20,7 +20,7 @@ ROLE_QUEUE_MAP: dict[str, str] = {
     "state-normalizer": "netops.patrol",
     "change-detector": "netops.patrol",
     "event-builder": "netops.patrol",
-    "patrol-raw-ingestor": "netops.patrol",
+    "patrol-raw-ingestor": "netops.ai",
     "report-generator": "netops.patrol",
     "textfsm-generator": "netops.ai",
     "observation-contract-generator": "netops.ai",

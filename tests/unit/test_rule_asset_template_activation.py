@@ -175,6 +175,15 @@ def test_publish_parser_outbox_seeds_rule_asset_generation(monkeypatch):
             assert template_id == "template-1"
             return {"success": True, "created": True, "job": {"id": "job-1"}}
 
+        def auto_build_context(self, job_id):
+            assert job_id == "job-1"
+            return {
+                "success": True,
+                "context_id": "ctx-1",
+                "ready": True,
+                "quality": {"passed": True, "record_count": 20},
+            }
+
     monkeypatch.setattr(parser_tasks, "ParserTemplateRepository", FakeRepository)
     monkeypatch.setattr(parser_tasks, "ParserOutboxRepository", FakeOutboxRepository)
     monkeypatch.setattr(parser_tasks, "RuleAssetTemplateActivationService", FakeSeedService)
@@ -184,7 +193,17 @@ def test_publish_parser_outbox_seeds_rule_asset_generation(monkeypatch):
 
     assert result["published"] == ["event-1"]
     assert result["rule_asset_seeds"] == [
-        {"success": True, "created": True, "job": {"id": "job-1"}}
+        {
+            "success": True,
+            "created": True,
+            "job": {"id": "job-1"},
+            "auto_context": {
+                "success": True,
+                "context_id": "ctx-1",
+                "ready": True,
+                "quality": {"passed": True, "record_count": 20},
+            },
+        }
     ]
 
 
@@ -388,13 +407,24 @@ def test_start_generation_workflow_uses_prepared_context(monkeypatch):
             return "workflow-1"
 
     import src.core.workflows.engine as workflow_engine
+    from src.core.rule_control.dataset_context import DatasetRuleGenerationContextService
 
     monkeypatch.setattr(workflow_engine, "WorkflowEngine", FakeWorkflowEngine)
+    monkeypatch.setattr(
+        DatasetRuleGenerationContextService,
+        "load",
+        lambda self, *, context_id, job_id: {
+            "context_id": context_id,
+            "context_digest": "digest-1",
+            "context": {"records": [{"interface": "Gi1", "status": "up"}]},
+            "privacy": {"success": True, "raw_cli_included": False},
+        },
+    )
     service = RuleAssetTemplateActivationService(job_repository=FakeJobRepository())
 
     result = service.start_generation_workflow(
         "job-1",
-        context_overrides={"records": [{"interface": "Gi1", "status": "up"}]},
+        context_id="context-1",
         actor="operator",
     )
 
@@ -406,3 +436,14 @@ def test_start_generation_workflow_uses_prepared_context(monkeypatch):
     assert started[0][1]["source_template_id"] == "template-1"
     assert started[0][2]["source"] == "parser-control-plane"
     assert started[0][2]["user_id"] == "operator"
+
+
+def test_start_generation_workflow_rejects_context_without_offline_evidence():
+    service = RuleAssetTemplateActivationService(job_repository=object())
+
+    try:
+        service.start_generation_workflow("job-1", actor="operator")
+    except ValueError as exc:
+        assert "immutable offline patrol context_id" in str(exc)
+    else:
+        raise AssertionError("generation should require immutable offline evidence")

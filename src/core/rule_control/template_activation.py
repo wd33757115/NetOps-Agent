@@ -116,6 +116,64 @@ class RuleAssetTemplateActivationService:
             "missing_context": missing_context,
         }
 
+    def auto_build_context(
+        self,
+        job_id: str,
+        *,
+        actor: str | None = None,
+    ) -> dict[str, Any]:
+        """Build immutable context from parser-template snapshots when possible.
+
+        Contexts that fail the quality gate (too few sampled records or a
+        mostly-empty target field) are persisted for inspection but do NOT mark
+        the job ready: missing_context is kept so operators attach a real
+        offline dataset instead of generating from unreliable samples.
+        """
+        from src.core.rule_control.dataset_context import DatasetRuleGenerationContextService
+
+        prepared = DatasetRuleGenerationContextService().prepare_from_parser_template(
+            job_id=job_id,
+            created_by=actor or "parser-template-activation",
+        )
+        quality = dict((prepared.get("privacy") or {}).get("quality") or {})
+        quality_passed = bool(quality.get("passed", True))
+        job = self.job_repository.get_job(job_id)
+        payload = dict((job or {}).get("payload_json") or {})
+        payload["auto_context_id"] = prepared["context_id"]
+        payload["auto_context_digest"] = prepared["context_digest"]
+        validation = dict((job or {}).get("validation_report_json") or {})
+        validation["auto_context"] = {
+            "context_id": prepared["context_id"],
+            "context_digest": prepared["context_digest"],
+            "sampled_record_count": (prepared.get("privacy") or {}).get("sampled_record_count"),
+            "quality": quality,
+        }
+        if quality_passed:
+            payload["missing_context"] = []
+            validation["ready_for_generation"] = True
+            validation["missing_context"] = []
+        else:
+            remaining = list(payload.get("missing_context") or ["records"])
+            if "records" not in remaining:
+                remaining.append("records")
+            payload["missing_context"] = remaining
+            validation["ready_for_generation"] = False
+            validation["missing_context"] = remaining
+            validation["quality_gate_failed"] = quality.get("reasons") or []
+        self.job_repository.update_job(
+            job_id,
+            payload_json=payload,
+            validation_report_json=validation,
+        )
+        return {
+            "success": True,
+            "job_id": job_id,
+            **prepared,
+            "ready": quality_passed,
+            "quality": quality,
+            "missing_context": payload["missing_context"],
+        }
+
     def build_generation_context(
         self,
         job_id: str,
@@ -157,7 +215,7 @@ class RuleAssetTemplateActivationService:
             "missing_context": missing,
             "privacy": {
                 "raw_cli_included": False,
-                "records_source": "operator_or_workflow_supplied_sanitized_records"
+                "records_source": "validated_structured_records"
                 if context.get("records")
                 else "not_supplied",
             },
@@ -171,24 +229,27 @@ class RuleAssetTemplateActivationService:
         actor: str | None = None,
         context_id: str | None = None,
     ) -> dict[str, Any]:
+        if not context_id:
+            raise ValueError(
+                "rule asset generation requires an immutable offline patrol context_id"
+            )
         overrides = dict(context_overrides or {})
         immutable_context: dict[str, Any] | None = None
-        if context_id:
-            from src.core.rule_control.dataset_context import (
-                DatasetRuleGenerationContextService,
-            )
+        from src.core.rule_control.dataset_context import (
+            DatasetRuleGenerationContextService,
+        )
 
-            immutable_context = DatasetRuleGenerationContextService().load(
-                context_id=context_id,
-                job_id=job_id,
-            )
-            frozen = dict(immutable_context.get("context") or {})
-            for key, value in frozen.items():
-                if key in overrides and overrides[key] != value:
-                    raise ValueError(
-                        f"immutable rule generation context field cannot be overridden: {key}"
-                    )
-            overrides = {**frozen, **overrides}
+        immutable_context = DatasetRuleGenerationContextService().load(
+            context_id=context_id,
+            job_id=job_id,
+        )
+        frozen = dict(immutable_context.get("context") or {})
+        for key, value in frozen.items():
+            if key in overrides and overrides[key] != value:
+                raise ValueError(
+                    f"immutable rule generation context field cannot be overridden: {key}"
+                )
+        overrides = {**frozen, **overrides}
 
         prepared = self.build_generation_context(
             job_id,
@@ -202,11 +263,8 @@ class RuleAssetTemplateActivationService:
         from src.core.workflows.engine import WorkflowEngine
 
         workflow_context = dict(prepared["context"])
-        if context_id and immutable_context:
-            workflow_context["rule_generation_context_id"] = context_id
-            workflow_context["rule_generation_context_digest"] = immutable_context[
-                "context_digest"
-            ]
+        workflow_context["rule_generation_context_id"] = context_id
+        workflow_context["rule_generation_context_digest"] = immutable_context["context_digest"]
         run_id = WorkflowEngine.start(
             "rule-asset-generation",
             workflow_context,

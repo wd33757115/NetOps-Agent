@@ -105,8 +105,16 @@ class RuntimeRuleAssetSeedService:
         self.change_policy_repository = change_policy_repository or ChangePolicyRepository()
         self.event_rule_repository = event_rule_repository or EventRuleRepository()
 
-    def seed_builtin_assets(self, *, actor: str | None = None) -> dict[str, Any]:
-        event_rules_created = self.event_rule_repository.ensure_default_rules()
+    def seed_builtin_assets(
+        self,
+        *,
+        actor: str | None = None,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        event_rules_created = self.event_rule_repository.ensure_default_rules(
+            actor=actor,
+            reason=reason,
+        )
         policies: list[dict[str, Any]] = []
         skipped: list[str] = []
         for policy in BUILTIN_CHANGE_POLICIES:
@@ -129,7 +137,9 @@ class RuntimeRuleAssetSeedService:
                 version=1,
             )
             activated = self.change_policy_repository.activate_policy_version(
-                str(created["version_id"])
+                str(created["version_id"]),
+                actor=actor,
+                reason=reason,
             )
             policies.append(activated)
 

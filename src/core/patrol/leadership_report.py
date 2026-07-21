@@ -739,6 +739,14 @@ def _assessment(
             "basis": "该任务用于发现和修复结构化解析模板及数据契约缺口，未执行双周期状态比较",
             "conclusion_allowed": False,
         }
+    if summary.get("report_purpose") == "rule_asset_replay":
+        return {
+            "code": "rule_replay_only",
+            "status": "已完成双周期规则回放，不形成网络健康结论",
+            "trust": "不适用",
+            "basis": "该任务用于验证候选变化与事件规则，不是正式设备巡检批次",
+            "conclusion_allowed": False,
+        }
     if active_count:
         return {
             "code": "in_progress",
@@ -1075,10 +1083,24 @@ def build_leadership_report(
                     "chain": dict(item.get("evidence_chain") or {}),
                 }
             )
+    is_asset_evidence_report = summary.get("report_purpose") in {
+        "parser_validation",
+        "rule_asset_replay",
+    }
     return {
-        "schema_version": "leadership-patrol-report/v1",
-        "document_type": "网络设备巡检报告",
-        "title": "网络设备巡检情况报告",
+        "schema_version": (
+            "rule-asset-evidence-report/v1"
+            if is_asset_evidence_report
+            else "leadership-patrol-report/v1"
+        ),
+        "document_type": (
+            "规则资产验证报告" if is_asset_evidence_report else "网络设备巡检报告"
+        ),
+        "title": (
+            "规则资产样本验证与回放报告"
+            if is_asset_evidence_report
+            else "网络设备巡检情况报告"
+        ),
         "issuer": issuer,
         "recipient": recipient,
         "patrol_batch_id": patrol_batch_id,

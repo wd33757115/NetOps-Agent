@@ -45,6 +45,7 @@ def build_cli_evidence(snapshot: CommandSnapshot) -> RawEvidence:
     return RawEvidence(
         evidence_id=evidence_id_for_command_snapshot(snapshot.id),
         evidence_key=f"cli_command_snapshot:{snapshot.id}",
+        source="cli",
         source_type="cli",
         evidence_type="cli_command_output",
         device_id=snapshot.device_id,
@@ -93,6 +94,7 @@ class RawEvidenceRepository:
                 created_at=now,
             )
             db.add(row)
+        row.source = evidence.source or evidence.source_type or "cli"
         row.source_type = evidence.source_type
         row.evidence_type = evidence.evidence_type
         row.run_id = evidence.run_id

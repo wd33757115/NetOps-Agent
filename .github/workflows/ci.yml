@@ -83,6 +83,18 @@ jobs:
           POSTGRES_HOST: localhost
           REDIS_HOST: localhost
           DEBUG: "false"
+      - name: Patrol and parser quality gate
+        run: |
+          pytest \
+            tests/unit/test_patrol_change_event_pipeline.py \
+            tests/unit/test_parser_work_queue.py \
+            tests/unit/test_patrol_production_readiness.py \
+            tests/unit/test_patrol_coverage_policy.py \
+            -v --timeout 30
+        env:
+          POSTGRES_HOST: localhost
+          REDIS_HOST: localhost
+          DEBUG: "false"
 
   test-django:
     needs: lint

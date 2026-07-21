@@ -37,6 +37,11 @@ const { listBundles } = vi.hoisted(() => ({
         asset_counts: { OBSERVATION_CONTRACT: 1, CHANGE_POLICY: 1, EVENT_RULE: 2 },
         active_asset_counts: {},
         release_ready: true,
+        engineering_review: {
+          decision: 'accepted',
+          actor: 'rule-engineer',
+          reason: '候选语义和回放结果符合要求',
+        },
         blockers: [],
         replay: {
           sampled_change_count: 62,
@@ -73,6 +78,7 @@ const { listBundles } = vi.hoisted(() => ({
           { key: 'policy', label: 'policy', status: 'passed', detail: {} },
           { key: 'rules', label: 'rules', status: 'passed', detail: {} },
           { key: 'replay', label: 'replay', status: 'passed', detail: { matched_change_count: 26, collision_count: 0 } },
+          { key: 'review', label: 'review', status: 'passed', detail: {} },
           { key: 'release', label: 'release', status: 'ready', detail: {} },
         ],
         children: [
@@ -196,7 +202,7 @@ describe('RuleAssetBundleWorkspace', () => {
   it('focuses bundles by immutable offline job context', async () => {
     renderFocusedWorkspace()
 
-    expect(await screen.findByText(/正在查看离线任务 offline-job-1/)).toBeVisible()
+    expect(await screen.findByText(/正在查看样本任务 offline-job-1/)).toBeVisible()
     expect(listBundles).toHaveBeenCalledWith(expect.objectContaining({ search: 'offline-job-1' }))
   })
 
@@ -214,7 +220,7 @@ describe('RuleAssetBundleWorkspace', () => {
       </QueryClientProvider>,
     )
 
-    expect(await screen.findByText('当前离线任务没有待治理的候选资产包')).toBeVisible()
+    expect(await screen.findByText('当前样本任务没有待治理的候选资产包')).toBeVisible()
     expect(screen.getByText(/没有候选包不代表运行时资产缺失/)).toBeVisible()
     await user.click(screen.getByRole('button', { name: '检查资产链' }))
     expect(inspectAssetChain).toHaveBeenCalledTimes(1)

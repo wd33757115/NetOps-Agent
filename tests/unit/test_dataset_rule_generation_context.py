@@ -4,6 +4,8 @@ import json
 import uuid
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from src.core.rule_control.dataset_context import (
     DatasetRuleGenerationContextService,
     _round_robin_snapshot_records,
@@ -18,6 +20,7 @@ from src.infrastructure.db.models import (
     PatrolRun,
     RuleGenerationContextRecord,
     RuleGenerationJobRecord,
+    SnapshotParseResult,
 )
 from src.infrastructure.db.postgres import get_db_session
 
@@ -81,6 +84,138 @@ def test_rule_context_prefers_comparable_contract_semantics_over_identity_defaul
     assert selected == "link"
 
 
+def test_rule_context_load_rejects_legacy_context_without_offline_job_evidence():
+    suffix = uuid.uuid4().hex
+    job_id = f"rule-job-legacy-{suffix}"
+    context_id = f"context-legacy-{suffix}"
+
+    with get_db_session() as db:
+        db.add(
+            RuleGenerationJobRecord(
+                id=job_id,
+                job_type="OBSERVATION_CONTRACT",
+                status="draft",
+                payload_json={},
+            )
+        )
+        db.flush()
+        db.add(
+            RuleGenerationContextRecord(
+                id=context_id,
+                job_id=job_id,
+                offline_job_id=None,
+                dataset_ids_json=[f"legacy-dataset-{suffix}"],
+                context_json={"records": [{"interface": "GE1/0/1"}]},
+                context_digest=suffix,
+                privacy_report_json={
+                    "success": True,
+                    "scope_type": "dataset_structured_records",
+                    "raw_cli_included": False,
+                },
+                created_by="unit-test",
+            )
+        )
+
+    try:
+        with pytest.raises(
+            ValueError,
+            match="not backed by an offline patrol job",
+        ):
+            DatasetRuleGenerationContextService().load(
+                context_id=context_id,
+                job_id=job_id,
+            )
+    finally:
+        with get_db_session() as db:
+            db.query(RuleGenerationContextRecord).filter(
+                RuleGenerationContextRecord.id == context_id
+            ).delete(synchronize_session=False)
+            db.query(RuleGenerationJobRecord).filter(
+                RuleGenerationJobRecord.id == job_id
+            ).delete(synchronize_session=False)
+
+
+def test_rule_context_rejects_offline_patrol_execution_dataset():
+    suffix = uuid.uuid4().hex
+    job_id = f"rule-job-patrol-boundary-{suffix}"
+    template_id = f"template-patrol-boundary-{suffix}"
+    offline_job_id = f"offline-patrol-boundary-{suffix}"
+    dataset_id = f"dataset-patrol-boundary-{suffix}"
+
+    with get_db_session() as db:
+        db.add(
+            OfflinePatrolJobRecord(
+                id=offline_job_id,
+                idempotency_key=f"idempotency-patrol-boundary-{suffix}",
+                purpose="offline_patrol",
+                job_type="single_patrol",
+                name="patrol execution evidence",
+                owner_id="unit-test",
+                status="completed",
+            )
+        )
+        db.add(
+            OfflinePatrolPeriodRecord(
+                id=f"period-patrol-boundary-{suffix}",
+                job_id=offline_job_id,
+                role="current",
+                label="current",
+                observed_at=datetime.now(timezone.utc),
+                dataset_id=dataset_id,
+                patrol_run_id=f"run-patrol-boundary-{suffix}",
+                status="completed",
+            )
+        )
+        db.add(
+            ParserTemplate(
+                id=template_id,
+                vendor="H3C",
+                profile="S5130S",
+                canonical_command="display interface brief",
+                category="interface_status",
+                version="1.0.0",
+                asset_path="tests/fixtures/interface.textfsm",
+                sha256="b" * 64,
+                status="active",
+                validation_json={
+                    "contract_approval_status": "approved",
+                    "primary_keys": ["interface"],
+                    "required_fields": ["interface", "status"],
+                },
+            )
+        )
+        db.add(
+            RuleGenerationJobRecord(
+                id=job_id,
+                job_type="OBSERVATION_CONTRACT",
+                status="draft",
+                payload_json={"template_id": template_id},
+            )
+        )
+
+    try:
+        with pytest.raises(ValueError, match="Parser control asset-source jobs"):
+            DatasetRuleGenerationContextService().prepare(
+                job_id=job_id,
+                dataset_ids=[dataset_id],
+                created_by="unit-test",
+            )
+    finally:
+        with get_db_session() as db:
+            db.query(OfflinePatrolPeriodRecord).filter(
+                OfflinePatrolPeriodRecord.job_id == offline_job_id
+            ).delete(synchronize_session=False)
+            db.query(OfflinePatrolJobRecord).filter(
+                OfflinePatrolJobRecord.id == offline_job_id
+            ).delete(synchronize_session=False)
+            db.query(RuleGenerationJobRecord).filter(
+                RuleGenerationJobRecord.id == job_id
+            ).delete(synchronize_session=False)
+            db.query(ParserTemplate).filter(ParserTemplate.id == template_id).delete(
+                synchronize_session=False
+            )
+
+
 def test_dataset_rule_context_is_immutable_balanced_and_sanitized():
     suffix = uuid.uuid4().hex
     job_id = f"rule-job-{suffix}"
@@ -115,6 +250,7 @@ def test_dataset_rule_context_is_immutable_balanced_and_sanitized():
             OfflinePatrolJobRecord(
                 id=offline_job_id,
                 idempotency_key=f"idempotency-{suffix}",
+                purpose="rule_asset_source",
                 job_type="history_compare",
                 name="authoritative context test",
                 owner_id="unit-test",
@@ -216,14 +352,26 @@ def test_dataset_rule_context_is_immutable_balanced_and_sanitized():
                     management_ip=f"10.0.0.{index + 1}",
                     command="display transceiver diagnosis interface",
                     canonical_command="display transceiver diagnosis interface",
-                    parser_template_id=template_id,
+                    parser_template_id=template_id if index == 1 else None,
                     observed_at=observed_at + timedelta(days=index),
-                    structured_json=records[index],
+                    structured_json=records[index] if index == 1 else None,
                     raw_text=f"raw CLI with password secret-{index}",
                     raw_text_hash=f"hash-{index}-{suffix}",
-                    parse_status="parsed",
+                    parse_status="parsed" if index == 1 else "template_missing",
                 )
             )
+            if index == 0:
+                db.add(
+                    SnapshotParseResult(
+                        id=f"reparse-{index}-{suffix}",
+                        snapshot_id=f"snapshot-{index}-{suffix}",
+                        template_id=template_id,
+                        template_version="1.0.0",
+                        parse_status="success",
+                        structured_json=records[index],
+                        parsed_at=observed_at + timedelta(hours=1),
+                    )
+                )
             db.add(
                 CommandSnapshot(
                     id=f"snapshot-stale-{index}-{suffix}",
@@ -271,6 +419,11 @@ def test_dataset_rule_context_is_immutable_balanced_and_sanitized():
             for group in first["context"]["record_groups"]
         )
         assert first["privacy"]["source_snapshot_count"] == 2
+        assert first["privacy"]["capture_snapshot_count"] == 1
+        assert first["privacy"]["reparse_snapshot_count"] == 1
+        assert first["privacy"]["source_resolution"] == (
+            "latest_successful_reparse_then_capture"
+        )
         assert first["privacy"]["scope_type"] == "offline_period_authoritative_runs"
         assert first["privacy"]["dataset_run_scopes"] == [
             {"dataset_id": dataset_ids[0], "run_id": run_ids[0]},
@@ -317,6 +470,11 @@ def test_dataset_rule_context_is_immutable_balanced_and_sanitized():
                 RuleGenerationContextRecord.job_id == job_id
             ).delete(synchronize_session=False)
             all_run_ids = run_ids + stale_run_ids
+            db.query(SnapshotParseResult).filter(
+                SnapshotParseResult.snapshot_id.in_(
+                    [f"snapshot-{index}-{suffix}" for index in range(2)]
+                )
+            ).delete(synchronize_session=False)
             db.query(CommandSnapshot).filter(CommandSnapshot.run_id.in_(all_run_ids)).delete(
                 synchronize_session=False
             )

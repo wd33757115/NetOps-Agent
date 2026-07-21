@@ -329,12 +329,17 @@ class RuleAssetApprovalService:
         job: RuleGenerationJobRecord,
         *,
         actor: str | None,
+        reason: str | None,
         now: datetime,
     ) -> None:
         job.status = "active"
         job.validation_report_json = _merge_governance(
             dict(job.validation_report_json or {}),
-            {"approved_by": actor, "approved_at": now.isoformat()},
+            {
+                "approved_by": actor,
+                "approved_at": now.isoformat(),
+                "approval_reason": reason,
+            },
         )
         job.updated_at = now
         job.completed_at = now
@@ -345,6 +350,7 @@ class RuleAssetApprovalService:
         bundle: RuleGenerationJobRecord,
         *,
         actor: str | None,
+        reason: str | None,
         now: datetime,
     ) -> dict[str, Any]:
         if bundle.status != "pending_approval":
@@ -356,14 +362,17 @@ class RuleAssetApprovalService:
         context_gate = dict(report.get("context_gate") or {})
         replay = dict(report.get("historical_replay") or {})
         replay_gate = evaluate_historical_replay_gate(replay, context_gate)
+        engineering_review = dict((report.get("governance") or {}).get("engineering_review") or {})
         if (
             report.get("success") is not True
             or gate.get("success") is not True
             or context_gate.get("success") is not True
             or replay_gate.get("success") is not True
+            or engineering_review.get("decision") != "accepted"
         ):
             raise RuleGenerationJobStateError(
-                "rule asset bundle cannot be approved before all release gates pass"
+                "rule asset bundle cannot be approved before validation, replay, "
+                "engineering review and all release gates pass"
             )
         child_ids = self._bundle_child_ids(bundle)
         if not child_ids:
@@ -646,12 +655,12 @@ class RuleAssetApprovalService:
         activation_snapshot["superseded_bundles"] = superseded["bundles"]
 
         for child in children:
-            self._mark_job_active(child, actor=actor, now=now)
+            self._mark_job_active(child, actor=actor, reason=reason, now=now)
         bundle.validation_report_json = _merge_governance(
             dict(bundle.validation_report_json or {}),
             {"activation_snapshot": activation_snapshot},
         )
-        self._mark_job_active(bundle, actor=actor, now=now)
+        self._mark_job_active(bundle, actor=actor, reason=reason, now=now)
         db.flush()
         return {
             "success": True,
@@ -940,7 +949,13 @@ class RuleAssetApprovalService:
             "atomic": True,
         }
 
-    def approve(self, job_id: str, *, actor: str | None = None) -> dict[str, Any]:
+    def approve(
+        self,
+        job_id: str,
+        *,
+        actor: str | None = None,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
         now = _utcnow()
         with get_db_session() as db:
             job = (
@@ -952,7 +967,7 @@ class RuleAssetApprovalService:
             if job is None:
                 raise KeyError("rule generation job not found")
             if job.job_type == "RULE_ASSET_BUNDLE":
-                return self._approve_bundle(db, job, actor=actor, now=now)
+                return self._approve_bundle(db, job, actor=actor, reason=reason, now=now)
             self._assert_direct_action_allowed(job)
             if job.status != "pending_approval":
                 raise RuleGenerationJobStateError(
@@ -1073,7 +1088,11 @@ class RuleAssetApprovalService:
                     job.asset_digest = version.digest
             job.validation_report_json = _merge_governance(
                 validation_report,
-                {"approved_by": actor, "approved_at": now.isoformat()},
+                {
+                    "approved_by": actor,
+                    "approved_at": now.isoformat(),
+                    "approval_reason": reason,
+                },
             )
             job.updated_at = now
             job.completed_at = now

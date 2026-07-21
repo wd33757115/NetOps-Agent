@@ -368,6 +368,20 @@ def generate_event_rule_definitions(
             )
         )
 
+    if observation_type:
+        definitions = [
+            replace(
+                definition,
+                condition={
+                    **dict(definition.condition or {}),
+                    "observation_types": [observation_type],
+                },
+            )
+            if str((definition.condition or {}).get("kind") or "") != "raw_config_hash"
+            else definition
+            for definition in definitions
+        ]
+
     recovery_pairs = {
         "CPURecovered": ["CPUHigh"],
         "MemoryRecovered": ["MemoryHigh"],

@@ -6,7 +6,14 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from src.core.patrol.offline_jobs import OfflinePatrolJobService, _offline_job_display_name
+from src.core.patrol.offline_jobs import (
+    OfflinePatrolJobService,
+    _normalized_preview,
+    _offline_job_display_name,
+    _preview_device_totals,
+)
+from src.core.rule_control.command_asset_units import RuleAssetCommandUnitService
+from src.gateway.offline_patrol_api import router as rule_asset_source_router
 from src.infrastructure.db.models import (
     OfflinePatrolJobRecord,
     OfflinePatrolPeriodRecord,
@@ -14,6 +21,30 @@ from src.infrastructure.db.models import (
     WorkflowStepRecord,
 )
 from src.infrastructure.db.postgres import get_db_session
+
+
+def test_rule_asset_source_and_offline_patrol_are_separate_first_class_apis():
+    routes = {
+        route.path: route
+        for route in rule_asset_source_router.routes
+        if hasattr(route, "path")
+    }
+
+    canonical = "/api/v1/parser/asset-source-jobs/{job_id}/asset-production-pipeline"
+    patrol_asset_endpoint = (
+        "/api/v1/patrol/offline-jobs/{job_id}/asset-production-pipeline"
+    )
+    patrol_command_assets_endpoint = (
+        "/api/v1/patrol/offline-jobs/{job_id}/command-asset-units"
+    )
+    patrol_list = "/api/v1/patrol/offline-jobs"
+    patrol_execute = "/api/v1/patrol/offline-jobs/{job_id}/execute"
+    assert canonical in routes
+    assert routes[canonical].deprecated is not True
+    assert patrol_list in routes
+    assert patrol_execute in routes
+    assert patrol_asset_endpoint not in routes
+    assert patrol_command_assets_endpoint not in routes
 
 
 def test_offline_job_is_idempotent_paginated_and_owner_scoped():
@@ -60,6 +91,69 @@ def test_offline_job_is_idempotent_paginated_and_owner_scoped():
             db.query(OfflinePatrolJobRecord).filter(
                 OfflinePatrolJobRecord.owner_id == owner_id
             ).delete(synchronize_session=False)
+
+
+def test_offline_patrol_and_rule_asset_source_jobs_are_workspace_scoped():
+    service = OfflinePatrolJobService()
+    suffix = uuid.uuid4().hex
+    owner_id = f"offline-purpose-owner-{suffix}"
+    observed_at = datetime.now(timezone.utc)
+
+    try:
+        patrol = service.create_job(
+            owner_id=owner_id,
+            idempotency_key=f"patrol-{suffix}",
+            purpose="offline_patrol",
+            job_type="single_patrol",
+            name="single offline patrol",
+            periods=[{"role": "current", "label": "current", "observed_at": observed_at}],
+            folder_id=None,
+        )
+        asset = service.create_job(
+            owner_id=owner_id,
+            idempotency_key=f"asset-{suffix}",
+            purpose="rule_asset_source",
+            job_type="parser_validation",
+            name="parser evidence",
+            periods=[{"role": "sample", "label": "sample", "observed_at": observed_at}],
+            folder_id=None,
+        )
+
+        patrol_page = service.list_jobs(owner_id=owner_id, purpose="offline_patrol")
+        asset_page = service.list_jobs(owner_id=owner_id, purpose="rule_asset_source")
+
+        assert [item["id"] for item in patrol_page["items"]] == [patrol["id"]]
+        assert [item["id"] for item in asset_page["items"]] == [asset["id"]]
+        with pytest.raises(KeyError, match="workspace"):
+            service.get_job(
+                patrol["id"],
+                owner_id=owner_id,
+                purpose="rule_asset_source",
+            )
+    finally:
+        with get_db_session() as db:
+            db.query(OfflinePatrolJobRecord).filter(
+                OfflinePatrolJobRecord.owner_id == owner_id
+            ).delete(synchronize_session=False)
+
+
+def test_offline_patrol_cannot_create_parser_validation_asset_job():
+    with pytest.raises(ValueError, match="not valid for offline_patrol"):
+        OfflinePatrolJobService().create_job(
+            owner_id="offline-boundary-test",
+            idempotency_key=f"offline-boundary-{uuid.uuid4().hex}",
+            purpose="offline_patrol",
+            job_type="parser_validation",
+            name="must stay in Parser control",
+            periods=[
+                {
+                    "role": "sample",
+                    "label": "sample",
+                    "observed_at": datetime.now(timezone.utc),
+                }
+            ],
+            folder_id=None,
+        )
 
 
 def test_offline_job_pagination_reaches_the_tail_of_ten_thousand_records():
@@ -127,13 +221,40 @@ def test_history_compare_requires_strict_period_order():
         )
 
 
+def test_history_preview_counts_physical_devices_once_across_periods():
+    previews = {
+        "baseline": {
+            "device_count": 2,
+            "files": [
+                {"device_id": "SW1-baseline", "management_ip": "10.0.0.1"},
+                {"device_id": "SW2-baseline", "management_ip": "10.0.0.2"},
+            ],
+        },
+        "current": {
+            "device_count": 2,
+            "files": [
+                {"device_id": "SW1-current", "management_ip": "10.0.0.1"},
+                {"device_id": "SW2-current", "management_ip": "10.0.0.2"},
+            ],
+        },
+    }
+
+    unique_devices, device_periods = _preview_device_totals(previews)
+
+    assert unique_devices == 2
+    assert device_periods == 4
+    normalized = _normalized_preview({"periods": previews, "totals": {"device_count": 4}})
+    assert normalized["totals"]["device_count"] == 2
+    assert normalized["totals"]["device_period_count"] == 4
+
+
 def test_corrupted_historical_name_gets_a_non_destructive_display_fallback():
     assert (
         _offline_job_display_name("?????? Q2?Q3?????????", "history_compare")
-        == "Q2 → Q3 历史周期对比"
+        == "Q2 → Q3 规则回放样本"
     )
     assert _offline_job_display_name("季度巡检", "history_compare") == "季度巡检"
-    assert _offline_job_display_name("?????", "parser_validation") == "离线巡检导入"
+    assert _offline_job_display_name("?????", "parser_validation") == "规则资产样本导入"
 
 
 def test_execution_quality_gate_keeps_asset_gaps_as_non_blocking_warnings(monkeypatch):
@@ -142,6 +263,7 @@ def test_execution_quality_gate_keeps_asset_gaps_as_non_blocking_warnings(monkey
         service,
         "get_job",
         lambda _job_id: {
+            "purpose": "rule_asset_source",
             "job_type": "history_compare",
             "source_files": [{"id": "source-1"}],
             "preview": {"periods": {"baseline": {}, "current": {}}},
@@ -192,8 +314,14 @@ def test_execution_quality_gate_still_blocks_ingestion_integrity_failures(monkey
     assert result["warnings"] == []
 
 
-def test_terminal_workflow_is_projected_with_report_artifact():
+def test_terminal_workflow_is_projected_with_report_artifact(monkeypatch):
     service = OfflinePatrolJobService()
+    projected_command_assets: list[str] = []
+    monkeypatch.setattr(
+        RuleAssetCommandUnitService,
+        "reconcile",
+        lambda _self, job_id: projected_command_assets.append(job_id) or {"unit_count": 0},
+    )
     suffix = uuid.uuid4().hex
     owner_id = f"offline-projection-owner-{suffix}"
     workflow_run_id = f"offline-projection-workflow-{suffix}"
@@ -265,6 +393,7 @@ def test_terminal_workflow_is_projected_with_report_artifact():
         assert projected["progress"] == {"phase": "completed", "percent": 100}
         assert projected["result"]["run_id"] == f"patrol-run-{suffix}"
         assert projected["artifacts"]["report"] == report_artifact
+        assert projected_command_assets == [job["id"]]
     finally:
         with get_db_session() as db:
             db.query(WorkflowStepRecord).filter(

@@ -6,6 +6,7 @@ import csv
 import hashlib
 import io
 import json
+import logging
 import re
 import shutil
 import tempfile
@@ -54,7 +55,10 @@ from src.infrastructure.db.postgres import get_db_session
 from src.infrastructure.storage.minio_client import get_minio_storage
 from src.storage.object_resolver import resolve_object_key
 
-JOB_TYPES = {"parser_validation", "history_compare"}
+log = logging.getLogger(__name__)
+
+JOB_PURPOSES = {"offline_patrol", "rule_asset_source"}
+JOB_TYPES = {"parser_validation", "single_patrol", "history_compare"}
 JOB_ACTIVE_STATUSES = {"previewing", "queued", "running"}
 JOB_TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 INGESTION_BLOCKER_CODES = {
@@ -65,8 +69,16 @@ INGESTION_BLOCKER_CODES = {
     "no_common_ready_parser",
     "parser_template_inactive",
 }
+PATROL_RUNTIME_BLOCKER_CODES = INGESTION_BLOCKER_CODES | {
+    "template_missing",
+    "parse_failed",
+    "observation_contract_missing",
+    "change_policy_missing",
+    "event_rule_missing",
+}
 PERIOD_ROLES = {
     "parser_validation": ("sample",),
+    "single_patrol": ("current",),
     "history_compare": ("baseline", "current"),
 }
 ALLOWED_SOURCE_SUFFIXES = {".txt", ".log", ".zip"}
@@ -94,6 +106,49 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, list):
         return [_json_safe(item) for item in value]
     return value
+
+
+def _preview_device_totals(previews: dict[str, Any]) -> tuple[int, int]:
+    """Return physical device coverage and device-period observations."""
+
+    identities: set[str] = set()
+    fallback_count = 0
+    device_period_count = 0
+    for preview in previews.values():
+        device_period_count += int(preview.get("device_count") or 0)
+        files = list(preview.get("files") or [])
+        period_identities: set[str] = set()
+        for item in files:
+            identity = next(
+                (
+                    str(item.get(key) or "").strip().casefold()
+                    for key in (
+                        "inventory_device_id",
+                        "management_ip",
+                        "device_id",
+                        "device_name",
+                    )
+                    if str(item.get(key) or "").strip()
+                ),
+                "",
+            )
+            if identity:
+                period_identities.add(identity)
+        identities.update(period_identities)
+        fallback_count += max(0, int(preview.get("device_count") or 0) - len(period_identities))
+    return len(identities) + fallback_count, device_period_count
+
+
+def _normalized_preview(preview: dict[str, Any] | None) -> dict[str, Any]:
+    result = dict(preview or {})
+    periods = dict(result.get("periods") or {})
+    totals = dict(result.get("totals") or {})
+    if periods:
+        unique_device_count, device_period_count = _preview_device_totals(periods)
+        totals["device_count"] = unique_device_count
+        totals["device_period_count"] = device_period_count
+    result["totals"] = totals
+    return result
 
 
 def _sha256_file(path: Path) -> str:
@@ -127,9 +182,29 @@ def _offline_job_display_name(name: str | None, job_type: str) -> str:
     if job_type == "history_compare":
         quarters = list(dict.fromkeys(item.upper() for item in re.findall(r"Q[1-4]", value, re.I)))
         if len(quarters) >= 2:
-            return f"{quarters[0]} → {quarters[1]} 历史周期对比"
-        return "历史周期对比"
-    return "离线巡检导入"
+            return f"{quarters[0]} → {quarters[1]} 规则回放样本"
+        return "双周期规则回放样本"
+    return "规则资产样本导入"
+
+
+def _purpose_aware_display_name(row: OfflinePatrolJobRecord) -> str:
+    if row.purpose == "rule_asset_source":
+        return _offline_job_display_name(row.name, row.job_type)
+    value = str(row.name or "").strip()
+    replacement_count = value.count("?") + value.count("\ufffd")
+    corrupted = not value or "\ufffd" in value or (
+        replacement_count >= 3 and replacement_count / max(len(value), 1) >= 0.2
+    )
+    if not corrupted:
+        return value
+    if row.job_type == "history_compare":
+        quarters = list(
+            dict.fromkeys(item.upper() for item in re.findall(r"Q[1-4]", value, re.I))
+        )
+        if len(quarters) >= 2:
+            return f"{quarters[0]} -> {quarters[1]} 离线巡检对比"
+        return "双周期离线巡检对比"
+    return "单周期离线巡检"
 
 
 class OfflinePatrolJobService:
@@ -142,13 +217,24 @@ class OfflinePatrolJobService:
         name: str,
         periods: list[dict[str, Any]],
         folder_id: str | None,
+        purpose: str = "offline_patrol",
         vendor: str | None = None,
         model: str | None = None,
         publish_events: bool = False,
     ) -> dict[str, Any]:
+        purpose = str(purpose or "").strip()
+        if purpose not in JOB_PURPOSES:
+            raise ValueError(f"unsupported offline job purpose: {purpose}")
         job_type = str(job_type or "").strip()
         if job_type not in JOB_TYPES:
             raise ValueError(f"unsupported offline patrol job type: {job_type}")
+        allowed_types = (
+            {"parser_validation", "history_compare"}
+            if purpose == "rule_asset_source"
+            else {"single_patrol", "history_compare"}
+        )
+        if job_type not in allowed_types:
+            raise ValueError(f"{job_type} is not valid for {purpose}")
         expected_roles = PERIOD_ROLES[job_type]
         by_role = {str(item.get("role") or ""): item for item in periods}
         if set(by_role) != set(expected_roles):
@@ -178,8 +264,9 @@ class OfflinePatrolJobService:
                     OfflinePatrolJobRecord(
                         id=job_id,
                         idempotency_key=stable_key,
+                        purpose=purpose,
                         job_type=job_type,
-                        name=str(name or "离线巡检任务").strip()[:256],
+                        name=str(name or "规则资产样本任务").strip()[:256],
                         owner_id=owner_id,
                         status="draft",
                         vendor=vendor,
@@ -218,6 +305,7 @@ class OfflinePatrolJobService:
         search: str | None = None,
         status: str | None = None,
         job_type: str | None = None,
+        purpose: str | None = None,
         archived: bool = False,
     ) -> dict[str, Any]:
         page = max(1, int(page))
@@ -226,6 +314,8 @@ class OfflinePatrolJobService:
             query = db.query(OfflinePatrolJobRecord)
             if not is_admin:
                 query = query.filter(OfflinePatrolJobRecord.owner_id == owner_id)
+            if purpose:
+                query = query.filter(OfflinePatrolJobRecord.purpose == purpose)
             query = query.filter(OfflinePatrolJobRecord.archived.is_(bool(archived)))
             if status:
                 query = query.filter(OfflinePatrolJobRecord.status == status)
@@ -259,10 +349,13 @@ class OfflinePatrolJobService:
         *,
         owner_id: str | None = None,
         is_admin: bool = False,
+        purpose: str | None = None,
     ) -> dict[str, Any]:
         with get_db_session() as db:
             row = db.get(OfflinePatrolJobRecord, job_id)
             self._assert_access(row, owner_id=owner_id, is_admin=is_admin)
+            if purpose and row.purpose != purpose:
+                raise KeyError("offline job not found in this workspace")
             self._sync_workflow_rows(db, [row])
             periods = (
                 db.query(OfflinePatrolPeriodRecord)
@@ -293,7 +386,7 @@ class OfflinePatrolJobService:
                 periods=[_json_safe(item.to_dict()) for item in periods],
                 source_files=[_json_safe(item.to_dict()) for item in sources],
                 device_bindings=[_json_safe(item.to_dict()) for item in bindings],
-                preview=_json_safe(row.preview_json or {}),
+                preview=_json_safe(_normalized_preview(row.preview_json)),
                 result=_json_safe(row.result_json or {}),
                 artifacts=_json_safe(row.artifacts_json or {}),
                 blockers=_json_safe(row.blockers_json or []),
@@ -430,7 +523,12 @@ class OfflinePatrolJobService:
                     .order_by(OfflinePatrolPeriodRecord.observed_at)
                     .all()
                 )
-                vendor, model, job_type = job.vendor, job.model, job.job_type
+                vendor, model, job_type, purpose = (
+                    job.vendor,
+                    job.model,
+                    job.job_type,
+                    job.purpose,
+                )
                 period_specs = [(item.role, item.dataset_id) for item in periods]
                 if not period_specs:
                     raise ValueError("offline patrol job has no periods")
@@ -453,7 +551,7 @@ class OfflinePatrolJobService:
                     previews[role] = preview_raw_path(
                         file_path=root,
                         mode="parser_validation"
-                        if job_type == "parser_validation"
+                        if purpose == "rule_asset_source" and job_type == "parser_validation"
                         else "production",
                         vendor=vendor,
                         model=model,
@@ -462,7 +560,10 @@ class OfflinePatrolJobService:
                 self._upsert_device_bindings(job_id, role, previews[role])
 
             quality_issues = self._build_quality_blockers(job_id, previews)
-            blockers, warnings = self._partition_quality_issues(quality_issues)
+            blockers, warnings = self._partition_quality_issues(
+                quality_issues,
+                purpose=purpose,
+            )
             status = "ready" if not blockers else "blocked"
             totals = {
                 key: sum(int(preview.get(key) or 0) for preview in previews.values())
@@ -480,6 +581,9 @@ class OfflinePatrolJobService:
                     "new_snapshots",
                 )
             }
+            unique_device_count, device_period_count = _preview_device_totals(previews)
+            totals["device_count"] = unique_device_count
+            totals["device_period_count"] = device_period_count
             result = {
                 "periods": previews,
                 "totals": totals,
@@ -598,8 +702,12 @@ class OfflinePatrolJobService:
             if not period:
                 raise KeyError("offline patrol period not found")
             run_id = period.patrol_run_id or f"{job_id}-{period_role}-attempt-{job.attempt_number}"
-            mode = "parser_validation" if job.job_type == "parser_validation" else "production"
-            vendor, model = job.vendor, job.model
+            mode = (
+                "parser_validation"
+                if job.purpose == "rule_asset_source" and job.job_type == "parser_validation"
+                else "production"
+            )
+            vendor, model, purpose = job.vendor, job.model, job.purpose
             observed_at = period.observed_at.isoformat()
             dataset_id = period.dataset_id
             bindings = (
@@ -637,9 +745,13 @@ class OfflinePatrolJobService:
                     "source": "offline_import",
                     "offline_job_id": job_id,
                     "period_role": period_role,
-                    "run_purpose": "parser_validation"
-                    if mode == "parser_validation"
-                    else "historical_compare",
+                    "run_purpose": (
+                        "parser_validation"
+                        if mode == "parser_validation"
+                        else "offline_patrol"
+                        if purpose == "offline_patrol"
+                        else "rule_asset_replay"
+                    ),
                 },
             )
         with get_db_session() as db:
@@ -662,7 +774,7 @@ class OfflinePatrolJobService:
             return {
                 "success": False,
                 "job_id": job_id,
-                "blockers": [{"code": "no_sources", "message": "未上传离线巡检文件"}],
+                "blockers": [{"code": "no_sources", "message": "未上传规则资产样本文件"}],
             }
         if not detail.get("preview"):
             return {
@@ -672,7 +784,10 @@ class OfflinePatrolJobService:
             }
         period_previews = dict((detail.get("preview") or {}).get("periods") or {})
         quality_issues = self._build_quality_blockers(job_id, period_previews)
-        blockers, warnings = self._partition_quality_issues(quality_issues)
+        blockers, warnings = self._partition_quality_issues(
+            quality_issues,
+            purpose=str(detail.get("purpose") or "offline_patrol"),
+        )
         with get_db_session() as db:
             job = db.get(OfflinePatrolJobRecord, job_id)
             if job:
@@ -720,6 +835,15 @@ class OfflinePatrolJobService:
                 raise KeyError("offline patrol job not found")
             if job.owner_id != owner_id and not is_admin:
                 raise PermissionError("offline patrol job belongs to another operator")
+            allowed_types = (
+                {"parser_validation", "history_compare"}
+                if job.purpose == "rule_asset_source"
+                else {"single_patrol", "history_compare"}
+            )
+            if job.job_type not in allowed_types:
+                raise ValueError(f"{job.job_type} is not valid for {job.purpose}")
+            if job.purpose == "rule_asset_source" and job.publish_events:
+                raise ValueError("rule asset source jobs cannot publish production events")
             if job.execution_idempotency_key == execution_idempotency_key and job.status in (
                 JOB_ACTIVE_STATUSES | {"completed"}
             ):
@@ -753,9 +877,10 @@ class OfflinePatrolJobService:
             job.updated_at = _now()
             context: dict[str, Any] = {
                 "offline_job_id": job_id,
+                "job_purpose": job.purpose,
                 "publish_events": bool(job.publish_events),
             }
-            if job.job_type == "parser_validation":
+            if job.job_type == "parser_validation" and job.purpose == "rule_asset_source":
                 sample = by_role["sample"]
                 context.update(
                     period_role="sample",
@@ -766,6 +891,14 @@ class OfflinePatrolJobService:
                     model=job.model,
                 )
                 workflow = "parser-validation-ingest"
+            elif job.job_type == "single_patrol":
+                current = by_role["current"]
+                context.update(
+                    period_role="current",
+                    current_run_id=current.patrol_run_id,
+                    current_observed_at=current.observed_at.isoformat(),
+                )
+                workflow = "patrol-offline-current"
             else:
                 baseline, current = by_role["baseline"], by_role["current"]
                 context.update(
@@ -782,7 +915,11 @@ class OfflinePatrolJobService:
             workflow_run_id = WorkflowEngine.start(
                 workflow,
                 context,
-                source="offline-patrol",
+                source=(
+                    "rule-asset-source"
+                    if context["job_purpose"] == "rule_asset_source"
+                    else "offline-patrol"
+                ),
                 user_id=owner_id,
             )
         except Exception as exc:
@@ -875,7 +1012,10 @@ class OfflinePatrolJobService:
                 raise KeyError("offline patrol job not found")
             if job.status in JOB_ACTIVE_STATUSES:
                 raise ValueError("active offline patrol jobs cannot be retried")
-            blockers, _warnings = self._partition_quality_issues(list(job.blockers_json or []))
+            blockers, _warnings = self._partition_quality_issues(
+                list(job.blockers_json or []),
+                purpose=job.purpose,
+            )
             job.status = "ready" if job.preview_json and not blockers else "blocked"
             job.workflow_run_id = None
             job.celery_task_id = None
@@ -978,8 +1118,6 @@ class OfflinePatrolJobService:
         """Return the same compact fact model used by the downloadable DOCX report."""
 
         detail = detail or self.get_job(job_id)
-        if detail.get("job_type") != "history_compare":
-            raise ValueError("leadership analysis is only available for history comparison jobs")
         if not run_id:
             periods = {item["role"]: item for item in detail.get("periods") or []}
             current = periods.get("current")
@@ -991,7 +1129,11 @@ class OfflinePatrolJobService:
             run_id,
             analysis_attempt_id=analysis_attempt_id,
         )
-        predecessor_id = self._find_predecessor_history_job_id(job_id)
+        predecessor_id = (
+            self._find_predecessor_history_job_id(job_id)
+            if detail.get("job_type") == "history_compare"
+            else None
+        )
         if predecessor_id:
             predecessor_detail = self.get_job(predecessor_id)
             predecessor_periods = {
@@ -1036,6 +1178,9 @@ class OfflinePatrolJobService:
         """Find an adjacent comparison by exact source-file content identity."""
 
         with get_db_session() as db:
+            current_job = db.get(OfflinePatrolJobRecord, job_id)
+            if current_job is None:
+                return None
             baseline_rows = (
                 db.query(OfflinePatrolSourceFileRecord)
                 .filter(
@@ -1063,6 +1208,7 @@ class OfflinePatrolJobService:
                         sorted({item[0] for item in baseline_signature})
                     ),
                     OfflinePatrolJobRecord.job_type == "history_compare",
+                    OfflinePatrolJobRecord.purpose == current_job.purpose,
                     OfflinePatrolJobRecord.status == "completed",
                 )
                 .all()
@@ -1201,7 +1347,11 @@ class OfflinePatrolJobService:
                 else None
             )
         binding_names: dict[str, str] = {}
-        current_role = "current" if detail.get("job_type") == "history_compare" else "sample"
+        current_role = (
+            "current"
+            if detail.get("job_type") in {"history_compare", "single_patrol"}
+            else "sample"
+        )
         current_bindings = [
             item
             for item in detail.get("device_bindings") or []
@@ -1232,7 +1382,10 @@ class OfflinePatrolJobService:
             rule_source = "frozen_analysis_attempt"
             rule_digest = frozen_attempt["rule_bundle_digest"]
             rule_error = None
-        elif detail.get("job_type") == "history_compare":
+        elif (
+            detail.get("purpose") == "offline_patrol"
+            or detail.get("job_type") == "history_compare"
+        ):
             try:
                 rules = EventRuleRepository().snapshot_active_rules()
                 rule_source = "active_runtime"
@@ -1533,14 +1686,27 @@ class OfflinePatrolJobService:
             }
             if detail.get("job_type") == "history_compare":
                 job_name = (
-                    "离线历史巡检对比（"
+                    "双周期规则回放（"
                     f"{period_dates.get('baseline') or '-'} 至 "
                     f"{period_dates.get('current') or '-'}）"
                 )
             else:
-                job_name = f"离线巡检解析验证（{period_dates.get('sample') or '-'}）"
+                job_name = f"规则资产样本解析验证（{period_dates.get('sample') or '-'}）"
+        purpose = str(detail.get("purpose") or "offline_patrol")
+        report_purpose = (
+            "parser_validation"
+            if purpose == "rule_asset_source" and detail.get("job_type") == "parser_validation"
+            else "rule_asset_replay"
+            if purpose == "rule_asset_source"
+            else "offline_patrol"
+        )
+        api_prefix = (
+            "/api/v1/parser/asset-source-jobs"
+            if purpose == "rule_asset_source"
+            else "/api/v1/patrol/offline-jobs"
+        )
         return {
-            "report_purpose": str(detail.get("job_type") or "history_compare"),
+            "report_purpose": report_purpose,
             "periods": [
                 {
                     "role": item.get("role"),
@@ -1592,8 +1758,8 @@ class OfflinePatrolJobService:
             },
             "runs": run_rows,
             "deliverables": {
-                "raw_cli_url": (f"/api/v1/patrol/offline-jobs/{detail.get('id')}/artifacts/raw"),
-                "events_url": (f"/api/v1/patrol/offline-jobs/{detail.get('id')}/artifacts/events"),
+                "raw_cli_url": f"{api_prefix}/{detail.get('id')}/artifacts/raw",
+                "events_url": f"{api_prefix}/{detail.get('id')}/artifacts/events",
                 "technical_report_url": (
                     ((detail.get("artifacts") or {}).get("report") or {}).get("download_url")
                 ),
@@ -1612,12 +1778,14 @@ class OfflinePatrolJobService:
     @staticmethod
     def _serialize_job_summary(row: OfflinePatrolJobRecord) -> dict[str, Any]:
         issues = list(row.blockers_json or [])
+        preview = _normalized_preview(row.preview_json)
         return _json_safe(
             {
                 "id": row.id,
+                "purpose": row.purpose,
                 "job_type": row.job_type,
                 "name": row.name,
-                "display_name": _offline_job_display_name(row.name, row.job_type),
+                "display_name": _purpose_aware_display_name(row),
                 "owner_id": row.owner_id,
                 "status": row.status,
                 "vendor": row.vendor,
@@ -1627,7 +1795,7 @@ class OfflinePatrolJobService:
                 "workflow_run_id": row.workflow_run_id,
                 "attempt_number": row.attempt_number,
                 "progress": row.progress_json or {},
-                "preview_totals": (row.preview_json or {}).get("totals", {}),
+                "preview_totals": preview.get("totals", {}),
                 "blocker_count": sum(
                     str(item.get("code") or "") in INGESTION_BLOCKER_CODES for item in issues
                 ),
@@ -1738,7 +1906,24 @@ class OfflinePatrolJobService:
                 .all()
             )
             self._sync_workflow_rows(db, rows)
-            return sum(row.status in JOB_TERMINAL_STATUSES for row in rows)
+            terminal_job_ids = [
+                str(row.id) for row in rows if row.status in JOB_TERMINAL_STATUSES
+            ]
+            terminal_count = len(terminal_job_ids)
+
+        if terminal_job_ids:
+            from src.core.rule_control.command_asset_units import RuleAssetCommandUnitService
+
+            projector = RuleAssetCommandUnitService()
+            for job_id in terminal_job_ids:
+                try:
+                    projector.reconcile(job_id)
+                except Exception:
+                    log.exception(
+                        "offline command asset projection failed",
+                        extra={"offline_job_id": job_id, "workflow_run_id": workflow_run_id},
+                    )
+        return terminal_count
 
     def _update_progress(self, job_id: str, *, phase: str, percent: int) -> None:
         with get_db_session() as db:
@@ -2021,12 +2206,19 @@ class OfflinePatrolJobService:
     @staticmethod
     def _partition_quality_issues(
         issues: list[dict[str, Any]],
+        *,
+        purpose: str = "rule_asset_source",
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         blockers: list[dict[str, Any]] = []
         warnings: list[dict[str, Any]] = []
         for raw in issues:
             item = dict(raw)
-            if str(item.get("code") or "") in INGESTION_BLOCKER_CODES:
+            blocker_codes = (
+                PATROL_RUNTIME_BLOCKER_CODES
+                if purpose == "offline_patrol"
+                else INGESTION_BLOCKER_CODES
+            )
+            if str(item.get("code") or "") in blocker_codes:
                 item["severity"] = "blocking"
                 blockers.append(item)
             else:

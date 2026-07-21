@@ -223,6 +223,70 @@ def test_optical_observation_carries_authoritative_device_threshold_context(
     ]
 
 
+def test_observations_from_snapshot_skip_blank_textfsm_fields(monkeypatch):
+    monkeypatch.setattr(
+        normalizer,
+        "_template_contract",
+        lambda *_args, **_kwargs: {
+            "entity_type": "interface_optical",
+            "primary_keys": ["interface"],
+            "contract_version": 1,
+            "state_semantics": {
+                "rx_power_dbm": {
+                    "semantic_type": "gauge",
+                    "unit": "dbm",
+                    "observation_type": "interface.optical.rx_power",
+                },
+                "transceiver_present": {
+                    "semantic_type": "state",
+                    "observation_type": "interface.optical.presence",
+                },
+            },
+            "validators": {
+                "rx_power_dbm": {"type": "number"},
+                "transceiver_present": {
+                    "type": "enum",
+                    "values": ["present", "absent"],
+                },
+            },
+        },
+    )
+
+    observations = observations_from_snapshot(
+        {
+            "id": "snapshot-optical-blanks",
+            "run_id": "run-1",
+            "device_id": "SW1",
+            "vendor": "H3C",
+            "model": "S5130S-54S-HI-G",
+            "canonical_command": "display transceiver diagnosis interface",
+            "parser_template_id": "template-optical",
+            "parser_version": "1",
+            "observed_at": "2026-07-18T00:00:00+00:00",
+            "structured_json": [
+                {
+                    "interface": "Ten-GigabitEthernet1/0/49",
+                    "rx_power_dbm": "-5.34",
+                    "transceiver_present": "",
+                },
+                {
+                    "interface": "Ten-GigabitEthernet1/0/51",
+                    "rx_power_dbm": " ",
+                    "transceiver_present": "absent",
+                },
+            ],
+        },
+        mode="parser_validation",
+        source="test",
+        dataset_id="dataset-optical",
+    )
+
+    assert [(item.field_name, item.value) for item in observations] == [
+        ("rx_power_dbm", -5.34),
+        ("transceiver_present", "absent"),
+    ]
+
+
 def _state_observation(observed_at: str, value: str = "up") -> StateObservation:
     return StateObservation(
         observation_id=f"obs-{observed_at}",

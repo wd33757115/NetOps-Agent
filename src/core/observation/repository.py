@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import or_, text
 
 from src.core.observation.contracts import (
     ObservationContract,
@@ -404,6 +404,65 @@ class ObservationContractRepository:
                 .all()
             )
             return [row.to_dict() for row in rows]
+
+    def list_contracts_page(
+        self,
+        *,
+        source_type: str | None = None,
+        status: str | None = None,
+        search: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        page_size = max(1, min(int(limit), 200))
+        page_offset = max(0, int(offset))
+        with get_db_session() as db:
+            query = db.query(ObservationContractRecord)
+            if source_type:
+                query = query.filter(ObservationContractRecord.source_type == source_type)
+            if status:
+                query = query.filter(ObservationContractRecord.status == status)
+            pattern = f"%{str(search).strip()}%" if str(search or "").strip() else None
+            if pattern:
+                query = query.filter(
+                    or_(
+                        ObservationContractRecord.id.ilike(pattern),
+                        ObservationContractRecord.schema_id.ilike(pattern),
+                        ObservationContractRecord.schema_ref.ilike(pattern),
+                        ObservationContractRecord.entity_type.ilike(pattern),
+                        ObservationContractRecord.source_type.ilike(pattern),
+                    )
+                )
+            total = query.order_by(None).count()
+            rows = (
+                query.order_by(
+                    ObservationContractRecord.updated_at.desc(),
+                    ObservationContractRecord.id.desc(),
+                )
+                .offset(page_offset)
+                .limit(page_size)
+                .all()
+            )
+            return {
+                "items": [row.to_dict() for row in rows],
+                "total": total,
+                "limit": page_size,
+                "offset": page_offset,
+            }
+
+    def list_active_validation_dicts(self) -> list[dict[str, Any]]:
+        with get_db_session() as db:
+            rows = (
+                db.query(ObservationContractRecord)
+                .filter(ObservationContractRecord.status == "active")
+                .order_by(
+                    ObservationContractRecord.source_type,
+                    ObservationContractRecord.schema_id,
+                    ObservationContractRecord.id,
+                )
+                .all()
+            )
+            return [_row_to_contract(row).to_validation_dict() for row in rows]
 
     def backfill_from_parser_templates(self) -> int:
         count = 0

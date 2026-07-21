@@ -9,12 +9,13 @@ import json
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from src.auth.dependencies import require_role
+from src.auth.models import CurrentUser
 from src.core.celery_tasks.celery_app import celery
 from src.core.collection.policy import (
     CollectionItem,
@@ -42,6 +43,7 @@ from src.core.parser.repository import (
 )
 from src.core.parser.runtime import ParserRuntime
 from src.core.parser.tasks import dispatch_ready_parser_jobs
+from src.core.parser.work_queue import ParserWorkQueueService
 from src.core.patrol.change_policy_repository import ChangePolicyRepository
 from src.core.patrol.event_rules import (
     EventRuleDefinition,
@@ -69,46 +71,68 @@ from src.core.rule_control import (
     RuntimeRuleAssetSeedService,
 )
 from src.core.rule_control.bundles import RuleAssetBundleService
+from src.core.rule_control.engineering_revision import (
+    RuleAssetEngineeringRevisionError,
+    RuleAssetEngineeringRevisionService,
+)
 
 router = APIRouter(
     prefix="/api/v1/parser",
     tags=["Parser Control Plane"],
-    dependencies=[Depends(require_role(["admin"]))],
+    dependencies=[Depends(require_role(["admin", "operator"]))],
 )
+
+
+def _authenticated_actor(request: Request) -> str:
+    user = getattr(getattr(request, "state", None), "current_user", None)
+    if not isinstance(user, CurrentUser):
+        raise HTTPException(status_code=401, detail="authenticated user context is required")
+    actor = str(user.username or user.user_id).strip()
+    if not actor:
+        raise HTTPException(status_code=401, detail="authenticated user identity is empty")
+    return actor
+
+
+def _required_reason(value: str | None, *, action: str) -> str:
+    reason = str(value or "").strip()
+    if not reason:
+        raise HTTPException(status_code=422, detail=f"{action} requires a reason")
+    return reason
 
 
 class ParserDispatchControlRequest(BaseModel):
     enabled: bool
+    reason: str
 
 
 class ParserTemplateApprovalRequest(BaseModel):
-    actor: str = "manual-api"
-    reason: str = "approved after parser validation"
+    reason: str
 
 
 class ParserTemplateForceActivationRequest(BaseModel):
-    actor: str
     reason: str
 
 
 class ParserTemplateStatusRequest(BaseModel):
-    actor: str
     reason: str
 
 
 class ParserBackfillCreateRequest(BaseModel):
     template_id: str
-    requested_by: str
     filters: dict[str, Any] | None = None
 
 
 class ParserBackfillCommitRequest(BaseModel):
-    actor: str
     reason: str
 
 
 class ParserBulkJobDeleteRequest(BaseModel):
     job_ids: list[str]
+    reason: str
+
+
+class ParserJobDeleteRequest(BaseModel):
+    reason: str
 
 
 class ParserImportRequest(BaseModel):
@@ -124,7 +148,6 @@ class EventRuleUpsertRequest(BaseModel):
     severity: str
     condition: dict[str, Any]
     description: str | None = None
-    created_by: str | None = None
     status: str = "draft"
 
 
@@ -171,7 +194,6 @@ class RuleGenerationJobCreateRequest(BaseModel):
     payload: dict[str, Any] | None = None
     validation_report: dict[str, Any] | None = None
     approval_required: bool = True
-    created_by: str | None = None
     status: str = "draft"
 
 
@@ -190,12 +212,10 @@ class RuleGenerationJobValidationRequest(BaseModel):
 
 
 class RuleGenerationJobApprovalRequest(BaseModel):
-    actor: str | None = None
     reason: str | None = None
 
 
 class EventRuleForceActivationRequest(BaseModel):
-    actor: str
     reason: str
 
 
@@ -206,7 +226,19 @@ class RuleAssetGenerationContextRequest(BaseModel):
     max_records: int = 120
     field_name: str | None = None
     observation_type: str | None = None
-    actor: str | None = None
+
+
+class RuleAssetEngineeringReviewRequest(BaseModel):
+    decision: Literal["accepted", "revision_requested"]
+    reason: str
+
+
+class RuleAssetEngineeringRevisionRequest(BaseModel):
+    contract: dict[str, Any]
+    change_policies: list[dict[str, Any]]
+    event_rules: list[dict[str, Any]]
+    reason: str
+    idempotency_key: str
 
 
 class RuntimeRuleAssetResolveRequest(BaseModel):
@@ -216,7 +248,7 @@ class RuntimeRuleAssetResolveRequest(BaseModel):
 
 
 class RuntimeRuleAssetSeedRequest(BaseModel):
-    actor: str | None = None
+    reason: str
 
 
 class CommandProfileUpsertRequest(BaseModel):
@@ -224,14 +256,17 @@ class CommandProfileUpsertRequest(BaseModel):
     action: str = "patrol"
     commands: list[str]
     status: str = "draft"
-    created_by: str | None = None
+
+
+class CommandProfileLifecycleRequest(BaseModel):
+    reason: str
 
 
 class CommandProfileBindingUpsertRequest(BaseModel):
     profile_version_id: str
     selector: dict[str, Any]
     priority: int = 100
-    status: str = "active"
+    status: str = "disabled"
 
 
 class EffectivePlanPreviewRequest(BaseModel):
@@ -252,8 +287,18 @@ class CommandProfileImpactPreviewRequest(BaseModel):
 
 
 @router.get("/templates")
-def list_templates(status: str | None = None):
-    return {"items": ParserTemplateRepository().list_templates(status=status)}
+def list_templates(
+    status: str | None = None,
+    search: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+):
+    return ParserTemplateRepository().list_templates_page(
+        status=status,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/templates/export")
@@ -441,8 +486,20 @@ def compare_template(template_id: str, limit: int = 20):
 
 
 @router.get("/jobs")
-def list_jobs(status: str | None = None):
-    return {"items": ParserJobRepository().list_jobs(status=status)}
+def list_jobs(
+    status: str | None = None,
+    job_type: str | None = None,
+    search: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+):
+    return ParserJobRepository().list_jobs_page(
+        status=status,
+        job_type=job_type,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/jobs/{job_id}")
@@ -487,17 +544,25 @@ def cancel_job(job_id: str):
 
 
 @router.delete("/jobs/{job_id}")
-def delete_job(job_id: str):
+def delete_job(job_id: str, request: Request, payload: ParserJobDeleteRequest):
     try:
-        result = ParserJobRepository().delete_job(job_id)
+        result = ParserJobRepository().delete_job(
+            job_id,
+            actor=_authenticated_actor(request),
+            reason=_required_reason(payload.reason, action="parser job deletion"),
+        )
     except ParserJobStateError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"success": True, "job_id": job_id, **result}
 
 
 @router.post("/jobs/bulk-delete")
-def bulk_delete_jobs(payload: ParserBulkJobDeleteRequest):
-    result = ParserJobRepository().delete_jobs(payload.job_ids)
+def bulk_delete_jobs(request: Request, payload: ParserBulkJobDeleteRequest):
+    result = ParserJobRepository().delete_jobs(
+        payload.job_ids,
+        actor=_authenticated_actor(request),
+        reason=_required_reason(payload.reason, action="parser job bulk deletion"),
+    )
     return {"success": result["failed_count"] == 0, **result}
 
 
@@ -541,38 +606,46 @@ def get_dispatch_control():
 
 
 @router.post("/dispatch-control")
-def set_dispatch_control(payload: ParserDispatchControlRequest):
-    enabled = ParserJobRepository().set_auto_dispatch_enabled(payload.enabled)
+def set_dispatch_control(request: Request, payload: ParserDispatchControlRequest):
+    enabled = ParserJobRepository().set_auto_dispatch_enabled(
+        payload.enabled,
+        actor=_authenticated_actor(request),
+        reason=_required_reason(payload.reason, action="parser automatic dispatch change"),
+    )
     return {"success": True, "auto_dispatch_enabled": enabled}
 
 
 @router.post("/templates/{template_id}/activate")
 def activate_template(
     template_id: str,
-    payload: ParserTemplateApprovalRequest | None = None,
+    request: Request,
+    payload: ParserTemplateApprovalRequest,
 ):
-    payload = payload or ParserTemplateApprovalRequest()
     try:
         item = ParserTemplateRepository().activate_template(
             template_id,
-            approved_by=payload.actor,
-            reason=payload.reason,
+            approved_by=_authenticated_actor(request),
+            reason=_required_reason(payload.reason, action="template activation"),
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return item.to_dict()
 
 
-@router.post("/templates/{template_id}/force-activate")
+@router.post(
+    "/templates/{template_id}/force-activate",
+    dependencies=[Depends(require_role(["admin"]))],
+)
 def force_activate_template(
     template_id: str,
+    request: Request,
     payload: ParserTemplateForceActivationRequest,
 ):
     try:
         item = ParserTemplateRepository().activate_template(
             template_id,
-            approved_by=payload.actor,
-            reason=payload.reason,
+            approved_by=_authenticated_actor(request),
+            reason=_required_reason(payload.reason, action="template force activation"),
             force=True,
             approval_kind="force_activation",
         )
@@ -584,13 +657,14 @@ def force_activate_template(
 @router.post("/templates/{template_id}/rollback")
 def rollback_template(
     template_id: str,
+    request: Request,
     payload: ParserTemplateForceActivationRequest,
 ):
     try:
         item = ParserTemplateRepository().rollback_template(
             template_id,
-            actor=payload.actor,
-            reason=payload.reason,
+            actor=_authenticated_actor(request),
+            reason=_required_reason(payload.reason, action="template rollback"),
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -598,8 +672,18 @@ def rollback_template(
 
 
 @router.get("/backfills")
-def list_parser_backfills(status: str | None = None):
-    return {"items": ParserBackfillService().list_jobs(status=status)}
+def list_parser_backfills(
+    status: str | None = None,
+    search: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+):
+    return ParserBackfillService().list_jobs_page(
+        status=status,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/backfills/{job_id}")
@@ -611,11 +695,11 @@ def get_parser_backfill(job_id: str):
 
 
 @router.post("/backfills")
-def create_parser_backfill(payload: ParserBackfillCreateRequest):
+def create_parser_backfill(request: Request, payload: ParserBackfillCreateRequest):
     try:
         return ParserBackfillService().create_job(
             template_id=payload.template_id,
-            requested_by=payload.requested_by,
+            requested_by=_authenticated_actor(request),
             filters=payload.filters,
         )
     except ValueError as exc:
@@ -633,30 +717,37 @@ def execute_parser_backfill_dry_run(job_id: str):
 @router.post("/backfills/{job_id}/commit")
 def commit_parser_backfill(
     job_id: str,
+    request: Request,
     payload: ParserBackfillCommitRequest,
 ):
     try:
         return ParserBackfillService().commit(
             job_id,
-            actor=payload.actor,
-            reason=payload.reason,
+            actor=_authenticated_actor(request),
+            reason=_required_reason(payload.reason, action="backfill commit"),
         )
     except (ValueError, KeyError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/templates/{template_id}/reject")
-def reject_template(template_id: str, payload: ParserTemplateStatusRequest):
+def reject_template(template_id: str, request: Request, payload: ParserTemplateStatusRequest):
     ParserTemplateRepository().set_template_status(
-        template_id, "rejected", actor=payload.actor, reason=payload.reason
+        template_id,
+        "rejected",
+        actor=_authenticated_actor(request),
+        reason=_required_reason(payload.reason, action="template rejection"),
     )
     return {"success": True, "template_id": template_id, "status": "rejected"}
 
 
 @router.post("/templates/{template_id}/deprecate")
-def deprecate_template(template_id: str, payload: ParserTemplateStatusRequest):
+def deprecate_template(template_id: str, request: Request, payload: ParserTemplateStatusRequest):
     ParserTemplateRepository().set_template_status(
-        template_id, "deprecated", actor=payload.actor, reason=payload.reason
+        template_id,
+        "deprecated",
+        actor=_authenticated_actor(request),
+        reason=_required_reason(payload.reason, action="template deprecation"),
     )
     return {"success": True, "template_id": template_id, "status": "deprecated"}
 
@@ -703,11 +794,7 @@ def execute_validation_import(payload: ParserImportRequest):
 def dataset_coverage(dataset_ids: str | None = None):
     patrol_repository = PatrolRepository()
     requested_dataset_ids = sorted(
-        {
-            item.strip()
-            for item in str(dataset_ids or "").split(",")
-            if item.strip()
-        }
+        {item.strip() for item in str(dataset_ids or "").split(",") if item.strip()}
     )
     if len(requested_dataset_ids) > 50:
         raise HTTPException(
@@ -718,9 +805,7 @@ def dataset_coverage(dataset_ids: str | None = None):
         dataset_ids=requested_dataset_ids or None,
         mode=None if requested_dataset_ids else "parser_validation",
     )
-    offline_scopes = patrol_repository.get_offline_dataset_run_scopes(
-        requested_dataset_ids
-    )
+    offline_scopes = patrol_repository.get_offline_dataset_run_scopes(requested_dataset_ids)
     output = []
     for dataset in datasets:
         scope = offline_scopes.get(dataset["id"], {})
@@ -775,9 +860,7 @@ def dataset_coverage(dataset_ids: str | None = None):
                 "dataset_id": dataset["id"],
                 "snapshot_count": len(snapshots),
                 "device_count": len({item.device_id for item in snapshots}),
-                "command_count": len(
-                    {item.command_canonical for item in snapshots}
-                ),
+                "command_count": len({item.command_canonical for item in snapshots}),
                 "scope_type": "offline_patrol_run" if patrol_run_id else "dataset",
                 **scope,
                 **counts,
@@ -788,57 +871,108 @@ def dataset_coverage(dataset_ids: str | None = None):
                 "missing_template_rate": (counts["missing"] / eligible if eligible else 0.0),
                 "parse_failure_rate": (counts["failed"] / eligible if eligible else 0.0),
                 "primary_key_stability_rate": primary_key_stability_rate,
-                "primary_key_evaluated_count": (
-                    len(parsed_snapshot_ids) if patrol_run_id else 0
-                ),
+                "primary_key_evaluated_count": (len(parsed_snapshot_ids) if patrol_run_id else 0),
             }
         )
     found_ids = {item["dataset_id"] for item in output}
     return {
         "items": output,
         "requested_dataset_ids": requested_dataset_ids,
-        "missing_dataset_ids": [
-            item for item in requested_dataset_ids if item not in found_ids
-        ],
+        "missing_dataset_ids": [item for item in requested_dataset_ids if item not in found_ids],
     }
 
 
 @router.get("/aliases")
-def list_aliases():
-    return {"items": ParserMetadataRepository().list_command_aliases()}
+def list_aliases(
+    status: str | None = "confirmed",
+    search: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+):
+    return ParserMetadataRepository().list_command_aliases_page(
+        status=status,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/work-items")
+def list_parser_work_items(
+    task_type: str | None = None,
+    status: str | None = None,
+    search: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+):
+    try:
+        return ParserWorkQueueService().list_items(
+            task_type=task_type,
+            status=status,
+            search=search,
+            limit=limit,
+            offset=offset,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/device-profiles")
-def list_device_profiles():
-    return {"items": ParserMetadataRepository().list_device_profiles()}
+def list_device_profiles(
+    status: str | None = "confirmed",
+    search: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+):
+    return ParserMetadataRepository().list_device_profiles_page(
+        status=status,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/identity-signatures")
-def list_identity_signatures():
-    return {"items": ParserMetadataRepository().list_identity_signatures()}
+def list_identity_signatures(
+    status: str | None = "confirmed",
+    search: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+):
+    return ParserMetadataRepository().list_identity_signatures_page(
+        status=status,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/coverage")
-def parser_coverage():
+def parser_coverage(by_effective_plan: bool = False):
     templates_repository = ParserTemplateRepository()
     jobs_repository = ParserJobRepository()
     metadata_repository = ParserMetadataRepository()
     templates_repository.backfill_contract_metadata()
-    templates = templates_repository.list_templates()
-    jobs = jobs_repository.list_jobs()
-    active = sum(item["status"] == "active" for item in templates)
-    open_jobs = [item for item in jobs if item["status"] in OPEN_JOB_STATUSES]
+    template_status_counts = templates_repository.template_status_counts()
+    job_status_counts = jobs_repository.job_status_counts()
+    open_job_type_counts = jobs_repository.open_job_type_counts()
+    open_job_count = sum(job_status_counts.get(status, 0) for status in OPEN_JOB_STATUSES)
     backlog = jobs_repository.backlog_summary()
-    backfills = ParserBackfillService().list_jobs()
+    backfill_status_counts = ParserBackfillService().status_counts()
+    rule_generation_status_counts = RuleGenerationJobRepository().status_counts()
     governance = ParserGovernanceProjectionRepository().governance_alert_summary()
     dialect_audit = TextFSMDialectAuditService().audit()
-    return {
-        "templates_total": len(templates),
-        "templates_active": active,
-        "jobs_total": len(jobs),
-        "jobs_pending": len(open_jobs),
-        "missing_candidates": sum(item["job_type"] == "CREATE_TEMPLATE" for item in open_jobs),
-        "repair_candidates": sum(item["job_type"] == "REPAIR_TEMPLATE" for item in open_jobs),
+    payload = {
+        "templates_total": sum(template_status_counts.values()),
+        "templates_active": template_status_counts.get("active", 0),
+        "template_status_counts": template_status_counts,
+        "jobs_total": sum(job_status_counts.values()),
+        "jobs_pending": open_job_count,
+        "job_status_counts": job_status_counts,
+        "missing_candidates": open_job_type_counts.get("CREATE_TEMPLATE", 0),
+        "repair_candidates": open_job_type_counts.get("REPAIR_TEMPLATE", 0),
+        "rule_generation_status_counts": rule_generation_status_counts,
+        "rule_generation_total": sum(rule_generation_status_counts.values()),
         "command_aliases": len(metadata_repository.list_command_aliases()),
         "device_profiles": len(metadata_repository.list_device_profiles()),
         "identity_signatures": len(metadata_repository.list_identity_signatures()),
@@ -847,18 +981,19 @@ def parser_coverage():
         "dialect_active_templates": dialect_audit["template_count"],
         "dialect_platform_violations": dialect_audit["platform_violation_count"],
         "dialect_runtime_blocked": dialect_audit["runtime_blocked_count"],
-        "dialect_regression_evidence_missing": dialect_audit[
-            "regression_evidence_missing_count"
-        ],
+        "dialect_regression_evidence_missing": dialect_audit["regression_evidence_missing_count"],
         **backlog,
-        "backfills_pending_approval": sum(
-            item["status"] == "pending_approval" for item in backfills
-        ),
+        "backfills_pending_approval": backfill_status_counts.get("pending_approval", 0),
         "backfills_failed": sum(
-            item["status"] in {"validation_failed", "failed"} for item in backfills
+            backfill_status_counts.get(status, 0) for status in {"validation_failed", "failed"}
         ),
         **governance,
     }
+    if by_effective_plan:
+        from src.core.parser.production_impact import effective_plan_coverage_summary
+
+        payload["effective_plan_coverage"] = effective_plan_coverage_summary()
+    return payload
 
 
 @router.get("/dialect-audit")
@@ -866,19 +1001,47 @@ def textfsm_dialect_audit(status: str = "active"):
     return TextFSMDialectAuditService().audit(status=status)
 
 
+@router.get("/rule-gaps/from-changes")
+def rule_gaps_from_changes(days: int = 90, limit: int = 200):
+    from src.core.rule_control.change_gap_analysis import ChangeGapAnalysisService
+
+    return ChangeGapAnalysisService().analyze(days=days, limit=limit)
+
+
+@router.post("/rule-gaps/seed-jobs")
+def seed_rule_gaps_from_changes(
+    http_request: Request,
+    days: int = 90,
+    limit: int = 20,
+):
+    from src.core.rule_control.change_gap_analysis import ChangeGapAnalysisService
+
+    return ChangeGapAnalysisService().seed_jobs(
+        days=days,
+        limit=limit,
+        created_by=_authenticated_actor(http_request),
+    )
+
+
 @router.get("/rule-generation-jobs")
 def list_rule_generation_jobs(
     job_type: str | None = None,
     status: str | None = None,
-    limit: int = 200,
+    action: str | None = None,
+    asset_type: str | None = None,
+    search: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
 ):
-    return {
-        "items": RuleGenerationJobRepository().list_jobs(
-            job_type=job_type,
-            status=status,
-            limit=limit,
-        )
-    }
+    return RuleGenerationJobRepository().list_jobs_page(
+        job_type=job_type,
+        status=status,
+        action=action,
+        asset_type=asset_type,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/rule-asset-bundles")
@@ -904,19 +1067,109 @@ def get_rule_asset_bundle(bundle_id: str):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.get("/rule-asset-bundles/{bundle_id}/engineering-draft")
+def get_rule_asset_bundle_engineering_draft(bundle_id: str):
+    try:
+        return RuleAssetEngineeringRevisionService().get_draft(bundle_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/rule-asset-bundles/{bundle_id}/engineering-review")
+def review_rule_asset_bundle(
+    bundle_id: str,
+    request: Request,
+    payload: RuleAssetEngineeringReviewRequest,
+):
+    try:
+        return RuleAssetEngineeringRevisionService().review(
+            bundle_id,
+            decision=payload.decision,
+            actor=_authenticated_actor(request),
+            reason=payload.reason,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/rule-asset-bundles/{bundle_id}/engineering-revision")
+def revise_rule_asset_bundle(
+    bundle_id: str,
+    request: Request,
+    payload: RuleAssetEngineeringRevisionRequest,
+    async_mode: bool = False,
+):
+    try:
+        if async_mode:
+            from src.core.rule_control.engineering_revision_async import (
+                enqueue_engineering_revision,
+            )
+
+            return enqueue_engineering_revision(
+                bundle_id,
+                contract=payload.contract,
+                change_policies=list(payload.change_policies or []),
+                event_rules=list(payload.event_rules or []),
+                actor=_authenticated_actor(request),
+                reason=payload.reason,
+                idempotency_key=payload.idempotency_key,
+            )
+        return RuleAssetEngineeringRevisionService().revise(
+            bundle_id,
+            contract=payload.contract,
+            change_policies=payload.change_policies,
+            event_rules=payload.event_rules,
+            actor=_authenticated_actor(request),
+            reason=payload.reason,
+            idempotency_key=payload.idempotency_key,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuleAssetEngineeringRevisionError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"message": str(exc), "validation": exc.validation},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/engineering-revision-tasks/{task_id}")
+def get_engineering_revision_task(task_id: str):
+    from celery.result import AsyncResult
+
+    from src.core.celery_tasks.celery_app import celery
+
+    result = AsyncResult(task_id, app=celery)
+    payload = {
+        "task_id": task_id,
+        "status": result.status,
+        "ready": result.ready(),
+    }
+    if result.successful():
+        payload["result"] = result.result
+    elif result.failed():
+        payload["error"] = str(result.result)
+    return payload
+
+
 @router.get("/replay-reports")
 def list_replay_reports(
     success: bool | None = None,
     asset_type: str | None = None,
-    limit: int = 200,
+    search: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
 ):
-    return {
-        "items": RuleGenerationJobRepository().list_replay_reports(
-            success=success,
-            asset_type=asset_type,
-            limit=limit,
-        )
-    }
+    return RuleGenerationJobRepository().list_replay_reports_page(
+        success=success,
+        asset_type=asset_type,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/approval-audit")
@@ -924,17 +1177,19 @@ def list_rule_asset_approval_audit(
     action: str | None = None,
     asset_type: str | None = None,
     actor: str | None = None,
-    limit: int = 200,
+    search: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
 ):
     try:
-        return {
-            "items": RuleGenerationJobRepository().list_approval_audit(
-                action=action,
-                asset_type=asset_type,
-                actor=actor,
-                limit=limit,
-            )
-        }
+        return RuleGenerationJobRepository().list_approval_audit_page(
+            action=action,
+            asset_type=asset_type,
+            actor=actor,
+            search=search,
+            limit=limit,
+            offset=offset,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -944,46 +1199,52 @@ def list_rule_asset_agent_loop_attempts(
     asset_type: str | None = None,
     stage: str | None = None,
     success: bool | None = None,
-    limit: int = 200,
+    search: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
 ):
-    return {
-        "items": RuleGenerationJobRepository().list_agent_loop_attempts(
-            asset_type=asset_type,
-            stage=stage,
-            success=success,
-            limit=limit,
-        )
-    }
+    return RuleGenerationJobRepository().list_agent_loop_attempts_page(
+        asset_type=asset_type,
+        stage=stage,
+        success=success,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/observation-contracts")
 def list_observation_contracts(
     source_type: str | None = None,
     status: str | None = None,
-    limit: int = 200,
+    search: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
 ):
-    return {
-        "items": ObservationContractRepository().list_contracts(
-            source_type=source_type,
-            status=status,
-            limit=limit,
-        )
-    }
+    return ObservationContractRepository().list_contracts_page(
+        source_type=source_type,
+        status=status,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/change-policies")
 def list_change_policies(
     status: str | None = None,
     observation_type: str | None = None,
-    limit: int = 200,
+    search: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
 ):
-    return {
-        "items": ChangePolicyRepository().list_versions(
-            status=status,
-            observation_type=observation_type,
-            limit=limit,
-        )
-    }
+    return ChangePolicyRepository().list_versions_page(
+        status=status,
+        observation_type=observation_type,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.post("/runtime-assets/resolve")
@@ -999,16 +1260,29 @@ def resolve_runtime_rule_assets(payload: RuntimeRuleAssetResolveRequest):
     )
 
 
+@router.get("/runtime-assets/health")
+def get_runtime_rule_asset_health():
+    return RuntimeRuleAssetResolver().load_inventory_bundle().to_dict()
+
+
 @router.post("/runtime-assets/seed-builtin")
-def seed_builtin_runtime_rule_assets(payload: RuntimeRuleAssetSeedRequest | None = None):
+def seed_builtin_runtime_rule_assets(
+    request: Request,
+    payload: RuntimeRuleAssetSeedRequest | None = None,
+):
+    if payload is None:
+        raise HTTPException(status_code=422, detail="runtime asset seed requires a reason")
     return RuntimeRuleAssetSeedService().seed_builtin_assets(
-        actor=payload.actor if payload else None,
+        actor=_authenticated_actor(request),
+        reason=_required_reason(payload.reason, action="builtin runtime asset seed"),
     )
 
 
 @router.post("/rule-generation-jobs")
-def create_rule_generation_job(payload: RuleGenerationJobCreateRequest):
+def create_rule_generation_job(request: Request, payload: RuleGenerationJobCreateRequest):
     try:
+        if payload.status != "draft":
+            raise ValueError("rule generation jobs must be created as draft")
         return RuleGenerationJobRepository().create_job(
             job_type=payload.job_type,
             source_ref=payload.source_ref,
@@ -1020,7 +1294,7 @@ def create_rule_generation_job(payload: RuleGenerationJobCreateRequest):
             payload=payload.payload,
             validation_report=payload.validation_report,
             approval_required=payload.approval_required,
-            created_by=payload.created_by,
+            created_by=_authenticated_actor(request),
             status=payload.status,
         )
     except ValueError as exc:
@@ -1048,21 +1322,13 @@ def transition_rule_generation_job(
     job_id: str,
     payload: RuleGenerationJobTransitionRequest,
 ):
-    try:
-        return RuleGenerationJobRepository().transition_job(
-            job_id,
-            status=payload.status,
-            validation_report=payload.validation_report,
-            asset_ref=payload.asset_ref,
-            asset_type=payload.asset_type,
-            asset_id=payload.asset_id,
-            asset_version_id=payload.asset_version_id,
-            asset_digest=payload.asset_digest,
-        )
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except RuleGenerationJobStateError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            "direct rule generation job transitions are disabled; use generation, "
+            "validation, submission, and Rule Asset Bundle approval workflows"
+        ),
+    )
 
 
 @router.post("/rule-generation-jobs/{job_id}/validation-report")
@@ -1070,24 +1336,30 @@ def attach_rule_generation_validation_report(
     job_id: str,
     payload: RuleGenerationJobValidationRequest,
 ):
-    try:
-        return RuleGenerationJobRepository().attach_validation_report(
-            job_id,
-            validation_report=payload.validation_report,
-        )
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            "direct validation report attachment is disabled; validation evidence "
+            "must be produced by the governed validation workflow"
+        ),
+    )
 
 
-@router.post("/rule-generation-jobs/{job_id}/approve")
+@router.post(
+    "/rule-generation-jobs/{job_id}/approve",
+    dependencies=[Depends(require_role(["admin"]))],
+)
 def approve_rule_generation_job(
     job_id: str,
+    request: Request,
     payload: RuleGenerationJobApprovalRequest | None = None,
 ):
+    reason = _required_reason(payload.reason if payload else None, action="rule asset approval")
     try:
         return RuleAssetApprovalService().approve(
             job_id,
-            actor=payload.actor if payload else None,
+            actor=_authenticated_actor(request),
+            reason=reason,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1100,12 +1372,13 @@ def approve_rule_generation_job(
 @router.post("/rule-generation-jobs/{job_id}/revise")
 def revise_rule_generation_job(
     job_id: str,
+    request: Request,
     payload: RuleGenerationJobApprovalRequest | None = None,
 ):
     try:
         return AgentLoopRevisionService().create_revision_job(
             job_id,
-            actor=payload.actor if payload else None,
+            actor=_authenticated_actor(request),
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1116,12 +1389,13 @@ def revise_rule_generation_job(
 @router.post("/rule-generation-jobs/{job_id}/execute-revision")
 def execute_rule_generation_revision_job(
     job_id: str,
+    request: Request,
     payload: RuleGenerationJobApprovalRequest | None = None,
 ):
     try:
         return AgentLoopRevisionExecutor().execute(
             job_id,
-            actor=payload.actor if payload else None,
+            actor=_authenticated_actor(request),
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1134,12 +1408,13 @@ def execute_rule_generation_revision_job(
 @router.post("/rule-generation-jobs/{job_id}/submit")
 def submit_rule_generation_job_candidate(
     job_id: str,
+    request: Request,
     payload: RuleGenerationJobApprovalRequest | None = None,
 ):
     try:
         return RuleAssetSubmissionService().submit_candidate(
             job_id,
-            actor=payload.actor if payload else None,
+            actor=_authenticated_actor(request),
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1147,13 +1422,31 @@ def submit_rule_generation_job_candidate(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+@router.post("/rule-generation-jobs/{job_id}/auto-context")
+def auto_build_rule_generation_context(job_id: str, http_request: Request):
+    try:
+        return RuleAssetTemplateActivationService().auto_build_context(
+            job_id,
+            actor=_authenticated_actor(http_request),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.post("/rule-generation-jobs/{job_id}/generation-context")
 def preview_rule_asset_generation_context(
     job_id: str,
+    http_request: Request,
     payload: RuleAssetGenerationContextRequest | None = None,
 ):
     try:
         request = payload or RuleAssetGenerationContextRequest()
+        if not request.context_id and not request.dataset_ids:
+            raise ValueError(
+                "select an offline patrol dataset before previewing rule generation context"
+            )
         overrides = dict(request.context_overrides or {})
         prepared_dataset = None
         if request.context_id or request.dataset_ids:
@@ -1166,7 +1459,7 @@ def preview_rule_asset_generation_context(
                 else context_service.prepare(
                     job_id=job_id,
                     dataset_ids=list(request.dataset_ids or []),
-                    created_by=request.actor,
+                    created_by=_authenticated_actor(http_request),
                     max_records=request.max_records,
                     field_name=request.field_name,
                     observation_type=request.observation_type,
@@ -1207,10 +1500,15 @@ def preview_rule_asset_generation_context(
 @router.post("/rule-generation-jobs/{job_id}/start-generation")
 def start_rule_asset_generation_workflow(
     job_id: str,
+    http_request: Request,
     payload: RuleAssetGenerationContextRequest | None = None,
 ):
     try:
         request = payload or RuleAssetGenerationContextRequest()
+        if not request.context_id and not request.dataset_ids:
+            raise ValueError(
+                "select an offline patrol dataset before starting rule asset generation"
+            )
         overrides = dict(request.context_overrides or {})
         context_id = request.context_id
         if context_id or request.dataset_ids:
@@ -1223,7 +1521,7 @@ def start_rule_asset_generation_workflow(
                 else context_service.prepare(
                     job_id=job_id,
                     dataset_ids=list(request.dataset_ids or []),
-                    created_by=request.actor,
+                    created_by=_authenticated_actor(http_request),
                     max_records=request.max_records,
                     field_name=request.field_name,
                     observation_type=request.observation_type,
@@ -1246,7 +1544,7 @@ def start_rule_asset_generation_workflow(
             context_id = prepared_dataset["context_id"]
         generation_kwargs = {
             "context_overrides": overrides,
-            "actor": request.actor,
+            "actor": _authenticated_actor(http_request),
         }
         if context_id:
             generation_kwargs["context_id"] = context_id
@@ -1263,13 +1561,15 @@ def start_rule_asset_generation_workflow(
 @router.post("/rule-generation-jobs/{job_id}/reject")
 def reject_rule_generation_job(
     job_id: str,
+    request: Request,
     payload: RuleGenerationJobApprovalRequest | None = None,
 ):
+    reason = _required_reason(payload.reason if payload else None, action="rule asset rejection")
     try:
         return RuleAssetApprovalService().reject(
             job_id,
-            actor=payload.actor if payload else None,
-            reason=payload.reason if payload else None,
+            actor=_authenticated_actor(request),
+            reason=reason,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1280,13 +1580,15 @@ def reject_rule_generation_job(
 @router.post("/rule-generation-jobs/{job_id}/deprecate")
 def deprecate_rule_generation_job(
     job_id: str,
+    request: Request,
     payload: RuleGenerationJobApprovalRequest | None = None,
 ):
+    reason = _required_reason(payload.reason if payload else None, action="rule asset deprecation")
     try:
         return RuleAssetApprovalService().deprecate(
             job_id,
-            actor=payload.actor if payload else None,
-            reason=payload.reason if payload else None,
+            actor=_authenticated_actor(request),
+            reason=reason,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1300,29 +1602,31 @@ def deprecate_rule_generation_job(
 def list_event_rules(
     status: str | None = None,
     event_type: str | None = None,
-    limit: int = 500,
+    search: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
 ):
-    return {
-        "items": EventRuleRepository().list_versions(
-            status=status,
-            event_type=event_type,
-            limit=limit,
-        )
-    }
+    return EventRuleRepository().list_versions_page(
+        status=status,
+        event_type=event_type,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.post("/event-rules")
-def upsert_event_rule(payload: EventRuleUpsertRequest):
+def upsert_event_rule(request: Request, payload: EventRuleUpsertRequest):
     try:
-        if payload.status == "active":
-            raise ValueError("event rule versions must be created as draft or pending_approval")
+        if payload.status != "draft":
+            raise ValueError("manually created event rule versions must start as draft")
         version_id = EventRuleRepository().create_rule_version(
             name=payload.name,
             event_type=payload.event_type,
             severity=payload.severity,
             condition=payload.condition,
             description=payload.description,
-            created_by=payload.created_by,
+            created_by=_authenticated_actor(request),
             status=payload.status,
         )
         return {"success": True, "version_id": version_id}
@@ -1332,31 +1636,43 @@ def upsert_event_rule(payload: EventRuleUpsertRequest):
 
 @router.post("/event-rules/{version_id}/activate")
 def activate_event_rule(version_id: str):
-    try:
-        return EventRuleRepository().activate_rule_version(version_id)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            "direct EventRule activation is disabled; publish a validated Rule Asset "
+            "Bundle or use the audited force-activate endpoint for an emergency"
+        ),
+    )
 
 
 @router.post("/event-rules/{version_id}/force-activate")
 def force_activate_event_rule(
     version_id: str,
+    request: Request,
     payload: EventRuleForceActivationRequest,
 ):
     try:
         return EventRuleRepository().force_activate_rule_version(
             version_id,
-            actor=payload.actor,
-            reason=payload.reason,
+            actor=_authenticated_actor(request),
+            reason=_required_reason(payload.reason, action="event rule force activation"),
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/event-rules/{version_id}/deprecate")
-def deprecate_event_rule(version_id: str):
+def deprecate_event_rule(
+    version_id: str,
+    request: Request,
+    payload: EventRuleForceActivationRequest,
+):
     try:
-        return EventRuleRepository().deprecate_rule_version(version_id)
+        return EventRuleRepository().deprecate_rule_version(
+            version_id,
+            actor=_authenticated_actor(request),
+            reason=_required_reason(payload.reason, action="event rule deprecation"),
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1436,44 +1752,64 @@ def replay_event_rules(payload: EventRuleReplayRequest):
 
 
 @router.post("/event-rules/bootstrap")
-def bootstrap_event_rules():
-    return {"success": True, "created": EventRuleRepository().ensure_default_rules()}
+def bootstrap_event_rules(
+    request: Request,
+    payload: CommandProfileLifecycleRequest,
+):
+    actor = _authenticated_actor(request)
+    reason = _required_reason(payload.reason, action="builtin event rule bootstrap")
+    return {
+        "success": True,
+        "created": EventRuleRepository().ensure_default_rules(actor=actor, reason=reason),
+    }
 
 
 @router.get("/command-profiles")
-def list_command_profiles():
-    return {"items": CommandProfileRepository().list_profiles()}
+def list_command_profiles(
+    status: str | None = None,
+    search: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+):
+    return CommandProfileRepository().list_profiles_page(
+        status=status,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.post("/command-profiles")
-def upsert_command_profile(payload: CommandProfileUpsertRequest):
+def upsert_command_profile(request: Request, payload: CommandProfileUpsertRequest):
     try:
         if payload.status == "active":
-            version_id = CommandProfileRepository().upsert_active_profile(
-                name=payload.name,
-                action=payload.action,
-                commands=payload.commands,
-                created_by=payload.created_by,
-            )
-        else:
-            version_id = CommandProfileRepository().create_profile_version(
-                name=payload.name,
-                action=payload.action,
-                commands=payload.commands,
-                created_by=payload.created_by,
-                status="draft",
-            )
+            raise ValueError("command profile versions must be created as draft")
+        version_id = CommandProfileRepository().create_profile_version(
+            name=payload.name,
+            action=payload.action,
+            commands=payload.commands,
+            created_by=_authenticated_actor(request),
+            status="draft",
+        )
         return {"success": True, "profile_version_id": version_id, "status": payload.status}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/command-profiles/{profile_version_id}/activate")
-def activate_command_profile(profile_version_id: str):
+def activate_command_profile(
+    profile_version_id: str,
+    request: Request,
+    payload: CommandProfileLifecycleRequest,
+):
     try:
         repository = CommandProfileRepository()
         repository.validate_profile_activation(profile_version_id)
-        return repository.activate_profile_version(profile_version_id)
+        return repository.activate_profile_version(
+            profile_version_id,
+            actor=_authenticated_actor(request),
+            reason=_required_reason(payload.reason, action="command profile activation"),
+        )
     except Exception as exc:
         message = str(exc)
         if message == "command profile impact evidence is required before activation":
@@ -1482,56 +1818,96 @@ def activate_command_profile(profile_version_id: str):
 
 
 @router.delete("/command-profiles/{profile_version_id}")
-def delete_command_profile(profile_version_id: str):
+def delete_command_profile(
+    profile_version_id: str,
+    request: Request,
+    payload: CommandProfileLifecycleRequest,
+):
     try:
-        return CommandProfileRepository().delete_profile_version(profile_version_id)
+        return CommandProfileRepository().delete_profile_version(
+            profile_version_id,
+            actor=_authenticated_actor(request),
+            reason=_required_reason(payload.reason, action="command profile deletion"),
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/command-profiles/{profile_version_id}/deprecate")
-def deprecate_command_profile(profile_version_id: str):
+def deprecate_command_profile(
+    profile_version_id: str,
+    request: Request,
+    payload: CommandProfileLifecycleRequest,
+):
     try:
-        return CommandProfileRepository().deprecate_profile_version(profile_version_id)
+        return CommandProfileRepository().deprecate_profile_version(
+            profile_version_id,
+            actor=_authenticated_actor(request),
+            reason=_required_reason(payload.reason, action="command profile deprecation"),
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/command-profiles/{profile_version_id}/rollback")
-def rollback_command_profile(profile_version_id: str):
+def rollback_command_profile(
+    profile_version_id: str,
+    request: Request,
+    payload: CommandProfileLifecycleRequest,
+):
     try:
-        return CommandProfileRepository().rollback_profile_version(profile_version_id)
+        return CommandProfileRepository().rollback_profile_version(
+            profile_version_id,
+            actor=_authenticated_actor(request),
+            reason=_required_reason(payload.reason, action="command profile rollback"),
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/command-profiles/activate")
 def activate_command_profile_legacy(payload: CommandProfileUpsertRequest):
-    try:
-        version_id = CommandProfileRepository().upsert_active_profile(
-            name=payload.name,
-            action=payload.action,
-            commands=payload.commands,
-            created_by=payload.created_by,
-        )
-        return {"success": True, "profile_version_id": version_id, "status": "active"}
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            "legacy command profile activation is disabled; create a draft, save impact "
+            "evidence, then activate the version with an audited reason"
+        ),
+    )
 
 
 @router.get("/command-profile-bindings")
-def list_command_profile_bindings():
-    return {"items": CommandProfileRepository().list_bindings()}
+def list_command_profile_bindings(
+    status: str | None = None,
+    search: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+):
+    return CommandProfileRepository().list_bindings_page(
+        status=status,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.post("/command-profile-bindings")
-def upsert_command_profile_binding(payload: CommandProfileBindingUpsertRequest):
+def upsert_command_profile_binding(
+    request: Request,
+    payload: CommandProfileBindingUpsertRequest,
+):
     try:
+        _authenticated_actor(request)
+        if payload.status != "disabled":
+            raise ValueError(
+                "command profile bindings must be created disabled and enabled "
+                "through the audited lifecycle endpoint"
+            )
         binding_id = CommandProfileRepository().upsert_binding(
             profile_version_id=payload.profile_version_id,
             selector=payload.selector,
             priority=payload.priority,
-            status=payload.status,
+            status="disabled",
         )
         return {"success": True, "binding_id": binding_id}
     except Exception as exc:
@@ -1539,17 +1915,35 @@ def upsert_command_profile_binding(payload: CommandProfileBindingUpsertRequest):
 
 
 @router.post("/command-profile-bindings/{binding_id}/enable")
-def enable_command_profile_binding(binding_id: str):
+def enable_command_profile_binding(
+    binding_id: str,
+    request: Request,
+    payload: CommandProfileLifecycleRequest,
+):
     try:
-        return CommandProfileRepository().set_binding_status(binding_id, "active")
+        return CommandProfileRepository().set_binding_status(
+            binding_id,
+            "active",
+            actor=_authenticated_actor(request),
+            reason=_required_reason(payload.reason, action="command profile binding enable"),
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/command-profile-bindings/{binding_id}/disable")
-def disable_command_profile_binding(binding_id: str):
+def disable_command_profile_binding(
+    binding_id: str,
+    request: Request,
+    payload: CommandProfileLifecycleRequest,
+):
     try:
-        return CommandProfileRepository().set_binding_status(binding_id, "disabled")
+        return CommandProfileRepository().set_binding_status(
+            binding_id,
+            "disabled",
+            actor=_authenticated_actor(request),
+            reason=_required_reason(payload.reason, action="command profile binding disable"),
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

@@ -16,6 +16,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    event,
     text,
 )
 from sqlalchemy.orm import declarative_base
@@ -829,6 +830,12 @@ class OfflinePatrolJobRecord(Base):
 
     id = Column(String(64), primary_key=True)
     idempotency_key = Column(String(128), nullable=False, unique=True)
+    purpose = Column(
+        String(32),
+        nullable=False,
+        default="offline_patrol",
+        server_default="offline_patrol",
+    )
     job_type = Column(String(32), nullable=False)
     name = Column(String(256), nullable=False)
     owner_id = Column(String(64), nullable=False)
@@ -878,6 +885,7 @@ class OfflinePatrolJobRecord(Base):
 
     __table_args__ = (
         Index("ix_offline_patrol_jobs_idempotency", "idempotency_key"),
+        Index("ix_offline_patrol_jobs_purpose_created", "purpose", "created_at"),
         Index("ix_offline_patrol_jobs_owner_created", "owner_id", "created_at"),
         Index("ix_offline_patrol_jobs_status_created", "status", "created_at"),
         Index("ix_offline_patrol_jobs_archived", "archived"),
@@ -1324,6 +1332,7 @@ class RawEvidenceRecord(Base):
 
     id = Column(String(64), primary_key=True)
     evidence_key = Column(String(256), nullable=False)
+    source = Column(String(32), nullable=False, default="cli", index=True, comment="cli|gnmi|snmp|syslog")
     source_type = Column(String(64), nullable=False, index=True)
     evidence_type = Column(String(128), nullable=False, index=True)
     run_id = Column(String(128), nullable=True, index=True)
@@ -2289,6 +2298,42 @@ class ParserTemplateJob(Base):
         return {column.name: getattr(self, column.name) for column in self.__table__.columns}
 
 
+class ParserGapLedgerRecord(Base):
+    """Production parse-gap ledger (draft-only; never auto-dispatches LLM)."""
+
+    __tablename__ = "netops_parser_gap_ledger"
+
+    id = Column(String(64), primary_key=True)
+    vendor = Column(String(64), nullable=False)
+    model = Column(String(128), nullable=True)
+    family = Column(String(128), nullable=True)
+    canonical_command = Column(String(256), nullable=False)
+    failure_code = Column(String(64), nullable=False)
+    occurrence_count = Column(Integer, nullable=False, default=0, server_default="0")
+    first_seen_at = Column(DateTime(timezone=True), nullable=False)
+    last_seen_at = Column(DateTime(timezone=True), nullable=False)
+    last_run_id = Column(String(128), nullable=True)
+    last_device_id = Column(String(256), nullable=True)
+    draft_job_id = Column(String(64), nullable=True)
+    metadata_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index(
+            "uq_parser_gap_ledger_key",
+            "vendor",
+            "canonical_command",
+            "failure_code",
+            unique=True,
+        ),
+        Index("ix_parser_gap_ledger_last_seen", "last_seen_at"),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
 class ParserGenerationAttempt(Base):
     __tablename__ = "parser_generation_attempts"
 
@@ -2573,6 +2618,206 @@ class RuleGenerationContextRecord(Base):
 
     def to_dict(self):
         return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class RuleAssetCommandUnitRecord(Base):
+    """Materialized command-level production flow for one offline patrol job."""
+
+    __tablename__ = "netops_rule_asset_command_units"
+
+    id = Column(String(64), primary_key=True)
+    offline_job_id = Column(
+        String(64),
+        ForeignKey("netops_offline_patrol_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    asset_key = Column(String(64), nullable=False)
+    vendor = Column(String(64), nullable=False)
+    model = Column(String(128), nullable=True)
+    models_json = Column(JSON, nullable=False, default=list)
+    family = Column(String(128), nullable=True)
+    profile = Column(String(128), nullable=False)
+    canonical_command = Column(String(512), nullable=False)
+    handling = Column(String(32), nullable=False)
+    asset_mode = Column(String(32), nullable=False)
+    status = Column(String(32), nullable=False)
+    current_stage = Column(String(64), nullable=False)
+    progress_percent = Column(Integer, nullable=False, default=0, server_default="0")
+    sample_count = Column(Integer, nullable=False, default=0, server_default="0")
+    device_count = Column(Integer, nullable=False, default=0, server_default="0")
+    output_signature_count = Column(Integer, nullable=False, default=0, server_default="0")
+    blocker_count = Column(Integer, nullable=False, default=0, server_default="0")
+    parse_counts_json = Column(JSON, nullable=False, default=dict)
+    stage_states_json = Column(JSON, nullable=False, default=list)
+    next_action_json = Column(JSON, nullable=False, default=dict)
+    parser_job_id = Column(String(64), nullable=True)
+    parser_template_id = Column(String(64), nullable=True)
+    rule_seed_job_id = Column(String(64), nullable=True)
+    context_id = Column(String(64), nullable=True)
+    bundle_id = Column(String(64), nullable=True)
+    projection_version = Column(Integer, nullable=False, default=1, server_default="1")
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_rule_asset_command_unit_job_key",
+            "offline_job_id",
+            "asset_key",
+            unique=True,
+        ),
+        Index(
+            "ix_rule_asset_command_unit_job_status",
+            "offline_job_id",
+            "status",
+        ),
+        Index(
+            "ix_rule_asset_command_unit_job_stage",
+            "offline_job_id",
+            "current_stage",
+        ),
+        Index(
+            "ix_rule_asset_command_unit_job_mode",
+            "offline_job_id",
+            "asset_mode",
+        ),
+        Index(
+            "ix_rule_asset_command_unit_identity",
+            "vendor",
+            "profile",
+            "canonical_command",
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class RuleReplayReportRecord(Base):
+    """Queryable projection of the current historical replay for one rule job."""
+
+    __tablename__ = "netops_rule_replay_reports"
+
+    job_id = Column(
+        String(64),
+        ForeignKey("netops_rule_generation_jobs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    success = Column(Boolean, nullable=True, index=True)
+    sampled_change_count = Column(Integer, nullable=False, default=0, server_default="0")
+    matched_change_count = Column(Integer, nullable=False, default=0, server_default="0")
+    estimated_daily_event_count = Column(Float, nullable=False, default=0, server_default="0")
+    collision_count = Column(Integer, nullable=False, default=0, server_default="0")
+    event_types_json = Column(JSON, nullable=False, default=dict)
+    matched_entity_types_json = Column(JSON, nullable=False, default=dict)
+    top_devices_json = Column(JSON, nullable=False, default=dict)
+    collision_rules_json = Column(JSON, nullable=False, default=dict)
+    unexpected_matches_json = Column(JSON, nullable=False, default=list)
+    recovery_pair_coverage_json = Column(JSON, nullable=True)
+    report_json = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
+    __table_args__ = (
+        Index("ix_rule_replay_success_updated", "success", "updated_at"),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class RuleApprovalAuditRecord(Base):
+    """Append-semantic governance event projected from a rule job report."""
+
+    __tablename__ = "netops_rule_approval_audit"
+
+    id = Column(String(64), primary_key=True)
+    job_id = Column(
+        String(64),
+        ForeignKey("netops_rule_generation_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    action = Column(String(32), nullable=False, index=True)
+    actor = Column(String(128), nullable=True, index=True)
+    reason = Column(Text, nullable=True)
+    occurred_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    validation_success = Column(Boolean, nullable=True)
+    synthetic_success = Column(Boolean, nullable=True)
+    replay_success = Column(Boolean, nullable=True)
+    governance_json = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("job_id", "action", name="uq_rule_approval_job_action"),
+        Index("ix_rule_approval_action_occurred", "action", "occurred_at"),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class RuleAgentLoopAttemptRecord(Base):
+    """Queryable projection of one rule-generation Agent Loop attempt."""
+
+    __tablename__ = "netops_rule_agent_loop_attempts"
+
+    id = Column(String(64), primary_key=True)
+    job_id = Column(
+        String(64),
+        ForeignKey("netops_rule_generation_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    attempt_ordinal = Column(Integer, nullable=False)
+    attempt_number = Column(Integer, nullable=False)
+    stage = Column(String(128), nullable=True, index=True)
+    generator = Column(String(128), nullable=True)
+    model_name = Column(String(128), nullable=True, index=True)
+    mode = Column(String(64), nullable=True)
+    success = Column(Boolean, nullable=True, index=True)
+    input_summary_json = Column(JSON, nullable=False, default=dict)
+    output_summary_json = Column(JSON, nullable=False, default=dict)
+    validator_feedback_json = Column(JSON, nullable=False, default=dict)
+    revision_request_json = Column(JSON, nullable=True)
+    ready_for_approval = Column(Boolean, nullable=True)
+    next_action = Column(String(256), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
+    __table_args__ = (
+        Index("ix_rule_agent_loop_job_ordinal", "job_id", "attempt_ordinal"),
+        Index("ix_rule_agent_loop_stage_success", "stage", "success"),
+        Index("ix_rule_agent_loop_updated_job", "updated_at", "job_id"),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+@event.listens_for(RuleGenerationJobRecord, "after_insert")
+@event.listens_for(RuleGenerationJobRecord, "after_update")
+def _sync_rule_generation_job_projections(_mapper, connection, target) -> None:
+    if connection.dialect.name == "sqlite":
+        from sqlalchemy import inspect
+
+        if not inspect(connection).has_table("netops_rule_replay_reports"):
+            return
+    from src.infrastructure.db.rule_control_projections import (
+        synchronize_rule_job_projections,
+    )
+
+    synchronize_rule_job_projections(connection, target)
 
 
 class AgentModuleControlRecord(Base):

@@ -18,6 +18,13 @@ def _bundle_row(child_ids: list[str]):
         },
         validation_report_json={
             "success": True,
+            "governance": {
+                "engineering_review": {
+                    "decision": "accepted",
+                    "actor": "rule-engineer",
+                    "reason": "validated candidate semantics",
+                }
+            },
             "bundle_gate": {"success": True, "blockers": []},
             "context_gate": {
                 "success": True,
@@ -218,4 +225,24 @@ def test_bundle_read_model_blocks_replay_from_another_context():
 
     assert result["release_ready"] is False
     assert "historical replay run_ids do not match immutable context" in result["blockers"]
-    assert result["steps"][-2]["status"] == "blocked"
+    assert next(step for step in result["steps"] if step["key"] == "replay")["status"] == "blocked"
+
+
+def test_bundle_read_model_requires_engineering_review_before_release():
+    children = {
+        "contract": _child("contract", "OBSERVATION_CONTRACT"),
+        "policy": _child("policy", "CHANGE_POLICY"),
+        "rule": _child("rule", "EVENT_RULE"),
+    }
+    row = _bundle_row(list(children))
+    row.validation_report_json.pop("governance")
+
+    result = RuleAssetBundleService._serialize(
+        row,
+        children,
+        _asset_states(children),
+    )
+
+    assert result["release_ready"] is False
+    assert "engineering review has not accepted the generated candidates" in result["blockers"]
+    assert next(step for step in result["steps"] if step["key"] == "review")["status"] == "ready"

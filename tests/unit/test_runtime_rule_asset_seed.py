@@ -1,7 +1,20 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+from src.auth.models import CurrentUser
 from src.core.rule_control.runtime_seed import RuntimeRuleAssetSeedService
 from src.gateway import parser_api
+
+
+def _admin_request(username: str = "operator"):
+    return SimpleNamespace(
+        state=SimpleNamespace(
+            current_user=CurrentUser(
+                user_id=f"user:{username}", username=username, role="admin"
+            )
+        )
+    )
 
 
 class FakeChangePolicyRepository:
@@ -23,7 +36,9 @@ class FakeChangePolicyRepository:
         self.created.append(kwargs)
         return payload
 
-    def activate_policy_version(self, version_id):
+    def activate_policy_version(self, version_id, *, actor=None, reason=None):
+        assert actor == "pytest"
+        assert reason == "restore runtime baseline"
         created = self.created[int(version_id.split("-")[-1]) - 1]
         observation_type = created["policy"]["observation_type"]
         active = {
@@ -40,7 +55,9 @@ class FakeEventRuleRepository:
     def __init__(self):
         self.calls = 0
 
-    def ensure_default_rules(self):
+    def ensure_default_rules(self, *, actor=None, reason=None):
+        assert actor == "pytest"
+        assert reason == "restore runtime baseline"
         self.calls += 1
         return 11
 
@@ -53,8 +70,8 @@ def test_runtime_rule_asset_seed_creates_and_skips_builtin_assets():
         event_rule_repository=rules,
     )
 
-    first = service.seed_builtin_assets(actor="pytest")
-    second = service.seed_builtin_assets(actor="pytest")
+    first = service.seed_builtin_assets(actor="pytest", reason="restore runtime baseline")
+    second = service.seed_builtin_assets(actor="pytest", reason="restore runtime baseline")
 
     assert first["success"] is True
     assert first["event_rules_created"] == 11
@@ -69,14 +86,16 @@ def test_runtime_rule_asset_seed_creates_and_skips_builtin_assets():
 
 def test_runtime_rule_asset_seed_endpoint_uses_service(monkeypatch):
     class FakeSeedService:
-        def seed_builtin_assets(self, *, actor):
+        def seed_builtin_assets(self, *, actor, reason):
             assert actor == "operator"
+            assert reason == "restore runtime baseline"
             return {"success": True, "change_policies_active": 10}
 
     monkeypatch.setattr(parser_api, "RuntimeRuleAssetSeedService", FakeSeedService)
 
     result = parser_api.seed_builtin_runtime_rule_assets(
-        parser_api.RuntimeRuleAssetSeedRequest(actor="operator")
+        _admin_request(),
+        parser_api.RuntimeRuleAssetSeedRequest(reason="restore runtime baseline"),
     )
 
     assert result == {"success": True, "change_policies_active": 10}

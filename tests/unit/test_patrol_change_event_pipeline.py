@@ -1114,7 +1114,9 @@ def test_raw_import_fails_before_writing_when_postgres_is_unavailable(tmp_path: 
     assert not db.exists()
 
 
-def test_production_import_preserves_evidence_when_parser_fails(tmp_path: Path, monkeypatch):
+def test_production_import_preserves_evidence_without_creating_asset_jobs(
+    tmp_path: Path, monkeypatch
+):
     source = tmp_path / "SW1-10.0.0.1.log"
     source.write_text(CISCO_SAMPLE, encoding="utf-8")
     run_id = f"test-{uuid.uuid4()}"
@@ -1160,7 +1162,7 @@ def test_production_import_preserves_evidence_when_parser_fails(tmp_path: Path, 
             for item in result["parser_results"]
             if item.get("candidate_job_id")
         }
-        assert candidate_ids
+        assert not candidate_ids
         with get_db_session() as db:
             snapshots = db.query(CommandSnapshot).filter(CommandSnapshot.run_id == run_id).all()
             assert snapshots
@@ -1171,15 +1173,6 @@ def test_production_import_preserves_evidence_when_parser_fails(tmp_path: Path, 
                 .count()
             )
             assert evidence_count == len(snapshots)
-            jobs = db.query(ParserTemplateJob).filter(ParserTemplateJob.id.in_(candidate_ids)).all()
-            assert jobs
-            assert {job.source_mode for job in jobs} == {"production"}
-            samples = (
-                db.query(ParserJobSample).filter(ParserJobSample.job_id.in_(candidate_ids)).all()
-            )
-            assert samples
-            assert {sample.sanitization_status for sample in samples} == {"pending_sanitization"}
-            assert all(sample.sanitized_text is None for sample in samples)
             collection_results = (
                 db.query(PatrolCollectionResult)
                 .filter(PatrolCollectionResult.run_id == run_id)
@@ -1187,9 +1180,7 @@ def test_production_import_preserves_evidence_when_parser_fails(tmp_path: Path, 
             )
             assert {row.execution_status for row in collection_results} == {"complete"}
             assert {row.fact_status for row in collection_results} == {"blocked_by_parser"}
-            assert {
-                row.parser_candidate_id for row in collection_results if row.parser_candidate_id
-            } == candidate_ids
+            assert all(row.parser_candidate_id is None for row in collection_results)
     finally:
         _cleanup_runs(run_id)
 

@@ -4,22 +4,27 @@ import uuid
 
 import pytest
 
-from src.core.rule_control.jobs import RuleGenerationJob
-from src.core.rule_control.jobs import RuleGenerationJobStateError
-from src.core.rule_control.jobs import transition_job
+from src.core.patrol.change_policy_repository import ChangePolicyRepository
+from src.core.patrol.event_rules import EventRuleRepository
 from src.core.rule_control.approval import RuleAssetApprovalService
 from src.core.rule_control.executor import AgentLoopRevisionExecutor
+from src.core.rule_control.jobs import (
+    RuleGenerationJob,
+    RuleGenerationJobStateError,
+    transition_job,
+)
 from src.core.rule_control.repository import RuleGenerationJobRepository
 from src.core.rule_control.revision import AgentLoopRevisionService
 from src.core.rule_control.submission import RuleAssetSubmissionService
-from src.core.patrol.change_policy_repository import ChangePolicyRepository
-from src.core.patrol.event_rules import EventRuleRepository
 from src.infrastructure.db.models import (
     ChangePolicyRecord,
     ChangePolicyVersionRecord,
     EventRuleRecord,
     EventRuleVersionRecord,
+    RuleAgentLoopAttemptRecord,
+    RuleApprovalAuditRecord,
     RuleGenerationJobRecord,
+    RuleReplayReportRecord,
 )
 from src.infrastructure.db.postgres import get_db_session
 
@@ -150,8 +155,7 @@ def test_rule_generation_job_preview_summarizes_validation_and_redacts_private_p
         assert preview["validation_summary"]["case_count"] == 3
         assert preview["historical_replay"]["matched_change_count"] == 2
         assert (
-            preview["payload_summary"]["summary"]["records"]["reason"]
-            == "private_or_large_payload"
+            preview["payload_summary"]["summary"]["records"]["reason"] == "private_or_large_payload"
         )
         candidate = preview["candidate_preview"]["skill_result.candidate_rules"][0]
         assert candidate["raw_text"]["redacted"] is True
@@ -168,7 +172,9 @@ def test_rule_generation_job_preview_summarizes_validation_and_redacts_private_p
 
         blocked_preview = repo.preview_job(job["id"])
         assert blocked_preview["approval_readiness"]["can_approve"] is False
-        assert "historical replay has collisions" in blocked_preview["approval_readiness"]["blockers"]
+        assert (
+            "historical replay has collisions" in blocked_preview["approval_readiness"]["blockers"]
+        )
     finally:
         with get_db_session() as db:
             db.query(RuleGenerationJobRecord).filter(
@@ -271,6 +277,137 @@ def test_rule_generation_job_repository_lists_agent_loop_attempts():
             db.query(RuleGenerationJobRecord).filter(
                 RuleGenerationJobRecord.id == job["id"]
             ).delete()
+
+
+def test_rule_job_history_uses_transactional_database_projections(monkeypatch):
+    repo = RuleGenerationJobRepository()
+    marker = f"projection-{uuid.uuid4().hex}"
+    jobs = []
+    for index in range(3):
+        jobs.append(
+            repo.create_job(
+                job_type="EVENT_RULE",
+                source_ref=f"{marker}:{index}",
+                asset_ref=f"event_rule_version:{uuid.uuid4().hex}",
+                asset_type="EVENT_RULE",
+                asset_id=f"rule-{uuid.uuid4().hex}",
+                asset_version_id=f"version-{uuid.uuid4().hex}",
+                validation_report={
+                    "success": True,
+                    "historical_replay": {
+                        "success": index != 1,
+                        "sampled_change_count": 10 + index,
+                        "matched_change_count": index,
+                        "collision_count": 0,
+                    },
+                    "agent_loop": {
+                        "ready_for_approval": False,
+                        "next_action": "revise_candidate_rule",
+                        "attempts": [
+                            {
+                                "attempt": 1,
+                                "stage": "event_rule_validation",
+                                "success": False,
+                            },
+                            {
+                                "attempt": 2,
+                                "stage": "event_rule_validation",
+                                "success": True,
+                            },
+                        ],
+                    },
+                },
+                created_by=marker,
+            )
+        )
+
+    try:
+        monkeypatch.setattr(
+            repo,
+            "_extract_historical_replay",
+            lambda _report: (_ for _ in ()).throw(
+                AssertionError("JSON replay extraction must not run during list queries")
+            ),
+        )
+        first_page = repo.list_replay_reports_page(
+            search=marker,
+            limit=2,
+            offset=0,
+        )
+        second_page = repo.list_replay_reports_page(
+            search=marker,
+            limit=2,
+            offset=2,
+        )
+
+        assert first_page["total"] == 3
+        assert len(first_page["items"]) == 2
+        assert len(second_page["items"]) == 1
+        assert {item["job_id"] for item in first_page["items"]}.isdisjoint(
+            {item["job_id"] for item in second_page["items"]}
+        )
+
+        attempts = repo.list_agent_loop_attempts_page(
+            asset_type="EVENT_RULE",
+            stage="event_rule_validation",
+            search=marker,
+            limit=20,
+            offset=0,
+        )
+        assert attempts["total"] == 6
+
+        first_job = jobs[0]
+        repo.attach_validation_report(
+            first_job["id"],
+            validation_report={
+                "success": True,
+                "historical_replay": {
+                    "success": True,
+                    "sampled_change_count": 99,
+                    "matched_change_count": 9,
+                    "collision_count": 0,
+                },
+                "agent_loop": {
+                    "attempts": [
+                        {
+                            "attempt": 3,
+                            "stage": "event_rule_validation",
+                            "success": True,
+                        }
+                    ]
+                },
+            },
+        )
+        with get_db_session() as db:
+            assert db.query(RuleReplayReportRecord).filter_by(job_id=first_job["id"]).count() == 1
+            assert (
+                db.query(RuleAgentLoopAttemptRecord).filter_by(job_id=first_job["id"]).count() == 3
+            )
+
+        repo.transition_job(first_job["id"], status="validating")
+        repo.transition_job(first_job["id"], status="pending_approval")
+        repo.approve_job(first_job["id"], approved_by=marker)
+        audit = repo.list_approval_audit_page(
+            action="approved",
+            actor=marker,
+            search=marker,
+            limit=20,
+            offset=0,
+        )
+        assert audit["total"] == 1
+        assert audit["items"][0]["job_id"] == first_job["id"]
+        with get_db_session() as db:
+            assert (
+                db.query(RuleApprovalAuditRecord)
+                .filter_by(job_id=first_job["id"], action="approved")
+                .count()
+                == 1
+            )
+    finally:
+        with get_db_session() as db:
+            db.query(RuleGenerationJobRecord).filter(
+                RuleGenerationJobRecord.id.in_([job["id"] for job in jobs])
+            ).delete(synchronize_session=False)
 
 
 def test_agent_loop_revision_service_creates_idempotent_child_job():
@@ -585,9 +722,7 @@ def test_rule_generation_job_repository_requires_validated_asset_for_approval():
     finally:
         with get_db_session() as db:
             db.query(RuleGenerationJobRecord).filter(
-                RuleGenerationJobRecord.id.in_(
-                    [missing_asset["id"], failed_validation["id"]]
-                )
+                RuleGenerationJobRecord.id.in_([missing_asset["id"], failed_validation["id"]])
             ).delete(synchronize_session=False)
 
 
@@ -711,9 +846,7 @@ def test_change_policy_repository_rejects_same_version_different_digest():
             db.query(ChangePolicyVersionRecord).filter(
                 ChangePolicyVersionRecord.policy_id == policy_id
             ).delete(synchronize_session=False)
-            db.query(ChangePolicyRecord).filter(
-                ChangePolicyRecord.id == policy_id
-            ).delete()
+            db.query(ChangePolicyRecord).filter(ChangePolicyRecord.id == policy_id).delete()
 
 
 def test_rule_asset_approval_service_activates_change_policy_atomically():

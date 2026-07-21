@@ -452,7 +452,7 @@ def observations_from_snapshot(
             raw_value = record.get(field_name)
             if isinstance(raw_value, list):
                 for value_index, item in enumerate(raw_value):
-                    if item in (None, ""):
+                    if item is None or (isinstance(item, str) and not item.strip()):
                         continue
                     append_observation(
                         record=record,
@@ -461,6 +461,10 @@ def observations_from_snapshot(
                         raw_value=item,
                         value_index=value_index,
                     )
+                continue
+            if raw_value is None or (
+                isinstance(raw_value, str) and not raw_value.strip()
+            ):
                 continue
             append_observation(
                 record=record,

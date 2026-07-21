@@ -24,6 +24,9 @@ class FakeContractRepository:
             }
         return None
 
+    def list_active_validation_dicts(self):
+        return [self.get_active_validation_dict(source_type="cli", schema_id="template-active")]
+
 
 class FakeChangePolicyRepository:
     def __init__(self):
@@ -52,6 +55,7 @@ class FakeEventRuleRepository:
                 "version_id": "rule-version-1",
                 "event_type": "InterfaceDown",
                 "version_status": "active",
+                "condition": {"observation_types": ["interface.oper_status"]},
             }
         ]
 
@@ -95,6 +99,10 @@ def test_runtime_rule_asset_resolver_reports_active_assets_and_missing_gaps():
 
     payload = bundle.to_dict()
     assert payload["ready"] is False
+    assert payload["collection_ready"] is False
+    assert payload["analysis_ready"] is False
+    assert payload["event_evaluation_ready"] is False
+    assert payload["missing_event_rules"] == ["device.cpu.utilization"]
     assert payload["digest"]
     assert payload["counts"] == {
         "observation_contracts": 1,
@@ -117,6 +125,9 @@ def test_runtime_rule_asset_resolver_can_skip_event_rule_loading():
     )
 
     assert bundle.ready is True
+    assert bundle.collection_ready is True
+    assert bundle.analysis_ready is True
+    assert bundle.event_evaluation_ready is False
     assert bundle.event_rules == []
     assert rules.calls == []
 
@@ -135,5 +146,20 @@ def test_runtime_rule_asset_resolver_derives_policies_from_contract_semantics():
     )
 
     assert bundle.ready is True
+    assert bundle.event_evaluation_ready is False
     assert set(bundle.change_policies) == {"interface.oper_status"}
     assert policies.calls == ["interface.oper_status"]
+
+
+def test_runtime_inventory_health_uses_all_active_assets_and_exact_rule_scope():
+    bundle = RuntimeRuleAssetResolver(
+        contract_repository=FakeContractRepository(),
+        change_policy_repository=FakeChangePolicyRepository(),
+        event_rule_repository=FakeEventRuleRepository(),
+    ).load_inventory_bundle()
+
+    assert bundle.collection_ready is True
+    assert bundle.analysis_ready is True
+    assert bundle.event_evaluation_ready is True
+    assert bundle.observation_types == ["interface.oper_status"]
+    assert bundle.missing_event_rules == []

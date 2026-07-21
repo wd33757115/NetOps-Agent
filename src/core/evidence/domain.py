@@ -24,6 +24,7 @@ class RawEvidence:
     inventory_device_id: str | None = None
     retention_policy: str | None = None
     metadata: dict[str, Any] | None = None
+    source: str = "cli"
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)

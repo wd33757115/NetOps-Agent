@@ -273,8 +273,36 @@ class DispatchPatrolBatchHandler:
                         failure_code=failure_code,
                         error=str(exc),
                     )
+                    try:
+                        from src.core.patrol.batch_events import publish_patrol_batch_event
+
+                        publish_patrol_batch_event(
+                            {
+                                "type": "dispatch_failed",
+                                "patrol_batch_id": patrol_batch_id,
+                                "device_id": target.get("device_id"),
+                                "failure_code": failure_code,
+                                "error": str(exc),
+                            }
+                        )
+                    except Exception:
+                        pass
                     failed += 1
         status = self._batches.finalize_dispatch(patrol_batch_id)
+        try:
+            from src.core.patrol.batch_events import publish_patrol_batch_event
+
+            publish_patrol_batch_event(
+                {
+                    "type": "dispatch_finalized",
+                    "patrol_batch_id": patrol_batch_id,
+                    "dispatch_status": status,
+                    "dispatched_count": dispatched,
+                    "failed_count": failed,
+                }
+            )
+        except Exception:
+            pass
         return {
             "success": status in {"completed", "pending"},
             "patrol_batch_id": patrol_batch_id,
@@ -342,6 +370,29 @@ class ExecutePatrolHandler:
                 str(snapshot_run_id),
                 owner_token=command.owner_token,
             )
+        try:
+            from src.core.patrol.batch_events import publish_patrol_batch_event
+
+            plan = dict(command.execution_plan or {})
+            batch_id = (
+                plan.get("patrol_batch_id")
+                or (command.filter_params or {}).get("patrol_batch_id")
+            )
+            success = bool(result.get("success", True))
+            collection_status = str(result.get("collection_status") or "")
+            if batch_id and (not success or collection_status == "failed"):
+                publish_patrol_batch_event(
+                    {
+                        "type": "device_patrol_failed",
+                        "patrol_batch_id": str(batch_id),
+                        "snapshot_run_id": snapshot_run_id,
+                        "device_id": (command.filter_params or {}).get("device_id"),
+                        "error": result.get("error") or result.get("message"),
+                        "collection_status": collection_status or None,
+                    }
+                )
+        except Exception:
+            pass
         return result
 
 

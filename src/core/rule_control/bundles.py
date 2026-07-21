@@ -80,8 +80,7 @@ class RuleAssetBundleService:
             context_by_id = self._load_contexts(db, rows)
             return {
                 "items": [
-                    self._serialize(row, child_by_id, asset_states, context_by_id)
-                    for row in rows
+                    self._serialize(row, child_by_id, asset_states, context_by_id) for row in rows
                 ],
                 "total": int(total),
                 "limit": limit,
@@ -240,6 +239,9 @@ class RuleAssetBundleService:
                 active_counts[asset_type] = active_counts.get(asset_type, 0) + 1
         context_gate = dict(report.get("context_gate") or {})
         context_privacy = dict(context_gate.get("privacy") or {})
+        governance = dict(report.get("governance") or {})
+        engineering_review = dict(governance.get("engineering_review") or {})
+        engineering_review_ready = engineering_review.get("decision") == "accepted"
         context_id = str(context_gate.get("context_id") or payload.get("context_id") or "")
         context_meta = dict((context_by_id or {}).get(context_id) or {})
         context_row = context_meta.get("record")
@@ -271,6 +273,7 @@ class RuleAssetBundleService:
             and replay_ready
             and composition_complete
             and children_release_ready
+            and engineering_review_ready
         )
         blockers = list(bundle_gate.get("blockers") or [])
 
@@ -289,6 +292,8 @@ class RuleAssetBundleService:
         if not replay_ready:
             for error in replay_gate["errors"]:
                 add_blocker(error)
+        if row.status == "pending_approval" and not engineering_review_ready:
+            add_blocker("engineering review has not accepted the generated candidates")
         steps = [
             {
                 "key": "context",
@@ -325,6 +330,12 @@ class RuleAssetBundleService:
                     "scope": replay.get("scope"),
                     "scope_gate": replay_gate,
                 },
+            },
+            {
+                "key": "review",
+                "label": "工程师复核",
+                "status": "passed" if engineering_review_ready else "ready",
+                "detail": engineering_review,
             },
             {
                 "key": "release",
@@ -374,6 +385,7 @@ class RuleAssetBundleService:
             "asset_counts": counts,
             "active_asset_counts": active_counts,
             "release_ready": release_ready,
+            "engineering_review": engineering_review,
             "blockers": blockers,
             "replay": {
                 key: replay.get(key)

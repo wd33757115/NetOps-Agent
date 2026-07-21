@@ -116,13 +116,18 @@ def replay_event_rule_definitions(
     entity_types: Counter[str] = Counter()
     top_devices: Counter[str] = Counter()
     collision_rules: Counter[str] = Counter()
+    change_shapes: Counter[str] = Counter()
+    matched_change_shapes: Counter[str] = Counter()
     unexpected_matches: list[dict[str, Any]] = []
     sampled_run_id_values: set[str] = set()
+    oldest_detected_at = None
+    newest_detected_at = None
 
     with get_db_session() as db:
         query = db.query(NetworkChangeRecord)
         if run_ids is not None:
             query = query.filter(NetworkChangeRecord.run_id.in_(normalized_run_ids))
+        total_change_count = int(query.count() or 0)
         rows = (
             query.order_by(NetworkChangeRecord.detected_at.desc())
             .limit(max(1, min(int(limit), 10000)))
@@ -131,11 +136,22 @@ def replay_event_rule_definitions(
         for row in rows:
             if str(row.run_id or "").strip():
                 sampled_run_id_values.add(str(row.run_id).strip())
+            if row.detected_at is not None:
+                if oldest_detected_at is None or row.detected_at < oldest_detected_at:
+                    oldest_detected_at = row.detected_at
+                if newest_detected_at is None or row.detected_at > newest_detected_at:
+                    newest_detected_at = row.detected_at
+            shape = (
+                f"{row.change_type or 'unknown'}"
+                f"|{row.observation_type or row.entity_type or 'unknown'}"
+            )
+            change_shapes[shape] += 1
             change = change_record_to_payload(row)
             candidates = matched_rules(change, candidate_rules)
             if not candidates:
                 continue
             matched_change_count += 1
+            matched_change_shapes[shape] += 1
             for rule in candidates:
                 event_types[rule.event_type] += 1
                 collision_rules[rule.rule_id] += 1
@@ -167,10 +183,35 @@ def replay_event_rule_definitions(
     }
     if run_ids is not None:
         scope["missing_run_ids"] = sorted(set(normalized_run_ids) - set(sampled_run_ids))
+    sampled_count = len(rows) if "rows" in locals() else 0
+    window_days = 0
+    if oldest_detected_at is not None and newest_detected_at is not None:
+        window_days = max(0, (newest_detected_at - oldest_detected_at).days)
+    # Representativeness: collision==0 over a sparse window is an empty gate, so
+    # expose how much of history and how many change shapes replay covered.
+    representativeness = {
+        "total_change_count": total_change_count,
+        "sampled_change_count": sampled_count,
+        "sample_coverage_rate": (
+            round(sampled_count / total_change_count, 4) if total_change_count else 0.0
+        ),
+        "matched_change_count": matched_change_count,
+        "match_rate": (
+            round(matched_change_count / sampled_count, 4) if sampled_count else 0.0
+        ),
+        "window_days": window_days,
+        "window_start": oldest_detected_at.isoformat() if oldest_detected_at else None,
+        "window_end": newest_detected_at.isoformat() if newest_detected_at else None,
+        "change_shape_count": len(change_shapes),
+        "matched_change_shape_count": len(matched_change_shapes),
+        "change_shapes": dict(change_shapes.most_common(20)),
+        "sparse_history": total_change_count < 10 or len(change_shapes) < 2,
+    }
     return {
         "success": collision_count == 0,
         "rule_count": len(definitions),
-        "sampled_change_count": len(rows) if "rows" in locals() else 0,
+        "sampled_change_count": sampled_count,
+        "total_change_count": total_change_count,
         "matched_change_count": matched_change_count,
         "estimated_daily_event_count": matched_change_count,
         "event_count": sum(event_types.values()),
@@ -190,5 +231,6 @@ def replay_event_rule_definitions(
         ),
         "candidate_logical_keys": sorted(candidate_logical_keys),
         "recovery_pair_coverage": None,
+        "representativeness": representativeness,
         "scope": scope,
     }

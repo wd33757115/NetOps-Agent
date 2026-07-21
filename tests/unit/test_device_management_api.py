@@ -25,6 +25,24 @@ def _disable_agent_module_guard(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _patrol_platform_is_ready(monkeypatch):
+    monkeypatch.setattr(
+        devices_api,
+        "_patrol_platform_readiness",
+        lambda _payload: {
+            "schema_version": "patrol-production-readiness/v1",
+            "status": "ready",
+            "can_launch": True,
+            "blocking_count": 0,
+            "warning_count": 0,
+            "checks": [],
+            "blockers": [],
+            "warnings": [],
+        },
+    )
+
+
+@pytest.fixture(autouse=True)
 def _isolate_patrol_batch_dispatch(monkeypatch):
     class MemoryBatchRepository:
         def create_pending_batch(self, **_kwargs):
@@ -1331,6 +1349,91 @@ def test_preview_device_patrol_launch_builds_execution_plans(monkeypatch):
     assert "password" not in result["rows"][0]["device"]
 
 
+def test_preview_device_patrol_launch_blocks_when_platform_is_not_ready(monkeypatch):
+    class FakeRepository:
+        def get_devices_by_filter(self, **_kwargs):
+            return [
+                {
+                    "device_id": "device-1",
+                    "device_name": "SW1",
+                    "ip": "10.0.0.1",
+                    "password": "secret",
+                }
+            ]
+
+    monkeypatch.setattr(devices_api, "DeviceRepository", FakeRepository)
+    monkeypatch.setattr(
+        devices_api,
+        "_patrol_platform_readiness",
+        lambda _payload: {
+            "status": "blocked",
+            "can_launch": False,
+            "blocking_count": 1,
+            "warning_count": 0,
+            "checks": [],
+            "blockers": [
+                {
+                    "id": "celery_patrol_queues",
+                    "failure_code": "patrol_celery_patrol_queues_not_ready",
+                }
+            ],
+            "warnings": [],
+        },
+    )
+
+    result = devices_api.preview_device_patrol_launch(
+        devices_api.DevicePatrolLaunchRequest(device_ids=["device-1"])
+    )
+
+    assert result["success"] is False
+    assert result["ready_count"] == 0
+    assert result["error_count"] == 1
+    assert result["platform_readiness"]["can_launch"] is False
+    assert result["errors"][0]["failure_code"] == "patrol_platform_not_ready"
+
+
+def test_launch_device_patrol_does_not_create_batch_when_platform_is_blocked(monkeypatch):
+    class FakeRepository:
+        def get_devices_by_filter(self, **_kwargs):
+            return [
+                {
+                    "device_id": "device-1",
+                    "device_name": "SW1",
+                    "ip": "10.0.0.1",
+                    "password": "secret",
+                }
+            ]
+
+    class ForbiddenHandler:
+        def __init__(self, **_kwargs):
+            raise AssertionError("blocked readiness must stop before batch persistence")
+
+    monkeypatch.setattr(devices_api, "DeviceRepository", FakeRepository)
+    monkeypatch.setattr(devices_api, "StartPatrolHandler", ForbiddenHandler)
+    monkeypatch.setattr(
+        devices_api,
+        "_patrol_platform_readiness",
+        lambda _payload: {
+            "status": "blocked",
+            "can_launch": False,
+            "blocking_count": 1,
+            "warning_count": 0,
+            "checks": [],
+            "blockers": [{"id": "minio"}],
+            "warnings": [],
+        },
+    )
+
+    with pytest.raises(devices_api.HTTPException) as exc_info:
+        devices_api.launch_device_patrol(
+            devices_api.DevicePatrolLaunchRequest(device_ids=["device-1"]),
+            None,
+        )
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail["failure_code"] == "patrol_platform_not_ready"
+
+
 def test_preview_device_patrol_launch_blocks_disabled_agent_module(monkeypatch):
     class FakeRepository:
         def get_devices_by_filter(self, **kwargs):
@@ -1478,6 +1581,11 @@ def test_preview_device_patrol_launch_blocks_empty_plan_in_validation_mode(monke
 
 
 def test_preview_device_patrol_launch_warns_without_blocking_missing_parser_coverage(monkeypatch):
+    # 本用例验证 warn 策略的"只告警不阻断"；默认 skip 策略的行为另有专门用例
+    from src.common.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "PATROL_PARSER_COVERAGE_POLICY", "warn")
+
     class FakeRepository:
         def get_devices_by_filter(self, **kwargs):
             return [

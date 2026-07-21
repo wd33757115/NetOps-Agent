@@ -6,15 +6,22 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from src.infrastructure.db.models import Notification, WorkflowRun, WorkflowStepRecord
+from src.infrastructure.db.models import (
+    Notification,
+    PatrolBatchDeviceRecord,
+    WorkflowRun,
+    WorkflowStepRecord,
+)
 from src.infrastructure.db.postgres import get_db_session
 
 TERMINAL_WORKFLOW_STATUSES = {"completed", "failed", "cancelled"}
+QUEUED_WORKFLOW_STATUSES = {"pending", "queued", "dispatching"}
+RUNNING_WORKFLOW_STATUSES = {"running", "in_progress", "collecting"}
 
 
 def _now():
@@ -143,6 +150,113 @@ def update_run_step_index(run_id: str, step_index: int, *, status: str = "runnin
             run.current_step_index = step_index
             run.status = status
             run.updated_at = _now()
+
+
+def reconcile_stale_patrol_workflow_runs(
+    *,
+    queued_stale_seconds: int,
+    running_stale_seconds: int,
+    limit: int = 100,
+) -> dict[str, Any]:
+    """Fail orphaned formal-patrol workflows and preserve a retryable reason."""
+
+    now = _now()
+    queued_cutoff = now - timedelta(seconds=max(60, int(queued_stale_seconds)))
+    running_cutoff = now - timedelta(seconds=max(60, int(running_stale_seconds)))
+    reconciled: list[str] = []
+    failure_counts: dict[str, int] = {}
+
+    with get_db_session() as db:
+        patrol_run_ids = (
+            db.query(PatrolBatchDeviceRecord.workflow_run_id)
+            .filter(PatrolBatchDeviceRecord.workflow_run_id.is_not(None))
+            .distinct()
+        )
+        rows = (
+            db.query(WorkflowRun)
+            .filter(
+                WorkflowRun.id.in_(patrol_run_ids),
+                WorkflowRun.updated_at.is_not(None),
+                (
+                    WorkflowRun.status.in_(QUEUED_WORKFLOW_STATUSES)
+                    & (WorkflowRun.updated_at < queued_cutoff)
+                )
+                | (
+                    WorkflowRun.status.in_(RUNNING_WORKFLOW_STATUSES)
+                    & (WorkflowRun.updated_at < running_cutoff)
+                ),
+            )
+            .order_by(WorkflowRun.updated_at, WorkflowRun.id)
+            .limit(max(1, min(int(limit), 1000)))
+            .with_for_update(skip_locked=True)
+            .all()
+        )
+        for run in rows:
+            previous_status = str(run.status or "unknown")
+            queued_timeout = previous_status in QUEUED_WORKFLOW_STATUSES
+            failure_code = (
+                "workflow_queue_timeout"
+                if queued_timeout
+                else "workflow_heartbeat_expired"
+            )
+            threshold_seconds = (
+                max(60, int(queued_stale_seconds))
+                if queued_timeout
+                else max(60, int(running_stale_seconds))
+            )
+            message = (
+                f"Workflow remained {previous_status} without progress for more than "
+                f"{threshold_seconds} seconds and was reconciled as failed"
+            )
+            previous_updated_at = run.updated_at
+            run.status = "failed"
+            run.error_message = message
+            run.completed_at = now
+            run.updated_at = now
+            run.context = {
+                **dict(run.context or {}),
+                "failure_code": failure_code,
+                "retryable": True,
+                "reconciled_at": now.isoformat(),
+                "stale_previous_status": previous_status,
+                "stale_last_updated_at": (
+                    previous_updated_at.isoformat()
+                    if hasattr(previous_updated_at, "isoformat")
+                    else str(previous_updated_at or "")
+                ),
+            }
+
+            active_steps = (
+                db.query(WorkflowStepRecord)
+                .filter(
+                    WorkflowStepRecord.run_id == run.id,
+                    WorkflowStepRecord.status.in_(["queued", "running"]),
+                )
+                .all()
+            )
+            for step in active_steps:
+                step.status = "failed"
+                step.error_message = message
+                step.completed_at = now
+
+            targets = (
+                db.query(PatrolBatchDeviceRecord)
+                .filter(PatrolBatchDeviceRecord.workflow_run_id == run.id)
+                .all()
+            )
+            for target in targets:
+                target.failure_code = failure_code
+                target.error_message = message
+                target.updated_at = now
+
+            reconciled.append(str(run.id))
+            failure_counts[failure_code] = failure_counts.get(failure_code, 0) + 1
+
+    return {
+        "reconciled_count": len(reconciled),
+        "run_ids": reconciled,
+        "failure_counts": failure_counts,
+    }
 
 
 def mark_step_queued(step_id: str, celery_task_id: str) -> bool:

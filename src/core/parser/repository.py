@@ -22,8 +22,10 @@ from src.core.parser.textfsm_dialect import (
 from src.core.parser.textfsm_dialect import (
     dialect_hash as current_dialect_hash,
 )
+from src.core.parser.time_utils import database_clocks, elapsed_seconds
 from src.core.patrol.repository import PatrolRepository
 from src.infrastructure.db.models import (
+    AuditLogRecord,
     CommandSnapshot,
     ObservationContractRecord,
     ParserBackfillJobRecord,
@@ -92,6 +94,45 @@ def parser_job_asset_identity(*, vendor: str, profile: str, command: str) -> tup
         " ".join(str(value or "").strip().casefold().split())
         for value in (vendor, profile, command)
     )
+
+
+def _parser_job_retry_projections(db, job_ids: list[str]) -> dict[str, dict[str, Any]]:
+    if not job_ids:
+        return {}
+    statuses: dict[str, list[str]] = {}
+    for job_id, status in (
+        db.query(ParserTemplate.source_job_id, ParserTemplate.status)
+        .filter(ParserTemplate.source_job_id.in_(job_ids))
+        .all()
+    ):
+        statuses.setdefault(str(job_id), []).append(str(status))
+    projections: dict[str, dict[str, Any]] = {}
+    for job_id in job_ids:
+        candidate_statuses = statuses.get(job_id, [])
+        blocking_count = sum(
+            status not in {"deprecated", "rejected"} for status in candidate_statuses
+        )
+        projections[job_id] = {
+            "generated_candidate_count": len(candidate_statuses),
+            "blocking_candidate_count": blocking_count,
+        }
+    return projections
+
+
+def _with_parser_job_retryability(
+    payload: dict[str, Any],
+    projection: dict[str, Any] | None,
+) -> dict[str, Any]:
+    candidate_count = int((projection or {}).get("generated_candidate_count") or 0)
+    blocking_count = int((projection or {}).get("blocking_candidate_count") or 0)
+    status = str(payload.get("status") or "")
+    return {
+        **payload,
+        "generated_candidate_count": candidate_count,
+        "blocking_candidate_count": blocking_count,
+        "can_retry": status in {"failed", "cancelled"}
+        or (status == "succeeded" and candidate_count > 0 and blocking_count == 0),
+    }
 
 
 def contract_digest(validation: dict[str, Any]) -> str:
@@ -244,13 +285,24 @@ class ParserRepository:
             )
             return bool((row.value_json or {}).get("enabled")) if row else False
 
-    def set_auto_dispatch_enabled(self, enabled: bool) -> bool:
+    def set_auto_dispatch_enabled(
+        self,
+        enabled: bool,
+        *,
+        actor: str,
+        reason: str,
+    ) -> bool:
+        if not str(actor or "").strip():
+            raise ValueError("actor is required")
+        if not str(reason or "").strip():
+            raise ValueError("reason is required")
         with get_db_session() as db:
             row = (
                 db.query(ParserControlSetting)
                 .filter(ParserControlSetting.key == "auto_dispatch_enabled")
                 .first()
             )
+            previous_enabled = bool((row.value_json or {}).get("enabled")) if row else False
             if row is None:
                 row = ParserControlSetting(
                     key="auto_dispatch_enabled",
@@ -260,6 +312,23 @@ class ParserRepository:
             else:
                 row.value_json = {"enabled": bool(enabled)}
                 row.updated_at = utcnow()
+            db.add(
+                AuditLogRecord(
+                    id=str(uuid.uuid4()),
+                    user_id=actor,
+                    username=actor,
+                    action="parser_auto_dispatch_changed",
+                    resource_type="parser_control_setting",
+                    resource_id="auto_dispatch_enabled",
+                    detail={
+                        "reason": str(reason).strip(),
+                        "from_enabled": previous_enabled,
+                        "to_enabled": bool(enabled),
+                    },
+                    status="success",
+                    created_at=utcnow(),
+                )
+            )
             return bool(enabled)
 
     def list_command_aliases(self, *, status: str = "confirmed") -> list[dict[str, Any]]:
@@ -271,6 +340,42 @@ class ParserRepository:
                 .order_by(ParserCommandAlias.alias)
                 .all()
             ]
+
+    def list_command_aliases_page(
+        self,
+        *,
+        status: str | None = "confirmed",
+        search: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        page_size = max(1, min(int(limit), 200))
+        page_offset = max(0, int(offset))
+        with get_db_session() as db:
+            query = db.query(ParserCommandAlias)
+            if status:
+                query = query.filter(ParserCommandAlias.status == status)
+            pattern = f"%{str(search).strip()}%" if str(search or "").strip() else None
+            if pattern:
+                query = query.filter(
+                    or_(
+                        ParserCommandAlias.alias.ilike(pattern),
+                        ParserCommandAlias.canonical_command.ilike(pattern),
+                    )
+                )
+            total = query.order_by(None).count()
+            rows = (
+                query.order_by(ParserCommandAlias.alias, ParserCommandAlias.id)
+                .offset(page_offset)
+                .limit(page_size)
+                .all()
+            )
+            return {
+                "items": [row.to_dict() for row in rows],
+                "total": total,
+                "limit": page_size,
+                "offset": page_offset,
+            }
 
     def upsert_command_alias(
         self,
@@ -302,6 +407,48 @@ class ParserRepository:
                 .order_by(ParserDeviceProfile.vendor, ParserDeviceProfile.model)
                 .all()
             ]
+
+    def list_device_profiles_page(
+        self,
+        *,
+        status: str | None = "confirmed",
+        search: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        page_size = max(1, min(int(limit), 200))
+        page_offset = max(0, int(offset))
+        with get_db_session() as db:
+            query = db.query(ParserDeviceProfile)
+            if status:
+                query = query.filter(ParserDeviceProfile.status == status)
+            pattern = f"%{str(search).strip()}%" if str(search or "").strip() else None
+            if pattern:
+                query = query.filter(
+                    or_(
+                        ParserDeviceProfile.vendor.ilike(pattern),
+                        ParserDeviceProfile.model.ilike(pattern),
+                        ParserDeviceProfile.family.ilike(pattern),
+                        ParserDeviceProfile.normalized_model.ilike(pattern),
+                    )
+                )
+            total = query.order_by(None).count()
+            rows = (
+                query.order_by(
+                    ParserDeviceProfile.vendor,
+                    ParserDeviceProfile.model,
+                    ParserDeviceProfile.id,
+                )
+                .offset(page_offset)
+                .limit(page_size)
+                .all()
+            )
+            return {
+                "items": [row.to_dict() for row in rows],
+                "total": total,
+                "limit": page_size,
+                "offset": page_offset,
+            }
 
     def find_device_profile(self, vendor: str, model: str) -> dict[str, Any] | None:
         with get_db_session() as db:
@@ -359,6 +506,49 @@ class ParserRepository:
                 .order_by(ParserIdentitySignature.vendor, ParserIdentitySignature.model)
                 .all()
             ]
+
+    def list_identity_signatures_page(
+        self,
+        *,
+        status: str | None = "confirmed",
+        search: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        page_size = max(1, min(int(limit), 200))
+        page_offset = max(0, int(offset))
+        with get_db_session() as db:
+            query = db.query(ParserIdentitySignature)
+            if status:
+                query = query.filter(ParserIdentitySignature.status == status)
+            pattern = f"%{str(search).strip()}%" if str(search or "").strip() else None
+            if pattern:
+                query = query.filter(
+                    or_(
+                        ParserIdentitySignature.vendor.ilike(pattern),
+                        ParserIdentitySignature.model.ilike(pattern),
+                        ParserIdentitySignature.family.ilike(pattern),
+                        ParserIdentitySignature.evidence_command.ilike(pattern),
+                        ParserIdentitySignature.pattern.ilike(pattern),
+                    )
+                )
+            total = query.order_by(None).count()
+            rows = (
+                query.order_by(
+                    ParserIdentitySignature.vendor,
+                    ParserIdentitySignature.model,
+                    ParserIdentitySignature.id,
+                )
+                .offset(page_offset)
+                .limit(page_size)
+                .all()
+            )
+            return {
+                "items": [row.to_dict() for row in rows],
+                "total": total,
+                "limit": page_size,
+                "offset": page_offset,
+            }
 
     def register_identity_signature(
         self,
@@ -963,6 +1153,56 @@ class ParserRepository:
                 query = query.filter(ParserTemplate.status == status)
             return [row.to_dict() for row in query.order_by(ParserTemplate.created_at.desc()).all()]
 
+    def list_templates_page(
+        self,
+        *,
+        status: str | None = None,
+        search: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        page_size = max(1, min(int(limit), 200))
+        page_offset = max(0, int(offset))
+        with get_db_session() as db:
+            query = db.query(ParserTemplate)
+            if status:
+                query = query.filter(ParserTemplate.status == status)
+            pattern = f"%{str(search).strip()}%" if str(search or "").strip() else None
+            if pattern:
+                query = query.filter(
+                    or_(
+                        ParserTemplate.vendor.ilike(pattern),
+                        ParserTemplate.profile.ilike(pattern),
+                        ParserTemplate.canonical_command.ilike(pattern),
+                        ParserTemplate.category.ilike(pattern),
+                        ParserTemplate.model.ilike(pattern),
+                        ParserTemplate.family.ilike(pattern),
+                    )
+                )
+            total = query.order_by(None).count()
+            rows = (
+                query.order_by(ParserTemplate.created_at.desc(), ParserTemplate.id.desc())
+                .offset(page_offset)
+                .limit(page_size)
+                .all()
+            )
+            return {
+                "items": [row.to_dict() for row in rows],
+                "total": total,
+                "limit": page_size,
+                "offset": page_offset,
+            }
+
+    def template_status_counts(self) -> dict[str, int]:
+        with get_db_session() as db:
+            return {
+                str(status): int(count)
+                for status, count in db.query(
+                    ParserTemplate.status,
+                    func.count(ParserTemplate.id),
+                ).group_by(ParserTemplate.status).all()
+            }
+
     def get_template(self, template_id: str) -> ParserTemplate | None:
         with get_db_session() as db:
             row = db.query(ParserTemplate).filter(ParserTemplate.id == template_id).first()
@@ -1529,7 +1769,17 @@ class ParserRepository:
                 "groups": duplicate_groups,
             }
 
-    def delete_job(self, job_id: str) -> dict[str, Any]:
+    def delete_job(
+        self,
+        job_id: str,
+        *,
+        actor: str = "system",
+        reason: str = "system parser job deletion",
+    ) -> dict[str, Any]:
+        normalized_actor = str(actor or "").strip()
+        normalized_reason = str(reason or "").strip()
+        if not normalized_actor or not normalized_reason:
+            raise ParserJobStateError("parser job deletion requires actor and reason")
         with get_db_session() as db:
             job = db.query(ParserTemplateJob).filter(ParserTemplateJob.id == job_id).first()
             if job is None:
@@ -1537,14 +1787,43 @@ class ParserRepository:
             if job.status in OPEN_JOB_STATUSES:
                 raise ParserJobStateError(f"parser job {job_id} must be cancelled before deletion")
             item = job.to_dict()
+            db.add(
+                AuditLogRecord(
+                    id=str(uuid.uuid4()),
+                    user_id=normalized_actor,
+                    username=normalized_actor,
+                    action="parser_job_delete",
+                    resource_type="parser_template_job",
+                    resource_id=job_id,
+                    detail={
+                        "reason": normalized_reason,
+                        "job_type": job.job_type,
+                        "status": job.status,
+                        "asset_key": job.idempotency_key,
+                    },
+                    status="success",
+                    created_at=utcnow(),
+                )
+            )
             return {"job": item, **self._delete_job_graph(db, job)}
 
-    def delete_jobs(self, job_ids: list[str]) -> dict[str, Any]:
+    def delete_jobs(
+        self,
+        job_ids: list[str],
+        *,
+        actor: str = "system",
+        reason: str = "system parser job bulk deletion",
+    ) -> dict[str, Any]:
         deleted: list[dict[str, Any]] = []
         failed: list[dict[str, str]] = []
         for job_id in list(dict.fromkeys(job_ids)):
             try:
-                deleted.append({"job_id": job_id, **self.delete_job(job_id)})
+                deleted.append(
+                    {
+                        "job_id": job_id,
+                        **self.delete_job(job_id, actor=actor, reason=reason),
+                    }
+                )
             except ParserJobStateError as exc:
                 failed.append({"job_id": job_id, "error": str(exc)})
         return {
@@ -1557,8 +1836,8 @@ class ParserRepository:
     def list_dispatchable_jobs(
         self, *, limit: int | None = None, job_id: str | None = None
     ) -> list[dict[str, Any]]:
-        now = utcnow()
         with get_db_session() as db:
+            now_utc, now_local = database_clocks(db)
             query = (
                 db.query(ParserTemplateJob)
                 .filter(ParserTemplateJob.status.in_(["pending", "collecting"]))
@@ -1578,13 +1857,13 @@ class ParserRepository:
                 recent_samples = [
                     sample
                     for sample in samples
-                    if sample.created_at >= (now - timedelta(hours=24)).replace(tzinfo=None)
+                    if sample.created_at >= now_local - timedelta(hours=24)
                 ]
-                age_seconds = (
-                    now - job.created_at.replace(tzinfo=timezone.utc)
-                    if job.created_at.tzinfo is None
-                    else now - job.created_at
-                ).total_seconds()
+                age_seconds = elapsed_seconds(
+                    job.created_at,
+                    now_utc=now_utc,
+                    now_local=now_local,
+                )
                 ready = (
                     job.job_type == "CREATE_TEMPLATE" and (len(samples) >= 2 or age_seconds >= 1800)
                 ) or (
@@ -1692,11 +1971,15 @@ class ParserRepository:
                 if job_ids
                 else {}
             )
+            retry_projections = _parser_job_retry_projections(db, job_ids)
             return [
-                {
-                    **row.to_dict(),
-                    "structure_variant_count": int(variant_counts.get(row.id) or 0),
-                }
+                _with_parser_job_retryability(
+                    {
+                        **row.to_dict(),
+                        "structure_variant_count": int(variant_counts.get(row.id) or 0),
+                    },
+                    retry_projections.get(row.id),
+                )
                 for row in rows
             ]
 
@@ -1800,9 +2083,9 @@ class ParserRepository:
     def fail_stale_jobs(
         self, *, pending_seconds: int = 600, running_seconds: int = 1800
     ) -> list[str]:
-        now = utcnow()
         failed: list[str] = []
         with get_db_session() as db:
+            now_utc, now_local = database_clocks(db)
             jobs = (
                 db.query(ParserTemplateJob)
                 .filter(ParserTemplateJob.status.in_(["pending", "running", "validating"]))
@@ -1817,13 +2100,12 @@ class ParserRepository:
                 )
                 if reference is None:
                     continue
-                reference_utc = (
-                    reference.replace(tzinfo=timezone.utc)
-                    if reference.tzinfo is None
-                    else reference
-                )
                 max_age = pending_seconds if job.status == "pending" else running_seconds
-                if (now - reference_utc).total_seconds() < max_age:
+                if elapsed_seconds(
+                    reference,
+                    now_utc=now_utc,
+                    now_local=now_local,
+                ) < max_age:
                     continue
                 previous_status = job.status
                 job.status = "failed"
@@ -1835,8 +2117,8 @@ class ParserRepository:
                     if previous_status == "pending"
                     else "parser job exceeded the worker execution timeout"
                 )
-                job.updated_at = now
-                job.completed_at = now
+                job.updated_at = now_utc
+                job.completed_at = now_utc
                 failed.append(job.id)
         return failed
 
@@ -1850,7 +2132,10 @@ class ParserRepository:
             job = db.query(ParserTemplateJob).filter(ParserTemplateJob.id == job_id).first()
             if not job:
                 return None
-            result = job.to_dict()
+            result = _with_parser_job_retryability(
+                job.to_dict(),
+                _parser_job_retry_projections(db, [job_id]).get(job_id),
+            )
             samples = [
                 sample.to_dict()
                 for sample in db.query(ParserJobSample)
@@ -1899,6 +2184,95 @@ class ParserRepository:
                 attempt_data.pop("template_text", None)
                 result["generation_attempts"].append(attempt_data)
             return result
+
+    def list_jobs_page(
+        self,
+        *,
+        status: str | None = None,
+        job_type: str | None = None,
+        search: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        page_size = max(1, min(int(limit), 200))
+        page_offset = max(0, int(offset))
+        with get_db_session() as db:
+            query = db.query(ParserTemplateJob)
+            if status:
+                query = query.filter(ParserTemplateJob.status == status)
+            if job_type:
+                query = query.filter(ParserTemplateJob.job_type == job_type)
+            pattern = f"%{str(search).strip()}%" if str(search or "").strip() else None
+            if pattern:
+                query = query.filter(
+                    or_(
+                        ParserTemplateJob.id.ilike(pattern),
+                        ParserTemplateJob.vendor.ilike(pattern),
+                        ParserTemplateJob.model.ilike(pattern),
+                        ParserTemplateJob.family.ilike(pattern),
+                        ParserTemplateJob.profile.ilike(pattern),
+                        ParserTemplateJob.canonical_command.ilike(pattern),
+                    )
+                )
+            total = query.order_by(None).count()
+            rows = (
+                query.order_by(ParserTemplateJob.updated_at.desc(), ParserTemplateJob.id.desc())
+                .offset(page_offset)
+                .limit(page_size)
+                .all()
+            )
+            job_ids = [row.id for row in rows]
+            variant_counts = (
+                dict(
+                    db.query(
+                        ParserJobSample.job_id,
+                        func.count(func.distinct(ParserJobSample.output_signature)),
+                    )
+                    .filter(ParserJobSample.job_id.in_(job_ids))
+                    .group_by(ParserJobSample.job_id)
+                    .all()
+                )
+                if job_ids
+                else {}
+            )
+            retry_projections = _parser_job_retry_projections(db, job_ids)
+            items: list[dict[str, Any]] = []
+            for row in rows:
+                item = _with_parser_job_retryability(
+                    row.to_dict(),
+                    retry_projections.get(row.id),
+                )
+                item["structure_variant_count"] = int(variant_counts.get(row.id) or 0)
+                items.append(item)
+            return {
+                "items": items,
+                "total": total,
+                "limit": page_size,
+                "offset": page_offset,
+            }
+
+    def job_status_counts(self) -> dict[str, int]:
+        with get_db_session() as db:
+            return {
+                str(status): int(count)
+                for status, count in db.query(
+                    ParserTemplateJob.status,
+                    func.count(ParserTemplateJob.id),
+                ).group_by(ParserTemplateJob.status).all()
+            }
+
+    def open_job_type_counts(self) -> dict[str, int]:
+        with get_db_session() as db:
+            return {
+                str(job_type): int(count)
+                for job_type, count in db.query(
+                    ParserTemplateJob.job_type,
+                    func.count(ParserTemplateJob.id),
+                )
+                .filter(ParserTemplateJob.status.in_(OPEN_JOB_STATUSES))
+                .group_by(ParserTemplateJob.job_type)
+                .all()
+            }
 
     def get_generation_resume_state(self, job_id: str) -> dict[str, Any]:
         """Load an internal Agent checkpoint and its best candidate template."""
@@ -2213,6 +2587,8 @@ class ParserTemplateRepository:
     activate_template = ParserRepository.activate_template
     rollback_template = ParserRepository.rollback_template
     list_templates = ParserRepository.list_templates
+    list_templates_page = ParserRepository.list_templates_page
+    template_status_counts = ParserRepository.template_status_counts
     get_template = ParserRepository.get_template
     find_template_version = ParserRepository.find_template_version
     has_trusted_family = ParserRepository.has_trusted_family
@@ -2235,6 +2611,9 @@ class ParserJobRepository:
     purge_duplicate_asset_jobs = ParserRepository.purge_duplicate_asset_jobs
     list_dispatchable_jobs = ParserRepository.list_dispatchable_jobs
     list_jobs = ParserRepository.list_jobs
+    list_jobs_page = ParserRepository.list_jobs_page
+    job_status_counts = ParserRepository.job_status_counts
+    open_job_type_counts = ParserRepository.open_job_type_counts
     backlog_summary = ParserRepository.backlog_summary
     transition_job_status = ParserRepository.transition_job_status
     mark_job_dispatched = ParserRepository.mark_job_dispatched

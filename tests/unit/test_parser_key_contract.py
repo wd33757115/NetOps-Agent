@@ -105,7 +105,8 @@ def test_multi_table_contract_rebuilds_column_evidence_and_optionalizes_sparse_f
     )
 
     assert valid, diagnostics
-    assert proposal.required_fields == ("name", "state")
+    # 语义目录治理会把非主键的 state 规范化为 status；主键 name 保持稳定
+    assert proposal.required_fields == ("name", "status")
     assert set(proposal.optional_fields) == {"metric", "speed"}
     metric = proposal.evidence["field_bindings"]["metric"]
     assert metric == [
@@ -327,7 +328,8 @@ def test_table_evidence_preserves_ip_semantics_when_missing_markers_exist():
         }""",
     )
 
-    assert proposal.validators["address"] == {"type": "ip_or_unassigned"}
+    # 非主键 address 会被语义目录规范化为 ip_address，同时保留 ip 语义修复
+    assert proposal.validators["ip_address"] == {"type": "ip_or_unassigned"}
 
 
 def test_table_evidence_aligns_punctuation_separated_header_fields():
@@ -623,7 +625,7 @@ def test_llm_contract_line_evidence_must_resolve_to_the_sanitized_sample():
     assert "outside sample" in diagnostics[0].message
 
 
-def test_llm_contract_rejects_field_semantics_that_conflict_with_source_label():
+def test_llm_contract_repairs_field_name_that_conflicts_with_source_label():
     samples = (
         '<CLI_SAMPLE id="sample-1" sha256="abc">\n'
         "Port 1\nRX power (dBm): -12.4\n"
@@ -656,6 +658,13 @@ def test_llm_contract_rejects_field_semantics_that_conflict_with_source_label():
         }""",
     )
 
+    # 字段名 status 与字面证据 RX power (dBm) 冲突时，治理按证据把字段
+    # 规范化为 rx_power_dbm（证据优先），而不是拒绝整个 Contract。
+    assert proposal.required_fields == ("interface", "rx_power_dbm")
+    assert proposal.evidence["semantic_field_normalization"]["mapping"] == {
+        "status": "rx_power_dbm"
+    }
+
     valid, diagnostics = validate_contract_candidate(
         proposal,
         structure_profile={
@@ -670,8 +679,7 @@ def test_llm_contract_rejects_field_semantics_that_conflict_with_source_label():
         samples_text=samples,
     )
 
-    assert not valid
-    assert "conflicts with governed label" in diagnostics[0].message
+    assert valid, diagnostics
 
 
 def test_required_field_evidence_must_cover_every_positive_sample():
@@ -810,10 +818,11 @@ def test_repeated_block_non_key_requirement_is_reclassified_without_domain_rules
         }""",
     )
 
+    # 非主键 state 先被语义目录规范化为 status，再因缺少逐实体证据被降级为可选
     assert proposal.required_fields == ("item",)
-    assert proposal.optional_fields == ("state",)
+    assert proposal.optional_fields == ("status",)
     assert proposal.evidence["capture_normalization"]["reclassified_fields"] == [
-        "state"
+        "status"
     ]
 
 

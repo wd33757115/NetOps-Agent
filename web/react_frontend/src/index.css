@@ -1182,6 +1182,81 @@ body {
   margin-top: 4px;
 }
 
+.command-asset-unit__summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(96px, 1fr));
+  width: 100%;
+  border-block: 1px solid #e5e7eb;
+}
+
+.command-asset-unit__summary > div {
+  min-width: 0;
+  padding: 10px 14px;
+  border-right: 1px solid #e5e7eb;
+}
+
+.command-asset-unit__summary > div:last-child {
+  border-right: 0;
+}
+
+.command-asset-unit__summary .ant-typography {
+  margin: 0;
+}
+
+.command-asset-unit__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+}
+
+.command-asset-unit__search {
+  width: min(280px, 100%);
+}
+
+.command-asset-unit__asset-states {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(110px, 1fr));
+  gap: 4px 8px;
+}
+
+.command-asset-unit__asset-states > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 4px;
+}
+
+.command-asset-unit__asset-states .ant-tag {
+  margin-inline-end: 0;
+}
+
+.command-asset-unit__table .ant-table-cell {
+  vertical-align: top;
+}
+
+.command-asset-unit__mobile-list .ant-list-item {
+  padding: 12px 0;
+}
+
+.command-asset-unit__mobile-item {
+  width: 100%;
+  min-width: 0;
+}
+
+.command-asset-unit__mobile-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.command-asset-unit__mobile-header .ant-typography {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 767px) {
   .patrol-history__header {
     flex-direction: column;
@@ -1205,6 +1280,28 @@ body {
   .offline-patrol-upload__header {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .command-asset-unit__summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .command-asset-unit__summary > div {
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  .command-asset-unit__summary > div:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .command-asset-unit__summary > div:last-child {
+    border-bottom: 0;
+  }
+
+  .command-asset-unit__toolbar > .ant-select,
+  .command-asset-unit__toolbar > .ant-btn,
+  .command-asset-unit__search {
+    width: 100% !important;
   }
 }
 

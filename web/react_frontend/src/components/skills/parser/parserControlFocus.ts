@@ -1,6 +1,15 @@
-export type ParserWorkspaceKey = 'today' | 'parser-assets' | 'rule-assets' | 'governance'
+export type ParserWorkspaceKey =
+  | 'production'
+  | 'inbox'
+  | 'inventory'
+  | 'generation'
+  | 'release'
+  | 'runtime'
+  | 'audit'
 
 export type ParserSubWorkspaceKey =
+  | 'source-jobs'
+  | 'work-items'
   | 'jobs'
   | 'templates'
   | 'aliases'
@@ -8,6 +17,7 @@ export type ParserSubWorkspaceKey =
   | 'profiles'
   | 'command-profiles'
   | 'rule-generation'
+  | 'asset-bundles'
   | 'backfills'
   | 'asset-chain'
   | 'runtime-assets'
@@ -18,6 +28,7 @@ export type ParserSubWorkspaceKey =
   | 'agent-loop-attempts'
   | 'approval-audit'
   | 'datasets'
+  | 'rule-gaps'
 
 export type ParserFocusKind =
   | 'parser-template'
@@ -45,40 +56,73 @@ export interface ParserControlFocus {
 
 const focusMap: Record<ParserFocusKind, { workspace: ParserWorkspaceKey; subWorkspace: ParserSubWorkspaceKey }> = {
   'parser-template': {
-    workspace: 'parser-assets',
+    workspace: 'inventory',
     subWorkspace: 'templates',
   },
   snapshot: {
-    workspace: 'parser-assets',
+    workspace: 'inventory',
     subWorkspace: 'templates',
   },
   'observation-contract': {
-    workspace: 'rule-assets',
+    workspace: 'inventory',
     subWorkspace: 'observation-contracts',
   },
   'change-policy': {
-    workspace: 'rule-assets',
+    workspace: 'inventory',
     subWorkspace: 'change-policies',
   },
   'event-rule': {
-    workspace: 'rule-assets',
+    workspace: 'inventory',
     subWorkspace: 'event-rules',
   },
   change: {
-    workspace: 'rule-assets',
+    workspace: 'inventory',
     subWorkspace: 'change-policies',
   },
 }
 
 export const parserWorkspaceTabs: Record<ParserWorkspaceKey, ParserSubWorkspaceKey[]> = {
-  today: ['jobs', 'rule-generation', 'backfills'],
-  'parser-assets': ['templates', 'aliases', 'signatures', 'profiles', 'command-profiles'],
-  'rule-assets': ['asset-chain', 'runtime-assets', 'observation-contracts', 'change-policies', 'event-rules'],
-  governance: ['replay-reports', 'agent-loop-attempts', 'approval-audit', 'datasets'],
+  production: ['source-jobs'],
+  inbox: ['work-items', 'jobs', 'backfills'],
+  inventory: [
+    'templates', 'aliases', 'signatures', 'profiles', 'command-profiles',
+    'observation-contracts', 'change-policies', 'event-rules',
+  ],
+  generation: ['rule-gaps', 'rule-generation', 'agent-loop-attempts', 'datasets'],
+  release: ['asset-bundles', 'replay-reports'],
+  runtime: ['asset-chain', 'runtime-assets'],
+  audit: ['approval-audit'],
 }
 
 const isWorkspace = (value: string | null): value is ParserWorkspaceKey =>
-  value === 'today' || value === 'parser-assets' || value === 'rule-assets' || value === 'governance'
+  value === 'production'
+  || value === 'inbox'
+  || value === 'inventory'
+  || value === 'generation'
+  || value === 'release'
+  || value === 'runtime'
+  || value === 'audit'
+
+const normalizeWorkspace = (
+  value: string | null,
+  subWorkspace: string | null,
+): ParserWorkspaceKey | null => {
+  if (isWorkspace(value)) return value
+  if (value === 'offline' || value === 'asset-production') return 'production'
+  if (value === 'today') return 'inbox'
+  if (value === 'parser-assets') return 'inventory'
+  if (value === 'rule-assets') {
+    return subWorkspace === 'asset-chain' || subWorkspace === 'runtime-assets'
+      ? 'runtime'
+      : 'inventory'
+  }
+  if (value === 'governance') {
+    if (subWorkspace === 'approval-audit') return 'audit'
+    if (subWorkspace === 'replay-reports') return 'release'
+    return 'generation'
+  }
+  return null
+}
 
 export const isSubWorkspace = (workspace: ParserWorkspaceKey, value: string | null): value is ParserSubWorkspaceKey =>
   value !== null && parserWorkspaceTabs[workspace].includes(value as ParserSubWorkspaceKey)
@@ -93,10 +137,10 @@ export const resolveParserControlFocus = (searchParams: URLSearchParams): Parser
   const requestedWorkspace = searchParams.get('workspace')
   const subWorkspace = searchParams.get('subtab')
 
-  const rawWorkspace = isWorkspace(requestedWorkspace) ? requestedWorkspace : null
+  const rawWorkspace = normalizeWorkspace(requestedWorkspace, subWorkspace)
   const mappedFocus = focus ? focusMap[focus] : undefined
   const kind = mappedFocus ? focus : null
-  const fallbackWorkspace = rawWorkspace || 'today'
+  const fallbackWorkspace = rawWorkspace || 'inbox'
   let fallbackReason: ParserControlFocus['fallbackReason'] = null
   let fallbackMessage: string | null = null
 
@@ -118,6 +162,7 @@ export const resolveParserControlFocus = (searchParams: URLSearchParams): Parser
     subWorkspace: normalizeSubWorkspace(fallbackWorkspace, subWorkspace),
     fallbackReason,
     fallbackMessage,
+    focusHint: searchParams.get('command') || searchParams.get('q') || null,
   }
 
   if (!kind) {

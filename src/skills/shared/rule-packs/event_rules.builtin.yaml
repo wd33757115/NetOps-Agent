@@ -11,6 +11,7 @@ rules:
     description: CPU usage crosses the high threshold.
     condition:
       kind: threshold
+      observation_types: [device.cpu.utilization]
       entity_types: [cpu, system_resources]
       fields: [cpu, cpu_5s, cpu_1m, cpu_5m, cpu_usage]
       gte: 90
@@ -25,6 +26,7 @@ rules:
     description: CPU usage falls below the recovery threshold.
     condition:
       kind: threshold_recovery
+      observation_types: [device.cpu.utilization]
       entity_types: [cpu, system_resources]
       fields: [cpu, cpu_5s, cpu_1m, cpu_5m, cpu_usage]
       lt: 90
@@ -36,6 +38,7 @@ rules:
     description: Memory usage crosses the high threshold.
     condition:
       kind: threshold
+      observation_types: [device.memory.free_ratio, device.memory.utilization]
       entity_types: [memory, system_resources]
       fields: [memory, memory_usage, mem_usage, usage, used_percent, memory_used_percent]
       gte: 90
@@ -50,6 +53,7 @@ rules:
     description: Memory usage falls below the recovery threshold.
     condition:
       kind: threshold_recovery
+      observation_types: [device.memory.free_ratio, device.memory.utilization]
       entity_types: [memory, system_resources]
       fields: [memory, memory_usage, mem_usage, usage, used_percent, memory_used_percent]
       lt: 90
@@ -61,6 +65,7 @@ rules:
     description: A network interface transitions from up to down, or is first observed operationally down.
     condition:
       kind: transition
+      observation_types: [interface.oper_status]
       entity_types: [interface, interface_l2, interface_l3, physical_interface]
       fields: [status, protocol, physical, physical_status, oper_status, line_protocol]
       from_group: up
@@ -77,6 +82,7 @@ rules:
     description: A network interface recovers from down to up.
     condition:
       kind: transition
+      observation_types: [interface.oper_status]
       entity_types: [interface, interface_l2, interface_l3, physical_interface]
       fields: [status, protocol, physical, physical_status, oper_status, line_protocol]
       from_group: down
@@ -126,6 +132,7 @@ rules:
     description: Fan state is failed or absent.
     condition:
       kind: entity_status_down
+      observation_types: [environment.fan.state]
       entity_types: [fan, environment_fan]
       fields: [state, status]
 
@@ -136,5 +143,6 @@ rules:
     description: Power supply state is failed or absent.
     condition:
       kind: entity_status_down
+      observation_types: [environment.power.state]
       entity_types: [power, power_supply, environment_power]
       fields: [state, status]

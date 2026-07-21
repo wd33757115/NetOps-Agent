@@ -752,6 +752,7 @@ class PatrolBatchManifestRepository:
                         ),
                         "connection_failed_count": int(connection_statuses.get("failed") or 0),
                         "connection_pending_count": int(connection_statuses.get("pending") or 0),
+                        "connection_unknown_count": int(connection_statuses.get("unknown") or 0),
                         "created_at": _iso(batch.created_at),
                         "completed_at": _iso(max(completed_at_values))
                         if completed_at_values

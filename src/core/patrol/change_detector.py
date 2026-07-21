@@ -90,12 +90,33 @@ def _snapshot_unstructured_diff(
 ) -> dict[str, Any]:
     metadata = dict(current.metadata or {})
     selected_profile = profile_name or str(metadata.get("comparison_profile") or "") or None
-    return build_unstructured_diff(
+    base = build_unstructured_diff(
         previous.raw_text,
         current.raw_text,
         command=current.command_canonical,
         profile_name=selected_profile,
     )
+    try:
+        from src.core.patrol.config_diff_bridge import (
+            compare_config_texts,
+            looks_like_config_command,
+        )
+
+        if looks_like_config_command(current.command_canonical):
+            config_diff = compare_config_texts(
+                previous.raw_text or "",
+                current.raw_text or "",
+                device_type=str(metadata.get("device_type") or "") or None,
+            )
+            base = {
+                **base,
+                "config_diff": config_diff,
+                "comparison_mode": config_diff.get("comparison_mode") or base.get("comparison_mode"),
+                "changed": bool(base.get("changed") or config_diff.get("changed")),
+            }
+    except Exception as exc:
+        base = {**base, "config_diff_error": str(exc)}
+    return base
 
 
 class ExplicitBaselineNotReadyError(ValueError):

@@ -14,6 +14,9 @@ from src.core.patrol.event_rules import (
 )
 from src.core.state.observation_applicability import (
     APPLICABILITY_CONTEXT_KEY,
+    applicability_decision,
+    applicable_context_example,
+    context_from_change,
     excluded_context_example,
     validate_applicability,
 )
@@ -40,11 +43,7 @@ class EventRuleValidationCase:
 
 def sanitize_change(change: dict[str, Any]) -> dict[str, Any]:
     """Return a validation-safe change payload without private identifiers."""
-    return {
-        key: value
-        for key, value in change.items()
-        if key not in PRIVATE_CHANGE_FIELDS
-    }
+    return {key: value for key, value in change.items() if key not in PRIVATE_CHANGE_FIELDS}
 
 
 def match_rule_set(change: dict[str, Any], rules: list[EventRule]) -> EventRule | None:
@@ -286,9 +285,7 @@ def generate_validation_cases_for_rule(
     elif kind == "threshold_lte":
         # The fallback only constructs a synthetic validator case. It must not
         # resemble a product or optic runtime default.
-        threshold = float(
-            condition["lte"] if condition.get("lte") is not None else 0.0
-        )
+        threshold = float(condition["lte"] if condition.get("lte") is not None else 0.0)
         cases.append(
             EventRuleValidationCase(
                 name=f"{definition.rule_id}-positive-low-threshold",
@@ -318,9 +315,7 @@ def generate_validation_cases_for_rule(
             )
         )
     elif kind == "threshold_low_recovery":
-        low = float(
-            condition["low"] if condition.get("low") is not None else 0.0
-        )
+        low = float(condition["low"] if condition.get("low") is not None else 0.0)
         recovered = float(condition.get("gt") or low + 2)
         cases.append(
             EventRuleValidationCase(
@@ -575,7 +570,13 @@ def generate_validation_cases_for_rule(
     applicability = condition.get("applicability")
     if applicability:
         for case in cases:
-            case.change.setdefault("context", {})
+            seed = context_from_change(case.change) or {}
+            applicable_context = applicable_context_example(
+                applicability,
+                seed=seed,
+            )
+            if applicable_context is not None:
+                case.change["context"] = applicable_context
         excluded_context = excluded_context_example(applicability)
         positive = next(
             (case for case in cases if case.expected_event_type is not None),
@@ -583,13 +584,20 @@ def generate_validation_cases_for_rule(
         )
         if excluded_context is not None and positive is not None:
             excluded_change = dict(positive.change)
-            excluded_change["context"] = excluded_context
-            cases.append(
-                EventRuleValidationCase(
-                    name=f"{definition.rule_id}-negative-not-applicable",
-                    change=excluded_change,
+            excluded_change["context"] = {
+                **(context_from_change(positive.change) or {}),
+                **excluded_context,
+            }
+            if not applicability_decision(
+                applicability,
+                context=excluded_change["context"],
+            )["applicable"]:
+                cases.append(
+                    EventRuleValidationCase(
+                        name=f"{definition.rule_id}-negative-not-applicable",
+                        change=excluded_change,
+                    )
                 )
-            )
     return cases
 
 
@@ -700,12 +708,12 @@ def validate_event_rule_condition(condition: dict[str, Any]) -> list[str]:
         },
         "raw_config_hash": {"kind", "command_markers"},
     }
+    for condition_kind, keys in allowed_keys.items():
+        if condition_kind != "raw_config_hash":
+            keys.add("observation_types")
     unknown_keys = sorted(set(condition) - allowed_keys[kind])
     if unknown_keys:
-        errors.append(
-            f"condition contains unsupported keys for {kind}: "
-            + ", ".join(unknown_keys)
-        )
+        errors.append(f"condition contains unsupported keys for {kind}: " + ", ".join(unknown_keys))
 
     def require_list(key: str) -> None:
         value = condition.get(key)
@@ -722,6 +730,8 @@ def validate_event_rule_condition(condition: dict[str, Any]) -> list[str]:
     if kind == "raw_config_hash":
         require_list("command_markers")
         return errors
+    if "observation_types" in condition:
+        require_list("observation_types")
     if condition.get("applicability"):
         errors.extend(validate_applicability(condition["applicability"]))
     require_list("fields")
@@ -768,12 +778,8 @@ def validate_event_rule_condition(condition: dict[str, Any]) -> list[str]:
             or not fallback_fields
             or any(not str(item).strip() for item in fallback_fields)
         ):
-            errors.append(
-                "condition.fallback_reference_fields must be a non-empty string list"
-            )
-        elif len({str(item).strip() for item in fallback_fields}) != len(
-            fallback_fields
-        ):
+            errors.append("condition.fallback_reference_fields must be a non-empty string list")
+        elif len({str(item).strip() for item in fallback_fields}) != len(fallback_fields):
             errors.append("condition.fallback_reference_fields must not contain duplicates")
     return errors
 
@@ -807,9 +813,7 @@ def validate_event_rule_definition(definition: EventRuleDefinition) -> dict[str,
 
 
 def validate_event_rule_pack(path: str | None = None) -> dict[str, Any]:
-    definitions = (
-        load_event_rule_pack(path) if path else default_event_rule_definitions()
-    )
+    definitions = load_event_rule_pack(path) if path else default_event_rule_definitions()
     generated_cases: list[EventRuleValidationCase] = []
     for definition in definitions:
         generated_cases.extend(generate_validation_cases_for_rule(definition))
@@ -828,8 +832,7 @@ def validate_event_rule_pack(path: str | None = None) -> dict[str, Any]:
     generated_failed = sum(item["failed_count"] for item in definition_results)
     generated_total = sum(item["case_count"] for item in definition_results)
     passed_count = (
-        sum(item["passed_count"] for item in definition_results)
-        + invariant_result["passed_count"]
+        sum(item["passed_count"] for item in definition_results) + invariant_result["passed_count"]
     )
     case_count = generated_total + invariant_result["case_count"]
     return {

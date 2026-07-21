@@ -9,6 +9,7 @@ from typing import Any
 
 from src.core.parser.contract_inference import (
     ContractProposal,
+    contract_has_singleton_scope,
     infer_contract,
     infer_field_semantics,
 )
@@ -409,6 +410,57 @@ def _profile_sample_ids(structure_profile: dict[str, Any]) -> set[str]:
     return sample_ids
 
 
+def _evidence_entity_cardinality(
+    proposal: ContractProposal,
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Estimate entity count and key capacity from direct line evidence."""
+
+    evidence = dict(proposal.evidence or {})
+    counts_by_field: dict[str, dict[str, set[tuple[int, str]]]] = {}
+    for field_name in proposal.required_fields:
+        for binding in _field_bindings(evidence, field_name):
+            if str(binding.get("capture_kind") or "").strip() == "derived":
+                continue
+            sample_id = str(binding.get("sample_id") or "").strip()
+            try:
+                line_number = int(binding.get("line") or binding.get("line_number"))
+            except (TypeError, ValueError):
+                continue
+            value = str(binding.get("source_value") or "").strip()
+            if sample_id and line_number > 0:
+                counts_by_field.setdefault(field_name, {}).setdefault(sample_id, set()).add(
+                    (line_number, value)
+                )
+
+    sample_ids = {
+        sample_id
+        for by_sample in counts_by_field.values()
+        for sample_id in by_sample
+    }
+    entity_counts = {
+        sample_id: max(
+            (
+                len(counts_by_field.get(field_name, {}).get(sample_id, set()))
+                for field_name in proposal.required_fields
+            ),
+            default=0,
+        )
+        for sample_id in sample_ids
+    }
+    key_capacity: dict[str, int] = {}
+    for sample_id in sample_ids:
+        capacity = 1
+        for key in proposal.primary_keys:
+            values = {
+                value
+                for _line, value in counts_by_field.get(key, {}).get(sample_id, set())
+                if value
+            }
+            capacity *= len(values)
+        key_capacity[sample_id] = capacity if proposal.primary_keys else 0
+    return entity_counts, key_capacity
+
+
 def _same_governed_semantics(first: str, second: str) -> bool:
     left = catalog_field_semantics(first)
     right = catalog_field_semantics(second)
@@ -567,13 +619,49 @@ def validate_contract_candidate(
         for item in plans
         if item.get("estimated_entities") is not None
     ]
-    if estimated and max(estimated) > 1 and not proposal.primary_keys:
+    singleton_scope = contract_has_singleton_scope(
+        proposal,
+        structure_profile=structure_profile,
+        samples_text=samples_text,
+    )
+    evidence_entity_counts, evidence_key_capacity = _evidence_entity_cardinality(proposal)
+    maximum_entity_count = max([*estimated, *evidence_entity_counts.values()], default=0)
+    if maximum_entity_count > 1 and not proposal.primary_keys and not singleton_scope:
         diagnostics.append(
             ParserDiagnostic(
                 code="contract_evidence_conflict",
                 message="multi-entity samples require explicit primary keys",
                 expected="one or more primary key fields",
                 actual=[],
+            )
+        )
+    insufficient_key_samples = {
+        sample_id: {
+            "evidenced_entities": entity_count,
+            "key_capacity": evidence_key_capacity.get(sample_id, 0),
+        }
+        for sample_id, entity_count in evidence_entity_counts.items()
+        if proposal.primary_keys
+        and entity_count > evidence_key_capacity.get(sample_id, 0)
+    }
+    if insufficient_key_samples:
+        diagnostics.append(
+            ParserDiagnostic(
+                code="contract_evidence_conflict",
+                message=(
+                    "primary keys do not distinguish all evidenced entities; "
+                    "include the repeated entity identity in the key"
+                ),
+                expected={
+                    "minimum_key_capacity": max(
+                        item["evidenced_entities"]
+                        for item in insufficient_key_samples.values()
+                    )
+                },
+                actual={
+                    "primary_keys": list(proposal.primary_keys),
+                    "samples": insufficient_key_samples,
+                },
             )
         )
     if structure_profile.get("dominant_layout") in {None, "empty"}:

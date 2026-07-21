@@ -11,7 +11,6 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from src.common.config import get_settings
 from src.core.parser.identity import DeviceIdentityResolver
 from src.core.parser.runtime import ParserRuntime, ParserRuntimeResult
 from src.core.patrol.command_splitter import (
@@ -729,14 +728,29 @@ def import_raw_capture(
             "primary_key_duplicate",
             "asset_hash_mismatch",
         }
-        should_create_candidate = snapshot_created and (
-            mode == PARSER_VALIDATION_MODE
-            or (
-                mode == PRODUCTION_MODE
-                and get_settings().PRODUCTION_PARSER_BACKLOG_ENABLED
-                and parse_status in {"template_missing", "parse_failed"}
-            )
-        )
+        # Production patrol records the gap as evidence but never starts asset
+        # generation. Only explicitly imported parser-validation evidence may
+        # create Parser candidates. Production gaps are registered in the ledger.
+        should_create_candidate = snapshot_created and mode == PARSER_VALIDATION_MODE
+        if (
+            snapshot_created
+            and mode == PRODUCTION_MODE
+            and parse_status in {"template_missing", "parse_failed"}
+        ):
+            try:
+                from src.core.parser.gap_ledger import ParserGapLedgerService
+
+                ParserGapLedgerService().record_gap(
+                    vendor=identity.vendor or "",
+                    model=identity.model,
+                    family=identity.family,
+                    canonical_command=parsed.canonical_command,
+                    failure_code=parsed.failure_code or parse_status,
+                    run_id=rid,
+                    device_id=device_id,
+                )
+            except Exception:
+                pass
         if (
             should_create_candidate
             and (

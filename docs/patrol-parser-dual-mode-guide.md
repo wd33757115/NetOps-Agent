@@ -1,4 +1,4 @@
-# 巡检与 Parser 双模式使用手册
+# 巡检执行与规则资产生产双链路手册
 
 ## 1. 数据与职责边界
 
@@ -7,37 +7,44 @@
 
 | 模式 | 用途 | Snapshot 数据面 | 后续处理 |
 |---|---|---|---|
-| `parser_validation` | 收集和验证新设备、新版本、新输出格式 | PostgreSQL validation Dataset | 可创建或修复 Parser 候选，不生成 Change/Event |
-| `production` | 正式巡检和历史周期分析 | PostgreSQL production Dataset | State、Change、Event、Report |
+| `parser_validation` | 在 Parser 控制面收集和验证新设备、新版本、新输出格式 | PostgreSQL validation Dataset | 可创建或修复 Parser/规则候选，不发布正式事件 |
+| `production` | 设备巡检页发起正式巡检 | PostgreSQL production Dataset | 只读 active 资产，生成 State、Change、Event、Report |
+
+正式巡检遇到 `template_missing` / `parse_failed` 时：
+
+- **不会**创建 Parser LLM 候选任务；
+- 在开启 `PRODUCTION_GAP_LEDGER_ENABLED` 时写入 `netops_parser_gap_ledger`；
+- Beat 任务 `promote_parser_gap_ledger` 可把达到阈值的缺口提升为 **pending draft** Parser Job（`source_mode=production_gap`），仍不自动 dispatch。
 
 旧 SQLite 文件不是运行数据源。`file_path` 仅作为管理员在服务器本机执行的兼容入口，
-普通用户应通过设备巡检页上传文件。
+普通用户应通过 Parser 控制面的“资产生产”工作区上传文件。
 
 ## 2. 两套操作入口
 
-### 设备巡检页
+### Skills / Parser 控制面
 
-访问 `/devices?tab=patrol&patrol_view=offline`，用于：
+访问 `/skills/parser?workspace=production&subtab=source-jobs`，用于：
 
-- 创建单周期解析验证任务；
-- 创建双周期变化分析任务；
+- 创建单周期资产样本任务；
+- 创建双周期规则回放样本任务；
 - 上传多文件、文件夹或 ZIP；
 - 预览设备身份、命令、Parser 状态和质量门禁；
 - 确认 Inventory 设备绑定；
-- 查看 Workflow、Change、Event 和报告；
-- 下载原始输出、设备列表及失败设备列表。
+- 按命令查看 Parser、Contract、Policy、EventRule 的十阶段生产进度；
+- 进入生成、工程复核、审批发布和运行时覆盖工作区；
+- 下载样本原始输出、回放变化、回放事件和规则回放报告。
 
 任务列表采用服务端分页，支持搜索、用途、状态和归档筛选。
 
-### Skills / Parser 控制面
+### 设备巡检页
 
-用于处理离线任务发现的资产缺口：
+访问 `/devices?tab=patrol`，用于正式巡检，包含“在线巡检”和“离线巡检”：
 
-- `template_missing/parse_failed` 进入 Parser 候选生成、验证和激活；
-- active Parser 模板激活后幂等创建 `OBSERVATION_CONTRACT` 规则生成任务；
-- 从离线 Dataset 构建不可变 sanitized context；
-- 由 LLM 生成 ObservationContract、ChangePolicy 和 EventRule 候选；
-- 通过合成验证、历史回放、碰撞检查和审批后激活。
+- 发起设备巡检批次并查看设备执行状态；
+- 只读取 active Parser、ObservationContract、ChangePolicy 和 EventRule；
+- 展示 State、Change、Event、证据链和正式巡检报告；
+- 离线巡检导入历史 CLI，但只读取 active Parser、Contract、Policy 与 EventRule，不创建候选资产；
+- 遇到缺失资产时记录降级原因，但不创建或启动规则生成任务。
 
 新规则不会由离线导入代码硬编码。手工 JSON 和内置 Provider/Registry 仍作为兼容、测试及
 紧急兜底接口保留。
@@ -60,7 +67,7 @@
 允许出现 `template_missing` 和 `parse_failed`，因为该模式的目的就是发现和修复 Parser。
 预览不会写 Snapshot，也不会创建候选任务；正式执行才会持久化。
 
-## 4. 双周期变化分析
+## 4. 双周期规则回放
 
 baseline 的采集时间必须早于 current。执行流程为：
 
@@ -72,11 +79,10 @@ baseline 的采集时间必须早于 current。执行流程为：
   -> State Normalizer(update_current_state=false)
   -> Change Detector
   -> Event Builder
-  -> Report Generator
+  -> Rule Replay Report
 ```
 
-默认 `publish_events=false`，事件只作为本次历史分析结果保留；用户明确确认后才可发布到
-正式事件流。
+固定 `publish_events=false`，事件只作为候选规则的历史回放结果，不能发布到正式事件流。
 
 以下情况会阻断执行：
 
@@ -124,21 +130,23 @@ structured_json
 
 ## 7. API
 
-离线巡检入口：
+规则资产样本入口：
 
 ```text
-POST   /api/v1/patrol/offline-jobs
-GET    /api/v1/patrol/offline-jobs
-GET    /api/v1/patrol/offline-jobs/{job_id}
-POST   /api/v1/patrol/offline-jobs/{job_id}/sources
-POST   /api/v1/patrol/offline-jobs/{job_id}/preview
-POST   /api/v1/patrol/offline-jobs/{job_id}/device-bindings/confirm
-POST   /api/v1/patrol/offline-jobs/{job_id}/execute
-POST   /api/v1/patrol/offline-jobs/{job_id}/cancel
-POST   /api/v1/patrol/offline-jobs/{job_id}/retry
-POST   /api/v1/patrol/offline-jobs/{job_id}/archive
-GET    /api/v1/patrol/offline-jobs/{job_id}/artifacts/{kind}
+POST   /api/v1/parser/asset-source-jobs
+GET    /api/v1/parser/asset-source-jobs
+GET    /api/v1/parser/asset-source-jobs/{job_id}
+POST   /api/v1/parser/asset-source-jobs/{job_id}/sources
+POST   /api/v1/parser/asset-source-jobs/{job_id}/preview
+POST   /api/v1/parser/asset-source-jobs/{job_id}/device-bindings/confirm
+POST   /api/v1/parser/asset-source-jobs/{job_id}/execute
+POST   /api/v1/parser/asset-source-jobs/{job_id}/cancel
+POST   /api/v1/parser/asset-source-jobs/{job_id}/retry
+POST   /api/v1/parser/asset-source-jobs/{job_id}/archive
+GET    /api/v1/parser/asset-source-jobs/{job_id}/artifacts/{kind}
 ```
+
+离线巡检使用独立的 `/api/v1/patrol/offline-jobs`。两类任务共享上传、预检和文件证据基础设施，但通过 `purpose` 隔离，不能从一个工作区读取或执行另一个工作区的任务。
 
 规则生成入口继续使用 Parser 控制面：
 

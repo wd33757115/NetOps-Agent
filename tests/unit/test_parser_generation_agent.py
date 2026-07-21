@@ -476,6 +476,10 @@ def test_succeeded_job_retry_requires_every_generated_candidate_deprecated():
 
     repository = ParserJobRepository()
     try:
+        before = repository.get_job(job_id)
+        assert before["generated_candidate_count"] == 1
+        assert before["blocking_candidate_count"] == 1
+        assert before["can_retry"] is False
         with pytest.raises(ParserJobStateError, match="every generated candidate"):
             repository.retry_job(job_id)
 
@@ -484,6 +488,13 @@ def test_succeeded_job_retry_requires_every_generated_candidate_deprecated():
                 {"status": "deprecated"},
                 synchronize_session=False,
             )
+
+        retryable = repository.get_job(job_id)
+        assert retryable["generated_candidate_count"] == 1
+        assert retryable["blocking_candidate_count"] == 0
+        assert retryable["can_retry"] is True
+        projected = next(item for item in repository.list_jobs() if item["id"] == job_id)
+        assert projected["can_retry"] is True
 
         retried = repository.retry_job(job_id)
 

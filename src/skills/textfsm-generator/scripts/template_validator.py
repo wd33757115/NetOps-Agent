@@ -15,7 +15,7 @@ from src.core.parser.evidence_utils import literal_occurs
 from src.core.parser.generation_diagnostics import ParserDiagnostic
 from src.core.parser.key_contract import validate_entity_keys
 from src.core.parser.textfsm_dialect import lint_textfsm_template
-from src.core.parser.textfsm_input import prepare_textfsm_input
+from src.core.parser.textfsm_input import TEXTFSM_END_OF_INPUT, prepare_textfsm_input
 
 try:
     import textfsm
@@ -89,10 +89,7 @@ def validate_field_values(
                     elif not 0 <= value <= 100:
                         errors.append(f"{path}={raw!r} is outside 0-100")
                 elif rule_type == "enum":
-                    allowed = {
-                        str(value).strip().lower()
-                        for value in rules.get("values") or []
-                    }
+                    allowed = {str(value).strip().lower() for value in rules.get("values") or []}
                     if allowed and str(raw).strip().lower() not in allowed:
                         errors.append(f"{path}={raw!r} is not in {sorted(allowed)}")
                 elif rule_type in {"ip", "ip_or_unassigned"}:
@@ -147,9 +144,7 @@ def check_required_fields(
         field
         for field in required_fields
         if any(
-            record.get(field) is None
-            or record.get(field) == ""
-            or record.get(field) == []
+            record.get(field) is None or record.get(field) == "" or record.get(field) == []
             for record in records
         )
     ]
@@ -182,9 +177,7 @@ def uncovered_structured_lines(
     """Find numeric entity rows that no field-capturing rule can parse."""
 
     value_patterns: dict[str, str] = {}
-    declaration = re.compile(
-        r"^Value(?:\s+[A-Za-z,]+)?\s+([A-Za-z_][A-Za-z0-9_]*)\s+\((.*)\)$"
-    )
+    declaration = re.compile(r"^Value(?:\s+[A-Za-z,]+)?\s+([A-Za-z_][A-Za-z0-9_]*)\s+\((.*)\)$")
     for line in str(template_text or "").splitlines():
         match = declaration.match(line.strip())
         if match:
@@ -211,8 +204,7 @@ def uncovered_structured_lines(
             continue
 
     key_values = [
-        tuple(str(record.get(key) or "").strip() for key in primary_keys)
-        for record in records
+        tuple(str(record.get(key) or "").strip() for key in primary_keys) for record in records
     ]
     key_values = [key for key in key_values if key and all(key)]
     current_key: tuple[str, ...] | None = None
@@ -358,11 +350,7 @@ def validate_record_evidence_alignment(
             if runtime_line < 1 or runtime_line > len(lines):
                 continue
             anchor = next(
-                (
-                    item
-                    for item in reversed(anchored_records)
-                    if item[0] <= runtime_line
-                ),
+                (item for item in reversed(anchored_records) if item[0] <= runtime_line),
                 None,
             )
             if anchor is None:
@@ -382,9 +370,7 @@ def validate_record_evidence_alignment(
                 continue
             missing_value = not values
             code = (
-                "missing_evidenced_field_instance"
-                if missing_value
-                else "record_evidence_mismatch"
+                "missing_evidenced_field_instance" if missing_value else "record_evidence_mismatch"
             )
             message = (
                 f"parsed field {field_name!r} is missing for its evidenced entity "
@@ -472,9 +458,13 @@ def validate_template(
     result.record_count = len(records)
     result.parse_success = bool(records)
     if not records:
-        if allow_empty and not expected_min_records and any(
-            re.search(pattern, cli_output, re.IGNORECASE | re.MULTILINE)
-            for pattern in (empty_patterns or [])
+        if (
+            allow_empty
+            and not expected_min_records
+            and any(
+                re.search(pattern, cli_output, re.IGNORECASE | re.MULTILINE)
+                for pattern in (empty_patterns or [])
+            )
         ):
             result.parse_success = True
             result.empty_accepted = True
@@ -510,8 +500,7 @@ def validate_template(
 
     if expected_min_records and len(records) < expected_min_records:
         result.completeness_errors.append(
-            "parsed record count "
-            f"{len(records)} is below expected minimum {expected_min_records}"
+            f"parsed record count {len(records)} is below expected minimum {expected_min_records}"
         )
 
     if expected_record_count is not None and len(records) > expected_record_count:
@@ -540,9 +529,7 @@ def validate_template(
             )
         )
 
-    result.field_coverage, result.missing_fields = check_required_fields(
-        records, required_fields
-    )
+    result.field_coverage, result.missing_fields = check_required_fields(records, required_fields)
     result.value_errors = validate_field_values(records, validators)
     result.errors.extend(result.value_errors)
     if result.missing_fields:
@@ -605,11 +592,7 @@ def validate_template(
         unexpected_keys = sorted(actual_keys - expected_primary_keys)
         if unexpected_keys:
             preview = ", ".join("/".join(key) for key in unexpected_keys[:10])
-            suffix = (
-                ""
-                if len(unexpected_keys) <= 10
-                else f" (+{len(unexpected_keys) - 10} more)"
-            )
+            suffix = "" if len(unexpected_keys) <= 10 else f" (+{len(unexpected_keys) - 10} more)"
             message = f"unexpected entity keys: {preview}{suffix}"
             result.completeness_errors.append(message)
             result.errors.append(message)
@@ -652,13 +635,26 @@ def strip_llm_template(raw: str) -> str:
         text = fence.group(1).strip()
     output: list[str] = []
     started = False
+    in_states = False
     for line in text.splitlines():
-        if not started and (
-            line.strip().startswith("Value ") or line.strip().startswith("Start")
-        ):
+        stripped = line.strip()
+        if not started and (stripped.startswith("Value ") or stripped == "Start"):
             started = True
-        if started:
-            output.append(line)
+        if not started or stripped.startswith("#"):
+            continue
+        is_state = bool(re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", stripped))
+        if is_state:
+            if output and output[-1] != "":
+                output.append("")
+            output.append(stripped)
+            in_states = True
+            continue
+        if in_states:
+            if not stripped:
+                continue
+            output.append(f"  {stripped}" if stripped.startswith("^") else line)
+            continue
+        output.append(line)
     cleaned = "\n".join(output).strip() if output else text.strip()
     return f"{cleaned}\n"
 
@@ -697,10 +693,7 @@ def canonicalize_template_fields(
                 if option.strip() and option.strip().casefold() != "required"
             ]
             option_text = f" {','.join(options)}" if options else ""
-            line = (
-                f"{match.group('indent')}Value{option_text} {field_name}"
-                f"{match.group('suffix')}"
-            )
+            line = f"{match.group('indent')}Value{option_text} {field_name}{match.group('suffix')}"
         lines.append(line)
     normalized = "\n".join(lines)
     for declared, target in replacements.items():
@@ -710,3 +703,94 @@ def canonicalize_template_fields(
             normalized,
         )
     return f"{normalized.rstrip()}\n"
+
+
+def repair_record_boundary_candidate(
+    template_text: str,
+    diagnostic: dict[str, Any] | None,
+    *,
+    primary_keys: list[str] | tuple[str, ...],
+) -> str | None:
+    """Repair a same-state repeated-block template without another model call.
+
+    A frequent weak-model failure emits ``Record`` on the entity header. The
+    platform can safely turn that header into a non-capturing boundary followed
+    by the original capture rule, then flush the final entity with its reserved
+    end marker. Row-oriented templates are left untouched.
+    """
+
+    payload = dict(diagnostic or {})
+    if payload.get("allowed_action") != "repair_record_boundary":
+        return None
+    actual = payload.get("actual")
+    actual_details = actual if isinstance(actual, dict) else {}
+    transition_fields = {
+        str(field)
+        for field in actual_details.get("record_transition_fields") or []
+    }
+    key_fields = {str(field) for field in primary_keys} | transition_fields
+    if not key_fields:
+        return None
+
+    normalized = strip_llm_template(template_text)
+    lines = normalized.rstrip().splitlines()
+    value_pattern = re.compile(
+        r"^Value(?:\s+[A-Za-z,]+)?\s+"
+        r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s+\((?P<pattern>.*)\)$"
+    )
+    declarations = {
+        match.group("name"): match.group("pattern")
+        for line in lines
+        if (match := value_pattern.match(line.strip()))
+    }
+    rule_pattern = re.compile(
+        r"^(?P<indent>\s*)(?P<pattern>\^.*?)\s+->\s+(?P<action>\S+(?:\s+\S+)?)\s*$"
+    )
+    repaired_index: int | None = None
+    for index, line in enumerate(lines):
+        match = rule_pattern.match(line)
+        if not match or not re.search(r"(?:^|\.)Record(?:\s|$)", match.group("action")):
+            continue
+        captured = set(re.findall(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", match.group("pattern")))
+        if not captured or not captured.issubset(key_fields):
+            continue
+        boundary = match.group("pattern")
+        for field_name in sorted(captured):
+            pattern = declarations.get(field_name)
+            if not pattern:
+                return None
+            boundary = boundary.replace(f"${{{field_name}}}", f"(?:{pattern})")
+        action_parts = match.group("action").split()
+        target_state = action_parts[1] if len(action_parts) == 2 else None
+        capture_rule = f"  {match.group('pattern')}"
+        if target_state:
+            capture_rule += f" -> {target_state}"
+        lines[index : index + 1] = [
+            f"  {boundary} -> Continue.Record",
+            capture_rule,
+        ]
+        repaired_index = index
+        break
+    if repaired_index is None:
+        return None
+
+    has_explicit_eof = any(line.strip() == "EOF" for line in lines)
+    has_flush_marker = any(TEXTFSM_END_OF_INPUT in line for line in lines)
+    if has_explicit_eof and not has_flush_marker:
+        next_state = next(
+            (
+                index
+                for index in range(repaired_index + 2, len(lines))
+                if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", lines[index].strip())
+            ),
+            len(lines),
+        )
+        insert_at = next_state
+        while insert_at > repaired_index and not lines[insert_at - 1].strip():
+            insert_at -= 1
+        lines.insert(
+            insert_at,
+            f"  ^{re.escape(TEXTFSM_END_OF_INPUT)}$$ -> Record EOF",
+        )
+    repaired = "\n".join(lines).rstrip() + "\n"
+    return repaired if repaired != normalized else None

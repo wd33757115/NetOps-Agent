@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable
 
 from src.core.execution import (
@@ -63,19 +64,35 @@ class DeviceBackupRunner:
         if not result.success:
             raise RuntimeError(result.message or "device backup failed")
 
+        # Optional post-backup config-diff enrichment for paired before/after artifacts.
+        config_diff_summary = None
+        try:
+            from src.core.patrol.config_diff_bridge import compare_config_texts
+
+            outputs = list(result.output_files or [])
+            if len(outputs) >= 2:
+                before = Path(str(outputs[0])).read_text(encoding="utf-8", errors="replace")
+                after = Path(str(outputs[1])).read_text(encoding="utf-8", errors="replace")
+                config_diff_summary = compare_config_texts(before, after)
+        except Exception:
+            config_diff_summary = None
+
         download_url = self._archive_backup_outputs(
             output_files=result.output_files or [],
             ticket_id=request.ticket_id,
         )
 
         execution_time_ms = int((datetime.now() - execution_start).total_seconds() * 1000)
-        return runner_success_payload(
+        payload = runner_success_payload(
             action="backup",
             ticket_id=request.ticket_id,
             result=result,
             execution_time_ms=execution_time_ms,
             download_url=download_url,
         )
+        if config_diff_summary is not None:
+            payload["config_diff"] = config_diff_summary
+        return payload
 
     def _archive_backup_outputs(
         self,

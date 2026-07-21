@@ -1,7 +1,8 @@
-import React from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Descriptions, Input, Progress, Select, Space, Switch, Table, Tabs, Tag, Typography, type TableProps } from 'antd'
 import { DownloadOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
 import type { PatrolBatchDeviceItem, PatrolBatchDevicePage, PatrolBatchResultSummary, PatrolBatchSummary } from '../../services/api'
+import { deviceApi } from '../../services/api'
 import { useIsMobile } from '../../hooks/useBreakpoint'
 import PatrolBatchPipeline from './PatrolBatchPipeline'
 import OfflinePatrolPanel from './OfflinePatrolPanel'
@@ -148,6 +149,39 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
   retryRunLoading,
 }) => {
   const isMobile = useIsMobile()
+  const [liveEvents, setLiveEvents] = useState<Array<Record<string, unknown>>>([])
+
+  useEffect(() => {
+    if (!activePatrolBatchId) {
+      setLiveEvents([])
+      return undefined
+    }
+    const url = deviceApi.getPatrolBatchLiveEventsUrl(activePatrolBatchId)
+    const es = new EventSource(url, { withCredentials: true })
+    es.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data) as Record<string, unknown>
+        setLiveEvents((prev) => [payload, ...prev].slice(0, 20))
+        if (payload.type === 'dispatch_failed' || payload.type === 'device_patrol_failed') {
+          onRefreshActiveBatchRuns()
+        }
+      } catch {
+        /* ignore malformed SSE */
+      }
+    }
+    es.onerror = () => {
+      es.close()
+    }
+    return () => es.close()
+  }, [activePatrolBatchId, onRefreshActiveBatchRuns])
+
+  const noEventTop3 = useMemo(() => {
+    const byReason = activeBatchResultSummary?.no_event_summary?.by_reason || {}
+    return Object.entries(byReason)
+      .sort((left, right) => Number(right[1]) - Number(left[1]))
+      .slice(0, 3)
+  }, [activeBatchResultSummary])
+
   const onlineContent = (
   <Space direction="vertical" size={8} style={{ width: '100%' }}>
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
@@ -314,9 +348,34 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
             showIcon
             message={`${activeBatchResultSummary!.no_event_summary!.total} 条变化未生成事件`}
             description={(
-              <Space wrap size={[4, 4]}>
-                {Object.entries(activeBatchResultSummary!.no_event_summary!.by_reason || {}).map(([reason, count]) => (
-                  <Tag color="warning" key={reason}>{noEventReasonLabel(reason)}：{count}</Tag>
+              <Space direction="vertical" size={4}>
+                <Space wrap size={[4, 4]}>
+                  {noEventTop3.map(([reason, count]) => (
+                    <Tag color="warning" key={reason}>{noEventReasonLabel(reason)}：{count}</Tag>
+                  ))}
+                </Space>
+                <Typography.Link href="/skills/parser?workspace=generation&subtab=rule-gaps">
+                  查看变化缺口并 seed Job
+                </Typography.Link>
+              </Space>
+            )}
+          />
+        )}
+
+        {liveEvents.length > 0 && (
+          <Alert
+            type="error"
+            showIcon
+            message="实时失败推送"
+            description={(
+              <Space direction="vertical" size={2}>
+                {liveEvents.slice(0, 5).map((event, index) => (
+                  <Typography.Text key={`${String(event.type)}-${index}`} type="danger">
+                    {String(event.type || 'event')}
+                    {event.device_id ? ` · ${String(event.device_id)}` : ''}
+                    {event.failure_code ? ` · ${String(event.failure_code)}` : ''}
+                    {event.error ? ` · ${String(event.error)}` : ''}
+                  </Typography.Text>
                 ))}
               </Space>
             )}
@@ -358,7 +417,7 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
         {(activeBatchSummary.failed > 0 || activeBatchSummary.cancelled > 0 || (activeBatch?.skipped_count || 0) > 0) && (
           <Alert type="warning" showIcon
             message={`有 ${activeBatchSummary.failed + activeBatchSummary.cancelled + (activeBatch?.skipped_count || 0)} 台设备需要处理`}
-            description="预检跳过、登录/采集失败和取消设备均保留在设备清单中，可按状态筛选后查看证据或重试。" />
+            description="预检跳过（含 Parser 覆盖策略 skip/block）、登录/采集失败和取消设备均保留在设备清单中，可按状态筛选后查看证据或重试。" />
         )}
 
         <Space direction="vertical" size={8} style={{ width: '100%' }}>

@@ -51,6 +51,47 @@ def _token(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", "_", str(value or "").casefold()).strip("_")
 
 
+def govern_event_rule_severity(
+    *,
+    event_type: str,
+    proposed_severity: str,
+    constraints: dict[str, Any] | None = None,
+) -> tuple[str, dict[str, Any] | None]:
+    """Enforce platform severity policy without changing event conditions."""
+
+    proposed = str(proposed_severity or "warning").casefold()
+    if proposed != "critical":
+        return proposed, None
+    policy = dict(constraints or {})
+    required = {
+        str(item_type): str(severity).casefold()
+        for item_type, severity in dict(policy.get("required_severities") or {}).items()
+    }
+    allowed = policy.get("allow_critical") is True or event_type in {
+        str(item) for item in policy.get("allow_critical_event_types") or [] if str(item)
+    }
+    allowed = allowed or required.get(event_type) == "critical"
+    if allowed:
+        return proposed, None
+    configured = str(policy.get("unauthorized_critical_fallback") or "major").casefold()
+    fallback = required.get(event_type)
+    effective = (
+        fallback
+        if fallback in {"major", "warning"}
+        else configured
+        if configured in {"major", "warning"}
+        else "major"
+    )
+    return effective, {
+        "kind": "severity_governance",
+        "event_type": event_type,
+        "proposed": proposed,
+        "effective": effective,
+        "reason": "critical_requires_explicit_authorization",
+        "source": "deterministic_control_plane",
+    }
+
+
 def _target_fields(contract: dict[str, Any], observation_type: str) -> list[str]:
     semantics = dict(contract.get("state_semantics") or {})
     return [
@@ -81,7 +122,11 @@ def expected_rule_roles(
     if errors:
         return [], errors
 
-    base = {"entity_types": [entity_type], "fields": fields}
+    base = {
+        "entity_types": [entity_type],
+        "fields": fields,
+        "observation_types": [observation_type],
+    }
     compare_mode = str(change_policy.get("compare_mode") or "").strip()
     thresholds = {
         str(key): value
@@ -135,9 +180,7 @@ def expected_rule_roles(
                 not high_reference
                 or critical_high_reference["field_name"] != high_reference["field_name"]
             )
-        ) or bool(
-            critical_high is not None and (high is None or critical_high != high)
-        )
+        ) or bool(critical_high is not None and (high is None or critical_high != high))
         if critical_high_is_distinct:
             critical_high_condition = (
                 {
@@ -333,7 +376,7 @@ def expected_rule_roles(
     return [], []
 
 
-def _infer_role(rule: dict[str, Any]) -> str | None:
+def infer_event_rule_role(rule: dict[str, Any]) -> str | None:
     explicit = _ROLE_ALIASES.get(str(rule.get("trigger_role") or "").casefold())
     if explicit:
         return explicit
@@ -352,9 +395,7 @@ def _infer_role(rule: dict[str, Any]) -> str | None:
     )
     is_critical_high = "critical_high" in text
     is_low = is_critical_low or any(word in text for word in ("_low", "low_", "below", "under"))
-    is_high = is_critical_high or any(
-        word in text for word in ("_high", "high_", "above", "over")
-    )
+    is_high = is_critical_high or any(word in text for word in ("_high", "high_", "above", "over"))
     if recovery and is_low:
         return "low_recovery"
     if recovery and is_high:
@@ -396,11 +437,65 @@ def _fallback_event_type(observation_type: str, role: str) -> str:
     return f"{prefix}_{role}"
 
 
+def _govern_event_type_for_role(
+    *,
+    proposed_event_type: str,
+    observation_type: str,
+    role: RuleRole,
+    constraints: dict[str, Any] | None,
+    reserved_tokens: dict[str, str],
+) -> tuple[str, dict[str, Any] | None]:
+    """Keep machine event identity consistent with the compiled trigger role."""
+
+    policy = dict(constraints or {})
+    configured = str(dict(policy.get("role_event_types") or {}).get(role.name) or "").strip()
+    proposed = str(proposed_event_type or "").strip()
+    fallback = _fallback_event_type(observation_type, role.name)
+    effective = configured or proposed or fallback
+    reason: str | None = None
+    inferred_role: str | None = None
+
+    if configured:
+        if proposed and proposed != configured:
+            reason = "explicit_role_event_type_mapping"
+    elif proposed:
+        inferred_role = infer_event_rule_role(
+            {
+                "event_type": proposed,
+                "event_class": role.event_class,
+            }
+        )
+        if inferred_role is not None and inferred_role != role.name:
+            effective = fallback
+            reason = "event_type_direction_conflicts_with_trigger_role"
+
+    token = _token(effective)
+    reserved_by = reserved_tokens.get(token)
+    if reserved_by and reserved_by != role.name:
+        effective = fallback
+        token = _token(effective)
+        reason = "event_type_reused_by_another_trigger_role"
+    reserved_tokens[token] = role.name
+
+    if not reason or effective == proposed:
+        return effective, None
+    return effective, {
+        "kind": "event_type_governance",
+        "trigger_role": role.name,
+        "proposed": proposed,
+        "effective": effective,
+        "inferred_role": inferred_role,
+        "reason": reason,
+        "source": "deterministic_control_plane",
+    }
+
+
 def compile_event_rule_intents(
     *,
     candidate_rules: list[dict[str, Any]],
     contract: dict[str, Any],
     change_policy: dict[str, Any],
+    event_constraints: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compile permissive LLM intent objects into executable, policy-bound rules."""
 
@@ -422,11 +517,12 @@ def compile_event_rule_intents(
     for index, rule in enumerate(candidate_rules):
         if not isinstance(rule, dict):
             continue
-        inferred = _infer_role(rule)
+        inferred = infer_event_rule_role(rule)
         if inferred:
             classified.setdefault(inferred, []).append((index, rule))
 
     used: set[int] = set()
+    reserved_event_type_tokens: dict[str, str] = {}
     compiled_by_role: dict[str, dict[str, Any]] = {}
     normalizations: list[dict[str, Any]] = []
     for role in roles:
@@ -439,23 +535,30 @@ def compile_event_rule_intents(
         if selected_index is not None:
             used.add(selected_index)
         source = dict(selected or {})
-        event_type = str(source.get("event_type") or "").strip() or _fallback_event_type(
-            observation_type,
-            role.name,
+        event_type, event_type_repair = _govern_event_type_for_role(
+            proposed_event_type=str(source.get("event_type") or ""),
+            observation_type=observation_type,
+            role=role,
+            constraints=event_constraints,
+            reserved_tokens=reserved_event_type_tokens,
         )
         rule_name = str(source.get("name") or source.get("rule_id") or event_type)
+        proposed_severity = (
+            "info"
+            if role.event_class == "recovery"
+            else str(source.get("severity") or role.default_severity)
+        )
+        effective_severity, severity_repair = govern_event_rule_severity(
+            event_type=event_type,
+            proposed_severity=proposed_severity,
+            constraints=event_constraints,
+        )
         compiled = {
             "name": rule_name,
             "version": int(source.get("version") or 1),
             "event_type": event_type,
             "trigger_role": role.name,
-            "severity": (
-                "info"
-                if role.event_class == "recovery"
-                else role.default_severity
-                if role.name in {"critical_low", "critical_high"}
-                else str(source.get("severity") or role.default_severity)
-            ),
+            "severity": effective_severity,
             "description": str(
                 source.get("description")
                 or f"Generated {observation_type} {role.name} event candidate."
@@ -473,6 +576,21 @@ def compile_event_rule_intents(
             ),
         }
         compiled_by_role[role.name] = compiled
+        if event_type_repair:
+            normalizations.append(
+                {
+                    **event_type_repair,
+                    "source_rule_index": selected_index,
+                }
+            )
+        if severity_repair:
+            normalizations.append(
+                {
+                    **severity_repair,
+                    "trigger_role": role.name,
+                    "source_rule_index": selected_index,
+                }
+            )
         normalizations.append(
             {
                 "kind": "event_intent_compiled",
@@ -497,7 +615,7 @@ def compile_event_rule_intents(
             "kind": "unused_event_intent_dropped",
             "source_rule_index": index,
             "event_type": rule.get("event_type"),
-            "inferred_role": _infer_role(rule),
+            "inferred_role": infer_event_rule_role(rule),
         }
         for index, rule in enumerate(candidate_rules)
         if isinstance(rule, dict) and index not in used

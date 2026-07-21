@@ -4,6 +4,7 @@ import type { ParserChangePolicy, ParserObservationContract } from '../../../ser
 import { hasFocusMatched } from './parserControlFocus'
 import { asRecord } from './parserWorkspaceModel'
 import StandardTableShell from './StandardTableShell'
+import type { ParserPageState } from './useParserControlData'
 
 const codePanelStyle: React.CSSProperties = {
   background: '#f5f5f5',
@@ -38,12 +39,18 @@ const shortDigest = (value?: string | null) => value ? value.slice(0, 12) : '-'
 interface ObservationContractsWorkspaceProps {
   items: ParserObservationContract[]
   loading: boolean
+  page: ParserPageState
+  total: number
+  onPageChange: (page: number, pageSize: number) => void
   focusId?: string | null
 }
 
 export const ObservationContractsWorkspace: React.FC<ObservationContractsWorkspaceProps> = ({
   items,
   loading,
+  page,
+  total,
+  onPageChange,
   focusId,
 }) => (
   <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -110,7 +117,17 @@ export const ObservationContractsWorkspace: React.FC<ObservationContractsWorkspa
           </pre>
         ),
       }}
-      pagination={{ pageSize: 20, showSizeChanger: false }}
+      pagination={{
+        current: page.page,
+        pageSize: page.pageSize,
+        total,
+        showSizeChanger: true,
+        showTotal: (value) => `共 ${value} 条`,
+      }}
+      onChange={(pagination) => onPageChange(
+        pagination.current || 1,
+        pagination.pageSize || 20,
+      )}
       emptyText="暂无 ObservationContract"
       scroll={{ x: 1500 }}
     />
@@ -120,6 +137,9 @@ export const ObservationContractsWorkspace: React.FC<ObservationContractsWorkspa
 interface ChangePoliciesWorkspaceProps {
   items: ParserChangePolicy[]
   loading: boolean
+  page: ParserPageState
+  total: number
+  onPageChange: (page: number, pageSize: number) => void
   isMobile: boolean
   focusId?: string | null
 }
@@ -127,6 +147,9 @@ interface ChangePoliciesWorkspaceProps {
 export const ChangePoliciesWorkspace: React.FC<ChangePoliciesWorkspaceProps> = ({
   items,
   loading,
+  page,
+  total,
+  onPageChange,
   isMobile,
   focusId,
 }) => (
@@ -198,7 +221,17 @@ export const ChangePoliciesWorkspace: React.FC<ChangePoliciesWorkspaceProps> = (
           </Row>
         ),
       }}
-      pagination={{ pageSize: 20, showSizeChanger: false }}
+      pagination={{
+        current: page.page,
+        pageSize: page.pageSize,
+        total,
+        showSizeChanger: true,
+        showTotal: (value) => `共 ${value} 条`,
+      }}
+      onChange={(pagination) => onPageChange(
+        pagination.current || 1,
+        pagination.pageSize || 20,
+      )}
       emptyText="暂无 ChangePolicy"
       scroll={{ x: 1500 }}
     />

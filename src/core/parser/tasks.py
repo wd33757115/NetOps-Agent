@@ -78,6 +78,13 @@ def reconcile_parser_jobs():
     return {"failed": ParserJobRepository().fail_stale_jobs()}
 
 
+@celery.task(name="promote_parser_gap_ledger")
+def promote_parser_gap_ledger():
+    from src.core.parser.gap_ledger import ParserGapLedgerService
+
+    return ParserGapLedgerService().promote_to_draft_jobs()
+
+
 @celery.task(name="sanitize_parser_samples")
 def sanitize_parser_samples(job_id: str | None = None, limit: int = 100):
     samples = ParserSampleRepository().sanitize_pending_samples(job_id=job_id, limit=limit)
@@ -136,6 +143,36 @@ def publish_parser_outbox():
                             raise RuntimeError(
                                 str(seed_result.get("reason") or "rule asset seed failed")
                             )
+                        job_id = str((seed_result.get("job") or {}).get("id") or "")
+                        if job_id:
+                            try:
+                                auto_context = RuleAssetTemplateActivationService(
+                                    parser_repository=parser_repository,
+                                ).auto_build_context(job_id)
+                                context_ready = bool(auto_context.get("ready"))
+                                seed_result["auto_context"] = {
+                                    "success": True,
+                                    "context_id": auto_context.get("context_id"),
+                                    "ready": context_ready,
+                                    "quality": auto_context.get("quality"),
+                                }
+                                if (
+                                    context_ready
+                                    and get_settings().RULE_ASSET_AUTO_GENERATE_ENABLED
+                                ):
+                                    generation = RuleAssetTemplateActivationService(
+                                        parser_repository=parser_repository,
+                                    ).start_generation_workflow(
+                                        job_id,
+                                        context_id=str(auto_context["context_id"]),
+                                        actor="parser-template-activation",
+                                    )
+                                    seed_result["auto_generation"] = generation
+                            except Exception as auto_exc:
+                                seed_result["auto_context"] = {
+                                    "success": False,
+                                    "error": str(auto_exc),
+                                }
                 except Exception as exc:
                     failure = {
                         "success": False,

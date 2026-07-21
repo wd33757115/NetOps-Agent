@@ -40,6 +40,7 @@ from src.core.evidence import evidence_id_for_command_snapshot
 from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
 from src.core.patrol.handlers import StartPatrolCommand, StartPatrolHandler
 from src.core.patrol.modes import PRODUCTION_MODE, normalize_patrol_mode
+from src.core.patrol.production_readiness import PatrolProductionReadinessService
 from src.core.rule_control import RuntimeRuleAssetResolver
 from src.gateway.audit_service import write_audit_log
 from src.infrastructure.db.models import (
@@ -85,7 +86,7 @@ def _enqueue_patrol_batch_dispatch(patrol_batch_id: str) -> str:
 router = APIRouter(
     prefix="/api/v1/devices",
     tags=["Device Management"],
-    dependencies=[Depends(require_role(["admin"]))],
+    dependencies=[Depends(require_role(["admin", "operator"]))],
 )
 
 
@@ -669,13 +670,13 @@ def _production_parser_coverage(
 def _blocking_parser_coverage(
     device: dict[str, Any], commands: list[str], mode: str
 ) -> list[dict[str, Any]]:
-    if normalize_patrol_mode(mode) != PRODUCTION_MODE:
-        return []
-    return [
-        item
-        for item in _production_parser_coverage(device, commands)
-        if item.get("policy_status") == "eligible" and item.get("coverage_status") != "ready"
-    ]
+    from src.core.patrol.coverage_policy import decide_parser_coverage
+
+    decision = decide_parser_coverage(
+        coverage=_production_parser_coverage(device, commands),
+        mode=mode,
+    )
+    return list(decision.get("violations") or [])
 
 
 def _runtime_rule_asset_health(
@@ -2605,6 +2606,58 @@ def _patrol_launch_preview(
         repository,
         active_only=True,
     )
+    platform_readiness = _patrol_platform_readiness(payload)
+    if not devices:
+        return {
+            "success": False,
+            "target_count": 0,
+            "ready_count": 0,
+            "error_count": 1,
+            "mode": normalize_patrol_mode(payload.mode),
+            "save_baseline": payload.save_baseline,
+            "launch_mode": payload.launch_mode,
+            "workflow_name": payload.workflow_name,
+            "platform_readiness": platform_readiness,
+            "quality_readiness": _patrol_target_quality_readiness([]),
+            "module_violations": [],
+            "rows": [],
+            "errors": [
+                {
+                    "error": "当前目标条件没有匹配到可巡检设备",
+                    "failure_code": "no_patrol_targets",
+                    "module_violations": [],
+                    "plan_violations": [],
+                    "coverage_violations": [],
+                    "connection_issues": [],
+                }
+            ],
+        }
+    if not platform_readiness.get("can_launch"):
+        return {
+            "success": False,
+            "target_count": len(devices),
+            "ready_count": 0,
+            "error_count": len(devices),
+            "mode": normalize_patrol_mode(payload.mode),
+            "save_baseline": payload.save_baseline,
+            "launch_mode": payload.launch_mode,
+            "workflow_name": payload.workflow_name,
+            "platform_readiness": platform_readiness,
+            "quality_readiness": _patrol_target_quality_readiness([]),
+            "module_violations": [],
+            "rows": [],
+            "errors": [
+                {
+                    "error": "巡检运行环境未通过生产准入检查",
+                    "failure_code": "patrol_platform_not_ready",
+                    "platform_violations": platform_readiness.get("blockers") or [],
+                    "module_violations": [],
+                    "plan_violations": [],
+                    "coverage_violations": [],
+                    "connection_issues": [],
+                }
+            ],
+        }
     module_violations = _agent_module_control_violations(
         _required_agent_modules_for_patrol(payload)
     )
@@ -2642,6 +2695,8 @@ def _patrol_launch_preview(
             "save_baseline": payload.save_baseline,
             "launch_mode": payload.launch_mode,
             "workflow_name": payload.workflow_name,
+            "platform_readiness": platform_readiness,
+            "quality_readiness": _patrol_target_quality_readiness([]),
             "module_violations": module_violations,
             "rows": [],
             "errors": errors,
@@ -2649,6 +2704,7 @@ def _patrol_launch_preview(
     resolver = CollectionPolicyResolver()
     rows: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
     for device in devices:
         try:
             plan = resolver.build_plan(
@@ -2663,19 +2719,18 @@ def _patrol_launch_preview(
                 if normalize_patrol_mode(payload.mode) == PRODUCTION_MODE
                 else []
             )
-            coverage_violations = [
-                item
-                for item in parser_coverage
-                if item.get("policy_status") == "eligible"
-                and item.get("coverage_status") != "ready"
-            ]
+            from src.core.patrol.coverage_policy import decide_parser_coverage
+
+            coverage_decision = decide_parser_coverage(
+                coverage=parser_coverage,
+                mode=payload.mode,
+            )
+            coverage_violations = list(coverage_decision.get("violations") or [])
             runtime_asset_health = _runtime_rule_asset_health(
                 mode=payload.mode,
                 coverage=parser_coverage,
             )
             connection_issues = _connection_preflight(device)
-            # Parser coverage is a data-quality warning, not a collection precondition.
-            # Preserve the diagnostics without losing the raw CLI snapshot.
             if plan_violations or connection_issues:
                 failure_code = (
                     "collector_preflight_failed"
@@ -2701,7 +2756,38 @@ def _patrol_launch_preview(
                         "failure_code": failure_code,
                         "plan_violations": plan_violations,
                         "coverage_violations": coverage_violations,
+                        "coverage_decision": coverage_decision,
                         "connection_issues": connection_issues,
+                        "runtime_asset_health": runtime_asset_health,
+                    }
+                )
+                continue
+            if coverage_decision["decision"] == "block":
+                errors.append(
+                    {
+                        "device_id": device.get("device_id"),
+                        "device_name": device.get("device_name"),
+                        "error": "parser coverage blocked launch",
+                        "failure_code": coverage_decision["failure_code"],
+                        "plan_violations": [],
+                        "coverage_violations": coverage_violations,
+                        "coverage_decision": coverage_decision,
+                        "connection_issues": [],
+                        "runtime_asset_health": runtime_asset_health,
+                    }
+                )
+                continue
+            if coverage_decision["decision"] == "skip":
+                skipped.append(
+                    {
+                        "device_id": device.get("device_id"),
+                        "device_name": device.get("device_name"),
+                        "error": "parser coverage skipped device",
+                        "failure_code": coverage_decision["failure_code"],
+                        "plan_violations": [],
+                        "coverage_violations": coverage_violations,
+                        "coverage_decision": coverage_decision,
+                        "connection_issues": [],
                         "runtime_asset_health": runtime_asset_health,
                     }
                 )
@@ -2717,6 +2803,7 @@ def _patrol_launch_preview(
                     "command_count": len(plan.commands),
                     "plan_violations": [],
                     "coverage_violations": coverage_violations,
+                    "coverage_decision": coverage_decision,
                     "connection_issues": [],
                     "runtime_asset_health": runtime_asset_health,
                 }
@@ -2734,13 +2821,61 @@ def _patrol_launch_preview(
         "target_count": len(devices),
         "ready_count": len(rows),
         "error_count": len(errors),
+        "skipped_count": len(skipped),
         "mode": normalize_patrol_mode(payload.mode),
         "save_baseline": payload.save_baseline,
         "launch_mode": payload.launch_mode,
         "workflow_name": payload.workflow_name,
+        "platform_readiness": platform_readiness,
+        "quality_readiness": _patrol_target_quality_readiness(rows),
         "module_violations": [],
         "rows": rows,
         "errors": errors,
+        "skipped": skipped,
+    }
+
+
+def _patrol_platform_readiness(payload: DevicePatrolLaunchRequest) -> dict[str, Any]:
+    return PatrolProductionReadinessService().evaluate(
+        workflow_name=payload.workflow_name,
+        launch_mode=payload.launch_mode,
+    )
+
+
+def _patrol_target_quality_readiness(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if not rows:
+        return {
+            "status": "not_evaluated",
+            "can_determine_health": False,
+            "warning_device_count": 0,
+            "parser_warning_count": 0,
+            "runtime_asset_warning_count": 0,
+            "message": "尚未形成可评估的设备执行计划",
+        }
+    parser_warning_count = sum(len(row.get("coverage_violations") or []) for row in rows)
+    runtime_warning_rows = [
+        row
+        for row in rows
+        if str((row.get("runtime_asset_health") or {}).get("status") or "not_checked")
+        not in {"ready", "not_required"}
+    ]
+    warning_device_ids = {
+        str(row.get("device_id") or "")
+        for row in rows
+        if row.get("coverage_violations") or row in runtime_warning_rows
+    }
+    degraded = bool(parser_warning_count or runtime_warning_rows)
+    return {
+        "status": "degraded" if degraded else "ready",
+        "can_determine_health": not degraded,
+        "warning_device_count": len(warning_device_ids),
+        "parser_warning_count": parser_warning_count,
+        "runtime_asset_warning_count": len(runtime_warning_rows),
+        "message": (
+            "可以采集原始证据，但 Parser 或规则资产覆盖不足，最终报告将降级"
+            if degraded
+            else "目标命令与运行时规则资产已通过质量预检"
+        ),
     }
 
 
@@ -3199,9 +3334,48 @@ def preview_device_patrol_launch(payload: DevicePatrolLaunchRequest):
     return _patrol_launch_preview(payload, DeviceRepository())
 
 
+@router.get("/patrol/readiness")
+def get_device_patrol_readiness(
+    workflow_name: str = "patrol-change-event",
+    launch_mode: str = "workflow",
+):
+    if launch_mode not in {"workflow", "direct"}:
+        raise HTTPException(status_code=400, detail="launch_mode must be workflow or direct")
+    payload = DevicePatrolLaunchRequest(
+        workflow_name=workflow_name,
+        launch_mode=launch_mode,
+    )
+    return _patrol_platform_readiness(payload)
+
+
+@router.get("/patrol/batches/{batch_id}/events")
+async def stream_patrol_batch_events(batch_id: str):
+    """SSE stream of live patrol batch failures / stage updates."""
+    from fastapi.responses import StreamingResponse
+
+    from src.core.patrol.batch_events import iter_patrol_batch_events
+
+    def event_stream():
+        yield f"data: {json.dumps({'type': 'subscribed', 'patrol_batch_id': batch_id})}\n\n"
+        for event in iter_patrol_batch_events(batch_id=batch_id):
+            yield f"data: {json.dumps(event, ensure_ascii=False, default=str)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
 @router.post("/patrol/launch")
 def launch_device_patrol(payload: DevicePatrolLaunchRequest, request: Request):
     preview = _patrol_launch_preview(payload, DeviceRepository())
+    platform_readiness = preview.get("platform_readiness") or {}
+    if not platform_readiness.get("can_launch", False):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "patrol platform is not ready; no batch was created",
+                "failure_code": "patrol_platform_not_ready",
+                "platform_readiness": platform_readiness,
+            },
+        )
     if preview["error_count"] and not preview["rows"]:
         raise HTTPException(
             status_code=400,
@@ -3364,6 +3538,8 @@ def preview_device_plan(device_id: str, payload: DevicePlanPreviewRequest):
         plan_violations=plan_violations,
         runtime_asset_health=runtime_asset_health,
     )
+    from src.core.rule_control.command_four_state import command_four_states
+
     return {
         "success": True,
         "device": _redact_device(device),
@@ -3371,6 +3547,11 @@ def preview_device_plan(device_id: str, payload: DevicePlanPreviewRequest):
         "commands": commands,
         "parser_coverage": parser_coverage,
         "coverage_summary": coverage_summary,
+        "command_asset_states": command_four_states(
+            coverage=parser_coverage,
+            runtime_asset_health=runtime_asset_health,
+        ),
+        "runtime_asset_health": runtime_asset_health,
     }
 
 

@@ -12,6 +12,7 @@ from src.core.parser.backfill import ParserBackfillService
 from src.core.parser.repository import ParserRepository
 from src.core.patrol.repository import PatrolRepository
 from src.infrastructure.db.models import (
+    CommandSnapshot,
     CurrentStateRecord,
     NetworkChangeDecisionRecord,
     NetworkChangeRecord,
@@ -35,6 +36,11 @@ def test_parser_backfill_is_dry_run_first_idempotent_and_silent(
 ):
     token = uuid.uuid4().hex
     run_id = f"backfill-run-{token}"
+    excluded_run_id = f"backfill-excluded-run-{token}"
+    validation_run_id = f"backfill-validation-run-{token}"
+    selected_dataset_id = f"backfill-selected-dataset-{token}"
+    excluded_dataset_id = f"backfill-excluded-dataset-{token}"
+    validation_dataset_id = f"backfill-validation-dataset-{token}"
     template_path = tmp_path / "display_interface_brief.textfsm"
     template_text = r"""Value Required INTERFACE (\S+)
 Value Required STATUS (UP|DOWN)
@@ -78,6 +84,8 @@ Start
     )
     patrol = PatrolRepository()
     patrol.create_run(run_id=run_id, mode="production", source="unit-test")
+    patrol.create_run(run_id=excluded_run_id, mode="production", source="unit-test")
+    patrol.create_run(run_id=validation_run_id, mode="parser_validation", source="unit-test")
     snapshot_id, _ = patrol.save_snapshot_idempotent(
         run_id=run_id,
         device_id="SW1",
@@ -91,18 +99,49 @@ Start
         execution_item_id=f"item-{token}",
         import_fingerprint=f"snapshot-{token}",
     )
+    excluded_snapshot_id, _ = patrol.save_snapshot_idempotent(
+        run_id=excluded_run_id,
+        device_id="SW1",
+        device_name="SW1",
+        vendor="H3C",
+        model=f"LAB-{token}",
+        command="display interface brief",
+        command_canonical="display interface brief",
+        raw_text="GE1/0/2 DOWN DOWN\n",
+        parse_status="template_missing",
+        execution_item_id=f"excluded-item-{token}",
+        import_fingerprint=f"excluded-snapshot-{token}",
+    )
+    validation_snapshot_id, _ = patrol.save_snapshot_idempotent(
+        run_id=validation_run_id,
+        device_id="SW1",
+        device_name="SW1",
+        vendor="H3C",
+        model=f"LAB-{token}",
+        command="display interface brief",
+        command_canonical="display interface brief",
+        raw_text="GE1/0/3 UP UP\n",
+        parse_status="template_missing",
+        execution_item_id=f"validation-item-{token}",
+        import_fingerprint=f"validation-snapshot-{token}",
+    )
+    with get_db_session() as db:
+        db.get(CommandSnapshot, snapshot_id).dataset_id = selected_dataset_id
+        db.get(CommandSnapshot, excluded_snapshot_id).dataset_id = excluded_dataset_id
+        db.get(CommandSnapshot, validation_snapshot_id).dataset_id = validation_dataset_id
     service = ParserBackfillService()
     job_id = ""
+    validation_job_id = ""
     try:
         first = service.create_job(
             template_id=template_id,
             requested_by="operator",
-            filters={"device_ids": ["SW1"]},
+            filters={"device_ids": ["SW1"], "dataset_ids": [selected_dataset_id]},
         )
         second = service.create_job(
             template_id=template_id,
             requested_by="operator",
-            filters={"device_ids": ["SW1"]},
+            filters={"device_ids": ["SW1"], "dataset_ids": [selected_dataset_id]},
         )
         job_id = first["id"]
         assert second["id"] == job_id
@@ -113,6 +152,9 @@ Start
         assert preview["summary"]["observation_count"] == 2
         assert preview["summary"]["current_state_updates"] == 0
         assert preview["summary"]["notifications"] == 0
+        rerun = service.execute_dry_run(job_id)
+        assert rerun["status"] == "pending_approval"
+        assert rerun["summary"] == preview["summary"]
         with get_db_session() as db:
             assert (
                 db.query(StateObservationRecord)
@@ -167,6 +209,12 @@ Start
                 .count()
                 == 1
             )
+            assert (
+                db.query(StateObservationRecord)
+                .filter(StateObservationRecord.snapshot_id == excluded_snapshot_id)
+                .count()
+                == 0
+            )
             job = db.get(ParserBackfillJobRecord, job_id)
             assert job.approved_by == "approver"
             assert job.approval_reason == "validated historical repair"
@@ -194,6 +242,41 @@ Start
                 .count()
                 == 0
             )
+
+        validation_job = service.create_job(
+            template_id=template_id,
+            requested_by="operator",
+            filters={
+                "device_ids": ["SW1"],
+                "dataset_ids": [validation_dataset_id],
+                "run_modes": ["parser_validation"],
+            },
+        )
+        validation_job_id = validation_job["id"]
+        assert validation_job["filters_json"]["run_modes"] == ["parser_validation"]
+        validation_preview = service.execute_dry_run(validation_job_id)
+        assert validation_preview["status"] == "pending_approval"
+        assert validation_preview["summary"]["snapshot_count"] == 1
+        validation_commit = service.commit(
+            validation_job_id,
+            actor="approver",
+            reason="validated rule source repair",
+        )
+        assert validation_commit["summary"]["created_observation_count"] == 2
+        assert validation_commit["summary"]["production_run_count"] == 0
+        assert validation_commit["summary"]["analysis_skipped_run_count"] == 1
+        assert validation_commit["summary"]["change_count"] == 0
+        assert validation_commit["summary"]["event_count"] == 0
+        with get_db_session() as db:
+            validation_observations = (
+                db.query(StateObservationRecord)
+                .filter(StateObservationRecord.snapshot_id == validation_snapshot_id)
+                .all()
+            )
+            assert len(validation_observations) == 2
+            assert all(item.mode == "parser_validation" for item in validation_observations)
+            assert db.query(NetworkChangeRecord).filter_by(run_id=validation_run_id).count() == 0
+            assert db.query(NetworkEventRecord).filter_by(run_id=validation_run_id).count() == 0
     finally:
         with get_db_session() as db:
             event_ids = [
@@ -217,8 +300,15 @@ Start
             if job_id:
                 db.query(ParserBackfillResultRecord).filter_by(job_id=job_id).delete()
                 db.query(ParserBackfillJobRecord).filter_by(id=job_id).delete()
+            if validation_job_id:
+                db.query(ParserBackfillResultRecord).filter_by(job_id=validation_job_id).delete()
+                db.query(ParserBackfillJobRecord).filter_by(id=validation_job_id).delete()
             db.query(SnapshotParseResult).filter_by(template_id=template_id).delete()
             db.query(StateObservationRecord).filter_by(snapshot_id=snapshot_id).delete()
+            db.query(StateObservationRecord).filter_by(snapshot_id=excluded_snapshot_id).delete()
+            db.query(StateObservationRecord).filter_by(snapshot_id=validation_snapshot_id).delete()
             db.query(PatrolRun).filter_by(id=run_id).delete()
+            db.query(PatrolRun).filter_by(id=excluded_run_id).delete()
+            db.query(PatrolRun).filter_by(id=validation_run_id).delete()
             db.query(ObservationContractRecord).filter_by(source_template_id=template_id).delete()
             db.query(ParserTemplate).filter_by(id=template_id).delete()

@@ -124,7 +124,7 @@ if ($token) {
 
     try {
         $me = Invoke-BffJson -Path "/api/auth/me/" -Headers $auth
-        Assert-Ok "GET /api/auth/me/" ($me.data.user.username -eq $AdminUser)
+        Assert-Ok "GET /api/auth/me/" ($me.data.username -eq $AdminUser)
     } catch {
         Assert-Ok "GET /api/auth/me/" $false $_.Exception.Message
     }
@@ -146,6 +146,18 @@ if ($token) {
         Assert-Ok "Skills list API" ($skills.success -eq $true -or ($skills.data -ne $null))
     } catch {
         Assert-Ok "Skills list API" $false $_.Exception.Message
+    }
+
+    try {
+        $readiness = Invoke-BffJson -Path "/api/devices/patrol/readiness/" -Headers $auth
+        $detail = if ($readiness.data.blockers) {
+            ($readiness.data.blockers | ForEach-Object { $_.message }) -join "; "
+        } else { "" }
+        Assert-Ok "Formal patrol production readiness" (
+            $readiness.success -eq $true -and $readiness.data.can_launch -eq $true
+        ) $detail
+    } catch {
+        Assert-Ok "Formal patrol production readiness" $false $_.Exception.Message
     }
 }
 

@@ -39,6 +39,13 @@ from generate_templates import (  # noqa: E402
     resolve_template_path,
 )
 from llm_generator import build_generation_prompt  # noqa: E402
+from template_providers import (  # noqa: E402
+    EvidenceHierarchicalRowProvider,
+    EvidenceRepeatedBlockProvider,
+    EvidenceSingletonProvider,
+    ProviderContext,
+    expected_entity_count_from_evidence,
+)
 from template_synthesizer import (  # noqa: E402
     expected_min_records,
     expected_primary_key_tuples,
@@ -47,6 +54,7 @@ from template_synthesizer import (  # noqa: E402
 from template_validator import (  # noqa: E402
     canonicalize_template_fields,
     check_required_fields,
+    repair_record_boundary_candidate,
     strip_llm_template,
     validate_field_values,
     validate_template,
@@ -123,7 +131,17 @@ class TestConfigLoader(unittest.TestCase):
             )
         )
 
-    def test_load_mapping_from_active_template_assets(self):
+    @patch("src.core.parser.repository.ParserTemplateRepository.list_templates")
+    def test_load_mapping_from_active_template_assets(self, list_templates):
+        list_templates.return_value = [
+            {
+                "vendor": "H3C",
+                "profile": "S5130S-54S-HI-G",
+                "canonical_command": "display cpu",
+                "category": "cpu",
+                "family": "Comware7",
+            }
+        ]
         mappings = load_command_mapping(SHARED_PARSER_CONFIG_ROOT / "command_policy.yaml")
         self.assertTrue(mappings)
         cat = find_category("H3C", "S5130S-54S-HI-G", "display cpu", mappings)
@@ -138,7 +156,17 @@ class TestConfigLoader(unittest.TestCase):
         )
         self.assertTrue(decision.enabled)
 
-    def test_resolve_device_model(self):
+    @patch("src.core.parser.repository.ParserTemplateRepository.list_templates")
+    def test_resolve_device_model(self, list_templates):
+        list_templates.return_value = [
+            {
+                "vendor": "H3C",
+                "profile": "S5130S-54S-HI-G",
+                "canonical_command": "display cpu",
+                "category": "cpu",
+                "family": "Comware7",
+            }
+        ]
         mappings = load_command_mapping(SHARED_PARSER_CONFIG_ROOT / "command_policy.yaml")
         self.assertEqual(
             resolve_device_mapping("S5130S-54S-HI-G", mappings),
@@ -208,10 +236,236 @@ class TestTemplateValidator(unittest.TestCase):
 
         self.assertEqual(governed.state_semantics["mac_address"], {"semantic_type": "text"})
         self.assertEqual(
-            governed.evidence["semantic_reference_governance"]["removed_units"][
-                "mac_address"
-            ]["reason"],
+            governed.evidence["semantic_reference_governance"]["removed_units"]["mac_address"][
+                "reason"
+            ],
             "unit_requires_numeric_semantic_type",
+        )
+
+    def test_semantic_governance_forces_every_primary_key_to_identity(self):
+        proposal = ContractProposal(
+            category="hardware",
+            entity_type="fan",
+            primary_keys=("slot_id", "fan_id"),
+            required_fields=("slot_id", "fan_id", "state"),
+            state_semantics={
+                "slot_id": {"semantic_type": "identity"},
+                "fan_id": {
+                    "semantic_type": "text",
+                    "observation_type": "invented.fan_id",
+                },
+                "state": {"semantic_type": "state"},
+            },
+            evidence={},
+            source="llm_revision",
+        )
+
+        governed = govern_contract_candidate(proposal)
+
+        self.assertEqual(
+            governed.state_semantics["slot_id"],
+            {"semantic_type": "identity"},
+        )
+        self.assertEqual(
+            governed.state_semantics["fan_id"],
+            {"semantic_type": "identity"},
+        )
+        correction = governed.evidence["semantic_reference_governance"][
+            "corrected_primary_key_semantics"
+        ]["fan_id"]
+        self.assertEqual(correction["reason"], "primary_key_requires_identity_semantics")
+        self.assertEqual(correction["previous"]["semantic_type"], "text")
+
+    def test_contract_normalizes_unambiguous_table_label_to_canonical_field(self):
+        sample = """Interface  Link  Description
+GE1/0/1   UP    uplink
+GE1/0/2   DOWN  spare
+"""
+        samples_text = f'<CLI_SAMPLE id="sample-1" sha256="abc">\n{sample}</CLI_SAMPLE>'
+
+        proposal = infer_contract(
+            command="inspect arbitrary ports",
+            samples_text=samples_text,
+            structure_profile=profile_sample_set([("sample-1", sample)]),
+            llm_call=lambda _prompt: (
+                """{
+              "category": "ports",
+              "entity_type": "port",
+              "primary_keys": ["interface"],
+              "required_fields": ["interface", "link"],
+              "optional_fields": ["description"],
+              "validators": {
+                "interface": {"type": "interface_name"},
+                "link": {"type": "enum", "values": ["UP", "DOWN"]},
+                "description": {"type": "text"}
+              },
+              "state_semantics": {
+                "interface": {"semantic_type": "text"},
+                "link": {"semantic_type": "text"}
+              },
+              "evidence": {"field_bindings": {
+                "interface": [{"sample_id": "sample-1", "line": 2,
+                  "source_label": "Interface", "source_value": "GE1/0/1",
+                  "capture_kind": "column"}],
+                "link": [{"sample_id": "sample-1", "line": 2,
+                  "source_label": "Link", "source_value": "UP",
+                  "capture_kind": "column"}],
+                "description": [{"sample_id": "sample-1", "line": 2,
+                  "source_label": "Description", "source_value": "uplink",
+                  "capture_kind": "column"}]
+              }}
+            }"""
+            ),
+        )
+
+        self.assertNotIn("link", proposal.required_fields)
+        self.assertIn("status", proposal.required_fields)
+        self.assertEqual(proposal.state_semantics["interface"], {"semantic_type": "identity"})
+        self.assertEqual(proposal.state_semantics["status"]["semantic_type"], "state")
+        self.assertIn("status", proposal.evidence["field_bindings"])
+        self.assertEqual(
+            proposal.evidence["semantic_field_normalization"]["mapping"],
+            {"link": "status"},
+        )
+
+    def test_persisted_contract_reapplies_semantic_field_normalization(self):
+        proposal = ContractProposal(
+            category="ports",
+            entity_type="port",
+            primary_keys=("interface",),
+            required_fields=("interface", "link"),
+            validators={
+                "interface": {"type": "interface_name"},
+                "link": {"type": "enum", "values": ["UP", "DOWN"]},
+            },
+            state_semantics={
+                "interface": {"semantic_type": "text"},
+                "link": {"semantic_type": "text"},
+            },
+            evidence={
+                "field_bindings": {
+                    "interface": [{
+                        "sample_id": "sample-1",
+                        "line": 2,
+                        "source_label": "Interface",
+                        "source_value": "GE1/0/1",
+                        "capture_kind": "column",
+                    }],
+                    "link": [{
+                        "sample_id": "sample-1",
+                        "line": 2,
+                        "source_label": "Link",
+                        "source_value": "UP",
+                        "capture_kind": "column",
+                    }],
+                }
+            },
+            source="llm_proposal",
+        )
+
+        governed = govern_contract_candidate(proposal)
+
+        self.assertEqual(governed.required_fields, ("interface", "status"))
+        self.assertNotIn("link", governed.validators)
+        self.assertEqual(governed.state_semantics["status"]["semantic_type"], "state")
+        self.assertEqual(
+            governed.evidence["semantic_field_normalization"]["mapping"],
+            {"link": "status"},
+        )
+
+    def test_qualified_optical_fields_normalize_without_vendor_logic(self):
+        proposal = ContractProposal(
+            category="optics",
+            entity_type="transceiver_diagnostic",
+            primary_keys=("interface",),
+            required_fields=("interface",),
+            optional_fields=(
+                "current_rx_power_dbm",
+                "current_tx_power_dbm",
+                "warning_low_rx_power_dbm",
+                "alarm_low_rx_power_dbm",
+                "status",
+            ),
+            validators={
+                "interface": {"type": "interface_name"},
+                "current_rx_power_dbm": {"type": "number"},
+                "current_tx_power_dbm": {"type": "number"},
+                "warning_low_rx_power_dbm": {"type": "number"},
+                "alarm_low_rx_power_dbm": {"type": "number"},
+                "status": {"type": "text"},
+            },
+            evidence={
+                "field_bindings": {
+                    "interface": [{"capture_kind": "record_anchor"}],
+                    "current_rx_power_dbm": [{
+                        "source_label": "30 3.32 2.82 -5.34 -6.32",
+                        "capture_kind": "column",
+                    }],
+                    "current_tx_power_dbm": [{
+                        "source_label": "30 3.32 2.82 -5.34 -6.32",
+                        "capture_kind": "column",
+                    }],
+                    "warning_low_rx_power_dbm": [{
+                        "source_label": "Low 0 2.97 2.97 -15.00 -9.50",
+                        "capture_kind": "column",
+                    }],
+                    "alarm_low_rx_power_dbm": [{
+                        "source_label": "Low 0 2.97 2.97 -18.01 -12.50",
+                        "capture_kind": "column",
+                    }],
+                    "status": [{
+                        "source_label": "The transceiver is absent.",
+                        "source_value": "absent",
+                        "capture_kind": "key_value",
+                    }],
+                }
+            },
+            source="llm_proposal",
+        )
+
+        governed = govern_contract_candidate(proposal)
+
+        self.assertEqual(governed.primary_keys, ("interface",))
+        self.assertEqual(
+            governed.optional_fields,
+            (
+                "rx_power_dbm",
+                "tx_power_dbm",
+                "rx_low_warning_dbm",
+                "rx_low_alarm_dbm",
+                "transceiver_present",
+            ),
+        )
+        normalization = governed.evidence["semantic_field_normalization"]
+        self.assertEqual(
+            normalization["resolution_sources"]["current_rx_power_dbm"],
+            "qualified_field_name",
+        )
+        self.assertEqual(
+            normalization["resolution_sources"]["status"],
+            "literal_label",
+        )
+
+    def test_semantic_name_normalization_skips_colliding_context_fields(self):
+        proposal = ContractProposal(
+            category="optics",
+            entity_type="transceiver_diagnostic",
+            primary_keys=("interface",),
+            required_fields=("interface",),
+            optional_fields=("current_rx_power_dbm", "measured_rx_power_dbm"),
+            evidence={"field_bindings": {}},
+            source="llm_proposal",
+        )
+
+        governed = govern_contract_candidate(proposal)
+
+        self.assertEqual(governed.optional_fields, proposal.optional_fields)
+        self.assertEqual(
+            governed.evidence["semantic_field_normalization"]["skipped_collisions"],
+            {
+                "current_rx_power_dbm": "rx_power_dbm",
+                "measured_rx_power_dbm": "rx_power_dbm",
+            },
         )
 
     def test_redacted_serial_contract_is_generalized_for_runtime_values(self):
@@ -256,10 +510,7 @@ MANU SERIAL NUMBER : <SERIAL>
         valid, diagnostics = validate_contract_candidate(
             proposal,
             structure_profile=profile_sample_set([("sample-1", sample)]),
-            samples_text=(
-                '<CLI_SAMPLE id="sample-1" sha256="abc">\n'
-                f"{sample}</CLI_SAMPLE>"
-            ),
+            samples_text=(f'<CLI_SAMPLE id="sample-1" sha256="abc">\n{sample}</CLI_SAMPLE>'),
         )
         self.assertTrue(valid, [item.message for item in diagnostics])
 
@@ -275,7 +526,8 @@ The module does not support diagnostics.
             command="inspect arbitrary modules",
             samples_text=samples_text,
             structure_profile=profile_sample_set([("sample-1", sample)]),
-            llm_call=lambda _prompt: """{
+            llm_call=lambda _prompt: (
+                """{
               "category": "module_diagnostics",
               "entity_type": "module",
               "primary_keys": ["module"],
@@ -319,16 +571,14 @@ The module does not support diagnostics.
                    "capture_kind": "key_value"}
                 ]
               }}
-            }""",
+            }"""
+            ),
         )
 
         status_bindings = proposal.evidence["field_bindings"]["diagnosis_status"]
         self.assertEqual(len(status_bindings), 2)
         self.assertEqual(
-            {
-                binding["capture_kind"]
-                for binding in proposal.evidence["field_bindings"]["module"]
-            },
+            {binding["capture_kind"] for binding in proposal.evidence["field_bindings"]["module"]},
             {"record_anchor"},
         )
         self.assertEqual(
@@ -353,6 +603,229 @@ The module does not support diagnostics.
         )
         self.assertTrue(valid, [item.message for item in diagnostics])
 
+    def test_contract_keeps_singleton_preamble_fields_before_repeated_sections(self):
+        sample = """Software Version: 7.1.070
+Boot Image: flash:/boot.bin
+System Image: flash:/system.bin
+Feature Images:
+  flash:/feature.bin
+Slot 1:
+  Board Type: S5130
+"""
+        samples_text = f'<CLI_SAMPLE id="sample-1" sha256="abc">\n{sample}</CLI_SAMPLE>'
+        structure = profile_sample_set([("sample-1", sample)])
+        proposal = infer_contract(
+            command="inspect arbitrary software inventory",
+            samples_text=samples_text,
+            structure_profile=structure,
+            llm_call=lambda _prompt: (
+                """{
+              "category": "software_inventory",
+              "entity_type": "device_software",
+              "primary_keys": [],
+              "required_fields": ["software_version"],
+              "optional_fields": ["slot_id"],
+              "validators": {
+                "software_version": {"type": "text"},
+                "slot_id": {"type": "text"}
+              },
+              "evidence": {"field_bindings": {
+                "software_version": [{"sample_id": "sample-1", "line": 1,
+                  "source_label": "Software Version:", "source_value": "7.1.070",
+                  "capture_kind": "key_value"}],
+                "slot_id": [{"sample_id": "sample-1", "line": 6,
+                  "source_label": "Slot 1:", "source_value": "Slot 1:",
+                  "capture_kind": "record_anchor"}]
+              }}
+            }"""
+            ),
+        )
+
+        self.assertEqual(proposal.required_fields, ("software_version",))
+        self.assertEqual(
+            proposal.evidence["entity_scope_governance"]["scope"],
+            "singleton",
+        )
+        valid, diagnostics = validate_contract_candidate(
+            proposal,
+            structure_profile=structure,
+            samples_text=samples_text,
+        )
+        self.assertTrue(valid, [item.message for item in diagnostics])
+
+    def test_contract_normalizes_exact_sample_regex_without_weakening_typed_regex(self):
+        sample = """Hardware Model: S5130SHIG-8307P24
+Serial Index: 8307
+"""
+        samples_text = f'<CLI_SAMPLE id="sample-1" sha256="abc">\n{sample}</CLI_SAMPLE>'
+        proposal = infer_contract(
+            command="inspect arbitrary inventory",
+            samples_text=samples_text,
+            structure_profile=profile_sample_set([("sample-1", sample)]),
+            llm_call=lambda _prompt: (
+                """{
+              "category": "inventory",
+              "entity_type": "device_inventory",
+              "primary_keys": [],
+              "required_fields": ["hardware_model"],
+              "optional_fields": ["serial_index"],
+              "validators": {
+                "hardware_model": {"type": "regex", "pattern": "^S5130SHIG-8307P24$"},
+                "serial_index": {"type": "regex", "pattern": "^\\\\d+$"}
+              },
+              "evidence": {"field_bindings": {
+                "hardware_model": [{"sample_id": "sample-1", "line": 1,
+                  "source_label": "Hardware Model:", "source_value": "S5130SHIG-8307P24",
+                  "capture_kind": "key_value"}],
+                "serial_index": [{"sample_id": "sample-1", "line": 2,
+                  "source_label": "Serial Index:", "source_value": "8307",
+                  "capture_kind": "key_value"}]
+              }}
+            }"""
+            ),
+        )
+
+        self.assertEqual(proposal.validators["hardware_model"], {"type": "text"})
+        self.assertEqual(
+            proposal.validators["serial_index"],
+            {"type": "regex", "pattern": r"^\d+$"},
+        )
+
+    def test_repeated_entity_contract_still_requires_a_primary_key(self):
+        sample = """Port1:
+  Status: up
+Port2:
+  Status: down
+"""
+        samples_text = f'<CLI_SAMPLE id="sample-1" sha256="abc">\n{sample}</CLI_SAMPLE>'
+        proposal = ContractProposal(
+            category="module_status",
+            entity_type="module",
+            primary_keys=(),
+            required_fields=("module",),
+            validators={"module": {"type": "text"}},
+            evidence={
+                "field_bindings": {
+                    "module": [
+                        {
+                            "sample_id": "sample-1",
+                            "line": 1,
+                            "source_label": "Port1:",
+                            "source_value": "Port1:",
+                            "capture_kind": "record_anchor",
+                        },
+                        {
+                            "sample_id": "sample-1",
+                            "line": 3,
+                            "source_label": "Port2:",
+                            "source_value": "Port2:",
+                            "capture_kind": "record_anchor",
+                        },
+                    ]
+                }
+            },
+            source="llm_proposal",
+        )
+
+        valid, diagnostics = validate_contract_candidate(
+            proposal,
+            structure_profile=profile_sample_set([("sample-1", sample)]),
+            samples_text=samples_text,
+        )
+
+        self.assertFalse(valid)
+        self.assertIn(
+            "multi-entity samples require explicit primary keys",
+            [item.message for item in diagnostics],
+        )
+
+    def test_contract_rejects_parent_only_key_for_repeated_child_entities(self):
+        sample = """Slot 1:
+  Fan 1 State: Normal
+  Fan 2 State: Normal
+"""
+        samples_text = f'<CLI_SAMPLE id="sample-1" sha256="abc">\n{sample}</CLI_SAMPLE>'
+        proposal = ContractProposal(
+            category="hardware",
+            entity_type="fan",
+            primary_keys=("slot_id",),
+            required_fields=("slot_id", "fan_id", "state"),
+            validators={
+                "slot_id": {"type": "text"},
+                "fan_id": {"type": "text"},
+                "state": {"type": "text"},
+            },
+            evidence={
+                "field_bindings": {
+                    "slot_id": [{"sample_id": "sample-1", "line": 1,
+                        "source_label": "Slot 1:", "source_value": "Slot 1:",
+                        "capture_kind": "record_anchor"}],
+                    "fan_id": [
+                        {"sample_id": "sample-1", "line": 2,
+                         "source_label": "Fan 1", "source_value": "Fan 1",
+                         "capture_kind": "key_value"},
+                        {"sample_id": "sample-1", "line": 3,
+                         "source_label": "Fan 2", "source_value": "Fan 2",
+                         "capture_kind": "key_value"},
+                    ],
+                    "state": [
+                        {"sample_id": "sample-1", "line": 2,
+                         "source_label": "State:", "source_value": "Normal",
+                         "capture_kind": "key_value"},
+                        {"sample_id": "sample-1", "line": 3,
+                         "source_label": "State:", "source_value": "Normal",
+                         "capture_kind": "key_value"},
+                    ],
+                }
+            },
+            source="llm_proposal",
+        )
+
+        valid, diagnostics = validate_contract_candidate(
+            proposal,
+            structure_profile=profile_sample_set([("sample-1", sample)]),
+            samples_text=samples_text,
+        )
+
+        self.assertFalse(valid)
+        self.assertIn(
+            "primary keys do not distinguish all evidenced entities; "
+            "include the repeated entity identity in the key",
+            [item.message for item in diagnostics],
+        )
+
+    def test_evidence_entity_count_uses_repeated_required_field_lines(self):
+        cli = "Slot 1:\n  Fan 1 State: Normal\n  Fan 2 State: Normal\n"
+        spec = CategorySpec(
+            name="hardware",
+            entity_type="fan",
+            primary_keys=["slot_id", "fan_id"],
+            required_fields=["slot_id", "fan_id", "state"],
+            optional_fields=[],
+            validators={},
+        )
+        bindings = {
+            "slot_id": [{"line": 1, "source_label": "Slot 1:",
+                         "source_value": "Slot 1:", "capture_kind": "record_anchor"}],
+            "fan_id": [
+                {"line": 2, "source_label": "Fan 1", "source_value": "Fan 1",
+                 "capture_kind": "key_value"},
+                {"line": 3, "source_label": "Fan 2", "source_value": "Fan 2",
+                 "capture_kind": "key_value"},
+            ],
+            "state": [
+                {"line": 2, "source_label": "State:", "source_value": "Normal",
+                 "capture_kind": "key_value"},
+                {"line": 3, "source_label": "State:", "source_value": "Normal",
+                 "capture_kind": "key_value"},
+            ],
+        }
+
+        self.assertEqual(
+            expected_entity_count_from_evidence(cli, spec, field_bindings=bindings),
+            2,
+        )
+
     def test_table_binding_normalization_keeps_same_header_in_original_context(self):
         sample = """Port1 diagnostic information:
   Current values:
@@ -376,7 +849,8 @@ Port2 diagnostic information:
             command="inspect arbitrary sensor blocks",
             samples_text=samples_text,
             structure_profile=profile_sample_set([("sample-1", sample)]),
-            llm_call=lambda _prompt: """{
+            llm_call=lambda _prompt: (
+                """{
               "category": "sensor",
               "entity_type": "port_sensor",
               "primary_keys": ["port"],
@@ -409,7 +883,8 @@ Port2 diagnostic information:
                    "source_label": "Voltage", "source_value": "3.31", "capture_kind": "column"}
                 ]
               }}
-            }""",
+            }"""
+            ),
         )
 
         temperatures = {
@@ -417,8 +892,7 @@ Port2 diagnostic information:
             for binding in proposal.evidence["field_bindings"]["temperature_celsius"]
         }
         voltages = {
-            binding["source_value"]
-            for binding in proposal.evidence["field_bindings"]["voltage_v"]
+            binding["source_value"] for binding in proposal.evidence["field_bindings"]["voltage_v"]
         }
         self.assertEqual(temperatures, {"40", "41"})
         self.assertEqual(voltages, {"3.30", "3.31"})
@@ -1701,6 +2175,560 @@ Start
         self.assertIn("Value rx_level (-?\\d+(?:\\.\\d+)?)", normalized)
         self.assertNotIn("Required", normalized)
         self.assertIn("^${interface}\\s+${rx_level} -> Record", normalized)
+
+    def test_evidence_repeated_block_provider_supports_composite_primary_keys(self):
+        cli = """Slot 1 CPU 0:
+DEVICE_NAME : S5130-A
+SERIAL : SERIAL-A
+Slot 2 CPU 0:
+DEVICE_NAME : S5130-B
+SERIAL : SERIAL-B
+"""
+        sample_id = f"sample-{hashlib.sha256(cli.encode()).hexdigest()[:12]}"
+        spec = CategorySpec(
+            name="device_manufacturing_info",
+            required_fields=["slot", "cpu"],
+            optional_fields=["device_name", "serial"],
+            entity_type="device_manufacturing_info",
+            primary_keys=["slot", "cpu"],
+            validators={
+                "slot": {"type": "number"},
+                "cpu": {"type": "number"},
+            },
+        )
+        bindings = {
+            "slot": [
+                {
+                    "sample_id": sample_id,
+                    "line": 1,
+                    "source_label": "Slot 1 CPU 0:",
+                    "source_value": "1",
+                },
+                {
+                    "sample_id": sample_id,
+                    "line": 4,
+                    "source_label": "Slot 2 CPU 0:",
+                    "source_value": "2",
+                },
+            ],
+            "cpu": [
+                {
+                    "sample_id": sample_id,
+                    "line": 1,
+                    "source_label": "Slot 1 CPU 0:",
+                    "source_value": "0",
+                },
+                {
+                    "sample_id": sample_id,
+                    "line": 4,
+                    "source_label": "Slot 2 CPU 0:",
+                    "source_value": "0",
+                },
+            ],
+            "device_name": [
+                {
+                    "sample_id": sample_id,
+                    "line": 2,
+                    "source_label": "DEVICE_NAME : S5130-A",
+                    "source_value": "S5130-A",
+                },
+                {
+                    "sample_id": sample_id,
+                    "line": 5,
+                    "source_label": "DEVICE_NAME : S5130-B",
+                    "source_value": "S5130-B",
+                },
+            ],
+            "serial": [
+                {
+                    "sample_id": sample_id,
+                    "line": 3,
+                    "source_label": "SERIAL : SERIAL-A",
+                    "source_value": "SERIAL-A",
+                },
+                {
+                    "sample_id": sample_id,
+                    "line": 6,
+                    "source_label": "SERIAL : SERIAL-B",
+                    "source_value": "SERIAL-B",
+                },
+            ],
+        }
+        candidate = EvidenceRepeatedBlockProvider().propose(
+            ProviderContext(
+                command="display device manuinfo",
+                samples=(SimpleNamespace(output=cli),),
+                spec=spec,
+                structure_profile={"dominant_layout": "repeated_block"},
+                field_bindings=bindings,
+                evidence_samples={sample_id: cli},
+            )
+        )
+
+        self.assertIsNotNone(candidate)
+        self.assertIn("Continue.Record", candidate.template_text)
+        result = validate_template(
+            candidate.template_text,
+            cli,
+            spec.required_fields,
+            spec.validators,
+            primary_keys=spec.primary_keys,
+            expected_min_records=2,
+            expected_record_count=2,
+            field_bindings=bindings,
+            sample_id=sample_id,
+            evidence_line_map={line: line for line in range(1, 7)},
+        )
+        self.assertTrue(result.is_valid, result.errors)
+        self.assertEqual(
+            [(row["slot"], row["cpu"]) for row in result.records],
+            [("1", "0"), ("2", "0")],
+        )
+
+    def test_repeated_block_provider_does_not_compile_derived_sample_literals(self):
+        cli = """Ten-GigabitEthernet1/0/49
+Current 30 3.32 2.82 -5.34 -6.32
+Ten-GigabitEthernet1/0/50
+The transceiver is absent.
+"""
+        sample_id = f"sample-{hashlib.sha256(cli.encode()).hexdigest()[:12]}"
+        spec = CategorySpec(
+            name="interface_optical",
+            required_fields=["interface"],
+            optional_fields=["rx_power_dbm", "transceiver_present"],
+            entity_type="interface_optical",
+            primary_keys=["interface"],
+            validators={
+                "interface": {"type": "interface_name"},
+                "rx_power_dbm": {"type": "number"},
+                "transceiver_present": {"type": "text"},
+            },
+        )
+        bindings = {
+            "interface": [
+                {
+                    "sample_id": sample_id,
+                    "line": 1,
+                    "source_label": "Ten-GigabitEthernet1/0/49",
+                    "source_value": "Ten-GigabitEthernet1/0/49",
+                    "capture_kind": "record_anchor",
+                },
+                {
+                    "sample_id": sample_id,
+                    "line": 3,
+                    "source_label": "Ten-GigabitEthernet1/0/50",
+                    "source_value": "Ten-GigabitEthernet1/0/50",
+                    "capture_kind": "record_anchor",
+                },
+            ],
+            "rx_power_dbm": [{
+                "sample_id": sample_id,
+                "line": 2,
+                "source_label": "Current 30 3.32 2.82 -5.34 -6.32",
+                "source_value": "-5.34",
+                "capture_kind": "column",
+            }],
+            "transceiver_present": [{
+                "sample_id": sample_id,
+                "line": 4,
+                "source_label": "The transceiver is absent.",
+                "source_value": "absent",
+                "capture_kind": "derived",
+            }],
+        }
+
+        candidate = EvidenceRepeatedBlockProvider().propose(
+            ProviderContext(
+                command="inspect arbitrary optical output",
+                samples=(SimpleNamespace(output=cli),),
+                spec=spec,
+                structure_profile={"dominant_layout": "repeated_block"},
+                field_bindings=bindings,
+                evidence_samples={sample_id: cli},
+            )
+        )
+
+        self.assertIsNotNone(candidate)
+        self.assertNotIn("Value transceiver_present", candidate.template_text)
+        self.assertNotIn("transceiver\\s+is\\s+absent", candidate.template_text)
+        result = validate_template(
+            candidate.template_text,
+            cli,
+            spec.required_fields,
+            spec.validators,
+            primary_keys=spec.primary_keys,
+            expected_min_records=2,
+            expected_record_count=2,
+            field_bindings={
+                "interface": bindings["interface"],
+                "rx_power_dbm": bindings["rx_power_dbm"],
+            },
+            sample_id=sample_id,
+            evidence_line_map={line: line for line in range(1, 5)},
+        )
+        self.assertTrue(result.is_valid, result.errors)
+        self.assertEqual(
+            [row["interface"] for row in result.records],
+            ["Ten-GigabitEthernet1/0/49", "Ten-GigabitEthernet1/0/50"],
+        )
+
+    def test_evidence_hierarchy_provider_uses_parent_filldown_for_child_rows(self):
+        cli = """Slot 1:
+Fan 1 State: Normal
+Fan 2 State: Normal
+"""
+        sample_id = f"sample-{hashlib.sha256(cli.encode()).hexdigest()[:12]}"
+        spec = CategorySpec(
+            name="cooling_status",
+            required_fields=["slot_id", "fan_id", "state"],
+            optional_fields=[],
+            entity_type="fan",
+            primary_keys=["slot_id", "fan_id"],
+            validators={
+                "slot_id": {"type": "regex", "pattern": r"^Slot \d+:$"},
+                "fan_id": {"type": "regex", "pattern": r"^Fan \d+$"},
+                "state": {"type": "enum", "values": ["Normal"]},
+            },
+        )
+        bindings = {
+            "slot_id": [{
+                "sample_id": sample_id,
+                "line": 1,
+                "source_label": "Slot 1:",
+                "source_value": "Slot 1:",
+                "capture_kind": "record_anchor",
+            }],
+            "fan_id": [
+                {
+                    "sample_id": sample_id,
+                    "line": 2,
+                    "source_label": "Fan 1 State: Normal",
+                    "source_value": "Fan 1",
+                    "capture_kind": "key_value",
+                },
+                {
+                    "sample_id": sample_id,
+                    "line": 3,
+                    "source_label": "Fan 2 State: Normal",
+                    "source_value": "Fan 2",
+                    "capture_kind": "key_value",
+                },
+            ],
+            "state": [
+                {
+                    "sample_id": sample_id,
+                    "line": 2,
+                    "source_label": "Fan 1 State: Normal",
+                    "source_value": "Normal",
+                    "capture_kind": "key_value",
+                },
+                {
+                    "sample_id": sample_id,
+                    "line": 3,
+                    "source_label": "Fan 2 State: Normal",
+                    "source_value": "Normal",
+                    "capture_kind": "key_value",
+                },
+            ],
+        }
+        candidate = EvidenceHierarchicalRowProvider().propose(
+            ProviderContext(
+                command="inspect arbitrary cooling output",
+                samples=(SimpleNamespace(output=cli),),
+                spec=spec,
+                structure_profile={"dominant_layout": "repeated_block"},
+                field_bindings=bindings,
+                evidence_samples={sample_id: cli},
+            )
+        )
+
+        self.assertIsNotNone(candidate)
+        self.assertIn("Value Filldown slot_id", candidate.template_text)
+        self.assertIn("-> Record", candidate.template_text)
+        self.assertRegex(candidate.template_text, r"(?m)^EOF$")
+        result = validate_template(
+            candidate.template_text,
+            cli,
+            spec.required_fields,
+            spec.validators,
+            primary_keys=spec.primary_keys,
+            expected_min_records=2,
+            expected_record_count=2,
+            field_bindings=bindings,
+            sample_id=sample_id,
+            evidence_line_map={1: 1, 2: 2, 3: 3},
+        )
+        self.assertTrue(result.is_valid, result.errors)
+        self.assertEqual(
+            [(row["slot_id"], row["fan_id"], row["state"]) for row in result.records],
+            [
+                ("Slot 1:", "Fan 1", "Normal"),
+                ("Slot 1:", "Fan 2", "Normal"),
+            ],
+        )
+
+    def test_evidence_singleton_provider_compiles_one_bounded_snapshot_record(self):
+        cli = """H3C Comware Platform Software
+Software Version: 7.1.070
+Hardware Model: S5130S-54S-HI-G
+Feature Images:
+  flash:/feature-a.bin
+  flash:/feature-b.bin
+Patch Version: None
+Slot 1:
+  Board Type: S5130S-54S-HI-G
+"""
+        sample_id = f"sample-{hashlib.sha256(cli.encode()).hexdigest()[:12]}"
+        spec = CategorySpec(
+            name="device_version",
+            required_fields=["software_version", "hardware_model"],
+            optional_fields=["feature_images", "patch_version", "slot_id", "unsafe_note"],
+            entity_type="device_version",
+            primary_keys=[],
+            validators={
+                "software_version": {"type": "text"},
+                "hardware_model": {"type": "text"},
+                "feature_images": {"type": "regex", "pattern": r"^flash:/\S+\.bin$"},
+                "patch_version": {"type": "regex", "pattern": "^None$"},
+                "slot_id": {"type": "regex", "pattern": r"^Slot\s+\d+:$"},
+                "unsafe_note": {"type": "text"},
+            },
+        )
+        bindings = {
+            "software_version": [{
+                "sample_id": sample_id,
+                "line": 2,
+                "source_label": "Software Version:",
+                "source_value": "7.1.070",
+                "capture_kind": "key_value",
+            }],
+            "hardware_model": [{
+                "sample_id": sample_id,
+                "line": 3,
+                "source_label": "Hardware Model:",
+                "source_value": "S5130S-54S-HI-G",
+                "capture_kind": "key_value",
+            }],
+            "feature_images": [
+                {
+                    "sample_id": sample_id,
+                    "line": 5,
+                    "source_label": "flash:/feature-a.bin",
+                    "source_value": "flash:/feature-a.bin",
+                    "capture_kind": "literal",
+                },
+                {
+                    "sample_id": sample_id,
+                    "line": 6,
+                    "source_label": "flash:/feature-b.bin",
+                    "source_value": "flash:/feature-b.bin",
+                    "capture_kind": "literal",
+                },
+            ],
+            "patch_version": [{
+                "sample_id": sample_id,
+                "line": 7,
+                "source_label": "Patch Version:",
+                "source_value": "None",
+                "capture_kind": "key_value",
+            }],
+            "slot_id": [{
+                "sample_id": sample_id,
+                "line": 8,
+                "source_label": "Slot 1:",
+                "source_value": "Slot 1:",
+                "capture_kind": "record_anchor",
+            }],
+            "unsafe_note": [{
+                "sample_id": sample_id,
+                "line": 1,
+                "source_label": "H3C Comware Platform Software",
+                "source_value": "H3C Comware Platform Software",
+                "capture_kind": "literal",
+            }],
+        }
+        candidate = EvidenceSingletonProvider().propose(
+            ProviderContext(
+                command="inspect arbitrary version output",
+                samples=(SimpleNamespace(output=cli),),
+                spec=spec,
+                structure_profile={"dominant_layout": "repeated_block"},
+                field_bindings=bindings,
+                evidence_samples={sample_id: cli},
+                entity_scope="singleton",
+            )
+        )
+
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate.provider, "generic_evidence_singleton")
+        self.assertIn("Record EOF", candidate.template_text)
+        self.assertIn("Value List feature_images", candidate.template_text)
+        self.assertIn("Value patch_version", candidate.template_text)
+        self.assertIn("Value slot_id", candidate.template_text)
+        self.assertNotIn("Value unsafe_note", candidate.template_text)
+        result = validate_template(
+            candidate.template_text,
+            cli,
+            spec.required_fields,
+            spec.validators,
+            expected_min_records=1,
+            expected_record_count=1,
+            field_bindings={
+                field: items
+                for field, items in bindings.items()
+                if field != "unsafe_note"
+            },
+            sample_id=sample_id,
+            evidence_line_map={line: line for line in range(1, 10)},
+        )
+        self.assertTrue(result.is_valid, result.errors)
+        self.assertEqual(len(result.records), 1)
+        self.assertEqual(result.records[0]["software_version"], "7.1.070")
+        self.assertEqual(result.records[0]["hardware_model"], "S5130S-54S-HI-G")
+        self.assertEqual(
+            result.records[0]["feature_images"],
+            ["flash:/feature-a.bin", "flash:/feature-b.bin"],
+        )
+        self.assertEqual(result.records[0]["patch_version"], "None")
+        self.assertEqual(result.records[0]["slot_id"], "Slot 1:")
+
+    def test_evidence_singleton_provider_requires_governed_singleton_scope(self):
+        spec = CategorySpec(
+            name="status",
+            required_fields=["status"],
+            optional_fields=[],
+            entity_type="status",
+            primary_keys=[],
+            validators={"status": {"type": "text"}},
+        )
+        context = ProviderContext(
+            command="inspect arbitrary status",
+            samples=(SimpleNamespace(output="Status: up\n"),),
+            spec=spec,
+            structure_profile={"dominant_layout": "key_value"},
+            field_bindings={"status": [{
+                "sample_id": "sample-1",
+                "line": 1,
+                "source_label": "Status:",
+                "source_value": "up",
+                "capture_kind": "key_value",
+            }]},
+            evidence_samples={"sample-1": "Status: up\n"},
+        )
+
+        self.assertIsNone(EvidenceSingletonProvider().propose(context))
+
+    def test_evidence_entity_count_ignores_nested_component_headers(self):
+        cli = """Slot 1 CPU 0:
+DEVICE_NAME : S5130S-54S-HI-G
+Fan 1:
+State : Normal
+Fan 2:
+State : Normal
+Power 1:
+State : Normal
+"""
+        sample_id = f"sample-{hashlib.sha256(cli.encode()).hexdigest()[:12]}"
+        spec = CategorySpec(
+            name="device_manufacturing_info",
+            required_fields=["slot", "cpu"],
+            optional_fields=["device_name"],
+            entity_type="device_manufacturing_info",
+            primary_keys=["slot", "cpu"],
+            validators={"slot": {"type": "number"}, "cpu": {"type": "number"}},
+        )
+        bindings = {
+            "slot": [
+                {
+                    "sample_id": sample_id,
+                    "line": 1,
+                    "source_label": "Slot 1 CPU 0:",
+                    "source_value": "1",
+                }
+            ],
+            "cpu": [
+                {
+                    "sample_id": sample_id,
+                    "line": 1,
+                    "source_label": "Slot 1 CPU 0:",
+                    "source_value": "0",
+                }
+            ],
+        }
+
+        self.assertEqual(
+            expected_entity_count_from_evidence(cli, spec, field_bindings=bindings),
+            1,
+        )
+
+    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
+    def test_record_boundary_diagnostic_gets_platform_repair(self):
+        template = r"""Value slot (\d+)
+Value cpu (\d+)
+Value device_name (\S+)
+
+Start
+  ^Slot\s+${slot}\s+CPU\s+${cpu}:$$ -> Record
+  ^DEVICE_NAME\s+:\s+${device_name}$$
+  ^Slot\s+\d+\s+CPU\s+\d+:$$ -> Record
+
+EOF
+"""
+        diagnostic = {
+            "allowed_action": "repair_record_boundary",
+            "actual": {"record_transition_fields": ["slot", "cpu"]},
+        }
+        repaired = repair_record_boundary_candidate(
+            template,
+            diagnostic,
+            primary_keys=["slot", "cpu"],
+        )
+
+        self.assertIsNotNone(repaired)
+        self.assertIn("Continue.Record", repaired)
+        self.assertIn("__NETOPS_TEXTFSM_END_OF_INPUT", repaired)
+        result = validate_template(
+            repaired,
+            "Slot 1 CPU 0:\nDEVICE_NAME : A\nSlot 2 CPU 0:\nDEVICE_NAME : B\n",
+            ["slot", "cpu", "device_name"],
+            primary_keys=["slot", "cpu"],
+            expected_min_records=2,
+            expected_record_count=2,
+        )
+        self.assertTrue(result.is_valid, result.errors)
+        self.assertEqual(len(result.records), 2)
+
+    def test_record_boundary_repair_accepts_scalar_actual_diagnostic(self):
+        template = """Value Filldown slot_id (Slot \\d+:)
+Value fan_id (Fan \\d+)
+
+Start
+  ^${slot_id}\\s*$$ -> Record
+  ^\\s+${fan_id}\\s*$$ -> Record
+
+EOF
+"""
+
+        repaired = repair_record_boundary_candidate(
+            template,
+            {"allowed_action": "repair_record_boundary", "actual": 3},
+            primary_keys=["slot_id"],
+        )
+
+        self.assertIsNotNone(repaired)
+
+    def test_strip_llm_template_normalizes_state_comments_and_rule_indent(self):
+        raw = """Value item (\\S+)
+
+Start
+# explanation that TextFSM must not parse
+^${item} -> Record
+"""
+
+        cleaned = strip_llm_template(raw)
+
+        self.assertNotIn("# explanation", cleaned)
+        self.assertIn("  ^${item} -> Record", cleaned)
 
     @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
     def test_agent_reports_early_record_boundary_without_domain_rules(self):

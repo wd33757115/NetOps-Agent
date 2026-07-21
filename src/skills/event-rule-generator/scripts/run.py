@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import re
 import sys
@@ -17,6 +18,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.core.patrol.event_rule_compiler import (  # noqa: E402
     compile_event_rule_intents,
+    govern_event_rule_severity,
+    infer_event_rule_role,
 )
 from src.core.patrol.event_rule_generation import (  # noqa: E402
     generate_and_validate_event_rules,
@@ -119,6 +122,7 @@ def _validate_llm_rules(
         candidate_rules=rules,
         contract=contract,
         change_policy=change_policy,
+        event_constraints=dict(event_constraints or {}),
     )
     rules = list(compilation.get("rules") or [])
     declared_fields = {
@@ -243,6 +247,12 @@ def _validate_llm_rules(
             constraints=dict(event_constraints or {}),
         )
     )
+    governance_repairs = [
+        dict(item)
+        for item in normalizations
+        if isinstance(item, dict)
+        and item.get("kind") in {"event_type_governance", "severity_governance"}
+    ]
     technical_names = [str(rule.get("name") or "") for rule in normalized_rules]
     if len(technical_names) != len(set(technical_names)):
         errors.append("compiled event rules contain duplicate logical rule names")
@@ -290,6 +300,7 @@ def _validate_llm_rules(
         "rules": normalized_rules,
         "generated_rule_count": len(normalized_rules),
         "normalizations": normalizations,
+        "governance_repairs": governance_repairs,
         "compiler": {
             "compiled": bool(compilation.get("compiled")),
             "normalization_count": len(compilation.get("normalizations") or []),
@@ -299,6 +310,128 @@ def _validate_llm_rules(
 
 def _rule_name_token(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", "-", str(value or "rule").casefold()).strip("-")
+
+
+def _event_type_token(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", str(value or "observation").casefold()).strip("_")
+
+
+def _govern_fanout_event_types(
+    scoped_results: list[tuple[str, dict[str, Any], dict[str, Any]]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Give every observation target an unambiguous, stable event namespace."""
+
+    claims: dict[str, list[tuple[str, dict[str, Any], dict[str, Any], dict[str, Any]]]] = {}
+    for observation_type, result, constraints in scoped_results:
+        for rule in result.get("rules") or []:
+            if not isinstance(rule, dict):
+                continue
+            event_type = str(rule.get("event_type") or "").strip()
+            if event_type:
+                claims.setdefault(event_type, []).append(
+                    (observation_type, result, constraints, rule)
+                )
+
+    repairs: list[dict[str, Any]] = []
+    errors: list[str] = []
+    renamed_faults: dict[str, dict[str, str]] = {}
+    effective_owners: dict[str, tuple[str, str]] = {}
+    for event_type, event_claims in sorted(claims.items()):
+        observation_types = {claim[0] for claim in event_claims}
+        if len(observation_types) <= 1:
+            claim = event_claims[0]
+            role = str(
+                claim[3].get("trigger_role") or infer_event_rule_role(claim[3]) or ""
+            )
+            effective_owners[event_type] = (claim[0], role)
+            continue
+
+        locked: list[tuple[str, dict[str, Any], dict[str, Any], dict[str, Any]]] = []
+        for claim in event_claims:
+            observation_type, _result, constraints, rule = claim
+            role = str(rule.get("trigger_role") or infer_event_rule_role(rule) or "")
+            role_mapping = dict(constraints.get("role_event_types") or {})
+            required_types = {str(item) for item in constraints.get("required_event_types") or []}
+            if str(role_mapping.get(role) or "") == event_type or event_type in required_types:
+                locked.append(claim)
+        if len(locked) > 1:
+            errors.append(
+                f"event_type {event_type} is explicitly required by multiple observation targets: "
+                + ", ".join(sorted(observation_types))
+            )
+            continue
+
+        locked_claim = locked[0] if locked else None
+        if locked_claim:
+            locked_role = str(
+                locked_claim[3].get("trigger_role")
+                or infer_event_rule_role(locked_claim[3])
+                or ""
+            )
+            effective_owners[event_type] = (locked_claim[0], locked_role)
+
+        for observation_type, result, _constraints, rule in event_claims:
+            if locked_claim is not None and rule is locked_claim[3]:
+                continue
+            role = str(
+                rule.get("trigger_role") or infer_event_rule_role(rule) or ""
+            ).strip()
+            if not role:
+                errors.append(
+                    f"event_type {event_type} is shared across observation targets but its "
+                    f"trigger role cannot be inferred for {observation_type}"
+                )
+                continue
+            effective = f"{_event_type_token(observation_type)}_{_event_type_token(role)}"
+            owner = effective_owners.get(effective)
+            if owner and owner != (observation_type, role):
+                errors.append(
+                    f"target-specific event_type {effective} collides between "
+                    f"{owner[0]} and {observation_type}"
+                )
+                continue
+            effective_owners[effective] = (observation_type, role)
+            rule["event_type"] = effective
+            repair = {
+                "kind": "cross_target_event_type_namespace",
+                "observation_type": observation_type,
+                "trigger_role": role,
+                "proposed": event_type,
+                "effective": effective,
+                "reason": "event_type_reused_across_observation_targets",
+                "source": "deterministic_control_plane",
+            }
+            repairs.append(repair)
+            validation = result.get("validation")
+            if isinstance(validation, dict):
+                validation.setdefault("normalizations", []).append(repair)
+                validation.setdefault("governance_repairs", []).append(repair)
+            loop = result.get("agent_loop")
+            if (
+                isinstance(loop, dict)
+                and isinstance(loop.get("attempts"), list)
+                and loop["attempts"]
+            ):
+                last_attempt = loop["attempts"][-1]
+                if isinstance(last_attempt, dict):
+                    last_attempt.setdefault("governance_repairs", []).append(repair)
+            if str(rule.get("event_class") or "fault") != "recovery":
+                renamed_faults.setdefault(observation_type, {})[event_type] = effective
+
+    for observation_type, result, _constraints in scoped_results:
+        fault_mapping = renamed_faults.get(observation_type) or {}
+        if not fault_mapping:
+            continue
+        for rule in result.get("rules") or []:
+            if not isinstance(rule, dict) or str(rule.get("event_class") or "fault") != "recovery":
+                continue
+            recovery = dict(rule.get("recovery") or {})
+            recovery["resolves"] = [
+                fault_mapping.get(str(value), str(value))
+                for value in recovery.get("resolves") or []
+            ]
+            rule["recovery"] = recovery
+    return repairs, list(dict.fromkeys(errors))
 
 
 def _normalize_rule_ir(
@@ -527,9 +660,7 @@ def _cross_asset_rule_errors(
                 rule
                 for rule in fault_rules
                 if (rule.get("condition") or {}).get("kind") == expected_kind
-                and target_fields.intersection(
-                    (rule.get("condition") or {}).get("fields") or []
-                )
+                and target_fields.intersection((rule.get("condition") or {}).get("fields") or [])
             ]
             if reference:
                 matched = any(
@@ -578,9 +709,7 @@ def _cross_asset_rule_errors(
                 errors.append("recovery rule reference must match the ChangePolicy")
             elif not primary_reference and not any(
                 _numbers_equal((rule.get("condition") or {}).get("low"), primary_value)
-                and _numbers_equal(
-                    (rule.get("condition") or {}).get("gt"), expected_recovery
-                )
+                and _numbers_equal((rule.get("condition") or {}).get("gt"), expected_recovery)
                 for rule in matching_recovery
             ):
                 errors.append("recovery rule thresholds must match the ChangePolicy")
@@ -603,9 +732,7 @@ def _cross_asset_rule_errors(
                 rule
                 for rule in fault_rules
                 if (rule.get("condition") or {}).get("kind") == expected_kind
-                and target_fields.intersection(
-                    (rule.get("condition") or {}).get("fields") or []
-                )
+                and target_fields.intersection((rule.get("condition") or {}).get("fields") or [])
             ]
             if reference:
                 matched = any(
@@ -633,22 +760,14 @@ def _cross_asset_rule_errors(
             if primary_value is not None and deadband
             else None
         )
-        if (
-            expected_recovery is not None or (primary_reference and deadband)
-        ) and not any(
+        if (expected_recovery is not None or (primary_reference and deadband)) and not any(
             (rule.get("condition") or {}).get("kind")
-            == (
-                "threshold_field_high_recovery"
-                if primary_reference
-                else "threshold_recovery"
-            )
+            == ("threshold_field_high_recovery" if primary_reference else "threshold_recovery")
             and (
                 str((rule.get("condition") or {}).get("reference_field") or "")
                 == str(primary_reference.get("field_name") or "")
                 if primary_reference
-                else _numbers_equal(
-                    (rule.get("condition") or {}).get("lt"), expected_recovery
-                )
+                else _numbers_equal((rule.get("condition") or {}).get("lt"), expected_recovery)
             )
             for rule in recovery_rules
         ):
@@ -682,16 +801,6 @@ def _cross_asset_rule_errors(
 def _critical_severity_errors(
     rules: list[dict[str, Any]], constraints: dict[str, Any]
 ) -> list[str]:
-    if constraints.get("allow_critical") is True:
-        return []
-    allowed_event_types = {
-        str(item) for item in constraints.get("allow_critical_event_types") or [] if str(item)
-    }
-    allowed_event_types.update(
-        str(event_type)
-        for event_type, severity in dict(constraints.get("required_severities") or {}).items()
-        if str(severity).casefold() == "critical"
-    )
     return [
         (
             f"event type {rule.get('event_type')} uses critical severity without "
@@ -699,8 +808,51 @@ def _critical_severity_errors(
         )
         for rule in rules
         if str(rule.get("severity") or "warning").casefold() == "critical"
-        and str(rule.get("event_type") or "") not in allowed_event_types
+        and govern_event_rule_severity(
+            event_type=str(rule.get("event_type") or ""),
+            proposed_severity="critical",
+            constraints=constraints,
+        )[1]
+        is not None
     ]
+
+
+def _govern_llm_event_rule_candidate(
+    candidate: dict[str, Any],
+    context: dict[str, Any],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Apply platform policy to model output without inventing event semantics."""
+
+    governed = copy.deepcopy(candidate)
+    rules = governed.get("rules")
+    if not isinstance(rules, list):
+        return governed, []
+
+    constraints = dict(context.get("event_constraints") or {})
+    if constraints.get("allow_critical") is True:
+        return governed, []
+
+    repairs: list[dict[str, Any]] = []
+    for index, rule in enumerate(rules):
+        if not isinstance(rule, dict):
+            continue
+        event_type = str(rule.get("event_type") or "")
+        proposed = str(rule.get("severity") or "warning").casefold()
+        effective, repair = govern_event_rule_severity(
+            event_type=event_type,
+            proposed_severity=proposed,
+            constraints=constraints,
+        )
+        if repair is None:
+            continue
+        rule["severity"] = effective
+        repairs.append(
+            {
+                **repair,
+                "path": f"rules[{index}].severity",
+            }
+        )
+    return governed, repairs
 
 
 def _numbers_equal(left: Any, right: Any) -> bool:
@@ -717,10 +869,10 @@ def run_event_rule_generation(params: dict[str, Any]) -> dict[str, Any]:
     change_policies = params.get("change_policies")
     if isinstance(change_policies, list) and change_policies:
         results: list[dict[str, Any]] = []
+        scoped_results: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
         attempts: list[dict[str, Any]] = []
         rules_by_name: dict[str, dict[str, Any]] = {}
         conflicts: list[str] = []
-        reserved_fault_event_types: dict[str, str] = {}
         for index, policy in enumerate(change_policies):
             if not isinstance(policy, dict):
                 raise ValueError(f"change_policies[{index}] must be an object")
@@ -737,15 +889,32 @@ def run_event_rule_generation(params: dict[str, Any]) -> dict[str, Any]:
                     "change_policies": None,
                     "change_policy": policy,
                     "event_constraints": scoped_constraints or params.get("event_constraints"),
-                    "reserved_fault_event_types": reserved_fault_event_types,
+                    "reserved_fault_event_types": {},
                 }
             )
             results.append(result)
+            scoped_results.append(
+                (
+                    observation_type,
+                    result,
+                    dict(scoped_constraints or params.get("event_constraints") or {}),
+                )
+            )
             loop = result.get("agent_loop")
             if isinstance(loop, dict):
                 for attempt in loop.get("attempts") or []:
                     if isinstance(attempt, dict):
                         attempts.append({**attempt, "attempt": len(attempts) + 1})
+        governance_repairs, governance_errors = _govern_fanout_event_types(scoped_results)
+        conflicts.extend(governance_errors)
+        for observation_type, result, scoped_constraints in scoped_results:
+            constraint_errors = _event_constraint_errors(
+                list(result.get("rules") or []), scoped_constraints
+            )
+            if constraint_errors:
+                conflicts.extend(
+                    f"{observation_type}: {message}" for message in constraint_errors
+                )
             for rule in result.get("rules") or []:
                 if not isinstance(rule, dict):
                     continue
@@ -757,10 +926,6 @@ def run_event_rule_generation(params: dict[str, Any]) -> dict[str, Any]:
                     conflicts.append(f"conflicting generated rule name: {name}")
                 else:
                     rules_by_name[name] = rule
-                if str(rule.get("event_class") or "fault") != "recovery":
-                    event_type = str(rule.get("event_type") or "")
-                    if event_type:
-                        reserved_fault_event_types[event_type] = observation_type
         success = all(result.get("success") is True for result in results) and not conflicts
         return {
             "success": success,
@@ -768,7 +933,12 @@ def run_event_rule_generation(params: dict[str, Any]) -> dict[str, Any]:
             "generated_rule_count": len(rules_by_name),
             "rules": list(rules_by_name.values()),
             "results": results,
-            "validation": {"success": success, "errors": conflicts},
+            "validation": {
+                "success": success,
+                "errors": list(dict.fromkeys(conflicts)),
+                "governance_repairs": governance_repairs,
+            },
+            "governance_repairs": governance_repairs,
             "agent_loop": {
                 "ready_for_approval": success,
                 "next_action": (
@@ -776,6 +946,7 @@ def run_event_rule_generation(params: dict[str, Any]) -> dict[str, Any]:
                 ),
                 "attempt_count": len(attempts),
                 "attempts": attempts,
+                "governance_repairs": governance_repairs,
             },
             "generation_provider": str(params.get("generation_provider") or "builtin").casefold(),
         }
@@ -804,6 +975,7 @@ def run_event_rule_generation(params: dict[str, Any]) -> dict[str, Any]:
                 event_constraints=dict(params.get("event_constraints") or {}),
                 reserved_fault_event_types=dict(params.get("reserved_fault_event_types") or {}),
             ),
+            candidate_governor=_govern_llm_event_rule_candidate,
         )
         validation = dict(generated.get("validation") or {})
         return {

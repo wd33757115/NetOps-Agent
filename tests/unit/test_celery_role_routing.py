@@ -16,6 +16,7 @@ def test_builtin_patrol_and_ai_skills_have_immutable_role_queues(monkeypatch):
     assert celery_routing.resolve_skill_celery_queue("state-normalizer") == "netops.patrol"
     assert celery_routing.resolve_skill_celery_queue("change-detector") == "netops.patrol"
     assert celery_routing.resolve_skill_celery_queue("event-builder") == "netops.patrol"
+    assert celery_routing.resolve_skill_celery_queue("patrol-raw-ingestor") == "netops.ai"
     assert celery_routing.resolve_skill_celery_queue("textfsm-generator") == "netops.ai"
     assert celery_routing.resolve_skill_celery_queue("event-rule-generator") == "netops.ai"
 

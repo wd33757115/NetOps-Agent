@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from itertools import product
 from typing import Any
-
 
 APPLICABILITY_CONTEXT_KEY = "_observation_context"
 SUPPORTED_PREDICATE_OPERATORS = {
@@ -259,22 +259,108 @@ def excluded_context_example(applicability: Any) -> dict[str, Any] | None:
     return materialize(exclusions[0].get("when"))
 
 
-def context_from_change(change: dict[str, Any]) -> dict[str, Any] | None:
-    for value in (
-        change.get("context"),
-        change.get("record_context"),
-        (change.get("dimensions") or {}).get(APPLICABILITY_CONTEXT_KEY)
-        if isinstance(change.get("dimensions"), dict)
-        else None,
-    ):
-        if isinstance(value, dict):
-            return dict(value)
+def applicable_context_example(
+    applicability: Any,
+    *,
+    seed: dict[str, Any] | None = None,
+    max_candidates: int = 16_384,
+) -> dict[str, Any] | None:
+    """Build a bounded deterministic context that does not match any exclusion.
+
+    Candidate values come from the declared predicate DSL. This keeps synthetic
+    validation independent of vendors, commands, and observation field names.
+    Existing values, such as per-record threshold references, are preserved.
+    """
+
+    context = deepcopy(seed or {})
+    if not isinstance(applicability, dict) or not applicability:
+        return context
+
+    fields = applicability_context_fields(applicability)
+    if not fields:
+        decision = applicability_decision(applicability, context=context)
+        return context if decision["applicable"] else None
+
+    candidates: dict[str, list[Any]] = {field: [] for field in fields}
+
+    def add(field: str, value: Any) -> None:
+        if field not in candidates:
+            return
+        if not any(existing == value for existing in candidates[field]):
+            candidates[field].append(value)
+
+    for field in fields:
+        if field in context:
+            add(field, context[field])
+        for value in ("__applicable__", 1, 0, "", None):
+            add(field, value)
+
+    def collect(predicate: Any) -> None:
+        if not isinstance(predicate, dict):
+            return
+        for key in ("all", "any"):
+            if isinstance(predicate.get(key), list):
+                for item in predicate[key]:
+                    collect(item)
+                return
+        if isinstance(predicate.get("not"), dict):
+            collect(predicate["not"])
+            return
+        field = str(predicate.get("field") or "").strip()
+        operator = str(predicate.get("op") or "").strip()
+        if not field:
+            return
+        if operator in {"in_ci", "not_in_ci", "contains_any_ci"}:
+            for value in predicate.get("values") or []:
+                add(field, value)
+        elif operator in {"eq", "lte"}:
+            expected = predicate.get("value")
+            add(field, expected)
+            numeric = _number(expected)
+            if numeric is not None:
+                add(field, numeric + 1)
+                add(field, numeric - 1)
+        elif operator == "equals_field":
+            other = str(predicate.get("other_field") or "").strip()
+            add(field, 0)
+            add(field, 1)
+            if other:
+                add(other, 0)
+                add(other, 1)
+
+    for exclusion in applicability.get("exclude_when") or []:
+        if isinstance(exclusion, dict):
+            collect(exclusion.get("when"))
+
+    attempts = 0
+    pools = [candidates[field] for field in fields]
+    for values in product(*pools):
+        attempts += 1
+        if attempts > max_candidates:
+            break
+        candidate = {**context, **dict(zip(fields, values, strict=True))}
+        if applicability_decision(applicability, context=candidate)["applicable"]:
+            return candidate
     return None
 
 
-def condition_applicability_matches(
-    condition: dict[str, Any], change: dict[str, Any]
-) -> bool:
+def context_from_change(change: dict[str, Any]) -> dict[str, Any] | None:
+    dimensions = change.get("dimensions")
+    sources = (
+        dimensions.get(APPLICABILITY_CONTEXT_KEY) if isinstance(dimensions, dict) else None,
+        change.get("record_context"),
+        change.get("context"),
+    )
+    merged: dict[str, Any] = {}
+    found = False
+    for value in sources:
+        if isinstance(value, dict):
+            merged.update(value)
+            found = True
+    return merged if found else None
+
+
+def condition_applicability_matches(condition: dict[str, Any], change: dict[str, Any]) -> bool:
     applicability = condition.get("applicability")
     if not applicability:
         return True

@@ -131,7 +131,7 @@ fi
 
 if [[ -n "$TOKEN" ]]; then
     if me="$(bff_json GET "/api/auth/me/" -H "Authorization: Bearer $TOKEN" 2>/dev/null)"; then
-        me_user="$(echo "$me" | python3 -c "import sys,json; print(((json.load(sys.stdin).get('data') or {}).get('user') or {}).get('username',''))" 2>/dev/null || true)"
+        me_user="$(echo "$me" | python3 -c "import sys,json; print((json.load(sys.stdin).get('data') or {}).get('username',''))" 2>/dev/null || true)"
         assert_ok "GET /api/auth/me/" "$([[ "$me_user" == "$ADMIN_USER" ]] && echo 1 || echo 0)"
     else
         assert_ok "GET /api/auth/me/" 0 "request failed"
@@ -160,6 +160,22 @@ print(d.get('success') or d.get('data') is not None)
         assert_ok "Skills list API" "$([[ "$skills_ok" == "True" || "$skills_ok" == "true" ]] && echo 1 || echo 0)"
     else
         assert_ok "Skills list API" 0 "request failed"
+    fi
+
+    if readiness="$(bff_json GET "/api/devices/patrol/readiness/" -H "Authorization: Bearer $TOKEN" 2>/dev/null)"; then
+        readiness_ok="$(echo "$readiness" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print(bool(d.get('success')) and bool((d.get('data') or {}).get('can_launch')))
+" 2>/dev/null || echo false)"
+        readiness_detail="$(echo "$readiness" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print('; '.join(str(x.get('message') or '') for x in (d.get('data') or {}).get('blockers') or []))
+" 2>/dev/null || true)"
+        assert_ok "Formal patrol production readiness" "$([[ "$readiness_ok" == "True" || "$readiness_ok" == "true" ]] && echo 1 || echo 0)" "$readiness_detail"
+    else
+        assert_ok "Formal patrol production readiness" 0 "request failed"
     fi
 fi
 

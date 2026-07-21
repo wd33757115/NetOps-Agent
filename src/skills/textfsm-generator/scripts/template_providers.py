@@ -9,6 +9,7 @@ from typing import Any, Protocol
 
 from config_loader import CategorySpec
 
+from src.core.parser.evidence_utils import literal_occurs
 from src.core.parser.parser_ir import (
     EvidenceCapture,
     ParserIR,
@@ -35,6 +36,7 @@ class ProviderContext:
     structure_profile: dict
     field_bindings: dict[str, Any] | None = None
     evidence_samples: dict[str, str] | None = None
+    entity_scope: str | None = None
 
 
 @dataclass(frozen=True)
@@ -136,6 +138,8 @@ def _value_pattern(field: str, spec: CategorySpec) -> str:
             return "(?:" + "|".join(values) + ")"
     if validator.get("type") in {"number", "percent"}:
         return r"-?\d+(?:\.\d+)?%?"
+    if validator.get("type") == "text":
+        return r"\S(?:.*\S)?"
     if field in {"description", "name", "reason"}:
         return r"\S(?:.*\S)?"
     return r"\S+"
@@ -209,9 +213,7 @@ def _mapped_header(
 
 def _row_pattern(mapped: list[str | None]) -> str:
     tokens = [
-        f"${{{field}}}"
-        if field
-        else (r"\S(?:.*\S)?" if index == len(mapped) - 1 else r"\S+")
+        f"${{{field}}}" if field else (r"\S(?:.*\S)?" if index == len(mapped) - 1 else r"\S+")
         for index, field in enumerate(mapped)
     ]
     return r"^\s*" + r"\s+".join(tokens) + r"\s*$$"
@@ -399,7 +401,10 @@ def _binding_is_capturable(
     if runtime_pattern_for_redacted_value(value):
         return True
     validator = dict((spec.validators or {}).get(field_name) or {})
-    if value.casefold() in _MISSING_MARKERS:
+    if value.casefold() in _MISSING_MARKERS and validator.get("type") in {
+        "number",
+        "percent",
+    }:
         return False
     if validator.get("type") in {"number", "percent"}:
         try:
@@ -413,11 +418,138 @@ def _binding_is_capturable(
     return True
 
 
+def _has_bounded_literal_context(
+    source_line: str,
+    captures: list[EvidenceCapture],
+) -> bool:
+    """Reject capture rules that reduce an entire arbitrary line to text."""
+
+    remainder = str(source_line or "").strip()
+    for capture in captures:
+        remainder = remainder.replace(str(capture.literal or ""), "", 1)
+    literal = re.sub(r"\s+", "", remainder)
+    if len(re.findall(r"[A-Za-z0-9]", literal)) >= 2:
+        return True
+    if any(token in literal for token in ("<>", "[]", "()", "{}")):
+        return True
+    return all(
+        len(re.findall(r"[A-Za-z]{2,}", capture.pattern)) > 0
+        for capture in captures
+    )
+
+
 def _python_rule(pattern: str, field_patterns: dict[str, str]) -> re.Pattern[str]:
     value = pattern.replace("$$", "$")
     for field, field_pattern in field_patterns.items():
         value = value.replace(f"${{{field}}}", f"(?:{field_pattern})")
     return re.compile(value)
+
+
+def _primary_key_anchor_patterns(
+    spec: CategorySpec,
+    field_bindings: dict[str, Any] | None,
+    *,
+    evidence_samples: dict[str, str] | None = None,
+) -> tuple[list[str], list[str]]:
+    """Compile capture and non-capturing entity anchors from Contract evidence."""
+
+    primary_keys = tuple(spec.primary_keys)
+    if not primary_keys:
+        return [], []
+    grouped: dict[tuple[str, int], dict[str, dict[str, Any]]] = {}
+    for field in primary_keys:
+        for item in _binding_items(field_bindings, field):
+            if not _binding_is_direct(item):
+                continue
+            sample_id = str(item.get("sample_id") or "")
+            line_number = _binding_line(item)
+            if not line_number:
+                continue
+            grouped.setdefault((sample_id, line_number), {})[field] = item
+
+    field_patterns = {field: _value_pattern(field, spec) for field in primary_keys}
+    capture_patterns: list[str] = []
+    boundary_patterns: list[str] = []
+    for (sample_id, line_number), items in sorted(grouped.items()):
+        if any(field not in items for field in primary_keys):
+            continue
+        source_line = ""
+        sample_lines = str((evidence_samples or {}).get(sample_id) or "").splitlines()
+        if line_number <= len(sample_lines):
+            source_line = sample_lines[line_number - 1]
+        if not source_line:
+            labels = {str(items[field].get("source_label") or "").strip() for field in primary_keys}
+            labels.discard("")
+            if len(labels) != 1:
+                continue
+            source_line = labels.pop()
+
+        captures: list[EvidenceCapture] = []
+        boundaries: list[EvidenceCapture] = []
+        for field in primary_keys:
+            source_value = str(items[field].get("source_value") or "").strip()
+            if not source_value:
+                captures = []
+                break
+            captures.append(EvidenceCapture(source_value, field_patterns[field], field))
+            boundaries.append(EvidenceCapture(source_value, field_patterns[field], None))
+        if not captures:
+            continue
+        try:
+            capture_pattern = compile_evidence_line(
+                source_line,
+                tuple(captures),
+                generalize_unbound_numbers=True,
+            )
+            boundary_pattern = compile_evidence_line(
+                source_line,
+                tuple(boundaries),
+                generalize_unbound_numbers=True,
+            )
+        except ValueError:
+            continue
+        if capture_pattern not in capture_patterns:
+            capture_patterns.append(capture_pattern)
+        if boundary_pattern not in boundary_patterns:
+            boundary_patterns.append(boundary_pattern)
+    return capture_patterns, boundary_patterns
+
+
+def expected_entity_count_from_evidence(
+    sample_text: str,
+    spec: CategorySpec,
+    *,
+    field_bindings: dict[str, Any] | None = None,
+) -> int | None:
+    """Count repeated entities from evidenced primary-key anchors."""
+
+    _captures, boundaries = _primary_key_anchor_patterns(spec, field_bindings)
+    lines = str(sample_text or "").splitlines()
+    matchers = [_python_rule(pattern, {}) for pattern in boundaries]
+    matched_lines = {
+        index
+        for index, line in enumerate(lines)
+        if any(matcher.match(line) for matcher in matchers)
+    }
+    required_evidence_counts: list[int] = []
+    for field_name in spec.required_fields:
+        evidence_lines = {
+            index
+            for item in _binding_items(field_bindings, field_name)
+            if _binding_is_direct(item)
+            for index, line in enumerate(lines)
+            if (
+                literal_occurs(line, str(item.get("source_label") or "").strip())
+                if str(item.get("source_label") or "").strip()
+                else (
+                    str(item.get("source_value") or "").strip()
+                    and literal_occurs(line, str(item.get("source_value") or "").strip())
+                )
+            )
+        }
+        if evidence_lines:
+            required_evidence_counts.append(len(evidence_lines))
+    return max([len(matched_lines), *required_evidence_counts], default=0) or None
 
 
 def _contextualize_fields(
@@ -516,6 +648,176 @@ def _nearest_block_section(
     return None
 
 
+class EvidenceHierarchicalRowProvider:
+    """Compile parent Filldown context plus repeated child record rows."""
+
+    name = "generic_evidence_hierarchy"
+
+    def propose(self, context: ProviderContext) -> ProviderCandidate | None:
+        primary_keys = tuple(context.spec.primary_keys)
+        if len(primary_keys) < 2 or not context.evidence_samples:
+            return None
+
+        key_lines: dict[str, dict[str, set[int]]] = {}
+        for field in primary_keys:
+            for item in _binding_items(context.field_bindings, field):
+                sample_id = str(item.get("sample_id") or "")
+                line_number = _binding_line(item)
+                if not line_number or sample_id not in context.evidence_samples:
+                    continue
+                key_lines.setdefault(field, {}).setdefault(sample_id, set()).add(line_number)
+        key_counts = {
+            field: sum(len(lines) for lines in by_sample.values())
+            for field, by_sample in key_lines.items()
+        }
+        if set(key_counts) != set(primary_keys):
+            return None
+        maximum_count = max(key_counts.values(), default=0)
+        parent_keys = tuple(
+            field for field in primary_keys if key_counts[field] < maximum_count
+        )
+        child_keys = tuple(field for field in primary_keys if field not in parent_keys)
+        if not parent_keys or not child_keys:
+            return None
+
+        for sample_id in context.evidence_samples:
+            child_line_numbers = sorted(
+                set().union(*(key_lines[field].get(sample_id, set()) for field in child_keys))
+            )
+            if not child_line_numbers:
+                return None
+            for parent in parent_keys:
+                parent_line_numbers = sorted(key_lines[parent].get(sample_id, set()))
+                if not parent_line_numbers or any(
+                    not any(parent_line <= child_line for parent_line in parent_line_numbers)
+                    for child_line in child_line_numbers
+                ):
+                    return None
+
+        field_patterns = {
+            field: _value_pattern(field, context.spec) for field in context.spec.fields
+        }
+        field_order = {field: index for index, field in enumerate(context.spec.fields)}
+        line_bindings: dict[tuple[str, int], list[tuple[str, dict[str, Any]]]] = {}
+        for field in context.spec.fields:
+            for item in _binding_items(context.field_bindings, field):
+                sample_id = str(item.get("sample_id") or "")
+                line_number = _binding_line(item)
+                if (
+                    not line_number
+                    or sample_id not in context.evidence_samples
+                    or not _binding_is_capturable(field, item, context.spec)
+                ):
+                    continue
+                line_bindings.setdefault((sample_id, line_number), []).append((field, item))
+
+        def compile_group(
+            sample_id: str,
+            line_number: int,
+            bindings: list[tuple[str, dict[str, Any]]],
+        ) -> tuple[ParserRule, tuple[str, ...]] | None:
+            lines = str(context.evidence_samples.get(sample_id) or "").splitlines()
+            if line_number > len(lines):
+                return None
+            source_line = lines[line_number - 1]
+            captures = [
+                EvidenceCapture(
+                    str(item.get("source_value") or ""),
+                    field_patterns[field],
+                    field,
+                )
+                for field, item in sorted(
+                    bindings,
+                    key=lambda pair: (
+                        source_line.find(str(pair[1].get("source_value") or "")),
+                        field_order.get(pair[0], 10_000),
+                    ),
+                )
+            ]
+            if not captures or not _has_bounded_literal_context(source_line, captures):
+                return None
+            try:
+                pattern = compile_evidence_line(
+                    source_line,
+                    tuple(captures),
+                    generalize_unbound_numbers=True,
+                )
+            except ValueError:
+                return None
+            return ParserRule(pattern), tuple(
+                capture.field for capture in captures if capture.field
+            )
+
+        parent_rules: list[ParserRule] = []
+        parent_metadata: list[tuple[str, tuple[str, ...]]] = []
+        parent_fields: set[str] = set()
+        seen_parent_patterns: set[str] = set()
+        for (sample_id, line_number), bindings in sorted(line_bindings.items()):
+            fields = {field for field, _item in bindings}
+            if not set(parent_keys).issubset(fields) or set(child_keys).intersection(fields):
+                continue
+            compiled = compile_group(sample_id, line_number, bindings)
+            if not compiled or compiled[0].pattern in seen_parent_patterns:
+                continue
+            rule, captured = compiled
+            seen_parent_patterns.add(rule.pattern)
+            parent_rules.append(rule)
+            parent_metadata.append((rule.pattern, captured))
+            parent_fields.update(captured)
+        if not set(parent_keys).issubset(parent_fields):
+            return None
+
+        child_required = set(context.spec.required_fields) - parent_fields
+        child_rules: list[ParserRule] = []
+        child_metadata: list[tuple[str, tuple[str, ...]]] = []
+        child_fields: set[str] = set()
+        seen_child_patterns: set[str] = set()
+        for (sample_id, line_number), bindings in sorted(line_bindings.items()):
+            fields = {field for field, _item in bindings}
+            if not set(child_keys).issubset(fields) or not child_required.issubset(fields):
+                continue
+            compiled = compile_group(sample_id, line_number, bindings)
+            if not compiled or compiled[0].pattern in seen_child_patterns:
+                continue
+            rule, captured = compiled
+            seen_child_patterns.add(rule.pattern)
+            child_rules.append(ParserRule(rule.pattern, "Record"))
+            child_metadata.append((rule.pattern, captured))
+            child_fields.update(captured)
+        if not set(child_keys).issubset(child_fields) or not child_required.issubset(
+            child_fields
+        ):
+            return None
+
+        parent_rules, _parent_metadata = _prioritize_capture_rules(
+            parent_rules, parent_metadata
+        )
+        child_rules, _child_metadata = _prioritize_capture_rules(
+            child_rules, child_metadata
+        )
+        used_fields = parent_fields | child_fields
+        values = tuple(
+            ParserValue(
+                field,
+                field_patterns[field],
+                ("Filldown",) if field in parent_fields else (),
+            )
+            for field in context.spec.fields
+            if field in used_fields
+        )
+        ir = ParserIR(
+            values=values,
+            states=(ParserState("Start", tuple([*parent_rules, *child_rules])),),
+            explicit_eof=True,
+            record_grain="hierarchical_child_row",
+        )
+        return ProviderCandidate(
+            compile_textfsm(ir),
+            self.name,
+            "contract_evidence_parent_filldown_child_record",
+        )
+
+
 class EvidenceRepeatedBlockProvider:
     """Compile a repeated-block state machine from Contract line evidence."""
 
@@ -524,49 +826,21 @@ class EvidenceRepeatedBlockProvider:
     def propose(self, context: ProviderContext) -> ProviderCandidate | None:
         if context.structure_profile.get("dominant_layout") != "repeated_block":
             return None
-        if len(context.spec.primary_keys) != 1 or not context.evidence_samples:
-            return None
-        key = context.spec.primary_keys[0]
-        key_items = [
-            item for item in _binding_items(context.field_bindings, key) if _binding_is_direct(item)
-        ]
-        if not key_items:
+        if not context.spec.primary_keys or not context.evidence_samples:
             return None
 
         field_patterns = {
             field: _value_pattern(field, context.spec) for field in context.spec.fields
         }
-        anchor_patterns: list[str] = []
-        boundary_patterns: list[str] = []
-        for item in key_items:
-            sample_id = str(item.get("sample_id") or "")
-            line_number = _binding_line(item)
-            lines = str(context.evidence_samples.get(sample_id) or "").splitlines()
-            if not line_number or line_number > len(lines):
-                continue
-            source_value = str(item.get("source_value") or "").strip()
-            if not source_value:
-                continue
-            try:
-                capture_pattern = compile_evidence_line(
-                    lines[line_number - 1],
-                    (EvidenceCapture(source_value, field_patterns[key], key),),
-                )
-                boundary_pattern = compile_evidence_line(
-                    lines[line_number - 1],
-                    (EvidenceCapture(source_value, field_patterns[key], None),),
-                )
-            except ValueError:
-                continue
-            if capture_pattern not in anchor_patterns:
-                anchor_patterns.append(capture_pattern)
-            if boundary_pattern not in boundary_patterns:
-                boundary_patterns.append(boundary_pattern)
+        anchor_patterns, boundary_patterns = _primary_key_anchor_patterns(
+            context.spec,
+            context.field_bindings,
+            evidence_samples=context.evidence_samples,
+        )
         if not anchor_patterns:
             return None
 
         anchor_matchers = [_python_rule(pattern, field_patterns) for pattern in anchor_patterns]
-        block_ends: set[tuple[str, int]] = set()
         blocks: list[tuple[str, int, int]] = []
         for sample_id, sample_text in context.evidence_samples.items():
             lines = str(sample_text or "").splitlines()
@@ -581,15 +855,16 @@ class EvidenceRepeatedBlockProvider:
                 while end > start and not lines[end].strip():
                     end -= 1
                 if end > start:
-                    block_ends.add((sample_id, end + 1))
                     blocks.append((sample_id, start + 1, end + 1))
 
         field_order = {field: index for index, field in enumerate(context.spec.fields)}
         line_bindings: dict[tuple[str, int], list[tuple[str, dict[str, Any]]]] = {}
         for field in context.spec.fields:
-            if field == key:
+            if field in context.spec.primary_keys:
                 continue
             for item in _binding_items(context.field_bindings, field):
+                if not _binding_is_capturable(field, item, context.spec):
+                    continue
                 line_number = _binding_line(item)
                 sample_id = str(item.get("sample_id") or "")
                 if not line_number or sample_id not in context.evidence_samples:
@@ -600,9 +875,8 @@ class EvidenceRepeatedBlockProvider:
         body_rule_fields: list[tuple[str, tuple[str, ...]]] = []
         body_rule_contexts: list[str | None] = []
         seen_rules: set[tuple[str, str | None]] = set()
-        used_fields: set[str] = {key}
-        all_lines = set(line_bindings) | block_ends
-        for sample_id, line_number in sorted(all_lines):
+        used_fields: set[str] = set(context.spec.primary_keys)
+        for sample_id, line_number in sorted(line_bindings):
             lines = str(context.evidence_samples.get(sample_id) or "").splitlines()
             if line_number < 1 or line_number > len(lines):
                 continue
@@ -611,8 +885,6 @@ class EvidenceRepeatedBlockProvider:
                 line_bindings.get((sample_id, line_number), []),
                 key=lambda pair: field_order.get(pair[0], 10_000),
             ):
-                if not _binding_is_capturable(field, item, context.spec):
-                    continue
                 captures.append(
                     EvidenceCapture(
                         str(item.get("source_value") or ""),
@@ -655,7 +927,7 @@ class EvidenceRepeatedBlockProvider:
                 mapped = _mapped_header(
                     lines[header_index],
                     context.spec,
-                    excluded={key},
+                    excluded=set(context.spec.primary_keys),
                     field_bindings=None,
                 )
                 if not mapped:
@@ -667,7 +939,7 @@ class EvidenceRepeatedBlockProvider:
                     if _mapped_header(
                         lines[row_index],
                         context.spec,
-                        excluded={key},
+                        excluded=set(context.spec.primary_keys),
                         field_bindings=None,
                     ):
                         break
@@ -791,12 +1063,9 @@ class EvidenceRepeatedBlockProvider:
                     ParserRule(capture, "Start"),
                 )
             )
-        section_names = list(
-            dict.fromkeys(section for section in body_rule_contexts if section)
-        )
+        section_names = list(dict.fromkeys(section for section in body_rule_contexts if section))
         section_states = {
-            section: f"Context{index + 1}"
-            for index, section in enumerate(section_names)
+            section: f"Context{index + 1}" for index, section in enumerate(section_names)
         }
         section_transitions = [
             ParserRule(_literal_line_pattern(section), state_name)
@@ -868,6 +1137,113 @@ class EvidenceRepeatedBlockProvider:
             compile_textfsm(ir),
             self.name,
             "evidence_repeated_block",
+        )
+
+
+class EvidenceSingletonProvider:
+    """Compile one snapshot record from governed Contract line evidence."""
+
+    name = "generic_evidence_singleton"
+
+    def propose(self, context: ProviderContext) -> ProviderCandidate | None:
+        if context.entity_scope != "singleton":
+            return None
+        if context.spec.primary_keys or not context.evidence_samples:
+            return None
+
+        field_patterns = {
+            field: _value_pattern(field, context.spec) for field in context.spec.fields
+        }
+        field_order = {field: index for index, field in enumerate(context.spec.fields)}
+        line_bindings: dict[tuple[str, int], list[tuple[str, dict[str, Any]]]] = {}
+        binding_lines_by_field: dict[str, dict[str, set[int]]] = {}
+        for field in context.spec.fields:
+            for item in _binding_items(context.field_bindings, field):
+                sample_id = str(item.get("sample_id") or "")
+                line_number = _binding_line(item)
+                if (
+                    not line_number
+                    or sample_id not in context.evidence_samples
+                    or not _binding_is_capturable(field, item, context.spec)
+                ):
+                    continue
+                line_bindings.setdefault((sample_id, line_number), []).append((field, item))
+                binding_lines_by_field.setdefault(field, {}).setdefault(sample_id, set()).add(
+                    line_number
+                )
+
+        rules: list[ParserRule] = []
+        metadata: list[tuple[str, tuple[str, ...]]] = []
+        used_fields: set[str] = set()
+        seen_patterns: set[str] = set()
+        for (sample_id, line_number), bindings in sorted(line_bindings.items()):
+            lines = str(context.evidence_samples.get(sample_id) or "").splitlines()
+            if line_number > len(lines):
+                continue
+            source_line = lines[line_number - 1]
+            captures = [
+                EvidenceCapture(
+                    str(item.get("source_value") or ""),
+                    field_patterns[field],
+                    field,
+                )
+                for field, item in sorted(
+                    bindings,
+                    key=lambda pair: (
+                        source_line.find(str(pair[1].get("source_value") or "")),
+                        field_order.get(pair[0], 10_000),
+                    ),
+                )
+            ]
+            if not captures or not _has_bounded_literal_context(source_line, captures):
+                continue
+            try:
+                pattern = compile_evidence_line(
+                    source_line,
+                    tuple(captures),
+                    generalize_unbound_numbers=True,
+                )
+            except ValueError:
+                continue
+            if pattern in seen_patterns:
+                continue
+            seen_patterns.add(pattern)
+            fields = tuple(capture.field for capture in captures if capture.field)
+            rules.append(ParserRule(pattern))
+            metadata.append((pattern, fields))
+            used_fields.update(fields)
+
+        if not set(context.spec.required_fields).issubset(used_fields):
+            return None
+        rules, _metadata = _prioritize_capture_rules(rules, metadata)
+        repeated_fields = {
+            field
+            for field, sample_lines in binding_lines_by_field.items()
+            if any(len(lines) > 1 for lines in sample_lines.values())
+        }
+        values = tuple(
+            ParserValue(
+                field,
+                field_patterns[field],
+                ("List",) if field in repeated_fields else (),
+            )
+            for field in context.spec.fields
+            if field in used_fields
+        )
+        flush = ParserRule(
+            rf"^\s*{re.escape(TEXTFSM_END_OF_INPUT)}\s*$$",
+            "Record EOF",
+        )
+        ir = ParserIR(
+            values=values,
+            states=(ParserState("Start", tuple([flush, *rules])),),
+            explicit_eof=True,
+            record_grain="snapshot_singleton",
+        )
+        return ProviderCandidate(
+            compile_textfsm(ir),
+            self.name,
+            "contract_evidence_singleton",
         )
 
 
@@ -1091,6 +1467,8 @@ class TemplateProviderRegistry:
         include_manual_builtins: bool = False,
     ) -> None:
         automatic: tuple[TemplateProvider, ...] = (
+            EvidenceSingletonProvider(),
+            EvidenceHierarchicalRowProvider(),
             EvidenceRepeatedBlockProvider(),
             MultiSectionTableProvider(),
             GenericTableProvider(),

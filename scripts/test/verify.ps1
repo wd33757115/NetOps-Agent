@@ -85,8 +85,22 @@ import sys
 sys.exit(0 if celery_workers_available() else 1)
 "@ 2>$null
     Assert-Ok "Celery Worker ping" ($LASTEXITCODE -eq 0) "(run scripts\test\start.ps1 or start worker manually)"
+
+    $patrolReadiness = & $venvPython (Join-Path $PSScriptRoot "check_patrol_readiness.py") 2>$null
+    $patrolReadinessExit = $LASTEXITCODE
+    $patrolReadinessDetail = ""
+    if ($patrolReadiness) {
+        try {
+            $patrolReadinessJson = $patrolReadiness[-1] | ConvertFrom-Json
+            $patrolReadinessDetail = @($patrolReadinessJson.blockers | ForEach-Object { $_.message }) -join "; "
+        } catch {
+            $patrolReadinessDetail = $patrolReadiness -join " "
+        }
+    }
+    Assert-Ok "Formal patrol production readiness" ($patrolReadinessExit -eq 0) $patrolReadinessDetail
 } else {
     Assert-Ok "Celery Worker ping" $false "venv not found"
+    Assert-Ok "Formal patrol production readiness" $false "venv not found"
 }
 
 Write-ColorOutput "" "Cyan"

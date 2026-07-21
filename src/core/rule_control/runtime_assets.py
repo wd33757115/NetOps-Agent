@@ -27,24 +27,34 @@ class RuntimeRuleAssetBundle:
     event_rules: list[dict[str, Any]] = field(default_factory=list)
     missing_observation_contracts: list[str] = field(default_factory=list)
     missing_change_policies: list[str] = field(default_factory=list)
+    missing_event_rules: list[str] = field(default_factory=list)
+    observation_types: list[str] = field(default_factory=list)
     digest: str = ""
 
     @property
     def ready(self) -> bool:
         """Backward-compatible alias for analysis readiness."""
-        return not self.missing_observation_contracts and not self.missing_change_policies
+        return self.analysis_ready
 
     @property
     def collection_ready(self) -> bool:
-        return not self.missing_observation_contracts
+        return bool(self.observation_contracts) and not self.missing_observation_contracts
 
     @property
     def analysis_ready(self) -> bool:
-        return self.ready
+        return (
+            self.collection_ready
+            and bool(self.observation_types)
+            and not self.missing_change_policies
+        )
 
     @property
     def event_evaluation_ready(self) -> bool:
-        return bool(self.event_rules)
+        return (
+            self.analysis_ready
+            and bool(self.event_rules)
+            and not self.missing_event_rules
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -58,6 +68,8 @@ class RuntimeRuleAssetBundle:
             "event_rules": self.event_rules,
             "missing_observation_contracts": self.missing_observation_contracts,
             "missing_change_policies": self.missing_change_policies,
+            "missing_event_rules": self.missing_event_rules,
+            "observation_types": self.observation_types,
             "counts": {
                 "observation_contracts": len(self.observation_contracts),
                 "change_policies": len(self.change_policies),
@@ -118,12 +130,24 @@ class RuntimeRuleAssetResolver:
             if include_event_rules
             else []
         )
+        declared_event_types = _event_rule_observation_types(event_rules)
+        missing_event_rules = (
+            [
+                observation_type
+                for observation_type in requested_observation_types
+                if observation_type not in declared_event_types
+            ]
+            if include_event_rules
+            else list(requested_observation_types)
+        )
         payload = {
             "observation_contracts": contracts,
             "change_policies": policies,
             "event_rules": event_rules,
             "missing_observation_contracts": missing_contracts,
             "missing_change_policies": missing_policies,
+            "missing_event_rules": missing_event_rules,
+            "observation_types": requested_observation_types,
         }
         digest = hashlib.sha256(
             json.dumps(
@@ -140,7 +164,22 @@ class RuntimeRuleAssetResolver:
             event_rules=event_rules,
             missing_observation_contracts=missing_contracts,
             missing_change_policies=missing_policies,
+            missing_event_rules=missing_event_rules,
+            observation_types=requested_observation_types,
             digest=digest,
+        )
+
+    def load_inventory_bundle(self) -> RuntimeRuleAssetBundle:
+        contracts = self.contract_repository.list_active_validation_dicts()
+        schemas = [
+            (str(item.get("source_type") or ""), str(item.get("schema_id") or ""))
+            for item in contracts
+        ]
+        observation_types = _observation_types_from_contracts(contracts)
+        return self.load_bundle(
+            observation_schemas=schemas,
+            observation_types=observation_types,
+            include_event_rules=True,
         )
 
 
@@ -185,3 +224,18 @@ def _observation_types_from_contracts(
             if observation_type:
                 values.append(observation_type)
     return _unique_strings(values)
+
+
+def _event_rule_observation_types(rules: Iterable[dict[str, Any]]) -> set[str]:
+    values: set[str] = set()
+    for rule in rules:
+        condition = rule.get("condition")
+        if not isinstance(condition, dict):
+            condition = rule.get("condition_json")
+        if not isinstance(condition, dict):
+            continue
+        declared = condition.get("observation_types")
+        if not isinstance(declared, list):
+            continue
+        values.update(str(item).strip() for item in declared if str(item).strip())
+    return values

@@ -143,7 +143,9 @@ def test_snapshot_change_keeps_hashes_and_adds_safe_diff_evidence():
     assert changes[0].new_value == "b" * 64
     diff = changes[0].dimensions["unstructured_diff"]
     assert diff["changed"] is True
-    assert changes[0].comparison_type == "unstructured_ordered_lines"
+    # 配置类命令（show running-config）经 config-diff-tool 桥接比较
+    assert changes[0].comparison_type == "unstructured_config_diff_tool"
+    assert diff["config_diff"]["comparison_mode"] == "config_diff_tool"
 
 
 def test_summary_aggregates_only_effective_unstructured_changes():

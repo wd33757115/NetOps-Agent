@@ -28,12 +28,14 @@ from report_generator import GenerationReport, save_report, save_summary
 from template_providers import (
     ProviderContext,
     TemplateProviderRegistry,
+    expected_entity_count_from_evidence,
     expected_primary_key_tuples_from_tables,
 )
 from template_validator import (
     ValidationResult,
     canonicalize_template_fields,
     parse_with_template,
+    repair_record_boundary_candidate,
     strip_llm_template,
     uncovered_structured_lines,
     validate_template,
@@ -269,9 +271,16 @@ def _validate_samples(
             spec,
             field_bindings=field_bindings,
         )
+        evidenced_entity_count = expected_entity_count_from_evidence(
+            sample.output,
+            spec,
+            field_bindings=field_bindings,
+        )
         expected_entities = (
             len(expected_keys)
             if expected_keys
+            else evidenced_entity_count
+            if evidenced_entity_count is not None
             else structure.estimated_entities
             if structure.confidence >= 0.8
             and structure.layout_kind
@@ -426,11 +435,13 @@ def _category_spec_from_contract(payload: dict[str, Any]) -> CategorySpec:
         )
     }
     required_fields = [
-        str(field) for field in payload.get("required_fields") or []
+        str(field)
+        for field in payload.get("required_fields") or []
         if str(field) not in derived_only
     ]
     optional_fields = [
-        str(field) for field in payload.get("optional_fields") or []
+        str(field)
+        for field in payload.get("optional_fields") or []
         if str(field) not in derived_only
     ]
     parser_fields = {*required_fields, *optional_fields}
@@ -526,9 +537,7 @@ def _evaluate_agent_candidate(
     )
     keys_ok = contract_ok and all(not item.key_errors for item in validations)
     entities_ok = keys_ok and all(not item.completeness_errors for item in validations)
-    evidence_alignment_ok = entities_ok and all(
-        not item.evidence_errors for item in validations
-    )
+    evidence_alignment_ok = entities_ok and all(not item.evidence_errors for item in validations)
     empty_ok = evidence_alignment_ok and all(
         item.record_count > 0 or item.empty_accepted for item in validations
     )
@@ -560,9 +569,7 @@ def _evaluate_agent_candidate(
             continue
         sample_hash = hashlib.sha256(sample.output.encode("utf-8")).hexdigest()
         sample_id = f"sample-{sample_hash[:12]}"
-        uncovered_variants.extend(
-            {"sample_id": sample_id, **gap} for gap in gaps
-        )
+        uncovered_variants.extend({"sample_id": sample_id, **gap} for gap in gaps)
         detail["uncovered_structured_lines"] = gaps[:20]
         diagnostics.append(
             ParserDiagnostic(
@@ -589,9 +596,7 @@ def _evaluate_agent_candidate(
         for line in template_text.splitlines():
             if not re.search(r"->\s*(?:(?:Continue|Next)\.)?Record\b", line):
                 continue
-            record_transition_fields.update(
-                re.findall(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", line)
-            )
+            record_transition_fields.update(re.findall(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", line))
         primary_keys_populated = bool(parsed_records) and all(
             all(str(record.get(key, "")).strip() for key in spec.primary_keys)
             for record in parsed_records
@@ -599,9 +604,7 @@ def _evaluate_agent_candidate(
         likely_early_record = (
             primary_keys_populated
             and bool(set(spec.primary_keys).intersection(record_transition_fields))
-            and not set(missing_evidenced_fields).intersection(
-                record_transition_fields
-            )
+            and not set(missing_evidenced_fields).intersection(record_transition_fields)
         )
         if likely_early_record:
             diagnostics.append(
@@ -666,9 +669,7 @@ def _evaluate_agent_candidate(
                 code="cross_sample_regression",
                 message="candidate failed one or more hidden holdout samples",
                 evidence={
-                    "failed_count": sum(
-                        not item.is_valid for item in role_results["holdout"]
-                    )
+                    "failed_count": sum(not item.is_valid for item in role_results["holdout"])
                 },
             )
         )
@@ -736,18 +737,13 @@ def _process_candidate(
         prompt_refs,
     )
     parse_plan = profile_sample_set(
-        [
-            (ref.sample_id, candidate.samples[ref.index].output)
-            for ref in sample_partition.train
-        ]
+        [(ref.sample_id, candidate.samples[ref.index].output) for ref in sample_partition.train]
     )
     target = resolve_template_path(templates_dir, candidate.model, candidate.command)
     skipped_reason = None
     positive_refs = (*sample_partition.train, *sample_partition.holdout)
     positive_trigger_samples = tuple(candidate.samples[ref.index] for ref in positive_refs)
-    negative_samples = tuple(
-        candidate.samples[ref.index] for ref in sample_partition.negative
-    )
+    negative_samples = tuple(candidate.samples[ref.index] for ref in sample_partition.negative)
     positive_samples = tuple([*positive_trigger_samples, *regression_samples])
     negative_hashes = {ref.content_sha256 for ref in sample_partition.negative}
     replay_positive_samples = tuple(
@@ -755,8 +751,7 @@ def _process_candidate(
             *(
                 sample
                 for sample in candidate.samples
-                if hashlib.sha256(sample.output.encode("utf-8")).hexdigest()
-                not in negative_hashes
+                if hashlib.sha256(sample.output.encode("utf-8")).hexdigest() not in negative_hashes
             ),
             *regression_samples,
         ]
@@ -805,12 +800,19 @@ def _process_candidate(
                 spec=spec,
                 structure_profile=parse_plan,
                 field_bindings=dict(
-                    ((state.get("contract") or {}).get("evidence") or {}).get(
-                        "field_bindings"
-                    )
+                    ((state.get("contract") or {}).get("evidence") or {}).get("field_bindings")
                     or {}
                 ),
                 evidence_samples=_prompt_sample_bodies(sanitized_prompt_samples),
+                entity_scope=str(
+                    (
+                        ((state.get("contract") or {}).get("evidence") or {}).get(
+                            "entity_scope_governance"
+                        )
+                        or {}
+                    ).get("scope")
+                    or ""
+                ),
             ),
             limit=2,
         )
@@ -825,10 +827,27 @@ def _process_candidate(
     def template_builder(state) -> GeneratedTemplate:
         spec = _category_spec_from_contract(dict(state["contract"]))
         regenerate = state.get("template_mode") == "regenerate"
-        previous = "" if regenerate else str(
-            state.get("best_template") or state.get("current_template") or ""
+        previous = (
+            ""
+            if regenerate
+            else str(state.get("best_template") or state.get("current_template") or "")
         )
         diagnostic = dict(state.get("primary_diagnostic") or {})
+        repaired = (
+            repair_record_boundary_candidate(
+                previous,
+                diagnostic,
+                primary_keys=spec.primary_keys,
+            )
+            if previous
+            else None
+        )
+        if repaired:
+            synthesis_strategy["value"] = "deterministic_record_boundary_repair"
+            return GeneratedTemplate(
+                template_text=repaired,
+                provider="platform-repair",
+            )
         if regenerate:
             diagnostic = {
                 **diagnostic,
@@ -846,10 +865,7 @@ def _process_candidate(
             validators=spec.validators,
             parse_plan=parse_plan,
             field_bindings=dict(
-                ((state.get("contract") or {}).get("evidence") or {}).get(
-                    "field_bindings"
-                )
-                or {}
+                ((state.get("contract") or {}).get("evidence") or {}).get("field_bindings") or {}
             ),
             allow_empty=spec.allow_empty,
             empty_patterns=spec.empty_patterns,
@@ -868,10 +884,7 @@ def _process_candidate(
             validators=spec.validators,
             parse_plan=parse_plan,
             field_bindings=dict(
-                ((state.get("contract") or {}).get("evidence") or {}).get(
-                    "field_bindings"
-                )
-                or {}
+                ((state.get("contract") or {}).get("evidence") or {}).get("field_bindings") or {}
             ),
             allow_empty=spec.allow_empty,
             empty_patterns=spec.empty_patterns,
@@ -929,12 +942,23 @@ def _process_candidate(
         resume_state = job_repository.get_generation_resume_state(source_job_id)
         same_sample_sets = (
             resume_state.get("train_sample_set_hash") == sample_partition.train_set_hash
-            and resume_state.get("holdout_sample_set_hash")
-            == sample_partition.holdout_set_hash
+            and resume_state.get("holdout_sample_set_hash") == sample_partition.holdout_set_hash
         )
         if same_sample_sets:
             initial_agent_state.update(resume_state)
             initial_agent_state["job_id"] = source_job_id
+            if resume_state.get("contract"):
+                governed = govern_contract_candidate(
+                    proposal_from_dict(dict(resume_state["contract"]))
+                )
+                contract_valid, _contract_diagnostics = validate_contract_candidate(
+                    governed,
+                    structure_profile=parse_plan,
+                    samples_text=sanitized_prompt_samples,
+                )
+                if contract_valid:
+                    initial_agent_state["contract"] = governed.to_dict()
+                    initial_agent_state["contract_valid"] = True
         elif not resume_state:
             reusable = job_repository.get_latest_valid_contract_attempt(
                 source_job_id,
@@ -942,9 +966,7 @@ def _process_candidate(
                 holdout_sample_set_hash=sample_partition.holdout_set_hash,
             )
             if reusable:
-                governed = govern_contract_candidate(
-                    proposal_from_dict(dict(reusable["contract"]))
-                )
+                governed = govern_contract_candidate(proposal_from_dict(dict(reusable["contract"])))
                 contract_valid, _contract_diagnostics = validate_contract_candidate(
                     governed,
                     structure_profile=parse_plan,
@@ -969,11 +991,9 @@ def _process_candidate(
                     )
     agent_result = agent.invoke(initial_agent_state)
     synthesis_strategy["value"] = str(
-        (
-            agent_result.get("best_generated_meta")
-            or agent_result.get("generated_meta")
-            or {}
-        ).get("provider")
+        (agent_result.get("best_generated_meta") or agent_result.get("generated_meta") or {}).get(
+            "provider"
+        )
         or "llm"
     )
     proposal = proposal_from_dict(dict(agent_result.get("contract") or {}))
@@ -983,12 +1003,16 @@ def _process_candidate(
         agent_result.get("best_template") or agent_result.get("current_template") or ""
     )
     retry_count = max(0, int(agent_result.get("template_attempt") or 0) - 1)
-    validations, sample_results = _validate_samples(
-        template_text,
-        replay_positive_samples,
-        spec,
-        field_bindings=dict((proposal.evidence or {}).get("field_bindings") or {}),
-    ) if template_text else ([], [])
+    validations, sample_results = (
+        _validate_samples(
+            template_text,
+            replay_positive_samples,
+            spec,
+            field_bindings=dict((proposal.evidence or {}).get("field_bindings") or {}),
+        )
+        if template_text
+        else ([], [])
+    )
     positive_passed = sum(result.is_valid for result in validations)
     negative_results = list(
         (agent_result.get("validation_report") or {}).get("negative_results") or []
@@ -996,9 +1020,7 @@ def _process_candidate(
     negative_passed = sum(bool(item.get("passed")) for item in negative_results)
     passed_samples = positive_passed + negative_passed
     total_validation_samples = len(validations) + len(negative_results)
-    pass_rate = (
-        passed_samples / total_validation_samples if total_validation_samples else 0.0
-    )
+    pass_rate = passed_samples / total_validation_samples if total_validation_samples else 0.0
     accepted = agent_result.get("status") == "passed"
     generated = False
     if accepted and publish and not dry_run:
@@ -1033,8 +1055,7 @@ def _process_candidate(
                 "profile": target_profile,
                 "scope": (
                     "family"
-                    if candidate.family
-                    and target_profile.casefold() == candidate.family.casefold()
+                    if candidate.family and target_profile.casefold() == candidate.family.casefold()
                     else "model"
                 ),
                 "model": candidate.model,
@@ -1089,9 +1110,7 @@ def _process_candidate(
                 "template_attempts": agent_result.get("template_attempt"),
                 "best_attempt_id": agent_result.get("best_attempt_id"),
                 "contract_reuse": agent_result.get("contract_reuse"),
-                "hard_gates": (
-                    agent_result.get("validation_report") or {}
-                ).get("hard_gates"),
+                "hard_gates": (agent_result.get("validation_report") or {}).get("hard_gates"),
             },
             "regression_validation": {
                 "passed": accepted,
@@ -1142,8 +1161,7 @@ def _process_candidate(
         primary_keys=spec.primary_keys,
         template_generated=generated,
         accepted=accepted,
-        compile_success=bool(validations)
-        and all(result.compile_success for result in validations),
+        compile_success=bool(validations) and all(result.compile_success for result in validations),
         record_count=sum(result.record_count for result in validations),
         field_coverage=min((result.field_coverage for result in validations), default=0),
         validation_score=min((result.validation_score for result in validations), default=0),
@@ -1183,9 +1201,7 @@ def _process_candidate(
             "validation_report": agent_result.get("validation_report") or {},
             "contract": agent_result.get("contract") or {},
             "best_candidate_template": str(
-                agent_result.get("best_template")
-                or agent_result.get("current_template")
-                or ""
+                agent_result.get("best_template") or agent_result.get("current_template") or ""
             ),
             "best_candidate_provider": synthesis_strategy["value"],
             "best_attempt_id": agent_result.get("best_attempt_id"),
@@ -1202,9 +1218,13 @@ def _generation_succeeded(
     unresolved_files: list[str],
     minimum_pass_rate: float,
 ) -> bool:
-    return bool(reports) and not unresolved_files and all(
-        report.accepted and report.validation_pass_rate >= minimum_pass_rate
-        for report in reports
+    return (
+        bool(reports)
+        and not unresolved_files
+        and all(
+            report.accepted and report.validation_pass_rate >= minimum_pass_rate
+            for report in reports
+        )
     )
 
 
@@ -1273,9 +1293,7 @@ def generate_templates(params: dict[str, Any]) -> dict[str, Any]:
                 minimum_pass_rate=float(params.get("minimum_sample_pass_rate", 1.0)),
                 max_samples_per_prompt=int(params.get("max_samples_per_prompt", 3)),
                 agent_token_budget=int(params.get("agent_token_budget", 96000)),
-                agent_time_budget_seconds=int(
-                    params.get("agent_time_budget_seconds", 600)
-                ),
+                agent_time_budget_seconds=int(params.get("agent_time_budget_seconds", 600)),
                 mode=mode,
                 source_job_id=str(params.get("job_id") or "").strip() or None,
             )

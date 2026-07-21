@@ -20,8 +20,10 @@ from src.core.credentials import CredentialResolver
 from src.core.device_ops.manager import DeviceInventoryManager
 from src.core.device_ops.tools import ConfigBackupTool, PatrolTool
 from src.infrastructure.db.models import (
+    AuditLogRecord,
     Base,
     CollectionExecutionPlanRecord,
+    CollectionProfileBindingRecord,
     CommandProfileRecord,
     CommandProfileVersionRecord,
 )
@@ -45,7 +47,9 @@ def _patch_collection_db(monkeypatch, tmp_path):
     Base.metadata.create_all(
         engine,
         tables=[
+            AuditLogRecord.__table__,
             CollectionExecutionPlanRecord.__table__,
+            CollectionProfileBindingRecord.__table__,
             CommandProfileRecord.__table__,
             CommandProfileVersionRecord.__table__,
         ],
@@ -289,6 +293,41 @@ def test_command_profile_activation_requires_saved_impact_evidence(monkeypatch, 
     repository.validate_profile_activation(version_id)
     assert saved["coverage"]["coverage_rate"] == 1.0
     assert saved["coverage"]["recorded_at"]
+
+
+def test_command_profile_binding_status_change_is_audited(monkeypatch, tmp_path):
+    session_factory = _patch_collection_db(monkeypatch, tmp_path)
+    repository = CommandProfileRepository()
+    version_id = repository.create_profile_version(
+        name="core-patrol",
+        action="patrol",
+        commands=["show version"],
+        status="active",
+    )
+    binding_id = repository.upsert_binding(
+        profile_version_id=version_id,
+        selector={"vendor": "H3C", "role": "core"},
+        status="active",
+    )
+
+    result = repository.set_binding_status(
+        binding_id,
+        "disabled",
+        actor="operator",
+        reason="remove obsolete device scope",
+    )
+
+    assert result["status"] == "disabled"
+    with _session_scope(session_factory) as db:
+        audit = (
+            db.query(AuditLogRecord)
+            .filter(AuditLogRecord.resource_id == version_id)
+            .filter(AuditLogRecord.action == "command_profile_binding_disabled")
+            .one()
+        )
+        assert audit.user_id == "operator"
+        assert audit.detail["binding_id"] == binding_id
+        assert audit.detail["reason"] == "remove obsolete device scope"
 
 
 def test_command_profile_delete_version_keeps_active_versions_safe(monkeypatch, tmp_path):

@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 
 from src.common.config import get_settings
 from src.core.parser.identity import DeviceIdentity
@@ -43,8 +43,23 @@ class _TemplateRegistry:
 
 def _canonical_filters(filters: dict[str, Any] | None) -> dict[str, Any]:
     value = dict(filters or {})
+    run_modes = sorted(
+        {
+            str(item).strip().lower()
+            for item in value.get("run_modes") or ["production"]
+            if str(item).strip()
+        }
+    )
+    unsupported_modes = sorted(set(run_modes) - {"production", "parser_validation"})
+    if unsupported_modes:
+        raise ValueError(
+            "unsupported Parser backfill run modes: " + ", ".join(unsupported_modes)
+        )
     return {
         "device_ids": sorted({str(item) for item in value.get("device_ids") or []}),
+        "dataset_ids": sorted({str(item) for item in value.get("dataset_ids") or []}),
+        "run_ids": sorted({str(item) for item in value.get("run_ids") or []}),
+        "run_modes": run_modes,
         "observed_from": value.get("observed_from"),
         "observed_to": value.get("observed_to"),
         "limit": min(max(int(value.get("limit") or 1000), 1), 5000),
@@ -126,6 +141,58 @@ class ParserBackfillService:
                 for row in query.order_by(ParserBackfillJobRecord.created_at.desc()).all()
             ]
 
+    def list_jobs_page(
+        self,
+        *,
+        status: str | None = None,
+        search: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        page_size = max(1, min(int(limit), 200))
+        page_offset = max(0, int(offset))
+        with get_db_session() as db:
+            query = db.query(ParserBackfillJobRecord)
+            if status:
+                query = query.filter(ParserBackfillJobRecord.status == status)
+            pattern = f"%{str(search).strip()}%" if str(search or "").strip() else None
+            if pattern:
+                query = query.filter(
+                    or_(
+                        ParserBackfillJobRecord.id.ilike(pattern),
+                        ParserBackfillJobRecord.template_id.ilike(pattern),
+                        ParserBackfillJobRecord.requested_by.ilike(pattern),
+                    )
+                )
+            total = query.order_by(None).count()
+            rows = (
+                query.order_by(
+                    ParserBackfillJobRecord.created_at.desc(),
+                    ParserBackfillJobRecord.id.desc(),
+                )
+                .offset(page_offset)
+                .limit(page_size)
+                .all()
+            )
+            return {
+                "items": [row.to_dict() for row in rows],
+                "total": total,
+                "limit": page_size,
+                "offset": page_offset,
+            }
+
+    def status_counts(self) -> dict[str, int]:
+        with get_db_session() as db:
+            return {
+                str(status): int(count)
+                for status, count in db.query(
+                    ParserBackfillJobRecord.status,
+                    func.count(ParserBackfillJobRecord.id),
+                )
+                .group_by(ParserBackfillJobRecord.status)
+                .all()
+            }
+
     def execute_dry_run(self, job_id: str) -> dict[str, Any]:
         owner_token = uuid.uuid4().hex
         with get_db_session() as db:
@@ -136,13 +203,16 @@ class ParserBackfillService:
                 .one()
             )
             active_lease = (
-                job.status == "running"
-                and job.lease_until is not None
-                and job.lease_until > _now()
+                job.status == "running" and job.lease_until is not None and job.lease_until > _now()
             )
             if active_lease:
                 raise ValueError("backfill dry-run is already running")
-            if job.status not in {"draft", "validation_failed", "running"}:
+            if job.status not in {
+                "draft",
+                "validation_failed",
+                "pending_approval",
+                "running",
+            }:
                 raise ValueError(f"backfill dry-run cannot start from {job.status}")
             template = db.get(ParserTemplate, job.template_id)
             if template is None or template.status != "active":
@@ -165,7 +235,7 @@ class ParserBackfillService:
             raise ValueError("backfill template disappeared")
         runtime = ParserRuntime(registry=_TemplateRegistry(template))
         rows: list[dict[str, Any]] = []
-        for snapshot in snapshots:
+        for snapshot, run_mode in snapshots:
             identity = DeviceIdentity(
                 vendor=template.vendor,
                 model=template.model or template.profile,
@@ -190,6 +260,7 @@ class ParserBackfillService:
                             template,
                             structured,
                             job_id=job_id,
+                            mode=run_mode,
                         )
                     )
                 except Exception as exc:
@@ -218,6 +289,7 @@ class ParserBackfillService:
             rows.append(
                 {
                     "snapshot_id": snapshot.id,
+                    "run_mode": run_mode,
                     "parse_status": parse_status,
                     "observation_count": observation_count,
                     "existing_observation_count": existing_count,
@@ -306,18 +378,28 @@ class ParserBackfillService:
             raise ValueError("backfill template is no longer active")
         total_created = 0
         run_ids: set[str] = set()
+        production_run_ids: set[str] = set()
         for item in result_payloads:
             with get_db_session() as db:
-                snapshot = db.get(CommandSnapshot, item["snapshot_id"])
-                if snapshot is None:
+                snapshot_row = (
+                    db.query(CommandSnapshot, PatrolRun.mode)
+                    .join(PatrolRun, PatrolRun.id == CommandSnapshot.run_id)
+                    .filter(CommandSnapshot.id == item["snapshot_id"])
+                    .one_or_none()
+                )
+                if snapshot_row is None:
                     raise ValueError(f"backfill snapshot disappeared: {item['snapshot_id']}")
+                snapshot, run_mode = snapshot_row
                 db.expunge(snapshot)
             run_ids.add(snapshot.run_id)
+            if str(run_mode) == "production":
+                production_run_ids.add(snapshot.run_id)
             observations = self._observations(
                 snapshot,
                 template,
                 item["structured_json"],
                 job_id=job_id,
+                mode=str(run_mode),
             )
             created, _ = StateRepository().save_observations(
                 observations,
@@ -339,7 +421,7 @@ class ParserBackfillService:
                 result.updated_at = _now()
         change_count = 0
         event_count = 0
-        for run_id in sorted(run_ids):
+        for run_id in sorted(production_run_ids):
             change_result = detect_historical_backfill_changes(
                 run_id=run_id,
                 backfill_job_id=job_id,
@@ -376,6 +458,8 @@ class ParserBackfillService:
                 "notifications": 0,
                 "change_count": change_count,
                 "event_count": event_count,
+                "production_run_count": len(production_run_ids),
+                "analysis_skipped_run_count": len(run_ids - production_run_ids),
             }
             job.summary_json = summary
             job.status = "completed"
@@ -390,14 +474,14 @@ class ParserBackfillService:
     def _target_snapshots(
         template_id: str,
         filters: dict[str, Any],
-    ) -> list[CommandSnapshot]:
+    ) -> list[tuple[CommandSnapshot, str]]:
         with get_db_session() as db:
             template = db.get(ParserTemplate, template_id)
             query = (
-                db.query(CommandSnapshot)
+                db.query(CommandSnapshot, PatrolRun.mode)
                 .join(PatrolRun, PatrolRun.id == CommandSnapshot.run_id)
                 .filter(
-                    PatrolRun.mode == "production",
+                    PatrolRun.mode.in_(filters.get("run_modes") or ["production"]),
                     CommandSnapshot.canonical_command == template.canonical_command,
                     CommandSnapshot.parse_status.in_(["template_missing", "parse_failed"]),
                     CommandSnapshot.vendor == template.vendor,
@@ -418,6 +502,10 @@ class ParserBackfillService:
                         CommandSnapshot.inventory_device_id.in_(filters["device_ids"]),
                     )
                 )
+            if filters.get("dataset_ids"):
+                query = query.filter(CommandSnapshot.dataset_id.in_(filters["dataset_ids"]))
+            if filters.get("run_ids"):
+                query = query.filter(CommandSnapshot.run_id.in_(filters["run_ids"]))
             observed_from = _as_datetime(filters.get("observed_from"))
             observed_to = _as_datetime(filters.get("observed_to"))
             if observed_from:
@@ -429,9 +517,11 @@ class ParserBackfillService:
                 .limit(int(filters.get("limit") or 1000))
                 .all()
             )
-            for row in rows:
-                db.expunge(row)
-            return rows
+            detached_rows: list[tuple[CommandSnapshot, str]] = []
+            for snapshot, run_mode in rows:
+                db.expunge(snapshot)
+                detached_rows.append((snapshot, str(run_mode)))
+            return detached_rows
 
     @staticmethod
     def _observations(
@@ -440,6 +530,7 @@ class ParserBackfillService:
         structured: Any,
         *,
         job_id: str,
+        mode: str,
     ):
         snapshot_dict = snapshot.to_dict()
         snapshot_dict.update(
@@ -458,7 +549,7 @@ class ParserBackfillService:
         )
         return observations_from_snapshot(
             snapshot_dict,
-            mode="production",
+            mode=mode,
             source="parser-backfill",
             dataset_id=snapshot.dataset_id,
         )

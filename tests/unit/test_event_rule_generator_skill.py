@@ -37,7 +37,7 @@ def _load_skill_module():
     return module
 
 
-def test_event_rule_compiler_keeps_alarm_only_reference_critical():
+def test_event_rule_compiler_does_not_elevate_alarm_role_severity():
     compiled = compile_event_rule_intents(
         candidate_rules=[
             {
@@ -63,9 +63,7 @@ def test_event_rule_compiler_keeps_alarm_only_reference_critical():
             "semantic_type": "gauge",
             "compare_mode": "threshold_low_and_deadband",
             "thresholds": {"critical_low": -18.01},
-            "threshold_references": {
-                "critical_low": {"field_name": "rx_low_alarm_dbm"}
-            },
+            "threshold_references": {"critical_low": {"field_name": "rx_low_alarm_dbm"}},
             "deadband": 2,
         },
     )
@@ -76,16 +74,51 @@ def test_event_rule_compiler_keeps_alarm_only_reference_critical():
         "low_recovery",
     ]
     fault, recovery = compiled["rules"]
-    assert fault["severity"] == "critical"
+    assert fault["severity"] == "warning"
     assert fault["condition"]["reference_field"] == "rx_low_alarm_dbm"
     assert recovery["condition"] == {
         "kind": "threshold_field_low_recovery",
+        "observation_types": ["interface.optical.rx_power"],
         "entity_types": ["interface_optical"],
         "fields": ["rx_power_dbm"],
         "reference_field": "rx_low_alarm_dbm",
         "hysteresis": 2.0,
     }
     assert recovery["recovery"]["resolves"] == ["OpticalRxPowerAlarm"]
+
+
+def test_event_rule_compiler_governs_synthesized_critical_role():
+    compiled = compile_event_rule_intents(
+        candidate_rules=[],
+        contract={
+            "entity_type": "interface_optical",
+            "primary_keys": ["interface"],
+            "required_fields": ["interface"],
+            "optional_fields": ["rx_power_dbm", "rx_low_alarm_dbm"],
+            "state_semantics": {
+                "rx_power_dbm": {
+                    "semantic_type": "gauge",
+                    "observation_type": "interface.optical.rx_power",
+                }
+            },
+        },
+        change_policy={
+            "observation_type": "interface.optical.rx_power",
+            "semantic_type": "gauge",
+            "compare_mode": "threshold_low_and_deadband",
+            "threshold_references": {"critical_low": {"field_name": "rx_low_alarm_dbm"}},
+            "deadband": 2,
+        },
+    )
+
+    fault = next(rule for rule in compiled["rules"] if rule["event_class"] == "fault")
+    assert fault["severity"] == "major"
+    repair = next(
+        item for item in compiled["normalizations"] if item["kind"] == "severity_governance"
+    )
+    assert repair["trigger_role"] == "critical_low"
+    assert repair["proposed"] == "critical"
+    assert repair["effective"] == "major"
 
 
 def test_event_rule_compiler_adds_alarm_fallback_to_warning_recovery():
@@ -131,13 +164,143 @@ def test_event_rule_compiler_adds_alarm_fallback_to_warning_recovery():
         },
     )
 
-    recovery = next(
-        rule for rule in compiled["rules"] if rule["trigger_role"] == "low_recovery"
-    )
+    recovery = next(rule for rule in compiled["rules"] if rule["trigger_role"] == "low_recovery")
     assert recovery["condition"]["reference_field"] == "rx_low_warning_dbm"
-    assert recovery["condition"]["fallback_reference_fields"] == [
-        "rx_low_alarm_dbm"
-    ]
+    assert recovery["condition"]["fallback_reference_fields"] == ["rx_low_alarm_dbm"]
+
+
+def test_event_rule_compiler_repairs_directionally_wrong_event_type():
+    compiled = compile_event_rule_intents(
+        candidate_rules=[
+            {
+                "name": "measurement-critical-high",
+                "event_type": "measurement_critical_high",
+                "trigger_role": "critical_high",
+            },
+            {
+                "name": "measurement-critical-low",
+                "event_type": "measurement_critical_high",
+                "trigger_role": "critical_low",
+            },
+        ],
+        contract={
+            "entity_type": "measurement_entity",
+            "primary_keys": ["sensor"],
+            "required_fields": ["sensor"],
+            "optional_fields": ["measurement", "low_alarm", "high_alarm"],
+            "state_semantics": {
+                "measurement": {
+                    "semantic_type": "gauge",
+                    "observation_type": "generic.measurement",
+                }
+            },
+        },
+        change_policy={
+            "observation_type": "generic.measurement",
+            "semantic_type": "gauge",
+            "compare_mode": "threshold_and_deadband",
+            "threshold_references": {
+                "critical_low": {"field_name": "low_alarm"},
+                "critical_high": {"field_name": "high_alarm"},
+            },
+            "deadband": 1,
+        },
+    )
+
+    by_role = {rule["trigger_role"]: rule for rule in compiled["rules"]}
+    assert by_role["critical_high"]["event_type"] == "measurement_critical_high"
+    assert by_role["critical_low"]["event_type"] == ("generic_measurement_critical_low")
+    assert by_role["low_recovery"]["recovery"]["resolves"] == ["generic_measurement_critical_low"]
+    repair = next(
+        item for item in compiled["normalizations"] if item["kind"] == "event_type_governance"
+    )
+    assert repair["trigger_role"] == "critical_low"
+    assert repair["inferred_role"] == "critical_high"
+    assert repair["reason"] == "event_type_direction_conflicts_with_trigger_role"
+
+
+def test_event_rule_compiler_repairs_neutral_event_type_reused_across_roles():
+    compiled = compile_event_rule_intents(
+        candidate_rules=[
+            {
+                "event_type": "MeasurementFault",
+                "trigger_role": "high",
+            },
+            {
+                "event_type": "MeasurementFault",
+                "trigger_role": "low",
+            },
+        ],
+        contract={
+            "entity_type": "measurement_entity",
+            "primary_keys": ["sensor"],
+            "required_fields": ["sensor"],
+            "optional_fields": ["measurement"],
+            "state_semantics": {
+                "measurement": {
+                    "semantic_type": "gauge",
+                    "observation_type": "generic.measurement",
+                }
+            },
+        },
+        change_policy={
+            "observation_type": "generic.measurement",
+            "semantic_type": "gauge",
+            "compare_mode": "threshold_and_deadband",
+            "thresholds": {"low": 10, "high": 90},
+            "deadband": 2,
+        },
+    )
+
+    by_role = {rule["trigger_role"]: rule for rule in compiled["rules"]}
+    assert by_role["high"]["event_type"] == "MeasurementFault"
+    assert by_role["low"]["event_type"] == "generic_measurement_low"
+    assert any(
+        item.get("reason") == "event_type_reused_by_another_trigger_role"
+        for item in compiled["normalizations"]
+    )
+
+
+def test_event_rule_validator_exposes_event_type_governance_to_agent_loop():
+    module = _load_skill_module()
+    result = module._validate_llm_rules(
+        {
+            "rules": [
+                {
+                    "event_type": "measurement_critical_high",
+                    "trigger_role": "critical_low",
+                }
+            ]
+        },
+        contract={
+            "entity_type": "measurement_entity",
+            "primary_keys": ["sensor"],
+            "required_fields": ["sensor"],
+            "optional_fields": ["measurement", "low_alarm"],
+            "state_semantics": {
+                "measurement": {
+                    "semantic_type": "gauge",
+                    "observation_type": "generic.measurement",
+                }
+            },
+        },
+        change_policy={
+            "observation_type": "generic.measurement",
+            "semantic_type": "gauge",
+            "compare_mode": "threshold_low_and_deadband",
+            "threshold_references": {
+                "critical_low": {"field_name": "low_alarm"},
+            },
+            "deadband": 1,
+        },
+    )
+
+    assert result["success"] is True
+    assert any(
+        repair.get("kind") == "event_type_governance"
+        and repair.get("trigger_role") == "critical_low"
+        for repair in result["governance_repairs"]
+    )
 
 
 def test_event_rule_generator_builds_interface_rules():
@@ -341,11 +504,10 @@ def test_builtin_optical_rules_bind_to_per_observation_alarm_threshold():
         "OpticalRxPowerRecovered",
     }
     fault = next(rule for rule in result["rules"] if rule["event_class"] == "fault")
-    recovery = next(
-        rule for rule in result["rules"] if rule["event_class"] == "recovery"
-    )
+    recovery = next(rule for rule in result["rules"] if rule["event_class"] == "recovery")
     assert fault["condition"] == {
         "kind": "threshold_field_lte",
+        "observation_types": ["interface.optical.rx_power"],
         "entity_types": ["interface_optical"],
         "fields": ["rx_power_dbm"],
         "reference_field": "rx_low_alarm_dbm",
@@ -596,7 +758,104 @@ def test_event_rule_validator_rejects_fault_type_reserved_by_another_target():
     )
 
 
-def test_event_rule_validator_requires_explicit_critical_authorization():
+def test_llm_fanout_namespaces_event_types_reused_across_observation_targets(monkeypatch):
+    module = _load_skill_module()
+
+    class WeakSharedEventTypeProvider:
+        name = "fake-weak-shared-event-type-model"
+
+        def propose(self, **_kwargs):
+            from src.core.rule_control.generation_agent import ProviderResult
+
+            return ProviderResult(
+                provider=self.name,
+                model_name="mock",
+                candidate={
+                    "rules": [
+                        {
+                            "name": "interface-down",
+                            "event_type": "InterfaceDown",
+                            "trigger_role": "down",
+                            "severity": "major",
+                            "event_class": "fault",
+                        },
+                        {
+                            "name": "interface-up",
+                            "event_type": "InterfaceUp",
+                            "trigger_role": "up",
+                            "severity": "info",
+                            "event_class": "recovery",
+                        },
+                    ]
+                },
+            )
+
+    monkeypatch.setitem(
+        module.DEFAULT_RULE_GENERATION_PROVIDERS._factories,
+        "llm",
+        WeakSharedEventTypeProvider,
+    )
+    result = module.run_event_rule_generation(
+        {
+            "generation_provider": "llm",
+            "contract": {
+                "entity_type": "interface_brief",
+                "primary_keys": ["interface"],
+                "required_fields": ["interface", "status"],
+                "optional_fields": ["protocol"],
+                "state_semantics": {
+                    "interface": {"semantic_type": "identity"},
+                    "status": {
+                        "semantic_type": "state",
+                        "observation_type": "interface.oper_status",
+                    },
+                    "protocol": {
+                        "semantic_type": "state",
+                        "observation_type": "interface.protocol_state",
+                    },
+                },
+            },
+            "change_policies": [
+                {
+                    "observation_type": "interface.protocol_state",
+                    "semantic_type": "state",
+                    "compare_mode": "state_transition",
+                },
+                {
+                    "observation_type": "interface.oper_status",
+                    "semantic_type": "state",
+                    "compare_mode": "state_transition",
+                },
+            ],
+        }
+    )
+
+    assert result["success"] is True
+    assert result["generated_rule_count"] == 4
+    assert {rule["event_type"] for rule in result["rules"]} == {
+        "interface_oper_status_down",
+        "interface_oper_status_up",
+        "interface_protocol_state_down",
+        "interface_protocol_state_up",
+    }
+    by_observation = {
+        rule["condition"]["observation_types"][0]: rule
+        for rule in result["rules"]
+        if rule["event_class"] == "recovery"
+    }
+    assert by_observation["interface.oper_status"]["recovery"]["resolves"] == [
+        "interface_oper_status_down"
+    ]
+    assert by_observation["interface.protocol_state"]["recovery"]["resolves"] == [
+        "interface_protocol_state_down"
+    ]
+    assert len(result["governance_repairs"]) == 4
+    assert {
+        repair["kind"] for repair in result["governance_repairs"]
+    } == {"cross_target_event_type_namespace"}
+
+
+def test_event_rule_validator_governs_unapproved_critical_and_preserves_gate():
     module = _load_skill_module()
     candidate = {
         "rules": [
@@ -633,7 +892,8 @@ def test_event_rule_validator_requires_explicit_critical_authorization():
         "compare_mode": "state_transition",
     }
 
-    rejected = module._validate_llm_rules(
+    raw_gate_errors = module._critical_severity_errors(candidate["rules"], {})
+    governed = module._validate_llm_rules(
         candidate,
         contract=contract,
         change_policy=policy,
@@ -645,11 +905,133 @@ def test_event_rule_validator_requires_explicit_critical_authorization():
         event_constraints={"allow_critical_event_types": ["InterfaceDown"]},
     )
 
-    assert rejected["success"] is False
     assert any(
-        "without explicit event_constraints authorization" in error for error in rejected["errors"]
+        "without explicit event_constraints authorization" in error for error in raw_gate_errors
     )
+    assert governed["success"] is True
+    assert governed["rules"][0]["severity"] == "major"
+    assert any(item["kind"] == "severity_governance" for item in governed["governance_repairs"])
     assert authorized["success"] is True
+    assert authorized["rules"][0]["severity"] == "critical"
+
+
+def test_llm_event_rule_generation_governs_unauthorized_critical_and_records_repair(
+    monkeypatch,
+):
+    module = _load_skill_module()
+
+    class WeakCriticalProvider:
+        name = "fake-weak-model"
+
+        def propose(self, **_kwargs):
+            from src.core.rule_control.generation_agent import ProviderResult
+
+            return ProviderResult(
+                provider=self.name,
+                model_name="mock",
+                candidate={
+                    "rules": [
+                        {
+                            "name": "interface-down",
+                            "event_type": "InterfaceDown",
+                            "severity": "critical",
+                            "trigger_role": "down",
+                            "condition": {
+                                "kind": "transition",
+                                "entity_types": ["interface"],
+                                "fields": ["status"],
+                                "from_group": "up",
+                                "to_group": "down",
+                                "allow_initial_target": False,
+                            },
+                            "description": "接口状态由正常变为异常",
+                        },
+                        {
+                            "name": "interface-up",
+                            "event_type": "InterfaceUp",
+                            "severity": "warning",
+                            "trigger_role": "up",
+                            "condition": {
+                                "kind": "transition",
+                                "entity_types": ["interface"],
+                                "fields": ["status"],
+                                "from_group": "down",
+                                "to_group": "up",
+                                "allow_initial_target": False,
+                            },
+                            "description": "接口状态恢复正常",
+                            "event_class": "recovery",
+                            "recovery": {"resolves": ["InterfaceDown"]},
+                        },
+                    ]
+                },
+            )
+
+    monkeypatch.setitem(
+        module.DEFAULT_RULE_GENERATION_PROVIDERS._factories,
+        "llm",
+        WeakCriticalProvider,
+    )
+    result = module.run_event_rule_generation(
+        {
+            "generation_provider": "llm",
+            "contract": {
+                "entity_type": "interface",
+                "primary_keys": ["interface"],
+                "required_fields": ["interface", "status"],
+                "optional_fields": [],
+                "state_semantics": {
+                    "interface": {"semantic_type": "identity"},
+                    "status": {
+                        "semantic_type": "state",
+                        "observation_type": "interface.oper_status",
+                    },
+                },
+            },
+            "change_policy": {
+                "observation_type": "interface.oper_status",
+                "semantic_type": "state",
+                "compare_mode": "state_transition",
+            },
+        }
+    )
+
+    assert result["success"] is True
+    fault = next(rule for rule in result["rules"] if rule["event_class"] == "fault")
+    assert fault["severity"] == "major"
+    attempt = result["agent_loop"]["attempts"][0]
+    assert attempt["governance_repairs"] == [
+        {
+            "kind": "severity_governance",
+            "path": "rules[0].severity",
+            "event_type": "InterfaceDown",
+            "proposed": "critical",
+            "effective": "major",
+            "reason": "critical_requires_explicit_authorization",
+            "source": "deterministic_control_plane",
+        }
+    ]
+
+
+def test_llm_event_rule_governor_preserves_explicitly_authorized_critical():
+    module = _load_skill_module()
+    candidate = {
+        "rules": [
+            {
+                "name": "interface-down",
+                "event_type": "InterfaceDown",
+                "severity": "critical",
+            }
+        ]
+    }
+
+    governed, repairs = module._govern_llm_event_rule_candidate(
+        candidate,
+        {"event_constraints": {"allow_critical_event_types": ["InterfaceDown"]}},
+    )
+
+    assert governed == candidate
+    assert repairs == []
 
 
 def test_event_rule_ir_compiler_assigns_deterministic_precedence():
@@ -821,6 +1203,7 @@ def test_event_rule_ir_compiler_repairs_weak_model_condition_syntax():
     conditions = {rule["event_type"]: rule["condition"] for rule in result["rules"]}
     assert conditions["measurement_high"] == {
         "kind": "threshold",
+        "observation_types": ["generic.measurement"],
         "entity_types": ["generic_sensor"],
         "fields": ["measurement"],
         "gte": 80.0,

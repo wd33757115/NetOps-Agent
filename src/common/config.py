@@ -36,7 +36,9 @@ class Settings(BaseSettings):
     CELERY_MAX_RETRIES: int = 3
     # 空字符串表示自动：Windows → solo，Linux/macOS → prefork
     CELERY_WORKER_POOL: str = ""
-    CELERY_WORKER_QUEUES: str = "netops.default,netops.firewall,netops.health,netops.patrol,netops.ai"
+    CELERY_WORKER_QUEUES: str = (
+        "netops.default,netops.firewall,netops.health,netops.patrol,netops.ai"
+    )
     CELERY_WORKER_ROLE: str = "all"
     CELERY_BEAT_HEARTBEAT_INTERVAL_SECONDS: int = 15
     CELERY_BEAT_HEARTBEAT_STALE_AFTER_SECONDS: int = 45
@@ -142,16 +144,34 @@ class Settings(BaseSettings):
     PATROL_CONCURRENCY_LEASE_SECONDS: int = 180
     PATROL_CONCURRENCY_WAIT_SECONDS: int = 60
     PATROL_RUN_LEASE_SECONDS: int = 900
+    PATROL_WORKFLOW_RUNNING_STALE_SECONDS: int = 900
+    PATROL_WORKFLOW_QUEUED_STALE_SECONDS: int = 14_400
     PATROL_LOCAL_OUTPUT_RETENTION_HOURS: int = 72
+    # block=exclude from ready with error; skip=exclude with skip code; warn=allow launch
+    PATROL_PARSER_COVERAGE_POLICY: str = "skip"
     REDIS_RECONNECT_BACKOFF_SECONDS: int = 5
     EVENT_RULE_ALLOW_BUILTIN_FALLBACK: bool = False
-    PRODUCTION_PARSER_BACKLOG_ENABLED: bool = True
+    # Deprecated compatibility flag. Production patrol is evidence-only and
+    # cannot create Parser generation candidates.
+    PRODUCTION_PARSER_BACKLOG_ENABLED: bool = False
     PARSER_LLM_GENERATION_ENABLED: bool = False
     RULE_ASSET_AUTO_SEED_ENABLED: bool = True
+    # When True, template activation may auto-start rule-asset-generation after
+    # immutable context is ready. Default off for safe gray release.
+    RULE_ASSET_AUTO_GENERATE_ENABLED: bool = False
     PARSER_BACKFILL_ENABLED: bool = False
+    PARSER_BOOTSTRAP_SHARED_TEMPLATES_ON_STARTUP: bool = False
     PARSER_BACKLOG_ALERT_THRESHOLD: int = 20
     PARSER_CANDIDATE_STALE_MINUTES: int = 60
     PARSER_BLOCKED_RATIO_ALERT_THRESHOLD: float = 0.2
+    # Production template_missing / parse_failed → gap ledger only (no auto LLM).
+    PRODUCTION_GAP_LEDGER_ENABLED: bool = True
+    PRODUCTION_GAP_LEDGER_JOB_THRESHOLD: int = 3
+    # Impact-weighted promote: gaps with production_impact >= this value promote at 1 occurrence.
+    PRODUCTION_GAP_LEDGER_IMPACT_FAST_TRACK: int = 50
+    # Quality gate for auto-built rule generation contexts (P0-2 auto_build_context).
+    RULE_CONTEXT_MIN_RECORDS: int = 10
+    RULE_CONTEXT_MIN_FIELD_FILL_RATE: float = 0.6
 
     # 与 Django SIMPLE_JWT 共用（默认与 SECRET_KEY 一致，生产务必在 .env 中显式设置）
     JWT_SECRET_KEY: str = "django-insecure-default-key-change-in-production"

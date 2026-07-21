@@ -11,17 +11,25 @@ import type {
 import { codePanelStyle, governanceStatusLabel, shortDigest, successTag } from './parserUi'
 import StandardTableShell from './StandardTableShell'
 import type { ParserSubWorkspaceKey } from './parserControlFocus'
+import type { ParserPagedResource, ParserPageState } from './useParserControlData'
 
 interface ParserGovernancePanelProps {
   activeSubWorkspace: ParserSubWorkspaceKey
   onSubWorkspaceChange: (value: string) => void
+  visibleSubWorkspaces: ParserSubWorkspaceKey[]
+  hideNavigation?: boolean
   isMobile: boolean
   replayReports: ParserReplayReport[]
   replayReportsLoading: boolean
+  replayReportTotal: number
   approvalAudit: ParserApprovalAudit[]
   approvalAuditLoading: boolean
+  approvalAuditTotal: number
   agentLoopAttempts: ParserAgentLoopAttempt[]
   agentLoopAttemptsLoading: boolean
+  agentLoopAttemptTotal: number
+  pages: Record<ParserPagedResource, ParserPageState>
+  onPageChange: (resource: ParserPagedResource, page: number, pageSize: number) => void
   datasets: ParserDatasetCoverage[]
   linkedOfflineJobId: string
   linkedDatasetIds: string[]
@@ -46,13 +54,20 @@ const countMapText = (value?: Record<string, number> | null, emptyText = '-') =>
 const ParserGovernancePanel: React.FC<ParserGovernancePanelProps> = ({
   activeSubWorkspace,
   onSubWorkspaceChange,
+  visibleSubWorkspaces,
+  hideNavigation = false,
   isMobile,
   replayReports,
   replayReportsLoading,
+  replayReportTotal,
   approvalAudit,
   approvalAuditLoading,
+  approvalAuditTotal,
   agentLoopAttempts,
   agentLoopAttemptsLoading,
+  agentLoopAttemptTotal,
+  pages,
+  onPageChange,
   datasets,
   linkedOfflineJobId,
   linkedDatasetIds,
@@ -67,11 +82,11 @@ const ParserGovernancePanel: React.FC<ParserGovernancePanelProps> = ({
   onImport,
   onClearDatasetFocus,
   onOpenAssetChain,
-}) => (
-  <Tabs activeKey={activeSubWorkspace} onChange={onSubWorkspaceChange} items={[
+}) => {
+  const items = [
     {
       key: 'replay-reports',
-      label: `历史回放报告 (${replayReports.length})`,
+      label: `历史回放报告 (${replayReportTotal})`,
       children: (
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           <Alert type="info" showIcon message="历史回放报告用于评估候选 EventRule 在历史变化样本上的命中、碰撞和潜在误报；审批前应同时查看静态校验和历史回放结果。" />
@@ -79,6 +94,16 @@ const ParserGovernancePanel: React.FC<ParserGovernancePanelProps> = ({
             rowKey="id"
             loading={replayReportsLoading}
             dataSource={replayReports}
+            pagination={{
+              current: pages.replayReports.page,
+              pageSize: pages.replayReports.pageSize,
+              total: replayReportTotal,
+              showSizeChanger: true,
+              showTotal: (total) => `共 ${total} 条`,
+            }}
+            onChange={(pagination) => onPageChange(
+              'replayReports', pagination.current || 1, pagination.pageSize || 20,
+            )}
             emptyText="暂无历史回放报告"
             columns={[
               { title: '状态', dataIndex: 'success', width: 110, render: (value) => successTag(value, '通过', '未通过') },
@@ -100,7 +125,7 @@ const ParserGovernancePanel: React.FC<ParserGovernancePanelProps> = ({
     },
     {
       key: 'agent-loop-attempts',
-      label: `Agent Loop 尝试 (${agentLoopAttempts.length})`,
+      label: `Agent Loop 尝试 (${agentLoopAttemptTotal})`,
       children: (
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           <Alert type="info" showIcon message="Agent Loop 尝试记录展示 LLM 候选资产生成、确定性验证器反馈和下一步建议；这里只保存脱敏摘要，不展示原始 CLI 私有样本。" />
@@ -108,6 +133,16 @@ const ParserGovernancePanel: React.FC<ParserGovernancePanelProps> = ({
             rowKey="id"
             loading={agentLoopAttemptsLoading}
             dataSource={agentLoopAttempts}
+            pagination={{
+              current: pages.agentLoopAttempts.page,
+              pageSize: pages.agentLoopAttempts.pageSize,
+              total: agentLoopAttemptTotal,
+              showSizeChanger: true,
+              showTotal: (total) => `共 ${total} 条`,
+            }}
+            onChange={(pagination) => onPageChange(
+              'agentLoopAttempts', pagination.current || 1, pagination.pageSize || 20,
+            )}
             emptyText="暂无 Agent Loop 尝试记录"
             columns={[
               { title: '阶段', dataIndex: 'stage', width: 220, render: (value, row) => <Space direction="vertical" size={0}><Typography.Text strong>{value || '-'}</Typography.Text><Typography.Text type="secondary">{row.generator || '-'}</Typography.Text></Space> },
@@ -128,7 +163,7 @@ const ParserGovernancePanel: React.FC<ParserGovernancePanelProps> = ({
     },
     {
       key: 'approval-audit',
-      label: `审批审计 (${approvalAudit.length})`,
+      label: `审批审计 (${approvalAuditTotal})`,
       children: (
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           <Alert type="info" showIcon message="审批审计记录规则资产从候选进入生产、被拒绝或被废弃的治理动作；每条记录都保留来源 Job、资产版本、验证结果和回放证据摘要。" />
@@ -136,6 +171,16 @@ const ParserGovernancePanel: React.FC<ParserGovernancePanelProps> = ({
             rowKey="id"
             loading={approvalAuditLoading}
             dataSource={approvalAudit}
+            pagination={{
+              current: pages.approvalAudit.page,
+              pageSize: pages.approvalAudit.pageSize,
+              total: approvalAuditTotal,
+              showSizeChanger: true,
+              showTotal: (total) => `共 ${total} 条`,
+            }}
+            onChange={(pagination) => onPageChange(
+              'approvalAudit', pagination.current || 1, pagination.pageSize || 20,
+            )}
             emptyText="暂无审批审计记录"
             columns={[
               { title: '动作', dataIndex: 'action', width: 110, render: (value) => <Tag color={value === 'approved' ? 'green' : value === 'rejected' ? 'red' : 'default'}>{value === 'approved' ? '批准' : value === 'rejected' ? '拒绝' : value === 'deprecated' ? '废弃' : value}</Tag> },
@@ -163,7 +208,7 @@ const ParserGovernancePanel: React.FC<ParserGovernancePanelProps> = ({
               type={linkedDatasetIds.every((datasetId) =>
                 datasets.some((item) => item.dataset_id === datasetId)) ? 'info' : 'warning'}
               showIcon
-              message={linkedOfflineJobId ? `离线任务 ${linkedOfflineJobId}` : '已定位离线数据集'}
+              message={linkedOfflineJobId ? `样本任务 ${linkedOfflineJobId}` : '已定位样本数据集'}
               description={(
                 <Space wrap size={[4, 4]}>
                   {linkedDatasetIds.map((item) => <Tag key={item}>{item}</Tag>)}
@@ -184,9 +229,9 @@ const ParserGovernancePanel: React.FC<ParserGovernancePanelProps> = ({
           <Alert
             type="info"
             showIcon
-            message="离线巡检数据统一从设备巡检页导入"
-            description="这里负责查看数据集质量，并为 Parser 模板种子选择数据集、构造脱敏上下文和触发 LLM 规则资产生成。"
-            action={<Button onClick={() => { window.location.href = '/devices?tab=patrol&patrol_view=offline' }}>打开离线巡检</Button>}
+            message="离线样本统一从 Parser 控制面的资产生产工作区导入"
+            description="本页只查看数据集质量；上传、预检、命令级资产生产和进度追踪均在资产生产工作区完成。"
+            action={<Button onClick={() => { window.location.href = '/skills/parser?workspace=production&subtab=source-jobs' }}>打开资产生产</Button>}
           />
           <Typography.Text type="secondary">管理员兼容入口：从 FastAPI 所在服务器的本地绝对路径导入。</Typography.Text>
           <Row gutter={[12, 12]}>
@@ -238,7 +283,15 @@ const ParserGovernancePanel: React.FC<ParserGovernancePanelProps> = ({
         </Space>
       ),
     },
-  ]} />
-)
+  ]
+  return (
+    <Tabs
+      activeKey={activeSubWorkspace}
+      onChange={onSubWorkspaceChange}
+      tabBarStyle={hideNavigation ? { display: 'none' } : undefined}
+      items={items.filter((item) => visibleSubWorkspaces.includes(item.key as ParserSubWorkspaceKey))}
+    />
+  )
+}
 
 export default ParserGovernancePanel

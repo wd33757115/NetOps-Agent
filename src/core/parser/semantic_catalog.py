@@ -362,3 +362,25 @@ def canonical_field_for_name(
 
     catalog = load_semantic_catalog(catalog_path)
     return _canonical_field_for_name(field_name, catalog=catalog)
+
+
+def canonical_schema_field(
+    field_name: str,
+    *,
+    catalog_path: str | Path = CATALOG_PATH,
+) -> str | None:
+    """Resolve only an explicitly governed machine-field alias.
+
+    This stricter resolver is used when renaming a generated schema. The broad
+    suffix resolver remains appropriate for inheriting semantics, but is too
+    permissive for changing public field names such as ``serial_number``.
+    """
+
+    catalog = load_semantic_catalog(catalog_path)
+    target = str(field_name or "").strip().casefold()
+    matches = {
+        str(canonical)
+        for canonical, aliases in dict(catalog.get("schema_field_aliases") or {}).items()
+        if target in {str(alias).strip().casefold() for alias in aliases or []}
+    }
+    return next(iter(matches)) if len(matches) == 1 else None

@@ -211,7 +211,7 @@ export const ParserJobDetailDrawer: React.FC<
           <Descriptions.Item label="状态"><Tag color={statusColor(job.status)}>{job.status}</Tag></Descriptions.Item>
           <Descriptions.Item label="厂商">{job.vendor}</Descriptions.Item>
           <Descriptions.Item label="兼容域">{job.profile}</Descriptions.Item>
-          <Descriptions.Item label="作用域">{job.compatibility_scope === 'family' ? '设备族' : '精确型号'}</Descriptions.Item>
+          <Descriptions.Item label="作用域" span={2}>{job.compatibility_scope === 'family' ? '设备族' : '精确型号'}</Descriptions.Item>
           <Descriptions.Item label="命令" span={2}>{job.canonical_command}</Descriptions.Item>
           <Descriptions.Item label="样本数">{job.sample_count}</Descriptions.Item>
           <Descriptions.Item label="结构变体">{job.structure_variant_count ?? 0}</Descriptions.Item>
@@ -221,7 +221,7 @@ export const ParserJobDetailDrawer: React.FC<
           <Descriptions.Item label="Token 使用">
             {String(job.agent_state_json?.token_usage_total ?? 0)} / {String(job.agent_budget_json?.token_budget ?? '-')}
           </Descriptions.Item>
-          <Descriptions.Item label="时间预算">
+          <Descriptions.Item label="时间预算" span={2}>
             {job.agent_budget_json?.time_budget_seconds
               ? `${String(job.agent_budget_json.time_budget_seconds)} 秒`
               : '-'}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 
 from src.core.parser.repository import (
     ParserJobRepository,
@@ -8,6 +9,7 @@ from src.core.parser.repository import (
     output_signature,
     parser_job_asset_key,
 )
+from src.core.parser.time_utils import database_clocks
 from src.core.patrol.repository import PatrolRepository
 from src.infrastructure.db.models import (
     ObservationContractRecord,
@@ -586,3 +588,68 @@ def test_production_parser_backlog_deduplicates_and_requires_sanitization():
                     synchronize_session=False
                 )
             db.query(PatrolRun).filter(PatrolRun.id == run_id).delete(synchronize_session=False)
+
+
+def test_single_validation_sample_dispatches_after_database_local_grace_period():
+    token = uuid.uuid4().hex
+    run_id = f"parser-validation-aged-{token}"
+    device_id = f"AGED-SW-{token}"
+    patrol = PatrolRepository()
+    parser = ParserRepository()
+    patrol.create_run(
+        run_id=run_id,
+        mode="parser_validation",
+        source="unit-test",
+    )
+    job_id = ""
+    try:
+        snapshot_id, created = patrol.save_snapshot_idempotent(
+            run_id=run_id,
+            device_id=device_id,
+            device_name=device_id,
+            vendor="H3C",
+            model=f"S5130-{token}",
+            command="display version",
+            command_canonical="display version",
+            raw_text="H3C Comware Software, Version 7.1\n",
+            parse_status="template_missing",
+            execution_item_id=f"item-{token}",
+            import_fingerprint=f"fingerprint-{token}",
+        )
+        assert created is True
+        job_id = parser.create_candidate(
+            job_type="CREATE_TEMPLATE",
+            vendor="H3C",
+            model=f"S5130-{token}",
+            family="Comware7",
+            profile=f"S5130-{token}",
+            command="display version",
+            snapshot_id=snapshot_id,
+            device_id=device_id,
+            failure_code="template_missing",
+        )
+
+        assert parser.list_dispatchable_jobs(job_id=job_id) == []
+        with get_db_session() as db:
+            _, now_local = database_clocks(db)
+            job = db.get(ParserTemplateJob, job_id)
+            job.created_at = now_local - timedelta(minutes=31)
+
+        assert [item["id"] for item in parser.list_dispatchable_jobs(job_id=job_id)] == [
+            job_id
+        ]
+    finally:
+        with get_db_session() as db:
+            if job_id:
+                db.query(ParserOutboxEvent).filter_by(aggregate_id=job_id).delete(
+                    synchronize_session=False
+                )
+                db.query(ParserJobSample).filter_by(job_id=job_id).delete(
+                    synchronize_session=False
+                )
+                db.query(ParserTemplateJob).filter_by(id=job_id).delete(
+                    synchronize_session=False
+                )
+            db.query(PatrolRun).filter(PatrolRun.id == run_id).delete(
+                synchronize_session=False
+            )

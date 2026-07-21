@@ -31,6 +31,10 @@ DEFAULT_COMMAND_ALIASES = {
     "display transceiver diagnosis int": "display transceiver diagnosis interface",
 }
 
+RULE_ASSET_MODES = frozenset(
+    {"full_chain", "observation_only", "change_only", "raw_hash", "ignored"}
+)
+
 
 @dataclass(frozen=True)
 class CategorySpec:
@@ -50,6 +54,7 @@ class PolicyDecision:
     enabled: bool
     canonical_command: str
     handling: str
+    asset_mode: str = "ignored"
     category: str | None = None
     family: str | None = None
     spec: CategorySpec | None = None
@@ -153,12 +158,14 @@ class ParserPolicy:
             comparison_profile, comparison_profile_version = self._comparison_profile(
                 global_metadata.get("comparison_profile")
             )
+            handling = str(
+                global_metadata.get("handling") or ("structured" if enabled else "raw_only")
+            )
             return PolicyDecision(
                 enabled=enabled,
                 canonical_command=canonical,
-                handling=str(
-                    global_metadata.get("handling") or ("structured" if enabled else "raw_only")
-                ),
+                handling=handling,
+                asset_mode=self._asset_mode(handling, global_metadata.get("asset_mode")),
                 capability=capability,
                 capability_status=capability_status,
                 template_scope=template_scope,
@@ -178,10 +185,12 @@ class ParserPolicy:
             comparison_profile, comparison_profile_version = self._comparison_profile(
                 raw_rule.get("profile")
             )
+            handling = str(raw_rule.get("handling") or "raw_hash_diff")
             return PolicyDecision(
                 enabled=False,
                 canonical_command=canonical,
-                handling=str(raw_rule.get("handling") or "raw_hash_diff"),
+                handling=handling,
+                asset_mode=self._asset_mode(handling, raw_rule.get("asset_mode")),
                 comparison_profile=comparison_profile,
                 comparison_profile_version=comparison_profile_version,
             )
@@ -189,7 +198,27 @@ class ParserPolicy:
             enabled=False,
             canonical_command=canonical,
             handling="raw_only",
+            asset_mode="ignored",
         )
+
+    @staticmethod
+    def _asset_mode(handling: str, configured: Any = None) -> str:
+        defaults = {
+            "structured": "full_chain",
+            "raw_hash_diff": "raw_hash",
+            "raw_only": "ignored",
+            "not_applicable": "ignored",
+        }
+        mode = str(configured or defaults.get(handling, "ignored")).strip()
+        if mode not in RULE_ASSET_MODES:
+            raise ValueError(f"unsupported rule asset mode: {mode}")
+        if mode in {"full_chain", "observation_only", "change_only"} and handling != "structured":
+            raise ValueError(f"rule asset mode {mode} requires structured handling")
+        if mode == "raw_hash" and handling != "raw_hash_diff":
+            raise ValueError("rule asset mode raw_hash requires raw_hash_diff handling")
+        if handling in {"raw_only", "not_applicable"} and mode != "ignored":
+            raise ValueError(f"handling {handling} only supports ignored asset mode")
+        return mode
 
     def _comparison_profile(self, value: Any) -> tuple[str | None, int | None]:
         name = str(value or "").strip()

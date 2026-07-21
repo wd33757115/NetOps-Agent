@@ -112,7 +112,7 @@ flowchart TB
 - **「生成防火墙策略，工单号 rg001」** → 触发词匹配 → 规则调度 → `firewall-policy-generator` → Celery → MinIO 下载链接
 - **「交换机接口 down 了怎么办」** → 知识问句过滤 → `knowledge_qa` → Chroma 检索 → LLM 生成回答
 
-## 内置 Skill（6 个）
+## 内置 Skill（23+ 个）
 
 | Skill | 分类 | 触发示例 |
 |-------|------|----------|

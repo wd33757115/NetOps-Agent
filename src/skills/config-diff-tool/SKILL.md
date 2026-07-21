@@ -38,6 +38,8 @@ outputs:
   type: text
   description: 结构化的对比分析报告
 enabled: true
+execution_mode: sync
+entry_script: scripts/run.py
 fallback_to_rag: true
 ---
 

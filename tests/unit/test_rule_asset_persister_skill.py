@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from src.core.rule_control.approval import RuleAssetApprovalService
+from src.core.rule_control.engineering_revision import RuleAssetEngineeringRevisionService
 from src.core.rule_control.jobs import RuleGenerationJobStateError
 from src.infrastructure.db.models import (
     ChangePolicyRecord,
@@ -31,6 +32,15 @@ assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 run_persist = MODULE.run_persist
+
+
+def _accept_engineering_review(bundle_id: str) -> None:
+    RuleAssetEngineeringRevisionService().review(
+        bundle_id,
+        decision="accepted",
+        actor="rule-engineer",
+        reason="candidate semantics and replay evidence verified",
+    )
 
 
 def test_parser_template_source_is_the_stable_contract_identity():
@@ -232,6 +242,7 @@ def test_rule_asset_persister_creates_pending_approval_assets():
 
         with pytest.raises(RuleGenerationJobStateError, match="governed through bundle"):
             RuleAssetApprovalService().approve(contract_job["id"], actor="pytest")
+        _accept_engineering_review(result["bundle"]["id"])
         activated = RuleAssetApprovalService().approve(
             result["bundle"]["id"],
             actor="pytest",
@@ -439,6 +450,7 @@ def test_rule_asset_bundle_atomically_activates_multiple_change_policies():
         assert len(policy_jobs) == 2
         assert result["bundle"]["status"] == "pending_approval"
 
+        _accept_engineering_review(result["bundle"]["id"])
         activated = RuleAssetApprovalService().approve(result["bundle"]["id"], actor="pytest")
 
         assert activated["atomic"] is True
@@ -559,6 +571,7 @@ def test_bundle_rollback_restores_exact_activation_snapshot():
     second = None
     third = None
     try:
+        _accept_engineering_review(first["bundle"]["id"])
         RuleAssetApprovalService().approve(first["bundle"]["id"], actor="pytest")
         first_versions = {job["job_type"]: job["asset_version_id"] for job in first["jobs"]}
 
@@ -592,6 +605,7 @@ def test_bundle_rollback_restores_exact_activation_snapshot():
             )
 
         third = run_persist(_versioned_bundle_params(suffix, 3))
+        _accept_engineering_review(third["bundle"]["id"])
         activated = RuleAssetApprovalService().approve(third["bundle"]["id"], actor="pytest")
         snapshot = activated["activation_snapshot"]
         previous_ids = {

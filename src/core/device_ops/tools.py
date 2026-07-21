@@ -292,12 +292,42 @@ class PatrolTool:
             )
             _validate_plan_for_device(device=device, plan=plan, action="patrol", mode=mode)
             coverage_preflight: list[dict[str, Any]] = []
+            coverage_decision: dict[str, Any] | None = None
             if mode == PRODUCTION_MODE:
-                coverage_preflight = [
-                    item
-                    for item in self._production_coverage(device, plan.command_texts())
-                    if item["policy_status"] == "eligible" and item["coverage_status"] != "ready"
-                ]
+                from src.core.patrol.coverage_policy import decide_parser_coverage
+
+                coverage_decision = decide_parser_coverage(
+                    coverage=self._production_coverage(device, plan.command_texts()),
+                    mode=mode,
+                )
+                coverage_preflight = list(coverage_decision.get("violations") or [])
+                if coverage_decision["decision"] == "block":
+                    return {
+                        "inventory_device_id": device.get("device_id"),
+                        "device_name": device.get("device_name"),
+                        "ip": device.get("ip"),
+                        "vendor": device.get("vendor"),
+                        "model": device.get("model"),
+                        "success": False,
+                        "error": "production patrol blocked by parser coverage policy",
+                        "failure_code": coverage_decision["failure_code"],
+                        "coverage_preflight": coverage_preflight,
+                        "coverage_decision": coverage_decision,
+                    }
+                if coverage_decision["decision"] == "skip":
+                    return {
+                        "inventory_device_id": device.get("device_id"),
+                        "device_name": device.get("device_name"),
+                        "ip": device.get("ip"),
+                        "vendor": device.get("vendor"),
+                        "model": device.get("model"),
+                        "success": False,
+                        "error": "production patrol skipped by parser coverage policy",
+                        "failure_code": coverage_decision["failure_code"],
+                        "skipped": True,
+                        "coverage_preflight": coverage_preflight,
+                        "coverage_decision": coverage_decision,
+                    }
             if concurrency_lease is not None:
                 self.cli_collector.continuation_guard = lambda: (
                     self.distributed_semaphore.assert_lease(concurrency_lease)
@@ -334,6 +364,7 @@ class PatrolTool:
                 "completed_commands": completed_commands,
                 "command_collection_results": command_results,
                 "coverage_preflight": coverage_preflight,
+                "coverage_decision": coverage_decision,
             }
         except Exception as exc:
             _record_connection_health(

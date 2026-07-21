@@ -1,21 +1,23 @@
 import React from 'react'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from 'react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, vi } from 'vitest'
 import OfflinePatrolPanel, {
+  OfflineFileJobWorkbench,
   buildOfflineAssetControlUrl,
   buildOfflineRuleBundleUrl,
   formatOfflineBlockerMessage,
   offlineJobDisplayName,
 } from './OfflinePatrolPanel'
 
-const { list, breakpoint } = vi.hoisted(() => ({
+const { list, offlineList, breakpoint } = vi.hoisted(() => ({
   list: vi.fn().mockResolvedValue({
     items: [
       {
         id: 'offline-test-1',
+        purpose: 'rule_asset_source',
         job_type: 'parser_validation',
         name: 'Q1 Parser 验证',
         owner_id: 'operator',
@@ -34,6 +36,27 @@ const { list, breakpoint } = vi.hoisted(() => ({
     page: 1,
     page_size: 25,
   }),
+  offlineList: vi.fn().mockResolvedValue({
+    items: [{
+      id: 'offline-patrol-1',
+      purpose: 'offline_patrol',
+      job_type: 'single_patrol',
+      name: '园区离线巡检',
+      owner_id: 'operator',
+      status: 'ready',
+      publish_events: false,
+      attempt_number: 0,
+      progress: { phase: 'ready', percent: 100 },
+      preview_totals: { file_count: 6, device_count: 6, command_count: 314 },
+      blocker_count: 0,
+      archived: false,
+      created_at: '2026-07-18T10:00:00Z',
+      updated_at: '2026-07-18T10:01:00Z',
+    }],
+    total: 1,
+    page: 1,
+    page_size: 25,
+  }),
   breakpoint: { mobile: false },
 }))
 
@@ -41,10 +64,26 @@ vi.mock('../../services/api', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../services/api')>()
   return {
     ...original,
-    offlinePatrolApi: {
+    ruleAssetSourceApi: {
       list,
       get: vi.fn(),
-      analysis: vi.fn(),
+      replay: vi.fn(),
+      create: vi.fn(),
+      attachSource: vi.fn(),
+      removeSource: vi.fn(),
+      preview: vi.fn(),
+      confirmBindings: vi.fn(),
+      execute: vi.fn(),
+      cancel: vi.fn(),
+      retry: vi.fn(),
+      archive: vi.fn(),
+      restore: vi.fn(),
+      artifact: vi.fn(),
+    },
+    offlinePatrolApi: {
+      list: offlineList,
+      get: vi.fn(),
+      replay: vi.fn(),
       create: vi.fn(),
       attachSource: vi.fn(),
       removeSource: vi.fn(),
@@ -71,14 +110,16 @@ afterEach(() => {
   breakpoint.mobile = false
 })
 
-const renderPanel = () => {
+const renderPanel = (purpose: 'offline_patrol' | 'rule_asset_source' = 'rule_asset_source') => {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <MemoryRouter>
       <QueryClientProvider client={queryClient}>
-        <OfflinePatrolPanel />
+        {purpose === 'rule_asset_source'
+          ? <OfflineFileJobWorkbench purpose="rule_asset_source" />
+          : <OfflinePatrolPanel />}
       </QueryClientProvider>
     </MemoryRouter>,
   )
@@ -103,7 +144,9 @@ describe('OfflinePatrolPanel', () => {
       ],
     } as never)
 
-    expect(url).toContain('offline_job_id=offline-history-1')
+    expect(url).toContain('workspace=production')
+    expect(url).toContain('subtab=source-jobs')
+    expect(url).toContain('source_job_id=offline-history-1')
     expect(url).toContain('dataset_id=dataset-q1')
     expect(url).toContain('dataset_ids=dataset-q1%2Cdataset-q2')
   })
@@ -117,8 +160,8 @@ describe('OfflinePatrolPanel', () => {
       ],
     } as never)
 
-    expect(url).toContain('workspace=today')
-    expect(url).toContain('subtab=rule-generation')
+    expect(url).toContain('workspace=release')
+    expect(url).toContain('subtab=asset-bundles')
     expect(url).toContain('offline_job_id=offline-history-1')
     expect(url).toContain('dataset_ids=dataset-q1%2Cdataset-q2')
   })
@@ -129,11 +172,11 @@ describe('OfflinePatrolPanel', () => {
       job_type: 'history_compare',
     } as never
 
-    expect(offlineJobDisplayName(job)).toBe('Q2 → Q3 历史周期对比')
+    expect(offlineJobDisplayName(job)).toBe('Q2 → Q3 规则回放样本')
     expect(job.name).toBe('?????? Q2?Q3?????????')
   })
 
-  it('uses server pagination and exposes both offline patrol workflows', async () => {
+  it('uses server pagination and exposes both rule asset sample modes', async () => {
     const user = userEvent.setup()
     renderPanel()
 
@@ -142,14 +185,32 @@ describe('OfflinePatrolPanel', () => {
     expect(screen.getByText(/共 10001 个任务/)).toBeInTheDocument()
     expect(list).toHaveBeenCalledWith(expect.objectContaining({ page: 1, page_size: 25 }))
 
-    await user.click(screen.getByRole('button', { name: /导入单周期/ }))
-    expect(await screen.findByText('新建离线巡检任务')).toBeInTheDocument()
-    expect(screen.getAllByText('单周期解析验证').length).toBeGreaterThan(1)
+    await user.click(screen.getByRole('button', { name: /导入单周期样本/ }))
+    expect(await screen.findByText('新建规则资产样本任务')).toBeInTheDocument()
+    expect(screen.getAllByText('单周期资产样本').length).toBeGreaterThan(1)
+    const createButton = screen.getByRole('button', { name: '创建并继续' })
+    expect(createButton).toBeDisabled()
+    const observedAt = document.querySelector<HTMLInputElement>('input[type="datetime-local"]')
+    expect(observedAt).not.toBeNull()
+    fireEvent.change(observedAt!, { target: { value: '2026-03-23T09:00' } })
+    expect(createButton).toBeEnabled()
 
     await user.click(screen.getByLabelText('Close'))
-    await user.click(screen.getByRole('button', { name: /对比两个周期/ }))
-    expect(await screen.findByText('双周期变化分析')).toBeInTheDocument()
-    expect(screen.getByText('事件发布')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /导入双周期样本/ }))
+    expect(await screen.findByText('双周期规则回放样本')).toBeInTheDocument()
+    expect(screen.getByText('数据用途')).toBeInTheDocument()
+    expect(screen.queryByText('事件发布')).not.toBeInTheDocument()
+  })
+
+  it('keeps offline patrol as a separate active-rule execution workspace', async () => {
+    renderPanel('offline_patrol')
+
+    expect(await screen.findByText('离线巡检任务')).toBeInTheDocument()
+    expect(screen.getByText('园区离线巡检')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /发起单周期离线巡检/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /对比两个巡检周期/ })).toBeInTheDocument()
+    expect(screen.queryByText('规则资产样本任务')).not.toBeInTheDocument()
+    expect(offlineList).toHaveBeenCalled()
   })
 
   it('renders mobile tasks as actionable records instead of a horizontally clipped table', async () => {

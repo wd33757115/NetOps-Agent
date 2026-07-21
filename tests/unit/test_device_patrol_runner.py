@@ -18,6 +18,11 @@ def test_production_parser_preflight_does_not_block_cli_collection(monkeypatch, 
     output = tmp_path / "patrol.txt"
     output.write_text("Command: show version\nOutput:\nVersion 1\n", encoding="utf-8")
 
+    # warn 策略下缺模板只告警不阻断；默认 skip 策略会跳过设备（另有覆盖策略单测）
+    from src.common.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "PATROL_PARSER_COVERAGE_POLICY", "warn")
+
     class FakeCollector:
         def collect_command_outputs(self, *, device, execution_plan):
             return output

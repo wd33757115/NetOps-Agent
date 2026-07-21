@@ -585,6 +585,19 @@ def test_leadership_report_recovers_missing_parser_eligible_denominator():
     assert report["metrics"]["parser_eligible_count"] == 10
 
 
+def test_rule_asset_replay_report_cannot_claim_network_health():
+    summary = _summary(completed=2, target=2)
+    summary["report_purpose"] = "rule_asset_replay"
+
+    report = build_leadership_report("asset-source-job-1", summary)
+
+    assert report["schema_version"] == "rule-asset-evidence-report/v1"
+    assert report["document_type"] == "规则资产验证报告"
+    assert report["title"] == "规则资产样本验证与回放报告"
+    assert report["assessment"]["code"] == "rule_replay_only"
+    assert report["assessment"]["conclusion_allowed"] is False
+
+
 def test_leadership_report_uses_frozen_analysis_time_and_is_reproducible():
     completed_at = datetime(2026, 7, 15, 11, 1, 1, tzinfo=timezone.utc)
     summary = _summary()

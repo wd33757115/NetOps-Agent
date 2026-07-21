@@ -8,12 +8,15 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import or_
+
 from src.core.patrol.change_policy import (
     ChangePolicyProposal,
     policy_from_dict,
     validate_change_policy,
 )
 from src.infrastructure.db.models import (
+    AuditLogRecord,
     ChangePolicyRecord,
     ChangePolicyVersionRecord,
 )
@@ -113,7 +116,13 @@ class ChangePolicyRepository:
             db.flush()
             return self._to_payload(record, version_row)
 
-    def activate_policy_version(self, version_id: str) -> dict[str, Any]:
+    def activate_policy_version(
+        self,
+        version_id: str,
+        *,
+        actor: str | None = None,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
         now = datetime.now(timezone.utc)
         with get_db_session() as db:
             version = db.get(ChangePolicyVersionRecord, version_id)
@@ -150,6 +159,24 @@ class ChangePolicyRepository:
             policy.status = "active"
             policy.current_version = int(version.version)
             policy.updated_at = now
+            if actor and reason:
+                db.add(
+                    AuditLogRecord(
+                        id=str(uuid.uuid4()),
+                        user_id=actor,
+                        username=actor,
+                        action="change_policy_builtin_seed_activate",
+                        resource_type="change_policy_version",
+                        resource_id=version.id,
+                        detail={
+                            "reason": reason,
+                            "observation_type": version.observation_type,
+                            "emergency_override": True,
+                        },
+                        status="success",
+                        created_at=now,
+                    )
+                )
             db.flush()
             return self._to_payload(policy, version)
 
@@ -195,6 +222,57 @@ class ChangePolicyRepository:
                 .all()
             )
             return [self._to_payload(policy, version) for policy, version in rows]
+
+    def list_versions_page(
+        self,
+        *,
+        status: str | None = None,
+        observation_type: str | None = None,
+        search: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        page_size = max(1, min(int(limit), 200))
+        page_offset = max(0, int(offset))
+        with get_db_session() as db:
+            query = db.query(ChangePolicyRecord, ChangePolicyVersionRecord).join(
+                ChangePolicyVersionRecord,
+                ChangePolicyVersionRecord.policy_id == ChangePolicyRecord.id,
+            )
+            if status:
+                query = query.filter(ChangePolicyVersionRecord.status == status)
+            if observation_type:
+                query = query.filter(
+                    ChangePolicyVersionRecord.observation_type == observation_type
+                )
+            pattern = f"%{str(search).strip()}%" if str(search or "").strip() else None
+            if pattern:
+                query = query.filter(
+                    or_(
+                        ChangePolicyRecord.id.ilike(pattern),
+                        ChangePolicyRecord.name.ilike(pattern),
+                        ChangePolicyRecord.description.ilike(pattern),
+                        ChangePolicyVersionRecord.observation_type.ilike(pattern),
+                        ChangePolicyVersionRecord.semantic_type.ilike(pattern),
+                        ChangePolicyVersionRecord.compare_mode.ilike(pattern),
+                    )
+                )
+            total = query.order_by(None).count()
+            rows = (
+                query.order_by(
+                    ChangePolicyVersionRecord.created_at.desc(),
+                    ChangePolicyVersionRecord.id.desc(),
+                )
+                .offset(page_offset)
+                .limit(page_size)
+                .all()
+            )
+            return {
+                "items": [self._to_payload(policy, version) for policy, version in rows],
+                "total": total,
+                "limit": page_size,
+                "offset": page_offset,
+            }
 
     def list_active_policies(self) -> list[dict[str, Any]]:
         with get_db_session() as db:

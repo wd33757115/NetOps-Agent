@@ -106,7 +106,7 @@ export const ruleJobLifecycleHint = (row: ParserRuleGenerationJob) => {
   if (row.status === 'rejected') return '拒绝后的候选不会进入生产，可通过详情查看验证和治理原因。'
   if (row.status === 'deprecated') return '废弃版本不再参与运行时匹配，但保留版本、回放和审批证据。'
   if (isAgentLoopRevisionJob(row)) return '这是 Agent Loop 修订任务；执行后仍需验证、提交和审批。'
-  if (isParserTemplateSeedJob(row)) return '这是 Parser 模板激活后自动创建的种子任务；需要补充脱敏 records 或历史摘要后启动规则资产生成 Workflow。'
+  if (isParserTemplateSeedJob(row)) return '这是 Parser 模板激活后自动创建的种子任务；必须选择离线样本数据集，由平台生成不可变脱敏上下文后才能启动 Workflow。'
   if (hasRevisionRequest(row.validation_report_json)) return '验证器给出了修订反馈，可以生成新的候选版本。'
   return '规则资产必须经过生成、验证、提交审批、审批激活后才会影响生产链路。'
 }
@@ -157,11 +157,7 @@ export const buildRuleAssetChainRows = (
       const declaredTypes = Array.isArray(condition?.observation_types)
         ? condition.observation_types.map(String)
         : []
-      const scopedEntities = Array.isArray(condition?.entity_types)
-        ? condition.entity_types.map(String)
-        : []
       return declaredTypes.includes(observationType)
-        || scopedEntities.some((entityType) => entityTypes.has(entityType))
     })
     const activeContracts = contracts.filter((item) => item.status === 'active')
     const activePolicies = policies.filter((item) => item.version_status === 'active')

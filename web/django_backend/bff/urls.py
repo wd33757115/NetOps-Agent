@@ -215,6 +215,11 @@ urlpatterns = [
     ),
     path("maintenance/<path:path>/", maintenance.proxy_maintenance_path, name="bff_maintenance_path"),
     path("devices/", devices.proxy_devices_collection, name="bff_devices_collection"),
+    path(
+        "devices/patrol/batches/<str:batch_id>/events/",
+        devices.proxy_patrol_batch_live_events,
+        name="bff_patrol_batch_live_events",
+    ),
     path("devices/<path:path>/", devices.proxy_device_path, name="bff_device_path"),
     path("knowledge/documents/", knowledge.proxy_knowledge_documents, name="bff_knowledge_documents"),
     path(

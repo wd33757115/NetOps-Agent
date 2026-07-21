@@ -128,7 +128,11 @@ require_postgres_connection()
 require_database_schema_current()
 from src.core.parser.bootstrap import bootstrap_shared_templates
 
-parser_bootstrap = bootstrap_shared_templates()
+parser_bootstrap = (
+    bootstrap_shared_templates()
+    if settings.PARSER_BOOTSTRAP_SHARED_TEMPLATES_ON_STARTUP
+    else {"enabled": False, "imported": 0, "skipped": 0, "errors": []}
+)
 log.info("parser_assets_bootstrapped", **parser_bootstrap)
 
 

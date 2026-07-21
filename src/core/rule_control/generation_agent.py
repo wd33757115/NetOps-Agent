@@ -347,6 +347,11 @@ class RuleGenerationAgent:
         stage: str,
         context: dict[str, Any],
         validator: Callable[[dict[str, Any]], dict[str, Any]],
+        candidate_governor: Callable[
+            [dict[str, Any], dict[str, Any]],
+            tuple[dict[str, Any], list[dict[str, Any]]],
+        ]
+        | None = None,
     ) -> dict[str, Any]:
         assert_sanitized_generation_context(context)
         attempts: list[dict[str, Any]] = []
@@ -356,6 +361,7 @@ class RuleGenerationAgent:
 
         for attempt in range(1, self.max_attempts + 1):
             candidate: dict[str, Any] | None = None
+            governance_repairs: list[dict[str, Any]] = []
             try:
                 proposed = self.provider.propose(
                     stage=stage,
@@ -365,20 +371,38 @@ class RuleGenerationAgent:
                     validator_feedback=feedback,
                 )
                 candidate = proposed.candidate
+                if candidate_governor is not None:
+                    candidate, governance_repairs = candidate_governor(candidate, context)
                 final_report = dict(validator(candidate) or {})
+                reported_repairs = [
+                    dict(item)
+                    for item in final_report.get("governance_repairs") or []
+                    if isinstance(item, dict)
+                ]
+                combined_repairs: list[dict[str, Any]] = []
+                seen_repairs: set[str] = set()
+                for item in [*governance_repairs, *reported_repairs]:
+                    fingerprint = json.dumps(item, sort_keys=True, default=str)
+                    if fingerprint in seen_repairs:
+                        continue
+                    seen_repairs.add(fingerprint)
+                    combined_repairs.append(item)
+                if combined_repairs:
+                    final_report["governance_repairs"] = combined_repairs
                 success = final_report.get("success") is True
-                attempts.append(
-                    {
-                        "attempt": attempt,
-                        "stage": stage,
-                        "generator": proposed.provider,
-                        "model_name": proposed.model_name,
-                        "token_usage": dict(proposed.token_usage or {}),
-                        "success": success,
-                        "output_summary": _candidate_summary(stage, candidate),
-                        "validator_feedback": _feedback_summary(final_report),
-                    }
-                )
+                attempt_report = {
+                    "attempt": attempt,
+                    "stage": stage,
+                    "generator": proposed.provider,
+                    "model_name": proposed.model_name,
+                    "token_usage": dict(proposed.token_usage or {}),
+                    "success": success,
+                    "output_summary": _candidate_summary(stage, candidate),
+                    "validator_feedback": _feedback_summary(final_report),
+                }
+                if combined_repairs:
+                    attempt_report["governance_repairs"] = combined_repairs
+                attempts.append(attempt_report)
                 previous = candidate
                 feedback = _feedback_summary(final_report)
                 if success:

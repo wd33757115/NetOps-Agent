@@ -104,14 +104,15 @@ describe('buildRuleAssetChainRows', () => {
     expect(row.status).toBe('blocked')
   })
 
-  it('supports an event rule explicitly scoped by entity type', () => {
+  it('does not treat broad entity scope as observation coverage', () => {
     const [row] = buildRuleAssetChainRows(
       [contract()],
       [policy()],
       [eventRule({ condition: { entity_types: ['interface_l2'] } })],
     )
 
-    expect(row.status).toBe('ready')
+    expect(row.status).toBe('warning')
+    expect(row.rules).toEqual([])
   })
 })
 

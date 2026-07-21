@@ -41,6 +41,21 @@ def test_load_patrol_change_event_workflow():
     assert tpl.steps[3].inputs["run_id"] == "${steps.patrol.result.snapshot_run_id}"
 
 
+def test_load_single_period_offline_patrol_workflow():
+    load_workflows(force=True)
+    tpl = get_template("patrol-offline-current")
+
+    assert tpl is not None
+    assert [step.skill_name for step in tpl.steps] == [
+        "offline-patrol-quality-gate",
+        "patrol-raw-ingestor",
+        "state-normalizer",
+        "change-detector",
+        "event-builder",
+        "report-generator",
+    ]
+
+
 def test_load_patrol_history_change_event_uses_normalized_state():
     load_workflows(force=True)
     tpl = get_template("patrol-history-change-event")
@@ -1071,6 +1086,7 @@ def test_patrol_batch_summary_exposes_report_counts(monkeypatch):
         detected_at = FakeColumn("detected_at")
 
     class FakeNetworkEventRecord:
+        id = FakeColumn("id")
         run_id = FakeColumn("run_id")
         occurred_at = FakeColumn("occurred_at")
 
@@ -1105,11 +1121,14 @@ def test_patrol_batch_summary_exposes_report_counts(monkeypatch):
             SimpleNamespace(
                 id="event-1",
                 run_id="snapshot-run-1",
+                source_change_id="change-1",
                 device_id="device-1",
                 event_type="InterfaceDown",
                 severity="critical",
+                status="open",
                 entity_type="interface",
                 entity_key="GE1/0/1",
+                payload_json={"field": "status", "new": "down"},
                 occurred_at="2026-06-21T10:04:00",
             )
         ],
@@ -1123,6 +1142,9 @@ def test_patrol_batch_summary_exposes_report_counts(monkeypatch):
             self.items = [item for item in self.items if predicate(item)]
             return self
 
+        def join(self, *_args):
+            return self
+
         def order_by(self, *_args):
             return self
 
@@ -1130,8 +1152,10 @@ def test_patrol_batch_summary_exposes_report_counts(monkeypatch):
             return self.items
 
     class FakeSession:
-        def query(self, model):
-            return FakeQuery(rows_by_model.get(model, []))
+        def query(self, *models):
+            if len(models) != 1:
+                return FakeQuery([])
+            return FakeQuery(rows_by_model.get(models[0], []))
 
     class FakeSessionContext:
         def __enter__(self):

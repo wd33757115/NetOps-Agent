@@ -13,6 +13,8 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import func, or_
+
 from src.core.parser.policy import load_yaml
 from src.core.state.observation_applicability import (
     condition_applicability_matches,
@@ -102,6 +104,8 @@ def _logical_role(
         token in marker for token in ("critical-low", "loss-of-light", "signal-loss")
     ):
         return "critical_low"
+    if role == "high" and "critical-high" in marker:
+        return "critical_high"
     if role:
         return role
     return f"custom-{_logical_token(kind) or 'condition'}"
@@ -197,10 +201,7 @@ def resolve_threshold_reference(
 
     fields = [
         str(condition.get("reference_field") or ""),
-        *(
-            str(item)
-            for item in condition.get("fallback_reference_fields") or []
-        ),
+        *(str(item) for item in condition.get("fallback_reference_fields") or []),
     ]
     values = dict(context or {})
     for field_name in fields:
@@ -617,6 +618,99 @@ class EventRuleRepository:
                 for rule, version in rows
             ]
 
+    def list_versions_page(
+        self,
+        *,
+        status: str | None = None,
+        event_type: str | None = None,
+        search: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        page_size = max(1, min(int(limit), 200))
+        page_offset = max(0, int(offset))
+        with get_db_session() as db:
+            base_query = db.query(EventRuleRecord, EventRuleVersionRecord).join(
+                EventRuleVersionRecord,
+                EventRuleVersionRecord.rule_id == EventRuleRecord.id,
+            )
+            if event_type:
+                base_query = base_query.filter(EventRuleVersionRecord.event_type == event_type)
+            pattern = f"%{str(search).strip()}%" if str(search or "").strip() else None
+            if pattern:
+                base_query = base_query.filter(
+                    or_(
+                        EventRuleRecord.id.ilike(pattern),
+                        EventRuleRecord.name.ilike(pattern),
+                        EventRuleVersionRecord.id.ilike(pattern),
+                        EventRuleVersionRecord.event_type.ilike(pattern),
+                        EventRuleVersionRecord.severity.ilike(pattern),
+                        EventRuleVersionRecord.created_by.ilike(pattern),
+                    )
+                )
+            status_counts = {
+                str(value): int(count)
+                for value, count in (
+                    base_query.with_entities(
+                        EventRuleVersionRecord.status,
+                        func.count(EventRuleVersionRecord.id),
+                    )
+                    .group_by(EventRuleVersionRecord.status)
+                    .all()
+                )
+            }
+            query = base_query
+            if status:
+                query = query.filter(EventRuleVersionRecord.status == status)
+            total = query.order_by(None).count()
+            rows = (
+                query.order_by(
+                    EventRuleVersionRecord.priority.desc(),
+                    EventRuleRecord.name,
+                    EventRuleVersionRecord.version.desc(),
+                    EventRuleVersionRecord.id.desc(),
+                )
+                .offset(page_offset)
+                .limit(page_size)
+                .all()
+            )
+            return {
+                "items": [self._to_version_payload(rule, version) for rule, version in rows],
+                "total": total,
+                "limit": page_size,
+                "offset": page_offset,
+                "status_counts": status_counts,
+            }
+
+    @staticmethod
+    def _to_version_payload(
+        rule: EventRuleRecord,
+        version: EventRuleVersionRecord,
+    ) -> dict[str, Any]:
+        return {
+            **rule.to_dict(),
+            "rule_id": rule.id,
+            "rule_name": rule.name,
+            "version_id": version.id,
+            "version": version.version,
+            "event_type": version.event_type,
+            "severity": version.severity,
+            "condition": version.condition_json,
+            "version_status": version.status,
+            "source_job_id": version.source_job_id,
+            "validation_report": version.validation_report_json,
+            "digest": version.digest,
+            "priority": version.priority,
+            "exclusive": version.exclusive,
+            "event_class": version.event_class,
+            "recovery": version.recovery_json,
+            "correlation_keys": version.correlation_key_json,
+            "created_by": version.created_by,
+            "created_at": version.created_at,
+            "activated_at": version.activated_at,
+            "deprecated_at": version.deprecated_at,
+        }
+
     def list_active_rules(self) -> list[EventRule]:
         with get_db_session() as db:
             rows = (
@@ -692,7 +786,12 @@ class EventRuleRepository:
             for row in rows
         ]
 
-    def ensure_default_rules(self) -> int:
+    def ensure_default_rules(
+        self,
+        *,
+        actor: str | None = None,
+        reason: str | None = None,
+    ) -> int:
         created = 0
         with get_db_session() as db:
             for definition in default_event_rule_definitions():
@@ -753,6 +852,24 @@ class EventRuleRepository:
                     )
                     row.current_version = definition.version
                     created += 1
+            if actor and reason:
+                db.add(
+                    AuditLogRecord(
+                        id=str(uuid.uuid4()),
+                        user_id=actor,
+                        username=actor,
+                        action="event_rule_builtin_bootstrap",
+                        resource_type="event_rule_pack",
+                        resource_id="builtin",
+                        detail={
+                            "reason": reason,
+                            "created_count": created,
+                            "emergency_override": True,
+                        },
+                        status="success",
+                        created_at=datetime.now(timezone.utc),
+                    )
+                )
         return created
 
     def upsert_active_rule(
@@ -991,7 +1108,15 @@ class EventRuleRepository:
                 "deprecated_at": version.deprecated_at,
             }
 
-    def deprecate_rule_version(self, version_id: str) -> dict[str, Any]:
+    def deprecate_rule_version(
+        self,
+        version_id: str,
+        *,
+        actor: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        if not str(actor or "").strip() or not str(reason or "").strip():
+            raise ValueError("event rule deprecation requires actor and reason")
         with get_db_session() as db:
             version = (
                 db.query(EventRuleVersionRecord)
@@ -1003,8 +1128,9 @@ class EventRuleRepository:
             rule = db.query(EventRuleRecord).filter(EventRuleRecord.id == version.rule_id).first()
             if rule is None:
                 raise ValueError("event rule not found")
+            now = datetime.now(timezone.utc)
             version.status = "deprecated"
-            version.deprecated_at = datetime.now(timezone.utc)
+            version.deprecated_at = now
             if int(rule.current_version or 0) == int(version.version):
                 active = (
                     db.query(EventRuleVersionRecord)
@@ -1014,6 +1140,23 @@ class EventRuleRepository:
                 )
                 rule.current_version = int(active.version) if active else 0
                 rule.status = "active" if active else "deprecated"
+            db.add(
+                AuditLogRecord(
+                    id=str(uuid.uuid4()),
+                    user_id=actor,
+                    username=actor,
+                    action="event_rule_deprecate",
+                    resource_type="event_rule_version",
+                    resource_id=version.id,
+                    detail={
+                        "reason": reason,
+                        "rule_id": rule.id,
+                        "rule_name": rule.name,
+                    },
+                    status="success",
+                    created_at=now,
+                )
+            )
             db.flush()
             return {
                 **rule.to_dict(),
