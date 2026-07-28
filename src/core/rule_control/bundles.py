@@ -214,6 +214,8 @@ class RuleAssetBundleService:
         child_items = []
         for child in children:
             asset_state = dict(asset_states.get(str(child.id)) or {})
+            child_payload = dict(getattr(child, "payload_json", None) or {})
+            policy = dict(child_payload.get("policy") or {})
             child_items.append(
                 {
                     "id": child.id,
@@ -228,6 +230,7 @@ class RuleAssetBundleService:
                     "asset_exists": asset_state.get("exists") is True,
                     "asset_status": asset_state.get("status"),
                     "asset_digest_matches": asset_state.get("digest_matches") is True,
+                    "observation_type": policy.get("observation_type"),
                 }
             )
         counts: dict[str, int] = {}
@@ -346,11 +349,35 @@ class RuleAssetBundleService:
                 "detail": {"bundle_status": row.status},
             },
         ]
+        observation_types = sorted(
+            {
+                str(item).strip()
+                for item in [
+                    *(payload.get("observation_types") or []),
+                    *(child.get("observation_type") for child in child_items),
+                ]
+                if str(item or "").strip()
+            }
+        )
+        primary_observation_type = (
+            observation_types[0]
+            if len(observation_types) == 1
+            else str(payload.get("observation_type") or "").strip() or None
+        )
+        semantic_label = (
+            primary_observation_type
+            if len(observation_types) == 1
+            else f"{payload.get('command') or 'command rule assets'} ({len(observation_types)} observation types)"
+        )
         return {
             "id": row.id,
             "status": row.status,
             "source_ref": row.source_ref,
-            "observation_type": payload.get("observation_type"),
+            "observation_type": primary_observation_type,
+            "observation_types": observation_types,
+            "semantic_label": semantic_label,
+            "asset_scope": payload.get("asset_scope")
+            or ("single_observation" if len(observation_types) == 1 else "multi_observation"),
             "command": payload.get("command"),
             "vendor": payload.get("vendor"),
             "model": payload.get("model"),

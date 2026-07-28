@@ -33,6 +33,16 @@ from src.core.patrol.statuses import (
         ),
         (
             "complete",
+            "truncated",
+            ("complete", "truncated", "blocked_by_output", "blocked"),
+        ),
+        (
+            "complete",
+            "paged",
+            ("complete", "paged", "blocked_by_output", "blocked"),
+        ),
+        (
+            "complete",
             "template_missing",
             ("complete", "template_missing", "blocked_by_parser", "blocked"),
         ),

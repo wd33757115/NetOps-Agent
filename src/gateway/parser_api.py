@@ -6,17 +6,29 @@ import base64
 import hashlib
 import io
 import json
+import logging
+import uuid
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from pydantic import BaseModel, Field
 
-from src.auth.dependencies import require_role
+from src.auth.dependencies import get_current_user, require_role
 from src.auth.models import CurrentUser
 from src.core.celery_tasks.celery_app import celery
+from src.core.check_items import (
+    CheckItemCatalogRepository,
+    CheckItemEffectivePlanService,
+    CheckItemRuntimeBundleService,
+    EffectivePlanRequest,
+    PatrolProfileCheckItemRepository,
+    RuntimeBundleValidationError,
+    build_inventory_snapshot,
+    build_target_manifest,
+)
 from src.core.collection.policy import (
     CollectionItem,
     CollectionPolicyResolver,
@@ -26,7 +38,7 @@ from src.core.collection.policy import (
 from src.core.device_ops.repository import DeviceRepository
 from src.core.device_ops.tools import PatrolTool
 from src.core.observation.repository import ObservationContractRepository
-from src.core.parser.assets import TemplateAssetStore
+from src.core.parser.assets import TemplateAssetStore, safe_slug
 from src.core.parser.backfill import ParserBackfillService
 from src.core.parser.bootstrap import bootstrap_shared_templates
 from src.core.parser.dialect_audit import TextFSMDialectAuditService
@@ -40,6 +52,7 @@ from src.core.parser.repository import (
     ParserMetadataRepository,
     ParserSampleRepository,
     ParserTemplateRepository,
+    generated_template_activation_errors,
 )
 from src.core.parser.runtime import ParserRuntime
 from src.core.parser.tasks import dispatch_ready_parser_jobs
@@ -70,17 +83,34 @@ from src.core.rule_control import (
     RuntimeRuleAssetResolver,
     RuntimeRuleAssetSeedService,
 )
+from src.core.rule_control.automation import (
+    RuleAssetAutomationService,
+    RuleAssetAutomationSettingsRepository,
+)
 from src.core.rule_control.bundles import RuleAssetBundleService
+from src.core.rule_control.command_asset_units import RuleAssetCommandUnitService
 from src.core.rule_control.engineering_revision import (
     RuleAssetEngineeringRevisionError,
     RuleAssetEngineeringRevisionService,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/v1/parser",
     tags=["Parser Control Plane"],
     dependencies=[Depends(require_role(["admin", "operator"]))],
 )
+
+
+def _refresh_rule_asset_projection_for_template(template_id: str) -> None:
+    try:
+        RuleAssetCommandUnitService().reconcile_for_parser_template(template_id)
+    except Exception:
+        logger.exception(
+            "Rule asset projection refresh failed template_id=%s",
+            template_id,
+        )
 
 
 def _authenticated_actor(request: Request) -> str:
@@ -102,6 +132,20 @@ def _required_reason(value: str | None, *, action: str) -> str:
 
 class ParserDispatchControlRequest(BaseModel):
     enabled: bool
+    reason: str
+
+
+class RuleAssetAutomationControlRequest(BaseModel):
+    mode: Literal["disabled", "generate_only", "auto_publish"]
+    max_concurrency: int = 1
+    max_generation_attempts: int = 3
+    retry_delay_seconds: int = 300
+    stale_run_seconds: int = 1800
+    min_period_count: int = 2
+    min_device_count: int = 2
+    min_record_count: int = 10
+    max_estimated_daily_events: int = 500
+    allow_critical: bool = False
     reason: str
 
 
@@ -132,6 +176,26 @@ class ParserBulkJobDeleteRequest(BaseModel):
 
 
 class ParserJobDeleteRequest(BaseModel):
+    reason: str
+
+
+class ParserJobRecoverRequest(BaseModel):
+    reason: str | None = None
+
+
+class ParserSpecUpdateRequest(BaseModel):
+    parser_spec: dict[str, Any]
+    confirmed: bool = False
+    reason: str
+
+
+class ParserSpecSuggestionRequest(BaseModel):
+    reason: str | None = None
+
+
+class ParserSampleRoleUpdateRequest(BaseModel):
+    role: Literal["unassigned", "generation", "acceptance", "negative"]
+    expectation: dict[str, Any] | None = None
     reason: str
 
 
@@ -254,7 +318,8 @@ class RuntimeRuleAssetSeedRequest(BaseModel):
 class CommandProfileUpsertRequest(BaseModel):
     name: str
     action: str = "patrol"
-    commands: list[str]
+    commands: list[str] = Field(default_factory=list)
+    check_item_ids: list[str] = Field(default_factory=list)
     status: str = "draft"
 
 
@@ -286,6 +351,165 @@ class CommandProfileImpactPreviewRequest(BaseModel):
     save_evidence: bool = False
 
 
+class PatrolProfileCheckItemSelectionRequest(BaseModel):
+    check_item_ids: list[str] = Field(default_factory=list)
+
+
+class RuntimeBundleAssemblyRequest(BaseModel):
+    check_item_version_id: str
+    implementation_version_id: str
+    parser_template_ids: list[str] = Field(default_factory=list)
+    observation_contract_ids: list[str] = Field(default_factory=list)
+    change_policy_version_ids: list[str] = Field(default_factory=list)
+    event_rule_version_ids: list[str] = Field(default_factory=list)
+    comparison_profile_version_id: str | None = None
+
+
+class RuntimeBundleAssembleRequest(RuntimeBundleAssemblyRequest):
+    preview_digest: str
+
+
+class RuntimeBundleLifecycleRequest(BaseModel):
+    reason: str
+
+
+@router.get("/asset-production/units")
+def list_asset_production_units(
+    page: int = 1,
+    page_size: int = 25,
+    search: str | None = None,
+    bucket: str | None = None,
+    governance_status: str | None = None,
+    stage: str | None = None,
+    vendor: str | None = None,
+    model: str | None = None,
+    asset_mode: str | None = None,
+    offline_job_id: str | None = None,
+    user: CurrentUser = Depends(get_current_user),
+):
+    try:
+        return RuleAssetCommandUnitService().list_production_units(
+            owner_id=user.user_id,
+            is_admin=user.is_admin(),
+            page=page,
+            page_size=page_size,
+            search=search,
+            bucket=bucket,
+            governance_status=governance_status,
+            stage=stage,
+            vendor=vendor,
+            model=model,
+            asset_mode=asset_mode,
+            offline_job_id=offline_job_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/asset-production/check-items")
+def list_asset_production_check_items(
+    page: int = 1,
+    page_size: int = 25,
+    search: str | None = None,
+    bucket: str | None = None,
+    governance_status: str | None = None,
+    stage: str | None = None,
+    vendor: str | None = None,
+    model: str | None = None,
+    asset_mode: str | None = None,
+    offline_job_id: str | None = None,
+    user: CurrentUser = Depends(get_current_user),
+):
+    try:
+        return RuleAssetCommandUnitService().list_check_item_production_units(
+            owner_id=user.user_id,
+            is_admin=user.is_admin(),
+            page=page,
+            page_size=page_size,
+            search=search,
+            bucket=bucket,
+            governance_status=governance_status,
+            stage=stage,
+            vendor=vendor,
+            model=model,
+            asset_mode=asset_mode,
+            offline_job_id=offline_job_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/asset-production/automation-control")
+def get_rule_asset_automation_control(
+    _user: CurrentUser = Depends(get_current_user),
+):
+    return RuleAssetAutomationSettingsRepository().status()
+
+
+@router.post("/asset-production/automation-control")
+def set_rule_asset_automation_control(
+    request: Request,
+    payload: RuleAssetAutomationControlRequest,
+    user: CurrentUser = Depends(get_current_user),
+):
+    if not user.is_admin():
+        raise HTTPException(
+            status_code=403,
+            detail="only administrators may change unattended rule asset automation",
+        )
+    try:
+        settings = RuleAssetAutomationSettingsRepository().set(
+            payload.model_dump(exclude={"reason"}),
+            actor=_authenticated_actor(request),
+            reason=_required_reason(
+                payload.reason,
+                action="rule asset automation policy change",
+            ),
+        )
+        return {
+            "success": True,
+            "settings": settings,
+            **RuleAssetAutomationSettingsRepository().status(),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/asset-production/automation-control/run")
+def run_rule_asset_automation_now(
+    user: CurrentUser = Depends(get_current_user),
+):
+    if not user.is_admin():
+        raise HTTPException(
+            status_code=403,
+            detail="only administrators may run unattended rule asset automation",
+        )
+    try:
+        return RuleAssetAutomationService().run_once()
+    except Exception as exc:
+        logger.exception("Manual rule asset automation reconciliation failed")
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.get("/asset-production/units/{unit_id}")
+def get_asset_production_unit(
+    unit_id: str,
+    evidence_page: int = 1,
+    evidence_page_size: int = 25,
+    user: CurrentUser = Depends(get_current_user),
+):
+    try:
+        return RuleAssetCommandUnitService().get_production_unit(
+            unit_id,
+            owner_id=user.user_id,
+            is_admin=user.is_admin(),
+            evidence_page=evidence_page,
+            evidence_page_size=evidence_page_size,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.get("/templates")
 def list_templates(
     status: str | None = None,
@@ -311,13 +535,34 @@ def export_templates(status: str | None = "active"):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for item in templates:
-            target = Path(str(item.get("asset_path") or "")).resolve()
-            if not target.is_file() or not target.is_relative_to(asset_root):
+            template = repository.get_template(str(item.get("id") or ""))
+            if template is None:
                 manifest.append({**item, "export_status": "missing_asset"})
                 continue
-            content = target.read_bytes()
+            embedded_text = getattr(template, "template_text", None)
+            if embedded_text is None:
+                target = Path(str(template.asset_path or "")).resolve()
+                if not target.is_file() or not target.is_relative_to(asset_root):
+                    manifest.append({**item, "export_status": "missing_asset"})
+                    continue
+            try:
+                text_content = asset_store.read(
+                    template.asset_path,
+                    template.sha256,
+                    embedded_text,
+                )
+            except ValueError:
+                manifest.append({**item, "export_status": "invalid_asset"})
+                continue
+            content = text_content.encode("utf-8")
             actual_sha256 = hashlib.sha256(content).hexdigest()
-            export_path = f"templates/{item.get('vendor')}/{item.get('profile')}/{target.name}"
+            filename = (
+                f"{safe_slug(str(item.get('canonical_command') or '').lower())}__"
+                f"{safe_slug(str(item.get('version') or 'unknown'))}.textfsm"
+            )
+            export_path = (
+                f"templates/{item.get('vendor')}/{item.get('profile')}/{filename}"
+            )
             archive.writestr(export_path, content)
             validation = item.get("validation_json") or {}
             archive.writestr(
@@ -374,16 +619,32 @@ def preview_template(template_id: str):
     if not template:
         raise HTTPException(status_code=404, detail="parser template not found")
 
+    return _template_asset_evidence(template)
+
+
+def _template_asset_evidence(template) -> dict[str, Any]:
+    """Load the immutable template body used by preview and human approval."""
+
     asset_store = TemplateAssetStore()
-    asset_root = asset_store.root.resolve()
-    target = Path(template.asset_path).resolve()
-    if not target.is_relative_to(asset_root):
-        raise HTTPException(
-            status_code=400,
-            detail="template asset path is outside the shared asset store",
+    embedded_text = getattr(template, "template_text", None)
+    if embedded_text is None:
+        asset_root = asset_store.root.resolve()
+        target = Path(template.asset_path).resolve()
+        if not target.is_relative_to(asset_root):
+            raise HTTPException(
+                status_code=400,
+                detail="template asset path is outside the shared asset store",
+            )
+        if not target.is_file():
+            raise HTTPException(status_code=404, detail="template asset file not found")
+    try:
+        content = asset_store.read(
+            template.asset_path,
+            template.sha256,
+            embedded_text,
         )
-    if not target.is_file():
-        raise HTTPException(status_code=404, detail="template asset file not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     return {
         "id": template.id,
@@ -394,8 +655,8 @@ def preview_template(template_id: str):
         "version": template.version,
         "status": template.status,
         "sha256": template.sha256,
-        "hash_valid": asset_store.verify(target, template.sha256),
-        "content": target.read_text(encoding="utf-8"),
+        "hash_valid": True,
+        "content": content,
         "validation": template.validation_json or {},
     }
 
@@ -446,30 +707,86 @@ def compare_template(template_id: str, limit: int = 20):
         if (item.vendor or "").lower() == candidate.vendor.lower()
         and (item.model or "").lower() == (candidate.model or candidate.profile).lower()
         and item.command_canonical == candidate.canonical_command
-    ][: max(1, min(limit, 100))]
+    ]
+    if candidate.source_job_id:
+        source_job = ParserJobRepository().get_job(candidate.source_job_id)
+        source_snapshot_ids = [
+            str(item.get("snapshot_id") or "")
+            for item in (source_job or {}).get("samples", [])
+            if item.get("snapshot_id")
+        ]
+        snapshots_by_id = {str(item.snapshot_id): item for item in snapshots}
+        snapshots = [
+            snapshots_by_id[snapshot_id]
+            for snapshot_id in source_snapshot_ids
+            if snapshot_id in snapshots_by_id
+        ]
+    else:
+        snapshots = snapshots[: max(1, min(limit, 100))]
     rows = []
     for snapshot in snapshots:
         proposed = _parse_snapshot_with_template(candidate, snapshot)
         current = _parse_snapshot_with_template(active, snapshot) if active else None
+        raw_text = str(snapshot.raw_text or "")
         rows.append(
             {
                 "snapshot_id": snapshot.snapshot_id,
                 "dataset_id": snapshot.dataset_id or "legacy",
                 "device_id": snapshot.device_id,
+                "command": snapshot.command_canonical,
+                "raw_text": raw_text,
+                "raw_text_sha256": snapshot.raw_text_hash
+                or hashlib.sha256(raw_text.encode("utf-8")).hexdigest(),
                 "current": current,
                 "proposed": proposed,
                 "changed": current != proposed,
             }
         )
     passed_samples = sum(row["proposed"]["status"] in {"success", "empty"} for row in rows)
+    candidate_contract = dict(candidate.validation_json or {})
+    primary_keys = [
+        str(item) for item in candidate_contract.get("primary_keys") or []
+    ]
     repository.record_regression_validation(
         candidate.id,
         passed=bool(rows) and passed_samples == len(rows),
         sample_count=len(rows),
         passed_samples=passed_samples,
+        result_preview=[
+            {
+                "snapshot_id": row["snapshot_id"],
+                "raw_text_sha256": row["raw_text_sha256"],
+                "status": row["proposed"]["status"],
+                "records": row["proposed"].get("records") or [],
+                "primary_keys": [
+                    [
+                        str(record.get(key, "")).strip()
+                        for key in primary_keys
+                    ]
+                    for record in (row["proposed"].get("records") or [])
+                    if isinstance(record, dict)
+                ],
+            }
+            for row in rows
+        ],
     )
-    candidate_contract = dict(candidate.validation_json or {})
     active_contract = dict(active.validation_json or {}) if active else {}
+    candidate_template = _template_asset_evidence(candidate)
+    approval_blockers: list[str] = []
+    if not candidate_template["hash_valid"]:
+        approval_blockers.append("候选模板内容与不可变资产摘要不一致")
+    if not rows:
+        approval_blockers.append("没有可用于审批的解析验证样本")
+    elif passed_samples != len(rows):
+        approval_blockers.append(
+            f"候选模板仅通过 {passed_samples}/{len(rows)} 个解析验证样本"
+        )
+    approval_blockers.extend(
+        generated_template_activation_errors(
+            candidate_contract,
+            source_job_id=candidate.source_job_id,
+        )
+    )
     return {
         "template_id": candidate.id,
         "active_template_id": active.id if active else None,
@@ -479,8 +796,13 @@ def compare_template(template_id: str, limit: int = 20):
         "active_contract_sha256": active.contract_sha256 if active else None,
         "contract_changed": candidate.contract_sha256
         != (active.contract_sha256 if active else None),
+        "candidate_template": candidate_template,
         "candidate_contract": candidate_contract,
         "active_contract": active_contract,
+        "approval_readiness": {
+            "can_approve": not approval_blockers,
+            "blockers": approval_blockers,
+        },
         "rows": rows,
     }
 
@@ -504,7 +826,9 @@ def list_jobs(
 
 @router.get("/jobs/{job_id}")
 def get_job(job_id: str):
-    item = ParserJobRepository().get_job(job_id)
+    # This endpoint is restricted to the Parser control plane. Only the separately
+    # sanitized sample is returned; CommandSnapshot.raw_text never crosses this boundary.
+    item = ParserJobRepository().get_job(job_id, include_sanitized_payload=True)
     if not item:
         raise HTTPException(status_code=404, detail="parser job not found")
     return item
@@ -523,6 +847,91 @@ def list_job_generation_attempts(job_id: str, include_template: bool = False):
     }
 
 
+@router.put("/jobs/{job_id}/spec")
+def update_parser_spec(
+    job_id: str,
+    request: Request,
+    payload: ParserSpecUpdateRequest,
+):
+    try:
+        item = ParserJobRepository().set_parser_spec(
+            job_id,
+            parser_spec=payload.parser_spec,
+            confirmed=payload.confirmed,
+            actor=_authenticated_actor(request),
+            reason=_required_reason(payload.reason, action="ParserSpec change"),
+        )
+    except ParserJobStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"success": True, "job": item}
+
+
+@router.post("/jobs/{job_id}/suggest-spec")
+def suggest_parser_spec(
+    job_id: str,
+    request: Request,
+    payload: ParserSpecSuggestionRequest,
+):
+    task_id = str(uuid.uuid4())
+    repository = ParserJobRepository()
+    try:
+        repository.queue_parser_spec_suggestion(
+            job_id,
+            task_id=task_id,
+            actor=_authenticated_actor(request),
+            reason=str(payload.reason or "Generate an engineer-reviewable ParserSpec draft"),
+        )
+        celery.send_task(
+            "execute_skill_task",
+            args=["textfsm-generator"],
+            kwargs={
+                "job_id": job_id,
+                "operation": "suggest_spec",
+                "suggestion_task_id": task_id,
+            },
+            queue="netops.ai",
+            task_id=task_id,
+        )
+    except ParserJobStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        try:
+            repository.record_parser_spec_suggestion(
+                job_id,
+                task_id=task_id,
+                status="failed",
+                error=str(exc),
+            )
+        except ParserJobStateError:
+            pass
+        raise HTTPException(
+            status_code=503,
+            detail="ParserSpec suggestion dispatch failed",
+        ) from exc
+    return {"success": True, "job_id": job_id, "task_id": task_id, "status": "queued"}
+
+
+@router.put("/jobs/{job_id}/samples/{sample_id}/role")
+def update_parser_sample_role(
+    job_id: str,
+    sample_id: str,
+    request: Request,
+    payload: ParserSampleRoleUpdateRequest,
+):
+    try:
+        item = ParserJobRepository().set_sample_role(
+            job_id,
+            sample_id,
+            role=payload.role,
+            expectation=payload.expectation,
+            actor=_authenticated_actor(request),
+            reason=_required_reason(payload.reason, action="Parser sample role change"),
+        )
+    except ParserJobStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"success": True, "sample": item}
+
+
 @router.post("/jobs/{job_id}/retry")
 def retry_job(job_id: str):
     try:
@@ -530,6 +939,30 @@ def retry_job(job_id: str):
     except ParserJobStateError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"success": True, "job_id": job_id, "status": "pending"}
+
+
+@router.post("/jobs/{job_id}/recover")
+def recover_parser_job(
+    job_id: str,
+    request: Request,
+    payload: ParserJobRecoverRequest | None = None,
+):
+    """Fail a job stuck in pending/running/validating past the stale timeout."""
+    try:
+        item = ParserJobRepository().recover_stale_job(
+            job_id,
+            actor=_authenticated_actor(request),
+            reason=str(
+                (payload.reason if payload else None)
+                or "operator recovered a stale parser job"
+            ),
+        )
+    except ParserJobStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    stale_task_id = item.pop("recovered_celery_task_id", None)
+    if stale_task_id:
+        celery.control.revoke(stale_task_id, terminate=False)
+    return {"success": True, "job_id": job_id, "status": item["status"], "job": item}
 
 
 @router.post("/jobs/{job_id}/cancel")
@@ -568,8 +1001,16 @@ def bulk_delete_jobs(request: Request, payload: ParserBulkJobDeleteRequest):
 
 @router.post("/jobs/{job_id}/dispatch")
 def dispatch_job(job_id: str):
-    if not ParserJobRepository().get_job(job_id):
+    item = ParserJobRepository().get_job(job_id)
+    if not item:
         raise HTTPException(status_code=404, detail="parser job not found")
+    readiness = item.get("generation_readiness") or {}
+    if item.get("pipeline_version") == "simple_v2" and not readiness.get("ready"):
+        blockers = ", ".join(str(value) for value in readiness.get("blockers") or [])
+        raise HTTPException(
+            status_code=409,
+            detail=f"simple Parser job is not ready: {blockers or 'readiness_unknown'}",
+        )
     result = dispatch_ready_parser_jobs(
         job_id=job_id,
         limit=1,
@@ -629,6 +1070,7 @@ def activate_template(
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _refresh_rule_asset_projection_for_template(template_id)
     return item.to_dict()
 
 
@@ -651,6 +1093,7 @@ def force_activate_template(
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _refresh_rule_asset_projection_for_template(template_id)
     return item.to_dict()
 
 
@@ -668,6 +1111,7 @@ def rollback_template(
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _refresh_rule_asset_projection_for_template(template_id)
     return item.to_dict()
 
 
@@ -738,6 +1182,7 @@ def reject_template(template_id: str, request: Request, payload: ParserTemplateS
         actor=_authenticated_actor(request),
         reason=_required_reason(payload.reason, action="template rejection"),
     )
+    _refresh_rule_asset_projection_for_template(template_id)
     return {"success": True, "template_id": template_id, "status": "rejected"}
 
 
@@ -749,6 +1194,7 @@ def deprecate_template(template_id: str, request: Request, payload: ParserTempla
         actor=_authenticated_actor(request),
         reason=_required_reason(payload.reason, action="template deprecation"),
     )
+    _refresh_rule_asset_projection_for_template(template_id)
     return {"success": True, "template_id": template_id, "status": "deprecated"}
 
 
@@ -1150,6 +1596,11 @@ def get_engineering_revision_task(task_id: str):
     }
     if result.successful():
         payload["result"] = result.result
+        if isinstance(result.result, dict) and result.result.get("success") is False:
+            payload["error"] = str(
+                result.result.get("error") or "engineering revision failed"
+            )
+            payload["validation"] = result.result.get("validation")
     elif result.failed():
         payload["error"] = str(result.result)
     return payload
@@ -1263,6 +1714,173 @@ def resolve_runtime_rule_assets(payload: RuntimeRuleAssetResolveRequest):
 @router.get("/runtime-assets/health")
 def get_runtime_rule_asset_health():
     return RuntimeRuleAssetResolver().load_inventory_bundle().to_dict()
+
+
+@router.get("/check-item-runtime-bundles/health")
+def get_check_item_runtime_bundle_health(
+    page: int = 1,
+    page_size: int = 25,
+    search: str | None = None,
+    status: str | None = None,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    try:
+        return CheckItemRuntimeBundleService().catalog_health(
+            page=page,
+            page_size=page_size,
+            search=search,
+            status=status,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/check-item-runtime-bundles/assembly-preview")
+def preview_check_item_runtime_bundle_assembly(
+    payload: RuntimeBundleAssemblyRequest,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    try:
+        return CheckItemRuntimeBundleService().preview_assembly(
+            check_item_version_id=payload.check_item_version_id,
+            implementation_version_id=payload.implementation_version_id,
+            parser_template_ids=payload.parser_template_ids,
+            observation_contract_ids=payload.observation_contract_ids,
+            change_policy_version_ids=payload.change_policy_version_ids,
+            event_rule_version_ids=payload.event_rule_version_ids,
+            comparison_profile_version_id=payload.comparison_profile_version_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/check-item-runtime-bundles/assemble")
+def assemble_check_item_runtime_bundle(
+    payload: RuntimeBundleAssembleRequest,
+    request: Request,
+    _idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+):
+    try:
+        return CheckItemRuntimeBundleService().assemble(
+            check_item_version_id=payload.check_item_version_id,
+            implementation_version_id=payload.implementation_version_id,
+            preview_digest=payload.preview_digest,
+            actor=_authenticated_actor(request),
+            parser_template_ids=payload.parser_template_ids,
+            observation_contract_ids=payload.observation_contract_ids,
+            change_policy_version_ids=payload.change_policy_version_ids,
+            event_rule_version_ids=payload.event_rule_version_ids,
+            comparison_profile_version_id=payload.comparison_profile_version_id,
+        )
+    except RuntimeBundleValidationError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "运行包装配被阻断",
+                "blockers": list(exc.blockers),
+            },
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/check-item-runtime-bundles/{version_id}")
+def get_check_item_runtime_bundle(
+    version_id: str,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    try:
+        item = CheckItemRuntimeBundleService().get_version(version_id)
+    except RuntimeBundleValidationError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "运行包依赖已失效",
+                "blockers": list(exc.blockers),
+            },
+        ) from exc
+    if item is None:
+        raise HTTPException(status_code=404, detail="runtime bundle version not found")
+    return item
+
+
+@router.post(
+    "/check-item-runtime-bundles/{version_id}/activate",
+    dependencies=[Depends(require_role(["admin"]))],
+)
+def activate_check_item_runtime_bundle(
+    version_id: str,
+    payload: RuntimeBundleLifecycleRequest,
+    request: Request,
+    _idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+):
+    try:
+        return CheckItemRuntimeBundleService().activate(
+            version_id,
+            actor=_authenticated_actor(request),
+            reason=_required_reason(
+                payload.reason,
+                action="runtime bundle activation",
+            ),
+        )
+    except RuntimeBundleValidationError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "运行包发布被阻断",
+                "blockers": list(exc.blockers),
+            },
+        ) from exc
+    except ValueError as exc:
+        status_code = 404 if "not found" in str(exc).casefold() else 422
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
+@router.post(
+    "/check-item-runtime-bundles/{version_id}/rollback",
+    dependencies=[Depends(require_role(["admin"]))],
+)
+def rollback_check_item_runtime_bundle(
+    version_id: str,
+    payload: RuntimeBundleLifecycleRequest,
+    request: Request,
+    _idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+):
+    try:
+        return CheckItemRuntimeBundleService().rollback(
+            version_id,
+            actor=_authenticated_actor(request),
+            reason=_required_reason(
+                payload.reason,
+                action="runtime bundle rollback",
+            ),
+        )
+    except RuntimeBundleValidationError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "运行包回滚被阻断",
+                "blockers": list(exc.blockers),
+            },
+        ) from exc
+    except ValueError as exc:
+        status_code = 404 if "not found" in str(exc).casefold() else 422
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
 @router.post("/runtime-assets/seed-builtin")
@@ -1423,10 +2041,16 @@ def submit_rule_generation_job_candidate(
 
 
 @router.post("/rule-generation-jobs/{job_id}/auto-context")
-def auto_build_rule_generation_context(job_id: str, http_request: Request):
+def auto_build_rule_generation_context(
+    job_id: str,
+    http_request: Request,
+    payload: RuleAssetGenerationContextRequest | None = None,
+):
     try:
+        request = payload or RuleAssetGenerationContextRequest()
         return RuleAssetTemplateActivationService().auto_build_context(
             job_id,
+            dataset_ids=list(request.dataset_ids or []),
             actor=_authenticated_actor(http_request),
         )
     except KeyError as exc:
@@ -1764,6 +2388,121 @@ def bootstrap_event_rules(
     }
 
 
+def _enrich_command_profile_check_items(
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    version_ids = [
+        str(item["profile_version_id"])
+        for item in rows
+        if item.get("profile_version_id")
+    ]
+    selections = PatrolProfileCheckItemRepository().list_selections(
+        version_ids,
+        active_only=False,
+    )
+    enriched: list[dict[str, Any]] = []
+    for item in rows:
+        version_id = str(item.get("profile_version_id") or "")
+        selected = list(selections.get(version_id, []))
+        enriched.append(
+            {
+                **item,
+                "profile_mode": (
+                    "check_items" if selected else "legacy_commands"
+                ),
+                "check_item_ids": [
+                    str(row["check_item_id"]) for row in selected
+                ],
+                "check_items": selected,
+            }
+        )
+    return enriched
+
+
+@router.get("/check-items")
+def list_check_items(
+    search: str | None = None,
+    category: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+):
+    try:
+        catalog = CheckItemCatalogRepository().load_active()
+        search_value = str(search or "").strip().casefold()
+        category_value = str(category or "").strip().casefold()
+        implementations_by_item: dict[str, list[dict[str, Any]]] = {}
+        for implementation in catalog.implementations:
+            payload = {
+                "implementation_id": implementation.id,
+                "implementation_version_id": implementation.version_id,
+                "name": implementation.name,
+                "description": implementation.description,
+                "match": implementation.match,
+                "commands": [
+                    {
+                        "command": command.command,
+                        "priority": command.priority,
+                    }
+                    for command in implementation.commands
+                ],
+                "collector": implementation.collector,
+                "parser_requirement": implementation.parser_requirement,
+                "selection_priority": implementation.selection_priority,
+                "status": implementation.status,
+            }
+            for check_item_id in implementation.check_item_ids:
+                implementations_by_item.setdefault(
+                    check_item_id,
+                    [],
+                ).append(payload)
+        items = []
+        for item in catalog.check_items:
+            if category_value and item.category.casefold() != category_value:
+                continue
+            searchable = " ".join(
+                [item.id, item.name, item.category, item.description]
+            ).casefold()
+            if search_value and search_value not in searchable:
+                continue
+            implementations = sorted(
+                implementations_by_item.get(item.id, []),
+                key=lambda row: (
+                    -int(row["selection_priority"]),
+                    str(row["implementation_id"]),
+                ),
+            )
+            items.append(
+                {
+                    "check_item_id": item.id,
+                    "check_item_version_id": item.version_id,
+                    "version": item.version,
+                    "name": item.name,
+                    "category": item.category,
+                    "description": item.description,
+                    "result_mode": item.result_mode,
+                    "assessment_mode": item.assessment_mode,
+                    "canonical_contract": item.canonical_contract,
+                    "report_projection": item.report_projection,
+                    "applicability": item.applicability,
+                    "status": item.status,
+                    "digest": item.digest,
+                    "implementation_count": len(implementations),
+                    "implementations": implementations,
+                }
+            )
+        page_size = max(1, min(int(limit), 200))
+        page_offset = max(0, int(offset))
+        return {
+            "items": items[page_offset : page_offset + page_size],
+            "total": len(items),
+            "limit": page_size,
+            "offset": page_offset,
+            "catalog_version": catalog.catalog_version,
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 @router.get("/command-profiles")
 def list_command_profiles(
     status: str | None = None,
@@ -1771,12 +2510,14 @@ def list_command_profiles(
     limit: int = 20,
     offset: int = 0,
 ):
-    return CommandProfileRepository().list_profiles_page(
+    page = CommandProfileRepository().list_profiles_page(
         status=status,
         search=search,
         limit=limit,
         offset=offset,
     )
+    page["items"] = _enrich_command_profile_check_items(page["items"])
+    return page
 
 
 @router.post("/command-profiles")
@@ -1784,14 +2525,108 @@ def upsert_command_profile(request: Request, payload: CommandProfileUpsertReques
     try:
         if payload.status == "active":
             raise ValueError("command profile versions must be created as draft")
+        commands = [
+            str(item).strip()
+            for item in payload.commands
+            if str(item).strip()
+        ]
+        check_item_ids = sorted(
+            {
+                str(item).strip()
+                for item in payload.check_item_ids
+                if str(item).strip()
+            }
+        )
+        if commands and check_item_ids:
+            raise ValueError(
+                "a patrol profile cannot mix check items with legacy commands"
+            )
+        if not commands and not check_item_ids:
+            raise ValueError(
+                "a patrol profile requires at least one check item"
+            )
+        if check_item_ids and payload.action != "patrol":
+            raise ValueError("check-item profiles only support patrol action")
+        actor = _authenticated_actor(request)
         version_id = CommandProfileRepository().create_profile_version(
             name=payload.name,
             action=payload.action,
-            commands=payload.commands,
-            created_by=_authenticated_actor(request),
+            commands=commands,
+            created_by=actor,
             status="draft",
         )
-        return {"success": True, "profile_version_id": version_id, "status": payload.status}
+        if check_item_ids:
+            PatrolProfileCheckItemRepository().set_draft_selection(
+                version_id,
+                check_item_ids,
+                actor=actor,
+            )
+        result = {
+            "success": True,
+            "profile_version_id": version_id,
+            "status": payload.status,
+        }
+        if check_item_ids:
+            result.update(
+                {
+                    "profile_mode": "check_items",
+                    "check_item_ids": check_item_ids,
+                }
+            )
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/command-profiles/{profile_version_id}/check-items")
+def get_patrol_profile_check_items(profile_version_id: str):
+    if CommandProfileRepository().get_profile_version(profile_version_id) is None:
+        raise HTTPException(status_code=404, detail="patrol profile version not found")
+    rows = PatrolProfileCheckItemRepository().list_selection(
+        profile_version_id,
+        active_only=False,
+    )
+    return {
+        "profile_version_id": profile_version_id,
+        "profile_mode": "check_items" if rows else "legacy_commands",
+        "check_item_ids": [str(item["check_item_id"]) for item in rows],
+        "items": rows,
+    }
+
+
+@router.put("/command-profiles/{profile_version_id}/check-items")
+def set_patrol_profile_check_items(
+    profile_version_id: str,
+    request: Request,
+    payload: PatrolProfileCheckItemSelectionRequest,
+):
+    try:
+        profile = CommandProfileRepository().get_profile_version(
+            profile_version_id
+        )
+        if profile is None:
+            raise ValueError("patrol profile version not found")
+        if profile.get("items"):
+            raise ValueError(
+                "legacy command profile cannot be converted in place; create a new version"
+            )
+        selection_repository = PatrolProfileCheckItemRepository()
+        selection_repository.set_draft_selection(
+            profile_version_id,
+            payload.check_item_ids,
+            actor=_authenticated_actor(request),
+        )
+        rows = selection_repository.list_selection(
+            profile_version_id,
+            active_only=False,
+        )
+        return {
+            "success": True,
+            "profile_version_id": profile_version_id,
+            "profile_mode": "check_items",
+            "check_item_ids": [str(item["check_item_id"]) for item in rows],
+            "items": rows,
+        }
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1972,12 +2807,157 @@ def _profile_impact_commands(
     return str(item["profile_name"]), payload.profile_version_id, commands
 
 
+def _profile_check_item_ids(profile_version_id: str | None) -> tuple[str, ...]:
+    if not profile_version_id:
+        return ()
+    return PatrolProfileCheckItemRepository().active_check_item_ids(
+        profile_version_id
+    )
+
+
+def _preview_check_item_profile_impact(
+    *,
+    profile_name: str,
+    profile_version_id: str,
+    check_item_ids: tuple[str, ...],
+    selector: dict[str, Any],
+    devices: list[dict[str, Any]],
+    row_limit: int,
+    mode: str,
+) -> dict[str, Any]:
+    target = build_target_manifest(devices=devices, selector=selector)
+    inventory = build_inventory_snapshot(devices)
+    preview_id = f"profile-impact-{uuid.uuid4()}"
+    plan = CheckItemEffectivePlanService().preview(
+        EffectivePlanRequest(
+            patrol_batch_id=preview_id,
+            devices=tuple(devices),
+            check_item_ids=check_item_ids,
+            profile_version_id=profile_version_id,
+            profile_version_ids_by_device={
+                str(device.get("device_id") or device.get("id") or ""): (
+                    profile_version_id
+                )
+                for device in devices
+            },
+            target_manifest_digest=str(target["digest"]),
+            inventory_snapshot_digest=str(inventory["digest"]),
+            current_observed_at=datetime.now(timezone.utc),
+            actor="profile-impact-preview",
+        )
+    )
+    decisions_by_device: dict[str, list[dict[str, Any]]] = {}
+    actions_by_device: dict[str, list[dict[str, Any]]] = {}
+    for decision in plan.decisions:
+        decisions_by_device.setdefault(
+            str(decision.get("device_id") or ""),
+            [],
+        ).append(dict(decision))
+    for action in plan.collection_actions:
+        actions_by_device.setdefault(
+            str(action.get("device_id") or ""),
+            [],
+        ).append(dict(action))
+
+    rows: list[dict[str, Any]] = []
+    ready_total = 0
+    blocked_total = 0
+    not_applicable_total = 0
+    blocked_devices = 0
+    for device in devices:
+        device_id = str(device.get("device_id") or device.get("id") or "")
+        decisions = decisions_by_device.get(device_id, [])
+        ready = [item for item in decisions if item.get("status") == "resolved"]
+        not_applicable = [
+            item for item in decisions if item.get("status") == "not_applicable"
+        ]
+        blocked = [
+            item
+            for item in decisions
+            if item.get("status") not in {"resolved", "not_applicable"}
+        ]
+        ready_total += len(ready)
+        blocked_total += len(blocked)
+        not_applicable_total += len(not_applicable)
+        if blocked:
+            blocked_devices += 1
+        if len(rows) >= row_limit:
+            continue
+        actions = actions_by_device.get(device_id, [])
+        rows.append(
+            {
+                "device_id": device_id,
+                "device_name": device.get("device_name") or device.get("name"),
+                "ip": device.get("ip") or device.get("management_ip"),
+                "vendor": device.get("vendor"),
+                "model": device.get("model"),
+                "family": device.get("family"),
+                "platform": device.get("platform"),
+                "device_type": device.get("device_type"),
+                "site": device.get("site"),
+                "role": device.get("role"),
+                "groups": device.get("groups") or [],
+                "command_count": len(actions),
+                "check_item_count": len(decisions),
+                "eligible_count": len(decisions) - len(not_applicable),
+                "ready_count": len(ready),
+                "blocked_count": len(blocked),
+                "not_applicable_count": len(not_applicable),
+                "status": "blocked" if blocked else "ready",
+                "violations": [
+                    {
+                        "check_item_id": item.get("check_item_id"),
+                        "status": item.get("status"),
+                        "reason_codes": item.get("reason_codes") or [],
+                        "implementation_version_id": item.get(
+                            "implementation_version_id"
+                        ),
+                    }
+                    for item in blocked
+                ],
+                "plan": {
+                    "profile_name": profile_name,
+                    "profile_version_id": profile_version_id,
+                    "profile_mode": "check_items",
+                    "check_item_ids": list(check_item_ids),
+                    "decisions": decisions,
+                    "collection_items": actions,
+                    "runtime_manifest_digest": plan.manifest_digest,
+                },
+            }
+        )
+    denominator = ready_total + blocked_total
+    return {
+        "success": True,
+        "mode": mode,
+        "profile_mode": "check_items",
+        "profile_name": profile_name,
+        "profile_version_id": profile_version_id,
+        "selector": selector,
+        "command_count": len(plan.collection_actions),
+        "check_item_count": len(check_item_ids),
+        "matched_device_count": len(devices),
+        "evaluated_device_count": len(devices),
+        "returned_device_count": len(rows),
+        "blocked_device_count": blocked_devices,
+        "ready_device_count": len(devices) - blocked_devices,
+        "eligible_command_count": denominator,
+        "ready_command_count": ready_total,
+        "blocked_command_count": blocked_total,
+        "ready_check_item_count": ready_total,
+        "blocked_check_item_count": blocked_total,
+        "not_applicable_check_item_count": not_applicable_total,
+        "coverage_rate": ready_total / denominator if denominator else 1.0,
+        "runtime_manifest_digest": plan.manifest_digest,
+        "rows": rows,
+    }
+
+
 @router.post("/command-profiles/impact-preview")
 def preview_command_profile_impact(payload: CommandProfileImpactPreviewRequest):
     try:
         repository = CommandProfileRepository()
         mode = normalize_patrol_mode(payload.mode)
-        profile_name, profile_version_id, commands = _profile_impact_commands(payload)
         selector = dict(payload.selector or {})
         devices = [
             device
@@ -1985,6 +2965,43 @@ def preview_command_profile_impact(payload: CommandProfileImpactPreviewRequest):
             if CollectionPolicyResolver._selector_matches(device, selector)
         ]
         limit = max(1, min(int(payload.limit or 100), 500))
+        profile = (
+            repository.get_profile_version(str(payload.profile_version_id))
+            if payload.profile_version_id
+            else None
+        )
+        check_item_ids = (
+            ()
+            if profile and profile.get("items")
+            else _profile_check_item_ids(payload.profile_version_id)
+        )
+        if check_item_ids:
+            if not devices:
+                raise ValueError(
+                    "no active devices match the impact-preview selector"
+                )
+            if profile is None:
+                raise ValueError("patrol profile version not found")
+            result = _preview_check_item_profile_impact(
+                profile_name=str(profile["profile_name"]),
+                profile_version_id=str(payload.profile_version_id),
+                check_item_ids=check_item_ids,
+                selector=selector,
+                devices=devices,
+                row_limit=limit,
+                mode=mode,
+            )
+            if payload.save_evidence:
+                repository.record_profile_coverage(
+                    str(payload.profile_version_id),
+                    result,
+                )
+                result["evidence_saved"] = True
+            else:
+                result["evidence_saved"] = False
+            return result
+
+        profile_name, profile_version_id, commands = _profile_impact_commands(payload)
         rows: list[dict[str, Any]] = []
         blocked_devices = 0
         eligible_commands = 0
@@ -2051,11 +3068,13 @@ def preview_command_profile_impact(payload: CommandProfileImpactPreviewRequest):
         result = {
             "success": True,
             "mode": mode,
+            "profile_mode": "legacy_commands",
             "profile_name": profile_name,
             "profile_version_id": profile_version_id,
             "selector": selector,
             "command_count": len(commands),
             "matched_device_count": len(devices),
+            "evaluated_device_count": len(rows),
             "returned_device_count": len(rows),
             "blocked_device_count": blocked_devices,
             "ready_device_count": len(rows) - blocked_devices,

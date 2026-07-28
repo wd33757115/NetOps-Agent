@@ -49,6 +49,9 @@ steps:
       records: ${context.records}
       record_groups: ${context.record_groups}
       proposal: ${context.proposal}
+      observation_targets: ${context.observation_targets}
+      strict_observation_targets: ${context.strict_observation_targets}
+      canonical_identity_constraint: ${context.canonical_identity_constraint}
       policy_intent: ${context.policy_intent}
       event_intent: ${context.event_intent}
       generation_provider: ${context.generation_provider}
@@ -85,7 +88,8 @@ steps:
     inputs:
       contract: ${steps.observation_contract.result.proposal}
       change_policy: ${steps.change_policy.result.policy}
-      change_policies: ${steps.change_policy.result.policies}
+      change_policies: ${steps.change_policy.result.target_policies}
+      event_observation_types: ${steps.rule_target_planning.result.event_observation_types}
       intent: ${context.event_intent}
       event_constraints: ${context.event_constraints}
       event_constraints_by_observation_type: ${context.event_constraints_by_observation_type}
@@ -122,6 +126,7 @@ steps:
       vendor: ${context.vendor}
       model: ${context.model}
       observation_type: ${steps.rule_target_planning.result.observation_type}
+      rule_generation_seed_job_id: ${context.rule_generation_seed_job_id}
       rule_generation_context_id: ${context.rule_generation_context_id}
       rule_generation_context_digest: ${context.rule_generation_context_digest}
       contract_result: ${steps.observation_contract.result}

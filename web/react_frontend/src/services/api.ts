@@ -3,6 +3,22 @@
 
 import { api, getChatWebSocketUrl, type AuthSession, API_BASE_URL } from '../config/api'
 
+const responseFilename = (
+  contentDisposition: unknown,
+  fallback: string,
+) => {
+  const value = String(contentDisposition || '')
+  const encoded = value.match(/filename\*=UTF-8''([^;]+)/i)?.[1]
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded.replace(/^["']|["']$/g, ''))
+    } catch {
+      return encoded
+    }
+  }
+  return value.match(/filename="?([^";]+)"?/i)?.[1] || fallback
+}
+
 export interface ChatRequest {
   query: string
   thread_id?: string
@@ -107,6 +123,7 @@ export interface ParserTemplateItem {
   category: string
   version: string
   status: string
+  source_job_id?: string
   validation_json?: Record<string, unknown>
   created_at: string
 }
@@ -133,12 +150,20 @@ export interface ParserTemplateComparison {
   candidate_contract_sha256?: string
   active_contract_sha256?: string
   contract_changed: boolean
+  candidate_template: ParserTemplatePreview
   candidate_contract: Record<string, unknown>
   active_contract: Record<string, unknown>
+  approval_readiness: {
+    can_approve: boolean
+    blockers: string[]
+  }
   rows: Array<{
     snapshot_id: string
     dataset_id: string
     device_id: string
+    command: string
+    raw_text: string
+    raw_text_sha256: string
     changed: boolean
     current?: { status: string; failure_code?: string; records?: unknown }
     proposed: { status: string; failure_code?: string; records?: unknown }
@@ -203,6 +228,10 @@ export interface ParserJobItem {
   canonical_command: string
   status: string
   source_mode: 'parser_validation' | 'production'
+  pipeline_version?: 'legacy' | 'simple_v2'
+  parser_spec_status?: 'missing' | 'draft' | 'confirmed'
+  parser_spec_json?: Record<string, unknown>
+  parser_spec_sha256?: string
   sample_count: number
   structure_variant_count?: number
   structure_signatures?: string[]
@@ -213,6 +242,7 @@ export interface ParserJobItem {
   attempts: number
   contract_revision_count?: number
   template_attempt_count?: number
+  model_calls_used?: number
   best_attempt_id?: string
   agent_state_json?: Record<string, unknown>
   agent_budget_json?: Record<string, unknown>
@@ -232,6 +262,33 @@ export interface ParserJobItem {
     template_attempts: number
   }
   generation_attempts?: ParserGenerationAttempt[]
+  model_call_ledger?: ParserModelCallLedger[]
+  generation_readiness?: {
+    ready: boolean
+    blockers: string[]
+    warnings?: string[]
+    validation_mode?: 'generation_sample_only' | 'independent_acceptance'
+    role_counts: Partial<Record<'generation' | 'acceptance' | 'negative' | 'unassigned', number>>
+  }
+}
+
+export interface ParserModelCallLedger {
+  id: string
+  job_id: string
+  call_number: number
+  generation_run_id: string
+  status: string
+  model_provider?: string
+  model_name?: string
+  protocol_version?: string
+  candidate_sha256?: string
+  failure_signature?: string
+  result_json?: Record<string, unknown>
+  token_usage_json?: Record<string, number>
+  latency_ms?: number
+  error?: string
+  created_at: string
+  completed_at?: string
 }
 
 export interface ParserGenerationAttempt {
@@ -268,10 +325,40 @@ export interface ParserJobSample {
   dataset_id?: string
   device_id: string
   output_signature: string
+  sample_role?: 'unassigned' | 'generation' | 'acceptance' | 'negative'
+  expectation_json?: {
+    record_count: number
+    primary_keys: string[][]
+  }
   sanitization_status: 'pending_sanitization' | 'sanitized' | 'failed'
   sanitization_version?: string
+  sanitized_text?: string
+  sanitized_preview?: string
   sanitized_hash?: string
   redaction_summary_json?: Record<string, number>
+  content_classification?: {
+    status: 'data' | 'valid_empty' | 'empty_unverified' | 'unsupported_command' | 'command_error'
+    confidence: number
+    reason: string
+    recommended_role: 'generation' | 'negative' | 'unassigned'
+  }
+  source_context?: {
+    run_id?: string
+    offline_job_id?: string
+    period_role?: string
+    source_file_name?: string
+    device_name?: string
+    management_ip?: string
+    vendor?: string
+    model?: string
+    command?: string
+    canonical_command?: string
+    observed_at?: string
+    parse_status?: string
+    output_status?: string
+    start_line?: number
+    end_line?: number
+  }
   created_at: string
 }
 
@@ -409,10 +496,16 @@ export interface ParserRuleAssetReplayGate {
   success?: boolean
   outcome_success?: boolean
   scope_success?: boolean
+  evidence_success?: boolean
   scope_required?: boolean
   scope_mode?: string
   expected_run_ids?: string[]
   actual_run_ids?: string[]
+  sampled_run_ids?: string[]
+  missing_run_ids?: string[]
+  sampled_change_count?: number
+  total_change_count?: number
+  warnings?: string[]
   errors?: string[]
 }
 
@@ -421,6 +514,9 @@ export interface ParserRuleAssetBundle {
   status: string
   source_ref?: string | null
   observation_type?: string | null
+  observation_types?: string[]
+  semantic_label?: string | null
+  asset_scope?: 'single_observation' | 'multi_observation' | string
   command?: string | null
   vendor?: string | null
   model?: string | null
@@ -607,6 +703,16 @@ export interface OfflineRuleAssetPipeline {
   context_ids: string[]
   bundle_ids: string[]
   command_units?: OfflineCommandAssetUnitSummary
+  runtime_targets?: Array<{
+    check_item_id: string
+    check_item_version_id: string
+    implementation_id: string
+    implementation_version_id: string
+    status: CheckItemRuntimeBundleHealthStatus
+    blocking_reasons: string[]
+    bundle_version_id?: string | null
+    bundle_digest?: string | null
+  }>
 }
 
 export type OfflineCommandAssetUnitStatus =
@@ -653,6 +759,7 @@ export interface OfflineCommandAssetUnitStage {
 export interface OfflineCommandAssetUnit {
   id: string
   offline_job_id: string
+  check_item_id?: string | null
   asset_key: string
   vendor: string
   model?: string | null
@@ -714,6 +821,165 @@ export interface OfflineCommandAssetUnitPage {
   total: number
   page_count: number
   summary: OfflineCommandAssetUnitSummary
+}
+
+export type RuleAssetGovernanceBucket =
+  | 'action_required'
+  | 'in_progress'
+  | 'awaiting_approval'
+  | 'published'
+  | 'not_applicable'
+  | 'exception'
+
+export type RuleAssetGovernanceStatus =
+  | 'preparing'
+  | 'ready_to_generate'
+  | 'generating'
+  | 'engineering_review'
+  | 'release_approval'
+  | 'published'
+  | 'not_applicable'
+  | 'blocked'
+  | 'failed'
+
+export type RuleAssetComponentStatus =
+  | 'not_started'
+  | 'ready_to_generate'
+  | 'generating'
+  | 'engineering_review'
+  | 'published'
+  | 'not_applicable'
+  | 'blocked'
+  | 'failed'
+
+export interface RuleAssetProductionUnit extends OfflineCommandAssetUnit {
+  governance_status: RuleAssetGovernanceStatus
+  governance_bucket: RuleAssetGovernanceBucket
+  component_statuses: {
+    parser: RuleAssetComponentStatus
+    contract: RuleAssetComponentStatus
+    policy: RuleAssetComponentStatus
+    event: RuleAssetComponentStatus
+  }
+  source_job: {
+    id: string
+    name: string
+    status: string
+    created_at?: string | null
+  }
+}
+
+export interface RuleAssetProductionUnitDetail
+  extends OfflineCommandAssetUnitDetail, RuleAssetProductionUnit {}
+
+export interface RuleAssetProductionSummary {
+  total: number
+  action_required: number
+  in_progress: number
+  awaiting_approval: number
+  published: number
+  not_applicable: number
+  exception: number
+  by_bucket: Record<string, number>
+  by_status: Record<string, number>
+}
+
+export interface RuleAssetProductionUnitPage {
+  items: RuleAssetProductionUnit[]
+  page: number
+  page_size: number
+  total: number
+  page_count: number
+  summary: RuleAssetProductionSummary
+}
+
+export interface RuleAssetCheckItemProductionUnit {
+  id: string
+  check_item_id?: string | null
+  check_item_version_id?: string | null
+  name: string
+  category: string
+  description: string
+  result_mode?: string | null
+  assessment_mode?: string | null
+  governance_status: RuleAssetGovernanceStatus
+  governance_bucket: RuleAssetGovernanceBucket
+  current_stage: string
+  current_stage_label: string
+  progress_percent: number
+  sample_count: number
+  evidence_device_count: number
+  output_signature_count: number
+  blocker_count: number
+  implementation_count: number
+  command_count: number
+  vendors: string[]
+  component_statuses: RuleAssetProductionUnit['component_statuses']
+  next_action?: OfflineRuleAssetPipelineAction
+  updated_at?: string | null
+  coverage: {
+    total: number
+    published: number
+    action_required: number
+    in_progress: number
+    awaiting_approval: number
+    exception: number
+  }
+  implementations: Array<RuleAssetProductionUnit & {
+    implementation_id?: string | null
+    implementation_version_id?: string | null
+    implementation_name?: string | null
+    mapping_status: 'catalog_resolved' | 'unclassified'
+  }>
+}
+
+export interface RuleAssetCheckItemProductionUnitPage {
+  items: RuleAssetCheckItemProductionUnit[]
+  page: number
+  page_size: number
+  total: number
+  page_count: number
+  summary: RuleAssetProductionSummary & { unclassified?: number }
+}
+
+export type RuleAssetAutomationMode = 'disabled' | 'generate_only' | 'auto_publish'
+
+export interface RuleAssetAutomationSettings {
+  mode: RuleAssetAutomationMode
+  max_concurrency: number
+  max_generation_attempts: number
+  retry_delay_seconds: number
+  stale_run_seconds: number
+  min_period_count: number
+  min_device_count: number
+  min_record_count: number
+  max_estimated_daily_events: number
+  allow_critical: boolean
+  updated_at?: string | null
+  updated_by?: string | null
+  last_run?: {
+    ran_at?: string | null
+    success?: boolean
+    mode?: RuleAssetAutomationMode
+    dispatched_count?: number
+    published_count?: number
+    review_required_count?: number
+    failed_count?: number
+    summary?: string
+  }
+}
+
+export interface RuleAssetAutomationControl {
+  settings: RuleAssetAutomationSettings
+  scheduler: {
+    status: 'ok' | 'missing' | 'stale' | 'invalid' | 'unavailable'
+    recorded_at?: string | null
+    age_seconds?: number | null
+    worker_id?: string | null
+    error?: string | null
+  }
+  active_generation_runs: number
+  command_units: Record<string, number>
 }
 
 export interface OfflinePatrolReportRisk {
@@ -864,6 +1130,15 @@ export interface ParserApprovalAudit {
   governance?: Record<string, unknown>
 }
 
+export interface ParserApprovalAuditPage extends ParserPage<ParserApprovalAudit> {
+  summary?: {
+    total: number
+    approved: number
+    rejected: number
+    deprecated: number
+  }
+}
+
 export interface ParserAgentLoopAttempt {
   id: string
   job_id: string
@@ -965,6 +1240,155 @@ export interface ParserRuntimeRuleAssetHealth extends Partial<ParserRuntimeRuleA
   error?: string
 }
 
+export type CheckItemRuntimeBundleHealthStatus = 'ready' | 'missing' | 'invalid'
+
+export interface CheckItemRuntimeBundleHealthItem {
+  check_item_id: string
+  check_item_version_id: string
+  check_item_name: string
+  result_mode: string
+  assessment_mode: string
+  implementation_id: string
+  implementation_version_id: string
+  implementation_name: string
+  commands: string[]
+  status: CheckItemRuntimeBundleHealthStatus
+  ready: boolean
+  blocking_reasons: string[]
+  bundle_id?: string | null
+  bundle_version_id?: string | null
+  bundle_digest?: string | null
+  activated_at?: string | null
+}
+
+export interface CheckItemRuntimeBundleHealthPage {
+  items: CheckItemRuntimeBundleHealthItem[]
+  page: number
+  page_size: number
+  total: number
+  page_count: number
+  summary: {
+    scope: 'active_catalog'
+    catalog_version: number
+    check_item_count: number
+    implementation_pair_count: number
+    ready_count: number
+    missing_count: number
+    invalid_count: number
+    ready_rate: number
+    ready: boolean
+    status_counts: Record<string, number>
+  }
+}
+
+export interface RuntimeBundleAssemblyIssue {
+  code: string
+  message: string
+  remediation?: string | null
+  context?: Record<string, unknown>
+}
+
+export interface RuntimeBundleCommandRoute {
+  command: string
+  canonical_command: string
+  priority: number
+  status: 'executable' | 'unavailable' | 'ambiguous'
+  selected_parser_template_id?: string | null
+  selected_contract_ids: string[]
+  candidate_count: number
+  reasons: Array<Record<string, unknown>>
+}
+
+export interface RuntimeBundleAssemblyPreview {
+  schema_version: number
+  check_item: {
+    id?: string | null
+    version_id: string
+    name?: string | null
+    result_mode?: string
+    assessment_mode?: string
+  }
+  implementation: {
+    id?: string | null
+    version_id: string
+    name?: string | null
+    selector?: Record<string, unknown>
+    commands?: Array<{ command: string; canonical_command: string; priority: number }>
+  }
+  selected: {
+    parser_template_ids: string[]
+    observation_contract_ids: string[]
+    change_policy_version_ids: string[]
+    event_rule_version_ids: string[]
+    event_rule_bindings: Record<string, string[]>
+    comparison_profile_version_id?: string | null
+    entity_identity_policy_version_id?: string | null
+  }
+  candidates: {
+    parsers: Array<Record<string, any>>
+    observation_contracts: Array<Record<string, any>>
+    change_policies: Array<Record<string, any>>
+    event_rules: Array<Record<string, any>>
+    comparison_profiles: Array<Record<string, any>>
+  }
+  command_routes: RuntimeBundleCommandRoute[]
+  compatibility: {
+    expected_observation_types?: string[]
+    produced_observation_types?: string[]
+    observation_projection?: string[]
+    current_state_rule_types?: string[]
+    change_policy_types?: string[]
+    executable_commands?: string[]
+    unavailable_fallbacks?: string[]
+    fallback_resilience?: 'full' | 'reduced' | 'none' | 'not_applicable'
+    parser_manifests?: Record<string, Record<string, unknown>>
+  }
+  active_bundle?: {
+    bundle_id: string
+    version_id: string
+    version: number
+    digest: string
+    activated_at?: string | null
+  } | null
+  drafts: Array<{
+    version_id: string
+    version: number
+    digest: string
+    created_at?: string | null
+  }>
+  operationally_ready: boolean
+  fallback_resilience: 'full' | 'reduced' | 'none' | 'not_applicable'
+  blockers: RuntimeBundleAssemblyIssue[]
+  warnings: RuntimeBundleAssemblyIssue[]
+  preview_digest: string
+}
+
+export interface CheckItemRuntimeBundleVersion {
+  bundle_id: string
+  version_id: string
+  version: number
+  version_status: 'draft' | 'active' | 'deprecated'
+  digest: string
+  check_item_version_id: string
+  implementation_version_id: string
+  parser_bundle: Record<string, Record<string, unknown>>
+  compatibility: Record<string, any>
+  validation_report: Record<string, any>
+  assets: Array<Record<string, any>>
+  activated_at?: string | null
+  deprecated_at?: string | null
+}
+
+export interface RuntimeBundleAssemblyPayload {
+  check_item_version_id: string
+  implementation_version_id: string
+  parser_template_ids?: string[]
+  observation_contract_ids?: string[]
+  change_policy_version_ids?: string[]
+  event_rule_version_ids?: string[]
+  comparison_profile_version_id?: string | null
+}
+
 export interface ParserCoverage {
   templates_total: number
   templates_active: number
@@ -990,9 +1414,11 @@ export interface ParserCoverage {
   backfills_pending_approval: number
   backfills_failed: number
   effective_plan_coverage?: {
-    eligible_count?: number
-    ready_count?: number
+    eligible_command_count?: number
+    ready_command_count?: number
     ready_rate?: number
+    inventory_vendor_count?: number
+    active_template_count?: number
     [key: string]: unknown
   }
   rule_generation_total?: number
@@ -1103,7 +1529,55 @@ export interface ParserCommandProfile {
   version?: number
   version_status?: string
   items: Array<{ action: string; command: string }>
+  profile_mode?: 'check_items' | 'legacy_commands'
+  check_item_ids?: string[]
+  check_items?: ParserProfileCheckItemSelection[]
   coverage?: Record<string, unknown>
+}
+
+export interface ParserProfileCheckItemSelection {
+  id: string
+  profile_version_id: string
+  check_item_version_id: string
+  check_item_id: string
+  check_item_name?: string
+  check_item_category?: string
+  check_item_version: number
+  result_mode: string
+  assessment_mode: string
+  report_projection: string
+  priority: number
+  required: boolean
+  status: string
+}
+
+export interface ParserCheckItem {
+  check_item_id: string
+  check_item_version_id: string
+  version: number
+  name: string
+  category: string
+  description: string
+  result_mode: string
+  assessment_mode: string
+  canonical_contract: Record<string, unknown>
+  report_projection: string
+  applicability: Record<string, unknown>
+  status: string
+  digest: string
+  implementation_count: number
+  implementations: Array<{
+    implementation_id: string
+    implementation_version_id: string
+    name: string
+    description: string
+    match: Record<string, unknown>
+    commands: Array<{ command: string; priority: number }>
+    collector: string
+    parser_requirement: string
+    selection_priority: number
+    status: string
+  }>
 }
 
 export interface ParserCommandProfileBinding {
@@ -1122,9 +1596,11 @@ export interface ParserCommandProfileImpactPreview {
   success: boolean
   mode: string
   profile_name: string
+  profile_mode?: 'check_items' | 'legacy_commands'
   profile_version_id?: string | null
   selector: Record<string, unknown>
   command_count: number
+  check_item_count?: number
   matched_device_count: number
   returned_device_count: number
   blocked_device_count: number
@@ -1132,6 +1608,9 @@ export interface ParserCommandProfileImpactPreview {
   eligible_command_count: number
   ready_command_count: number
   blocked_command_count: number
+  ready_check_item_count?: number
+  blocked_check_item_count?: number
+  not_applicable_check_item_count?: number
   coverage_rate: number
   evidence_saved?: boolean
   rows: Array<{
@@ -1145,9 +1624,11 @@ export interface ParserCommandProfileImpactPreview {
     role?: string
     groups?: string[]
     command_count: number
+    check_item_count?: number
     eligible_count: number
     ready_count: number
     blocked_count: number
+    not_applicable_count?: number
     status: string
     violations: Array<Record<string, unknown>>
     plan: Record<string, unknown>
@@ -1164,6 +1645,9 @@ export interface ParserEffectivePlanPreview {
     policy_source?: string
     binding_id?: string
     selector?: Record<string, unknown>
+    check_item_ids?: string[]
+    runtime_manifest_id?: string | null
+    runtime_manifest_digest?: string | null
     collection_items: Array<{
       command: string
       action: string
@@ -2123,6 +2607,81 @@ export const skillApi = {
 }
 
 export const parserApi = {
+  assetProductionCheckItems: async (params: {
+    page?: number
+    page_size?: number
+    search?: string
+    bucket?: RuleAssetGovernanceBucket
+    governance_status?: RuleAssetGovernanceStatus
+    stage?: string
+    vendor?: string
+    model?: string
+    asset_mode?: string
+    offline_job_id?: string
+  } = {}): Promise<RuleAssetCheckItemProductionUnitPage> => {
+    const response = await api.get<RuleAssetCheckItemProductionUnitPage>(
+      '/parser/asset-production/check-items/',
+      { params },
+    )
+    return response.data
+  },
+  assetProductionUnits: async (params: {
+    page?: number
+    page_size?: number
+    search?: string
+    bucket?: RuleAssetGovernanceBucket
+    governance_status?: RuleAssetGovernanceStatus
+    stage?: string
+    vendor?: string
+    model?: string
+    asset_mode?: string
+    offline_job_id?: string
+  } = {}): Promise<RuleAssetProductionUnitPage> => {
+    const response = await api.get<RuleAssetProductionUnitPage>(
+      '/parser/asset-production/units/',
+      { params },
+    )
+    return response.data
+  },
+  assetProductionUnit: async (unitId: string, params: {
+    evidence_page?: number
+    evidence_page_size?: number
+  } = {}): Promise<RuleAssetProductionUnitDetail> => {
+    const response = await api.get<RuleAssetProductionUnitDetail>(
+      `/parser/asset-production/units/${unitId}/`,
+      { params },
+    )
+    return response.data
+  },
+  ruleAssetAutomationControl: async (): Promise<RuleAssetAutomationControl> => {
+    const response = await api.get<RuleAssetAutomationControl>(
+      '/parser/asset-production/automation-control/',
+    )
+    return response.data
+  },
+  updateRuleAssetAutomationControl: async (
+    data: RuleAssetAutomationSettings & { reason: string },
+  ): Promise<RuleAssetAutomationControl & { success: boolean }> => {
+    const response = await api.post<RuleAssetAutomationControl & { success: boolean }>(
+      '/parser/asset-production/automation-control/',
+      data,
+    )
+    return response.data
+  },
+  runRuleAssetAutomation: async (): Promise<{
+    success: boolean
+    mode: RuleAssetAutomationMode
+    dispatched_count: number
+    published_count: number
+    review_required_count: number
+    failed_count: number
+    summary?: string
+  }> => {
+    const response = await api.post(
+      '/parser/asset-production/automation-control/run/',
+    )
+    return response.data
+  },
   workItems: async (params: ParserPageParams = {}): Promise<ParserPage<ParserWorkItem>> => {
     const response = await api.get<ParserPage<ParserWorkItem>>('/parser/work-items/', { params })
     return response.data
@@ -2204,8 +2763,10 @@ export const parserApi = {
       error?: string | null
     }>(`/parser/engineering-revision-tasks/${taskId}/`)
   ).data,
-  autoBuildRuleGenerationContext: async (jobId: string) => (
-    await api.post(`/parser/rule-generation-jobs/${jobId}/auto-context/`, {})
+  autoBuildRuleGenerationContext: async (jobId: string, datasetIds: string[]) => (
+    await api.post(`/parser/rule-generation-jobs/${jobId}/auto-context/`, {
+      dataset_ids: datasetIds,
+    })
   ).data,
   ruleGapsFromChanges: async (params: { days?: number; limit?: number } = {}) => (
     await api.get<{
@@ -2242,12 +2803,76 @@ export const parserApi = {
     const response = await api.get<ParserRuntimeRuleAssetBundle>('/parser/runtime-assets/health/')
     return response.data
   },
+  checkItemRuntimeBundleHealth: async (params: {
+    page?: number
+    page_size?: number
+    search?: string
+    status?: CheckItemRuntimeBundleHealthStatus
+  } = {}): Promise<CheckItemRuntimeBundleHealthPage> => {
+    const response = await api.get<CheckItemRuntimeBundleHealthPage>(
+      '/parser/check-item-runtime-bundles/health/',
+      { params },
+    )
+    return response.data
+  },
+  previewCheckItemRuntimeBundle: async (
+    data: RuntimeBundleAssemblyPayload,
+  ): Promise<RuntimeBundleAssemblyPreview> => {
+    const response = await api.post<RuntimeBundleAssemblyPreview>(
+      '/parser/check-item-runtime-bundles/assembly-preview/',
+      data,
+    )
+    return response.data
+  },
+  assembleCheckItemRuntimeBundle: async (
+    data: RuntimeBundleAssemblyPayload & { preview_digest: string },
+    idempotencyKey: string,
+  ): Promise<CheckItemRuntimeBundleVersion> => {
+    const response = await api.post<CheckItemRuntimeBundleVersion>(
+      '/parser/check-item-runtime-bundles/assemble/',
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  getCheckItemRuntimeBundle: async (
+    versionId: string,
+  ): Promise<CheckItemRuntimeBundleVersion> => {
+    const response = await api.get<CheckItemRuntimeBundleVersion>(
+      `/parser/check-item-runtime-bundles/${versionId}/`,
+    )
+    return response.data
+  },
+  activateCheckItemRuntimeBundle: async (
+    versionId: string,
+    reason: string,
+    idempotencyKey: string,
+  ): Promise<CheckItemRuntimeBundleVersion> => {
+    const response = await api.post<CheckItemRuntimeBundleVersion>(
+      `/parser/check-item-runtime-bundles/${versionId}/activate/`,
+      { reason },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  rollbackCheckItemRuntimeBundle: async (
+    versionId: string,
+    reason: string,
+    idempotencyKey: string,
+  ): Promise<CheckItemRuntimeBundleVersion> => {
+    const response = await api.post<CheckItemRuntimeBundleVersion>(
+      `/parser/check-item-runtime-bundles/${versionId}/rollback/`,
+      { reason },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
   replayReports: async (params: ParserPageParams = {}): Promise<ParserPage<ParserReplayReport>> => {
     const response = await api.get<ParserPage<ParserReplayReport>>('/parser/replay-reports/', { params })
     return response.data
   },
-  approvalAudit: async (params: ParserPageParams = {}): Promise<ParserPage<ParserApprovalAudit>> => {
-    const response = await api.get<ParserPage<ParserApprovalAudit>>('/parser/approval-audit/', { params })
+  approvalAudit: async (params: ParserPageParams = {}): Promise<ParserApprovalAuditPage> => {
+    const response = await api.get<ParserApprovalAuditPage>('/parser/approval-audit/', { params })
     return response.data
   },
   agentLoopAttempts: async (params: ParserPageParams = {}): Promise<ParserPage<ParserAgentLoopAttempt>> => {
@@ -2314,6 +2939,24 @@ export const parserApi = {
     )
     return response.data.items
   },
+  updateJobSpec: async (
+    id: string,
+    data: { parser_spec: Record<string, unknown>; confirmed: boolean; reason: string },
+  ) => (await api.put(`/parser/jobs/${id}/spec/`, data)).data,
+  suggestJobSpec: async (id: string) => (
+    await api.post(`/parser/jobs/${id}/suggest-spec/`, {
+      reason: 'Generate ParserSpec draft from sanitized samples',
+    })
+  ).data,
+  updateJobSampleRole: async (
+    jobId: string,
+    sampleId: string,
+    data: {
+      role: 'unassigned' | 'generation' | 'acceptance' | 'negative'
+      expectation?: { record_count: number; primary_keys: string[][] }
+      reason: string
+    },
+  ) => (await api.put(`/parser/jobs/${jobId}/samples/${sampleId}/role/`, data)).data,
   aliases: async (params: ParserPageParams = {}): Promise<ParserPage<ParserCommandAlias>> => {
     const response = await api.get<ParserPage<ParserCommandAlias>>('/parser/aliases/', { params })
     return response.data
@@ -2359,6 +3002,9 @@ export const parserApi = {
   deprecate: async (id: string, reason: string) => (await api.post(`/parser/templates/${id}/deprecate/`, { reason })).data,
   retryJob: async (id: string) => (await api.post(`/parser/jobs/${id}/retry/`)).data,
   cancelJob: async (id: string) => (await api.post(`/parser/jobs/${id}/cancel/`)).data,
+  recoverJob: async (id: string, reason?: string) => (
+    await api.post(`/parser/jobs/${id}/recover/`, reason ? { reason } : {})
+  ).data,
   deleteJob: async (id: string, reason: string) => (
     await api.delete(`/parser/jobs/${id}/`, { data: { reason } })
   ).data,
@@ -2422,9 +3068,22 @@ export const parserApi = {
   upsertCommandProfile: async (data: {
     name: string
     action?: string
-    commands: string[]
+    commands?: string[]
+    check_item_ids?: string[]
     status?: string
   }) => (await api.post('/parser/command-profiles/', data)).data,
+  checkItems: async (params: ParserPageParams & { category?: string } = {}): Promise<ParserPage<ParserCheckItem>> => {
+    const response = await api.get<ParserPage<ParserCheckItem>>('/parser/check-items/', { params })
+    return response.data
+  },
+  getPatrolProfileCheckItems: async (profileVersionId: string) => (
+    await api.get(`/parser/command-profiles/${profileVersionId}/check-items/`)
+  ).data,
+  setPatrolProfileCheckItems: async (profileVersionId: string, checkItemIds: string[]) => (
+    await api.put(`/parser/command-profiles/${profileVersionId}/check-items/`, {
+      check_item_ids: checkItemIds,
+    })
+  ).data,
   activateCommandProfile: async (profileVersionId: string, reason: string) =>
     (await api.post(`/parser/command-profiles/${profileVersionId}/activate/`, { reason })).data,
   deprecateCommandProfile: async (profileVersionId: string, reason: string) =>
@@ -3237,6 +3896,38 @@ export interface PatrolBatchResultSummary {
   change_count: number
   event_count: number
   current_finding_count?: number
+  check_item_summary?: {
+    schema_version: string
+    patrol_batch_id: string
+    report_status: string
+    report_manifest_id?: string | null
+    report_manifest_digest?: string | null
+    source_digest?: string
+    runtime_manifest_id?: string | null
+    runtime_manifest_digest?: string | null
+    target_manifest_digest?: string | null
+    conclusion: {
+      code: string
+      text: string
+      basis: string
+      trust: string
+      formal: boolean
+    }
+    coverage: {
+      target_device_count: number
+      expected_check_count: number
+      executed_check_count: number
+      assessed_check_count: number
+      complete_check_count: number
+      partial_check_count: number
+      insufficient_check_count: number
+    }
+    execution_counts: Record<string, number>
+    assessment_counts: Record<string, number>
+    completeness_counts: Record<string, number>
+    comparison_counts: Record<string, number>
+    blocking_reason_counts: Record<string, number>
+  }
   assessment?: {
     code: string
     status: string
@@ -3332,10 +4023,240 @@ export interface PatrolBatchResultSummary {
     report_url: string
     report_json_url?: string
     technical_report_url?: string
+    technical_workbook_url?: string
     execution_ledger_url?: string
     raw_cli_url?: string
     raw_data_url?: string
     events_url?: string
+    evidence_package_url?: string
+  }
+}
+
+export interface PatrolBatchCheckResult {
+  execution_id: string
+  device_id: string
+  device_name?: string | null
+  management_ip?: string | null
+  check_item_id: string
+  check_item_name: string
+  check_item_category: string
+  check_item_version_id: string
+  result_mode: string
+  assessment_mode: string
+  report_projection: string
+  implementation_version_id?: string | null
+  execution_status: string
+  assessment_status: string
+  completeness_status: string
+  comparison_status: string
+  evidence_qualification_id?: string | null
+  coverage_decision_id?: string | null
+  source_identity_status: string
+  output_quality_status: string
+  freshness_status: string
+  empty_result_classification: string
+  coverage_status: string
+  coverage_basis: string
+  risk_verification_status: string
+  expected_entity_count?: number | null
+  blocking_reason_codes: string[]
+  observation_count: number
+  observed_entity_count: number
+  evaluated_entity_count: number
+  change_count: number
+  event_count: number
+  current_finding_count: number
+  runtime_bundle_version_id?: string | null
+  runtime_bundle_digest?: string | null
+  comparison_context_id?: string | null
+  observation_min_at?: string | null
+  observation_max_at?: string | null
+  evidence_digest?: string | null
+  started_at?: string | null
+  completed_at?: string | null
+}
+
+export interface PatrolBatchCheckResultPage {
+  patrol_batch_id: string
+  total: number
+  limit: number
+  offset: number
+  items: PatrolBatchCheckResult[]
+}
+
+export type PatrolReportReleaseStatus =
+  | 'facts_not_final'
+  | 'pending_signoff'
+  | 'released'
+
+export interface PatrolReportReleaseView {
+  success?: boolean
+  report_manifest_id: string
+  patrol_batch_id: string
+  facts_status: 'draft' | 'partial' | 'final' | 'superseded' | string
+  release_status: PatrolReportReleaseStatus
+  report_cutoff_at?: string | null
+  source_facts_digest: string
+  qualification_fact_digest: string
+  coverage_fact_digest: string
+  artifact_sha256: Record<string, string>
+  artifact_object_keys: Record<string, string>
+  required_confirmations: Array<
+    'facts_reviewed'
+    | 'unknown_scope_disclosed'
+    | 'artifact_digests_verified'
+  >
+  conclusion?: {
+    code?: string
+    text?: string
+    basis?: string
+    trust?: string
+    formal?: boolean
+  }
+  coverage?: {
+    target_device_count?: number
+    expected_check_count?: number
+    executed_check_count?: number
+    assessed_check_count?: number
+    complete_check_count?: number
+    partial_check_count?: number
+    insufficient_check_count?: number
+  }
+  risk_verification_counts?: {
+    confirmed_current?: number
+    not_reverified?: number
+    current_confirmed?: number
+    historical_not_reverified?: number
+    recovery_pending?: number
+    resolved?: number
+    [key: string]: number | undefined
+  }
+  blocking_reason_counts?: Record<string, number>
+  release?: {
+    id: string
+    status: 'released'
+    release_digest: string
+    signed_by: string
+    signed_at: string
+    signoff_comment: string
+    disclosure_confirmations_json: string[]
+    artifact_sha256_json: Record<string, string>
+  } | null
+}
+
+export interface PatrolReportDownload {
+  blob: Blob
+  filename: string
+  status?: PatrolReportReleaseStatus
+}
+
+export type RiskCaseStatus =
+  | 'open'
+  | 'acknowledged'
+  | 'recovering'
+  | 'resolved'
+  | 'suppressed'
+
+export type RiskSeverity =
+  | 'info'
+  | 'warning'
+  | 'minor'
+  | 'major'
+  | 'critical'
+
+export type RiskRemediationStatus =
+  | 'not_started'
+  | 'planned'
+  | 'in_progress'
+  | 'completed'
+  | 'cancelled'
+
+export interface RiskCase {
+  id: string
+  correlation_key: string
+  check_item_id: string
+  check_item_name?: string | null
+  device_id: string
+  device_name?: string | null
+  management_ip?: string | null
+  entity_type: string
+  entity_key: string
+  correlation_dimensions_json?: Record<string, unknown> | null
+  risk_type: string
+  severity: RiskSeverity
+  status: RiskCaseStatus
+  first_seen_at: string
+  last_seen_at: string
+  last_successful_evaluation_at?: string | null
+  resolved_at?: string | null
+  source_finding_ids_json: string[]
+  source_event_ids_json: string[]
+  owner?: string | null
+  remediation_status: RiskRemediationStatus
+  due_at?: string | null
+  resolution_evidence_refs_json?: string[] | null
+  age_days: number
+  overdue: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface RiskOccurrence {
+  id: string
+  risk_case_id: string
+  occurrence_kind: string
+  source_finding_id?: string | null
+  source_event_id?: string | null
+  patrol_batch_id?: string | null
+  observed_at: string
+  status_after: RiskCaseStatus
+  actor?: string | null
+  reason?: string | null
+  evidence_refs_json?: string[] | null
+}
+
+export interface RiskRemediation {
+  id: string
+  risk_case_id: string
+  status: Exclude<RiskRemediationStatus, 'not_started'>
+  owner?: string | null
+  action_text: string
+  due_at?: string | null
+  evidence_refs_json?: string[] | null
+  created_by?: string | null
+  completed_by?: string | null
+  created_at: string
+  completed_at?: string | null
+  updated_at: string
+}
+
+export interface RiskCaseDetail extends RiskCase {
+  occurrences: RiskOccurrence[]
+  occurrence_pagination: {
+    page: number
+    page_size: number
+    total: number
+    page_count: number
+  }
+  remediations: RiskRemediation[]
+  findings: Array<Record<string, unknown>>
+}
+
+export interface RiskCasePage {
+  items: RiskCase[]
+  page: number
+  page_size: number
+  total: number
+  page_count: number
+  summary: {
+    total: number
+    active: number
+    resolved: number
+    suppressed: number
+    overdue: number
+    by_status: Record<string, number>
+    by_severity: Record<string, number>
+    by_remediation_status: Record<string, number>
   }
 }
 
@@ -3521,6 +4442,26 @@ export const workflowApi = {
     const response = await api.get<PatrolBatchResultSummary>(`/workflows/runs/patrol-batches/${batchId}/summary/`)
     return response.data
   },
+  listPatrolBatchCheckResults: async (
+    batchId: string,
+    params?: {
+      limit?: number
+      offset?: number
+      search?: string
+      assessment_status?: string
+      completeness_status?: string
+      source_identity_status?: string
+      output_quality_status?: string
+      freshness_status?: string
+      coverage_status?: string
+    },
+  ): Promise<PatrolBatchCheckResultPage> => {
+    const response = await api.get<PatrolBatchCheckResultPage>(
+      `/workflows/runs/patrol-batches/${batchId}/check-results`,
+      { params },
+    )
+    return response.data
+  },
   listPatrolBatchDevices: async (
     batchId: string,
     params?: { limit?: number; offset?: number; search?: string; selection_status?: string },
@@ -3559,11 +4500,44 @@ export const workflowApi = {
     })
     return response.data
   },
-  exportPatrolBatchReport: async (batchId: string): Promise<Blob> => {
+  exportPatrolBatchReport: async (batchId: string): Promise<PatrolReportDownload> => {
     const response = await api.get(`/workflows/runs/patrol-batches/${batchId}/report.docx`, {
       responseType: 'blob',
     })
-    return response.data
+    return {
+      blob: response.data,
+      filename: responseFilename(
+        response.headers['content-disposition'],
+        `${batchId}-leadership-report.docx`,
+      ),
+      status: response.headers['x-netops-report-status'],
+    }
+  },
+  exportPatrolBatchTechnicalWorkbook: async (batchId: string): Promise<PatrolReportDownload> => {
+    const response = await api.get(`/workflows/runs/patrol-batches/${batchId}/report.xlsx`, {
+      responseType: 'blob',
+    })
+    return {
+      blob: response.data,
+      filename: responseFilename(
+        response.headers['content-disposition'],
+        `${batchId}-technical-report.xlsx`,
+      ),
+      status: response.headers['x-netops-report-status'],
+    }
+  },
+  exportPatrolBatchEvidencePackage: async (batchId: string): Promise<PatrolReportDownload> => {
+    const response = await api.get(`/workflows/runs/patrol-batches/${batchId}/evidence.zip`, {
+      responseType: 'blob',
+    })
+    return {
+      blob: response.data,
+      filename: responseFilename(
+        response.headers['content-disposition'],
+        `${batchId}-evidence.zip`,
+      ),
+      status: response.headers['x-netops-report-status'],
+    }
   },
   exportPatrolBatchRawData: async (batchId: string): Promise<Blob> => {
     const response = await api.get(
@@ -3719,6 +4693,123 @@ export const workflowApi = {
       chat_intent_yaml: string
       tips?: string[]
     }>('/workflows/chat-intent/suggest-nl/', data)
+    return response.data
+  },
+}
+
+export const patrolApi = {
+  getBatchReportManifest: async (
+    batchId: string,
+  ): Promise<PatrolReportReleaseView> => {
+    const response = await api.get<PatrolReportReleaseView>(
+      `/patrol/batches/${batchId}/report-manifest`,
+    )
+    return response.data
+  },
+  materializeBatchReport: async (
+    batchId: string,
+    idempotencyKey: string,
+  ): Promise<PatrolReportReleaseView> => {
+    const response = await api.post<PatrolReportReleaseView>(
+      `/patrol/batches/${batchId}/reports/materialize`,
+      {},
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  releaseBatchReport: async (
+    batchId: string,
+    reportManifestId: string,
+    data: {
+      signoff_comment: string
+      disclosure_confirmations: PatrolReportReleaseView['required_confirmations']
+      verified_artifact_sha256: Record<string, string>
+    },
+    idempotencyKey: string,
+  ): Promise<PatrolReportReleaseView> => {
+    const response = await api.post<PatrolReportReleaseView>(
+      `/patrol/batches/${batchId}/reports/${reportManifestId}/release`,
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  listRiskCases: async (params: {
+    page?: number
+    page_size?: number
+    search?: string
+    status?: RiskCaseStatus
+    severity?: RiskSeverity
+    remediation_status?: RiskRemediationStatus
+    check_item_id?: string
+    device_id?: string
+    owner?: string
+    overdue_only?: boolean
+  } = {}): Promise<RiskCasePage> => {
+    const response = await api.get<RiskCasePage>('/patrol/risk-cases', { params })
+    return response.data
+  },
+  getRiskCase: async (
+    riskCaseId: string,
+    params: { occurrence_page?: number; occurrence_page_size?: number } = {},
+  ): Promise<RiskCaseDetail> => {
+    const response = await api.get<RiskCaseDetail>(
+      `/patrol/risk-cases/${riskCaseId}`,
+      { params },
+    )
+    return response.data
+  },
+  acknowledgeRiskCase: async (
+    riskCaseId: string,
+    data: { reason: string },
+    idempotencyKey: string,
+  ): Promise<{ success: boolean; risk_case: RiskCase }> => {
+    const response = await api.post(
+      `/patrol/risk-cases/${riskCaseId}/acknowledge`,
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  createRiskRemediation: async (
+    riskCaseId: string,
+    data: { action_text: string; owner?: string; due_at?: string },
+    idempotencyKey: string,
+  ): Promise<{ success: boolean; remediation: RiskRemediation }> => {
+    const response = await api.post(
+      `/patrol/risk-cases/${riskCaseId}/remediation`,
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  updateRiskRemediation: async (
+    riskCaseId: string,
+    remediationId: string,
+    data: {
+      status: 'in_progress' | 'completed' | 'cancelled'
+      reason: string
+      evidence_refs?: string[]
+    },
+    idempotencyKey: string,
+  ): Promise<{ success: boolean; remediation: RiskRemediation }> => {
+    const response = await api.patch(
+      `/patrol/risk-cases/${riskCaseId}/remediations/${remediationId}`,
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  suppressRiskCase: async (
+    riskCaseId: string,
+    data: { reason: string },
+    idempotencyKey: string,
+  ): Promise<{ success: boolean; risk_case: RiskCase }> => {
+    const response = await api.post(
+      `/patrol/risk-cases/${riskCaseId}/suppress`,
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
     return response.data
   },
 }

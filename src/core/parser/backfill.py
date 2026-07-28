@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -27,6 +28,9 @@ from src.infrastructure.db.models import (
     StateObservationRecord,
 )
 from src.infrastructure.db.postgres import get_db_session
+
+
+logger = logging.getLogger(__name__)
 
 
 def _now() -> datetime:
@@ -71,6 +75,76 @@ def _as_datetime(value: Any) -> datetime | None:
         return None
     parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _historical_analysis_pairs(
+    run_ids: set[str],
+) -> list[tuple[str, str | None]]:
+    """Choose production runs and explicit offline baseline/current comparisons."""
+    if not run_ids:
+        return []
+    with get_db_session() as db:
+        rows = (
+            db.query(PatrolRun)
+            .filter(PatrolRun.id.in_(sorted(run_ids)))
+            .order_by(PatrolRun.started_at, PatrolRun.id)
+            .all()
+        )
+        production_pairs = [
+            (str(row.id), None) for row in rows if str(row.mode) == "production"
+        ]
+        offline_groups: dict[str, dict[str, list[PatrolRun]]] = {}
+        for row in rows:
+            if str(row.mode) != "parser_validation":
+                continue
+            metadata = dict(row.metadata_json or {})
+            offline_job_id = str(metadata.get("offline_job_id") or "").strip()
+            period_role = str(metadata.get("period_role") or "").strip().lower()
+            if not offline_job_id or period_role not in {"baseline", "current"}:
+                continue
+            offline_groups.setdefault(
+                offline_job_id,
+                {"baseline": [], "current": []},
+            )[period_role].append(row)
+
+        offline_pairs: list[tuple[str, str | None]] = []
+        for group in offline_groups.values():
+            baselines = sorted(
+                group["baseline"],
+                key=lambda row: (row.started_at or row.created_at, row.id),
+            )
+            currents = sorted(
+                group["current"],
+                key=lambda row: (row.started_at or row.created_at, row.id),
+            )
+            for current in currents:
+                current_at = current.started_at or current.created_at
+                eligible = [
+                    baseline
+                    for baseline in baselines
+                    if (baseline.started_at or baseline.created_at) < current_at
+                ]
+                if eligible:
+                    offline_pairs.append((str(current.id), str(eligible[-1].id)))
+        return sorted(
+            {*production_pairs, *offline_pairs},
+            key=lambda item: (item[0], item[1] or ""),
+        )
+
+
+def _refresh_rule_asset_command_units(template_id: str) -> int:
+    """Refresh materialized command units after append-only parse results change."""
+    try:
+        from src.core.rule_control.command_asset_units import RuleAssetCommandUnitService
+
+        result = RuleAssetCommandUnitService().reconcile_for_parser_template(template_id)
+        return int(result.get("reconciled_count") or 0)
+    except Exception:
+        logger.exception(
+            "Rule asset command unit refresh failed after Parser backfill template_id=%s",
+            template_id,
+        )
+        return 0
 
 
 class ParserBackfillService:
@@ -419,12 +493,15 @@ class ParserBackfillService:
                 result.committed_observation_count = len(observations)
                 result.committed_at = _now()
                 result.updated_at = _now()
+        projection_refresh_count = _refresh_rule_asset_command_units(template_id)
         change_count = 0
         event_count = 0
-        for run_id in sorted(production_run_ids):
+        analysis_pairs = _historical_analysis_pairs(run_ids)
+        for run_id, previous_run_id in analysis_pairs:
             change_result = detect_historical_backfill_changes(
                 run_id=run_id,
                 backfill_job_id=job_id,
+                previous_run_id=previous_run_id,
             )
             changes = list(change_result.get("changes") or [])
             change_count += len(changes)
@@ -459,7 +536,14 @@ class ParserBackfillService:
                 "change_count": change_count,
                 "event_count": event_count,
                 "production_run_count": len(production_run_ids),
-                "analysis_skipped_run_count": len(run_ids - production_run_ids),
+                "offline_compare_run_count": sum(
+                    previous_run_id is not None
+                    for _, previous_run_id in analysis_pairs
+                ),
+                "rule_asset_projection_refresh_count": projection_refresh_count,
+                "analysis_skipped_run_count": len(
+                    run_ids - {run_id for run_id, _ in analysis_pairs}
+                ),
             }
             job.summary_json = summary
             job.status = "completed"

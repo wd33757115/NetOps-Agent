@@ -23,12 +23,23 @@ from pydantic import BaseModel, Field
 
 from src.auth.dependencies import get_optional_user, require_role
 from src.auth.models import CurrentUser
+from src.core.check_items.report_manifest import ReportManifestService
+from src.core.check_items.report_release import ReportReleaseService
+from src.core.check_items.batch_results import (
+    CheckItemBatchResultService,
+)
+from src.core.check_items.reporting import (
+    ReportArtifact,
+    load_attached_report_artifact,
+    render_check_item_artifact,
+)
 from src.core.patrol.leadership_report import (
     build_leadership_report,
     render_leadership_docx,
     render_leadership_json,
 )
 from src.core.patrol.patrol_report_service import PatrolReportService
+from src.core.patrol.reporting import render_patrol_batch_xlsx
 from src.core.workflows.dsl import GenerateOptions, WorkflowDSL
 from src.core.workflows.engine import WorkflowEngine
 from src.core.workflows.events import get_workflow_timeline
@@ -216,6 +227,113 @@ def _build_patrol_batch_leadership_report(
         patrol_batch_id,
         summary,
         generated_at=datetime.now(timezone.utc),
+    )
+
+
+def _build_check_item_report_artifact(
+    patrol_batch_id: str,
+    artifact_name: str,
+) -> tuple[dict[str, Any], ReportArtifact] | None:
+    """Use frozen check-item facts when the batch has switched runtimes."""
+
+    from src.infrastructure.db.models import PatrolBatchRecord
+    from src.infrastructure.db.postgres import get_db_session
+
+    with get_db_session() as db:
+        batch = db.get(PatrolBatchRecord, patrol_batch_id)
+        if batch is None or not batch.runtime_manifest_id:
+            return None
+    manifest = ReportManifestService().build(
+        patrol_batch_id,
+        generated_by="api:patrol-report-download",
+    )
+    release = ReportReleaseService().get_for_manifest(
+        str(manifest["id"])
+    )
+    if release is not None:
+        release_digests = dict(
+            release.get("artifact_sha256_json") or {}
+        )
+        manifest_digests = dict(
+            manifest.get("artifact_sha256_json") or {}
+        )
+        if (
+            str(release.get("source_facts_digest") or "")
+            != str(manifest.get("source_digest") or "")
+            or release_digests != manifest_digests
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "released report metadata does not match its "
+                    "immutable manifest"
+                ),
+            )
+        try:
+            artifact = load_attached_report_artifact(
+                manifest,
+                artifact_name,
+            )
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(
+                status_code=409,
+                detail=str(exc),
+            ) from exc
+        return {
+            **manifest,
+            "_delivery_status": "released",
+            "_release_digest": str(
+                release.get("release_digest") or ""
+            ),
+        }, artifact
+    return manifest, render_check_item_artifact(
+        manifest,
+        artifact_name,
+    )
+
+
+def _check_item_report_response(
+    manifest: dict[str, Any],
+    artifact: ReportArtifact,
+) -> Response:
+    facts_status = str(manifest.get("status") or "draft")
+    status = str(
+        manifest.get("_delivery_status")
+        or (
+            "pending_signoff"
+            if facts_status == "final"
+            else "facts_not_final"
+        )
+    )
+    filename = artifact.filename
+    if status != "released":
+        stem, separator, suffix = filename.rpartition(".")
+        qualifier = (
+            "preview"
+            if facts_status == "final"
+            else "partial"
+        )
+        filename = (
+            f"{stem}-{qualifier}.{suffix}"
+            if separator
+            else f"{filename}-{qualifier}"
+        )
+    return Response(
+        content=artifact.content,
+        media_type=artifact.content_type,
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{filename}"'
+            ),
+            "X-NetOps-Report-Status": status,
+            "X-NetOps-Report-Facts-Status": facts_status,
+            "X-NetOps-Report-Source-Digest": str(
+                manifest.get("source_digest") or ""
+            ),
+            "X-NetOps-Report-Release-Digest": str(
+                manifest.get("_release_digest") or ""
+            ),
+        },
     )
 
 
@@ -1069,7 +1187,52 @@ async def get_patrol_batch_summary(patrol_batch_id: str):
     runs = _list_patrol_batch_runs(patrol_batch_id)
     if not runs and not _patrol_batch_manifest_exists(patrol_batch_id):
         raise HTTPException(status_code=404, detail="patrol batch not found")
-    return _build_patrol_batch_summary(patrol_batch_id, runs)
+    summary = _build_patrol_batch_summary(patrol_batch_id, runs)
+    check_item_summary = CheckItemBatchResultService().summary(
+        patrol_batch_id
+    )
+    if check_item_summary is not None:
+        summary["check_item_summary"] = check_item_summary
+        deliverables = dict(summary.get("deliverables") or {})
+        deliverables["evidence_package_url"] = (
+            f"/api/v1/workflows/runs/patrol-batches/"
+            f"{patrol_batch_id}/evidence.zip"
+        )
+        summary["deliverables"] = deliverables
+    return summary
+
+
+@router.get(
+    "/runs/patrol-batches/{patrol_batch_id}/check-results"
+)
+async def list_patrol_batch_check_results(
+    patrol_batch_id: str,
+    limit: int = 50,
+    offset: int = 0,
+    search: str | None = None,
+    assessment_status: str | None = None,
+    completeness_status: str | None = None,
+    source_identity_status: str | None = None,
+    output_quality_status: str | None = None,
+    freshness_status: str | None = None,
+    coverage_status: str | None = None,
+    _user: CurrentUser = Depends(require_role(["admin", "operator"])),
+):
+    try:
+        return CheckItemBatchResultService().list_results(
+            patrol_batch_id,
+            limit=limit,
+            offset=offset,
+            search=search,
+            assessment_status=assessment_status,
+            completeness_status=completeness_status,
+            source_identity_status=source_identity_status,
+            output_quality_status=output_quality_status,
+            freshness_status=freshness_status,
+            coverage_status=coverage_status,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/runs/patrol-batches/{patrol_batch_id}/export.csv")
@@ -1351,6 +1514,12 @@ async def export_patrol_batch_report(
     runs = _list_patrol_batch_runs(patrol_batch_id)
     if not runs and not _patrol_batch_manifest_exists(patrol_batch_id):
         raise HTTPException(status_code=404, detail="patrol batch not found")
+    check_item_artifact = _build_check_item_report_artifact(
+        patrol_batch_id,
+        "markdown",
+    )
+    if check_item_artifact is not None:
+        return _check_item_report_response(*check_item_artifact)
     markdown = _build_patrol_batch_report(patrol_batch_id, runs)
     return Response(
         content=markdown,
@@ -1367,6 +1536,12 @@ async def export_patrol_batch_leadership_report(
     runs = _list_patrol_batch_runs(patrol_batch_id)
     if not runs and not _patrol_batch_manifest_exists(patrol_batch_id):
         raise HTTPException(status_code=404, detail="patrol batch not found")
+    check_item_artifact = _build_check_item_report_artifact(
+        patrol_batch_id,
+        "docx",
+    )
+    if check_item_artifact is not None:
+        return _check_item_report_response(*check_item_artifact)
     report = _build_patrol_batch_leadership_report(patrol_batch_id, runs)
     content = render_leadership_docx(report)
     return Response(
@@ -1382,6 +1557,35 @@ async def export_patrol_batch_leadership_report(
     )
 
 
+@router.get("/runs/patrol-batches/{patrol_batch_id}/report.xlsx")
+async def export_patrol_batch_technical_workbook(
+    patrol_batch_id: str,
+    _user: CurrentUser = Depends(require_role(["admin", "operator"])),
+):
+    runs = _list_patrol_batch_runs(patrol_batch_id)
+    if not runs and not _patrol_batch_manifest_exists(patrol_batch_id):
+        raise HTTPException(status_code=404, detail="patrol batch not found")
+    check_item_artifact = _build_check_item_report_artifact(
+        patrol_batch_id,
+        "excel",
+    )
+    if check_item_artifact is not None:
+        return _check_item_report_response(*check_item_artifact)
+    summary = _build_patrol_batch_summary(patrol_batch_id, runs)
+    content = render_patrol_batch_xlsx(patrol_batch_id, summary)
+    return Response(
+        content=content,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{patrol_batch_id}-technical-report.xlsx"'
+            )
+        },
+    )
+
+
 @router.get("/runs/patrol-batches/{patrol_batch_id}/report.json")
 async def export_patrol_batch_leadership_report_json(
     patrol_batch_id: str,
@@ -1390,6 +1594,12 @@ async def export_patrol_batch_leadership_report_json(
     runs = _list_patrol_batch_runs(patrol_batch_id)
     if not runs and not _patrol_batch_manifest_exists(patrol_batch_id):
         raise HTTPException(status_code=404, detail="patrol batch not found")
+    check_item_artifact = _build_check_item_report_artifact(
+        patrol_batch_id,
+        "json",
+    )
+    if check_item_artifact is not None:
+        return _check_item_report_response(*check_item_artifact)
     report = _build_patrol_batch_leadership_report(patrol_batch_id, runs)
     return Response(
         content=render_leadership_json(report),
@@ -1400,6 +1610,29 @@ async def export_patrol_batch_leadership_report_json(
             )
         },
     )
+
+
+@router.get("/runs/patrol-batches/{patrol_batch_id}/evidence.zip")
+async def export_patrol_batch_evidence_package(
+    patrol_batch_id: str,
+    _user: CurrentUser = Depends(require_role(["admin", "operator"])),
+):
+    runs = _list_patrol_batch_runs(patrol_batch_id)
+    if not runs and not _patrol_batch_manifest_exists(patrol_batch_id):
+        raise HTTPException(status_code=404, detail="patrol batch not found")
+    check_item_artifact = _build_check_item_report_artifact(
+        patrol_batch_id,
+        "evidence",
+    )
+    if check_item_artifact is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "evidence package requires a check-item runtime manifest; "
+                "legacy batches keep their existing raw-output exports"
+            ),
+        )
+    return _check_item_report_response(*check_item_artifact)
 
 
 @router.post("/runs/test")

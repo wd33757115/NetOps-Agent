@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Alert, Button, Col, Descriptions, Drawer, Input, InputNumber, Row, Select, Space, Spin,
+  Alert, Button, Col, Descriptions, Drawer, Input, InputNumber, Row, Select, Space,
   Statistic, Switch, Table, Tabs, Tag, Typography, message,
 } from 'antd'
 import {
@@ -64,8 +64,13 @@ import EffectiveDeviceForm, {
   type EffectiveDeviceDraft,
 } from './parser/EffectiveDeviceForm'
 import ParserWorkQueueWorkspace from './parser/ParserWorkQueueWorkspace'
-import RuleAssetSourceJobsWorkspace from './parser/RuleAssetSourceJobsWorkspace'
+import RuleAssetProductionWorkbench from './parser/RuleAssetProductionWorkbench'
+import PublishedAssetsWorkspace from './parser/PublishedAssetsWorkspace'
+import CoverageBackfillWorkspace from './parser/CoverageBackfillWorkspace'
+import AuditTimelineWorkspace from './parser/AuditTimelineWorkspace'
 import RuleGapsWorkspace from './parser/RuleGapsWorkspace'
+import ParserTemplateApprovalDrawer from './parser/ParserTemplateApprovalDrawer'
+import WorkflowRunMonitor from './WorkflowRunMonitor'
 import {
   codePanelStyle,
   governanceAlertLabel,
@@ -295,6 +300,24 @@ const ParserControlTab: React.FC = () => {
       })
     }
   }, [focus.fallbackReason, searchKey, searchParams])
+  useEffect(() => {
+    if (!focus.legacyRedirect || !focus.subWorkspace) return
+    const next = new URLSearchParams(searchParams)
+    next.set('workspace', focus.workspace)
+    next.set('subtab', focus.subWorkspace)
+    if (focus.productAction) next.set('action', focus.productAction)
+    next.delete('open_generation_context')
+    next.delete('pc_rule_job_search')
+    next.delete('pc_ruleJobs_page')
+    setSearchParams(next, { replace: true })
+  }, [
+    focus.legacyRedirect,
+    focus.productAction,
+    focus.subWorkspace,
+    focus.workspace,
+    searchParams,
+    setSearchParams,
+  ])
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [preview, setPreview] = useState<ParserTemplatePreview | null>(null)
@@ -306,6 +329,8 @@ const ParserControlTab: React.FC = () => {
   const [generationContextPreview, setGenerationContextPreview] = useState<ParserRuleGenerationContextPreview | null>(null)
   const [generationContextDatasets, setGenerationContextDatasets] = useState<string[]>([])
   const [generationContextId, setGenerationContextId] = useState<string | null>(null)
+  const [generationWorkflowRunId, setGenerationWorkflowRunId] = useState<string | null>(null)
+  const generationDeepLinkHandled = useRef<string | null>(null)
   const [jobOpen, setJobOpen] = useState(false)
   const [jobId, setJobId] = useState<string | null>(null)
   const [workItemStatus, setWorkItemStatus] = useState<string | undefined>(searchParams.get('pc_work_item_status') || undefined)
@@ -491,8 +516,22 @@ const ParserControlTab: React.FC = () => {
     const next = new URLSearchParams(searchParams)
     next.set('workspace', typedWorkspace)
     next.set('subtab', parserWorkspaceTabs[typedWorkspace][0])
-    next.delete('focus')
-    next.delete('id')
+    const focusParams = [
+      'focus',
+      'id',
+      'action',
+      'source_job_id',
+      'offline_job_id',
+      'command',
+      'dataset_id',
+      'dataset_ids',
+      'run_modes',
+      'rule_seed_job_id',
+      'bundle_id',
+      'template_id',
+      'open_backfill',
+    ]
+    focusParams.forEach((key) => next.delete(key))
     setSearchParams(next, { replace: true })
   }
 
@@ -564,6 +603,48 @@ const ParserControlTab: React.FC = () => {
     {
       onSuccess: () => { message.success('操作已提交'); setLifecycleRequest(null); refresh() },
       onError: (error: any) => message.error(error?.response?.data?.detail || '操作失败'),
+    },
+  )
+
+  const configureParserJob = useMutation(
+    (request: {
+      type: 'spec' | 'sample' | 'suggest-spec' | 'dispatch'
+      jobId: string
+      sampleId?: string
+      parserSpec?: Record<string, unknown>
+      confirmed?: boolean
+      role?: 'unassigned' | 'generation' | 'acceptance' | 'negative'
+      expectation?: { record_count: number; primary_keys: string[][] }
+      reason?: string
+    }) => {
+      if (request.type === 'spec') {
+        return parserApi.updateJobSpec(request.jobId, {
+          parser_spec: request.parserSpec || {},
+          confirmed: Boolean(request.confirmed),
+          reason: request.reason || '',
+        })
+      }
+      if (request.type === 'sample' && request.sampleId && request.role) {
+        return parserApi.updateJobSampleRole(request.jobId, request.sampleId, {
+          role: request.role,
+          expectation: request.expectation,
+          reason: request.reason || '',
+        })
+      }
+      if (request.type === 'suggest-spec') {
+        return parserApi.suggestJobSpec(request.jobId)
+      }
+      return parserApi.dispatchJob(request.jobId)
+    },
+    {
+      onSuccess: (_result, request) => {
+        message.success(request.type === 'dispatch' ? '生成任务已调度' : '任务配置已保存')
+        refresh()
+      },
+      onError: (error: any) => {
+        const detail = error?.response?.data?.detail
+        message.error(typeof detail === 'string' ? detail : '任务配置失败')
+      },
     },
   )
 
@@ -819,6 +900,7 @@ const ParserControlTab: React.FC = () => {
     {
       onSuccess: (result: any) => {
         message.success(`已启动规则资产生成 Workflow：${result?.run_id || ''}`)
+        setGenerationWorkflowRunId(String(result?.run_id || '') || null)
         setGenerationContextOpen(false)
         setGenerationContextPreview(null)
         refresh()
@@ -828,7 +910,9 @@ const ParserControlTab: React.FC = () => {
   )
 
   const autoBuildGenerationContext = useMutation(
-    (id: string) => parserApi.autoBuildRuleGenerationContext(id),
+    ({ id, datasetIds }: { id: string; datasetIds: string[] }) => (
+      parserApi.autoBuildRuleGenerationContext(id, datasetIds)
+    ),
     {
       onSuccess: (result: any) => {
         const contextId = result?.context_id || result?.job?.context_id
@@ -843,7 +927,7 @@ const ParserControlTab: React.FC = () => {
     },
   )
 
-  const openGenerationContext = (row: ParserRuleGenerationJob) => {
+  const openGenerationContext = useCallback((row: ParserRuleGenerationJob) => {
     const linkedDatasets = (searchParams.get('dataset_ids') || searchParams.get('dataset_id') || '')
       .split(',')
       .map((item) => item.trim())
@@ -856,7 +940,21 @@ const ParserControlTab: React.FC = () => {
     setGenerationContextId(null)
     setGenerationContextPreview(null)
     setGenerationContextOpen(true)
-  }
+  }, [searchParams])
+
+  useEffect(() => {
+    const seedJobId = searchParams.get('rule_seed_job_id')
+    if (searchParams.get('open_generation_context') !== '1' || !seedJobId) return
+    const deepLinkKey = `${seedJobId}:${searchParams.get('dataset_ids') || ''}`
+    if (generationDeepLinkHandled.current === deepLinkKey) return
+    const seedJob = ruleGenerationJobs.find((item) => item.id === seedJobId)
+    if (!seedJob) return
+    generationDeepLinkHandled.current = deepLinkKey
+    openGenerationContext(seedJob)
+    const next = new URLSearchParams(searchParams)
+    next.delete('open_generation_context')
+    setSearchParams(next, { replace: true })
+  }, [openGenerationContext, ruleGenerationJobs, searchParams, setSearchParams])
 
   const submitLifecycleAction = (reason: string) => {
     if (!lifecycleRequest) return
@@ -1035,6 +1133,17 @@ const ParserControlTab: React.FC = () => {
             onClick={() => openGenerationContext(row)}>
             补上下文
           </Button>
+          {Boolean(asRecord(row.payload_json)?.latest_generation_run_id) && (
+            <Button
+              size="small"
+              icon={<EyeOutlined />}
+              onClick={() => setGenerationWorkflowRunId(
+                String(asRecord(row.payload_json)?.latest_generation_run_id || '') || null,
+              )}
+            >
+              查看生成进度
+            </Button>
+          )}
         </>
       )}
       {canSubmitRuleCandidate(row) && (
@@ -1181,7 +1290,7 @@ const ParserControlTab: React.FC = () => {
       <Space>
         <Button icon={<EyeOutlined />} size="small" title="查看解析模板" onClick={() => showPreview(row.id)} />
         {row.status !== 'active' && row.status !== 'rejected' &&
-          <Button icon={<CheckOutlined />} size="small" title="对比并激活" onClick={() => showComparison(row)} />}
+          <Button icon={<CheckOutlined />} size="small" title="人工审批" onClick={() => showComparison(row)} />}
         {row.status !== 'rejected' && row.status !== 'active' &&
           <Button icon={<CloseOutlined />} size="small" title="拒绝" onClick={() => setLifecycleRequest({
             action: 'template_reject',
@@ -1210,15 +1319,36 @@ const ParserControlTab: React.FC = () => {
     { title: '样本', dataIndex: 'sample_count', width: 70 },
     { title: '结构变体', dataIndex: 'structure_variant_count', width: 90 },
     { title: '尝试', dataIndex: 'attempts', width: 70 },
+    { title: '生成流程', dataIndex: 'pipeline_version', width: 110,
+      render: (value: ParserJobItem['pipeline_version']) => value === 'simple_v2'
+        ? <Tag color="green">Simple v2</Tag>
+        : <Tag>历史只读</Tag> },
+    { title: '候选生成', width: 120,
+      render: (_: unknown, row: ParserJobItem) => {
+        if (row.pipeline_version !== 'simple_v2') return <Tag>需升级</Tag>
+        if (!row.generation_readiness?.ready) return <Tag color="gold">待配置</Tag>
+        return row.generation_readiness.validation_mode === 'generation_sample_only'
+          ? <Tag color="gold">单样本就绪</Tag>
+          : <Tag color="green">就绪</Tag>
+      } },
     { title: '状态', dataIndex: 'status', width: 120,
       render: (value: string) => <Tag color={statusColor(value)}>{statusLabel(value)}</Tag> },
     { title: '操作', width: 210, render: (_: unknown, row: ParserJobItem) => (
       <Space>
         <Button icon={<EyeOutlined />} size="small" title="查看任务" onClick={() => showJob(row.id)} />
-        {['collecting', 'pending'].includes(row.status) &&
-          <Button icon={<PlayCircleOutlined />} size="small" title="立即调度" onClick={() => action.mutate({ type: 'dispatch', id: row.id })} />}
+        {['collecting', 'pending'].includes(row.status) && <Button
+          icon={<PlayCircleOutlined />}
+          size="small"
+          title={row.pipeline_version === 'simple_v2' && row.generation_readiness?.ready
+            ? '立即调度'
+            : '请先在任务详情中完成 ParserSpec 与样本门禁'}
+          disabled={row.pipeline_version !== 'simple_v2' || !row.generation_readiness?.ready}
+          onClick={() => action.mutate({ type: 'dispatch', id: row.id })}
+        />}
         {Boolean(row.can_retry ?? ['failed', 'cancelled'].includes(row.status)) &&
-          <Button icon={<ReloadOutlined />} size="small" title="重试" onClick={() => action.mutate({ type: 'retry', id: row.id })} />}
+          <Button icon={<ReloadOutlined />} size="small" title="重试"
+            disabled={row.pipeline_version !== 'simple_v2' || !row.generation_readiness?.ready}
+            onClick={() => action.mutate({ type: 'retry', id: row.id })} />}
         {['collecting', 'pending', 'running', 'validating'].includes(row.status) &&
           <Button icon={<StopOutlined />} size="small" title="取消" onClick={() => action.mutate({ type: 'cancel', id: row.id })} />}
         {!['collecting', 'pending', 'running', 'validating'].includes(row.status) &&
@@ -1458,8 +1588,12 @@ const ParserControlTab: React.FC = () => {
     { title: '资产类型', dataIndex: 'job_type', width: 180,
       render: (value: string, row: ParserRuleGenerationJob) => (
         <Space direction="vertical" size={0}>
-          <Typography.Text strong>{row.asset_type || value}</Typography.Text>
-          <Typography.Text type="secondary">{value}</Typography.Text>
+          <Typography.Text strong>
+            {isParserTemplateSeedJob(row) ? '完整规则资产生成种子' : row.asset_type || value}
+          </Typography.Text>
+          <Typography.Text type="secondary">
+            {isParserTemplateSeedJob(row) ? '由 Parser 模板启动 Contract、Policy 与 EventRule 整包生成' : value}
+          </Typography.Text>
         </Space>
       ) },
     { title: '状态', dataIndex: 'status', width: 120,
@@ -1586,7 +1720,11 @@ const ParserControlTab: React.FC = () => {
     : Object.keys(buildDeviceSelector(bindingSelectorDraft)).length > 0
   const activationSelectorReady = !activationSelectorExpertMode || Boolean(activationSelector.trim())
   const subWorkspaceLabels: Record<ParserSubWorkspaceKey, React.ReactNode> = {
+    'asset-production-units': '检查项资产',
     'source-jobs': '规则资产生成',
+    'published-assets': '生产资产目录',
+    'coverage-backfill': '覆盖与历史回填',
+    'audit-log': '规则资产审计',
     'work-items': `统一待办 (${workItemTotal})`,
     jobs: '任务队列',
     backfills: '历史回填',
@@ -1609,7 +1747,34 @@ const ParserControlTab: React.FC = () => {
     'approval-audit': `审批审计 (${approvalAuditTotal})`,
   }
 
+  const productWorkspace = workspace === 'inventory'
+    ? 'inventory'
+    : workspace === 'runtime'
+      ? 'runtime'
+      : workspace === 'audit'
+        ? 'audit'
+        : 'production'
+  const changeProductWorkspace = (nextWorkspace: 'production' | 'inventory' | 'runtime' | 'audit') => {
+    changeWorkspace(nextWorkspace)
+  }
+  const changeProductionView = (view: 'commands' | 'sources') => {
+    const next = new URLSearchParams(searchParams)
+    next.set('workspace', 'production')
+    next.set('subtab', view === 'commands' ? 'asset-production-units' : 'source-jobs')
+    next.delete('focus')
+    next.delete('id')
+    setSearchParams(next, { replace: true })
+  }
+  const isPrimaryProductWorkspace = (
+    workspace === 'production'
+    || workspace === 'inventory'
+    || workspace === 'runtime'
+    || workspace === 'audit'
+  )
+
   return <div className="parser-control-root">
+    {!isPrimaryProductWorkspace && (
+      <>
     <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
       <Col xs={12} sm={8} lg={4}><Statistic title="模板总数" value={coverage?.templates_total || 0} /></Col>
       <Col xs={12} sm={8} lg={4}><Statistic title="Active" value={coverage?.templates_active || 0} /></Col>
@@ -1643,6 +1808,8 @@ const ParserControlTab: React.FC = () => {
         style={{ marginBottom: 8 }}
       />
     ))}
+      </>
+    )}
     {(coverageError || workspaceErrors.length > 0) && (
       <Alert
         type="error"
@@ -1656,19 +1823,24 @@ const ParserControlTab: React.FC = () => {
         style={{ marginBottom: 12 }}
       />
     )}
-    <Tabs
-      activeKey={workspace}
-      onChange={changeWorkspace}
-      items={[
-        { key: 'production', label: '资产生产' },
-        { key: 'inbox', label: '待处理' },
-        { key: 'inventory', label: '资产目录' },
-        { key: 'generation', label: '生成与验证' },
-        { key: 'release', label: '审批发布' },
-        { key: 'runtime', label: '生产覆盖' },
-        { key: 'audit', label: '审计记录' },
-      ]}
-    />
+    <nav className="rule-asset-primary-nav" aria-label="规则资产控制面">
+      {([
+        ['production', '生产工作台'],
+        ['inventory', '已发布资产'],
+        ['runtime', '覆盖与回填'],
+        ['audit', '审计记录'],
+      ] as const).map(([key, label]) => (
+        <button
+          type="button"
+          key={key}
+          className={productWorkspace === key ? 'is-active' : ''}
+          aria-current={productWorkspace === key ? 'page' : undefined}
+          onClick={() => changeProductWorkspace(key)}
+        >
+          {label}
+        </button>
+      ))}
+    </nav>
     {focus.fallbackReason && (
       <Alert
         type="warning"
@@ -1695,16 +1867,24 @@ const ParserControlTab: React.FC = () => {
         style={{ marginBottom: 12 }}
       />
     )}
-    <Tabs
-      activeKey={activeSubWorkspace}
-      onChange={changeSubWorkspace}
-      items={parserWorkspaceTabs[workspace].map((key) => ({
-        key,
-        label: subWorkspaceLabels[key],
-      }))}
-      style={{ marginBottom: 12 }}
-    />
-    {(['replay-reports', 'agent-loop-attempts', 'approval-audit', 'datasets'] as ParserSubWorkspaceKey[])
+    {!isPrimaryProductWorkspace && (
+      <Tabs
+        activeKey={activeSubWorkspace}
+        onChange={changeSubWorkspace}
+        items={parserWorkspaceTabs[workspace].map((key) => ({
+          key,
+          label: subWorkspaceLabels[key],
+        }))}
+        style={{ marginBottom: 12 }}
+      />
+    )}
+    {workspace === 'inventory' ? (
+      <PublishedAssetsWorkspace focusKind={focus.kind} focusId={focus.id} />
+    ) : workspace === 'runtime' ? (
+      <CoverageBackfillWorkspace />
+    ) : workspace === 'audit' ? (
+      <AuditTimelineWorkspace />
+    ) : (['replay-reports', 'agent-loop-attempts', 'approval-audit', 'datasets'] as ParserSubWorkspaceKey[])
       .includes(activeSubWorkspace) ? (
       <ParserGovernancePanel
         activeSubWorkspace={activeSubWorkspace}
@@ -1741,7 +1921,32 @@ const ParserControlTab: React.FC = () => {
     ) : (
       <Tabs activeKey={activeSubWorkspace} onChange={changeSubWorkspace}
         tabBarStyle={{ display: 'none' }} items={[
-      { key: 'source-jobs', label: '规则资产生成', children: <RuleAssetSourceJobsWorkspace /> },
+      {
+        key: 'asset-production-units',
+        label: '命令资产',
+        children: (
+          <RuleAssetProductionWorkbench
+            view="commands"
+            onViewChange={changeProductionView}
+            initialSearch={searchParams.get('command') || ''}
+            focusAction={searchParams.get('action') || focus.productAction || undefined}
+            focusOfflineJobId={linkedOfflineJobId || undefined}
+            focusRuleSeedJobId={searchParams.get('rule_seed_job_id') || undefined}
+            focusBundleId={searchParams.get('bundle_id') || undefined}
+            datasetIds={linkedDatasetIds}
+          />
+        ),
+      },
+      {
+        key: 'source-jobs',
+        label: '规则资产生成',
+        children: (
+          <RuleAssetProductionWorkbench
+            view="sources"
+            onViewChange={changeProductionView}
+          />
+        ),
+      },
       { key: 'work-items', label: `统一待办 (${workItemTotal})`, children:
         <ParserWorkQueueWorkspace
           isMobile={isMobile}
@@ -1839,7 +2044,7 @@ const ParserControlTab: React.FC = () => {
             }} onChange={(pagination) => changeResourcePage(
               'jobs', pagination.current || 1, pagination.pageSize || 20,
             )}
-            scroll={{ x: 930 }} rowSelection={{ selectedRowKeys: selectedJobIds,
+            scroll={{ x: 1190 }} rowSelection={{ selectedRowKeys: selectedJobIds,
               onChange: setSelectedJobIds,
               getCheckboxProps: (row) => ({ disabled: ['collecting', 'pending', 'running', 'validating'].includes(row.status) }) }} />
         </Space> },
@@ -2367,47 +2572,21 @@ const ParserControlTab: React.FC = () => {
       preview={preview || undefined}
     />
 
-    <Drawer title="模板激活前对比" open={comparisonOpen}
+    <ParserTemplateApprovalDrawer
+      open={comparisonOpen}
       onClose={() => { setComparisonOpen(false); setComparisonTemplate(null); setComparison(null) }}
-      width={isMobile ? '100vw' : 920} destroyOnClose
-      extra={<Button type="primary" icon={<CheckOutlined />}
-        disabled={!comparison || comparison.sample_count === 0
-          || comparison.passed_samples !== comparison.sample_count}
-        loading={action.isLoading}
-        onClick={() => comparisonTemplate && setLifecycleRequest({
+      isMobile={isMobile}
+      loading={comparisonLoading}
+      comparison={comparison}
+      approving={action.isLoading}
+      onApprove={() => comparisonTemplate && setLifecycleRequest({
           action: 'template_activate',
           id: comparisonTemplate.id,
           resourceName: `${comparisonTemplate.vendor} ${comparisonTemplate.profile} · ${comparisonTemplate.canonical_command}`,
-          impact: `模板将进入生产解析运行时；本次回归通过 ${comparison?.passed_samples || 0}/${comparison?.sample_count || 0} 个样本${comparison?.contract_changed ? '，且数据契约发生了变化' : ''}。`,
-          blockers: !comparison || comparison.sample_count === 0
-            || comparison.passed_samples !== comparison.sample_count
-            ? ['必须存在回归样本，且全部样本通过后才能激活']
-            : [],
-        })}>激活模板</Button>}>
-      {comparisonLoading ? <div style={{ display: 'grid', minHeight: 240, placeItems: 'center' }}><Spin /></div>
-        : comparison ? <Space direction="vertical" size={16} style={{ width: '100%' }}>
-          <Alert type={comparison.contract_changed ? 'warning' : 'success'} showIcon
-            message={comparison.contract_changed ? '数据契约发生变化' : '数据契约未变化'}
-            description={`回归通过 ${comparison.passed_samples}/${comparison.sample_count}；当前 active 模板 ${comparison.active_template_id || '无'}`} />
-          <Table rowKey="snapshot_id" size="small" pagination={{ pageSize: 10 }}
-            dataSource={comparison.rows} scroll={{ x: 1100 }} columns={[
-              { title: '数据集', dataIndex: 'dataset_id', width: 150 },
-              { title: '设备', dataIndex: 'device_id', width: 200 },
-              { title: '当前模板', width: 130, render: (_: unknown, row: any) =>
-                <Tag color={statusColor(row.current?.status || 'unavailable')}>{row.current?.status || '无'}</Tag> },
-              { title: '候选模板', width: 130, render: (_: unknown, row: any) =>
-                <Tag color={statusColor(row.proposed.status)}>{row.proposed.status}</Tag> },
-              { title: '结果变化', dataIndex: 'changed', width: 100,
-                render: (value: boolean) => <Tag color={value ? 'orange' : 'green'}>{value ? '有变化' : '一致'}</Tag> },
-              { title: '候选结构化结果', render: (_: unknown, row: any) =>
-                <Typography.Text code>{JSON.stringify(row.proposed.records || row.proposed.failure_code || [])}</Typography.Text> },
-            ]} />
-          <Typography.Title level={5} style={{ margin: 0 }}>候选数据契约</Typography.Title>
-          <Typography.Paragraph style={{ ...codePanelStyle, maxHeight: 260, whiteSpace: 'pre-wrap' }}>
-            {JSON.stringify(comparison.candidate_contract, null, 2)}
-          </Typography.Paragraph>
-        </Space> : null}
-    </Drawer>
+          impact: `模板将进入生产解析运行时；人工审批已核对 TextFSM、原始 CLI 与 ${comparison?.passed_samples || 0}/${comparison?.sample_count || 0} 个样本的解析结果${comparison?.contract_changed ? '，且数据契约发生了变化' : ''}。`,
+          blockers: comparison?.approval_readiness.blockers || ['审批证据尚未加载'],
+        })}
+    />
 
     <RuleJobPreviewDrawer
       open={ruleJobPreviewOpen}
@@ -2430,10 +2609,13 @@ const ParserControlTab: React.FC = () => {
         <Button
           icon={<ThunderboltOutlined />}
           loading={autoBuildGenerationContext.isLoading}
-          disabled={!generationContextJob}
-          onClick={() => generationContextJob && autoBuildGenerationContext.mutate(generationContextJob.id)}
+          onClick={() => generationContextJob && autoBuildGenerationContext.mutate({
+            id: generationContextJob.id,
+            datasetIds: generationContextDatasets,
+          })}
+          disabled={!generationContextJob || generationContextDatasets.length === 0}
         >
-          从模板自动补齐
+          用所选数据集自动构建
         </Button>
         <Button icon={<EyeOutlined />} loading={previewGenerationContext.isLoading}
           disabled={!generationContextJob || generationContextDatasets.length === 0}
@@ -2524,6 +2706,27 @@ const ParserControlTab: React.FC = () => {
           {JSON.stringify(generationContextPreview.context || {}, null, 2)}
         </Typography.Paragraph>}
       </Space> : null}
+    </Drawer>
+
+    <Drawer
+      title="规则资产生成进度"
+      open={Boolean(generationWorkflowRunId)}
+      width={isMobile ? '100vw' : 920}
+      destroyOnClose
+      onClose={() => setGenerationWorkflowRunId(null)}
+    >
+      <Alert
+        type="info"
+        showIcon
+        message="生成在后台 Workflow 中执行"
+        description="这里会实时展示 Contract 推断、规则目标规划、Policy、EventRule、验证、回放和持久化步骤。关闭页面不会中断任务。"
+        style={{ marginBottom: 12 }}
+      />
+      <WorkflowRunMonitor
+        runId={generationWorkflowRunId}
+        plain
+        subjectLabel="规则资产生成"
+      />
     </Drawer>
 
     <Drawer
@@ -2618,6 +2821,19 @@ const ParserControlTab: React.FC = () => {
       isMobile={isMobile}
       loading={jobLoading}
       job={jobDetail || undefined}
+      configuring={configureParserJob.isLoading}
+      onSaveSpec={(targetJobId, parserSpec, confirmed, reason) => configureParserJob.mutateAsync({
+        type: 'spec', jobId: targetJobId, parserSpec, confirmed, reason,
+      })}
+      onSaveSampleRole={(targetJobId, sampleId, role, expectation, reason) => configureParserJob.mutateAsync({
+        type: 'sample', jobId: targetJobId, sampleId, role, expectation, reason,
+      })}
+      onSuggestSpec={(targetJobId) => configureParserJob.mutateAsync({
+        type: 'suggest-spec', jobId: targetJobId,
+      })}
+      onDispatch={(targetJobId) => configureParserJob.mutateAsync({
+        type: 'dispatch', jobId: targetJobId,
+      })}
     />
 
     <Drawer title="激活采集命令集" open={activationOpen}

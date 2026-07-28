@@ -135,6 +135,96 @@ def test_collection_policy_deduplicates_profile_commands(monkeypatch):
     assert plan.command_texts() == ["show version", "show inventory"]
 
 
+def test_collection_policy_projects_existing_commands_without_changing_them(
+    monkeypatch,
+):
+    legacy_commands = [
+        "display version",
+        "display cpu-usage",
+        "display interface brief",
+        "display unsupported diagnostic",
+    ]
+    monkeypatch.setattr(
+        CollectionPolicyResolver,
+        "_load_active_profile",
+        lambda *_args, **_kwargs: {
+            "profile_version_id": "version-1",
+            "commands": legacy_commands,
+        },
+    )
+
+    plan = CollectionPolicyResolver().build_plan(
+        device={
+            "device_id": "h3c-1",
+            "vendor": "H3C",
+            "family": "Comware7",
+            "command_file": "h3c-patrol",
+            "attributes": {},
+        },
+        action="patrol",
+        mode="production",
+    )
+
+    assert plan.command_texts() == legacy_commands
+    projection = plan.check_item_shadow_plan
+    assert projection is not None
+    assert projection["status"] == "ready"
+    assert projection["production_commands_changed"] is False
+    assert set(projection["mapped_check_item_ids"]) >= {
+        "device.version",
+        "interface.oper_status",
+        "system.cpu_usage",
+    }
+    assert projection["unmapped_commands"] == ["display unsupported diagnostic"]
+    assert projection["metrics"] == {
+        "legacy_command_count": 4,
+        "mapped_command_count": 3,
+        "unmapped_command_count": 1,
+        "mapped_check_item_count": 3,
+        "command_mapping_rate": 0.75,
+    }
+
+
+def test_collection_policy_shadow_projection_failure_never_blocks_commands(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        CollectionPolicyResolver,
+        "_load_active_profile",
+        lambda *_args, **_kwargs: {
+            "profile_version_id": "version-1",
+            "commands": ["show version"],
+        },
+    )
+    monkeypatch.setattr(
+        collection_policy,
+        "_load_packaged_check_item_catalog",
+        lambda: (_ for _ in ()).throw(ValueError("catalog unavailable")),
+    )
+
+    plan = CollectionPolicyResolver().build_plan(
+        device={
+            "device_id": "cisco-1",
+            "vendor": "Cisco",
+            "command_file": "cisco-patrol",
+            "attributes": {},
+        },
+        action="patrol",
+        mode="production",
+    )
+
+    assert plan.command_texts() == ["show version"]
+    assert plan.check_item_shadow_plan == {
+        "version": 1,
+        "mode": "legacy_command_projection",
+        "catalog_source": "packaged_seed",
+        "status": "unavailable",
+        "production_commands_changed": False,
+        "error_code": "shadow_projection_failed",
+        "error": "catalog unavailable",
+    }
+
+
 def test_collection_policy_prefers_active_profile(monkeypatch):
     monkeypatch.setattr(
         CollectionPolicyResolver,
@@ -366,6 +456,12 @@ def test_execution_plan_from_metadata_validates_and_round_trips():
             "policy_source": "profile_binding",
             "binding_id": "binding-1",
             "selector": {"vendor": "Cisco"},
+            "check_item_shadow_plan": {
+                "version": 1,
+                "mode": "legacy_command_projection",
+                "status": "ready",
+                "digest": "a" * 64,
+            },
             "collection_items": [
                 {"command": "show version", "action": "patrol", "collection_item_id": "cmd-1"}
             ],
@@ -379,6 +475,12 @@ def test_execution_plan_from_metadata_validates_and_round_trips():
     assert plan.collector_options == {"read_timeout": 45, "netmiko_device_type": "hp_comware"}
     assert plan.commands[0].command == "show version"
     assert plan.commands[0].collection_item_id == "cmd-1"
+    assert plan.to_metadata()["check_item_shadow_plan"] == {
+        "version": 1,
+        "mode": "legacy_command_projection",
+        "status": "ready",
+        "digest": "a" * 64,
+    }
 
 
 def test_execution_plan_repository_persists_auditable_snapshot(monkeypatch, tmp_path):

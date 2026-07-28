@@ -959,6 +959,7 @@ def test_export_patrol_batch_report_summarizes_changes_and_events(monkeypatch):
         detected_at = FakeColumn("detected_at")
 
     class FakeNetworkEventRecord:
+        id = FakeColumn("id")
         run_id = FakeColumn("run_id")
         occurred_at = FakeColumn("occurred_at")
 
@@ -990,12 +991,16 @@ def test_export_patrol_batch_report_summarizes_changes_and_events(monkeypatch):
         ],
         FakeNetworkEventRecord: [
             SimpleNamespace(
+                id="event-1",
                 run_id="snapshot-run-1",
+                source_change_id="change-1",
                 device_id="device-1",
                 event_type="InterfaceDown",
                 severity="critical",
+                status="open",
                 entity_type="interface",
                 entity_key="GE1/0/1",
+                payload_json={},
                 occurred_at="2026-06-21T10:04:00",
             )
         ],
@@ -1004,6 +1009,9 @@ def test_export_patrol_batch_report_summarizes_changes_and_events(monkeypatch):
     class FakeQuery:
         def __init__(self, items):
             self.items = list(items)
+
+        def join(self, *_args, **_kwargs):
+            return self
 
         def filter(self, predicate):
             self.items = [item for item in self.items if predicate(item)]
@@ -1016,7 +1024,9 @@ def test_export_patrol_batch_report_summarizes_changes_and_events(monkeypatch):
             return self.items
 
     class FakeSession:
-        def query(self, model):
+        def query(self, model, *additional_models):
+            if additional_models:
+                return FakeQuery([])
             return FakeQuery(rows_by_model.get(model, []))
 
     class FakeSessionContext:

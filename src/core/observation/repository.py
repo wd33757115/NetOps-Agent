@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -20,6 +21,93 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _state_identity(
+    *,
+    entity_type: str | None,
+    primary_keys: Any,
+    canonical_entity_type: str | None = None,
+    entity_identity_fields: Any = None,
+    entity_dimensions: Any = None,
+    record_sets: Any = None,
+) -> tuple[Any, ...]:
+    def identity(
+        item: dict[str, Any],
+        *,
+        name: str,
+        fallback_entity_type: str | None,
+        fallback_primary_keys: Any,
+    ) -> tuple[Any, ...]:
+        source_entity_type = str(
+            item.get("entity_type") or fallback_entity_type or "record"
+        )
+        source_primary_keys = tuple(
+            str(key)
+            for key in (
+                item.get("primary_keys")
+                if "primary_keys" in item
+                else fallback_primary_keys
+            )
+            or ()
+        )
+        canonical_type = str(
+            item.get("canonical_entity_type")
+            or canonical_entity_type
+            or source_entity_type
+        )
+        identity_fields = tuple(
+            str(key)
+            for key in (
+                item.get("entity_identity_fields")
+                if "entity_identity_fields" in item
+                else entity_identity_fields
+            )
+            or source_primary_keys
+        )
+        dimensions = (
+            item.get("entity_dimensions")
+            if "entity_dimensions" in item
+            else entity_dimensions
+        ) or {}
+        return (
+            name,
+            source_entity_type,
+            source_primary_keys,
+            canonical_type,
+            identity_fields,
+            json.dumps(
+                dimensions,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ),
+        )
+
+    normalized_sets = [
+        dict(item)
+        for item in record_sets or ()
+        if isinstance(item, dict)
+    ]
+    if normalized_sets:
+        return tuple(
+            identity(
+                item,
+                name=str(item.get("name") or item.get("entity_type") or ""),
+                fallback_entity_type=entity_type,
+                fallback_primary_keys=primary_keys,
+            )
+            for item in normalized_sets
+        )
+    return (
+        identity(
+            {},
+            name="default",
+            fallback_entity_type=entity_type,
+            fallback_primary_keys=primary_keys,
+        ),
+    )
+
+
 def _row_to_contract(row: ObservationContractRecord) -> ObservationContract:
     return ObservationContract(
         contract_id=row.id,
@@ -30,12 +118,20 @@ def _row_to_contract(row: ObservationContractRecord) -> ObservationContract:
         entity_type=row.entity_type,
         primary_keys=tuple(row.primary_keys_json or ()),
         required_fields=tuple(row.required_fields_json or ()),
+        canonical_entity_type=row.canonical_entity_type,
+        entity_identity_fields=tuple(row.entity_identity_fields_json or ()),
+        entity_dimensions=dict(row.entity_dimensions_json or {}),
         optional_fields=tuple(row.optional_fields_json or ()),
         validators=dict(row.validators_json or {}),
         ignore_fields=tuple(row.ignore_fields_json or ()),
         allow_empty=bool(row.allow_empty),
         empty_patterns=tuple(row.empty_patterns_json or ()),
         state_semantics=dict(row.state_semantics_json or {}),
+        record_sets=tuple(
+            dict(item)
+            for item in row.record_sets_json or ()
+            if isinstance(item, dict)
+        ),
         version=int(row.version or 1),
         contract_sha256=row.contract_sha256,
         status=row.status,
@@ -230,6 +326,11 @@ class ObservationContractRepository:
         if row.entity_type is None:
             row.entity_type = payload["entity_type"]
             row.primary_keys_json = list(payload["primary_keys"])
+            row.canonical_entity_type = payload["canonical_entity_type"]
+            row.entity_identity_fields_json = list(
+                payload["entity_identity_fields"]
+            )
+            row.entity_dimensions_json = dict(payload["entity_dimensions"])
             row.required_fields_json = list(payload["required_fields"])
             row.optional_fields_json = list(payload["optional_fields"])
             row.validators_json = payload["validators"]
@@ -237,6 +338,9 @@ class ObservationContractRepository:
             row.allow_empty = bool(payload["allow_empty"])
             row.empty_patterns_json = list(payload["empty_patterns"])
             row.state_semantics_json = payload["state_semantics"]
+            row.record_sets_json = [
+                dict(item) for item in payload["record_sets"]
+            ]
             row.contract_sha256 = payload["contract_sha256"]
         row.status = payload["status"]
         row.updated_at = now
@@ -285,12 +389,25 @@ class ObservationContractRepository:
             .order_by(ObservationContractRecord.version.desc())
             .first()
         )
-        next_identity = (
-            str(validation.get("entity_type") or template.category or "record"),
-            tuple(validation.get("primary_keys") or ()),
+        next_identity = _state_identity(
+            entity_type=str(
+                validation.get("entity_type") or template.category or "record"
+            ),
+            primary_keys=validation.get("primary_keys"),
+            canonical_entity_type=validation.get("canonical_entity_type"),
+            entity_identity_fields=validation.get("entity_identity_fields"),
+            entity_dimensions=validation.get("entity_dimensions"),
+            record_sets=validation.get("record_sets"),
         )
         previous_identity = (
-            (str(previous.entity_type), tuple(previous.primary_keys_json or ()))
+            _state_identity(
+                entity_type=previous.entity_type,
+                primary_keys=previous.primary_keys_json,
+                canonical_entity_type=previous.canonical_entity_type,
+                entity_identity_fields=previous.entity_identity_fields_json,
+                entity_dimensions=previous.entity_dimensions_json,
+                record_sets=previous.record_sets_json,
+            )
             if previous is not None
             else None
         )

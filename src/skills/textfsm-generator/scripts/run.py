@@ -18,6 +18,7 @@ for import_path in (PROJECT_ROOT, SCRIPT_DIR):
         sys.path.insert(0, str(import_path))
 
 from generate_templates import generate_templates  # noqa: E402
+from spec_suggester import suggest_parser_spec  # noqa: E402
 
 
 def _configure_stdio_utf8() -> None:
@@ -32,51 +33,31 @@ def _configure_stdio_utf8() -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Generate validated TextFSM parser assets"
+        description="Generate a validated TextFSM candidate for a durable Parser job"
     )
     parser.add_argument("--params", help="platform params JSON path")
-    parser.add_argument("--source-path", help="offline txt/log file or directory")
-    parser.add_argument("--templates-dir")
-    parser.add_argument("--vendor")
-    parser.add_argument("--model")
-    parser.add_argument("--command")
-    parser.add_argument("--max-retries", type=int)
-    parser.add_argument("--max-samples-per-prompt", type=int)
-    parser.add_argument("--minimum-sample-pass-rate", type=float)
+    parser.add_argument("--job-id", help="Parser control-plane job ID")
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--force-generate", action="store_true")
     parser.add_argument("--no-publish", action="store_true")
-    parser.add_argument("--no-recursive", action="store_true")
     args = parser.parse_args()
 
     params: dict = {}
     if args.params:
         with open(args.params, encoding="utf-8-sig") as handle:
             params = json.load(handle)
-    for key in (
-        "source_path",
-        "templates_dir",
-        "vendor",
-        "model",
-        "command",
-        "max_retries",
-        "max_samples_per_prompt",
-        "minimum_sample_pass_rate",
-    ):
-        value = getattr(args, key)
-        if value is not None:
-            params[key] = value
+    if args.job_id:
+        params["job_id"] = args.job_id
     if args.dry_run:
         params["dry_run"] = True
-    if args.force_generate:
-        params["force_generate"] = True
     if args.no_publish:
         params["publish"] = False
-    if args.no_recursive:
-        params["recursive"] = False
 
     try:
-        result = generate_templates(params)
+        result = (
+            suggest_parser_spec(params)
+            if str(params.get("operation") or "generate") == "suggest_spec"
+            else generate_templates(params)
+        )
         print(json.dumps(result, ensure_ascii=False))
         return 0 if result.get("success") else 1
     except Exception as exc:

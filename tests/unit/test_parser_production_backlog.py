@@ -12,6 +12,7 @@ from src.core.parser.repository import (
 from src.core.parser.time_utils import database_clocks
 from src.core.patrol.repository import PatrolRepository
 from src.infrastructure.db.models import (
+    AuditLogRecord,
     ObservationContractRecord,
     ParserJobSample,
     ParserOutboxEvent,
@@ -50,6 +51,168 @@ def test_parser_job_asset_key_separates_models_for_the_same_command():
     )
 
     assert first != second
+
+
+def test_simple_parser_job_dispatch_accepts_one_confirmed_generation_sample():
+    token = uuid.uuid4().hex
+    run_id = f"simple-parser-{token}"
+    model = f"S5130-{token}"
+    parser = ParserJobRepository()
+    patrol = PatrolRepository()
+    patrol.create_run(run_id=run_id, mode="parser_validation", source="unit-test")
+    job_id = ""
+    job: dict = {}
+    try:
+        for index in range(1):
+            snapshot_id, created = patrol.save_snapshot_idempotent(
+                run_id=run_id,
+                device_id=f"SW{index + 1}-{token}",
+                device_name=f"SW{index + 1}",
+                vendor="H3C",
+                model=model,
+                command="display interface brief",
+                command_canonical="display interface brief",
+                raw_text="Interface Link Protocol\nGE1/0/1 UP UP\n",
+                parse_status="template_missing",
+                execution_item_id=f"item-{index}-{token}",
+                import_fingerprint=f"fingerprint-{index}-{token}",
+            )
+            assert created is True
+            current_job_id = parser.create_candidate(
+                job_type="CREATE_TEMPLATE",
+                vendor="H3C",
+                model=model,
+                family=None,
+                profile=model,
+                command="display interface brief",
+                snapshot_id=snapshot_id,
+                device_id=f"SW{index + 1}-{token}",
+                failure_code="template_missing",
+            )
+            job_id = job_id or current_job_id
+            assert current_job_id == job_id
+
+        parser.set_parser_spec(
+            job_id,
+            parser_spec={
+                "entity": "interface",
+                "primary_keys": ["interface"],
+                "fields": {
+                    "interface": {"required": True, "type": "interface_name"},
+                    "status": {
+                        "required": True,
+                        "type": "enum",
+                        "values": ["UP", "DOWN"],
+                    },
+                },
+            },
+            confirmed=True,
+            actor="unit-test",
+            reason="confirm expected interface records",
+        )
+        job = parser.get_job(job_id)
+        assert job is not None
+        assert job["generation_readiness"]["ready"] is False
+        assert "sample_roles_unassigned" in job["generation_readiness"]["blockers"]
+        assert parser.list_dispatchable_jobs(job_id=job_id) == []
+
+        samples = job["samples"]
+        expectation = {"record_count": 1, "primary_keys": [["GE1/0/1"]]}
+        parser.set_sample_role(
+            job_id,
+            samples[0]["id"],
+            role="generation",
+            expectation=expectation,
+            actor="unit-test",
+            reason="use first device as generation evidence",
+        )
+        job = parser.get_job(job_id)
+        assert job is not None
+        assert job["generation_readiness"] == {
+            "ready": True,
+            "blockers": [],
+            "warnings": ["independent_acceptance_missing"],
+            "validation_mode": "generation_sample_only",
+            "role_counts": {
+                "generation": 1,
+                "acceptance": 0,
+                "negative": 0,
+                "unassigned": 0,
+            },
+        }
+        assert [item["id"] for item in parser.list_dispatchable_jobs(job_id=job_id)] == [
+            job_id
+        ]
+
+        with get_db_session() as db:
+            db.query(ParserTemplateJob).filter_by(id=job_id).update(
+                {"status": "succeeded"},
+                synchronize_session=False,
+            )
+        suggestion_task_id = f"suggestion-{token}"
+        queued = parser.queue_parser_spec_suggestion(
+            job_id,
+            task_id=suggestion_task_id,
+            actor="unit-test",
+            reason="re-analyze a completed ParserSpec",
+        )
+        assert queued["status"] == "succeeded"
+        assert (
+            queued["agent_state_json"]["parser_spec_suggestion"]["status"]
+            == "queued"
+        )
+        parser.record_parser_spec_suggestion(
+            job_id,
+            task_id=suggestion_task_id,
+            status="ready",
+            suggestion={
+                "parser_spec": {
+                    "entity": "interface_l3",
+                    "primary_keys": ["interface"],
+                    "fields": {
+                        "interface": {
+                            "required": True,
+                            "type": "interface_name",
+                        },
+                        "status": {
+                            "required": True,
+                            "type": "enum",
+                            "values": ["UP", "DOWN"],
+                        },
+                    },
+                },
+                "sample_suggestions": [
+                    {
+                        "sample_id": samples[0]["id"],
+                        "recommended_role": "generation",
+                    }
+                ],
+            },
+            auto_adopt=True,
+        )
+        revised = parser.get_job(job_id)
+        assert revised is not None
+        assert revised["status"] == "failed"
+        assert revised["failure_code"] == "parser_spec_revised"
+        assert revised["parser_spec_json"]["entity"] == "interface_l3"
+    finally:
+        with get_db_session() as db:
+            if job_id:
+                db.query(AuditLogRecord).filter(
+                    AuditLogRecord.resource_id.in_(
+                        [job_id, *(sample.get("id") for sample in (job or {}).get("samples", []))]
+                    )
+                ).delete(synchronize_session=False)
+                db.query(ParserOutboxEvent).filter_by(aggregate_id=job_id).delete(
+                    synchronize_session=False
+                )
+                db.query(ParserJobSample).filter_by(job_id=job_id).delete(
+                    synchronize_session=False
+                )
+                db.query(ParserTemplateJob).filter_by(id=job_id).delete(
+                    synchronize_session=False
+                )
+            db.query(PatrolRun).filter_by(id=run_id).delete(synchronize_session=False)
 
 
 def test_duplicate_asset_cleanup_hard_deletes_history_without_merging():
@@ -492,7 +655,9 @@ def test_parser_job_merges_validation_and_production_evidence_safely():
             sample for sample in job["samples"] if sample["device_id"] == "PRODUCTION-SW"
         )
         assert "production-secret" not in production_sample["sanitized_text"]
-        assert [item["id"] for item in parser.list_dispatchable_jobs(job_id=job_id)] == [job_id]
+        assert parser.list_dispatchable_jobs(job_id=job_id) == []
+        assert job["pipeline_version"] == "simple_v2"
+        assert "parser_spec_not_confirmed" in job["generation_readiness"]["blockers"]
     finally:
         with get_db_session() as db:
             if job_id:
@@ -574,7 +739,9 @@ def test_production_parser_backlog_deduplicates_and_requires_sanitization():
             assert "secret-" not in text
             assert "10.0.0." not in text
             assert "GE1/0/1 UP UP" in text
-        assert [item["id"] for item in parser.list_dispatchable_jobs(job_id=job_id)] == [job_id]
+        assert parser.list_dispatchable_jobs(job_id=job_id) == []
+        assert job["pipeline_version"] == "simple_v2"
+        assert "sample_roles_unassigned" in job["generation_readiness"]["blockers"]
     finally:
         with get_db_session() as db:
             if job_id:
@@ -590,7 +757,7 @@ def test_production_parser_backlog_deduplicates_and_requires_sanitization():
             db.query(PatrolRun).filter(PatrolRun.id == run_id).delete(synchronize_session=False)
 
 
-def test_single_validation_sample_dispatches_after_database_local_grace_period():
+def test_single_validation_sample_remains_blocked_after_legacy_grace_period():
     token = uuid.uuid4().hex
     run_id = f"parser-validation-aged-{token}"
     device_id = f"AGED-SW-{token}"
@@ -635,9 +802,11 @@ def test_single_validation_sample_dispatches_after_database_local_grace_period()
             job = db.get(ParserTemplateJob, job_id)
             job.created_at = now_local - timedelta(minutes=31)
 
-        assert [item["id"] for item in parser.list_dispatchable_jobs(job_id=job_id)] == [
-            job_id
-        ]
+        assert parser.list_dispatchable_jobs(job_id=job_id) == []
+        job = parser.get_job(job_id)
+        assert job is not None
+        assert "parser_spec_not_confirmed" in job["generation_readiness"]["blockers"]
+        assert "independent_acceptance_missing" in job["generation_readiness"]["warnings"]
     finally:
         with get_db_session() as db:
             if job_id:

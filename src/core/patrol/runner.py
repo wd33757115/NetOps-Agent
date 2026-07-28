@@ -11,6 +11,8 @@ workflow payload.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import uuid
 from collections.abc import Callable
@@ -110,6 +112,8 @@ def persist_patrol_snapshots(
                     item_status = (
                         str(item.get("status") or "failed") if isinstance(item, dict) else "failed"
                     )
+                    if item_status == "fallback_not_needed":
+                        continue
                     collection_repository.save_collection_result(
                         run_id=snapshot_run_id,
                         inventory_device_id=detail.get("inventory_device_id"),
@@ -123,10 +127,20 @@ def persist_patrol_snapshots(
                         execution_item_id=(
                             item.get("execution_item_id") if isinstance(item, dict) else None
                         ),
+                        collection_action_id=(
+                            item.get("collection_item_id")
+                            if isinstance(item, dict)
+                            else None
+                        ),
                         metadata={
                             "error": (
                                 item.get("error") if isinstance(item, dict) else detail.get("error")
-                            )
+                            ),
+                            "check_item_bindings": (
+                                item.get("check_item_bindings")
+                                if isinstance(item, dict)
+                                else []
+                            ),
                         },
                         owner_token=run_owner_token,
                     )
@@ -183,7 +197,10 @@ def persist_patrol_snapshots(
             )
             for command_result in command_statuses:
                 command = str(command_result.get("command") or "")
-                if command_result.get("status") == "complete":
+                if command_result.get("status") in {
+                    "complete",
+                    "fallback_not_needed",
+                }:
                     continue
                 collection_repository.save_collection_result(
                     run_id=snapshot_run_id,
@@ -196,7 +213,16 @@ def persist_patrol_snapshots(
                     failure_code=str(command_result.get("status") or "collection_failed"),
                     observed_at=command_result.get("observed_at"),
                     execution_item_id=command_result.get("execution_item_id"),
-                    metadata={"error": command_result.get("error")},
+                    collection_action_id=command_result.get(
+                        "collection_item_id"
+                    ),
+                    metadata={
+                        "error": command_result.get("error"),
+                        "check_item_bindings": command_result.get(
+                            "check_item_bindings"
+                        )
+                        or [],
+                    },
                     owner_token=run_owner_token,
                 )
         except Exception as exc:
@@ -375,7 +401,16 @@ class DevicePatrolRunner:
             else None
         )
         runtime_bundle_data = runtime_bundle.to_dict() if runtime_bundle is not None else None
-        runtime_asset_manifest = self._runtime_manifest_factory(runtime_bundle)
+        runtime_asset_manifest = (
+            _load_frozen_check_item_runtime_manifest(
+                context.execution_plan
+            )
+            if (
+                context.execution_plan is not None
+                and context.execution_plan.runtime_manifest_id
+            )
+            else self._runtime_manifest_factory(runtime_bundle)
+        )
         owner_token = request.owner_token or uuid.uuid4().hex
         if streaming_persistence:
             from src.core.patrol.run_repository import PatrolRunRepository
@@ -586,6 +621,9 @@ class DevicePatrolRunner:
 
 def _build_parser_runtime_bundle(execution_plan: Any):
     """Resolve Parser assets once before an explicit device plan starts."""
+    if execution_plan.runtime_manifest_id:
+        return _build_frozen_check_item_parser_bundle(execution_plan)
+
     from src.core.device_ops.repository import DeviceRepository
     from src.core.parser.identity import DeviceIdentity
     from src.core.parser.runtime_bundle import ParserRuntimeBundle
@@ -612,4 +650,164 @@ def _build_parser_runtime_bundle(execution_plan: Any):
     return ParserRuntimeBundle.build(
         identity=identity,
         commands=execution_plan.command_texts(),
+    )
+
+
+def _load_frozen_check_item_runtime_manifest(
+    execution_plan: Any,
+) -> dict[str, Any]:
+    from src.infrastructure.db.models import (
+        CheckItemRuntimeManifestRecord,
+    )
+    from src.infrastructure.db.postgres import get_db_session
+
+    manifest_id = str(execution_plan.runtime_manifest_id or "")
+    supplied_digest = str(execution_plan.runtime_manifest_digest or "")
+    if not manifest_id or not supplied_digest:
+        raise RuntimeError(
+            "check-item execution plan is missing its frozen manifest identity"
+        )
+    with get_db_session() as db:
+        row = db.get(CheckItemRuntimeManifestRecord, manifest_id)
+        if row is None:
+            raise RuntimeError(
+                f"frozen check-item runtime manifest not found: {manifest_id}"
+            )
+        payload = dict(row.manifest_json or {})
+        embedded_digest = str(payload.pop("digest", "") or "")
+        calculated_digest = hashlib.sha256(
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ).encode("utf-8")
+        ).hexdigest()
+        if (
+            supplied_digest != str(row.digest)
+            or embedded_digest != str(row.digest)
+            or calculated_digest != str(row.digest)
+        ):
+            raise RuntimeError(
+                "frozen check-item runtime manifest digest mismatch"
+            )
+        action_by_id = {
+            str(item.get("id")): item
+            for item in payload.get("collection_actions") or []
+            if isinstance(item, dict) and item.get("id")
+        }
+        for item in execution_plan.commands:
+            action = action_by_id.get(str(item.collection_item_id or ""))
+            if action is None:
+                raise RuntimeError(
+                    "execution plan action is absent from the frozen runtime manifest"
+                )
+            if str(action.get("command") or "") != str(item.command):
+                raise RuntimeError(
+                    "execution plan command differs from the frozen runtime manifest"
+                )
+        return {
+            **payload,
+            "digest": str(row.digest),
+            "manifest_id": str(row.id),
+            "manifest_kind": "check_item_runtime",
+        }
+
+
+def _build_frozen_check_item_parser_bundle(execution_plan: Any):
+    from src.core.check_items import CheckItemRuntimeBundleService
+    from src.core.device_ops.repository import DeviceRepository
+    from src.core.parser.policy import (
+        DEFAULT_COMMAND_ALIASES,
+        ParserPolicy,
+    )
+    from src.core.parser.runtime_bundle import ParserRuntimeBundle
+
+    _load_frozen_check_item_runtime_manifest(execution_plan)
+    matches = DeviceRepository().get_devices_by_filter(
+        device_id=str(execution_plan.device_id),
+        status=None,
+    )
+    if not matches:
+        raise RuntimeError(
+            f"inventory device not found: {execution_plan.device_id}"
+        )
+    device = matches[0]
+    vendor = str(device.get("vendor") or "").strip()
+    model = str(device.get("model") or "").strip()
+    family = str(device.get("family") or "").strip() or None
+    if not vendor or not model:
+        raise RuntimeError(
+            "frozen check-item parsing requires vendor and model identity"
+        )
+
+    def canonical(value: str) -> str:
+        basic = ParserPolicy._basic_normalize(value)
+        return ParserPolicy._basic_normalize(
+            DEFAULT_COMMAND_ALIASES.get(basic, basic)
+        )
+
+    templates: dict[str, dict[str, str] | None] = {}
+    output_quality_profiles: dict[str, dict[str, Any]] = {}
+    bundle_service = CheckItemRuntimeBundleService()
+    for item in execution_plan.commands:
+        command = canonical(item.command)
+        selected_ref: dict[str, str] | None = None
+        selected_profile: dict[str, Any] | None = None
+        for binding in item.check_item_bindings:
+            version_id = str(
+                binding.get("runtime_bundle_version_id") or ""
+            )
+            if not version_id:
+                raise RuntimeError(
+                    "collection action is missing a frozen runtime bundle"
+                )
+            bundle = bundle_service.get_version(version_id)
+            if bundle is None:
+                raise RuntimeError(
+                    f"frozen runtime bundle not found: {version_id}"
+                )
+            compatibility = dict(bundle.get("compatibility") or {})
+            evidence_policy = dict(
+                compatibility.get("evidence_policy") or {}
+            )
+            profile = dict(
+                evidence_policy.get("output_quality_profile") or {}
+            )
+            if profile:
+                if (
+                    selected_profile is not None
+                    and selected_profile != profile
+                ):
+                    raise RuntimeError(
+                        "shared command resolves conflicting frozen "
+                        "OutputQualityProfiles"
+                    )
+                selected_profile = profile
+            parser_ref = dict(
+                (bundle.get("parser_bundle") or {}).get(command) or {}
+            )
+            if not parser_ref:
+                continue
+            if selected_ref is not None and selected_ref != parser_ref:
+                raise RuntimeError(
+                    "shared command resolves conflicting frozen Parser templates"
+                )
+            selected_ref = {
+                "template_id": str(parser_ref["template_id"]),
+                "version": str(parser_ref["version"]),
+                "sha256": str(parser_ref["sha256"]),
+            }
+        templates[command] = selected_ref
+        if selected_profile is not None:
+            output_quality_profiles[command] = selected_profile
+    return ParserRuntimeBundle.from_dict(
+        {
+            "vendor": vendor,
+            "model": model,
+            "family": family,
+            "templates": templates,
+            "output_quality_profiles": output_quality_profiles,
+        }
     )

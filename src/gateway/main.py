@@ -91,6 +91,7 @@ from src.gateway.maintenance_api import router as maintenance_router
 from src.gateway.notification_api import router as notification_router
 from src.gateway.offline_patrol_api import router as offline_patrol_router
 from src.gateway.parser_api import router as parser_router
+from src.gateway.patrol_api import router as patrol_router
 from src.gateway.schemas import (
     AddMessageRequest,
     ChatFileUploadRequest,
@@ -127,6 +128,8 @@ EXECUTE_FIREWALL_POLICY_TASK = None
 require_postgres_connection()
 require_database_schema_current()
 from src.core.parser.bootstrap import bootstrap_shared_templates
+from src.core.check_items.catalog import CheckItemCatalogRepository
+from src.core.check_items.identity import EntityIdentityPolicyRepository
 
 parser_bootstrap = (
     bootstrap_shared_templates()
@@ -134,6 +137,16 @@ parser_bootstrap = (
     else {"enabled": False, "imported": 0, "skipped": 0, "errors": []}
 )
 log.info("parser_assets_bootstrapped", **parser_bootstrap)
+
+check_item_bootstrap = CheckItemCatalogRepository().bootstrap(
+    actor="gateway-startup"
+)
+log.info("check_item_catalog_bootstrapped", **check_item_bootstrap)
+
+identity_policy_bootstrap = EntityIdentityPolicyRepository().bootstrap(
+    actor="gateway-startup"
+)
+log.info("entity_identity_policy_bootstrapped", **identity_policy_bootstrap)
 
 
 # =============================================================================
@@ -293,6 +306,7 @@ app.include_router(notification_router)
 app.include_router(events_router)
 app.include_router(parser_router)
 app.include_router(devices_router)
+app.include_router(patrol_router)
 app.include_router(offline_patrol_router)
 app.include_router(maintenance_router)
 register_exception_handlers(app)

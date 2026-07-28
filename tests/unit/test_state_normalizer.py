@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from src.core.observation.semantic_projection import SemanticProjectionError
 from src.core.patrol.change_detector import (
     ExplicitBaselineNotReadyError,
     detect_changes_from_params,
@@ -72,6 +73,8 @@ def _install_analysis_runtime(monkeypatch):
         ("not_applicable", "skipped", "not_applicable", "not_applicable"),
         ("empty_unverified", "blocked", "blocked_by_output", "empty_unverified"),
         ("command_error", "blocked", "blocked_by_output", "command_error"),
+        ("truncated", "blocked", "blocked_by_output", "truncated"),
+        ("paged", "blocked", "blocked_by_output", "paged"),
         ("parse_empty", "empty", "empty", "legitimate_empty"),
     ],
 )
@@ -141,6 +144,84 @@ def test_raw_hash_diff_normalizes_only_the_digest():
         "profile": "configuration",
         "profile_version": 1,
     }
+
+
+def test_device_level_projection_deduplicates_repeated_parser_records():
+    observations = observations_from_snapshot(
+        {
+            "id": "snapshot-version-repeated",
+            "run_id": "run-1",
+            "device_id": "router-1",
+            "vendor": "H3C",
+            "model": "MSR5620",
+            "canonical_command": "display version",
+            "observed_at": "2026-07-28T00:00:00+00:00",
+            "structured_json": [
+                {"software_version": "7.1.064", "slot": "0"},
+                {"software_version": "7.1.064", "slot": "1"},
+            ],
+            "parser_template_id": "parser-version",
+            "parser_version": "1",
+            "metadata_json": {},
+        },
+        mode="production",
+        source="test",
+        dataset_id=None,
+        _contract_override={
+            "entity_type": "device",
+            "primary_keys": [],
+            "ignore_fields": ["slot"],
+            "state_semantics": {
+                "software_version": {
+                    "observation_type": "device.software.version",
+                    "semantic_type": "state",
+                }
+            },
+        },
+    )
+
+    assert len(observations) == 1
+    assert observations[0].value == "7.1.064"
+    assert observations[0].entity_key == "__singleton__"
+
+
+def test_device_level_projection_blocks_conflicting_same_snapshot_values():
+    with pytest.raises(
+        SemanticProjectionError,
+        match="conflicting canonical values",
+    ):
+        observations_from_snapshot(
+            {
+                "id": "snapshot-version-conflict",
+                "run_id": "run-1",
+                "device_id": "router-1",
+                "vendor": "H3C",
+                "model": "MSR5620",
+                "canonical_command": "display version",
+                "observed_at": "2026-07-28T00:00:00+00:00",
+                "structured_json": [
+                    {"software_version": "7.1.064", "slot": "0"},
+                    {"software_version": "7.1.065", "slot": "1"},
+                ],
+                "parser_template_id": "parser-version",
+                "parser_version": "1",
+                "metadata_json": {},
+            },
+            mode="production",
+            source="test",
+            dataset_id=None,
+            _contract_override={
+                "entity_type": "device",
+                "primary_keys": [],
+                "ignore_fields": ["slot"],
+                "state_semantics": {
+                    "software_version": {
+                        "observation_type": "device.software.version",
+                        "semantic_type": "state",
+                    }
+                },
+            },
+        )
 
 
 def test_optical_observation_carries_authoritative_device_threshold_context(
@@ -939,6 +1020,277 @@ def test_normalize_snapshot_rejects_validation_current_state(monkeypatch):
 
     with pytest.raises(ValueError, match="parser_validation"):
         normalize_snapshot("snapshot-1", update_current_state=True)
+
+
+def test_vendor_native_cpu_fields_share_canonical_state_identity(monkeypatch):
+    contracts = {
+        "template-h3c": {
+            "entity_type": "device",
+            "primary_keys": [],
+            "validators": {"cpu_5s": {"type": "percent"}},
+            "state_semantics": {
+                "cpu_5s": {
+                    "semantic_type": "percentage",
+                    "unit": "percent",
+                    "observation_type": "device.cpu.utilization",
+                    "dimensions": {"scope": "system", "window": "5s"},
+                }
+            },
+        },
+        "template-cisco": {
+            "entity_type": "device",
+            "primary_keys": [],
+            "validators": {"cpu_total_5_sec": {"type": "percent"}},
+            "state_semantics": {
+                "cpu_total_5_sec": {
+                    "semantic_type": "percentage",
+                    "unit": "percent",
+                    "observation_type": "device.cpu.utilization",
+                    "dimensions": {"scope": "system", "window": "5s"},
+                }
+            },
+        },
+    }
+    monkeypatch.setattr(
+        normalizer,
+        "_template_contract",
+        lambda template_id, **_kwargs: contracts[template_id],
+    )
+    common = {
+        "run_id": "run-1",
+        "device_id": "device-1",
+        "inventory_device_id": "inventory-device-1",
+        "observed_at": "2026-07-27T00:00:00+00:00",
+    }
+
+    h3c = observations_from_snapshot(
+        {
+            **common,
+            "id": "snapshot-h3c",
+            "vendor": "H3C",
+            "model": "S5130",
+            "canonical_command": "display cpu-usage",
+            "parser_template_id": "template-h3c",
+            "structured_json": [{"cpu_5s": "24"}],
+        },
+        mode="production",
+        source="test",
+        dataset_id=None,
+    )[0]
+    cisco = observations_from_snapshot(
+        {
+            **common,
+            "id": "snapshot-cisco",
+            "vendor": "Cisco",
+            "model": "NEXUS9000",
+            "canonical_command": "show processes cpu",
+            "parser_template_id": "template-cisco",
+            "structured_json": [{"cpu_total_5_sec": "18"}],
+        },
+        mode="production",
+        source="test",
+        dataset_id=None,
+    )[0]
+
+    assert h3c.field_name == "cpu_5s"
+    assert cisco.field_name == "cpu_total_5_sec"
+    assert h3c.observation_type == cisco.observation_type == "device.cpu.utilization"
+    assert h3c.dimensions == cisco.dimensions == {"scope": "system", "window": "5s"}
+    assert h3c.dimension_signature == cisco.dimension_signature
+    assert h3c.state_key == cisco.state_key
+
+
+def test_source_cpu_keys_project_to_governed_canonical_entity(monkeypatch):
+    monkeypatch.setattr(
+        normalizer,
+        "_template_contract",
+        lambda *_args, **_kwargs: {
+            "entity_type": "cpu_record",
+            "primary_keys": ["slot", "cpu"],
+            "canonical_entity_type": "cpu_scope",
+            "entity_identity_fields": ["scope", "scope_id"],
+            "entity_dimensions": {
+                "scope": {"literal": "processor"},
+                "scope_id": {
+                    "op": "concat",
+                    "args": [
+                        {"literal": "slot:"},
+                        {"field": "slot"},
+                        {"literal": "/cpu:"},
+                        {"field": "cpu"},
+                    ],
+                },
+            },
+            "validators": {"usage_5s": {"type": "percent"}},
+            "state_semantics": {
+                "usage_5s": {
+                    "semantic_type": "gauge",
+                    "unit": "percent",
+                    "observation_type": "device.cpu.utilization",
+                    "dimensions": {"window": "5s"},
+                }
+            },
+        },
+    )
+
+    observation = observations_from_snapshot(
+        {
+            "id": "snapshot-cpu-scope",
+            "run_id": "run-1",
+            "device_id": "device-1",
+            "inventory_device_id": "inventory-device-1",
+            "vendor": "H3C",
+            "model": "MSR5620",
+            "canonical_command": "display cpu",
+            "parser_template_id": "template-cpu",
+            "observed_at": "2026-07-29T00:00:00+00:00",
+            "structured_json": [
+                {"slot": "01", "cpu": "2", "usage_5s": "24"}
+            ],
+        },
+        mode="production",
+        source="test",
+        dataset_id=None,
+    )[0]
+
+    assert observation.entity_type == "cpu_scope"
+    assert observation.entity_key == '["processor","slot:01/cpu:2"]'
+    assert observation.metadata["source_entity_type"] == "cpu_record"
+    assert observation.metadata["source_entity_key"] == '["01","2"]'
+    assert observation.metadata["canonical_identity"]["values"] == {
+        "scope": "processor",
+        "scope_id": "slot:01/cpu:2",
+    }
+
+
+def test_state_normalizer_applies_governed_memory_formula(monkeypatch):
+    monkeypatch.setattr(
+        normalizer,
+        "_template_contract",
+        lambda *_args, **_kwargs: {
+            "entity_type": "device",
+            "primary_keys": [],
+            "validators": {"free_ratio": {"type": "percent"}},
+            "state_semantics": {
+                "free_ratio": {
+                    "semantic_type": "percentage",
+                    "unit": "percent",
+                    "observation_type": "device.memory.utilization",
+                    "dimensions": {"scope": "system"},
+                    "transform": {
+                        "op": "subtract",
+                        "args": [{"literal": 100}, {"field": "free_ratio"}],
+                    },
+                }
+            },
+        },
+    )
+
+    observation = observations_from_snapshot(
+        {
+            "id": "snapshot-memory",
+            "run_id": "run-1",
+            "device_id": "device-1",
+            "canonical_command": "display memory",
+            "parser_template_id": "template-memory",
+            "observed_at": "2026-07-27T00:00:00+00:00",
+            "structured_json": [{"free_ratio": "52.7%"}],
+        },
+        mode="production",
+        source="test",
+        dataset_id=None,
+    )[0]
+
+    assert observation.field_name == "free_ratio"
+    assert observation.observation_type == "device.memory.utilization"
+    assert observation.value_number == pytest.approx(47.3)
+    assert observation.metadata["source_value"] == pytest.approx(52.7)
+
+
+def test_state_normalizer_handles_multiple_record_sets_from_one_command(monkeypatch):
+    monkeypatch.setattr(
+        normalizer,
+        "_template_contract",
+        lambda *_args, **_kwargs: {
+            "contract_id": "contract-version",
+            "contract_version": 2,
+            "record_sets": [
+                {
+                    "name": "device_version",
+                    "entity_type": "device",
+                    "primary_keys": [],
+                    "required_fields": ["software_version"],
+                    "optional_fields": ["software_release"],
+                    "state_semantics": {
+                        "software_version": {
+                            "semantic_type": "text",
+                            "observation_type": "device.software.version",
+                        },
+                        "software_release": {
+                            "semantic_type": "text",
+                            "observation_type": "device.software.release",
+                        },
+                    },
+                },
+                {
+                    "name": "slot_inventory",
+                    "entity_type": "device_slot",
+                    "primary_keys": ["slot"],
+                    "required_fields": ["slot", "board_type"],
+                    "optional_fields": [],
+                    "state_semantics": {
+                        "slot": {"semantic_type": "identity"},
+                        "board_type": {
+                            "semantic_type": "text",
+                            "observation_type": "device.slot.board_type",
+                        },
+                    },
+                },
+            ],
+        },
+    )
+
+    observations = observations_from_snapshot(
+        {
+            "id": "snapshot-version",
+            "run_id": "run-1",
+            "device_id": "device-1",
+            "canonical_command": "display version",
+            "parser_template_id": "template-version",
+            "observed_at": "2026-07-27T00:00:00+00:00",
+            "structured_json": {
+                "record_sets": {
+                    "device_version": [
+                        {
+                            "software_version": "7.1.064",
+                            "software_release": "0821P18",
+                        }
+                    ],
+                    "slot_inventory": [
+                        {"slot": "0", "board_type": "MPU-60"},
+                        {"slot": "1", "board_type": "MPU-60"},
+                    ],
+                }
+            },
+        },
+        mode="production",
+        source="test",
+        dataset_id=None,
+    )
+
+    assert len(observations) == 4
+    assert {item.entity_type for item in observations} == {"device", "device_slot"}
+    assert {
+        item.metadata["record_set_name"] for item in observations
+    } == {"device_version", "slot_inventory"}
+    board_facts = [
+        item
+        for item in observations
+        if item.observation_type == "device.slot.board_type"
+    ]
+    assert len(board_facts) == 2
+    assert board_facts[0].state_key != board_facts[1].state_key
+    assert board_facts[0].idempotency_key != board_facts[1].idempotency_key
 
 
 def test_normalize_run_can_limit_to_selected_devices(monkeypatch):

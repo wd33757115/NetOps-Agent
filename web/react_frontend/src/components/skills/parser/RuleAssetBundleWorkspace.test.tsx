@@ -194,7 +194,7 @@ describe('RuleAssetBundleWorkspace', () => {
     expect(screen.getByText('预估每日事件 3')).toBeVisible()
     expect(screen.getByText('范围门禁已通过')).toBeVisible()
     expect(screen.getByText(/巡检 Run：run-q1、run-q2、run-q3/)).toBeVisible()
-    expect(screen.getByText(/无 Change 的基线 Run：run-q1/)).toBeVisible()
+    expect(screen.getByText(/未产生 Change 的 Run：run-q1/)).toBeVisible()
     expect(screen.getByText(/观测契约 · contract-v1/)).toBeVisible()
     expect(screen.getByText('审批发布', { selector: '.ant-steps-item-title' })).toBeVisible()
   })

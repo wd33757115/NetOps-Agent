@@ -8,6 +8,7 @@ from pathlib import Path
 
 from src.core.patrol.change_policy import (
     compare_with_policy,
+    compose_dimension_policies,
     infer_change_policy,
     policy_from_dict,
     validate_change_policy,
@@ -206,6 +207,89 @@ def test_change_policy_generator_fans_out_all_contract_targets(tmp_path: Path):
         "interface.optical.tx_power",
     }
     assert result["agent_loop"]["ready_for_approval"] is True
+
+
+def test_change_policy_compiles_dimension_targets_into_one_runtime_asset(tmp_path: Path):
+    result = _run_skill(
+        tmp_path,
+        {
+            "mode": "infer_and_validate",
+            "records": [{"cpu_5s": 12, "cpu_1m": 15}],
+            "policy_targets": [
+                {
+                    "field_name": "cpu_5s",
+                    "observation_type": "device.cpu.utilization",
+                    "field_semantics": {
+                        "semantic_type": "gauge",
+                        "unit": "percent",
+                    },
+                    "dimension_selector": {"window": "5s"},
+                },
+                {
+                    "field_name": "cpu_1m",
+                    "observation_type": "device.cpu.utilization",
+                    "field_semantics": {
+                        "semantic_type": "gauge",
+                        "unit": "percent",
+                    },
+                    "dimension_selector": {"window": "1m"},
+                },
+            ],
+        },
+    )
+
+    assert result["success"] is True
+    assert result["target_policy_count"] == 2
+    assert result["policy_count"] == 1
+    composite = result["policies"][0]
+    assert composite["compare_mode"] == "dimension_dispatch"
+    assert {
+        branch["selector"]["window"]
+        for branch in composite["dimension_policies"]
+    } == {"5s", "1m"}
+    assert validate_change_policy(policy_from_dict(composite))["success"] is True
+    selected = compare_with_policy(
+        policy_from_dict(composite),
+        old=20,
+        new=95,
+        dimensions={"window": "5s"},
+    )
+    assert selected["changed"] is True
+    assert selected["dimension_selector"] == {"window": "5s"}
+    unmatched = compare_with_policy(
+        policy_from_dict(composite),
+        old=20,
+        new=95,
+        dimensions={"window": "5m"},
+    )
+    assert unmatched == {
+        "changed": False,
+        "reason": "dimension_policy_not_matched",
+    }
+
+
+def test_dimension_policy_compiler_rejects_duplicate_selectors():
+    policies = [
+        {
+            "observation_type": "device.cpu.utilization",
+            "semantic_type": "gauge",
+            "compare_mode": "numeric_delta",
+            "dimension_selector": {"window": "5s"},
+        },
+        {
+            "observation_type": "device.cpu.utilization",
+            "semantic_type": "gauge",
+            "compare_mode": "numeric_delta",
+            "dimension_selector": {"window": "5s"},
+        },
+    ]
+
+    try:
+        compose_dimension_policies(policies)
+    except ValueError as exc:
+        assert "duplicate dimension selectors" in str(exc)
+    else:
+        raise AssertionError("duplicate selectors must be rejected")
 
 
 def test_change_policy_compiler_preserves_structured_threshold_references():

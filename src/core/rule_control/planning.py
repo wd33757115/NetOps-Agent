@@ -11,9 +11,32 @@ import math
 from collections import Counter
 from typing import Any
 
-COMPARABLE_SEMANTIC_TYPES = frozenset(
-    {"boolean", "counter", "enum", "gauge", "percentage", "raw_hash", "state"}
+from src.core.observation.semantic_projection import (
+    SemanticProjectionError,
+    dimension_schema_signature,
+    normalize_dimensions,
 )
+
+COMPARABLE_SEMANTIC_TYPES = frozenset(
+    {
+        "boolean",
+        "counter",
+        "enum",
+        "gauge",
+        "percentage",
+        "raw_hash",
+        "state",
+        "text",
+    }
+)
+SEMANTIC_TYPE_ALIASES = {
+    "driver_version": "text",
+    "firmware_version": "text",
+    "hardware_version": "text",
+    "software_version": "text",
+    "state_reason": "text",
+    "uptime": "text",
+}
 NON_TARGET_ROLES = frozenset({"dimension", "identity", "metadata", "reference", "threshold"})
 REFERENCE_MARKERS = frozenset(
     {"alarm", "limit", "reference", "threshold", "warn", "warning"}
@@ -39,6 +62,67 @@ REFERENCE_ROLE_TOKENS = frozenset(
 )
 MEASUREMENT_SCOPE_TOKENS = frozenset(
     {"channel", "current", "measured", "measurement", "module", "sensor", "value"}
+)
+EVENT_ENABLED_ROLES = frozenset(
+    {"alarm", "fault", "fault_state", "health", "health_state", "threshold"}
+)
+EVENT_DISABLED_ROLES = frozenset(
+    {"change_only", "configuration", "informational", "inventory", "none"}
+)
+CHANGE_EVENT_ROLES = frozenset({"change", "change_only", "lifecycle_change"})
+STATIC_CAPACITY_ROLES = frozenset({"capacity", "inventory_capacity"})
+
+
+def normalize_semantic_type(value: Any) -> str:
+    """Return the executable comparison type for a business semantic label."""
+
+    semantic_type = str(value or "text").strip().casefold()
+    return SEMANTIC_TYPE_ALIASES.get(semantic_type, semantic_type)
+
+
+def _literal_dimension_selector(dimensions: Any) -> dict[str, Any]:
+    declared = normalize_dimensions(dimensions)
+    return {
+        name: source["literal"]
+        for name, source in declared.items()
+        if "literal" in source
+    }
+
+
+def normalize_contract_semantics(contract: dict[str, Any]) -> dict[str, Any]:
+    """Preserve business meaning while compiling semantics for runtime policies."""
+
+    output = dict(contract)
+    semantics = dict(output.get("state_semantics") or {})
+    normalized: dict[str, Any] = {}
+    for field, raw_metadata in semantics.items():
+        if not isinstance(raw_metadata, dict):
+            normalized[str(field)] = raw_metadata
+            continue
+        metadata = dict(raw_metadata)
+        original = str(metadata.get("semantic_type") or "text").strip().casefold()
+        executable = normalize_semantic_type(original)
+        if executable != original:
+            metadata.setdefault("domain_semantic_type", original)
+            metadata["semantic_type"] = executable
+        normalized[str(field)] = metadata
+    output["state_semantics"] = normalized
+    return output
+HEALTHY_STATE_VALUES = frozenset(
+    {"active", "available", "connected", "healthy", "normal", "ok", "present", "up"}
+)
+FAULT_STATE_VALUES = frozenset(
+    {
+        "absent",
+        "critical",
+        "degraded",
+        "disconnected",
+        "down",
+        "error",
+        "failed",
+        "fault",
+        "unavailable",
+    }
 )
 
 
@@ -72,6 +156,77 @@ def _number(value: Any) -> float | None:
     else:
         return None
     return number if math.isfinite(number) else None
+
+
+def _event_generation_decision(
+    *,
+    field_semantics: dict[str, Any],
+    values: list[Any],
+) -> tuple[bool, str]:
+    """Conservatively separate change tracking from event generation."""
+
+    explicit = field_semantics.get("event_generation")
+    if explicit is False:
+        return False, "explicit_contract_disabled"
+    event_role = str(field_semantics.get("event_role") or "").strip().casefold()
+    if field_semantics.get("threshold_references"):
+        return True, "structured_threshold_reference"
+    constraints = field_semantics.get("policy_constraints")
+    if isinstance(constraints, dict) and any(
+        key in constraints
+        for key in (
+            "thresholds",
+            "high_threshold",
+            "low_threshold",
+            "critical_threshold",
+            "recovery_threshold",
+        )
+    ):
+        return True, "approved_threshold_constraint"
+
+    semantic_type = str(field_semantics.get("semantic_type") or "").strip().casefold()
+    if event_role in CHANGE_EVENT_ROLES:
+        if explicit is True:
+            return True, "explicit_change_event"
+        return False, f"event_role:{event_role}"
+    if event_role in STATIC_CAPACITY_ROLES:
+        return False, "static_capacity_has_no_threshold_evidence"
+    if event_role in EVENT_DISABLED_ROLES:
+        return False, f"event_role:{event_role}"
+    if semantic_type in {"gauge", "percentage", "counter"}:
+        return False, "numeric_event_has_no_threshold_evidence"
+    if semantic_type not in {"boolean", "enum", "state"}:
+        return False, "event_semantics_not_executable"
+    value_mapping = {
+        str(key).strip().casefold(): str(value).strip().casefold()
+        for key, value in dict(field_semantics.get("value_mapping") or {}).items()
+        if str(key).strip() and str(value).strip()
+    }
+    canonical_values = {
+        value_mapping.get(str(value).strip().casefold(), str(value).strip().casefold())
+        for value in values
+        if str(value).strip()
+    }
+    # A governed mapping may describe the failure state even when the current
+    # sample is healthy. It is still stronger evidence than an LLM-created name.
+    canonical_values.update(value_mapping.values())
+    has_healthy = bool(canonical_values.intersection(HEALTHY_STATE_VALUES))
+    has_fault = bool(canonical_values.intersection(FAULT_STATE_VALUES))
+    if has_healthy and has_fault:
+        return True, "governed_state_polarity"
+    return False, "state_has_no_fault_health_polarity"
+
+
+def event_generation_decision(
+    field_semantics: dict[str, Any],
+    values: list[Any] | None = None,
+) -> tuple[bool, str]:
+    """Expose the shared, vendor-neutral EventRule eligibility decision."""
+
+    return _event_generation_decision(
+        field_semantics=dict(field_semantics or {}),
+        values=list(values or []),
+    )
 
 
 def profile_fields(
@@ -319,7 +474,101 @@ def compile_rule_targets(
         raise ValueError("contract must be an object")
     if not isinstance(records, list) or not all(isinstance(item, dict) for item in records):
         raise ValueError("records must be a list of objects")
+    raw_record_sets = [
+        dict(item)
+        for item in contract.get("record_sets") or []
+        if isinstance(item, dict)
+    ]
+    if raw_record_sets:
+        targets: list[dict[str, Any]] = []
+        blockers: list[dict[str, Any]] = []
+        unmapped: list[dict[str, Any]] = []
+        historical_values: dict[str, list[Any]] = {}
+        field_profiles: dict[str, Any] = {}
+        normalized_sets: list[dict[str, Any]] = []
+        for record_set in raw_record_sets:
+            name = str(record_set.get("name") or "").strip()
+            if not name:
+                blockers.append(
+                    {
+                        "code": "record_set_name_missing",
+                        "message": "multi-record contract contains an unnamed record set",
+                    }
+                )
+                continue
+            set_records = [
+                {
+                    str(key): value
+                    for key, value in record.items()
+                    if str(key) != "__record_set__"
+                }
+                for record in records
+                if str(record.get("__record_set__") or "") == name
+            ]
+            result = compile_rule_targets(
+                contract={**record_set, "record_sets": []},
+                records=set_records,
+            )
+            normalized_set = dict(result.get("contract") or record_set)
+            normalized_set["name"] = name
+            normalized_sets.append(normalized_set)
+            for target in result.get("policy_targets") or []:
+                target = dict(target)
+                target["record_set_name"] = name
+                target["field_ref"] = f"{name}.{target['field_name']}"
+                targets.append(target)
+            for blocker in result.get("blockers") or []:
+                if blocker.get("code") == "no_policy_targets":
+                    continue
+                blockers.append({"record_set_name": name, **dict(blocker)})
+            unmapped.extend(
+                {"record_set_name": name, **dict(item)}
+                for item in result.get("unmapped_comparable_fields") or []
+            )
+            for field, values in dict(
+                result.get("historical_values_by_field") or {}
+            ).items():
+                historical_values[f"{name}.{field}"] = list(values)
+            for field, profile in dict(result.get("field_profiles") or {}).items():
+                field_profiles[f"{name}.{field}"] = profile
+        if not targets:
+            blockers.append(
+                {
+                    "code": "no_policy_targets",
+                    "message": (
+                        "validated multi-record contract contains no evidenced "
+                        "comparable observation"
+                    ),
+                }
+            )
+        normalized_contract = {
+            **contract,
+            "record_sets": normalized_sets,
+        }
+        event_targets = [
+            item for item in targets if item.get("event_generation") is True
+        ]
+        return {
+            "success": not blockers,
+            "policy_targets": targets,
+            "event_policy_targets": event_targets,
+            "event_observation_types": list(
+                dict.fromkeys(
+                    item["observation_type"] for item in event_targets
+                )
+            ),
+            "historical_values_by_field": historical_values,
+            "field_profiles": field_profiles,
+            "contract": normalized_contract,
+            "unmapped_comparable_fields": unmapped,
+            "blockers": blockers,
+            "field_name": targets[0]["field_name"] if targets else None,
+            "observation_type": (
+                targets[0]["observation_type"] if targets else None
+            ),
+        }
 
+    contract = normalize_contract_semantics(contract)
     contract = enrich_contract_reference_semantics(contract=contract, records=records)
     declared_fields = {
         str(field)
@@ -392,6 +641,27 @@ def compile_rule_targets(
             "field_semantics": field_semantics,
             "field_profile": profiles.get(field) or {},
         }
+        try:
+            dimensions = normalize_dimensions(field_semantics.get("dimensions"))
+        except SemanticProjectionError as exc:
+            blockers.append(
+                {
+                    "code": "invalid_dimensions",
+                    "field_name": field,
+                    "observation_type": observation_type,
+                    "message": str(exc),
+                }
+            )
+            continue
+        target["dimensions"] = dimensions
+        target["dimension_schema_signature"] = dimension_schema_signature(dimensions)
+        target["dimension_selector"] = _literal_dimension_selector(dimensions)
+        target["dimension_selector_signature"] = dimension_schema_signature(
+            target["dimension_selector"]
+        )
+        target["target_id"] = (
+            f"{observation_type}:{target['dimension_selector_signature']}"
+        )
         constraints = field_semantics.get("policy_constraints")
         if isinstance(constraints, dict) and constraints:
             target["policy_constraints"] = constraints
@@ -406,23 +676,39 @@ def compile_rule_targets(
                 for role, reference in references.items()
                 if isinstance(reference, dict)
             }
+        event_generation, event_reason = _event_generation_decision(
+            field_semantics=field_semantics,
+            values=values,
+        )
+        target["event_generation"] = event_generation
+        target["event_generation_reason"] = event_reason
         targets.append(target)
 
     observation_types = [item["observation_type"] for item in targets]
     duplicates = sorted(value for value, count in Counter(observation_types).items() if count > 1)
     for observation_type in duplicates:
-        blockers.append(
-            {
-                "code": "duplicate_observation_type",
-                "observation_type": observation_type,
-                "fields": [
-                    item["field_name"]
-                    for item in targets
-                    if item["observation_type"] == observation_type
-                ],
-                "message": f"observation_type {observation_type} maps to multiple fields",
-            }
+        matching = [
+            item for item in targets if item["observation_type"] == observation_type
+        ]
+        signatures = [
+            str(item.get("dimension_selector_signature") or "") for item in matching
+        ]
+        repeated_signatures = sorted(
+            value for value, count in Counter(signatures).items() if count > 1
         )
+        if repeated_signatures:
+            blockers.append(
+                {
+                    "code": "ambiguous_observation_dimensions",
+                    "observation_type": observation_type,
+                    "fields": [item["field_name"] for item in matching],
+                    "duplicate_dimension_selector_signatures": repeated_signatures,
+                    "message": (
+                        f"observation_type {observation_type} maps to multiple fields "
+                        "without distinct runtime dimension selectors"
+                    ),
+                }
+            )
     if not targets:
         blockers.append(
             {
@@ -434,6 +720,16 @@ def compile_rule_targets(
     return {
         "success": not blockers,
         "policy_targets": targets,
+        "event_policy_targets": [
+            item for item in targets if item.get("event_generation") is True
+        ],
+        "event_observation_types": list(
+            dict.fromkeys(
+                item["observation_type"]
+                for item in targets
+                if item.get("event_generation") is True
+            )
+        ),
         "historical_values_by_field": historical_values_by_field,
         "field_profiles": profiles,
         "contract": contract,

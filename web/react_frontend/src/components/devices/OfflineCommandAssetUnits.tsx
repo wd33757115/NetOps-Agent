@@ -35,6 +35,7 @@ import {
   type OfflineCommandAssetUnitDetail,
   type OfflineCommandAssetUnitStage,
 } from '../../services/api'
+import ParserGenerationStep from '../skills/parser/ParserGenerationStep'
 
 const stageOptions = [
   ['output_slicing', '命令输出切片'],
@@ -134,12 +135,14 @@ const AssetFlowStatus: React.FC<{ unit: OfflineCommandAssetUnit }> = ({ unit }) 
   </div>
 )
 
-const CommandAssetDetail: React.FC<{
+export const CommandAssetDetail: React.FC<{
   detail?: OfflineCommandAssetUnitDetail
   evidencePage: number
   evidencePageSize: number
   loading: boolean
   open: boolean
+  generationContent?: React.ReactNode
+  initialTab?: 'flow' | 'parser' | 'generation' | 'evidence' | 'attempts' | 'assets'
   onEvidencePageChange: (page: number, pageSize: number) => void
   onClose: () => void
 }> = ({
@@ -148,15 +151,68 @@ const CommandAssetDetail: React.FC<{
   evidencePageSize,
   loading,
   open,
+  generationContent,
+  initialTab = 'flow',
   onEvidencePageChange,
   onClose,
 }) => {
   const screens = Grid.useBreakpoint()
   const navigate = useNavigate()
   const isMobile = !screens.md
+  const [activeTab, setActiveTab] = useState(initialTab)
+  useEffect(() => {
+    if (open) setActiveTab(initialTab)
+  }, [initialTab, open])
+  const handleStageAction = (targetUrl: string) => {
+    const target = new URL(targetUrl, window.location.origin)
+    const params = target.searchParams
+    const action = params.get('action')
+    const subtab = params.get('subtab')
+    if (
+      generationContent
+      && (action === 'rule-generation' || subtab === 'rule-generation')
+    ) {
+      // 同步 next_action 深链参数（尤其是 dataset_ids），否则规则生成步骤会误报“尚未选择”。
+      const next = new URLSearchParams(window.location.search)
+      let changed = false
+      for (const key of [
+        'workspace',
+        'subtab',
+        'action',
+        'source_job_id',
+        'offline_job_id',
+        'command',
+        'dataset_ids',
+        'dataset_id',
+        'rule_seed_job_id',
+        'bundle_id',
+      ]) {
+        const value = params.get(key)
+        if (value != null && value !== '' && next.get(key) !== value) {
+          next.set(key, value)
+          changed = true
+        }
+      }
+      if (changed) {
+        navigate(`${window.location.pathname}?${next.toString()}`, { replace: true })
+      }
+      setActiveTab('generation')
+      return
+    }
+    if (action === 'parser' || subtab === 'jobs') {
+      setActiveTab('parser')
+      return
+    }
+    if (action === 'bundle-review' || subtab === 'asset-bundles') {
+      setActiveTab('assets')
+      return
+    }
+    navigate(targetUrl)
+  }
   return (
     <Drawer
       title="命令规则资产生产详情"
+      rootClassName="rule-asset-detail-drawer"
       open={open}
       width={isMobile ? '100vw' : 1040}
       destroyOnClose
@@ -165,7 +221,7 @@ const CommandAssetDetail: React.FC<{
       extra={detail?.next_action?.target_url ? (
         <Button
           icon={<ArrowRightOutlined />}
-          onClick={() => navigate(detail.next_action?.target_url || '')}
+          onClick={() => handleStageAction(detail.next_action?.target_url || '')}
         >
           {detail.next_action.label}
         </Button>
@@ -200,6 +256,8 @@ const CommandAssetDetail: React.FC<{
           </Descriptions>
 
           <Tabs
+            activeKey={activeTab}
+            onChange={(key) => setActiveTab(key as typeof activeTab)}
             items={[
               {
                 key: 'flow',
@@ -246,7 +304,7 @@ const CommandAssetDetail: React.FC<{
                             <Button
                               size="small"
                               icon={<ArrowRightOutlined />}
-                              onClick={() => navigate(stage.next_action?.target_url || '')}
+                              onClick={() => handleStageAction(stage.next_action?.target_url || '')}
                             >
                               {stage.next_action.label}
                             </Button>
@@ -257,6 +315,16 @@ const CommandAssetDetail: React.FC<{
                   />
                 ),
               },
+              ...(detail.parser_job_id ? [{
+                key: 'parser',
+                label: 'Parser 生成',
+                children: <ParserGenerationStep jobId={detail.parser_job_id} />,
+              }] : []),
+              ...(generationContent ? [{
+                key: 'generation',
+                label: '规则生成',
+                children: generationContent,
+              }] : []),
               {
                 key: 'evidence',
                 label: `证据样本 (${detail.evidence_pagination.total})`,

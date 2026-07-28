@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import replace
 from typing import Any
 
 from src.core.patrol.change_policy import (
     ChangePolicyProposal,
+    normalize_dimension_selector,
     policy_from_dict,
 )
 from src.core.patrol.event_rules import EventRuleDefinition
@@ -379,6 +382,31 @@ def generate_event_rule_definitions(
             )
             if str((definition.condition or {}).get("kind") or "") != "raw_config_hash"
             else definition
+            for definition in definitions
+        ]
+    dimension_selector = normalize_dimension_selector(policy.dimension_selector)
+    if dimension_selector:
+        dimension_keys = tuple(sorted(dimension_selector))
+        dimension_suffix = hashlib.sha256(
+            json.dumps(
+                dimension_selector,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ).encode("utf-8")
+        ).hexdigest()[:8]
+        definitions = [
+            replace(
+                definition,
+                rule_id=f"{definition.rule_id}-dim-{dimension_suffix}",
+                condition={
+                    **dict(definition.condition or {}),
+                    "dimensions": dimension_selector,
+                },
+                correlation_keys=tuple(
+                    dict.fromkeys((*definition.correlation_keys, *dimension_keys))
+                ),
+            )
             for definition in definitions
         ]
 

@@ -137,12 +137,15 @@ def reconcile_patrol_batch_reports_task() -> dict[str, Any]:
     retry_backoff=5,
 )
 def materialize_patrol_batch_report_task(patrol_batch_id: str) -> dict[str, Any]:
+    from src.core.check_items import CheckItemReportMaterializer
     from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
     from src.core.patrol.patrol_report_service import PatrolReportService
     from src.core.workflows.patrol_batch_projection import (
         MaterializePatrolBatchReportHandler,
     )
     from src.core.workflows.patrol_batch_service import build_patrol_batch_summary
+    from src.infrastructure.db.models import PatrolBatchRecord
+    from src.infrastructure.db.postgres import get_db_session
     from src.infrastructure.storage.minio_client import get_minio_storage
 
     repository = PatrolBatchManifestRepository()
@@ -151,6 +154,27 @@ def materialize_patrol_batch_report_task(patrol_batch_id: str) -> dict[str, Any]
         return {"success": False, "patrol_batch_id": patrol_batch_id, "reason": "not_found"}
     repository.mark_report_status(patrol_batch_id, "generating")
     try:
+        with get_db_session() as db:
+            batch = db.get(PatrolBatchRecord, patrol_batch_id)
+            uses_check_item_runtime = bool(
+                batch is not None and batch.runtime_manifest_id
+            )
+        if uses_check_item_runtime:
+            result = CheckItemReportMaterializer(
+                object_storage=get_minio_storage(),
+            ).materialize(
+                patrol_batch_id,
+                generated_by="celery:materialize_patrol_batch_report",
+            )
+            repository.mark_report_status(
+                patrol_batch_id,
+                "completed",
+            )
+            return {
+                **result,
+                "run_count": len(runs),
+                "report_mode": "check_item_manifest",
+            }
         markdown = MaterializePatrolBatchReportHandler(
             summary_builder=build_patrol_batch_summary,
             renderer=PatrolReportService.render_markdown,
@@ -165,6 +189,7 @@ def materialize_patrol_batch_report_task(patrol_batch_id: str) -> dict[str, Any]
         "patrol_batch_id": patrol_batch_id,
         "run_count": len(runs),
         "report_bytes": len(markdown.encode("utf-8")),
+        "report_mode": "legacy_projection",
     }
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import asdict, dataclass
 from statistics import mean, pstdev
@@ -23,6 +24,8 @@ class ChangePolicyProposal:
     source: str = "deterministic_policy_generator"
     confidence: float = 0.85
     reason: str = ""
+    dimension_selector: dict[str, Any] | None = None
+    dimension_policies: tuple[dict[str, Any], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -39,6 +42,151 @@ def _number(value: Any) -> float | None:
         except ValueError:
             return None
     return None
+
+
+def normalize_dimension_selector(value: Any) -> dict[str, Any]:
+    if value in (None, {}):
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("dimension_selector must be an object")
+    selector: dict[str, Any] = {}
+    for raw_name, raw_value in sorted(value.items()):
+        name = str(raw_name).strip()
+        if not name:
+            raise ValueError("dimension_selector keys cannot be empty")
+        if isinstance(raw_value, (dict, list, tuple, set)):
+            raise ValueError(
+                f"dimension_selector.{name} must be a scalar value"
+            )
+        selector[name] = raw_value
+    return selector
+
+
+def dimension_selector_matches(
+    selector: Any,
+    dimensions: Any,
+) -> bool:
+    expected = normalize_dimension_selector(selector)
+    actual = dict(dimensions or {}) if isinstance(dimensions or {}, dict) else {}
+    return all(actual.get(name) == value for name, value in expected.items())
+
+
+def compose_dimension_policies(
+    policies: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Compile target policies into one runtime asset per observation type."""
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for raw_policy in policies:
+        policy = dict(raw_policy)
+        observation_type = str(policy.get("observation_type") or "").strip()
+        if not observation_type:
+            raise ValueError("policy observation_type is required")
+        policy["dimension_selector"] = normalize_dimension_selector(
+            policy.get("dimension_selector")
+        )
+        grouped.setdefault(observation_type, []).append(policy)
+
+    compiled: list[dict[str, Any]] = []
+    for observation_type, candidates in grouped.items():
+        if len(candidates) == 1:
+            compiled.append(candidates[0])
+            continue
+        selectors = [
+            json.dumps(
+                candidate.get("dimension_selector") or {},
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            for candidate in candidates
+        ]
+        if len(set(selectors)) != len(selectors):
+            raise ValueError(
+                f"duplicate dimension selectors for {observation_type}"
+            )
+        semantic_types = {
+            str(candidate.get("semantic_type") or "")
+            for candidate in candidates
+        }
+        if len(semantic_types) != 1:
+            raise ValueError(
+                f"dimension policies for {observation_type} must share semantic_type"
+            )
+        branches = []
+        for candidate in sorted(
+            candidates,
+            key=lambda item: json.dumps(
+                item.get("dimension_selector") or {},
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        ):
+            branch_policy = {
+                key: value
+                for key, value in candidate.items()
+                if key not in {"dimension_selector", "dimension_policies"}
+            }
+            branches.append(
+                {
+                    "selector": dict(candidate.get("dimension_selector") or {}),
+                    "policy": branch_policy,
+                }
+            )
+        compiled.append(
+            {
+                "observation_type": observation_type,
+                "semantic_type": next(iter(semantic_types)),
+                "compare_mode": "dimension_dispatch",
+                "dimension_selector": {},
+                "dimension_policies": branches,
+                "source": "platform_dimension_dispatch",
+                "confidence": min(
+                    float(candidate.get("confidence") or 0.0)
+                    for candidate in candidates
+                ),
+                "reason": (
+                    f"platform compiled {len(branches)} dimension-specific "
+                    f"policies for {observation_type}"
+                ),
+            }
+        )
+    return compiled
+
+
+def _select_dimension_policy(
+    policy: ChangePolicyProposal,
+    dimensions: dict[str, Any] | None,
+) -> ChangePolicyProposal | None:
+    if policy.compare_mode != "dimension_dispatch":
+        return (
+            policy
+            if dimension_selector_matches(policy.dimension_selector, dimensions)
+            else None
+        )
+    matches: list[tuple[int, ChangePolicyProposal]] = []
+    for branch in policy.dimension_policies:
+        if not isinstance(branch, dict):
+            continue
+        selector = normalize_dimension_selector(branch.get("selector"))
+        child = branch.get("policy")
+        if not isinstance(child, dict):
+            continue
+        if dimension_selector_matches(selector, dimensions):
+            matches.append(
+                (
+                    len(selector),
+                    policy_from_dict(
+                        {**child, "dimension_selector": selector}
+                    ),
+                )
+            )
+    if not matches:
+        return None
+    matches.sort(key=lambda item: item[0], reverse=True)
+    if len(matches) > 1 and matches[0][0] == matches[1][0]:
+        return None
+    return matches[0][1]
 
 
 def numeric_stats(values: list[Any]) -> dict[str, Any]:
@@ -87,6 +235,7 @@ def infer_change_policy(
     historical_values: list[Any] | None = None,
     device_role: str | None = None,
     policy_intent: str | None = None,
+    dimension_selector: dict[str, Any] | None = None,
 ) -> ChangePolicyProposal:
     semantics = dict(field_semantics or {})
     semantic_type = str(semantics.get("semantic_type") or "text")
@@ -108,6 +257,7 @@ def infer_change_policy(
             semantic_type=semantic_type,
             compare_mode="state_transition",
             reason="; ".join(reason_parts),
+            dimension_selector=normalize_dimension_selector(dimension_selector),
         )
     if semantic_type == "gauge":
         thresholds: dict[str, float] = {}
@@ -171,6 +321,7 @@ def infer_change_policy(
                     f"p99={stats.get('p99')}",
                 ]
             ),
+            dimension_selector=normalize_dimension_selector(dimension_selector),
         )
     if semantic_type == "counter":
         return ChangePolicyProposal(
@@ -178,6 +329,7 @@ def infer_change_policy(
             semantic_type=semantic_type,
             compare_mode="counter_delta",
             reason="; ".join(reason_parts),
+            dimension_selector=normalize_dimension_selector(dimension_selector),
         )
     if semantic_type == "raw_hash":
         return ChangePolicyProposal(
@@ -185,6 +337,7 @@ def infer_change_policy(
             semantic_type=semantic_type,
             compare_mode="hash_diff",
             reason="; ".join(reason_parts),
+            dimension_selector=normalize_dimension_selector(dimension_selector),
         )
     if semantic_type == "enum":
         return ChangePolicyProposal(
@@ -192,12 +345,14 @@ def infer_change_policy(
             semantic_type=semantic_type,
             compare_mode="enum_transition",
             reason="; ".join(reason_parts),
+            dimension_selector=normalize_dimension_selector(dimension_selector),
         )
     return ChangePolicyProposal(
         observation_type=observation_type,
         semantic_type=semantic_type,
         compare_mode="exact",
         reason="; ".join(reason_parts),
+        dimension_selector=normalize_dimension_selector(dimension_selector),
     )
 
 
@@ -233,6 +388,14 @@ def policy_from_dict(payload: dict[str, Any]) -> ChangePolicyProposal:
         source=str(payload.get("source") or "provided"),
         confidence=float(payload.get("confidence") or 0.8),
         reason=str(payload.get("reason") or ""),
+        dimension_selector=normalize_dimension_selector(
+            payload.get("dimension_selector")
+        ),
+        dimension_policies=tuple(
+            dict(item)
+            for item in payload.get("dimension_policies") or ()
+            if isinstance(item, dict)
+        ),
     )
 
 
@@ -241,6 +404,7 @@ def validate_change_policy(policy: ChangePolicyProposal) -> dict[str, Any]:
     if not policy.observation_type:
         errors.append("observation_type is required")
     allowed_modes = {
+        "dimension_dispatch",
         "state_transition",
         "threshold_and_deadband",
         "threshold_low_and_deadband",
@@ -252,6 +416,51 @@ def validate_change_policy(policy: ChangePolicyProposal) -> dict[str, Any]:
     }
     if policy.compare_mode not in allowed_modes:
         errors.append(f"unsupported compare_mode: {policy.compare_mode}")
+    try:
+        normalize_dimension_selector(policy.dimension_selector)
+    except ValueError as exc:
+        errors.append(str(exc))
+    if policy.compare_mode == "dimension_dispatch":
+        if not policy.dimension_policies:
+            errors.append("dimension_dispatch requires dimension_policies")
+        selectors: set[str] = set()
+        for index, branch in enumerate(policy.dimension_policies):
+            selector = branch.get("selector")
+            child = branch.get("policy")
+            try:
+                normalized_selector = normalize_dimension_selector(selector)
+            except ValueError as exc:
+                errors.append(f"dimension_policies[{index}]: {exc}")
+                continue
+            selector_key = json.dumps(
+                normalized_selector,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            if selector_key in selectors:
+                errors.append(
+                    f"dimension_policies[{index}] duplicates a dimension selector"
+                )
+            selectors.add(selector_key)
+            if not isinstance(child, dict):
+                errors.append(
+                    f"dimension_policies[{index}].policy must be an object"
+                )
+                continue
+            child_policy = policy_from_dict(child)
+            if child_policy.observation_type != policy.observation_type:
+                errors.append(
+                    f"dimension_policies[{index}] observation_type must match parent"
+                )
+            for child_error in validate_change_policy(child_policy)["errors"]:
+                errors.append(
+                    f"dimension_policies[{index}]: {child_error}"
+                )
+        return {
+            "success": not errors,
+            "errors": errors,
+            "policy": policy.to_dict(),
+        }
     if policy.semantic_type in {"state", "enum", "text"} and policy.thresholds:
         errors.append("non-numeric semantic types must not define thresholds")
     if policy.semantic_type == "counter" and policy.compare_mode != "counter_delta":
@@ -312,7 +521,28 @@ def compare_with_policy(
     new: Any,
     field: str | None = None,
     context: dict[str, Any] | None = None,
+    dimensions: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    selected_policy = _select_dimension_policy(policy, dimensions)
+    if selected_policy is None:
+        return {
+            "changed": False,
+            "reason": "dimension_policy_not_matched",
+        }
+    if selected_policy is not policy:
+        result = compare_with_policy(
+            selected_policy,
+            old=old,
+            new=new,
+            field=field,
+            context=context,
+            dimensions=dimensions,
+        )
+        result["dimension_policy_matched"] = True
+        result["dimension_selector"] = selected_policy.dimension_selector or {}
+        result["selected_compare_mode"] = selected_policy.compare_mode
+        return result
+    policy = selected_policy
     if field and field in policy.ignore_fields:
         return {"changed": False, "reason": "ignored_field"}
     if policy.compare_mode in {"state_transition", "enum_transition", "exact", "hash_diff"}:

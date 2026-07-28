@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
+
 from src.auth.models import CurrentUser
+from src.core.parser.assets import TemplateAssetStore
 from src.gateway import parser_api
 
 
@@ -12,6 +18,430 @@ def _admin_request(username: str = "operator"):
             current_user=CurrentUser(user_id=f"user:{username}", username=username, role="admin")
         )
     )
+
+
+def test_parser_spec_and_sample_roles_are_engineer_confirmed_and_audited(monkeypatch):
+    calls: list[tuple[str, dict]] = []
+
+    class FakeJobRepository:
+        def set_parser_spec(self, job_id, **payload):
+            calls.append(("spec", {"job_id": job_id, **payload}))
+            return {"id": job_id, "parser_spec_status": "confirmed"}
+
+        def set_sample_role(self, job_id, sample_id, **payload):
+            calls.append(
+                ("sample", {"job_id": job_id, "sample_id": sample_id, **payload})
+            )
+            return {"id": sample_id, "sample_role": payload["role"]}
+
+    monkeypatch.setattr(parser_api, "ParserJobRepository", FakeJobRepository)
+    spec = {
+        "entity": "interface",
+        "primary_keys": ["interface"],
+        "fields": {
+            "interface": {"required": True, "type": "interface_name"},
+            "status": {"required": True, "type": "enum", "values": ["UP", "DOWN"]},
+        },
+    }
+
+    spec_result = parser_api.update_parser_spec(
+        "job-1",
+        _admin_request("engineer"),
+        parser_api.ParserSpecUpdateRequest(
+            parser_spec=spec,
+            confirmed=True,
+            reason="sample fields reviewed",
+        ),
+    )
+    sample_result = parser_api.update_parser_sample_role(
+        "job-1",
+        "sample-1",
+        _admin_request("engineer"),
+        parser_api.ParserSampleRoleUpdateRequest(
+            role="acceptance",
+            expectation={"record_count": 1, "primary_keys": [["GE1/0/1"]]},
+            reason="reserve independent acceptance evidence",
+        ),
+    )
+
+    assert spec_result["job"]["parser_spec_status"] == "confirmed"
+    assert sample_result["sample"]["sample_role"] == "acceptance"
+    assert calls[0][1]["actor"] == "engineer"
+    assert calls[0][1]["reason"] == "sample fields reviewed"
+    assert calls[1][1]["expectation"]["primary_keys"] == [["GE1/0/1"]]
+
+
+def test_simple_parser_dispatch_reports_readiness_blockers(monkeypatch):
+    class FakeJobRepository:
+        def get_job(self, job_id):
+            assert job_id == "job-1"
+            return {
+                "id": job_id,
+                "pipeline_version": "simple_v2",
+                "generation_readiness": {
+                    "ready": False,
+                    "blockers": ["parser_spec_not_confirmed"],
+                },
+            }
+
+    monkeypatch.setattr(parser_api, "ParserJobRepository", FakeJobRepository)
+
+    with pytest.raises(HTTPException) as exc_info:
+        parser_api.dispatch_job("job-1")
+
+    assert exc_info.value.status_code == 409
+    assert "parser_spec_not_confirmed" in str(exc_info.value.detail)
+
+
+def test_recover_endpoint_fails_stale_job_and_revokes_task(monkeypatch):
+    calls: list[tuple[str, dict]] = []
+
+    class FakeJobRepository:
+        def recover_stale_job(self, job_id, **payload):
+            calls.append(("recover", {"job_id": job_id, **payload}))
+            return {
+                "id": job_id,
+                "status": "failed",
+                "failure_code": "stale_running_recovered",
+                "recovered_celery_task_id": "task-9",
+            }
+
+    class FakeControl:
+        def revoke(self, task_id, terminate):
+            calls.append(("revoke", {"task_id": task_id, "terminate": terminate}))
+
+    monkeypatch.setattr(parser_api, "ParserJobRepository", FakeJobRepository)
+    monkeypatch.setattr(
+        parser_api, "celery", SimpleNamespace(control=FakeControl())
+    )
+
+    result = parser_api.recover_parser_job(
+        "job-1",
+        _admin_request("engineer"),
+        parser_api.ParserJobRecoverRequest(reason="generation worker crashed"),
+    )
+
+    assert result["success"] is True
+    assert result["status"] == "failed"
+    assert result["job"]["failure_code"] == "stale_running_recovered"
+    assert calls[0][1]["actor"] == "engineer"
+    assert calls[0][1]["reason"] == "generation worker crashed"
+    assert ("revoke", {"task_id": "task-9", "terminate": False}) in calls
+
+
+def test_recover_endpoint_keeps_409_for_fresh_running_job(monkeypatch):
+    from src.core.parser.repository import ParserJobStateError
+
+    class FakeJobRepository:
+        def recover_stale_job(self, job_id, **_payload):
+            raise ParserJobStateError(
+                f"parser job {job_id} is still running within the stale timeout; "
+                "recovery is allowed in 100 seconds"
+            )
+
+    monkeypatch.setattr(parser_api, "ParserJobRepository", FakeJobRepository)
+
+    with pytest.raises(HTTPException) as exc_info:
+        parser_api.recover_parser_job("job-1", _admin_request("engineer"), None)
+
+    assert exc_info.value.status_code == 409
+    assert "still running" in str(exc_info.value.detail)
+
+
+def test_parser_spec_suggestion_is_queued_without_starting_generation_lifecycle(monkeypatch):
+    calls: list[tuple[str, dict]] = []
+
+    class FakeJobRepository:
+        def queue_parser_spec_suggestion(self, job_id, **payload):
+            calls.append(("queue", {"job_id": job_id, **payload}))
+            return {"id": job_id}
+
+        def record_parser_spec_suggestion(self, *_args, **_kwargs):
+            raise AssertionError("dispatch should not fail")
+
+    class FakeCelery:
+        def send_task(self, name, **payload):
+            calls.append((name, payload))
+
+    monkeypatch.setattr(parser_api, "ParserJobRepository", FakeJobRepository)
+    monkeypatch.setattr(parser_api, "celery", FakeCelery())
+
+    result = parser_api.suggest_parser_spec(
+        "job-1",
+        _admin_request("engineer"),
+        parser_api.ParserSpecSuggestionRequest(),
+    )
+
+    assert result["status"] == "queued"
+    assert calls[0][0] == "queue"
+    assert calls[0][1]["actor"] == "engineer"
+    assert calls[1][0] == "execute_skill_task"
+    assert calls[1][1]["kwargs"]["operation"] == "suggest_spec"
+
+
+def test_asset_production_list_uses_current_user_scope(monkeypatch):
+    captured: dict = {}
+
+    class FakeService:
+        def list_production_units(self, **kwargs):
+            captured.update(kwargs)
+            return {"items": [], "total": 0, "summary": {}}
+
+    monkeypatch.setattr(parser_api, "RuleAssetCommandUnitService", FakeService)
+    user = CurrentUser(user_id="user:engineer", username="engineer", role="operator")
+    result = parser_api.list_asset_production_units(
+        page=2,
+        page_size=50,
+        bucket="action_required",
+        user=user,
+    )
+
+    assert result["total"] == 0
+    assert captured["owner_id"] == "user:engineer"
+    assert captured["is_admin"] is False
+    assert captured["page"] == 2
+    assert captured["bucket"] == "action_required"
+
+
+def test_parser_template_comparison_returns_complete_human_approval_evidence(
+    monkeypatch,
+    tmp_path,
+):
+    template_path = tmp_path / "candidate.textfsm"
+    template_text = "Value interface (\\S+)\n\nStart\n  ^${interface} -> Record\n"
+    template_path.write_text(template_text, encoding="utf-8")
+    candidate = SimpleNamespace(
+        id="template-candidate",
+        vendor="H3C",
+        model="S5130S",
+        family=None,
+        profile="S5130S",
+        canonical_command="display interface brief",
+        category="interface",
+        version="v2",
+        status="pending_approval",
+        sha256="candidate-sha",
+        asset_path=str(template_path),
+        validation_json={},
+        contract_sha256="contract-new",
+        source_job_id=None,
+    )
+    active = SimpleNamespace(
+        id="template-active",
+        validation_json={},
+        contract_sha256="contract-old",
+    )
+    recorded: list[dict] = []
+
+    class FakeTemplateRepository:
+        def get_template(self, template_id):
+            assert template_id == candidate.id
+            return candidate
+
+        def resolve_active(self, **kwargs):
+            assert kwargs["command"] == candidate.canonical_command
+            return active
+
+        def record_regression_validation(self, template_id, **payload):
+            recorded.append({"template_id": template_id, **payload})
+
+    class FakeAssetStore:
+        root = tmp_path
+
+        @staticmethod
+        def verify(path, sha256, embedded_text=None):
+            assert embedded_text is None
+            assert Path(path) == template_path
+            assert sha256 == "candidate-sha"
+            return True
+
+        @staticmethod
+        def read(path, sha256, embedded_text=None):
+            assert FakeAssetStore.verify(path, sha256, embedded_text)
+            return template_path.read_text(encoding="utf-8")
+
+    snapshot = SimpleNamespace(
+        snapshot_id="snapshot-1",
+        dataset_id="dataset-q3",
+        device_id="SW1",
+        vendor="H3C",
+        model="S5130S",
+        command_canonical="display interface brief",
+        raw_text="Interface Link\nGE1/0/1 UP\n",
+        raw_text_hash=None,
+    )
+
+    class FakePatrolRepository:
+        @staticmethod
+        def list_dataset_snapshots(*, mode):
+            assert mode == "parser_validation"
+            return [snapshot]
+
+    monkeypatch.setattr(parser_api, "ParserTemplateRepository", FakeTemplateRepository)
+    monkeypatch.setattr(parser_api, "TemplateAssetStore", FakeAssetStore)
+    monkeypatch.setattr(parser_api, "PatrolRepository", FakePatrolRepository)
+    monkeypatch.setattr(
+        parser_api,
+        "_parse_snapshot_with_template",
+        lambda template, _snapshot: {
+            "status": "success",
+            "failure_code": None,
+            "records": [{"interface": "GE1/0/1", "status": "UP"}],
+        },
+    )
+
+    result = parser_api.compare_template(candidate.id)
+
+    assert result["approval_readiness"] == {"can_approve": True, "blockers": []}
+    assert result["candidate_template"]["content"] == template_text
+    assert result["candidate_template"]["hash_valid"] is True
+    assert result["rows"][0]["raw_text"] == snapshot.raw_text
+    assert result["rows"][0]["raw_text_sha256"]
+    assert result["rows"][0]["proposed"]["records"][0]["status"] == "UP"
+    assert recorded == [{
+        "template_id": candidate.id,
+        "passed": True,
+        "sample_count": 1,
+        "passed_samples": 1,
+        "result_preview": [{
+            "snapshot_id": "snapshot-1",
+            "raw_text_sha256": result["rows"][0]["raw_text_sha256"],
+            "status": "success",
+            "records": [{"interface": "GE1/0/1", "status": "UP"}],
+            "primary_keys": [[]],
+        }],
+    }]
+
+
+def test_parser_template_comparison_scopes_evidence_to_source_job(
+    monkeypatch,
+    tmp_path,
+):
+    template_path = tmp_path / "candidate.textfsm"
+    template_text = "Value interface (\\S+)\n\nStart\n  ^${interface} -> Record\n"
+    template_path.write_text(template_text, encoding="utf-8")
+    candidate = SimpleNamespace(
+        id="template-candidate",
+        vendor="Cisco",
+        model="N9K-C9364C",
+        family="NXOS9K",
+        profile="N9K-C9364C",
+        canonical_command="show interface status",
+        category="interface",
+        version="simple-v1",
+        status="pending_approval",
+        sha256="candidate-sha",
+        asset_path=str(template_path),
+        validation_json={},
+        contract_sha256="contract-new",
+        source_job_id="parser-job-1",
+    )
+    scoped_snapshot = SimpleNamespace(
+        snapshot_id="snapshot-scoped",
+        dataset_id="offline-job-current",
+        device_id="switch-1",
+        vendor="Cisco",
+        model="N9K-C9364C",
+        command_canonical="show interface status",
+        raw_text="Eth1/1 uplink connected trunk full 100G QSFP\n",
+        raw_text_hash=None,
+    )
+    historical_snapshot = SimpleNamespace(
+        snapshot_id="snapshot-historical",
+        dataset_id="historical",
+        device_id="switch-old",
+        vendor="Cisco",
+        model="N9K-C9364C",
+        command_canonical="show interface status",
+        raw_text="Eth1/2 old notconnect 1 auto auto --\n",
+        raw_text_hash=None,
+    )
+
+    class FakeTemplateRepository:
+        def get_template(self, template_id):
+            assert template_id == candidate.id
+            return candidate
+
+        def resolve_active(self, **_kwargs):
+            return None
+
+        def record_regression_validation(self, *_args, **_kwargs):
+            return None
+
+    class FakeAssetStore:
+        root = tmp_path
+
+        @staticmethod
+        def verify(path, sha256, embedded_text=None):
+            return Path(path) == template_path and sha256 == "candidate-sha"
+
+        @staticmethod
+        def read(path, sha256, embedded_text=None):
+            assert FakeAssetStore.verify(path, sha256, embedded_text)
+            return template_path.read_text(encoding="utf-8")
+
+    class FakePatrolRepository:
+        @staticmethod
+        def list_dataset_snapshots(*, mode):
+            assert mode == "parser_validation"
+            return [historical_snapshot, scoped_snapshot]
+
+    class FakeParserJobRepository:
+        @staticmethod
+        def get_job(job_id):
+            assert job_id == "parser-job-1"
+            return {"samples": [{"snapshot_id": "snapshot-scoped"}]}
+
+    monkeypatch.setattr(parser_api, "ParserTemplateRepository", FakeTemplateRepository)
+    monkeypatch.setattr(parser_api, "TemplateAssetStore", FakeAssetStore)
+    monkeypatch.setattr(parser_api, "PatrolRepository", FakePatrolRepository)
+    monkeypatch.setattr(parser_api, "ParserJobRepository", FakeParserJobRepository)
+    monkeypatch.setattr(
+        parser_api,
+        "_parse_snapshot_with_template",
+        lambda _template, _snapshot: {
+            "status": "success",
+            "failure_code": None,
+            "records": [{"interface": "Eth1/1"}],
+        },
+    )
+
+    result = parser_api.compare_template(candidate.id)
+
+    assert result["sample_count"] == 1
+    assert [row["snapshot_id"] for row in result["rows"]] == ["snapshot-scoped"]
+
+
+def test_template_preview_reads_embedded_candidate_without_a_local_file(
+    monkeypatch,
+    tmp_path,
+):
+    content = "Value item (\\S+)\n\nStart\n  ^${item} -> Record\n"
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    template = SimpleNamespace(
+        id="template-embedded",
+        vendor="Generic",
+        profile="Generic",
+        canonical_command="inspect item",
+        category="item",
+        version="simple-1",
+        status="pending_approval",
+        sha256=digest,
+        asset_path=f"postgresql://parser-template/{digest}",
+        template_text=content,
+        validation_json={"simple_parser": {"status": "candidate_ready"}},
+    )
+    monkeypatch.setattr(
+        parser_api,
+        "TemplateAssetStore",
+        lambda: TemplateAssetStore(tmp_path),
+    )
+
+    evidence = parser_api._template_asset_evidence(template)
+
+    assert evidence["content"] == content
+    assert evidence["hash_valid"] is True
+    assert not any(tmp_path.iterdir())
 
 
 def test_effective_plan_preview_returns_commands(monkeypatch):
@@ -1079,6 +1509,118 @@ def test_command_profile_save_creates_draft_by_default(monkeypatch):
     }
 
 
+def test_check_item_profile_save_persists_business_selection(monkeypatch):
+    calls: list[tuple[str, object]] = []
+
+    class FakeProfileRepository:
+        def create_profile_version(
+            self,
+            *,
+            name,
+            action,
+            commands,
+            created_by,
+            status,
+        ):
+            calls.append(
+                (
+                    "profile",
+                    {
+                        "name": name,
+                        "action": action,
+                        "commands": commands,
+                        "created_by": created_by,
+                        "status": status,
+                    },
+                )
+            )
+            return "profile-version-check-items"
+
+    class FakeSelectionRepository:
+        def set_draft_selection(
+            self,
+            profile_version_id,
+            check_item_ids,
+            *,
+            actor,
+        ):
+            calls.append(
+                (
+                    "selection",
+                    {
+                        "profile_version_id": profile_version_id,
+                        "check_item_ids": check_item_ids,
+                        "actor": actor,
+                    },
+                )
+            )
+            return []
+
+    monkeypatch.setattr(
+        parser_api,
+        "CommandProfileRepository",
+        FakeProfileRepository,
+    )
+    monkeypatch.setattr(
+        parser_api,
+        "PatrolProfileCheckItemRepository",
+        FakeSelectionRepository,
+    )
+
+    result = parser_api.upsert_command_profile(
+        _admin_request(),
+        parser_api.CommandProfileUpsertRequest(
+            name="golden-patrol",
+            check_item_ids=[
+                "system.cpu_usage",
+                "interface.oper_status",
+                "system.cpu_usage",
+            ],
+        ),
+    )
+
+    assert result == {
+        "success": True,
+        "profile_version_id": "profile-version-check-items",
+        "status": "draft",
+        "profile_mode": "check_items",
+        "check_item_ids": [
+            "interface.oper_status",
+            "system.cpu_usage",
+        ],
+    }
+    assert calls[0][1]["commands"] == []
+    assert calls[1][1]["check_item_ids"] == [
+        "interface.oper_status",
+        "system.cpu_usage",
+    ]
+
+
+def test_patrol_profile_rejects_mixed_check_items_and_commands(monkeypatch):
+    class FakeRepository:
+        def create_profile_version(self, **_kwargs):
+            raise AssertionError("mixed profile must not reach persistence")
+
+    monkeypatch.setattr(
+        parser_api,
+        "CommandProfileRepository",
+        FakeRepository,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        parser_api.upsert_command_profile(
+            _admin_request(),
+            parser_api.CommandProfileUpsertRequest(
+                name="invalid-mixed-profile",
+                commands=["show version"],
+                check_item_ids=["device.version"],
+            ),
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "cannot mix" in str(exc_info.value.detail)
+
+
 def test_command_profile_activate_endpoint(monkeypatch):
     calls = []
 
@@ -1419,3 +1961,92 @@ def test_runtime_rule_asset_resolve_endpoint(monkeypatch):
             "include_event_rules": True,
         }
     ]
+
+
+def test_runtime_bundle_assembly_endpoints_preserve_preview_and_actor(monkeypatch):
+    calls = []
+
+    class FakeRuntimeBundleService:
+        def preview_assembly(self, **payload):
+            calls.append(("preview", payload))
+            return {
+                "preview_digest": "preview-1",
+                "operationally_ready": True,
+                "blockers": [],
+            }
+
+        def assemble(self, **payload):
+            calls.append(("assemble", payload))
+            return {"version_id": "bundle-v1", "version_status": "draft"}
+
+        def activate(self, version_id, **payload):
+            calls.append(("activate", {"version_id": version_id, **payload}))
+            return {"version_id": version_id, "version_status": "active"}
+
+    monkeypatch.setattr(
+        parser_api,
+        "CheckItemRuntimeBundleService",
+        FakeRuntimeBundleService,
+    )
+    selection = {
+        "check_item_version_id": "check-v1",
+        "implementation_version_id": "implementation-v1",
+        "parser_template_ids": ["parser-v1"],
+        "event_rule_version_ids": ["rule-v1"],
+    }
+
+    preview = parser_api.preview_check_item_runtime_bundle_assembly(
+        parser_api.RuntimeBundleAssemblyRequest(**selection),
+        _admin_request("engineer").state.current_user,
+    )
+    draft = parser_api.assemble_check_item_runtime_bundle(
+        parser_api.RuntimeBundleAssembleRequest(
+            **selection,
+            preview_digest="preview-1",
+        ),
+        _admin_request("engineer"),
+        "request-key-assemble",
+    )
+    active = parser_api.activate_check_item_runtime_bundle(
+        "bundle-v1",
+        parser_api.RuntimeBundleLifecycleRequest(reason="verified runtime scope"),
+        _admin_request("approver"),
+        "request-key-activate",
+    )
+
+    assert preview["preview_digest"] == "preview-1"
+    assert draft["version_status"] == "draft"
+    assert active["version_status"] == "active"
+    assert calls[1][1]["actor"] == "engineer"
+    assert calls[1][1]["preview_digest"] == "preview-1"
+    assert calls[2][1]["actor"] == "approver"
+    assert calls[2][1]["reason"] == "verified runtime scope"
+
+
+def test_runtime_bundle_assemble_endpoint_returns_structured_conflict(monkeypatch):
+    class FakeRuntimeBundleService:
+        def assemble(self, **_payload):
+            raise parser_api.RuntimeBundleValidationError(
+                ["implementation scope is broader than Parser evidence"]
+            )
+
+    monkeypatch.setattr(
+        parser_api,
+        "CheckItemRuntimeBundleService",
+        FakeRuntimeBundleService,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        parser_api.assemble_check_item_runtime_bundle(
+            parser_api.RuntimeBundleAssembleRequest(
+                check_item_version_id="check-v1",
+                implementation_version_id="implementation-v1",
+                preview_digest="preview-1",
+            ),
+            _admin_request("engineer"),
+            "request-key-assemble",
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["message"] == "运行包装配被阻断"
+    assert "broader" in exc_info.value.detail["blockers"][0]

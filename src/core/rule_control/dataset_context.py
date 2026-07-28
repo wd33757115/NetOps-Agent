@@ -17,9 +17,12 @@ from sqlalchemy import and_, func, or_
 from src.core.rule_control.planning import profile_fields
 from src.core.rule_control.source_scope import require_rule_asset_source_job
 from src.infrastructure.db.models import (
+    CheckItemVersionRecord,
     CommandSnapshot,
     OfflinePatrolPeriodRecord,
     ParserTemplate,
+    RuleAssetCommandUnitCheckItemRecord,
+    RuleAssetCommandUnitRecord,
     RuleGenerationContextRecord,
     RuleGenerationJobRecord,
     SnapshotParseResult,
@@ -274,6 +277,15 @@ def _approved_field_whitelist(template: ParserTemplate, *, require_approval: boo
         for field in (validation.get(key) or [])
         if str(field).strip()
     }
+    for record_set in validation.get("record_sets") or []:
+        if not isinstance(record_set, dict):
+            continue
+        fields.update(
+            str(field).strip()
+            for key in ("primary_keys", "required_fields", "optional_fields")
+            for field in record_set.get(key) or []
+            if str(field).strip()
+        )
     if not fields:
         raise ValueError("parser template has no approved field whitelist")
     return fields
@@ -305,6 +317,163 @@ def _round_robin_snapshot_records(
                 records.append(record)
                 selected_groups.setdefault(group_key[1], []).append(record)
     return records, selected_groups
+
+
+def _structured_records(structured: Any) -> list[dict[str, Any]]:
+    if isinstance(structured, dict):
+        raw_sets = structured.get("record_sets")
+        if isinstance(raw_sets, dict):
+            return [
+                {"__record_set__": str(name), **dict(record)}
+                for name, records in raw_sets.items()
+                for record in (records if isinstance(records, list) else [records])
+                if isinstance(record, dict)
+            ]
+        return [structured]
+    if isinstance(structured, list):
+        return [dict(item) for item in structured if isinstance(item, dict)]
+    return []
+
+
+def _check_item_generation_governance(
+    db: Any,
+    *,
+    template: ParserTemplate,
+    offline_job_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """Resolve approved check-item targets from materialized command-unit links."""
+
+    unit_query = db.query(RuleAssetCommandUnitRecord).filter(
+        func.lower(RuleAssetCommandUnitRecord.vendor)
+        == str(template.vendor or "").strip().casefold(),
+        func.lower(RuleAssetCommandUnitRecord.canonical_command)
+        == str(template.canonical_command or "").strip().casefold(),
+    )
+    if offline_job_ids:
+        unit_query = unit_query.filter(
+            RuleAssetCommandUnitRecord.offline_job_id.in_(offline_job_ids)
+        )
+    units = unit_query.order_by(
+        RuleAssetCommandUnitRecord.updated_at.desc(),
+        RuleAssetCommandUnitRecord.id.desc(),
+    ).all()
+    exact = [
+        item
+        for item in units
+        if str(item.parser_template_id or "") == str(template.id)
+    ]
+    selected_units = exact or units
+    unit_ids = [str(item.id) for item in selected_units]
+    if not unit_ids:
+        return {
+            "check_item_targets": [],
+            "observation_targets": [],
+            "strict_observation_targets": False,
+            "canonical_identity_constraint": {},
+            "target_resolution": "unclassified",
+        }
+    rows = (
+        db.query(
+            RuleAssetCommandUnitCheckItemRecord,
+            CheckItemVersionRecord,
+        )
+        .join(
+            CheckItemVersionRecord,
+            CheckItemVersionRecord.id
+            == RuleAssetCommandUnitCheckItemRecord.check_item_version_id,
+        )
+        .filter(
+            RuleAssetCommandUnitCheckItemRecord.command_unit_id.in_(unit_ids)
+        )
+        .order_by(
+            RuleAssetCommandUnitCheckItemRecord.check_item_id,
+            RuleAssetCommandUnitCheckItemRecord.implementation_version_id,
+        )
+        .all()
+    )
+    targets: list[dict[str, Any]] = []
+    seen_links: set[tuple[str, str]] = set()
+    for link, version in rows:
+        key = (
+            str(link.check_item_version_id),
+            str(link.implementation_version_id),
+        )
+        if key in seen_links:
+            continue
+        seen_links.add(key)
+        canonical_contract = dict(version.canonical_contract_json or {})
+        targets.append(
+            {
+                "check_item_id": str(link.check_item_id),
+                "check_item_version_id": str(link.check_item_version_id),
+                "implementation_id": str(link.implementation_id),
+                "implementation_version_id": str(
+                    link.implementation_version_id
+                ),
+                "canonical_entity_type": str(
+                    canonical_contract.get("entity_type") or ""
+                ),
+                "identity_dimensions": [
+                    str(item)
+                    for item in canonical_contract.get(
+                        "identity_dimensions"
+                    )
+                    or []
+                ],
+                "identity_dimension_rules": dict(
+                    canonical_contract.get("identity_dimension_rules") or {}
+                ),
+                "observations": [
+                    dict(item)
+                    for item in canonical_contract.get("observations") or []
+                    if isinstance(item, dict)
+                ],
+            }
+        )
+    observation_targets: list[dict[str, Any]] = []
+    seen_observations: set[str] = set()
+    for target in targets:
+        for observation in target["observations"]:
+            observation_type = str(
+                observation.get("observation_type") or ""
+            ).strip()
+            if not observation_type or observation_type in seen_observations:
+                continue
+            seen_observations.add(observation_type)
+            observation_targets.append(observation)
+    identity_constraints = {
+        json.dumps(
+            {
+                "canonical_entity_type": target["canonical_entity_type"],
+                "identity_dimensions": target["identity_dimensions"],
+                "identity_dimension_rules": target[
+                    "identity_dimension_rules"
+                ],
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        for target in targets
+        if target["canonical_entity_type"]
+    }
+    canonical_identity_constraint = (
+        json.loads(next(iter(identity_constraints)))
+        if len(identity_constraints) == 1
+        else {}
+    )
+    return {
+        "check_item_targets": targets,
+        "observation_targets": observation_targets,
+        "strict_observation_targets": bool(observation_targets),
+        "canonical_identity_constraint": canonical_identity_constraint,
+        "target_resolution": (
+            "resolved"
+            if targets and len(identity_constraints) <= 1
+            else "multi_entity_partition_required"
+            if targets
+            else "unclassified"
+        ),
+    }
 
 
 class DatasetRuleGenerationContextService:
@@ -449,6 +618,11 @@ class DatasetRuleGenerationContextService:
                     )
                 )
             offline_job_ids = sorted({str(job_id) for _dataset_id, _run_id, job_id in period_rows})
+            generation_governance = _check_item_generation_governance(
+                db,
+                template=template,
+                offline_job_ids=offline_job_ids,
+            )
         if not rows:
             raise ValueError("selected datasets contain no parsed records for this template")
 
@@ -483,12 +657,15 @@ class DatasetRuleGenerationContextService:
                 "snapshot",
                 f"{dataset_id}|{run_id}|{device_id}|{observed_at}",
             )
-            records = structured if isinstance(structured, list) else [structured]
+            records = _structured_records(structured)
             for record in records:
                 if isinstance(record, dict):
                     whitelisted = {}
                     for key, value in record.items():
                         field = str(key)
+                        if field == "__record_set__":
+                            whitelisted[field] = value
+                            continue
                         if field not in allowed_fields:
                             dropped_unapproved[field] = dropped_unapproved.get(field, 0) + 1
                             continue
@@ -546,6 +723,7 @@ class DatasetRuleGenerationContextService:
             "field_name": selected_field,
             "observation_type": selected_observation or None,
             "replay_run_ids": replay_run_ids,
+            **generation_governance,
         }
         if historical_values:
             context["historical_values"] = historical_values
@@ -648,6 +826,10 @@ class DatasetRuleGenerationContextService:
                 raise ValueError("rule generation job parser template is not active")
             allowed_fields = _field_whitelist_relaxed(template)
             validation = dict(template.validation_json or {})
+            generation_governance = _check_item_generation_governance(
+                db,
+                template=template,
+            )
             vendor = str(template.vendor or "").strip()
             command = str(template.canonical_command or "").strip()
             if not vendor or not command:
@@ -707,13 +889,16 @@ class DatasetRuleGenerationContextService:
                     f"{dataset_id}|{snapshot.run_id}|{snapshot.device_id}|{snapshot.observed_at}",
                 )
                 structured = snapshot.structured_json
-                records = structured if isinstance(structured, list) else [structured]
+                records = _structured_records(structured)
                 for record in records:
                     if not isinstance(record, dict):
                         continue
                     whitelisted = {}
                     for key, value in record.items():
                         field = str(key)
+                        if field == "__record_set__":
+                            whitelisted[field] = value
+                            continue
                         if field not in allowed_fields:
                             dropped_unapproved[field] = dropped_unapproved.get(field, 0) + 1
                             continue
@@ -760,6 +945,7 @@ class DatasetRuleGenerationContextService:
                 "field_name": selected_field,
                 "observation_type": selected_observation,
                 "replay_run_ids": replay_run_ids,
+                **generation_governance,
             }
             if historical_values:
                 context["historical_values"] = historical_values
@@ -850,7 +1036,14 @@ class DatasetRuleGenerationContextService:
 
     @staticmethod
     def _first_scalar_field(records: list[dict[str, Any]]) -> str:
-        excluded = {"interface", "name", "id", "index", "description"}
+        excluded = {
+            "__record_set__",
+            "interface",
+            "name",
+            "id",
+            "index",
+            "description",
+        }
         counts: dict[str, int] = {}
         for record in records:
             for key, value in record.items():

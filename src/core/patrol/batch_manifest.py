@@ -12,6 +12,9 @@ from typing import Any
 from sqlalchemy import and_, func, or_
 
 from src.infrastructure.db.models import (
+    CheckAssessmentRecord,
+    CheckExecutionRecord,
+    CheckItemRuntimeManifestRecord,
     PatrolBatchDeviceRecord,
     PatrolBatchRecord,
     WorkflowRun,
@@ -198,6 +201,23 @@ class PatrolBatchManifestRepository:
             row.dispatch_status = "pending"
             row.dispatch_error = str(error)[:4000]
             row.updated_at = datetime.now(timezone.utc)
+
+    def mark_plan_freeze_failed(
+        self,
+        patrol_batch_id: str,
+        error: str,
+    ) -> None:
+        """Make a pre-dispatch planning failure terminal and visible."""
+
+        now = datetime.now(timezone.utc)
+        with get_db_session() as db:
+            row = db.get(PatrolBatchRecord, patrol_batch_id)
+            if row is None:
+                return
+            row.dispatch_status = "failed"
+            row.dispatch_error = str(error)[:4000]
+            row.dispatch_completed_at = now
+            row.updated_at = now
 
     def claim_dispatch_targets(
         self,
@@ -388,6 +408,7 @@ class PatrolBatchManifestRepository:
     def request_terminal_report(self, patrol_batch_id: str) -> bool:
         """Atomically request one final report after every launched run is terminal."""
 
+        self._reconcile_failed_check_item_workflows(patrol_batch_id)
         now = datetime.now(timezone.utc)
         with get_db_session() as db:
             batch = (
@@ -406,20 +427,119 @@ class PatrolBatchManifestRepository:
                 )
                 .all()
             )
-            if not targets or any(not target.workflow_run_id for target in targets):
-                return False
-            run_ids = [str(target.workflow_run_id) for target in targets]
-            terminal_count = (
-                db.query(func.count(WorkflowRun.id))
-                .filter(
-                    WorkflowRun.id.in_(run_ids),
-                    WorkflowRun.status.in_(["completed", "failed", "cancelled"]),
+            if batch.runtime_manifest_id:
+                runtime_manifest = db.get(
+                    CheckItemRuntimeManifestRecord,
+                    batch.runtime_manifest_id,
                 )
-                .scalar()
-                or 0
-            )
-            if terminal_count != len(run_ids):
-                return False
+                if (
+                    runtime_manifest is None
+                    or str(runtime_manifest.digest)
+                    != str(batch.runtime_manifest_digest or "")
+                ):
+                    return False
+                payload = dict(runtime_manifest.manifest_json or {})
+                expected_pairs = {
+                    (
+                        str(device_id),
+                        str(check_item_version_id),
+                    )
+                    for device_id, version_ids in dict(
+                        payload.get("device_check_item_versions") or {}
+                    ).items()
+                    for check_item_version_id in version_ids or []
+                }
+                executions = (
+                    db.query(CheckExecutionRecord)
+                    .filter(
+                        CheckExecutionRecord.patrol_batch_id
+                        == patrol_batch_id
+                    )
+                    .all()
+                )
+                actual_pairs = {
+                    (
+                        str(item.device_id),
+                        str(item.check_item_version_id),
+                    )
+                    for item in executions
+                }
+                if not expected_pairs or actual_pairs != expected_pairs:
+                    return False
+                terminal_statuses = {
+                    "completed",
+                    "not_applicable",
+                    "unsupported",
+                    "blocked_asset_missing",
+                    "collection_failed",
+                    "parse_failed",
+                    "normalization_failed",
+                    "comparison_failed",
+                    "assessment_failed",
+                    "cancelled",
+                }
+                if any(
+                    str(item.execution_status) not in terminal_statuses
+                    for item in executions
+                ):
+                    return False
+                assessment_execution_ids = {
+                    str(value)
+                    for (value,) in db.query(
+                        CheckAssessmentRecord.execution_id
+                    )
+                    .filter(
+                        CheckAssessmentRecord.patrol_batch_id
+                        == patrol_batch_id
+                    )
+                    .all()
+                }
+                if {
+                    str(item.id) for item in executions
+                } != assessment_execution_ids:
+                    return False
+                workflow_run_ids = [
+                    str(target.workflow_run_id)
+                    for target in targets
+                    if target.workflow_run_id
+                ]
+                if batch.launch_mode == "workflow":
+                    if len(workflow_run_ids) != len(targets):
+                        return False
+                    terminal_count = (
+                        db.query(func.count(WorkflowRun.id))
+                        .filter(
+                            WorkflowRun.id.in_(workflow_run_ids),
+                            WorkflowRun.status.in_(
+                                ["completed", "failed", "cancelled"]
+                            ),
+                        )
+                        .scalar()
+                        or 0
+                    )
+                    if terminal_count != len(workflow_run_ids):
+                        return False
+            else:
+                if not targets or any(
+                    not target.workflow_run_id for target in targets
+                ):
+                    return False
+                run_ids = [
+                    str(target.workflow_run_id) for target in targets
+                ]
+                terminal_count = (
+                    db.query(func.count(WorkflowRun.id))
+                    .filter(
+                        WorkflowRun.id.in_(run_ids),
+                        WorkflowRun.status.in_(
+                            ["completed", "failed", "cancelled"]
+                        ),
+                    )
+                    .scalar()
+                    or 0
+                )
+                if terminal_count != len(run_ids):
+                    return False
             batch.report_status = "queued"
             batch.report_requested_at = now
             batch.report_completed_at = None
@@ -435,7 +555,10 @@ class PatrolBatchManifestRepository:
                 .filter(
                     PatrolBatchRecord.report_status == "not_requested",
                     PatrolBatchRecord.dispatch_status.in_(["completed", "partial"]),
-                    PatrolBatchRecord.launch_mode == "workflow",
+                    or_(
+                        PatrolBatchRecord.launch_mode == "workflow",
+                        PatrolBatchRecord.runtime_manifest_id.is_not(None),
+                    ),
                 )
                 .order_by(
                     PatrolBatchRecord.created_at,
@@ -444,6 +567,50 @@ class PatrolBatchManifestRepository:
                 .limit(max(1, min(int(limit), 500)))
                 .all()
             ]
+
+    @staticmethod
+    def _reconcile_failed_check_item_workflows(
+        patrol_batch_id: str,
+    ) -> None:
+        with get_db_session() as db:
+            batch = db.get(PatrolBatchRecord, patrol_batch_id)
+            if batch is None or not batch.runtime_manifest_id:
+                return
+            rows = (
+                db.query(PatrolBatchDeviceRecord, WorkflowRun)
+                .join(
+                    WorkflowRun,
+                    WorkflowRun.id
+                    == PatrolBatchDeviceRecord.workflow_run_id,
+                )
+                .filter(
+                    PatrolBatchDeviceRecord.patrol_batch_id
+                    == patrol_batch_id,
+                    WorkflowRun.status.in_(["failed", "cancelled"]),
+                )
+                .all()
+            )
+            failures = [
+                (
+                    str(target.device_id),
+                    str(run.status),
+                    str(run.id),
+                )
+                for target, run in rows
+            ]
+        if not failures:
+            return
+        from src.core.check_items import CheckItemRunFinalizer
+
+        finalizer = CheckItemRunFinalizer()
+        for device_id, status, workflow_run_id in failures:
+            finalizer.fail_device(
+                patrol_batch_id=patrol_batch_id,
+                device_id=device_id,
+                reason_code=f"workflow_{status}",
+                status="assessment_failed",
+                evidence_refs=(workflow_run_id,),
+            )
 
     def mark_report_status(
         self,

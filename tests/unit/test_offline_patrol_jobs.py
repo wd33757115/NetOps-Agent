@@ -286,6 +286,49 @@ def test_execution_quality_gate_keeps_asset_gaps_as_non_blocking_warnings(monkey
     assert result["warnings"][0]["severity"] == "warning"
 
 
+def test_rule_asset_source_can_ingest_before_any_common_parser_is_ready(monkeypatch):
+    service = OfflinePatrolJobService()
+    monkeypatch.setattr(
+        service,
+        "get_job",
+        lambda _job_id: {
+            "purpose": "rule_asset_source",
+            "job_type": "history_compare",
+            "source_files": [{"id": "baseline"}, {"id": "current"}],
+            "preview": {"periods": {"baseline": {}, "current": {}}},
+            "blockers": [],
+        },
+    )
+    monkeypatch.setattr(
+        service,
+        "_build_quality_blockers",
+        lambda _job_id, _previews: [
+            {
+                "code": "no_common_ready_parser",
+                "message": "no common command has a ready Parser yet",
+            },
+            {
+                "code": "parser_template_inactive",
+                "message": "a previously selected template is inactive",
+            },
+            {"code": "template_missing", "message": "Parser generation is required"},
+            {"code": "parse_failed", "message": "Parser repair is required"},
+        ],
+    )
+
+    result = service.execution_quality_gate("offline-rule-assets-with-parser-gaps")
+
+    assert result["success"] is True
+    assert result["blockers"] == []
+    assert {item["code"] for item in result["warnings"]} == {
+        "no_common_ready_parser",
+        "parser_template_inactive",
+        "template_missing",
+        "parse_failed",
+    }
+    assert all(item["severity"] == "warning" for item in result["warnings"])
+
+
 def test_execution_quality_gate_still_blocks_ingestion_integrity_failures(monkeypatch):
     service = OfflinePatrolJobService()
     monkeypatch.setattr(

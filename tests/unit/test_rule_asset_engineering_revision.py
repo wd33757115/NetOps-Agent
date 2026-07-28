@@ -246,6 +246,8 @@ def test_engineering_revision_creates_replacement_bundle_after_validation(monkey
 
     def fake_execute(skill_name, params):
         if skill_name == "observation-contract-generator":
+            assert params["allow_semantic_overrides"] is True
+            assert params["require_policy_targets"] is True
             return {
                 "success": True,
                 "proposal": params["proposal"],

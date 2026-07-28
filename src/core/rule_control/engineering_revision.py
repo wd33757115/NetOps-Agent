@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any
 
 from src.core.rule_control.repository import RuleGenerationJobRepository
-from src.core.skills.executor import execute_skill
+from src.core.rule_control.replay_gate import evaluate_historical_replay_gate
+from src.core.skills.executor import SkillExecutionError, execute_skill
 from src.infrastructure.db.models import (
     ObservationContractRecord,
     RuleGenerationContextRecord,
@@ -19,10 +21,38 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _skill_failure_detail(exc: SkillExecutionError) -> dict[str, Any]:
+    message = str(exc)
+    payload_start = message.find("{")
+    if payload_start >= 0:
+        try:
+            payload = json.loads(message[payload_start:])
+            if isinstance(payload, dict):
+                return payload
+        except json.JSONDecodeError:
+            pass
+    return {"success": False, "error": message}
+
+
 class RuleAssetEngineeringRevisionError(ValueError):
     def __init__(self, message: str, *, validation: dict[str, Any] | None = None) -> None:
         super().__init__(message)
         self.validation = validation or {}
+
+
+def _execute_revision_skill(
+    skill_name: str,
+    params: dict[str, Any],
+    *,
+    stage: str,
+) -> dict[str, Any]:
+    try:
+        return execute_skill(skill_name, params)
+    except SkillExecutionError as exc:
+        raise RuleAssetEngineeringRevisionError(
+            f"engineering revision {stage} validation failed",
+            validation={stage: _skill_failure_detail(exc)},
+        ) from exc
 
 
 class RuleAssetEngineeringRevisionService:
@@ -216,7 +246,7 @@ class RuleAssetEngineeringRevisionService:
                 "source_template_id": contract_record.source_template_id,
             }
 
-        contract_result = execute_skill(
+        contract_result = _execute_revision_skill(
             "observation-contract-generator",
             {
                 "mode": "validate",
@@ -228,10 +258,13 @@ class RuleAssetEngineeringRevisionService:
                 "proposal": contract,
                 "generation_provider": "manual",
                 "agent_loop": False,
+                "require_policy_targets": True,
+                "allow_semantic_overrides": True,
             },
+            stage="contract",
         )
         policy_results = [
-            execute_skill(
+            _execute_revision_skill(
                 "change-policy-generator",
                 {
                     "mode": "validate",
@@ -240,14 +273,16 @@ class RuleAssetEngineeringRevisionService:
                     "generation_provider": "manual",
                     "agent_loop": False,
                 },
+                stage=f"change_policy[{index}]",
             )
-            for policy in change_policies
+            for index, policy in enumerate(change_policies)
         ]
-        event_validation = execute_skill(
+        event_validation = _execute_revision_skill(
             "event-rule-validator",
             {"mode": "candidates", "candidate_rules": event_rules, "agent_loop": False},
+            stage="event_rules",
         )
-        replay = execute_skill(
+        replay = _execute_revision_skill(
             "event-rule-replay",
             {
                 "candidate_rules": event_rules,
@@ -255,19 +290,28 @@ class RuleAssetEngineeringRevisionService:
                 "run_ids": detached["context"].get("replay_run_ids") or [],
                 "include_active_collisions": True,
             },
+            stage="historical_replay",
         )
+        context_gate = {
+            "success": True,
+            "mode": "immutable_dataset_context",
+            "context_id": detached["context_id"],
+            "context_digest": detached["context_digest"],
+            "replay_run_ids": detached["context"].get("replay_run_ids") or [],
+        }
+        replay_gate = evaluate_historical_replay_gate(replay, context_gate)
         validation = {
             "contract": contract_result,
             "change_policies": policy_results,
             "event_rules": event_validation,
             "historical_replay": replay,
+            "replay_gate": replay_gate,
         }
         validation_success = (
             contract_result.get("success") is True
             and all(item.get("success") is True for item in policy_results)
             and event_validation.get("success") is True
-            and replay.get("success") is True
-            and int(replay.get("collision_count") or 0) == 0
+            and replay_gate.get("success") is True
         )
         if not validation_success:
             raise RuleAssetEngineeringRevisionError(

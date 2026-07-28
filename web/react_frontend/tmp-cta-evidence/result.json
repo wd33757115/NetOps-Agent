@@ -1,0 +1,30 @@
+{
+  "opened": true,
+  "loggedIn": true,
+  "drawerOpen": true,
+  "generationTab": true,
+  "buttonText": "生成完整规则资产包",
+  "buttonEnabled": true,
+  "buttonVisible": true,
+  "waitingOnlyGray": false,
+  "startGenerationRequested": false,
+  "startGenerationStatus": null,
+  "startGenerationUrl": null,
+  "uiMessage": "规则资产生成失败",
+  "blockers": [],
+  "screenshots": [
+    "C:\\Users\\wangd\\PycharmProjects\\PythonProject\\netops-agent\\web\\react_frontend\\tmp-cta-evidence\\01-login.png",
+    "C:\\Users\\wangd\\PycharmProjects\\PythonProject\\netops-agent\\web\\react_frontend\\tmp-cta-evidence\\02-after-login.png",
+    "C:\\Users\\wangd\\PycharmProjects\\PythonProject\\netops-agent\\web\\react_frontend\\tmp-cta-evidence\\03-target-loaded.png",
+    "C:\\Users\\wangd\\PycharmProjects\\PythonProject\\netops-agent\\web\\react_frontend\\tmp-cta-evidence\\05-generation-tab.png",
+    "C:\\Users\\wangd\\PycharmProjects\\PythonProject\\netops-agent\\web\\react_frontend\\tmp-cta-evidence\\06-before-click.png",
+    "C:\\Users\\wangd\\PycharmProjects\\PythonProject\\netops-agent\\web\\react_frontend\\tmp-cta-evidence\\07-after-click.png"
+  ],
+  "pageUrl": "http://localhost:3000/skills/parser?workspace=production&subtab=asset-production-units&action=rule-generation&source_job_id=offline-3f695d258fee4eb58973&offline_job_id=offline-3f695d258fee4eb58973&command=display+power&dataset_ids=offline-3f695d258fee4eb58973-sample&rule_seed_job_id=960c057d-0d2e-4575-b918-a31d70395780",
+  "hasWaitingStatusText": true,
+  "alertTexts": [
+    "规则资产生成失败\n步骤轨道展示完整处理流程；事件日志按实际时间记录每一步的开始、完成和错误。",
+    "Skill 脚本失败 (observation-contract-generator): {\"success\": false, \"mode\": \"llm_agent_loop\", \"proposal\": null, \"validation\": {\"success\": false, \"errors\": [\"BadRequestError: Error code: 400 - {'error': {'message': 'Thinking mode does not support this tool_choice', 'type': 'invalid_request_error', 'param"
+  ],
+  "startGenRequests": []
+}

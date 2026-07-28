@@ -16,6 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.core.patrol.change_policy import normalize_dimension_selector  # noqa: E402
 from src.core.patrol.event_rule_compiler import (  # noqa: E402
     compile_event_rule_intents,
     govern_event_rule_severity,
@@ -139,6 +140,9 @@ def _validate_llm_rules(
     recovery_rules: list[dict[str, Any]] = []
     normalized_rules: list[dict[str, Any]] = []
     guard_normalizations: list[dict[str, Any]] = []
+    dimension_selector = normalize_dimension_selector(
+        change_policy.get("dimension_selector")
+    )
     for index, item in enumerate(rules):
         if not isinstance(item, dict):
             errors.append(f"rules[{index}] must be an object")
@@ -146,6 +150,19 @@ def _validate_llm_rules(
         condition, guard_changed = attach_governed_applicability(
             dict(item.get("condition") or {}), contract
         )
+        proposed_dimensions = dict(condition.get("dimensions") or {})
+        if dimension_selector:
+            condition["dimensions"] = dimension_selector
+            if proposed_dimensions != dimension_selector:
+                guard_normalizations.append(
+                    {
+                        "kind": "dimension_scope_governance",
+                        "rule_index": index,
+                        "event_type": item.get("event_type"),
+                        "proposed": proposed_dimensions,
+                        "effective": dimension_selector,
+                    }
+                )
         if guard_changed:
             guard_normalizations.append(
                 {
@@ -180,6 +197,12 @@ def _validate_llm_rules(
             or item.get("correlation_key")
             or ("device_id", "entity_type", "entity_key", "field")
         )
+        if dimension_selector:
+            proposed_correlation_keys = tuple(
+                dict.fromkeys(
+                    (*proposed_correlation_keys, *sorted(dimension_selector))
+                )
+            )
         definition = EventRuleDefinition(
             rule_id=str(item.get("name") or item.get("rule_id") or item.get("event_type") or ""),
             version=int(item.get("version") or 1),
@@ -190,6 +213,7 @@ def _validate_llm_rules(
             priority=int(item.get("priority") or 100),
             exclusive=bool(item.get("exclusive", False)),
             event_class=str(item.get("event_class") or "fault"),
+            evaluation_scope=item.get("evaluation_scope"),
             recovery=dict(item.get("recovery") or {}),
             correlation_keys=proposed_correlation_keys,
         )
@@ -218,6 +242,7 @@ def _validate_llm_rules(
             "priority": definition.priority,
             "exclusive": definition.exclusive,
             "event_class": definition.event_class,
+            "evaluation_scope": definition.evaluation_scope,
             "recovery": definition.recovery or {},
             "correlation_keys": list(definition.correlation_keys),
         }
@@ -245,6 +270,7 @@ def _validate_llm_rules(
             normalized_rules,
             observation_type=str(change_policy.get("observation_type") or "rule"),
             constraints=dict(event_constraints or {}),
+            dimension_selector=dimension_selector,
         )
     )
     governance_repairs = [
@@ -439,11 +465,19 @@ def _normalize_rule_ir(
     *,
     observation_type: str,
     constraints: dict[str, Any],
+    dimension_selector: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Compile unambiguous names and precedence without changing rule semantics."""
 
     changes: list[dict[str, Any]] = []
+    selector = normalize_dimension_selector(dimension_selector)
+    selector_token = "-".join(
+        f"{_rule_name_token(key)}-{_rule_name_token(value)}"
+        for key, value in selector.items()
+    )
     namespace = _rule_name_token(observation_type)
+    if selector_token:
+        namespace = f"{namespace}-{selector_token}"
     for rule in rules:
         old_name = str(rule.get("name") or "rule")
         event_token = _rule_name_token(rule.get("event_type"))
@@ -868,6 +902,45 @@ def run_event_rule_generation(params: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("contract must be an object")
     change_policies = params.get("change_policies")
     if isinstance(change_policies, list) and change_policies:
+        event_observation_types = params.get("event_observation_types")
+        if isinstance(event_observation_types, list):
+            eligible = {
+                str(item).strip()
+                for item in event_observation_types
+                if str(item).strip()
+            }
+            change_policies = [
+                policy
+                for policy in change_policies
+                if (
+                    isinstance(policy, dict)
+                    and str(policy.get("observation_type") or "").strip() in eligible
+                )
+            ]
+            if not change_policies:
+                return {
+                    "success": True,
+                    "mode": "change_policy_fanout",
+                    "generated_rule_count": 0,
+                    "rules": [],
+                    "results": [],
+                    "validation": {
+                        "success": True,
+                        "errors": [],
+                        "governance_repairs": [],
+                    },
+                    "governance_repairs": [],
+                    "agent_loop": {
+                        "ready_for_approval": True,
+                        "next_action": "submit_for_validation",
+                        "attempt_count": 0,
+                        "attempts": [],
+                        "governance_repairs": [],
+                    },
+                    "generation_provider": str(
+                        params.get("generation_provider") or "builtin"
+                    ).casefold(),
+                }
         results: list[dict[str, Any]] = []
         scoped_results: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
         attempts: list[dict[str, Any]] = []

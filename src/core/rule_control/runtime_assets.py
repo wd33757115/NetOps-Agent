@@ -16,6 +16,7 @@ from typing import Any
 from src.core.observation.repository import ObservationContractRepository
 from src.core.patrol.change_policy_repository import ChangePolicyRepository
 from src.core.patrol.event_rules import EventRuleRepository
+from src.core.rule_control.planning import event_generation_decision
 
 
 @dataclass(frozen=True)
@@ -52,7 +53,6 @@ class RuntimeRuleAssetBundle:
     def event_evaluation_ready(self) -> bool:
         return (
             self.analysis_ready
-            and bool(self.event_rules)
             and not self.missing_event_rules
         )
 
@@ -112,9 +112,10 @@ class RuntimeRuleAssetResolver:
             else:
                 contracts[key] = contract
 
+        explicit_observation_types = _unique_strings(observation_types)
         inferred_observation_types = _observation_types_from_contracts(contracts.values())
         requested_observation_types = _unique_strings(
-            [*observation_types, *inferred_observation_types]
+            [*explicit_observation_types, *inferred_observation_types]
         )
         policies: dict[str, dict[str, Any]] = {}
         missing_policies: list[str] = []
@@ -131,14 +132,20 @@ class RuntimeRuleAssetResolver:
             else []
         )
         declared_event_types = _event_rule_observation_types(event_rules)
+        required_event_types = _unique_strings(
+            [
+                *explicit_observation_types,
+                *_event_observation_types_from_contracts(contracts.values()),
+            ]
+        )
         missing_event_rules = (
             [
                 observation_type
-                for observation_type in requested_observation_types
+                for observation_type in required_event_types
                 if observation_type not in declared_event_types
             ]
             if include_event_rules
-            else list(requested_observation_types)
+            else list(required_event_types)
         )
         payload = {
             "observation_contracts": contracts,
@@ -178,7 +185,7 @@ class RuntimeRuleAssetResolver:
         observation_types = _observation_types_from_contracts(contracts)
         return self.load_bundle(
             observation_schemas=schemas,
-            observation_types=observation_types,
+            observation_types=[],
             include_event_rules=True,
         )
 
@@ -239,3 +246,33 @@ def _event_rule_observation_types(rules: Iterable[dict[str, Any]]) -> set[str]:
             continue
         values.update(str(item).strip() for item in declared if str(item).strip())
     return values
+
+
+def _event_observation_types_from_contracts(
+    contracts: Iterable[dict[str, Any]],
+) -> list[str]:
+    """Return only observation types whose Contract semantics require events."""
+
+    values: list[str] = []
+    for contract in contracts:
+        semantics = contract.get("state_semantics")
+        if not isinstance(semantics, dict):
+            semantics = contract.get("state_semantics_json")
+        if not isinstance(semantics, dict):
+            continue
+        for item in semantics.values():
+            if not isinstance(item, dict):
+                continue
+            observation_type = str(item.get("observation_type") or "").strip()
+            if not observation_type:
+                continue
+            # Contracts created before event intent governance did not carry this
+            # flag. Preserve their historical "every observation needs a rule"
+            # behavior while governing all newly generated explicit intent.
+            if "event_generation" not in item:
+                values.append(observation_type)
+                continue
+            enabled, _ = event_generation_decision(item)
+            if enabled:
+                values.append(observation_type)
+    return _unique_strings(values)

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Alert, Button, Descriptions, Drawer, Dropdown, Input, List, Pagination, Progress,
+  Alert, Button, DatePicker, Descriptions, Drawer, Dropdown, Input, List, Pagination, Progress,
   Segmented, Select, Space, Steps, Switch, Table, Tabs, Tag, Typography, message,
 } from 'antd'
 import {
@@ -9,6 +9,7 @@ import {
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from 'react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import dayjs from 'dayjs'
 import {
   offlinePatrolApi, ruleAssetSourceApi, storageApi,
   type OfflinePatrolDeviceBinding, type OfflinePatrolJob,
@@ -61,8 +62,42 @@ const jobScaleLabel = (job: OfflinePatrolJob) => {
     : '等待预览'
 }
 
+const sameObservedDevice = (
+  left: OfflinePatrolDeviceBinding,
+  right: OfflinePatrolDeviceBinding,
+) => {
+  const leftIp = String(left.management_ip || '').trim()
+  const rightIp = String(right.management_ip || '').trim()
+  if (leftIp && rightIp) return leftIp === rightIp
+  const leftKey = String(left.external_device_id || left.device_name || '').trim().toLowerCase()
+  const rightKey = String(right.external_device_id || right.device_name || '').trim().toLowerCase()
+  return Boolean(leftKey && rightKey && leftKey === rightKey)
+}
+
 const validDateTimeInput = (value: string) => (
   Boolean(value.trim()) && !Number.isNaN(new Date(value).getTime())
+)
+
+const OfflineObservedAtPicker: React.FC<{
+  value: string
+  onChange: (value: string) => void
+  label: string
+}> = ({ value, onChange, label }) => (
+  <Space direction="vertical" size={2} style={{ width: '100%' }}>
+    <DatePicker
+      aria-label={label}
+      allowClear
+      format="YYYY-MM-DD HH:mm"
+      placeholder="选择原始数据采集时间"
+      showTime={{ format: 'HH:mm' }}
+      style={{ width: '100%' }}
+      value={validDateTimeInput(value) ? dayjs(value) : null}
+      onChange={(next) => onChange(next ? next.format('YYYY-MM-DDTHH:mm') : '')}
+    />
+    <Typography.Text type="secondary">
+      填写原始文件实际采集时间，不是本次导入时间
+    </Typography.Text>
+  </Space>
 )
 
 const errorText = (error: any, fallback: string) =>
@@ -100,8 +135,9 @@ export const buildOfflineAssetControlUrl = (job: OfflinePatrolJob) => {
 
 export const buildOfflineRuleBundleUrl = (job: OfflinePatrolJob) => {
   const params = new URLSearchParams({
-    workspace: 'release',
-    subtab: 'asset-bundles',
+    workspace: 'production',
+    subtab: 'asset-production-units',
+    action: 'bundle-review',
     source_job_id: job.id,
     offline_job_id: job.id,
   })
@@ -131,9 +167,15 @@ export const offlineJobDisplayName = (
 
 export interface OfflineFileJobWorkbenchProps {
   purpose: OfflinePatrolJobPurpose
+  initialJobType?: OfflinePatrolJobType
+  initialJobName?: string
 }
 
-export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = ({ purpose }) => {
+export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = ({
+  purpose,
+  initialJobType,
+  initialJobName,
+}) => {
   const isMobile = useIsMobile()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -152,16 +194,16 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
   const [status, setStatus] = useState<string>()
   const [jobTypeFilter, setJobTypeFilter] = useState<OfflinePatrolJobType>()
   const [archived, setArchived] = useState(false)
-  const [wizardOpen, setWizardOpen] = useState(false)
+  const [wizardOpen, setWizardOpen] = useState(Boolean(initialJobType))
   const [detailJobId, setDetailJobId] = useState<string | null>(focusedSourceJobId)
   const [detailTab, setDetailTab] = useState(focusedSourceJobTab)
   const [artifactLoading, setArtifactLoading] = useState<string | null>(null)
   const [draftJob, setDraftJob] = useState<OfflinePatrolJob | null>(null)
   const [jobType, setJobType] = useState<OfflinePatrolJobType>(
-    isAssetSource ? 'parser_validation' : 'single_patrol',
+    initialJobType || (isAssetSource ? 'parser_validation' : 'single_patrol'),
   )
   const [jobName, setJobName] = useState(
-    isAssetSource ? '规则资产样本导入' : '单周期离线巡检',
+    initialJobName || (isAssetSource ? '规则资产样本导入' : '单周期离线巡检'),
   )
   const [sampleAt, setSampleAt] = useState('')
   const [baselineAt, setBaselineAt] = useState('')
@@ -303,8 +345,21 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
     },
   )
   const confirmBinding = useMutation(
-    ({ jobId, binding, inventoryId }: { jobId: string; binding: OfflinePatrolDeviceBinding; inventoryId?: string | null }) =>
-      jobApi.confirmBindings(jobId, [{ binding_id: binding.id, inventory_device_id: inventoryId }]),
+    ({
+      jobId,
+      bindings,
+      inventoryId,
+    }: {
+      jobId: string
+      bindings: OfflinePatrolDeviceBinding[]
+      inventoryId?: string | null
+    }) => jobApi.confirmBindings(
+      jobId,
+      bindings.map((binding) => ({
+        binding_id: binding.id,
+        inventory_device_id: inventoryId,
+      })),
+    ),
     {
       onSuccess: (_result, variables) => refresh(variables.jobId),
       onError: (error: any) => message.error(errorText(error, '确认设备匹配失败')),
@@ -630,9 +685,9 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
             ]} />
             <Descriptions bordered size="small" column={1}>
               <Descriptions.Item label="任务名称"><Input value={jobName} onChange={(event) => setJobName(event.target.value)} /></Descriptions.Item>
-              {jobType === 'parser_validation' ? <Descriptions.Item label="采集时间"><Input type="datetime-local" value={sampleAt} onChange={(event) => setSampleAt(event.target.value)} /></Descriptions.Item> : jobType === 'single_patrol' ? <Descriptions.Item label="巡检时间"><Input type="datetime-local" value={currentAt} onChange={(event) => setCurrentAt(event.target.value)} /></Descriptions.Item> : <>
-                <Descriptions.Item label="基线时间"><Input type="datetime-local" value={baselineAt} onChange={(event) => setBaselineAt(event.target.value)} /></Descriptions.Item>
-                <Descriptions.Item label="当前时间"><Input type="datetime-local" value={currentAt} onChange={(event) => setCurrentAt(event.target.value)} /></Descriptions.Item>
+              {jobType === 'parser_validation' ? <Descriptions.Item label="采集时间"><OfflineObservedAtPicker label="样本采集时间" value={sampleAt} onChange={setSampleAt} /></Descriptions.Item> : jobType === 'single_patrol' ? <Descriptions.Item label="巡检时间"><OfflineObservedAtPicker label="巡检采集时间" value={currentAt} onChange={setCurrentAt} /></Descriptions.Item> : <>
+                <Descriptions.Item label="基线时间"><OfflineObservedAtPicker label="基线采集时间" value={baselineAt} onChange={setBaselineAt} /></Descriptions.Item>
+                <Descriptions.Item label="当前时间"><OfflineObservedAtPicker label="当前采集时间" value={currentAt} onChange={setCurrentAt} /></Descriptions.Item>
               </>}
               <Descriptions.Item label="厂商 / 型号"><Space.Compact block><Input value={vendor} onChange={(event) => setVendor(event.target.value)} placeholder="可选厂商" /><Input value={model} onChange={(event) => setModel(event.target.value)} placeholder="可选型号" /></Space.Compact></Descriptions.Item>
               <Descriptions.Item label="数据用途"><Typography.Text type="secondary">{isAssetSource ? '仅用于规则资产生产、验证与回放，不写入正式巡检事件流' : '使用当前 active 规则执行离线巡检，不创建或修改规则资产'}</Typography.Text></Descriptions.Item>
@@ -659,13 +714,21 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
             })}
             {uploading && <Progress percent={uploadProgress.total ? Math.round(uploadProgress.current / uploadProgress.total * 100) : 0} />}
             {draftJob.status === 'previewing' && <Alert type="info" showIcon message="正在识别设备、命令和 Parser 状态" description="任务在 Worker 中异步执行，可以关闭此窗口后从历史列表继续查看。" />}
-            {(draftJob.status === 'ready' || draftJob.status === 'blocked') && <Alert type={draftJob.status === 'ready' ? 'success' : 'error'} showIcon message={draftJob.status === 'ready' ? '质量门禁已通过' : `存在 ${draftJob.blocker_count} 个阻断项`} description={draftJob.status === 'blocked' ? '先处理 Parser 或设备身份缺口，再重新预览。' : isAssetSource ? '可以启动样本处理；候选资产仍需验证、工程复核和审批后才能进入生产。' : '可以执行离线巡检；运行时只读取当前已激活规则。'} />}
+            {(draftJob.status === 'ready' || draftJob.status === 'blocked') && <Alert type={draftJob.status === 'ready' ? 'success' : 'error'} showIcon message={draftJob.status === 'ready' ? '质量门禁已通过' : `存在 ${draftJob.blocker_count} 个阻断项`} description={draftJob.status === 'blocked' ? '请按下方原因处理后重新预览。' : isAssetSource ? '可以启动样本处理；候选资产仍需验证、工程复核和审批后才能进入生产。' : '可以执行离线巡检；运行时只读取当前已激活规则。'} />}
+            {draftJob.status === 'blocked' && (draftJob.blockers || []).map((item, index) => (
+              <Alert
+                key={`${item.period_role || 'job'}-${item.code}-${index}`}
+                type="warning"
+                showIcon
+                message={formatOfflineBlockerMessage(item)}
+              />
+            ))}
             {draftJob.blocker_count > 0 && <Button icon={<SafetyCertificateOutlined />} onClick={() => navigate(isAssetSource ? buildOfflineAssetControlUrl(draftJob) : '/skills/parser?workspace=production&subtab=source-jobs')}>前往规则资产控制面</Button>}
           </>}
         </Space>
       </Drawer>
 
-      <Drawer title={isAssetSource ? '规则资产样本任务详情' : '离线巡检任务详情'} open={Boolean(detailJobId)} width={isMobile ? '100vw' : 1040} destroyOnClose onClose={closeDetail} extra={detail && <Space><Button icon={<ReloadOutlined />} onClick={() => refresh(detail.id)}>刷新</Button>{Boolean(detail.source_files?.length) && !ACTIVE.has(detail.status) && detail.status !== 'completed' && <Button icon={<EyeOutlined />} loading={previewJob.isLoading} onClick={() => previewJob.mutate(detail.id)}>重新预览</Button>}{detail.status === 'ready' && <Button type="primary" icon={<PlayCircleOutlined />} onClick={() => executeJob.mutate(detail.id)}>{isAssetSource ? '开始处理' : '执行巡检'}</Button>}</Space>}>
+      <Drawer title={isAssetSource ? '规则资产样本任务详情' : '离线巡检任务详情'} open={Boolean(detailJobId)} width={isMobile ? '100vw' : 1040} destroyOnClose onClose={closeDetail} extra={detail && <Space><Button icon={<ReloadOutlined />} onClick={() => refresh(detail.id)}>刷新</Button>{Boolean(detail.source_files?.length) && !ACTIVE.has(detail.status) && detail.status !== 'completed' && <Button icon={<EyeOutlined />} loading={previewJob.isLoading} onClick={() => previewJob.mutate(detail.id)}>{['draft', 'uploading'].includes(detail.status) ? '预览' : '重新预览'}</Button>}{detail.status === 'ready' && <Button type="primary" icon={<PlayCircleOutlined />} loading={executeJob.isLoading} onClick={() => executeJob.mutate(detail.id)}>{isAssetSource ? '开始处理' : '执行巡检'}</Button>}</Space>}>
         {detail && <Tabs activeKey={detailTab} onChange={changeDetailTab} items={[
           { key: 'overview', label: '概览', children: <Space direction="vertical" size={12} style={{ width: '100%' }}>
             <Descriptions bordered size="small" column={isMobile ? 1 : 2}>
@@ -679,9 +742,97 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
           </Space> },
           { key: 'sources', label: `文件与设备 (${detail.source_files?.length || 0})`, children: <Space direction="vertical" size={16} style={{ width: '100%' }}>
             <Table<OfflinePatrolSourceFile> rowKey="id" size="small" pagination={{ pageSize: 20 }} dataSource={detail.source_files || []} columns={[{ title: '周期', dataIndex: 'period_role', width: 100, render: (value) => roleLabel[value] || value }, { title: '文件', dataIndex: 'relative_path' }, { title: '校验状态', dataIndex: 'status', width: 110, render: (value) => <Tag>{value}</Tag> }, { title: 'SHA-256', dataIndex: 'sha256', ellipsis: true }]} />
-            <Table<OfflinePatrolDeviceBinding> rowKey="id" size="small" pagination={{ pageSize: 20 }} dataSource={detail.device_bindings || []} columns={[{ title: '周期', dataIndex: 'period_role', width: 100, render: (value) => roleLabel[value] || value }, { title: '设备', render: (_, row) => <Space direction="vertical" size={0}><Typography.Text strong>{row.device_name}</Typography.Text><Typography.Text type="secondary">{row.management_ip || row.external_device_id}</Typography.Text></Space> }, { title: '资产匹配', dataIndex: 'match_status', width: 130, render: (value) => <Tag color={value === 'confirmed' ? 'green' : value === 'ambiguous' ? 'red' : 'default'}>{value}</Tag> }, { title: '操作', width: 190, render: (_, row) => <Space>{row.match_status === 'suggested' && <Button size="small" onClick={() => confirmBinding.mutate({ jobId: detail.id, binding: row, inventoryId: row.inventory_device_id })}>确认匹配</Button>}{!['confirmed', 'external'].includes(row.match_status) && <Button size="small" onClick={() => confirmBinding.mutate({ jobId: detail.id, binding: row, inventoryId: null })}>作为外部设备</Button>}</Space> }]} />
+            <Table<OfflinePatrolDeviceBinding>
+              rowKey="id"
+              size="small"
+              pagination={{ pageSize: 20 }}
+              dataSource={detail.device_bindings || []}
+              columns={[
+                {
+                  title: '周期',
+                  dataIndex: 'period_role',
+                  width: 100,
+                  render: (value) => roleLabel[value] || value,
+                },
+                {
+                  title: '设备',
+                  render: (_, row) => (
+                    <Space direction="vertical" size={0}>
+                      <Typography.Text strong>{row.device_name}</Typography.Text>
+                      <Typography.Text type="secondary">
+                        {row.management_ip || row.external_device_id}
+                      </Typography.Text>
+                    </Space>
+                  ),
+                },
+                {
+                  title: '资产匹配',
+                  dataIndex: 'match_status',
+                  width: 130,
+                  render: (value) => (
+                    <Tag color={value === 'confirmed' ? 'green' : value === 'ambiguous' ? 'red' : 'default'}>
+                      {value}
+                    </Tag>
+                  ),
+                },
+                {
+                  title: '操作',
+                  width: 220,
+                  render: (_, row) => {
+                    const related = (detail.device_bindings || []).filter(
+                      (candidate) => sameObservedDevice(candidate, row)
+                        && !['confirmed', 'external'].includes(candidate.match_status),
+                    )
+                    const spansPeriods = related.length > 1
+                    return (
+                      <Space>
+                        {row.match_status === 'suggested' && (
+                          <Button
+                            size="small"
+                            onClick={() => confirmBinding.mutate({
+                              jobId: detail.id,
+                              bindings: related,
+                              inventoryId: row.inventory_device_id,
+                            })}
+                          >
+                            {spansPeriods ? '确认全部周期' : '确认匹配'}
+                          </Button>
+                        )}
+                        {!['confirmed', 'external'].includes(row.match_status) && (
+                          <Button
+                            size="small"
+                            onClick={() => confirmBinding.mutate({
+                              jobId: detail.id,
+                              bindings: related,
+                              inventoryId: null,
+                            })}
+                          >
+                            {spansPeriods ? '全部周期作为外部设备' : '作为外部设备'}
+                          </Button>
+                        )}
+                      </Space>
+                    )
+                  },
+                },
+              ]}
+            />
           </Space> },
-          { key: 'workflow', label: isAssetSource ? '样本处理流程' : '巡检执行流程', children: detail.workflow_run_id ? <WorkflowRunMonitor runId={detail.workflow_run_id} plain /> : <Alert type="info" showIcon message="尚未启动 Workflow" /> },
+          {
+            key: 'workflow',
+            label: isAssetSource ? '样本处理流程' : '巡检执行流程',
+            children: detail.workflow_run_id
+              ? <WorkflowRunMonitor runId={detail.workflow_run_id} plain />
+              : ACTIVE.has(detail.status) || executeJob.isLoading
+                ? (
+                  <Alert
+                    type="info"
+                    showIcon
+                    message="任务已提交，正在创建 Workflow"
+                    description="调度完成后会自动显示完整处理步骤、阶段耗时和错误反馈。"
+                  />
+                )
+                : <Alert type="info" showIcon message="尚未启动 Workflow" description="通过预检并确认设备身份后即可开始处理。" />,
+          },
           ...(isAssetSource ? [{ key: 'assets', label: '资产生产', children: <OfflineRuleAssetPipeline jobId={detail.id} /> }] : []),
           { key: 'result', label: isAssetSource ? '验证与回放' : '巡检结果', children: detail.job_type === 'parser_validation'
             ? <Descriptions bordered size="small" column={isMobile ? 1 : 3}><Descriptions.Item label="Snapshot">{String(detail.result?.snapshot_count ?? '-')}</Descriptions.Item><Descriptions.Item label="新增">{String(detail.result?.new_snapshot_count ?? '-')}</Descriptions.Item><Descriptions.Item label="重复">{String(detail.result?.duplicate_snapshot_count ?? '-')}</Descriptions.Item></Descriptions>
@@ -696,7 +847,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
                 onOpenRuleAssets={() => navigate(
                   isAssetSource
                     ? buildOfflineRuleBundleUrl(detail)
-                    : '/skills/parser?workspace=release&subtab=asset-bundles',
+                    : '/skills/parser?workspace=production&subtab=asset-production-units&action=bundle-review',
                 )}
               /> },
         ]} />}

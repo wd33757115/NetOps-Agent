@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from zipfile import ZipFile
+from io import BytesIO
 
+from openpyxl import load_workbook
 from src.core.patrol import reporting
-from src.core.patrol.reporting import render_run_report
+from src.core.patrol.reporting import render_patrol_batch_xlsx, render_run_report
 
 
 def _raw_change():
@@ -119,7 +120,32 @@ def test_render_run_report_writes_html_and_xlsx(monkeypatch, tmp_path):
                 "current_open_event_count": 1,
             }
 
+    class FakeStateRepository:
+        def list_run_observations(self, run_id, *, device_ids=None):
+            assert run_id == "run-1"
+            assert device_ids is None
+            return [
+                {
+                    "id": "obs-cpu-5s",
+                    "device_id": "SW1",
+                    "vendor": "Cisco",
+                    "model": "NEXUS9000",
+                    "entity_type": "device",
+                    "entity_key": "__singleton__",
+                    "observation_type": "device.cpu.utilization",
+                    "dimensions_json": {"scope": "system", "window": "5s"},
+                    "value_number": 24,
+                    "unit": "percent",
+                    "canonical_command": "show processes cpu",
+                    "field_name": "cpu_total_5_sec",
+                    "parser_template_id": "parser-1",
+                    "evidence_id": "evidence-1",
+                    "observed_at": "2026-06-20T10:00:00+00:00",
+                }
+            ]
+
     monkeypatch.setattr(reporting, "ChangeEventRepository", FakeRepository)
+    monkeypatch.setattr(reporting, "StateRepository", FakeStateRepository)
     html_path = tmp_path / "report.html"
     xlsx_path = tmp_path / "report.xlsx"
 
@@ -139,8 +165,95 @@ def test_render_run_report_writes_html_and_xlsx(monkeypatch, tmp_path):
     assert "&lt;redacted&gt;" in html_result["content"]
     assert html_path.read_text(encoding="utf-8").startswith("<!doctype html>")
     assert xlsx_result["output_path"] == str(xlsx_path)
+    assert xlsx_result["observation_count"] == 1
     assert xlsx_path.read_bytes().startswith(b"PK")
-    with ZipFile(xlsx_path) as archive:
-        sheet = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
-    assert "Non-structured Output Changes" in sheet
-    assert "&lt;redacted&gt;" in sheet
+    workbook = load_workbook(xlsx_path, read_only=True, data_only=True)
+    assert {"总览", "CPU", "证据索引", "非结构化变更"}.issubset(
+        set(workbook.sheetnames)
+    )
+    assert workbook["CPU"]["F2"].value == 24
+    assert "<redacted>" in str(workbook["非结构化变更"]["F2"].value)
+
+
+def test_render_patrol_batch_xlsx_unifies_cross_vendor_facts(monkeypatch):
+    class FakeStateRepository:
+        def list_observations_for_runs(self, run_ids):
+            assert run_ids == ["snapshot-1", "snapshot-2"]
+            return [
+                {
+                    "id": "h3c-cpu",
+                    "device_id": "H3C-1",
+                    "vendor": "H3C",
+                    "model": "S5590",
+                    "entity_type": "device",
+                    "entity_key": "__singleton__",
+                    "observation_type": "device.cpu.utilization",
+                    "dimensions_json": {"scope": "system", "window": "5s"},
+                    "value_number": 24,
+                    "unit": "percent",
+                    "canonical_command": "display cpu-usage",
+                    "field_name": "five_sec",
+                    "observed_at": "2026-07-27T10:00:00+08:00",
+                },
+                {
+                    "id": "cisco-cpu",
+                    "device_id": "Cisco-1",
+                    "vendor": "Cisco",
+                    "model": "NEXUS9000",
+                    "entity_type": "device",
+                    "entity_key": "__singleton__",
+                    "observation_type": "device.cpu.utilization",
+                    "dimensions_json": {"scope": "system", "window": "5s"},
+                    "value_number": 18,
+                    "unit": "percent",
+                    "canonical_command": "show processes cpu",
+                    "field_name": "cpu_total_5_sec",
+                    "observed_at": "2026-07-27T10:00:00+08:00",
+                },
+            ]
+
+    monkeypatch.setattr(reporting, "StateRepository", FakeStateRepository)
+    summary = {
+        "runs": [
+            {"snapshot_run_id": "snapshot-2"},
+            {"snapshot_run_id": "snapshot-1"},
+        ],
+        "device_count": 2,
+        "changes": [],
+        "events": [],
+        "current_findings": [],
+        "quality": {
+            "status": "ready",
+            "parser_ready_rate": 1.0,
+            "observation_count": 2,
+        },
+        "unstructured_comparison": {},
+        "assessment": {
+            "status": "本次覆盖范围内未发现异常",
+            "trust": "高",
+            "reason": "活动规则已完成评估",
+        },
+        "current_state_rule_coverage": {
+            "available": True,
+            "evaluation_rate": 1.0,
+        },
+    }
+
+    content = render_patrol_batch_xlsx("batch-1", summary)
+
+    assert content.startswith(b"PK")
+    workbook = load_workbook(BytesIO(content), read_only=True, data_only=True)
+    assert {
+        "总览",
+        "当前风险",
+        "事件",
+        "变化",
+        "CPU",
+        "证据索引",
+    }.issubset(set(workbook.sheetnames))
+    cpu_rows = list(workbook["CPU"].iter_rows(values_only=True))
+    assert cpu_rows[0][5] == "CPU 5秒(%)"
+    assert {row[5] for row in cpu_rows[1:]} == {18, 24}
+    assert {row[-4] for row in cpu_rows[1:]} == {
+        "覆盖范围内未发现当前异常项"
+    }

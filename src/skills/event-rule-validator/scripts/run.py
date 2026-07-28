@@ -78,8 +78,11 @@ def _definition_from_candidate(candidate: dict[str, Any], index: int = 1) -> Eve
 
 
 def _candidate_definitions(payload: dict[str, Any]) -> list[EventRuleDefinition]:
-    candidates = payload.get("candidate_rules") or payload.get("rules")
-    if candidates is None:
+    if "candidate_rules" in payload:
+        candidates = payload["candidate_rules"]
+    elif "rules" in payload:
+        candidates = payload["rules"]
+    else:
         return [_candidate_definition(payload)]
     if not isinstance(candidates, list):
         raise ValueError("candidate_rules must be a list")

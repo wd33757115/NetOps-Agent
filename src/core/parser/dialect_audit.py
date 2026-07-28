@@ -27,17 +27,22 @@ def audit_textfsm_records(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
     items: list[dict[str, Any]] = []
     for record in records:
         path = _resolve_asset_path(str(record.get("asset_path") or ""))
+        embedded_text = record.get("template_text")
         violations: list[dict[str, Any]] = []
         digest = None
-        if not path.is_file():
+        if isinstance(embedded_text, str):
+            template_text = embedded_text
+        elif path.is_file():
+            template_text = path.read_text(encoding="utf-8")
+        else:
+            template_text = None
             violations.append(
                 {
                     "code": "asset_missing",
-                    "message": "template asset file does not exist",
+                    "message": "template asset content does not exist",
                 }
             )
-        else:
-            template_text = path.read_text(encoding="utf-8")
+        if template_text is not None:
             digest = hashlib.sha256(template_text.encode("utf-8")).hexdigest()
             if record.get("sha256") and digest != record.get("sha256"):
                 violations.append(
@@ -94,5 +99,8 @@ class TextFSMDialectAuditService:
             query = db.query(ParserTemplate)
             if status:
                 query = query.filter(ParserTemplate.status == status)
-            rows = [row.to_dict() for row in query.order_by(ParserTemplate.updated_at.desc()).all()]
+            rows = [
+                row.to_dict(include_content=True)
+                for row in query.order_by(ParserTemplate.updated_at.desc()).all()
+            ]
         return audit_textfsm_records(rows)

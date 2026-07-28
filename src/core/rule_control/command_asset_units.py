@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import uuid
 from collections import Counter, defaultdict
 from datetime import date, datetime
 from typing import Any
@@ -10,26 +11,31 @@ from urllib.parse import urlencode
 
 from sqlalchemy import case, func, or_, select
 
-from src.core.parser.policy import ParserPolicy
+from src.core.check_items.catalog import CheckItemCatalog, CheckItemCatalogRepository
+from src.core.check_items.resolver import CheckItemImplementationResolver
+from src.core.parser.policy import DEFAULT_COMMAND_ALIASES, ParserPolicy
 from src.core.parser.repository import parser_job_asset_key
+from src.core.rule_control.replay_gate import evaluate_historical_replay_gate
 from src.core.rule_control.source_scope import require_rule_asset_source_job
 from src.core.rule_control.template_activation import RuleAssetTemplateActivationService
 from src.infrastructure.db.models import (
     CommandSnapshot,
     ObservationContractRecord,
+    OfflinePatrolJobRecord,
     OfflinePatrolPeriodRecord,
     ParserGenerationAttempt,
     ParserJobSample,
     ParserTemplate,
     ParserTemplateJob,
     RuleAssetCommandUnitRecord,
+    RuleAssetCommandUnitCheckItemRecord,
     RuleGenerationContextRecord,
     RuleGenerationJobRecord,
     SnapshotParseResult,
 )
 from src.infrastructure.db.postgres import get_db_session
 
-PROJECTION_VERSION = 2
+PROJECTION_VERSION = 4
 STAGE_ORDER = (
     "output_slicing",
     "identity_grouping",
@@ -55,17 +61,64 @@ STAGE_LABELS = {
     "release": "审批发布",
 }
 RESOLVED_STAGE_STATUSES = {"passed", "skipped"}
-ACTIVE_PARSER_JOB_STATUSES = {"collecting", "running", "validating"}
+ACTIVE_PARSER_JOB_STATUSES = {"running", "validating"}
+GOVERNANCE_BUCKETS = {
+    "action_required",
+    "in_progress",
+    "awaiting_approval",
+    "published",
+    "not_applicable",
+    "exception",
+}
+GOVERNANCE_STATUSES = {
+    "preparing",
+    "ready_to_generate",
+    "generating",
+    "engineering_review",
+    "release_approval",
+    "published",
+    "not_applicable",
+    "blocked",
+    "failed",
+}
 
 
 def _norm(value: Any) -> str:
     return " ".join(str(value or "").strip().casefold().split())
 
 
+def _canonical_command_key(value: Any) -> str:
+    normalized = ParserPolicy._basic_normalize(str(value or ""))
+    return ParserPolicy._basic_normalize(
+        DEFAULT_COMMAND_ALIASES.get(normalized, normalized)
+    )
+
+
 def _iso(value: Any) -> Any:
     if isinstance(value, (datetime, date)):
         return value.isoformat()
     return value
+
+
+def _latest_bundle_by_context(
+    bundles: list[RuleGenerationJobRecord],
+) -> dict[str, RuleGenerationJobRecord]:
+    """Select the newest immutable bundle version, not the last metadata update."""
+
+    ordered = sorted(
+        bundles,
+        key=lambda item: (
+            item.created_at.timestamp() if item.created_at else 0,
+            str(item.id),
+        ),
+        reverse=True,
+    )
+    selected: dict[str, RuleGenerationJobRecord] = {}
+    for item in ordered:
+        context_id = str((item.payload_json or {}).get("context_id") or "")
+        if context_id:
+            selected.setdefault(context_id, item)
+    return selected
 
 
 def _unit_id(offline_job_id: str, asset_key: str) -> str:
@@ -104,14 +157,77 @@ def _stage(
     }
 
 
-def _parser_url(command: str) -> str:
-    return "/skills/parser?" + urlencode(
-        {
-            "workspace": "inbox",
-            "subtab": "jobs",
-            "search": command,
-        }
-    )
+def _governance_status(
+    status: str,
+    current_stage: str,
+    asset_mode: str | None = None,
+) -> str:
+    if status == "completed":
+        if asset_mode in {"raw_hash", "ignored"}:
+            return "not_applicable"
+        return "published"
+    if status == "failed":
+        return "failed"
+    if status == "blocked":
+        return "blocked"
+    if status == "running":
+        return "generating"
+    if status == "needs_review":
+        return "release_approval" if current_stage == "release" else "engineering_review"
+    if current_stage in {"output_slicing", "identity_grouping"}:
+        return "preparing"
+    return "ready_to_generate"
+
+
+def _governance_bucket(
+    status: str,
+    current_stage: str,
+    asset_mode: str | None = None,
+) -> str:
+    governance_status = _governance_status(status, current_stage, asset_mode)
+    if governance_status in {"preparing", "ready_to_generate"}:
+        return "action_required"
+    if governance_status == "generating":
+        return "in_progress"
+    if governance_status in {"engineering_review", "release_approval"}:
+        return "awaiting_approval"
+    if governance_status == "published":
+        return "published"
+    if governance_status == "not_applicable":
+        return "not_applicable"
+    return "exception"
+
+
+def _component_status(status: str | None) -> str:
+    return {
+        "passed": "published",
+        "skipped": "not_applicable",
+        "needs_review": "engineering_review",
+        "running": "generating",
+        "ready": "ready_to_generate",
+        "blocked": "blocked",
+        "failed": "failed",
+        "not_started": "not_started",
+    }.get(str(status or ""), "not_started")
+
+
+def _parser_url(
+    offline_job_id: str,
+    command: str,
+    *,
+    dataset_ids: list[str],
+) -> str:
+    params = {
+        "workspace": "production",
+        "subtab": "asset-production-units",
+        "action": "parser",
+        "source_job_id": offline_job_id,
+        "offline_job_id": offline_job_id,
+        "command": command,
+    }
+    if dataset_ids:
+        params["dataset_ids"] = ",".join(dataset_ids)
+    return "/skills/parser?" + urlencode(params)
 
 
 def _generation_url(
@@ -122,8 +238,9 @@ def _generation_url(
     seed_job_id: str | None = None,
 ) -> str:
     params = {
-        "workspace": "generation",
-        "subtab": "rule-generation",
+        "workspace": "production",
+        "subtab": "asset-production-units",
+        "action": "rule-generation",
         "source_job_id": offline_job_id,
         "offline_job_id": offline_job_id,
         "command": command,
@@ -131,7 +248,7 @@ def _generation_url(
     if dataset_ids:
         params["dataset_ids"] = ",".join(dataset_ids)
     if seed_job_id:
-        params["pc_rule_job_search"] = seed_job_id
+        params["rule_seed_job_id"] = seed_job_id
     return "/skills/parser?" + urlencode(params)
 
 
@@ -143,8 +260,9 @@ def _backfill_url(
     dataset_ids: list[str],
 ) -> str:
     params = {
-        "workspace": "inbox",
-        "subtab": "backfills",
+        "workspace": "runtime",
+        "subtab": "coverage-backfill",
+        "action": "backfill",
         "source_job_id": offline_job_id,
         "offline_job_id": offline_job_id,
         "command": command,
@@ -160,8 +278,9 @@ def _backfill_url(
 
 def _bundle_url(offline_job_id: str, bundle_id: str | None = None) -> str:
     params = {
-        "workspace": "release",
-        "subtab": "asset-bundles",
+        "workspace": "production",
+        "subtab": "asset-production-units",
+        "action": "release",
         "source_job_id": offline_job_id,
         "offline_job_id": offline_job_id,
     }
@@ -181,6 +300,8 @@ def _child_stage_status(
         return "passed", matching
     if not matching:
         return "not_started", []
+    if bundle_status in {"failed", "rejected", "cancelled"}:
+        return "blocked", matching
     statuses = {str(item.status or "") for item in matching}
     if statuses.intersection({"failed", "rejected", "cancelled"}):
         return "blocked", matching
@@ -200,13 +321,190 @@ class RuleAssetCommandUnitService:
         self,
         *,
         template_activation_service: RuleAssetTemplateActivationService | None = None,
+        catalog_repository: CheckItemCatalogRepository | None = None,
     ) -> None:
         self.template_activation_service = (
             template_activation_service or RuleAssetTemplateActivationService()
         )
+        self.catalog_repository = catalog_repository or CheckItemCatalogRepository()
+
+    @staticmethod
+    def _resolve_check_item_mappings(
+        unit: dict[str, Any],
+        *,
+        catalog: CheckItemCatalog,
+    ) -> list[dict[str, str]]:
+        """Resolve catalog mappings without inferring business identity from command text."""
+
+        resolver = CheckItemImplementationResolver(catalog)
+        implementations = {
+            item.version_id: item for item in catalog.implementations
+        }
+        command_key = _canonical_command_key(unit.get("command"))
+        models = sorted(
+            {
+                str(item).strip()
+                for item in unit.get("models") or ()
+                if str(item).strip()
+            }
+        )
+        if not models:
+            models = [str(unit.get("profile") or "").strip()]
+        mappings: dict[tuple[str, str], dict[str, str]] = {}
+        for model in models:
+            device = {
+                "device_id": f"rule-asset:{unit.get('vendor')}:{model}",
+                "vendor": unit.get("vendor"),
+                "model": model,
+                "family": unit.get("family"),
+                "platform": unit.get("profile"),
+            }
+            for check_item in catalog.check_items:
+                decision = resolver.resolve(
+                    device=device,
+                    check_item_id=check_item.id,
+                )
+                implementation = implementations.get(
+                    str(decision.implementation_version_id or "")
+                )
+                if decision.status != "resolved" or implementation is None:
+                    continue
+                implementation_commands = {
+                    _canonical_command_key(item.command)
+                    for item in implementation.commands
+                }
+                if command_key not in implementation_commands:
+                    continue
+                key = (check_item.id, implementation.version_id)
+                mappings[key] = {
+                    "check_item_id": check_item.id,
+                    "check_item_version_id": check_item.version_id,
+                    "implementation_id": implementation.id,
+                    "implementation_version_id": implementation.version_id,
+                }
+        return [
+            mappings[key]
+            for key in sorted(mappings)
+        ]
+
+    def _ensure_projection_current(self, offline_job_id: str) -> None:
+        """Rebuild persisted command units when the projection contract changes."""
+        with get_db_session() as db:
+            require_rule_asset_source_job(db, offline_job_id)
+            versions = (
+                db.query(RuleAssetCommandUnitRecord.projection_version)
+                .filter(RuleAssetCommandUnitRecord.offline_job_id == offline_job_id)
+                .distinct()
+                .all()
+            )
+        if not versions or any(int(version or 0) != PROJECTION_VERSION for (version,) in versions):
+            self.reconcile(offline_job_id)
+
+    def reconcile_for_parser_job(self, parser_job_id: str) -> dict[str, Any]:
+        """Refresh every offline source whose command units depend on a Parser job."""
+
+        normalized_job_id = str(parser_job_id or "").strip()
+        if not normalized_job_id:
+            raise ValueError("parser_job_id is required")
+        with get_db_session() as db:
+            projected_job_ids = {
+                str(job_id)
+                for (job_id,) in (
+                    db.query(RuleAssetCommandUnitRecord.offline_job_id)
+                    .filter(RuleAssetCommandUnitRecord.parser_job_id == normalized_job_id)
+                    .distinct()
+                    .all()
+                )
+                if job_id
+            }
+            sample_job_ids = {
+                str(job_id)
+                for (job_id,) in (
+                    db.query(OfflinePatrolPeriodRecord.job_id)
+                    .join(
+                        CommandSnapshot,
+                        CommandSnapshot.run_id == OfflinePatrolPeriodRecord.patrol_run_id,
+                    )
+                    .join(
+                        ParserJobSample,
+                        ParserJobSample.snapshot_id == CommandSnapshot.id,
+                    )
+                    .filter(ParserJobSample.job_id == normalized_job_id)
+                    .distinct()
+                    .all()
+                )
+                if job_id
+            }
+
+        source_job_ids = sorted(projected_job_ids | sample_job_ids)
+        reconciled = [self.reconcile(job_id) for job_id in source_job_ids]
+        return {
+            "parser_job_id": normalized_job_id,
+            "offline_job_ids": source_job_ids,
+            "reconciled_count": len(reconciled),
+            "results": reconciled,
+        }
+
+    def reconcile_for_parser_template(self, template_id: str) -> dict[str, Any]:
+        """Refresh command units after a Parser candidate changes governance state."""
+
+        normalized_template_id = str(template_id or "").strip()
+        if not normalized_template_id:
+            raise ValueError("template_id is required")
+        with get_db_session() as db:
+            template = db.get(ParserTemplate, normalized_template_id)
+            source_job_id = (
+                str(template.source_job_id).strip()
+                if template is not None and template.source_job_id
+                else ""
+            )
+            projected_job_ids = {
+                str(job_id)
+                for (job_id,) in (
+                    db.query(RuleAssetCommandUnitRecord.offline_job_id)
+                    .filter(
+                        RuleAssetCommandUnitRecord.parser_template_id
+                        == normalized_template_id
+                    )
+                    .distinct()
+                    .all()
+                )
+                if job_id
+            }
+
+        result = (
+            self.reconcile_for_parser_job(source_job_id)
+            if source_job_id
+            else {
+                "parser_job_id": None,
+                "offline_job_ids": [],
+                "reconciled_count": 0,
+                "results": [],
+            }
+        )
+        source_job_ids = sorted(
+            set(result["offline_job_ids"]) | projected_job_ids
+        )
+        already_reconciled = set(result["offline_job_ids"])
+        additional_results = [
+            self.reconcile(job_id)
+            for job_id in source_job_ids
+            if job_id not in already_reconciled
+        ]
+        return {
+            "template_id": normalized_template_id,
+            "parser_job_id": result["parser_job_id"],
+            "offline_job_ids": source_job_ids,
+            "reconciled_count": len(source_job_ids),
+            "results": [*result["results"], *additional_results],
+        }
 
     def reconcile(self, offline_job_id: str) -> dict[str, Any]:
         policy = ParserPolicy()
+        catalog = self.catalog_repository.load_active()
+        if not catalog.check_items:
+            self.catalog_repository.bootstrap(actor="rule-asset-projection")
+            catalog = self.catalog_repository.load_active()
         with get_db_session() as db:
             require_rule_asset_source_job(db, offline_job_id)
             periods = (
@@ -530,10 +828,7 @@ class RuleAssetCommandUnitService:
             seed_ids = {str(item.id) for item in seed_by_ref.values()}
             contexts = (
                 db.query(RuleGenerationContextRecord)
-                .filter(
-                    RuleGenerationContextRecord.offline_job_id == offline_job_id,
-                    RuleGenerationContextRecord.job_id.in_(seed_ids),
-                )
+                .filter(RuleGenerationContextRecord.job_id.in_(seed_ids))
                 .order_by(RuleGenerationContextRecord.created_at.desc())
                 .all()
                 if seed_ids
@@ -541,23 +836,58 @@ class RuleAssetCommandUnitService:
             )
             context_by_seed: dict[str, RuleGenerationContextRecord] = {}
             for item in contexts:
-                context_by_seed.setdefault(str(item.job_id), item)
-            context_ids = {str(item.id) for item in contexts}
+                seed_key = str(item.job_id)
+                existing = context_by_seed.get(seed_key)
+                if existing is None:
+                    if item.offline_job_id in {None, offline_job_id}:
+                        context_by_seed[seed_key] = item
+                    continue
+                # Prefer contexts that explicitly belong to this offline job.
+                if existing.offline_job_id == offline_job_id:
+                    continue
+                if item.offline_job_id == offline_job_id:
+                    context_by_seed[seed_key] = item
+            context_ids = {str(item.id) for item in context_by_seed.values()}
+            # Seed payload may already reference a context that was created without
+            # offline_job_id (template-scoped sanitize). Still bind it to the unit.
+            for seed in seed_by_ref.values():
+                seed_key = str(seed.id)
+                if seed_key in context_by_seed:
+                    continue
+                payload = dict(seed.payload_json or {})
+                for key in (
+                    "auto_context_id",
+                    "latest_generation_context_id",
+                    "context_id",
+                ):
+                    context_id = str(payload.get(key) or "").strip()
+                    if not context_id:
+                        continue
+                    row = db.get(RuleGenerationContextRecord, context_id)
+                    if row is None or str(row.job_id) != seed_key:
+                        continue
+                    context_by_seed[seed_key] = row
+                    context_ids.add(str(row.id))
+                    break
             bundles = (
                 db.query(RuleGenerationJobRecord)
                 .filter(
                     RuleGenerationJobRecord.job_type == "RULE_ASSET_BUNDLE",
                     RuleGenerationJobRecord.payload_json["context_id"].as_string().in_(context_ids),
                 )
-                .order_by(RuleGenerationJobRecord.updated_at.desc())
+                # A revision updates its parent review metadata after the replacement
+                # bundle is created. Ordering by updated_at would therefore select the
+                # superseded parent again. Bundle creation order is the immutable
+                # version order for a single context.
+                .order_by(
+                    RuleGenerationJobRecord.created_at.desc(),
+                    RuleGenerationJobRecord.id.desc(),
+                )
                 .all()
                 if context_ids
                 else []
             )
-            bundle_by_context: dict[str, RuleGenerationJobRecord] = {}
-            for item in bundles:
-                context_id = str((item.payload_json or {}).get("context_id") or "")
-                bundle_by_context.setdefault(context_id, item)
+            bundle_by_context = _latest_bundle_by_context(bundles)
             child_ids = {
                 str(child_id)
                 for item in bundles
@@ -573,6 +903,7 @@ class RuleAssetCommandUnitService:
             child_by_id = {str(item.id): item for item in children}
 
             keep_ids: set[str] = set()
+            mapped_link_count = 0
             for unit in resolved_groups.values():
                 unit["device_count"] = len(unit["device_keys"])
                 template = unit["template"]
@@ -616,6 +947,18 @@ class RuleAssetCommandUnitService:
                     db.add(record)
                 models = sorted(str(item) for item in unit["models"] if item)
                 record.offline_job_id = offline_job_id
+                mappings = self._resolve_check_item_mappings(
+                    unit,
+                    catalog=catalog,
+                )
+                mapped_check_item_ids = sorted(
+                    {item["check_item_id"] for item in mappings}
+                )
+                record.check_item_id = (
+                    mapped_check_item_ids[0]
+                    if len(mapped_check_item_ids) == 1
+                    else None
+                )
                 record.asset_key = unit["asset_key"]
                 record.vendor = unit["vendor"]
                 record.model = models[0] if len(models) == 1 else None
@@ -643,6 +986,28 @@ class RuleAssetCommandUnitService:
                 record.context_id = str(context.id) if context else None
                 record.bundle_id = str(bundle.id) if bundle else None
                 record.projection_version = PROJECTION_VERSION
+                db.flush([record])
+                db.query(RuleAssetCommandUnitCheckItemRecord).filter(
+                    RuleAssetCommandUnitCheckItemRecord.command_unit_id == record_id
+                ).delete(synchronize_session=False)
+                for mapping in mappings:
+                    link_id = str(
+                        uuid.uuid5(
+                            uuid.NAMESPACE_URL,
+                            "netops/rule-asset-command-check-item/"
+                            f"{record_id}/{mapping['check_item_id']}/"
+                            f"{mapping['implementation_version_id']}",
+                        )
+                    )
+                    db.add(
+                        RuleAssetCommandUnitCheckItemRecord(
+                            id=link_id,
+                            command_unit_id=record_id,
+                            **mapping,
+                            mapping_source="catalog_resolver",
+                        )
+                    )
+                    mapped_link_count += 1
 
             stale_query = db.query(RuleAssetCommandUnitRecord).filter(
                 RuleAssetCommandUnitRecord.offline_job_id == offline_job_id
@@ -653,6 +1018,7 @@ class RuleAssetCommandUnitService:
             return {
                 "offline_job_id": offline_job_id,
                 "unit_count": len(keep_ids),
+                "check_item_link_count": mapped_link_count,
                 "deleted": int(deleted or 0),
             }
 
@@ -671,6 +1037,7 @@ class RuleAssetCommandUnitService:
     ) -> dict[str, Any]:
         page = max(1, int(page))
         page_size = max(1, min(int(page_size), 100))
+        self._ensure_projection_current(offline_job_id)
         with get_db_session() as db:
             require_rule_asset_source_job(db, offline_job_id)
             query = db.query(RuleAssetCommandUnitRecord).filter(
@@ -719,6 +1086,662 @@ class RuleAssetCommandUnitService:
                 "summary": summary,
             }
 
+    def list_production_units(
+        self,
+        *,
+        owner_id: str,
+        is_admin: bool = False,
+        page: int = 1,
+        page_size: int = 25,
+        search: str | None = None,
+        bucket: str | None = None,
+        governance_status: str | None = None,
+        stage: str | None = None,
+        vendor: str | None = None,
+        model: str | None = None,
+        asset_mode: str | None = None,
+        offline_job_id: str | None = None,
+    ) -> dict[str, Any]:
+        """List the latest product-facing command asset for each stable asset key."""
+
+        page = max(1, int(page))
+        page_size = max(1, min(int(page_size), 100))
+        if bucket and bucket not in GOVERNANCE_BUCKETS:
+            raise ValueError(f"unsupported governance bucket: {bucket}")
+        if governance_status and governance_status not in GOVERNANCE_STATUSES:
+            raise ValueError(f"unsupported governance status: {governance_status}")
+
+        with get_db_session() as db:
+            ranked_query = (
+                db.query(
+                    RuleAssetCommandUnitRecord.id.label("unit_id"),
+                    func.row_number()
+                    .over(
+                        partition_by=RuleAssetCommandUnitRecord.asset_key,
+                        order_by=(
+                            RuleAssetCommandUnitRecord.updated_at.desc(),
+                            RuleAssetCommandUnitRecord.id.desc(),
+                        ),
+                    )
+                    .label("asset_rank"),
+                )
+                .join(
+                    OfflinePatrolJobRecord,
+                    OfflinePatrolJobRecord.id == RuleAssetCommandUnitRecord.offline_job_id,
+                )
+                .filter(
+                    OfflinePatrolJobRecord.purpose == "rule_asset_source",
+                    OfflinePatrolJobRecord.archived.is_(False),
+                )
+            )
+            if not is_admin:
+                ranked_query = ranked_query.filter(OfflinePatrolJobRecord.owner_id == owner_id)
+            if offline_job_id:
+                ranked_query = ranked_query.filter(
+                    RuleAssetCommandUnitRecord.offline_job_id == offline_job_id
+                )
+            ranked = ranked_query.subquery()
+
+            base_query = (
+                db.query(RuleAssetCommandUnitRecord, OfflinePatrolJobRecord)
+                .join(ranked, ranked.c.unit_id == RuleAssetCommandUnitRecord.id)
+                .join(
+                    OfflinePatrolJobRecord,
+                    OfflinePatrolJobRecord.id == RuleAssetCommandUnitRecord.offline_job_id,
+                )
+                .filter(ranked.c.asset_rank == 1)
+            )
+            summary_rows = (
+                base_query.with_entities(
+                    RuleAssetCommandUnitRecord.status,
+                    RuleAssetCommandUnitRecord.current_stage,
+                    RuleAssetCommandUnitRecord.asset_mode,
+                    func.count(RuleAssetCommandUnitRecord.id),
+                )
+                .group_by(
+                    RuleAssetCommandUnitRecord.status,
+                    RuleAssetCommandUnitRecord.current_stage,
+                    RuleAssetCommandUnitRecord.asset_mode,
+                )
+                .all()
+            )
+            summary = self._production_summary(summary_rows)
+
+            query = base_query
+            if search and search.strip():
+                pattern = f"%{search.strip()}%"
+                query = query.filter(
+                    or_(
+                        RuleAssetCommandUnitRecord.canonical_command.ilike(pattern),
+                        RuleAssetCommandUnitRecord.vendor.ilike(pattern),
+                        RuleAssetCommandUnitRecord.model.ilike(pattern),
+                        RuleAssetCommandUnitRecord.family.ilike(pattern),
+                        RuleAssetCommandUnitRecord.profile.ilike(pattern),
+                        OfflinePatrolJobRecord.name.ilike(pattern),
+                    )
+                )
+            query = self._apply_governance_filter(
+                query,
+                bucket=bucket,
+                governance_status=governance_status,
+            )
+            if stage:
+                query = query.filter(RuleAssetCommandUnitRecord.current_stage == stage)
+            if vendor:
+                query = query.filter(RuleAssetCommandUnitRecord.vendor == vendor)
+            if model:
+                query = query.filter(RuleAssetCommandUnitRecord.models_json.contains([model]))
+            if asset_mode:
+                query = query.filter(RuleAssetCommandUnitRecord.asset_mode == asset_mode)
+
+            total = query.count()
+            rows = (
+                query.order_by(
+                    case(
+                        (
+                            RuleAssetCommandUnitRecord.status.in_(["blocked", "failed"]),
+                            0,
+                        ),
+                        (RuleAssetCommandUnitRecord.status == "needs_review", 1),
+                        (
+                            RuleAssetCommandUnitRecord.status.in_(["ready", "not_started"]),
+                            2,
+                        ),
+                        (RuleAssetCommandUnitRecord.status == "running", 3),
+                        else_=4,
+                    ),
+                    RuleAssetCommandUnitRecord.updated_at.desc(),
+                    RuleAssetCommandUnitRecord.canonical_command.asc(),
+                    RuleAssetCommandUnitRecord.id.asc(),
+                )
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+                .all()
+            )
+            return {
+                "items": [
+                    self._serialize_production_row(unit, source_job)
+                    for unit, source_job in rows
+                ],
+                "page": page,
+                "page_size": page_size,
+                "total": int(total),
+                "page_count": (int(total) + page_size - 1) // page_size,
+                "summary": summary,
+            }
+
+    def list_check_item_production_units(
+        self,
+        *,
+        owner_id: str,
+        is_admin: bool = False,
+        page: int = 1,
+        page_size: int = 25,
+        search: str | None = None,
+        bucket: str | None = None,
+        governance_status: str | None = None,
+        stage: str | None = None,
+        vendor: str | None = None,
+        model: str | None = None,
+        asset_mode: str | None = None,
+        offline_job_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Return logical check items with expandable physical command implementations."""
+
+        page = max(1, int(page))
+        page_size = max(1, min(int(page_size), 100))
+        if bucket and bucket not in GOVERNANCE_BUCKETS:
+            raise ValueError(f"unsupported governance bucket: {bucket}")
+        if governance_status and governance_status not in GOVERNANCE_STATUSES:
+            raise ValueError(f"unsupported governance status: {governance_status}")
+        self._refresh_stale_product_sources(
+            owner_id=owner_id,
+            is_admin=is_admin,
+            offline_job_id=offline_job_id,
+        )
+        catalog = self.catalog_repository.load_active()
+        check_items = {item.id: item for item in catalog.check_items}
+        implementations = {
+            item.version_id: item for item in catalog.implementations
+        }
+
+        with get_db_session() as db:
+            ranked_query = (
+                db.query(
+                    RuleAssetCommandUnitRecord.id.label("unit_id"),
+                    func.row_number()
+                    .over(
+                        partition_by=RuleAssetCommandUnitRecord.asset_key,
+                        order_by=(
+                            RuleAssetCommandUnitRecord.updated_at.desc(),
+                            RuleAssetCommandUnitRecord.id.desc(),
+                        ),
+                    )
+                    .label("asset_rank"),
+                )
+                .join(
+                    OfflinePatrolJobRecord,
+                    OfflinePatrolJobRecord.id == RuleAssetCommandUnitRecord.offline_job_id,
+                )
+                .filter(
+                    OfflinePatrolJobRecord.purpose == "rule_asset_source",
+                    OfflinePatrolJobRecord.archived.is_(False),
+                )
+            )
+            if not is_admin:
+                ranked_query = ranked_query.filter(
+                    OfflinePatrolJobRecord.owner_id == owner_id
+                )
+            if offline_job_id:
+                ranked_query = ranked_query.filter(
+                    RuleAssetCommandUnitRecord.offline_job_id == offline_job_id
+                )
+            ranked = ranked_query.subquery()
+            query = (
+                db.query(RuleAssetCommandUnitRecord, OfflinePatrolJobRecord)
+                .join(ranked, ranked.c.unit_id == RuleAssetCommandUnitRecord.id)
+                .join(
+                    OfflinePatrolJobRecord,
+                    OfflinePatrolJobRecord.id == RuleAssetCommandUnitRecord.offline_job_id,
+                )
+                .filter(ranked.c.asset_rank == 1)
+            )
+            if vendor:
+                query = query.filter(RuleAssetCommandUnitRecord.vendor == vendor)
+            if model:
+                query = query.filter(
+                    RuleAssetCommandUnitRecord.models_json.contains([model])
+                )
+            if asset_mode:
+                query = query.filter(
+                    RuleAssetCommandUnitRecord.asset_mode == asset_mode
+                )
+            rows = query.all()
+            unit_ids = [str(unit.id) for unit, _source in rows]
+            link_rows = (
+                [
+                    {
+                        "command_unit_id": str(row.command_unit_id),
+                        "check_item_id": str(row.check_item_id),
+                        "check_item_version_id": str(row.check_item_version_id),
+                        "implementation_id": str(row.implementation_id),
+                        "implementation_version_id": str(
+                            row.implementation_version_id
+                        ),
+                    }
+                    for row in (
+                        db.query(RuleAssetCommandUnitCheckItemRecord)
+                        .filter(
+                            RuleAssetCommandUnitCheckItemRecord.command_unit_id.in_(
+                                unit_ids
+                            )
+                        )
+                        .order_by(
+                            RuleAssetCommandUnitCheckItemRecord.check_item_id,
+                            RuleAssetCommandUnitCheckItemRecord.implementation_version_id,
+                        )
+                        .all()
+                    )
+                ]
+                if unit_ids
+                else []
+            )
+            serialized_rows = [
+                self._serialize_production_row(unit, source_job)
+                for unit, source_job in rows
+            ]
+
+        links_by_unit: dict[str, list[dict[str, str]]] = defaultdict(list)
+        for link in link_rows:
+            links_by_unit[link["command_unit_id"]].append(link)
+
+        grouped: dict[str, dict[str, Any]] = {}
+        for serialized in serialized_rows:
+            links = links_by_unit.get(str(serialized["id"]), [])
+            if not links:
+                links = [None]
+            for link in links:
+                check_item_id = link["check_item_id"] if link is not None else ""
+                group_key = check_item_id or "__unclassified__"
+                check_item = check_items.get(check_item_id)
+                implementation = (
+                    implementations.get(link["implementation_version_id"])
+                    if link is not None
+                    else None
+                )
+                group = grouped.setdefault(
+                    group_key,
+                    {
+                        "check_item_id": check_item_id or None,
+                        "check_item_version_id": (
+                            link["check_item_version_id"] if link is not None else None
+                        ),
+                        "name": (
+                            check_item.name if check_item is not None else "待归类检查项"
+                        ),
+                        "category": (
+                            check_item.category if check_item is not None else "unclassified"
+                        ),
+                        "description": (
+                            check_item.description
+                            if check_item is not None
+                            else "命令输出尚未绑定已审批的检查项目录，不能进入生产运行包。"
+                        ),
+                        "result_mode": (
+                            check_item.result_mode if check_item is not None else None
+                        ),
+                        "assessment_mode": (
+                            check_item.assessment_mode if check_item is not None else None
+                        ),
+                        "implementations": [],
+                    },
+                )
+                group["implementations"].append(
+                    {
+                        **serialized,
+                        "implementation_id": (
+                            implementation.id if implementation is not None else None
+                        ),
+                        "implementation_version_id": (
+                            implementation.version_id
+                            if implementation is not None
+                            else None
+                        ),
+                        "implementation_name": (
+                            implementation.name if implementation is not None else None
+                        ),
+                        "mapping_status": (
+                            "catalog_resolved" if link is not None else "unclassified"
+                        ),
+                    }
+                )
+
+        groups = [
+            self._rollup_check_item_group(key, value)
+            for key, value in grouped.items()
+        ]
+        query_text = _norm(search)
+        if query_text:
+            groups = [
+                item
+                for item in groups
+                if query_text
+                in _norm(
+                    " ".join(
+                        [
+                            str(item.get("check_item_id") or ""),
+                            str(item.get("name") or ""),
+                            str(item.get("category") or ""),
+                            *[
+                                " ".join(
+                                    [
+                                        str(child.get("canonical_command") or ""),
+                                        str(child.get("vendor") or ""),
+                                        str(child.get("profile") or ""),
+                                        " ".join(child.get("models") or []),
+                                        str(
+                                            (child.get("source_job") or {}).get("name")
+                                            or ""
+                                        ),
+                                    ]
+                                )
+                                for child in item["implementations"]
+                            ],
+                        ]
+                    )
+                )
+            ]
+        summary = self._check_item_production_summary(groups)
+        if bucket:
+            groups = [
+                item for item in groups if item["governance_bucket"] == bucket
+            ]
+        if governance_status:
+            groups = [
+                item
+                for item in groups
+                if item["governance_status"] == governance_status
+            ]
+        if stage:
+            groups = [
+                item
+                for item in groups
+                if item["current_stage"] == stage
+                or any(
+                    child.get("current_stage") == stage
+                    for child in item["implementations"]
+                )
+            ]
+        urgency = {
+            "exception": 0,
+            "awaiting_approval": 1,
+            "action_required": 2,
+            "in_progress": 3,
+            "published": 4,
+            "not_applicable": 5,
+        }
+        groups.sort(
+            key=lambda item: (
+                urgency.get(str(item["governance_bucket"]), 9),
+                -float(item.get("updated_timestamp") or 0),
+                str(item.get("check_item_id") or "~unclassified"),
+            )
+        )
+        total = len(groups)
+        start = (page - 1) * page_size
+        return {
+            "items": groups[start : start + page_size],
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "page_count": (total + page_size - 1) // page_size,
+            "summary": summary,
+        }
+
+    def _refresh_stale_product_sources(
+        self,
+        *,
+        owner_id: str,
+        is_admin: bool,
+        offline_job_id: str | None,
+    ) -> None:
+        with get_db_session() as db:
+            query = (
+                db.query(RuleAssetCommandUnitRecord.offline_job_id)
+                .join(
+                    OfflinePatrolJobRecord,
+                    OfflinePatrolJobRecord.id == RuleAssetCommandUnitRecord.offline_job_id,
+                )
+                .filter(
+                    OfflinePatrolJobRecord.purpose == "rule_asset_source",
+                    OfflinePatrolJobRecord.archived.is_(False),
+                    RuleAssetCommandUnitRecord.projection_version != PROJECTION_VERSION,
+                )
+            )
+            if not is_admin:
+                query = query.filter(OfflinePatrolJobRecord.owner_id == owner_id)
+            if offline_job_id:
+                query = query.filter(
+                    RuleAssetCommandUnitRecord.offline_job_id == offline_job_id
+                )
+            stale_job_ids = sorted(
+                {str(job_id) for (job_id,) in query.distinct().all() if job_id}
+            )
+        for job_id in stale_job_ids:
+            self.reconcile(job_id)
+
+    @classmethod
+    def _rollup_check_item_group(
+        cls,
+        group_key: str,
+        group: dict[str, Any],
+    ) -> dict[str, Any]:
+        children = list(group["implementations"])
+        urgency = {
+            "exception": 0,
+            "awaiting_approval": 1,
+            "action_required": 2,
+            "in_progress": 3,
+            "published": 4,
+            "not_applicable": 5,
+        }
+        lead = min(
+            children,
+            key=lambda item: (
+                urgency.get(str(item.get("governance_bucket")), 9),
+                int(item.get("progress_percent") or 0),
+                str(item.get("id") or ""),
+            ),
+        )
+        component_rank = {
+            "failed": 0,
+            "blocked": 1,
+            "engineering_review": 2,
+            "ready_to_generate": 3,
+            "generating": 4,
+            "not_started": 5,
+            "published": 6,
+            "not_applicable": 7,
+        }
+        component_statuses = {
+            component: min(
+                (
+                    str(child.get("component_statuses", {}).get(component) or "not_started")
+                    for child in children
+                ),
+                key=lambda status: component_rank.get(status, 99),
+            )
+            for component in ("parser", "contract", "policy", "event")
+        }
+        updated_values = [
+            datetime.fromisoformat(str(child["updated_at"]).replace("Z", "+00:00"))
+            for child in children
+            if child.get("updated_at")
+        ]
+        updated_at = max(updated_values).isoformat() if updated_values else None
+        published_count = sum(
+            child.get("governance_bucket") == "published" for child in children
+        )
+        unclassified = not group.get("check_item_id")
+        governance_status = (
+            "blocked" if unclassified else lead["governance_status"]
+        )
+        governance_bucket = (
+            "exception" if unclassified else lead["governance_bucket"]
+        )
+        current_stage = (
+            "identity_grouping" if unclassified else lead["current_stage"]
+        )
+        current_stage_label = (
+            "检查项归类" if unclassified else lead["current_stage_label"]
+        )
+        blocker_count = sum(
+            int(child.get("blocker_count") or 0) for child in children
+        ) + (1 if unclassified else 0)
+        next_action = lead.get("next_action")
+        if unclassified:
+            first_child = children[0]
+            next_action = _action(
+                "classify_check_item",
+                "归类检查项",
+                "将该物理采集实现绑定到已审批的巡检检查项后，才能进入生产运行包。",
+                _parser_url(
+                    str(first_child.get("offline_job_id") or ""),
+                    str(first_child.get("canonical_command") or ""),
+                    dataset_ids=[],
+                ),
+            )
+        return {
+            "id": f"check-item:{group_key}",
+            **{key: value for key, value in group.items() if key != "implementations"},
+            "governance_status": governance_status,
+            "governance_bucket": governance_bucket,
+            "current_stage": current_stage,
+            "current_stage_label": current_stage_label,
+            "progress_percent": min(
+                int(child.get("progress_percent") or 0) for child in children
+            ),
+            "sample_count": sum(int(child.get("sample_count") or 0) for child in children),
+            "evidence_device_count": sum(
+                int(child.get("device_count") or 0) for child in children
+            ),
+            "output_signature_count": sum(
+                int(child.get("output_signature_count") or 0) for child in children
+            ),
+            "blocker_count": blocker_count,
+            "implementation_count": len(children),
+            "command_count": len(
+                {str(child.get("canonical_command") or "") for child in children}
+            ),
+            "vendors": sorted(
+                {str(child.get("vendor") or "") for child in children if child.get("vendor")}
+            ),
+            "component_statuses": component_statuses,
+            "next_action": next_action,
+            "updated_at": updated_at,
+            "updated_timestamp": (
+                max(value.timestamp() for value in updated_values)
+                if updated_values
+                else 0
+            ),
+            "coverage": {
+                "total": len(children),
+                "published": published_count,
+                "action_required": sum(
+                    child.get("governance_bucket") == "action_required"
+                    for child in children
+                ),
+                "in_progress": sum(
+                    child.get("governance_bucket") == "in_progress"
+                    for child in children
+                ),
+                "awaiting_approval": sum(
+                    child.get("governance_bucket") == "awaiting_approval"
+                    for child in children
+                ),
+                "exception": sum(
+                    child.get("governance_bucket") == "exception"
+                    for child in children
+                ),
+            },
+            "implementations": sorted(
+                children,
+                key=lambda child: (
+                    str(child.get("vendor") or ""),
+                    str(child.get("profile") or ""),
+                    str(child.get("canonical_command") or ""),
+                    str(child.get("id") or ""),
+                ),
+            ),
+        }
+
+    @staticmethod
+    def _check_item_production_summary(
+        groups: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        by_bucket = Counter(str(item["governance_bucket"]) for item in groups)
+        by_status = Counter(str(item["governance_status"]) for item in groups)
+        return {
+            "total": len(groups),
+            "action_required": int(by_bucket["action_required"]),
+            "in_progress": int(by_bucket["in_progress"]),
+            "awaiting_approval": int(by_bucket["awaiting_approval"]),
+            "published": int(by_bucket["published"]),
+            "not_applicable": int(by_bucket["not_applicable"]),
+            "exception": int(by_bucket["exception"]),
+            "unclassified": sum(
+                item.get("check_item_id") is None for item in groups
+            ),
+            "by_bucket": dict(by_bucket),
+            "by_status": dict(by_status),
+        }
+
+    def get_production_unit(
+        self,
+        unit_id: str,
+        *,
+        owner_id: str,
+        is_admin: bool = False,
+        evidence_page: int = 1,
+        evidence_page_size: int = 25,
+    ) -> dict[str, Any]:
+        with get_db_session() as db:
+            query = (
+                db.query(RuleAssetCommandUnitRecord, OfflinePatrolJobRecord)
+                .join(
+                    OfflinePatrolJobRecord,
+                    OfflinePatrolJobRecord.id == RuleAssetCommandUnitRecord.offline_job_id,
+                )
+                .filter(
+                    RuleAssetCommandUnitRecord.id == unit_id,
+                    OfflinePatrolJobRecord.purpose == "rule_asset_source",
+                    OfflinePatrolJobRecord.archived.is_(False),
+                )
+            )
+            if not is_admin:
+                query = query.filter(OfflinePatrolJobRecord.owner_id == owner_id)
+            match = query.first()
+            if match is None:
+                raise KeyError("command asset unit not found")
+            row, source_job = match
+            offline_job_id = str(row.offline_job_id)
+            source_metadata = {
+                "id": source_job.id,
+                "name": source_job.name,
+                "status": source_job.status,
+                "created_at": _iso(source_job.created_at),
+            }
+
+        result = self.get_unit(
+            offline_job_id,
+            unit_id,
+            evidence_page=evidence_page,
+            evidence_page_size=evidence_page_size,
+        )
+        result.update(self._serialize_product_state(result))
+        result["source_job"] = source_metadata
+        return result
+
     def get_unit(
         self,
         offline_job_id: str,
@@ -729,6 +1752,7 @@ class RuleAssetCommandUnitService:
     ) -> dict[str, Any]:
         evidence_page = max(1, int(evidence_page))
         evidence_page_size = max(1, min(int(evidence_page_size), 100))
+        self._ensure_projection_current(offline_job_id)
         with get_db_session() as db:
             require_rule_asset_source_job(db, offline_job_id)
             row = (
@@ -902,6 +1926,7 @@ class RuleAssetCommandUnitService:
             return result
 
     def summary(self, offline_job_id: str) -> dict[str, Any]:
+        self._ensure_projection_current(offline_job_id)
         with get_db_session() as db:
             require_rule_asset_source_job(db, offline_job_id)
             return self._summary(db, offline_job_id)
@@ -966,7 +1991,11 @@ class RuleAssetCommandUnitService:
                 "source_job_tab": "sources",
             }
         )
-        parser_url = _parser_url(command)
+        parser_url = _parser_url(
+            offline_job_id,
+            command,
+            dataset_ids=dataset_ids or [],
+        )
         backfill_url = _backfill_url(
             offline_job_id,
             command,
@@ -1048,6 +2077,9 @@ class RuleAssetCommandUnitService:
         elif parser_job is None:
             parser_generation_status = "not_started"
             parser_generation_blockers = ["尚未创建 Parser 资产任务"]
+        elif parser_job.status == "collecting":
+            parser_generation_status = "ready"
+            parser_generation_blockers = []
         elif parser_job.status in ACTIVE_PARSER_JOB_STATUSES:
             parser_generation_status = "running"
             parser_generation_blockers = []
@@ -1079,7 +2111,14 @@ class RuleAssetCommandUnitService:
                     None
                     if template_active
                     else _action(
-                        "open_parser_job", "处理 Parser", "生成、修订或审批 Parser。", parser_url
+                        "open_parser_job",
+                        (
+                            "配置并生成 Parser"
+                            if parser_job is not None and parser_job.status == "collecting"
+                            else "处理 Parser"
+                        ),
+                        "确认 ParserSpec 与样本期望，生成、验证并审批 Parser。",
+                        parser_url,
                     )
                 ),
             )
@@ -1164,7 +2203,7 @@ class RuleAssetCommandUnitService:
         )
         if active_contract is not None:
             contract_status = "passed"
-        elif not context and contract_status == "not_started":
+        elif contract_status == "not_started":
             contract_status = "ready" if seed and quality_status == "passed" else "not_started"
         contract_artifacts = (
             [{"type": "observation_contract", "id": active_contract.id, "status": "active"}]
@@ -1183,11 +2222,11 @@ class RuleAssetCommandUnitService:
                 artifacts=contract_artifacts,
                 next_action=(
                     None
-                    if contract_status == "passed"
+                    if contract_status == "passed" or bundle is not None
                     else _action(
-                        "generate_contract",
-                        "生成并修订 Contract",
-                        "使用脱敏结构化上下文生成候选。",
+                        "generate_rule_asset_bundle",
+                        "生成完整规则资产包",
+                        "从离线结构化样本生成 Contract、Policy 和 EventRule 候选。",
                         generation_url,
                     )
                 ),
@@ -1213,11 +2252,15 @@ class RuleAssetCommandUnitService:
                 ],
                 next_action=(
                     None
-                    if policy_status in RESOLVED_STAGE_STATUSES
+                    if (
+                        policy_status in RESOLVED_STAGE_STATUSES
+                        or contract_status != "passed"
+                        or bundle is not None
+                    )
                     else _action(
-                        "generate_policy",
-                        "生成并修订 Policy",
-                        "从多周期结构化数据生成变化策略。",
+                        "generate_rule_asset_bundle",
+                        "生成完整规则资产包",
+                        "从离线结构化样本生成缺失的变化策略和事件规则候选。",
                         generation_url,
                     )
                 ),
@@ -1243,11 +2286,16 @@ class RuleAssetCommandUnitService:
                 ],
                 next_action=(
                     None
-                    if event_status in RESOLVED_STAGE_STATUSES
+                    if (
+                        event_status in RESOLVED_STAGE_STATUSES
+                        or contract_status != "passed"
+                        or policy_status not in RESOLVED_STAGE_STATUSES
+                        or bundle is not None
+                    )
                     else _action(
-                        "generate_event_rule",
-                        "生成并修订 Event Rule",
-                        "生成事件与恢复规则。",
+                        "generate_rule_asset_bundle",
+                        "生成完整规则资产包",
+                        "从离线结构化样本补齐事件与恢复规则候选。",
                         generation_url,
                     )
                 ),
@@ -1256,11 +2304,11 @@ class RuleAssetCommandUnitService:
 
         report = dict(bundle.validation_report_json or {}) if bundle else {}
         replay = dict(report.get("historical_replay") or {})
+        context_gate = dict(report.get("context_gate") or {})
+        replay_gate = evaluate_historical_replay_gate(replay, context_gate)
         review = dict((report.get("governance") or {}).get("engineering_review") or {})
         validation_success = report.get("success") is True
-        replay_success = (
-            replay.get("success") is True and int(replay.get("collision_count") or 0) == 0
-        )
+        replay_success = replay_gate.get("success") is True
         review_accepted = review.get("decision") == "accepted"
         if bundle_status == "active":
             review_status = "passed"
@@ -1276,7 +2324,7 @@ class RuleAssetCommandUnitService:
         if bundle and not validation_success:
             review_blockers.append("确定性验证未通过")
         if bundle and not replay_success:
-            review_blockers.append("历史回放未通过或存在规则碰撞")
+            review_blockers.extend(str(item) for item in replay_gate.get("errors") or [])
         stages.append(
             _stage(
                 "validation_review",
@@ -1284,6 +2332,7 @@ class RuleAssetCommandUnitService:
                 "执行合成验证、历史回放、碰撞检查和工程师修订复核。",
                 metrics={
                     "matched_change_count": replay.get("matched_change_count"),
+                    "sampled_change_count": replay.get("sampled_change_count"),
                     "collision_count": replay.get("collision_count"),
                     "estimated_daily_event_count": replay.get("estimated_daily_event_count"),
                     "engineering_review_decision": review.get("decision"),
@@ -1291,7 +2340,7 @@ class RuleAssetCommandUnitService:
                 blockers=review_blockers,
                 next_action=(
                     None
-                    if review_status == "passed"
+                    if review_status == "passed" or bundle is None
                     else _action(
                         "review_bundle", "验证并复核资产包", "查看回放并修订候选资产。", bundle_url
                     )
@@ -1300,7 +2349,12 @@ class RuleAssetCommandUnitService:
         )
         if bundle_status == "active":
             release_status = "passed"
-        elif bundle_status == "pending_approval" and review_accepted and validation_success:
+        elif (
+            bundle_status == "pending_approval"
+            and review_accepted
+            and validation_success
+            and replay_success
+        ):
             release_status = "ready"
         elif bundle is None:
             release_status = "not_started"
@@ -1320,7 +2374,7 @@ class RuleAssetCommandUnitService:
                 ),
                 next_action=(
                     None
-                    if release_status == "passed"
+                    if release_status == "passed" or bundle is None
                     else _action(
                         "release_bundle", "审批发布", "完成工程复核后发布资产包。", bundle_url
                     )
@@ -1335,7 +2389,20 @@ class RuleAssetCommandUnitService:
     ) -> tuple[str, str, int, dict[str, Any] | None]:
         resolved = sum(item["status"] in RESOLVED_STAGE_STATUSES for item in stages)
         progress = round((resolved / len(stages)) * 100) if stages else 0
+        unresolved = [
+            item for item in stages if item["status"] not in RESOLVED_STAGE_STATUSES
+        ]
         current = next(
+            (
+                item
+                for item in unresolved
+                if item["status"] in {"failed", "blocked"} and item.get("next_action")
+            ),
+            None,
+        ) or next(
+            (item for item in unresolved if item["status"] in {"failed", "blocked"}),
+            None,
+        ) or next(
             (item for item in stages if item["status"] not in RESOLVED_STAGE_STATUSES),
             None,
         )
@@ -1391,6 +2458,131 @@ class RuleAssetCommandUnitService:
         }
 
     @staticmethod
+    def _production_summary(rows: list[tuple[str, str, str, int]]) -> dict[str, Any]:
+        by_bucket: Counter[str] = Counter()
+        by_status: Counter[str] = Counter()
+        total = 0
+        for status, current_stage, asset_mode, count in rows:
+            amount = int(count)
+            total += amount
+            by_bucket[
+                _governance_bucket(str(status), str(current_stage), str(asset_mode))
+            ] += amount
+            by_status[
+                _governance_status(str(status), str(current_stage), str(asset_mode))
+            ] += amount
+        return {
+            "total": total,
+            "action_required": int(by_bucket["action_required"]),
+            "in_progress": int(by_bucket["in_progress"]),
+            "awaiting_approval": int(by_bucket["awaiting_approval"]),
+            "published": int(by_bucket["published"]),
+            "not_applicable": int(by_bucket["not_applicable"]),
+            "exception": int(by_bucket["exception"]),
+            "by_bucket": dict(by_bucket),
+            "by_status": dict(by_status),
+        }
+
+    @staticmethod
+    def _apply_governance_filter(
+        query: Any,
+        *,
+        bucket: str | None,
+        governance_status: str | None,
+    ) -> Any:
+        status_column = RuleAssetCommandUnitRecord.status
+        stage_column = RuleAssetCommandUnitRecord.current_stage
+        if bucket == "action_required":
+            query = query.filter(status_column.in_(["ready", "not_started"]))
+        elif bucket == "in_progress":
+            query = query.filter(status_column == "running")
+        elif bucket == "awaiting_approval":
+            query = query.filter(status_column == "needs_review")
+        elif bucket == "published":
+            query = query.filter(
+                status_column == "completed",
+                ~RuleAssetCommandUnitRecord.asset_mode.in_(["raw_hash", "ignored"]),
+            )
+        elif bucket == "not_applicable":
+            query = query.filter(
+                status_column == "completed",
+                RuleAssetCommandUnitRecord.asset_mode.in_(["raw_hash", "ignored"]),
+            )
+        elif bucket == "exception":
+            query = query.filter(status_column.in_(["blocked", "failed"]))
+
+        if governance_status == "preparing":
+            query = query.filter(
+                status_column.in_(["ready", "not_started"]),
+                stage_column.in_(["output_slicing", "identity_grouping"]),
+            )
+        elif governance_status == "ready_to_generate":
+            query = query.filter(
+                status_column.in_(["ready", "not_started"]),
+                ~stage_column.in_(["output_slicing", "identity_grouping"]),
+            )
+        elif governance_status == "generating":
+            query = query.filter(status_column == "running")
+        elif governance_status == "engineering_review":
+            query = query.filter(
+                status_column == "needs_review",
+                stage_column != "release",
+            )
+        elif governance_status == "release_approval":
+            query = query.filter(
+                status_column == "needs_review",
+                stage_column == "release",
+            )
+        elif governance_status == "published":
+            query = query.filter(
+                status_column == "completed",
+                ~RuleAssetCommandUnitRecord.asset_mode.in_(["raw_hash", "ignored"]),
+            )
+        elif governance_status == "not_applicable":
+            query = query.filter(
+                status_column == "completed",
+                RuleAssetCommandUnitRecord.asset_mode.in_(["raw_hash", "ignored"]),
+            )
+        elif governance_status == "blocked":
+            query = query.filter(status_column == "blocked")
+        elif governance_status == "failed":
+            query = query.filter(status_column == "failed")
+        return query
+
+    @classmethod
+    def _serialize_product_state(cls, row: dict[str, Any]) -> dict[str, Any]:
+        status = str(row.get("status") or "")
+        current_stage = str(row.get("current_stage") or "")
+        asset_mode = str(row.get("asset_mode") or "")
+        stage_statuses = dict(row.get("stage_statuses") or {})
+        return {
+            "governance_status": _governance_status(status, current_stage, asset_mode),
+            "governance_bucket": _governance_bucket(status, current_stage, asset_mode),
+            "component_statuses": {
+                "parser": _component_status(stage_statuses.get("parser_generation")),
+                "contract": _component_status(stage_statuses.get("observation_contract")),
+                "policy": _component_status(stage_statuses.get("change_policy")),
+                "event": _component_status(stage_statuses.get("event_rule")),
+            },
+        }
+
+    @classmethod
+    def _serialize_production_row(
+        cls,
+        row: RuleAssetCommandUnitRecord,
+        source_job: OfflinePatrolJobRecord,
+    ) -> dict[str, Any]:
+        result = cls._serialize_row(row)
+        result.update(cls._serialize_product_state(result))
+        result["source_job"] = {
+            "id": source_job.id,
+            "name": source_job.name,
+            "status": source_job.status,
+            "created_at": _iso(source_job.created_at),
+        }
+        return result
+
+    @staticmethod
     def _serialize_row(
         row: RuleAssetCommandUnitRecord,
         *,
@@ -1399,6 +2591,7 @@ class RuleAssetCommandUnitService:
         result = {
             "id": row.id,
             "offline_job_id": row.offline_job_id,
+            "check_item_id": row.check_item_id,
             "asset_key": row.asset_key,
             "vendor": row.vendor,
             "model": row.model,

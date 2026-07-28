@@ -16,6 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.core.patrol.change_policy import (  # noqa: E402
+    compose_dimension_policies,
     infer_change_policy,
     numeric_stats,
     policy_from_dict,
@@ -35,11 +36,15 @@ def _historical_values(params: dict[str, Any]) -> list[Any]:
 
 
 def _target_historical_values(
-    params: dict[str, Any], field_name: str
+    params: dict[str, Any],
+    field_name: str,
+    *,
+    field_ref: str | None = None,
 ) -> list[Any]:
     by_field = params.get("historical_values_by_field")
-    if isinstance(by_field, dict) and isinstance(by_field.get(field_name), list):
-        return list(by_field[field_name])
+    lookup = str(field_ref or field_name)
+    if isinstance(by_field, dict) and isinstance(by_field.get(lookup), list):
+        return list(by_field[lookup])
     records = params.get("records") or params.get("structured_records") or []
     if isinstance(records, list):
         values = [
@@ -316,6 +321,7 @@ def run_change_policy_generation(params: dict[str, Any]) -> dict[str, Any]:
             field_name = str(target.get("field_name") or "").strip()
             observation_type = str(target.get("observation_type") or "").strip()
             field_semantics = dict(target.get("field_semantics") or {})
+            record_set_name = str(target.get("record_set_name") or "").strip()
             if not field_name or not observation_type:
                 raise ValueError(
                     f"policy_targets[{index}] requires field_name and observation_type"
@@ -326,19 +332,47 @@ def run_change_policy_generation(params: dict[str, Any]) -> dict[str, Any]:
                 "field_name": field_name,
                 "observation_type": observation_type,
                 "field_semantics": field_semantics,
-                "historical_values": _target_historical_values(params, field_name),
+                "records": [
+                    {
+                        str(key): value
+                        for key, value in record.items()
+                        if str(key) != "__record_set__"
+                    }
+                    for record in params.get("records") or []
+                    if isinstance(record, dict)
+                    and (
+                        not record_set_name
+                        or str(record.get("__record_set__") or "")
+                        == record_set_name
+                    )
+                ],
+                "historical_values": _target_historical_values(
+                    params,
+                    field_name,
+                    field_ref=str(target.get("field_ref") or "") or None,
+                ),
                 "threshold_references": target.get("threshold_references") or {},
+                "dimension_selector": target.get("dimension_selector") or {},
                 "policy_constraints": target.get("policy_constraints")
                 or field_semantics.get("policy_constraints")
                 or (params.get("policy_constraints_by_field") or {}).get(field_name)
                 or params.get("policy_constraints"),
             }
             results.append(run_change_policy_generation(child_params))
+        target_policies = [
+            dict(result["policy"])
+            for result in results
+            if isinstance(result.get("policy"), dict)
+        ]
+        policies = compose_dimension_policies(target_policies)
         return {
             "success": all(result.get("success") is True for result in results),
             "mode": "policy_target_fanout",
-            "policy_count": len(results),
-            "policies": [result.get("policy") for result in results if result.get("policy")],
+            "policy_count": len(policies),
+            "target_policy_count": len(target_policies),
+            "policy": policies[0] if len(policies) == 1 else None,
+            "policies": policies,
+            "target_policies": target_policies,
             "results": results,
             "agent_loop": _merge_generated_loops(results),
             "generation_provider": str(
@@ -348,6 +382,7 @@ def run_change_policy_generation(params: dict[str, Any]) -> dict[str, Any]:
     mode = str(params.get("mode") or "infer_and_validate").strip().lower()
     values = _historical_values(params)
     proposal_payload = params.get("proposal") or params.get("change_policy")
+    dimension_selector = dict(params.get("dimension_selector") or {})
     generation_provider = str(params.get("generation_provider") or "").strip().casefold()
     if generation_provider == "llm" and mode != "validate":
         observation_type = str(
@@ -365,6 +400,7 @@ def run_change_policy_generation(params: dict[str, Any]) -> dict[str, Any]:
                 threshold_references,
                 policy_constraints,
             )
+            compiled_candidate["dimension_selector"] = dimension_selector
             policy = policy_from_dict(compiled_candidate)
             report = dict(validate_change_policy(policy))
             errors = [str(item) for item in report.get("errors") or []]
@@ -416,6 +452,7 @@ def run_change_policy_generation(params: dict[str, Any]) -> dict[str, Any]:
             historical_values=values,
             device_role=params.get("device_role"),
             policy_intent=params.get("policy_intent"),
+            dimension_selector=dimension_selector,
         )
         policy = policy_from_dict(
             _compile_reference_policy_candidate(
@@ -436,7 +473,9 @@ def run_change_policy_generation(params: dict[str, Any]) -> dict[str, Any]:
     if mode == "validate":
         if not isinstance(proposal_payload, dict):
             raise ValueError("proposal is required in validate mode")
-        policy = policy_from_dict(proposal_payload)
+        policy = policy_from_dict(
+            {**proposal_payload, "dimension_selector": dimension_selector}
+        )
         validation = dict(validate_change_policy(policy))
         constraint_errors = _validate_policy_constraints(
             policy, dict(params.get("policy_constraints") or {})
@@ -469,8 +508,10 @@ def run_change_policy_generation(params: dict[str, Any]) -> dict[str, Any]:
                 historical_values=values,
                 device_role=params.get("device_role"),
                 policy_intent=params.get("policy_intent"),
+                dimension_selector=dimension_selector,
             ).to_dict()
         )
+        candidate["dimension_selector"] = dimension_selector
         policy = policy_from_dict(
             _compile_reference_policy_candidate(
                 candidate,

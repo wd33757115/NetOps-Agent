@@ -24,6 +24,7 @@ class PatrolBatchDownloadRouteTests(SimpleTestCase):
         expected = {
             "bff_patrol_batch_summary": "summary/",
             "bff_patrol_batch_devices": "devices",
+            "bff_patrol_batch_check_results": "check-results",
             "bff_patrol_batch_archive": "archive/",
             "bff_patrol_batch_restore": "restore/",
             "bff_patrol_batch_rerun": "rerun/",
@@ -63,3 +64,30 @@ class OfflinePatrolRouteTests(SimpleTestCase):
             match = resolve(path)
             self.assertEqual(path, f"/api/patrol/offline-jobs/{suffix}/")
             self.assertEqual(match.url_name, "bff_offline_patrol_job_path")
+
+
+class PatrolGovernanceRouteTests(SimpleTestCase):
+    def test_report_manifest_and_risk_routes_use_patrol_proxy(self):
+        for suffix in (
+            "batches/patrol-batch-test/report-manifest",
+            "batches/patrol-batch-test/reports/materialize",
+            "risk-cases",
+        ):
+            path = reverse("bff_patrol_path", kwargs={"path": suffix})
+            match = resolve(path)
+
+            self.assertEqual(path, f"/api/patrol/{suffix}")
+            self.assertEqual(match.url_name, "bff_patrol_path")
+
+    def test_patrol_proxy_maps_to_versioned_gateway_path(self):
+        from bff.views.patrol import _patrol_api_path
+
+        self.assertEqual(
+            _patrol_api_path(
+                "/batches/patrol-batch-test/report-manifest/"
+            ),
+            (
+                "/api/v1/patrol/batches/"
+                "patrol-batch-test/report-manifest"
+            ),
+        )

@@ -70,9 +70,8 @@ def init_postgres_schema():
 
     print("[OK] Initializing PostgreSQL Schema for LangGraph...")
 
-    with engine.connect() as conn:
-        PostgresSaver.create_tables(conn)
-        conn.commit()
+    with PostgresSaver.from_conn_string(settings.postgres_url) as saver:
+        saver.setup()
 
     print("[OK] PostgreSQL LangGraph Schema initialized")
 

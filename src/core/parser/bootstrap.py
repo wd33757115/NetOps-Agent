@@ -410,6 +410,7 @@ def bootstrap_shared_templates(root: str | Path | None = None) -> dict[str, Any]
                 version=version,
                 asset_path=str(target),
                 sha256=digest,
+                template_text=content,
                 validation={
                     **_activation_validation(entry),
                     "bootstrap_source_path": str(asset_path),

@@ -17,6 +17,8 @@ PARSE_STATUSES = {
     "not_applicable",
     "empty_unverified",
     "command_error",
+    "truncated",
+    "paged",
 }
 FACT_STATUSES = {
     "ready",
@@ -82,6 +84,8 @@ def derive_command_status(
         "not_applicable": ("not_applicable", "skipped"),
         "empty_unverified": ("blocked_by_output", "blocked"),
         "command_error": ("blocked_by_output", "blocked"),
+        "truncated": ("blocked_by_output", "blocked"),
+        "paged": ("blocked_by_output", "blocked"),
     }
     fact_status, normalization_status = mapping[parsed]
     return PatrolCommandStatus(execution, parsed, fact_status, normalization_status)

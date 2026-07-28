@@ -120,23 +120,30 @@ class RuleAssetTemplateActivationService:
         self,
         job_id: str,
         *,
+        dataset_ids: list[str] | None = None,
         actor: str | None = None,
     ) -> dict[str, Any]:
-        """Build immutable context from parser-template snapshots when possible.
-
-        Contexts that fail the quality gate (too few sampled records or a
-        mostly-empty target field) are persisted for inspection but do NOT mark
-        the job ready: missing_context is kept so operators attach a real
-        offline dataset instead of generating from unreliable samples.
-        """
+        """Build immutable context only from an explicit offline asset-source dataset."""
         from src.core.rule_control.dataset_context import DatasetRuleGenerationContextService
 
-        prepared = DatasetRuleGenerationContextService().prepare_from_parser_template(
+        selected_dataset_ids = sorted(
+            {str(item).strip() for item in (dataset_ids or []) if str(item).strip()}
+        )
+        if not selected_dataset_ids:
+            raise ValueError(
+                "select an offline patrol dataset before building rule generation context"
+            )
+        prepared = DatasetRuleGenerationContextService().prepare(
             job_id=job_id,
+            dataset_ids=selected_dataset_ids,
             created_by=actor or "parser-template-activation",
         )
-        quality = dict((prepared.get("privacy") or {}).get("quality") or {})
-        quality_passed = bool(quality.get("passed", True))
+        quality = {
+            "passed": bool((prepared.get("context") or {}).get("records")),
+            "record_count": len((prepared.get("context") or {}).get("records") or []),
+            "scope": "offline_period_authoritative_runs",
+        }
+        quality_passed = quality["passed"]
         job = self.job_repository.get_job(job_id)
         payload = dict((job or {}).get("payload_json") or {})
         payload["auto_context_id"] = prepared["context_id"]
@@ -263,6 +270,7 @@ class RuleAssetTemplateActivationService:
         from src.core.workflows.engine import WorkflowEngine
 
         workflow_context = dict(prepared["context"])
+        workflow_context["rule_generation_seed_job_id"] = job_id
         workflow_context["rule_generation_context_id"] = context_id
         workflow_context["rule_generation_context_digest"] = immutable_context["context_digest"]
         run_id = WorkflowEngine.start(
@@ -271,6 +279,24 @@ class RuleAssetTemplateActivationService:
             source="parser-control-plane",
             user_id=actor,
         )
+        job = self.job_repository.get_job(job_id) or {}
+        payload = dict(job.get("payload_json") or {})
+        run_history = [
+            dict(item)
+            for item in payload.get("generation_workflow_runs") or []
+            if isinstance(item, dict)
+        ]
+        run_history.append(
+            {
+                "run_id": run_id,
+                "context_id": context_id,
+                "context_digest": immutable_context["context_digest"],
+            }
+        )
+        payload["latest_generation_run_id"] = run_id
+        payload["latest_generation_context_id"] = context_id
+        payload["generation_workflow_runs"] = run_history[-20:]
+        self.job_repository.update_job(job_id, payload_json=payload)
         return {
             "success": True,
             "workflow": "rule-asset-generation",
@@ -286,12 +312,23 @@ def _contract_seed(template: Any, validation: dict[str, Any]) -> dict[str, Any]:
         "category": getattr(template, "category", None),
         "entity_type": validation.get("entity_type") or getattr(template, "category", None),
         "primary_keys": list(validation.get("primary_keys") or []),
+        "canonical_entity_type": validation.get("canonical_entity_type"),
+        "entity_identity_fields": list(
+            validation.get("entity_identity_fields") or []
+        ),
+        "entity_dimensions": dict(validation.get("entity_dimensions") or {}),
         "required_fields": list(validation.get("required_fields") or []),
         "optional_fields": list(validation.get("optional_fields") or []),
         "ignore_fields": list(validation.get("ignore_fields") or []),
         "allow_empty": bool(validation.get("allow_empty")),
+        "empty_patterns": list(validation.get("empty_patterns") or []),
         "validators": dict(validation.get("validators") or {}),
         "state_semantics": dict(validation.get("state_semantics") or {}),
+        "record_sets": [
+            dict(item)
+            for item in validation.get("record_sets") or []
+            if isinstance(item, dict)
+        ],
         "contract_version": validation.get("contract_version"),
         "contract_sha256": validation.get("contract_sha256"),
     }
@@ -460,4 +497,11 @@ def _generation_context_missing(
         dict,
     ):
         missing.append("field_semantics:object")
+    target_resolution = str(
+        context.get("target_resolution") or ""
+    ).strip()
+    if target_resolution == "unclassified":
+        missing.append("check_item_target")
+    elif target_resolution == "multi_entity_partition_required":
+        missing.append("check_item_record_set_partition")
     return list(dict.fromkeys(missing))

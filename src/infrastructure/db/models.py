@@ -223,6 +223,7 @@ class PatrolBatchSummaryProjection(Base):
     summary_json = Column(JSON, nullable=False)
     markdown_text = Column(Text, nullable=False)
     object_key = Column(String(512), nullable=True)
+    report_manifest_id = Column(String(64), nullable=True, index=True)
     generated_at = Column(DateTime(timezone=True), nullable=False)
     updated_at = Column(DateTime(timezone=True), nullable=False)
 
@@ -246,6 +247,12 @@ class PatrolBatchRecord(Base):
     target_count = Column(Integer, nullable=False, default=0)
     launched_count = Column(Integer, nullable=False, default=0)
     skipped_count = Column(Integer, nullable=False, default=0)
+    target_manifest_digest = Column(String(64), nullable=True, index=True)
+    inventory_snapshot_digest = Column(String(64), nullable=True, index=True)
+    runtime_manifest_id = Column(String(64), nullable=True, index=True)
+    runtime_manifest_digest = Column(String(64), nullable=True, index=True)
+    report_manifest_id = Column(String(64), nullable=True, index=True)
+    report_manifest_digest = Column(String(64), nullable=True, index=True)
     save_baseline = Column(
         Boolean,
         nullable=False,
@@ -1188,6 +1195,9 @@ class CommandSnapshot(Base):
     )
     device_id = Column(String(256), nullable=False, index=True)
     execution_item_id = Column(String(128), nullable=False, index=True)
+    collection_action_id = Column(String(64), nullable=True, index=True)
+    implementation_version_id = Column(String(64), nullable=True, index=True)
+    check_item_ids_json = Column(JSON, nullable=True)
     device_name = Column(String(256), nullable=False)
     management_ip = Column(String(64), nullable=True)
     vendor = Column(String(64), nullable=True, index=True)
@@ -1262,6 +1272,7 @@ class PatrolCollectionResult(Base):
     )
     device_id = Column(String(256), nullable=False, index=True)
     execution_item_id = Column(String(128), nullable=False, index=True)
+    collection_action_id = Column(String(64), nullable=True, index=True)
     canonical_command = Column(String(512), nullable=False, index=True)
     status = Column(
         String(32), nullable=False, default="unknown", server_default="unknown", index=True
@@ -1332,7 +1343,13 @@ class RawEvidenceRecord(Base):
 
     id = Column(String(64), primary_key=True)
     evidence_key = Column(String(256), nullable=False)
-    source = Column(String(32), nullable=False, default="cli", index=True, comment="cli|gnmi|snmp|syslog")
+    source = Column(
+        String(32),
+        nullable=False,
+        default="cli",
+        index=True,
+        comment="cli|gnmi|snmp|syslog",
+    )
     source_type = Column(String(64), nullable=False, index=True)
     evidence_type = Column(String(128), nullable=False, index=True)
     run_id = Column(String(128), nullable=True, index=True)
@@ -1391,6 +1408,7 @@ class StateObservationRecord(Base):
 
     id = Column(String(64), primary_key=True)
     idempotency_key = Column(String(64), nullable=False)
+    state_key = Column(String(64), nullable=True, index=True)
     run_id = Column(String(128), nullable=False, index=True)
     snapshot_id = Column(
         String(64),
@@ -1422,6 +1440,8 @@ class StateObservationRecord(Base):
     observation_type = Column(String(256), nullable=True, index=True)
     semantic_type = Column(String(64), nullable=True, index=True)
     unit = Column(String(64), nullable=True)
+    dimensions_json = Column(JSON, nullable=True)
+    dimension_signature = Column(String(64), nullable=True, index=True)
     value_json = Column(JSON, nullable=True)
     value_text = Column(Text, nullable=True)
     value_number = Column(Float, nullable=True)
@@ -1477,6 +1497,8 @@ class CurrentStateRecord(Base):
     observation_type = Column(String(256), nullable=True, index=True)
     semantic_type = Column(String(64), nullable=True, index=True)
     unit = Column(String(64), nullable=True)
+    dimensions_json = Column(JSON, nullable=True)
+    dimension_signature = Column(String(64), nullable=True, index=True)
     value_json = Column(JSON, nullable=True)
     value_text = Column(Text, nullable=True)
     value_number = Column(Float, nullable=True)
@@ -1541,6 +1563,9 @@ class NetworkChangeRecord(Base):
     id = Column(String(64), primary_key=True)
     idempotency_key = Column(String(64), nullable=False)
     run_id = Column(String(128), nullable=True, index=True)
+    check_item_id = Column(String(128), nullable=True, index=True)
+    check_item_version_id = Column(String(64), nullable=True, index=True)
+    check_execution_id = Column(String(64), nullable=True, index=True)
     device_id = Column(String(256), nullable=True, index=True)
     canonical_command = Column(String(512), nullable=True, index=True)
     entity_type = Column(String(128), nullable=False, index=True)
@@ -1639,6 +1664,9 @@ class NetworkEventRecord(Base):
 
     id = Column(String(64), primary_key=True)
     idempotency_key = Column(String(64), nullable=False)
+    check_item_id = Column(String(128), nullable=True, index=True)
+    check_item_version_id = Column(String(64), nullable=True, index=True)
+    check_execution_id = Column(String(64), nullable=True, index=True)
     event_type = Column(String(128), nullable=False, index=True)
     severity = Column(String(32), nullable=False, index=True)
     device_id = Column(String(256), nullable=True, index=True)
@@ -1820,6 +1848,9 @@ class EventRuleVersionRecord(Base):
     event_class = Column(
         String(32), nullable=False, default="fault", server_default="fault", index=True
     )
+    evaluation_scope = Column(
+        String(32), nullable=False, default="both", server_default="both", index=True
+    )
     recovery_json = Column(JSON, nullable=True)
     correlation_key_json = Column(JSON, nullable=True)
     status = Column(String(32), nullable=False, default="draft", index=True)
@@ -1832,6 +1863,10 @@ class EventRuleVersionRecord(Base):
     deprecated_at = Column(DateTime, nullable=True)
 
     __table_args__ = (
+        CheckConstraint(
+            "evaluation_scope IN ('current_state', 'change', 'both')",
+            name="ck_event_rule_version_evaluation_scope",
+        ),
         Index("uq_event_rule_version", "rule_id", "version", unique=True),
         Index(
             "uq_event_rule_active_version",
@@ -1952,6 +1987,1555 @@ class CollectionProfileBindingRecord(Base):
         return {column.name: getattr(self, column.name) for column in self.__table__.columns}
 
 
+class CheckItemRecord(Base):
+    """Stable business identity for one patrol check item."""
+
+    __tablename__ = "netops_check_items"
+
+    id = Column(String(128), primary_key=True)
+    name = Column(String(256), nullable=False)
+    category = Column(String(64), nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    status = Column(
+        String(32), nullable=False, default="draft", server_default="draft", index=True
+    )
+    current_version = Column(Integer, nullable=False, default=0, server_default="0")
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class CheckItemVersionRecord(Base):
+    """Immutable version of check-item semantics and report behavior."""
+
+    __tablename__ = "netops_check_item_versions"
+
+    id = Column(String(64), primary_key=True)
+    check_item_id = Column(
+        String(128),
+        ForeignKey("netops_check_items.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    version = Column(Integer, nullable=False)
+    result_mode = Column(String(32), nullable=False, index=True)
+    assessment_mode = Column(String(32), nullable=False, index=True)
+    canonical_contract_json = Column(JSON, nullable=False)
+    report_projection = Column(String(128), nullable=False, index=True)
+    applicability_json = Column(JSON, nullable=True)
+    freshness_policy_json = Column(JSON, nullable=True)
+    empty_result_policy_json = Column(JSON, nullable=True)
+    coverage_policy_json = Column(JSON, nullable=True)
+    status = Column(
+        String(32), nullable=False, default="draft", server_default="draft", index=True
+    )
+    digest = Column(String(64), nullable=False, index=True)
+    created_by = Column(String(128), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    activated_at = Column(DateTime(timezone=True), nullable=True)
+    deprecated_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "result_mode IN ('structured', 'normalized_diff', 'hash_only', 'evidence_only')",
+            name="ck_check_item_version_result_mode",
+        ),
+        CheckConstraint(
+            "assessment_mode IN ('health', 'change', 'evidence')",
+            name="ck_check_item_version_assessment_mode",
+        ),
+        CheckConstraint(
+            "status IN ('draft', 'active', 'deprecated')",
+            name="ck_check_item_version_status",
+        ),
+        Index(
+            "uq_check_item_version",
+            "check_item_id",
+            "version",
+            unique=True,
+        ),
+        Index(
+            "uq_check_item_active_version",
+            "check_item_id",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+            sqlite_where=text("status = 'active'"),
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class CollectionImplementationRecord(Base):
+    """Stable identity for a vendor/platform-specific collection implementation."""
+
+    __tablename__ = "netops_collection_implementations"
+
+    id = Column(String(128), primary_key=True)
+    name = Column(String(256), nullable=False)
+    description = Column(Text, nullable=True)
+    status = Column(
+        String(32), nullable=False, default="draft", server_default="draft", index=True
+    )
+    current_version = Column(Integer, nullable=False, default=0, server_default="0")
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class CollectionImplementationVersionRecord(Base):
+    """Immutable compatibility selector and command chain for one implementation."""
+
+    __tablename__ = "netops_collection_implementation_versions"
+
+    id = Column(String(64), primary_key=True)
+    implementation_id = Column(
+        String(128),
+        ForeignKey("netops_collection_implementations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    version = Column(Integer, nullable=False)
+    collector = Column(String(32), nullable=False, default="cli", server_default="cli")
+    match_json = Column(JSON, nullable=False)
+    commands_json = Column(JSON, nullable=False)
+    parser_requirement = Column(String(32), nullable=False, index=True)
+    template_scope = Column(String(32), nullable=True)
+    output_quality_policy_json = Column(JSON, nullable=True)
+    selection_priority = Column(Integer, nullable=False, default=100, server_default="100")
+    status = Column(
+        String(32), nullable=False, default="draft", server_default="draft", index=True
+    )
+    digest = Column(String(64), nullable=False, index=True)
+    created_by = Column(String(128), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    activated_at = Column(DateTime(timezone=True), nullable=True)
+    deprecated_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "parser_requirement IN ('structured', 'normalized_diff', 'hash_only', 'evidence_only')",
+            name="ck_collection_impl_parser_requirement",
+        ),
+        CheckConstraint(
+            "status IN ('draft', 'active', 'deprecated')",
+            name="ck_collection_impl_version_status",
+        ),
+        Index(
+            "uq_collection_implementation_version",
+            "implementation_id",
+            "version",
+            unique=True,
+        ),
+        Index(
+            "uq_collection_implementation_active",
+            "implementation_id",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+            sqlite_where=text("status = 'active'"),
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class CheckItemImplementationLinkRecord(Base):
+    """Normalized many-to-many relation between immutable asset versions."""
+
+    __tablename__ = "netops_check_item_implementation_links"
+
+    id = Column(String(64), primary_key=True)
+    check_item_version_id = Column(
+        String(64),
+        ForeignKey("netops_check_item_versions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    implementation_version_id = Column(
+        String(64),
+        ForeignKey("netops_collection_implementation_versions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    priority = Column(Integer, nullable=False, default=100, server_default="100")
+    required = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_check_item_implementation_link",
+            "check_item_version_id",
+            "implementation_version_id",
+            unique=True,
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class CollectionImplementationParserBindingRecord(Base):
+    """Approved Parser binding for one implementation command."""
+
+    __tablename__ = "netops_collection_implementation_parsers"
+
+    id = Column(String(64), primary_key=True)
+    implementation_version_id = Column(
+        String(64),
+        ForeignKey("netops_collection_implementation_versions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    canonical_command = Column(String(512), nullable=False)
+    parser_template_id = Column(
+        String(64),
+        ForeignKey("parser_templates.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    record_set = Column(String(64), nullable=False, default="default", server_default="default")
+    binding_role = Column(String(32), nullable=False, default="primary", server_default="primary")
+    output_signature = Column(String(64), nullable=True, index=True)
+    status = Column(
+        String(32), nullable=False, default="draft", server_default="draft", index=True
+    )
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_collection_implementation_parser",
+            "implementation_version_id",
+            "canonical_command",
+            "record_set",
+            "binding_role",
+            unique=True,
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class ComparisonContextRecord(Base):
+    """Immutable baseline-selection decision for one device and check item."""
+
+    __tablename__ = "netops_comparison_contexts"
+
+    id = Column(String(64), primary_key=True)
+    digest = Column(String(64), nullable=False, unique=True, index=True)
+    mode = Column(String(32), nullable=False, index=True)
+    device_id = Column(String(256), nullable=False, index=True)
+    check_item_version_id = Column(
+        String(64),
+        ForeignKey("netops_check_item_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    current_observed_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    baseline_observed_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    baseline_run_id = Column(String(128), nullable=True, index=True)
+    baseline_snapshot_ids_json = Column(JSON, nullable=True)
+    max_baseline_age_seconds = Column(Integer, nullable=True)
+    canonical_schema_version = Column(String(128), nullable=True)
+    entity_identity_policy_version = Column(String(64), nullable=True)
+    selection_reason = Column(String(256), nullable=False)
+    metadata_json = Column(JSON, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "mode IN ('online_previous_success', 'explicit_periods', 'no_baseline')",
+            name="ck_comparison_context_mode",
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class CheckExecutionRecord(Base):
+    """Execution fact for one batch, device and immutable check-item version."""
+
+    __tablename__ = "netops_check_executions"
+
+    id = Column(String(64), primary_key=True)
+    idempotency_key = Column(String(128), nullable=False, unique=True)
+    patrol_batch_id = Column(String(128), nullable=False, index=True)
+    device_id = Column(String(256), nullable=False, index=True)
+    check_item_version_id = Column(
+        String(64),
+        ForeignKey("netops_check_item_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    implementation_version_id = Column(
+        String(64),
+        ForeignKey("netops_collection_implementation_versions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    collection_action_ids_json = Column(JSON, nullable=False, default=list)
+    runtime_bundle_id = Column(String(64), nullable=True, index=True)
+    runtime_bundle_version_id = Column(String(64), nullable=True, index=True)
+    runtime_bundle_digest = Column(String(64), nullable=True, index=True)
+    comparison_context_id = Column(
+        String(64),
+        ForeignKey("netops_comparison_contexts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    execution_status = Column(
+        String(32), nullable=False, default="planned", server_default="planned", index=True
+    )
+    reason_codes_json = Column(JSON, nullable=False, default=list)
+    observation_count = Column(Integer, nullable=False, default=0, server_default="0")
+    observed_entity_count = Column(Integer, nullable=False, default=0, server_default="0")
+    change_count = Column(Integer, nullable=False, default=0, server_default="0")
+    event_count = Column(Integer, nullable=False, default=0, server_default="0")
+    current_finding_count = Column(Integer, nullable=False, default=0, server_default="0")
+    assessment_id = Column(String(64), nullable=True, index=True)
+    evidence_qualification_id = Column(String(64), nullable=True, index=True)
+    coverage_decision_id = Column(String(64), nullable=True, index=True)
+    source_identity_status = Column(
+        String(32), nullable=False, default="unknown", server_default="unknown", index=True
+    )
+    output_quality_status = Column(
+        String(32), nullable=False, default="unknown", server_default="unknown", index=True
+    )
+    freshness_status = Column(
+        String(32), nullable=False, default="unknown", server_default="unknown", index=True
+    )
+    empty_result_classification = Column(
+        String(32),
+        nullable=False,
+        default="not_evaluated",
+        server_default="not_evaluated",
+        index=True,
+    )
+    coverage_status = Column(
+        String(32), nullable=False, default="unknown", server_default="unknown", index=True
+    )
+    coverage_basis = Column(
+        String(32), nullable=False, default="unknown", server_default="unknown", index=True
+    )
+    risk_verification_status = Column(
+        String(32), nullable=False, default="unknown", server_default="unknown", index=True
+    )
+    expected_entity_count = Column(Integer, nullable=True)
+    observation_min_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    observation_max_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    target_manifest_digest = Column(String(64), nullable=False, index=True)
+    asset_manifest_digest = Column(String(64), nullable=True, index=True)
+    evidence_refs_json = Column(JSON, nullable=False, default=list)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "execution_status IN ("
+            "'planned', 'collecting', 'processing', 'completed', 'not_applicable', "
+            "'unsupported', 'blocked_asset_missing', 'collection_failed', 'parse_failed', "
+            "'normalization_failed', 'comparison_failed', 'assessment_failed', 'cancelled')",
+            name="ck_check_execution_status",
+        ),
+        Index(
+            "uq_check_execution_scope",
+            "patrol_batch_id",
+            "device_id",
+            "check_item_version_id",
+            unique=True,
+        ),
+        Index(
+            "ix_check_execution_batch_status",
+            "patrol_batch_id",
+            "execution_status",
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class CheckAssessmentRecord(Base):
+    """Explicit health, completeness and comparison conclusion for a check execution."""
+
+    __tablename__ = "netops_check_assessments"
+
+    id = Column(String(64), primary_key=True)
+    idempotency_key = Column(String(128), nullable=False, unique=True)
+    patrol_batch_id = Column(String(128), nullable=False, index=True)
+    device_id = Column(String(256), nullable=False, index=True)
+    check_item_version_id = Column(
+        String(64),
+        ForeignKey("netops_check_item_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    execution_id = Column(
+        String(64),
+        ForeignKey("netops_check_executions.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    assessment_status = Column(String(32), nullable=False, index=True)
+    completeness_status = Column(String(32), nullable=False, index=True)
+    comparison_status = Column(String(32), nullable=False, index=True)
+    expected_entity_count = Column(Integer, nullable=True)
+    observed_entity_count = Column(Integer, nullable=False, default=0, server_default="0")
+    evaluated_entity_count = Column(Integer, nullable=False, default=0, server_default="0")
+    threshold_unknown_count = Column(Integer, nullable=False, default=0, server_default="0")
+    current_finding_ids_json = Column(JSON, nullable=False, default=list)
+    risk_case_ids_json = Column(JSON, nullable=False, default=list)
+    evidence_qualification_id = Column(String(64), nullable=True, index=True)
+    coverage_decision_id = Column(String(64), nullable=True, index=True)
+    source_identity_status = Column(
+        String(32), nullable=False, default="unknown", server_default="unknown", index=True
+    )
+    output_quality_status = Column(
+        String(32), nullable=False, default="unknown", server_default="unknown", index=True
+    )
+    freshness_status = Column(
+        String(32), nullable=False, default="unknown", server_default="unknown", index=True
+    )
+    empty_result_classification = Column(
+        String(32),
+        nullable=False,
+        default="not_evaluated",
+        server_default="not_evaluated",
+        index=True,
+    )
+    coverage_status = Column(
+        String(32), nullable=False, default="unknown", server_default="unknown", index=True
+    )
+    coverage_basis = Column(
+        String(32), nullable=False, default="unknown", server_default="unknown", index=True
+    )
+    risk_verification_status = Column(
+        String(32), nullable=False, default="unknown", server_default="unknown", index=True
+    )
+    blocking_reason_codes_json = Column(JSON, nullable=False, default=list)
+    assessment_rule_bundle_digest = Column(String(64), nullable=True, index=True)
+    comparison_context_digest = Column(String(64), nullable=True, index=True)
+    evidence_digest = Column(String(64), nullable=False, index=True)
+    assessed_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "assessment_status IN ("
+            "'healthy', 'at_risk', 'unable_to_determine', 'not_applicable', 'informational')",
+            name="ck_check_assessment_status",
+        ),
+        CheckConstraint(
+            "completeness_status IN ('complete', 'partial', 'insufficient')",
+            name="ck_check_assessment_completeness",
+        ),
+        CheckConstraint(
+            "comparison_status IN ("
+            "'comparable', 'first_observation', 'baseline_missing', "
+            "'baseline_stale', 'schema_incompatible')",
+            name="ck_check_assessment_comparison",
+        ),
+        Index(
+            "uq_check_assessment_scope",
+            "patrol_batch_id",
+            "device_id",
+            "check_item_version_id",
+            unique=True,
+        ),
+        Index(
+            "ix_check_assessment_batch_status",
+            "patrol_batch_id",
+            "assessment_status",
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class EvidenceQualificationRecord(Base):
+    """Immutable identity, output-quality and freshness decision for one execution."""
+
+    __tablename__ = "netops_evidence_qualifications"
+
+    id = Column(String(64), primary_key=True)
+    digest = Column(String(64), nullable=False, unique=True, index=True)
+    check_execution_id = Column(
+        String(64),
+        ForeignKey("netops_check_executions.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    patrol_batch_id = Column(String(128), nullable=False, index=True)
+    device_id = Column(String(256), nullable=False, index=True)
+    check_item_version_id = Column(
+        String(64),
+        ForeignKey("netops_check_item_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    implementation_version_id = Column(String(64), nullable=True, index=True)
+    runtime_bundle_version_id = Column(String(64), nullable=True, index=True)
+    runtime_bundle_digest = Column(String(64), nullable=True, index=True)
+    source_identity_status = Column(String(32), nullable=False, index=True)
+    output_quality_status = Column(String(32), nullable=False, index=True)
+    freshness_status = Column(String(32), nullable=False, index=True)
+    empty_result_classification = Column(String(32), nullable=False, index=True)
+    snapshot_ids_json = Column(JSON, nullable=False, default=list)
+    observation_min_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    observation_max_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    qualification_reason_codes_json = Column(JSON, nullable=False, default=list)
+    policy_snapshot_json = Column(JSON, nullable=False, default=dict)
+    policy_digest = Column(String(64), nullable=False, index=True)
+    profile_version_id = Column(String(64), nullable=True, index=True)
+    profile_digest = Column(String(64), nullable=True, index=True)
+    evidence_refs_json = Column(JSON, nullable=False, default=list)
+    qualified_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "source_identity_status IN "
+            "('confirmed', 'ambiguous', 'conflict', 'external_unbound', 'unknown')",
+            name="ck_evidence_qualification_identity",
+        ),
+        CheckConstraint(
+            "output_quality_status IN "
+            "('complete', 'empty', 'unsupported', 'device_error', 'truncated', "
+            "'paged', 'ambiguous', 'unknown')",
+            name="ck_evidence_qualification_output",
+        ),
+        CheckConstraint(
+            "freshness_status IN ('fresh', 'stale', 'unknown')",
+            name="ck_evidence_qualification_freshness",
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class CoverageDecisionRecord(Base):
+    """Immutable expected-versus-observed entity-set decision."""
+
+    __tablename__ = "netops_coverage_decisions"
+
+    id = Column(String(64), primary_key=True)
+    digest = Column(String(64), nullable=False, unique=True, index=True)
+    check_execution_id = Column(
+        String(64),
+        ForeignKey("netops_check_executions.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    patrol_batch_id = Column(String(128), nullable=False, index=True)
+    device_id = Column(String(256), nullable=False, index=True)
+    check_item_version_id = Column(
+        String(64),
+        ForeignKey("netops_check_item_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    coverage_status = Column(String(32), nullable=False, index=True)
+    coverage_basis = Column(String(32), nullable=False, index=True)
+    expected_entity_count = Column(Integer, nullable=True)
+    observed_entity_count = Column(Integer, nullable=False, default=0, server_default="0")
+    evaluated_entity_count = Column(Integer, nullable=False, default=0, server_default="0")
+    expected_entity_set_digest = Column(String(64), nullable=True, index=True)
+    observed_entity_set_digest = Column(String(64), nullable=False, index=True)
+    denominator_ref_json = Column(JSON, nullable=False, default=dict)
+    missing_entity_sample_json = Column(JSON, nullable=False, default=list)
+    unexpected_entity_sample_json = Column(JSON, nullable=False, default=list)
+    reason_codes_json = Column(JSON, nullable=False, default=list)
+    policy_snapshot_json = Column(JSON, nullable=False, default=dict)
+    policy_digest = Column(String(64), nullable=False, index=True)
+    evidence_refs_json = Column(JSON, nullable=False, default=list)
+    decided_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "coverage_status IN "
+            "('complete', 'partial', 'empty', 'unbounded', 'unknown', 'not_applicable')",
+            name="ck_coverage_decision_status",
+        ),
+        CheckConstraint(
+            "coverage_basis IN "
+            "('fixed', 'inventory_entity_set', 'derived_entity_set', "
+            "'command_reported_total', 'non_exhaustive', 'unknown')",
+            name="ck_coverage_decision_basis",
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class PatrolProfileCheckItemRecord(Base):
+    """Versioned check-item selection for a patrol profile."""
+
+    __tablename__ = "netops_patrol_profile_check_items"
+
+    id = Column(String(64), primary_key=True)
+    profile_version_id = Column(
+        String(64),
+        ForeignKey("netops_command_profile_versions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    check_item_version_id = Column(
+        String(64),
+        ForeignKey("netops_check_item_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    priority = Column(Integer, nullable=False, default=100, server_default="100")
+    required = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    status = Column(
+        String(32), nullable=False, default="active", server_default="active", index=True
+    )
+    created_by = Column(String(128), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('active', 'disabled')",
+            name="ck_patrol_profile_check_item_status",
+        ),
+        Index(
+            "uq_patrol_profile_check_item",
+            "profile_version_id",
+            "check_item_version_id",
+            unique=True,
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class CheckItemCollectionActionRecord(Base):
+    """One immutable physical collection action shared by logical check items."""
+
+    __tablename__ = "netops_check_item_collection_actions"
+
+    id = Column(String(64), primary_key=True)
+    patrol_batch_id = Column(String(128), nullable=False, index=True)
+    device_id = Column(String(256), nullable=False, index=True)
+    collector = Column(String(32), nullable=False, default="cli", server_default="cli")
+    command = Column(String(512), nullable=False)
+    canonical_command = Column(String(512), nullable=False, index=True)
+    fallback_rank = Column(Integer, nullable=False, default=0, server_default="0")
+    priority = Column(Integer, nullable=False, default=100, server_default="100")
+    parameters_json = Column(JSON, nullable=False, default=dict)
+    check_item_version_ids_json = Column(JSON, nullable=False, default=list)
+    implementation_version_ids_json = Column(JSON, nullable=False, default=list)
+    runtime_bundle_version_ids_json = Column(JSON, nullable=False, default=list)
+    digest = Column(String(64), nullable=False, index=True)
+    status = Column(
+        String(32), nullable=False, default="planned", server_default="planned", index=True
+    )
+    execution_plan_id = Column(
+        String(64),
+        ForeignKey("netops_collection_execution_plans.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    failure_code = Column(String(128), nullable=True, index=True)
+    error = Column(Text, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('planned', 'collecting', 'completed', 'failed', 'cancelled', 'skipped')",
+            name="ck_check_item_collection_action_status",
+        ),
+        Index(
+            "uq_check_item_collection_action",
+            "patrol_batch_id",
+            "device_id",
+            "digest",
+            unique=True,
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class CheckItemRuntimeManifestRecord(Base):
+    """Frozen per-batch check-item execution and asset selection."""
+
+    __tablename__ = "netops_check_item_runtime_manifests"
+
+    id = Column(String(64), primary_key=True)
+    patrol_batch_id = Column(String(128), nullable=False, unique=True, index=True)
+    schema_version = Column(Integer, nullable=False, default=2, server_default="2")
+    target_manifest_digest = Column(String(64), nullable=False, index=True)
+    inventory_snapshot_digest = Column(String(64), nullable=False, index=True)
+    check_item_versions_json = Column(JSON, nullable=False)
+    collection_actions_json = Column(JSON, nullable=False)
+    runtime_bundle_refs_json = Column(JSON, nullable=False)
+    comparison_context_ids_json = Column(JSON, nullable=False)
+    entity_identity_policy_versions_json = Column(JSON, nullable=False)
+    assessment_schema_version = Column(String(64), nullable=False)
+    report_schema_version = Column(String(64), nullable=False)
+    manifest_json = Column(JSON, nullable=False)
+    digest = Column(String(64), nullable=False, unique=True, index=True)
+    status = Column(
+        String(32), nullable=False, default="frozen", server_default="frozen", index=True
+    )
+    created_by = Column(String(128), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('frozen', 'superseded')",
+            name="ck_check_item_runtime_manifest_status",
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class TextComparisonProfileRecord(Base):
+    """Stable identity for a governed non-structured comparison profile."""
+
+    __tablename__ = "netops_text_comparison_profiles"
+
+    id = Column(String(128), primary_key=True)
+    name = Column(String(256), nullable=False)
+    status = Column(
+        String(32), nullable=False, default="draft", server_default="draft", index=True
+    )
+    current_version = Column(Integer, nullable=False, default=0, server_default="0")
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class TextComparisonProfileVersionRecord(Base):
+    """Immutable normalization and diff policy for raw command evidence."""
+
+    __tablename__ = "netops_text_comparison_profile_versions"
+
+    id = Column(String(64), primary_key=True)
+    profile_id = Column(
+        String(128),
+        ForeignKey("netops_text_comparison_profiles.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    version = Column(Integer, nullable=False)
+    mode = Column(String(32), nullable=False)
+    profile_json = Column(JSON, nullable=False)
+    digest = Column(String(64), nullable=False, index=True)
+    status = Column(
+        String(32), nullable=False, default="draft", server_default="draft", index=True
+    )
+    created_by = Column(String(128), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    activated_at = Column(DateTime(timezone=True), nullable=True)
+    deprecated_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "mode IN ('ordered_lines', 'unordered_lines', 'hash_only')",
+            name="ck_text_comparison_profile_mode",
+        ),
+        CheckConstraint(
+            "status IN ('draft', 'active', 'deprecated')",
+            name="ck_text_comparison_profile_status",
+        ),
+        Index(
+            "uq_text_comparison_profile_version",
+            "profile_id",
+            "version",
+            unique=True,
+        ),
+        Index(
+            "uq_text_comparison_profile_active",
+            "profile_id",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+            sqlite_where=text("status = 'active'"),
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class AssetGapRecord(Base):
+    """A production asset or output-compatibility gap; never an LLM trigger."""
+
+    __tablename__ = "netops_asset_gaps"
+
+    id = Column(String(64), primary_key=True)
+    idempotency_key = Column(String(64), nullable=False, unique=True)
+    patrol_batch_id = Column(String(128), nullable=True, index=True)
+    check_execution_id = Column(
+        String(64),
+        ForeignKey("netops_check_executions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    check_item_id = Column(String(128), nullable=False, index=True)
+    check_item_version_id = Column(String(64), nullable=True, index=True)
+    implementation_version_id = Column(String(64), nullable=True, index=True)
+    canonical_command = Column(String(512), nullable=True, index=True)
+    output_signature = Column(String(64), nullable=True, index=True)
+    gap_type = Column(String(64), nullable=False, index=True)
+    purpose = Column(String(32), nullable=False, index=True)
+    status = Column(
+        String(32), nullable=False, default="open", server_default="open", index=True
+    )
+    reason_code = Column(String(128), nullable=False, index=True)
+    sanitized_sample_refs_json = Column(JSON, nullable=False, default=list)
+    evidence_refs_json = Column(JSON, nullable=False, default=list)
+    occurrence_count = Column(Integer, nullable=False, default=1, server_default="1")
+    first_seen_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    last_seen_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    resolved_by = Column(String(128), nullable=True)
+    resolution_note = Column(Text, nullable=True)
+    metadata_json = Column(JSON, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "purpose IN ('production_patrol', 'offline_import', 'historical_backfill')",
+            name="ck_asset_gap_purpose",
+        ),
+        CheckConstraint(
+            "status IN ('open', 'in_progress', 'resolved', 'ignored')",
+            name="ck_asset_gap_status",
+        ),
+        Index(
+            "ix_asset_gap_work_queue",
+            "status",
+            "gap_type",
+            "last_seen_at",
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class ReportManifestRecord(Base):
+    """Immutable fact and artifact manifest for one report version."""
+
+    __tablename__ = "netops_report_manifests"
+
+    id = Column(String(64), primary_key=True)
+    patrol_batch_id = Column(String(128), nullable=False, index=True)
+    version = Column(Integer, nullable=False)
+    schema_version = Column(String(64), nullable=False)
+    status = Column(String(32), nullable=False, index=True)
+    target_manifest_digest = Column(String(64), nullable=False, index=True)
+    runtime_manifest_digest = Column(String(64), nullable=False, index=True)
+    comparison_context_digests_json = Column(JSON, nullable=False)
+    check_execution_fact_digest = Column(String(64), nullable=False, index=True)
+    check_assessment_fact_digest = Column(String(64), nullable=False, index=True)
+    risk_case_revision = Column(String(64), nullable=False, index=True)
+    evidence_index_digest = Column(String(64), nullable=False, index=True)
+    generator_version = Column(String(64), nullable=False)
+    source_facts_json = Column(JSON, nullable=False)
+    source_digest = Column(String(64), nullable=False, index=True)
+    artifact_object_keys_json = Column(JSON, nullable=False, default=dict)
+    artifact_sha256_json = Column(JSON, nullable=False, default=dict)
+    generated_by = Column(String(128), nullable=True)
+    generated_at = Column(DateTime(timezone=True), nullable=False)
+    report_cutoff_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    qualification_fact_digest = Column(String(64), nullable=False, index=True)
+    coverage_fact_digest = Column(String(64), nullable=False, index=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'partial', 'final', 'superseded')",
+            name="ck_report_manifest_status",
+        ),
+        Index(
+            "uq_report_manifest_batch_version",
+            "patrol_batch_id",
+            "version",
+            unique=True,
+        ),
+        Index(
+            "uq_report_manifest_batch_source",
+            "patrol_batch_id",
+            "source_digest",
+            unique=True,
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class ReportReleaseRecord(Base):
+    """Immutable human sign-off for one exact report artifact set."""
+
+    __tablename__ = "netops_report_releases"
+
+    id = Column(String(64), primary_key=True)
+    report_manifest_id = Column(
+        String(64),
+        ForeignKey("netops_report_manifests.id", ondelete="RESTRICT"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    patrol_batch_id = Column(String(128), nullable=False, index=True)
+    status = Column(
+        String(32), nullable=False, default="released", server_default="released", index=True
+    )
+    source_facts_digest = Column(String(64), nullable=False, index=True)
+    artifact_sha256_json = Column(JSON, nullable=False)
+    release_digest = Column(String(64), nullable=False, unique=True, index=True)
+    signed_by = Column(String(128), nullable=False, index=True)
+    signed_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    signoff_comment = Column(Text, nullable=False)
+    disclosure_confirmations_json = Column(JSON, nullable=False, default=list)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status = 'released'",
+            name="ck_report_release_status",
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class EntityIdentityPolicyRecord(Base):
+    """Stable identity-policy metadata."""
+
+    __tablename__ = "netops_entity_identity_policies"
+
+    id = Column(String(128), primary_key=True)
+    name = Column(String(256), nullable=False)
+    status = Column(String(32), nullable=False, default="draft", server_default="draft", index=True)
+    current_version = Column(Integer, nullable=False, default=0, server_default="0")
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class EntityIdentityPolicyVersionRecord(Base):
+    """Immutable entity-identity normalization policy version."""
+
+    __tablename__ = "netops_entity_identity_policy_versions"
+
+    id = Column(String(64), primary_key=True)
+    policy_id = Column(
+        String(128),
+        ForeignKey("netops_entity_identity_policies.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    version = Column(Integer, nullable=False)
+    policy_json = Column(JSON, nullable=False)
+    digest = Column(String(64), nullable=False, index=True)
+    status = Column(String(32), nullable=False, default="draft", server_default="draft", index=True)
+    created_by = Column(String(128), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    activated_at = Column(DateTime(timezone=True), nullable=True)
+    deprecated_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'active', 'deprecated')",
+            name="ck_entity_identity_policy_version_status",
+        ),
+        Index(
+            "uq_entity_identity_policy_version",
+            "policy_id",
+            "version",
+            unique=True,
+        ),
+        Index(
+            "uq_entity_identity_policy_active",
+            "policy_id",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+            sqlite_where=text("status = 'active'"),
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class CheckItemRuntimeBundleRecord(Base):
+    """Stable runtime-bundle identity for one check item and implementation."""
+
+    __tablename__ = "netops_check_item_runtime_bundles"
+
+    id = Column(String(64), primary_key=True)
+    check_item_id = Column(
+        String(128),
+        ForeignKey("netops_check_items.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    implementation_id = Column(
+        String(128),
+        ForeignKey("netops_collection_implementations.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    name = Column(String(256), nullable=False)
+    status = Column(String(32), nullable=False, default="draft", server_default="draft", index=True)
+    current_version = Column(Integer, nullable=False, default=0, server_default="0")
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_check_item_runtime_bundle_identity",
+            "check_item_id",
+            "implementation_id",
+            unique=True,
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class CheckItemRuntimeBundleVersionRecord(Base):
+    """Immutable, atomically activated set of compatible production assets."""
+
+    __tablename__ = "netops_check_item_runtime_bundle_versions"
+
+    id = Column(String(64), primary_key=True)
+    bundle_id = Column(
+        String(64),
+        ForeignKey("netops_check_item_runtime_bundles.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    version = Column(Integer, nullable=False)
+    check_item_version_id = Column(
+        String(64),
+        ForeignKey("netops_check_item_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    implementation_version_id = Column(
+        String(64),
+        ForeignKey("netops_collection_implementation_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    parser_bundle_json = Column(JSON, nullable=False)
+    canonical_catalog_version = Column(Integer, nullable=False)
+    canonical_catalog_digest = Column(String(64), nullable=False, index=True)
+    entity_identity_policy_version_id = Column(
+        String(64),
+        ForeignKey("netops_entity_identity_policy_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    comparison_profile_version_id = Column(String(64), nullable=True, index=True)
+    dependency_digests_json = Column(JSON, nullable=False)
+    compatibility_json = Column(JSON, nullable=False)
+    validation_report_json = Column(JSON, nullable=False)
+    digest = Column(String(64), nullable=False, unique=True, index=True)
+    status = Column(String(32), nullable=False, default="draft", server_default="draft", index=True)
+    created_by = Column(String(128), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    activated_at = Column(DateTime(timezone=True), nullable=True)
+    deprecated_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'active', 'deprecated')",
+            name="ck_check_item_runtime_bundle_version_status",
+        ),
+        Index(
+            "uq_check_item_runtime_bundle_version",
+            "bundle_id",
+            "version",
+            unique=True,
+        ),
+        Index(
+            "uq_check_item_runtime_bundle_active",
+            "bundle_id",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+            sqlite_where=text("status = 'active'"),
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class RuntimeBundleAssetRecord(Base):
+    """Normalized child-asset reference for an immutable runtime bundle."""
+
+    __tablename__ = "netops_runtime_bundle_assets"
+
+    id = Column(String(64), primary_key=True)
+    bundle_version_id = Column(
+        String(64),
+        ForeignKey("netops_check_item_runtime_bundle_versions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    asset_type = Column(String(32), nullable=False, index=True)
+    asset_id = Column(String(128), nullable=False, index=True)
+    asset_version_id = Column(String(128), nullable=False, index=True)
+    asset_digest = Column(String(64), nullable=False, index=True)
+    role = Column(String(64), nullable=False, default="primary", server_default="primary")
+    canonical_command = Column(String(512), nullable=True, index=True)
+    observation_type = Column(String(256), nullable=True, index=True)
+    required = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    metadata_json = Column(JSON, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "asset_type IN ("
+            "'parser_template', 'observation_contract', 'current_state_rule', "
+            "'change_policy', 'event_rule', 'comparison_profile', 'identity_policy')",
+            name="ck_runtime_bundle_asset_type",
+        ),
+        Index(
+            "uq_runtime_bundle_asset_ref",
+            "bundle_version_id",
+            "asset_type",
+            "asset_version_id",
+            "role",
+            unique=True,
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class CurrentStateFindingRecord(Base):
+    """Immutable evidence that a current observation matched a fault rule."""
+
+    __tablename__ = "netops_current_state_findings"
+
+    id = Column(String(64), primary_key=True)
+    idempotency_key = Column(String(64), nullable=False, unique=True)
+    patrol_batch_id = Column(String(128), nullable=False, index=True)
+    check_execution_id = Column(
+        String(64),
+        ForeignKey("netops_check_executions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    device_id = Column(String(256), nullable=False, index=True)
+    check_item_version_id = Column(
+        String(64),
+        ForeignKey("netops_check_item_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    implementation_version_id = Column(
+        String(64),
+        ForeignKey("netops_collection_implementation_versions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    entity_type = Column(String(128), nullable=False, index=True)
+    entity_key = Column(String(1024), nullable=False)
+    dimensions_json = Column(JSON, nullable=True)
+    observation_id = Column(
+        String(64),
+        ForeignKey("netops_state_observations.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    observation_type = Column(String(256), nullable=True, index=True)
+    actual_value_json = Column(JSON, nullable=True)
+    actual_value_text = Column(Text, nullable=True)
+    actual_value_number = Column(Float, nullable=True)
+    unit = Column(String(64), nullable=True)
+    reference_value_json = Column(JSON, nullable=True)
+    reference_value_text = Column(Text, nullable=True)
+    reference_value_number = Column(Float, nullable=True)
+    reference_source = Column(String(128), nullable=True)
+    severity = Column(String(32), nullable=False, index=True)
+    event_type = Column(String(128), nullable=False, index=True)
+    event_rule_version_id = Column(
+        String(64),
+        ForeignKey("netops_event_rule_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    rule_digest = Column(String(64), nullable=False, index=True)
+    runtime_bundle_version_id = Column(
+        String(64),
+        ForeignKey("netops_check_item_runtime_bundle_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    runtime_bundle_digest = Column(String(64), nullable=False, index=True)
+    observed_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    assessed_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    evidence_refs_json = Column(JSON, nullable=False)
+    evidence_digest = Column(String(64), nullable=False, index=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_current_state_finding_scope",
+            "patrol_batch_id",
+            "device_id",
+            "check_item_version_id",
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class RiskCaseRecord(Base):
+    """Cross-batch operational risk projected from immutable findings and events."""
+
+    __tablename__ = "netops_risk_cases"
+
+    id = Column(String(64), primary_key=True)
+    correlation_key = Column(String(1024), nullable=False, unique=True)
+    check_item_id = Column(
+        String(128),
+        ForeignKey("netops_check_items.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    device_id = Column(String(256), nullable=False, index=True)
+    entity_type = Column(String(128), nullable=False, index=True)
+    entity_key = Column(String(1024), nullable=False)
+    correlation_dimensions_json = Column(JSON, nullable=True)
+    risk_type = Column(String(128), nullable=False, index=True)
+    severity = Column(String(32), nullable=False, index=True)
+    status = Column(String(32), nullable=False, default="open", server_default="open", index=True)
+    first_seen_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    last_seen_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    last_successful_evaluation_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    verification_status = Column(
+        String(32),
+        nullable=False,
+        default="not_reverified",
+        server_default="not_reverified",
+        index=True,
+    )
+    last_verified_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    last_verification_execution_id = Column(String(64), nullable=True, index=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    source_finding_ids_json = Column(JSON, nullable=False, default=list)
+    source_event_ids_json = Column(JSON, nullable=False, default=list)
+    owner = Column(String(128), nullable=True, index=True)
+    remediation_status = Column(
+        String(32), nullable=False, default="not_started", server_default="not_started", index=True
+    )
+    due_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    resolution_evidence_refs_json = Column(JSON, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('open', 'acknowledged', 'recovering', 'resolved', 'suppressed')",
+            name="ck_risk_case_status",
+        ),
+        CheckConstraint(
+            "remediation_status IN ('not_started', 'planned', 'in_progress', 'completed', 'cancelled')",
+            name="ck_risk_case_remediation_status",
+        ),
+        CheckConstraint(
+            "verification_status IN "
+            "('confirmed_current', 'recovery_pending', 'not_reverified', 'resolved')",
+            name="ck_risk_case_verification_status",
+        ),
+        Index("ix_risk_case_active_scope", "check_item_id", "device_id", "status"),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class RiskOccurrenceRecord(Base):
+    """Append-only lifecycle transition for a RiskCase."""
+
+    __tablename__ = "netops_risk_occurrences"
+
+    id = Column(String(64), primary_key=True)
+    idempotency_key = Column(String(64), nullable=False, unique=True)
+    risk_case_id = Column(
+        String(64),
+        ForeignKey("netops_risk_cases.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    occurrence_kind = Column(String(32), nullable=False, index=True)
+    source_finding_id = Column(
+        String(64),
+        ForeignKey("netops_current_state_findings.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    source_event_id = Column(
+        String(64),
+        ForeignKey("netops_network_events.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    patrol_batch_id = Column(String(128), nullable=True, index=True)
+    observed_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    status_after = Column(String(32), nullable=False)
+    actor = Column(String(128), nullable=True)
+    reason = Column(Text, nullable=True)
+    evidence_refs_json = Column(JSON, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "occurrence_kind IN ("
+            "'opened', 'observed', 'reopened', 'acknowledged', 'recovering', "
+            "'resolved', 'suppressed', 'unable_to_confirm')",
+            name="ck_risk_occurrence_kind",
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class RiskRemediationRecord(Base):
+    """Remediation workflow kept separate from technical recovery state."""
+
+    __tablename__ = "netops_risk_remediations"
+
+    id = Column(String(64), primary_key=True)
+    risk_case_id = Column(
+        String(64),
+        ForeignKey("netops_risk_cases.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    status = Column(String(32), nullable=False, default="planned", server_default="planned", index=True)
+    owner = Column(String(128), nullable=True, index=True)
+    action_text = Column(Text, nullable=False)
+    due_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    evidence_refs_json = Column(JSON, nullable=True)
+    created_by = Column(String(128), nullable=True)
+    completed_by = Column(String(128), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('planned', 'in_progress', 'completed', 'cancelled')",
+            name="ck_risk_remediation_status",
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
 class CollectionExecutionPlanRecord(Base):
     """Immutable collector execution-plan snapshot created before launch."""
 
@@ -2007,6 +3591,7 @@ class ParserTemplate(Base):
     category = Column(String(64), nullable=False)
     version = Column(String(64), nullable=False)
     asset_path = Column(String(1024), nullable=False)
+    template_text = Column(Text, nullable=True)
     sha256 = Column(String(64), nullable=False)
     status = Column(String(32), nullable=False, default="draft", index=True)
     validation_json = Column(JSON, nullable=True)
@@ -2037,8 +3622,12 @@ class ParserTemplate(Base):
         ),
     )
 
-    def to_dict(self):
-        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+    def to_dict(self, *, include_content: bool = False):
+        return {
+            column.name: getattr(self, column.name)
+            for column in self.__table__.columns
+            if include_content or column.name != "template_text"
+        }
 
 
 class ObservationContractRecord(Base):
@@ -2058,6 +3647,9 @@ class ObservationContractRecord(Base):
     )
     entity_type = Column(String(128), nullable=False, index=True)
     primary_keys_json = Column(JSON, nullable=False)
+    canonical_entity_type = Column(String(128), nullable=True, index=True)
+    entity_identity_fields_json = Column(JSON, nullable=True)
+    entity_dimensions_json = Column(JSON, nullable=True)
     required_fields_json = Column(JSON, nullable=False)
     optional_fields_json = Column(JSON, nullable=True)
     validators_json = Column(JSON, nullable=True)
@@ -2065,6 +3657,7 @@ class ObservationContractRecord(Base):
     allow_empty = Column(Boolean, nullable=False, default=False)
     empty_patterns_json = Column(JSON, nullable=True)
     state_semantics_json = Column(JSON, nullable=True)
+    record_sets_json = Column(JSON, nullable=True)
     version = Column(Integer, nullable=False, default=1)
     contract_sha256 = Column(String(64), nullable=False, index=True)
     status = Column(String(32), nullable=False, default="active", index=True)
@@ -2264,10 +3857,27 @@ class ParserTemplateJob(Base):
     output_signature = Column(String(64), nullable=False)
     idempotency_key = Column(String(64), nullable=False, index=True)
     status = Column(String(32), nullable=False, default="pending", index=True)
+    pipeline_version = Column(
+        String(32),
+        nullable=False,
+        default="simple_v2",
+        server_default="simple_v2",
+        index=True,
+    )
+    parser_spec_status = Column(
+        String(32),
+        nullable=False,
+        default="missing",
+        server_default="missing",
+        index=True,
+    )
+    parser_spec_json = Column(JSON, nullable=True)
+    parser_spec_sha256 = Column(String(64), nullable=True, index=True)
     sample_count = Column(Integer, default=0)
     attempts = Column(Integer, default=0)
     contract_revision_count = Column(Integer, nullable=False, default=0, server_default="0")
     template_attempt_count = Column(Integer, nullable=False, default=0, server_default="0")
+    model_calls_used = Column(Integer, nullable=False, default=0, server_default="0")
     best_attempt_id = Column(String(64), nullable=True, index=True)
     agent_state_json = Column(JSON, nullable=True)
     agent_budget_json = Column(JSON, nullable=True)
@@ -2394,6 +4004,52 @@ class ParserGenerationAttempt(Base):
         return {column.name: getattr(self, column.name) for column in self.__table__.columns}
 
 
+class ParserModelCallLedger(Base):
+    __tablename__ = "parser_model_call_ledger"
+
+    id = Column(String(64), primary_key=True)
+    job_id = Column(
+        String(64),
+        ForeignKey("parser_template_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    call_number = Column(Integer, nullable=False)
+    generation_run_id = Column(String(64), nullable=False, index=True)
+    status = Column(String(32), nullable=False, default="reserved", index=True)
+    model_provider = Column(String(64), nullable=True)
+    model_name = Column(String(128), nullable=True)
+    protocol_version = Column(String(64), nullable=True)
+    candidate_sha256 = Column(String(64), nullable=True, index=True)
+    failure_signature = Column(String(64), nullable=True, index=True)
+    result_json = Column(JSON, nullable=False, default=dict)
+    token_usage_json = Column(JSON, nullable=True)
+    latency_ms = Column(Integer, nullable=True)
+    error = Column(Text, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index(
+            "uq_parser_model_call_job_number",
+            "job_id",
+            "call_number",
+            unique=True,
+        ),
+        Index(
+            "ix_parser_model_call_job_created",
+            "job_id",
+            "created_at",
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
 class ParserJobSample(Base):
     __tablename__ = "parser_job_samples"
 
@@ -2415,6 +4071,14 @@ class ParserJobSample(Base):
     device_id = Column(String(256), nullable=False, index=True)
     output_signature = Column(String(64), nullable=False)
     dataset_id = Column(String(256), nullable=True, index=True)
+    sample_role = Column(
+        String(32),
+        nullable=False,
+        default="unassigned",
+        server_default="unassigned",
+        index=True,
+    )
+    expectation_json = Column(JSON, nullable=True)
     sanitization_status = Column(
         String(32),
         nullable=False,
@@ -2631,6 +4295,7 @@ class RuleAssetCommandUnitRecord(Base):
         ForeignKey("netops_offline_patrol_jobs.id", ondelete="CASCADE"),
         nullable=False,
     )
+    check_item_id = Column(String(128), nullable=True, index=True)
     asset_key = Column(String(64), nullable=False)
     vendor = Column(String(64), nullable=False)
     model = Column(String(128), nullable=True)
@@ -2695,6 +4360,78 @@ class RuleAssetCommandUnitRecord(Base):
             "vendor",
             "profile",
             "canonical_command",
+        ),
+        Index(
+            "ix_rule_asset_command_unit_asset_updated",
+            "asset_key",
+            "updated_at",
+        ),
+    )
+
+    def to_dict(self):
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class RuleAssetCommandUnitCheckItemRecord(Base):
+    """Catalog-approved many-to-many projection from command units to check items."""
+
+    __tablename__ = "netops_rule_asset_command_unit_check_items"
+
+    id = Column(String(64), primary_key=True)
+    command_unit_id = Column(
+        String(64),
+        ForeignKey("netops_rule_asset_command_units.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    check_item_id = Column(
+        String(128),
+        ForeignKey("netops_check_items.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    check_item_version_id = Column(
+        String(64),
+        ForeignKey("netops_check_item_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    implementation_id = Column(
+        String(128),
+        ForeignKey("netops_collection_implementations.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    implementation_version_id = Column(
+        String(64),
+        ForeignKey("netops_collection_implementation_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    mapping_source = Column(
+        String(32),
+        nullable=False,
+        default="catalog_resolver",
+        server_default="catalog_resolver",
+    )
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index("ix_rule_asset_link_unit", "command_unit_id"),
+        Index("ix_rule_asset_link_check", "check_item_id"),
+        Index("ix_rule_asset_link_check_ver", "check_item_version_id"),
+        Index("ix_rule_asset_link_impl", "implementation_id"),
+        Index("ix_rule_asset_link_impl_ver", "implementation_version_id"),
+        Index(
+            "uq_rule_asset_command_unit_check_item",
+            "command_unit_id",
+            "check_item_id",
+            "implementation_version_id",
+            unique=True,
+        ),
+        Index(
+            "ix_rule_asset_check_item_implementation",
+            "check_item_id",
+            "implementation_version_id",
         ),
     )
 

@@ -158,7 +158,72 @@ def _preview_parse_status(parsed: ParserRuntimeResult) -> str:
         return "ready"
     if parsed.failure_code == "template_missing":
         return "template_missing"
+    if parsed.failure_code in {
+        "empty_unverified",
+        "command_error",
+        "truncated",
+        "paged",
+    }:
+        return str(parsed.failure_code)
     return "parse_failed"
+
+
+def _check_item_binding_metadata(
+    command_collection: dict[str, Any],
+) -> dict[str, Any]:
+    all_bindings = [
+        dict(item)
+        for item in command_collection.get("check_item_bindings") or []
+        if isinstance(item, dict)
+    ]
+    selected_bindings = [
+        dict(item)
+        for item in command_collection.get("selected_for_bindings") or []
+        if isinstance(item, dict)
+    ]
+    effective = selected_bindings or all_bindings
+    implementation_versions = sorted(
+        {
+            str(item.get("implementation_version_id"))
+            for item in effective
+            if item.get("implementation_version_id")
+        }
+    )
+    return {
+        "collection_action_id": (
+            str(command_collection.get("collection_item_id"))
+            if command_collection.get("collection_item_id")
+            else None
+        ),
+        "implementation_version_id": (
+            implementation_versions[0]
+            if len(implementation_versions) == 1
+            else None
+        ),
+        "check_item_ids": sorted(
+            {
+                str(item.get("check_item_id"))
+                for item in effective
+                if item.get("check_item_id")
+            }
+        ),
+        "check_item_version_ids": sorted(
+            {
+                str(item.get("check_item_version_id"))
+                for item in effective
+                if item.get("check_item_version_id")
+            }
+        ),
+        "runtime_bundle_version_ids": sorted(
+            {
+                str(item.get("runtime_bundle_version_id"))
+                for item in effective
+                if item.get("runtime_bundle_version_id")
+            }
+        ),
+        "all_bindings": all_bindings,
+        "selected_bindings": selected_bindings,
+    }
 
 
 def preview_raw_path(
@@ -529,6 +594,9 @@ def import_raw_capture(
                 if isinstance(structured, dict)
                 else None
             )
+            binding_metadata = _check_item_binding_metadata(
+                command_collection
+            )
             collection_repository.save_collection_result(
                 run_id=str(snapshot.run_id),
                 inventory_device_id=inventory_device_id,
@@ -546,6 +614,9 @@ def import_raw_capture(
                 failure_code=parsed.failure_code,
                 observed_at=command_collection.get("observed_at") or snapshot.observed_at,
                 execution_item_id=snapshot.execution_item_id,
+                collection_action_id=binding_metadata[
+                    "collection_action_id"
+                ],
                 metadata={
                     "parse_status": parse_status,
                     "execution_status": command_status.execution_status,
@@ -555,6 +626,15 @@ def import_raw_capture(
                     "collector_complete": command_complete,
                     "collection_item_id": command_collection.get("collection_item_id"),
                     "command_ordinal": command_collection.get("command_ordinal"),
+                    "check_item_version_ids": binding_metadata[
+                        "check_item_version_ids"
+                    ],
+                    "runtime_bundle_version_ids": binding_metadata[
+                        "runtime_bundle_version_ids"
+                    ],
+                    "selected_check_item_bindings": binding_metadata[
+                        "selected_bindings"
+                    ],
                 },
                 owner_token=run_owner_token,
             )
@@ -650,6 +730,10 @@ def import_raw_capture(
             parse_status = "empty_unverified"
         elif parsed.failure_code == "command_error":
             parse_status = "command_error"
+        elif parsed.failure_code == "truncated":
+            parse_status = "truncated"
+        elif parsed.failure_code == "paged":
+            parse_status = "paged"
         elif parsed.identity_status != "known":
             parse_status = "identity_unknown"
         elif parsed.parser_status == "unavailable":
@@ -666,6 +750,9 @@ def import_raw_capture(
         parser_version = parsed.template_version
         deterministic_snapshot_id = (
             str(uuid.uuid5(uuid.NAMESPACE_URL, fingerprint)) if run_id else None
+        )
+        binding_metadata = _check_item_binding_metadata(
+            command_collection
         )
         snapshot_id, snapshot_created = snapshot_repository.save_snapshot_idempotent(
             run_id=rid,
@@ -705,9 +792,26 @@ def import_raw_capture(
                 "parser_runtime_bundle_digest": (
                     runtime_bundle.digest if runtime_bundle is not None else None
                 ),
+                "check_item_version_ids": binding_metadata[
+                    "check_item_version_ids"
+                ],
+                "runtime_bundle_version_ids": binding_metadata[
+                    "runtime_bundle_version_ids"
+                ],
+                "check_item_bindings": binding_metadata["all_bindings"],
+                "selected_check_item_bindings": binding_metadata[
+                    "selected_bindings"
+                ],
             },
             inventory_device_id=inventory_device_id,
             execution_item_id=command_collection.get("execution_item_id"),
+            collection_action_id=binding_metadata[
+                "collection_action_id"
+            ],
+            implementation_version_id=binding_metadata[
+                "implementation_version_id"
+            ],
+            check_item_ids=binding_metadata["check_item_ids"],
             owner_token=run_owner_token,
         )
         snapshot_ids.append(snapshot_id)
@@ -831,6 +935,9 @@ def import_raw_capture(
             failure_code=parsed.failure_code,
             observed_at=command_observed_at,
             execution_item_id=stored_snapshot.execution_item_id,
+            collection_action_id=binding_metadata[
+                "collection_action_id"
+            ],
             metadata={
                 "parse_status": parse_status,
                 "execution_status": command_status.execution_status,
@@ -841,6 +948,15 @@ def import_raw_capture(
                 "collector_complete": command_complete,
                 "collection_item_id": command_collection.get("collection_item_id"),
                 "command_ordinal": command_collection.get("command_ordinal"),
+                "check_item_version_ids": binding_metadata[
+                    "check_item_version_ids"
+                ],
+                "runtime_bundle_version_ids": binding_metadata[
+                    "runtime_bundle_version_ids"
+                ],
+                "selected_check_item_bindings": binding_metadata[
+                    "selected_bindings"
+                ],
             },
             owner_token=run_owner_token,
         )

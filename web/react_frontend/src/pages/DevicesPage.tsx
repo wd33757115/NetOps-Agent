@@ -32,6 +32,7 @@ import {
   type DevicePatrolPreview,
   type DeviceUpsertPayload,
   type ManagedDevice,
+  type ParserCheckItem,
   type ParserCommandProfile,
   type ParserCommandProfileImpactPreview,
   type PatrolBatchPage,
@@ -237,6 +238,12 @@ interface ProfileBindingFormValues {
   target_type?: 'selected' | 'group' | 'dynamic_group' | 'filters'
   dynamic_group_id?: string
   group?: string
+  reason?: string
+}
+
+interface CheckItemProfileFormValues {
+  name: string
+  check_item_ids: string[]
 }
 
 const dynamicGroupSelectorFields = [
@@ -366,6 +373,7 @@ const DevicesPage: React.FC = () => {
   const [patrolForm] = Form.useForm<PatrolFormValues>()
   const [dynamicGroupForm] = Form.useForm<DynamicGroupFormValues>()
   const [profileBindingForm] = Form.useForm<ProfileBindingFormValues>()
+  const [checkItemProfileForm] = Form.useForm<CheckItemProfileFormValues>()
   const [filters, setFilters] = useState<DeviceAssetFilters>({
     keyword: '',
     vendor: '',
@@ -414,6 +422,7 @@ const DevicesPage: React.FC = () => {
   const [dynamicGroupPreview, setDynamicGroupPreview] = useState<DeviceDynamicGroupPreview | null>(null)
   const [dynamicGroupRules, setDynamicGroupRules] = useState<DynamicGroupRule[]>([])
   const [profileBindingOpen, setProfileBindingOpen] = useState(false)
+  const [checkItemProfileOpen, setCheckItemProfileOpen] = useState(false)
   const [profileBindingImpact, setProfileBindingImpact] = useState<ParserCommandProfileImpactPreview | null>(null)
   const [profileBindingDraft, setProfileBindingDraft] = useState<ProfileBindingFormValues>({})
   const [credentialInspection, setCredentialInspection] = useState<DeviceCredentialInspection | null>(null)
@@ -557,12 +566,21 @@ const DevicesPage: React.FC = () => {
   )
   const { data: commandProfilePage, refetch: refetchCommandProfiles } = useQuery(
     ['device-command-profiles'],
-    () => parserApi.commandProfiles({ status: 'active', limit: 100, offset: 0 }),
+    () => parserApi.commandProfiles({ limit: 100, offset: 0 }),
+    { refetchOnWindowFocus: false },
+  )
+  const { data: checkItemPage } = useQuery(
+    ['patrol-check-item-catalog'],
+    () => parserApi.checkItems({ limit: 200, offset: 0 }),
     { refetchOnWindowFocus: false },
   )
   const commandProfiles = useMemo(
     () => commandProfilePage?.items || [],
     [commandProfilePage?.items],
+  )
+  const checkItems = useMemo<ParserCheckItem[]>(
+    () => checkItemPage?.items || [],
+    [checkItemPage?.items],
   )
   const watchedCommandProfile = Form.useWatch('command_profile', form)
   const currentCommandProfile = useMemo(
@@ -821,12 +839,16 @@ const DevicesPage: React.FC = () => {
     },
   )
 
-  const activeProfileVersionOptions = commandProfiles
-    .filter((profile: ParserCommandProfile) => profile.profile_version_id && profile.version_status === 'active')
+  const checkItemProfileVersionOptions = commandProfiles
+    .filter((profile: ParserCommandProfile) =>
+      profile.profile_version_id && profile.profile_mode === 'check_items')
     .map((profile) => ({
       value: profile.profile_version_id!,
-      label: String(profile.profile_name || '-') + ' v' + String(profile.version || profile.current_version || '-'),
+      label: `${String(profile.profile_name || '-')} v${String(profile.version || profile.current_version || '-')} · ${statusLabel(profile.version_status)} · ${profile.check_item_ids?.length || 0} 项`,
     }))
+  const selectedBindingProfile = commandProfiles.find(
+    (profile) => profile.profile_version_id === profileBindingDraft.profile_version_id,
+  )
 
   const currentFilterSelector = (): Record<string, unknown> => {
     const selector: Record<string, unknown> = {
@@ -870,7 +892,7 @@ const DevicesPage: React.FC = () => {
     const draft = {
       target_type: targetType,
       priority: 100,
-      profile_version_id: activeProfileVersionOptions[0]?.value,
+      profile_version_id: checkItemProfileVersionOptions[0]?.value,
     }
     setProfileBindingDraft(draft)
     profileBindingForm.setFieldsValue(draft)
@@ -881,39 +903,93 @@ const DevicesPage: React.FC = () => {
   const previewProfileBindingImpact = useMutation(
     async () => {
       const values = await profileBindingForm.validateFields()
-      if (!values.profile_version_id) throw new Error('必须选择采集命令集版本')
+      if (!values.profile_version_id) throw new Error('必须选择巡检 Profile')
       return parserApi.commandProfileImpactPreview({
         profile_version_id: values.profile_version_id,
         selector: buildProfileBindingSelector(values),
         mode: 'production',
         limit: 100,
+        save_evidence: true,
       })
     },
     {
       onSuccess: setProfileBindingImpact,
-      onError: (error: any) => message.error(extractErrorMessage(error, '预览采集命令集影响失败')),
+      onError: (error: any) => message.error(extractErrorMessage(error, '预览巡检 Profile 影响失败')),
+    },
+  )
+
+  const createCheckItemProfile = useMutation(
+    async () => {
+      const values = await checkItemProfileForm.validateFields()
+      return parserApi.upsertCommandProfile({
+        name: values.name.trim(),
+        action: 'patrol',
+        check_item_ids: values.check_item_ids,
+        status: 'draft',
+      })
+    },
+    {
+      onSuccess: async (result) => {
+        message.success('巡检 Profile 草稿已创建，请完成影响预览后激活')
+        setCheckItemProfileOpen(false)
+        checkItemProfileForm.resetFields()
+        await refetchCommandProfiles()
+        const draft = {
+          ...profileBindingDraft,
+          profile_version_id: result.profile_version_id,
+        }
+        setProfileBindingDraft(draft)
+        profileBindingForm.setFieldValue('profile_version_id', result.profile_version_id)
+        setProfileBindingImpact(null)
+      },
+      onError: (error: any) => message.error(extractErrorMessage(error, '创建巡检 Profile 失败')),
+    },
+  )
+
+  const activateCheckItemProfile = useMutation(
+    async () => {
+      const values = await profileBindingForm.validateFields(['profile_version_id', 'reason'])
+      if (!values.profile_version_id) throw new Error('必须选择巡检 Profile')
+      if (!profileBindingImpact?.evidence_saved) throw new Error('请先完成并保存影响预览')
+      if (profileBindingImpact.blocked_device_count > 0) throw new Error('仍有阻断项，不能激活')
+      return parserApi.activateCommandProfile(values.profile_version_id, values.reason || '')
+    },
+    {
+      onSuccess: async () => {
+        message.success('巡检 Profile 已激活，可以绑定到设备范围')
+        await refetchCommandProfiles()
+      },
+      onError: (error: any) => message.error(extractErrorMessage(error, '激活巡检 Profile 失败')),
     },
   )
 
   const saveProfileBinding = useMutation(
     async () => {
       const values = await profileBindingForm.validateFields()
-      if (!values.profile_version_id) throw new Error('必须选择采集命令集版本')
+      if (!values.profile_version_id) throw new Error('必须选择巡检 Profile')
+      if (selectedBindingProfile?.version_status !== 'active') {
+        throw new Error('请先激活巡检 Profile')
+      }
       const selector = buildProfileBindingSelector(values)
       if (!Object.keys(selector).length) throw new Error('目标选择器不能为空')
-      return parserApi.upsertCommandProfileBinding({
+      const created = await parserApi.upsertCommandProfileBinding({
         profile_version_id: values.profile_version_id,
         selector,
         priority: values.priority || 100,
-        status: 'active',
+        status: 'disabled',
       })
+      await parserApi.enableCommandProfileBinding(
+        created.binding_id,
+        values.reason || '',
+      )
+      return created
     },
     {
       onSuccess: async () => {
-        message.success('采集命令集绑定已保存')
+        message.success('巡检 Profile 已绑定并启用')
         await previewProfileBindingImpact.mutateAsync()
       },
-      onError: (error: any) => message.error(extractErrorMessage(error, '保存采集命令集绑定失败')),
+      onError: (error: any) => message.error(extractErrorMessage(error, '保存巡检 Profile 绑定失败')),
     },
   )
 
@@ -1213,17 +1289,51 @@ const DevicesPage: React.FC = () => {
   const exportPatrolBatchReport = useMutation(
     (batchId: string) => workflowApi.exportPatrolBatchReport(batchId),
     {
-      onSuccess: (blob, batchId) => {
-        const url = window.URL.createObjectURL(blob)
+      onSuccess: (download) => {
+        const url = window.URL.createObjectURL(download.blob)
         const link = document.createElement('a')
         link.href = url
-        link.download = `${batchId}-leadership-report.docx`
+        link.download = download.filename
         document.body.appendChild(link)
         link.click()
         link.remove()
         window.URL.revokeObjectURL(url)
       },
       onError: (error: any) => message.error(extractErrorMessage(error, '批次报告导出失败')),
+    },
+  )
+
+  const exportPatrolBatchTechnicalWorkbook = useMutation(
+    (batchId: string) => workflowApi.exportPatrolBatchTechnicalWorkbook(batchId),
+    {
+      onSuccess: (download) => {
+        const url = window.URL.createObjectURL(download.blob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = download.filename
+        document.body.appendChild(link)
+        link.click()
+        link.remove()
+        window.URL.revokeObjectURL(url)
+      },
+      onError: (error: any) => message.error(extractErrorMessage(error, '技术附表导出失败')),
+    },
+  )
+
+  const exportPatrolBatchEvidencePackage = useMutation(
+    (batchId: string) => workflowApi.exportPatrolBatchEvidencePackage(batchId),
+    {
+      onSuccess: (download) => {
+        const url = window.URL.createObjectURL(download.blob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = download.filename
+        document.body.appendChild(link)
+        link.click()
+        link.remove()
+        window.URL.revokeObjectURL(url)
+      },
+      onError: (error: any) => message.error(extractErrorMessage(error, '证据包导出失败')),
     },
   )
 
@@ -1590,7 +1700,7 @@ const DevicesPage: React.FC = () => {
   const bulkColumns = [
     { title: '设备', dataIndex: 'device_name', width: 220 },
     { title: 'IP', dataIndex: 'ip', width: 130 },
-    { title: '采集命令集', dataIndex: ['update', 'command_profile'], width: 170,
+    { title: '历史 Profile 引用', dataIndex: ['update', 'command_profile'], width: 170,
       render: (value: string) => value || '-' },
     { title: '凭据引用', dataIndex: ['update', 'credential_ref'], width: 180,
       render: (value: string) => value || '-' },
@@ -1611,7 +1721,11 @@ const DevicesPage: React.FC = () => {
   const patrolColumns = [
     { title: '设备', dataIndex: 'device_name', width: 220 },
     { title: 'IP', dataIndex: 'ip', width: 130 },
-    { title: '命令数', dataIndex: 'command_count', width: 100 },
+    { title: '检查项 / 命令', width: 140,
+      render: (_: unknown, row: DevicePatrolPreview['rows'][number]) => {
+        const checkItemCount = row.plan.check_item_ids?.length || 0
+        return checkItemCount ? `${checkItemCount} 项 / ${row.command_count} 条` : `兼容模式 / ${row.command_count} 条`
+      } },
     { title: '预检状态', width: 180,
       render: (_: unknown, row: DevicePatrolPreview['rows'][number]) => {
         const coverageCount = recordList(row.coverage_violations).length
@@ -1629,10 +1743,12 @@ const DevicesPage: React.FC = () => {
       } },
     { title: '策略来源', dataIndex: ['plan', 'policy_source'], width: 140,
       render: (value: string) => value || '-' },
-    { title: 'Profile', dataIndex: ['plan', 'profile_name'], width: 180,
+    { title: '巡检 Profile', dataIndex: ['plan', 'profile_name'], width: 180,
       render: (value: string) => value || '-' },
-    { title: '命令列表', dataIndex: 'commands',
-      render: (value: string[]) => <Typography.Text>{(value || []).join(' | ')}</Typography.Text> },
+    { title: '检查项', dataIndex: ['plan', 'check_item_ids'],
+      render: (value: string[], row: DevicePatrolPreview['rows'][number]) => value?.length
+        ? <Space wrap size={[4, 4]}>{value.map((item) => <Tag key={item}>{item}</Tag>)}</Space>
+        : <Typography.Text type="secondary">{(row.commands || []).join(' | ')}</Typography.Text> },
   ]
 
   const planCoverageColumns = [
@@ -1709,13 +1825,17 @@ const DevicesPage: React.FC = () => {
     { title: '角色', dataIndex: 'role', width: 120, render: (value: string) => value || '-' },
     { title: '状态', dataIndex: 'status', width: 120,
       render: (value: string) => <Tag color={value === 'ready' ? 'green' : value === 'blocked' ? 'red' : 'default'}>{statusLabel(value)}</Tag> },
-    { title: '覆盖率', width: 170,
+    { title: '检查项覆盖', width: 190,
       render: (_: unknown, row: ParserCommandProfileImpactPreview['rows'][number]) =>
-        `${row.ready_count}/${row.eligible_count} 就绪，${row.blocked_count} 阻塞` },
+        `${row.ready_count}/${row.eligible_count} 就绪，${row.blocked_count} 阻塞，${row.not_applicable_count || 0} 不适用` },
     { title: '阻塞原因', dataIndex: 'violations',
       render: (value: Array<Record<string, unknown>>) => {
         if (!value?.length) return '-'
-        return value.map((item) => String(item.canonical_command || item.command || item.coverage_status || '未就绪')).join('; ')
+        return value.map((item) => {
+          const reasonCodes = Array.isArray(item.reason_codes) ? item.reason_codes.join(', ') : ''
+          return String(item.check_item_id || item.canonical_command || item.command || item.coverage_status || '未就绪')
+            + (reasonCodes ? `：${reasonCodes}` : '')
+        }).join('; ')
       } },
   ]
 
@@ -2117,7 +2237,7 @@ const DevicesPage: React.FC = () => {
               items: [
                 { key: 'import', icon: <ImportOutlined />, label: '导入设备', onClick: () => setImportOpen(true) },
                 { key: 'dynamic-group', icon: <SearchOutlined />, label: '动态分组', onClick: openDynamicGroupCreate },
-                { key: 'profile-binding', icon: <LinkOutlined />, label: '绑定采集命令集', onClick: openProfileBinding },
+                { key: 'profile-binding', icon: <LinkOutlined />, label: '配置巡检 Profile', onClick: openProfileBinding },
                 { type: 'divider' },
                 { key: 'refresh', icon: <ReloadOutlined />, label: '刷新当前数据', onClick: () => refetch() },
               ],
@@ -2219,6 +2339,8 @@ const DevicesPage: React.FC = () => {
           showArchivedBatches={showArchivedPatrolBatches}
           onClearActiveBatch={() => setActivePatrolBatchId(null)}
           onExportBatchReport={(batchId) => exportPatrolBatchReport.mutate(batchId)}
+          onExportBatchTechnicalWorkbook={(batchId) => exportPatrolBatchTechnicalWorkbook.mutate(batchId)}
+          onExportBatchEvidencePackage={(batchId) => exportPatrolBatchEvidencePackage.mutate(batchId)}
           onExportBatchRawCli={(batchId) => exportPatrolBatchRawCli.mutate(batchId)}
           onExportBatchEvents={(batchId) => exportPatrolBatchEvents.mutate(batchId)}
           onOpenDeviceEvidence={openDeviceEvidenceTimeline}
@@ -2251,6 +2373,8 @@ const DevicesPage: React.FC = () => {
           onBatchDeviceSearchChange={(value) => { setBatchDeviceSearch(value); setBatchDevicePage(1) }}
           onBatchDeviceSelectionStatusChange={(value) => { setBatchDeviceSelectionStatus(value); setBatchDevicePage(1) }}
           exportBatchReportLoading={exportPatrolBatchReport.isLoading}
+          exportBatchTechnicalWorkbookLoading={exportPatrolBatchTechnicalWorkbook.isLoading}
+          exportBatchEvidencePackageLoading={exportPatrolBatchEvidencePackage.isLoading}
           exportBatchRawCliLoading={exportPatrolBatchRawCli.isLoading}
           exportBatchEventsLoading={exportPatrolBatchEvents.isLoading}
           retryRunLoading={retryWorkflowRun.isLoading}
@@ -2809,7 +2933,7 @@ const DevicesPage: React.FC = () => {
       </Drawer>
 
       <Drawer
-        title="绑定采集命令集"
+        title="配置巡检 Profile"
         open={profileBindingOpen}
         onClose={() => setProfileBindingOpen(false)}
         width={isMobile ? '100vw' : 1100}
@@ -2819,7 +2943,8 @@ const DevicesPage: React.FC = () => {
           <Alert
             type="info"
             showIcon
-            message="将已激活的采集命令集绑定到设备集合。绑定关系存储在 Parser 控制面，并由 device-patrol 通过 CollectionPolicyResolver 使用。"
+            message="先选择业务检查项，再由平台按设备厂商、型号和能力解析实际命令与规则资产。"
+            description="Profile 版本经过全目标影响预览和激活后才能绑定；旧命令 Profile 仅保留兼容读取，不会出现在这里。"
           />
           <Form<ProfileBindingFormValues>
             form={profileBindingForm}
@@ -2834,14 +2959,14 @@ const DevicesPage: React.FC = () => {
               <Col xs={24} md={9}>
                 <Form.Item
                   name="profile_version_id"
-                  label="采集命令集版本"
-                  rules={[{ required: true, message: '请选择采集命令集版本' }]}
+                  label="巡检 Profile 版本"
+                  rules={[{ required: true, message: '请选择巡检 Profile 版本' }]}
                 >
                   <Select
                     showSearch
                     optionFilterProp="label"
-                    placeholder="选择已激活的采集命令集版本"
-                    options={activeProfileVersionOptions}
+                    placeholder="选择检查项 Profile"
+                    options={checkItemProfileVersionOptions}
                   />
                 </Form.Item>
               </Col>
@@ -2904,8 +3029,34 @@ const DevicesPage: React.FC = () => {
                   </Col>
                 ) : null}
               </Form.Item>
+              <Col span={24}>
+                <Form.Item
+                  name="reason"
+                  label="变更原因"
+                  rules={[{ required: true, message: '请填写激活或绑定原因' }]}
+                >
+                  <Input placeholder="例如：西安核心网络季度巡检范围调整" />
+                </Form.Item>
+              </Col>
             </Row>
           </Form>
+          <Space wrap>
+            <Tag color={selectedBindingProfile?.version_status === 'active' ? 'green' : 'gold'}>
+              {selectedBindingProfile ? statusLabel(selectedBindingProfile.version_status) : '未选择'}
+            </Tag>
+            {(selectedBindingProfile?.check_items || []).map((item) => (
+              <Tag key={item.check_item_id}>{item.check_item_name || item.check_item_id}</Tag>
+            ))}
+            <Button
+              icon={<PlusOutlined />}
+              onClick={() => {
+                checkItemProfileForm.resetFields()
+                setCheckItemProfileOpen(true)
+              }}
+            >
+              新建 Profile
+            </Button>
+          </Space>
           <Descriptions size="small" bordered column={isMobile ? 1 : 3}>
             <Descriptions.Item label="已选择">{selectedRowKeys.length}</Descriptions.Item>
             <Descriptions.Item label="当前筛选">{Object.keys(currentFilterSelector()).length} 个字段</Descriptions.Item>
@@ -2923,25 +3074,42 @@ const DevicesPage: React.FC = () => {
               })(),
             }, null, 2)}
           </Typography.Paragraph>
-          <Space>
+          <Space wrap>
             <Button
               icon={<EyeOutlined />}
               loading={previewProfileBindingImpact.isLoading}
               onClick={() => previewProfileBindingImpact.mutate()}
             >
-              预览影响
+              预览并保存证据
             </Button>
+            {selectedBindingProfile?.version_status !== 'active' && (
+              <Button
+                icon={<SafetyCertificateOutlined />}
+                loading={activateCheckItemProfile.isLoading}
+                disabled={
+                  !profileBindingImpact?.evidence_saved
+                  || Boolean(profileBindingImpact?.blocked_device_count)
+                }
+                onClick={() => activateCheckItemProfile.mutate()}
+              >
+                激活 Profile
+              </Button>
+            )}
             <Button
               type="primary"
               icon={<LinkOutlined />}
               loading={saveProfileBinding.isLoading}
-              disabled={!profileBindingImpact}
+              disabled={
+                !profileBindingImpact
+                || selectedBindingProfile?.version_status !== 'active'
+                || Boolean(profileBindingImpact.blocked_device_count)
+              }
               onClick={() => saveProfileBinding.mutate()}
             >
-              保存绑定
+              绑定并启用
             </Button>
             <Button icon={<ReloadOutlined />} onClick={() => refetchCommandProfiles()}>
-              刷新命令集
+              刷新 Profile
             </Button>
           </Space>
           {profileBindingImpact && (
@@ -2949,7 +3117,7 @@ const DevicesPage: React.FC = () => {
               type={profileBindingImpact.blocked_device_count ? 'warning' : 'success'}
               showIcon
               message={'影响范围：' + profileBindingImpact.matched_device_count + ' 台设备，' + profileBindingImpact.blocked_device_count + ' 台阻断'}
-              description={`覆盖率 ${(profileBindingImpact.coverage_rate * 100).toFixed(1)}%；就绪命令 ${profileBindingImpact.ready_command_count}/${profileBindingImpact.eligible_command_count}；阻塞命令 ${profileBindingImpact.blocked_command_count}`}
+              description={`检查项覆盖率 ${(profileBindingImpact.coverage_rate * 100).toFixed(1)}%；就绪 ${profileBindingImpact.ready_check_item_count ?? profileBindingImpact.ready_command_count}/${profileBindingImpact.eligible_command_count}；阻断 ${profileBindingImpact.blocked_check_item_count ?? profileBindingImpact.blocked_command_count}；不适用 ${profileBindingImpact.not_applicable_check_item_count || 0}`}
             />
           )}
           {profileBindingImpact && (
@@ -2964,6 +3132,74 @@ const DevicesPage: React.FC = () => {
           )}
         </Space>
       </Drawer>
+
+      <Modal
+        title="新建巡检 Profile"
+        open={checkItemProfileOpen}
+        onCancel={() => setCheckItemProfileOpen(false)}
+        onOk={() => createCheckItemProfile.mutate()}
+        okText="创建草稿"
+        confirmLoading={createCheckItemProfile.isLoading}
+        width={720}
+        destroyOnClose
+      >
+        <Alert
+          type="info"
+          showIcon
+          message="Profile 只描述要检查什么，不维护不同厂商的具体命令。"
+          description="创建后回到上一步选择目标设备，平台会解析每台设备的兼容实现、命令和完整 Active RuntimeBundle。"
+          style={{ marginBottom: 16 }}
+        />
+        <Form<CheckItemProfileFormValues>
+          form={checkItemProfileForm}
+          layout="vertical"
+          requiredMark={false}
+        >
+          <Form.Item
+            name="name"
+            label="Profile 名称"
+            rules={[{ required: true, message: '请输入 Profile 名称' }]}
+          >
+            <Input placeholder="例如：核心网络季度巡检" />
+          </Form.Item>
+          <Form.Item
+            name="check_item_ids"
+            label="业务检查项"
+            rules={[{ required: true, type: 'array', min: 1, message: '至少选择一个检查项' }]}
+          >
+            <Select
+              mode="multiple"
+              showSearch
+              optionFilterProp="label"
+              placeholder="选择 CPU、内存、接口、光功率等检查项"
+              options={checkItems.map((item) => ({
+                value: item.check_item_id,
+                label: `${item.name} · ${item.check_item_id} · ${item.implementation_count} 个兼容实现`,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item shouldUpdate noStyle>
+            {({ getFieldValue }) => {
+              const selectedIds = getFieldValue('check_item_ids') || []
+              const selectedItems = checkItems.filter((item) => selectedIds.includes(item.check_item_id))
+              return selectedItems.length ? (
+                <Table<ParserCheckItem>
+                  rowKey="check_item_id"
+                  size="small"
+                  pagination={false}
+                  dataSource={selectedItems}
+                  columns={[
+                    { title: '检查项', render: (_: unknown, item: ParserCheckItem) => item.name },
+                    { title: '结果模式', dataIndex: 'result_mode', width: 130 },
+                    { title: '评估模式', dataIndex: 'assessment_mode', width: 120 },
+                    { title: '兼容实现', dataIndex: 'implementation_count', width: 100 },
+                  ]}
+                />
+              ) : null
+            }}
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <Modal
         title={editing ? '编辑设备' : '新增设备'}
@@ -3028,23 +3264,27 @@ const DevicesPage: React.FC = () => {
                 </Space.Compact>
               </Form.Item>
             </Col>
-            <Col xs={24} md={12}><Form.Item name="command_profile" label="采集命令集"><Input /></Form.Item></Col>
+            <Col xs={24} md={12}><Form.Item name="command_profile" label="历史 Profile 引用"><Input disabled /></Form.Item></Col>
             <Col xs={24} md={12}><Form.Item name="groups" label="分组"><Input placeholder="core, xian-dc" /></Form.Item></Col>
             <Col span={24}>
-              <Form.Item label="巡检命令">
+              <Form.Item label="巡检 Profile">
                 <Space direction="vertical" size={8} style={{ width: '100%' }}>
                   <Alert
                     type={currentCommandProfile ? 'info' : 'warning'}
                     showIcon
                     message={currentCommandProfile
-                      ? `来自采集命令集：${currentCommandProfile.profile_name} v${currentCommandProfile.version || currentCommandProfile.current_version || '-'}`
-                      : '未匹配到已登记的采集命令集'}
+                      ? `巡检 Profile：${currentCommandProfile.profile_name} v${currentCommandProfile.version || currentCommandProfile.current_version || '-'}`
+                      : '未匹配到已登记的巡检 Profile'}
                     description={currentCommandProfile
-                      ? `共 ${currentCommandProfileCommands.length} 条 patrol 命令；实际巡检以执行计划预览为准。`
-                      : '请先填写或绑定采集命令集。设备级巡检命令覆盖已移除。'}
+                      ? currentCommandProfile.profile_mode === 'check_items'
+                        ? `已选择 ${currentCommandProfile.check_item_ids?.length || 0} 个检查项；实际命令按设备身份和 Active RuntimeBundle 解析。`
+                        : `兼容命令 Profile，共 ${currentCommandProfileCommands.length} 条命令。`
+                      : '请通过“配置巡检 Profile”绑定设备范围；设备级命令覆盖已停用。'}
                   />
                   <pre style={{ ...codeStyle, maxHeight: 180 }}>
-                    {currentCommandProfileCommands.length
+                    {currentCommandProfile?.profile_mode === 'check_items'
+                      ? (currentCommandProfile.check_item_ids || []).join('\n')
+                      : currentCommandProfileCommands.length
                       ? currentCommandProfileCommands.join('\n')
                       : '暂无可展示命令'}
                   </pre>
@@ -3267,7 +3507,7 @@ const DevicesPage: React.FC = () => {
                   />
                 </Form.Item>
               </Col>
-              <Col xs={24} md={8}><Form.Item name="command_profile" label="采集命令集"><Input /></Form.Item></Col>
+              <Col xs={24} md={8}><Form.Item name="command_profile" label="历史 Profile 引用"><Input disabled /></Form.Item></Col>
               <Col xs={24} md={8}>
                 <Form.Item name="credential_ref" label="凭据引用">
                   <AutoComplete

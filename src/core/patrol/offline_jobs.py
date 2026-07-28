@@ -66,10 +66,10 @@ INGESTION_BLOCKER_CODES = {
     "file_invalid",
     "identity_unknown",
     "no_common_device",
-    "no_common_ready_parser",
-    "parser_template_inactive",
 }
 PATROL_RUNTIME_BLOCKER_CODES = INGESTION_BLOCKER_CODES | {
+    "no_common_ready_parser",
+    "parser_template_inactive",
     "template_missing",
     "parse_failed",
     "observation_contract_missing",
@@ -702,11 +702,9 @@ class OfflinePatrolJobService:
             if not period:
                 raise KeyError("offline patrol period not found")
             run_id = period.patrol_run_id or f"{job_id}-{period_role}-attempt-{job.attempt_number}"
-            mode = (
-                "parser_validation"
-                if job.purpose == "rule_asset_source" and job.job_type == "parser_validation"
-                else "production"
-            )
+            # Rule-asset sources retain Parser gaps as governed generation
+            # evidence and never publish them into the production event stream.
+            mode = "parser_validation" if job.purpose == "rule_asset_source" else "production"
             vendor, model, purpose = job.vendor, job.model, job.purpose
             observed_at = period.observed_at.isoformat()
             dataset_id = period.dataset_id
@@ -1779,6 +1777,11 @@ class OfflinePatrolJobService:
     def _serialize_job_summary(row: OfflinePatrolJobRecord) -> dict[str, Any]:
         issues = list(row.blockers_json or [])
         preview = _normalized_preview(row.preview_json)
+        blocker_codes = (
+            PATROL_RUNTIME_BLOCKER_CODES
+            if row.purpose == "offline_patrol"
+            else INGESTION_BLOCKER_CODES
+        )
         return _json_safe(
             {
                 "id": row.id,
@@ -1797,10 +1800,10 @@ class OfflinePatrolJobService:
                 "progress": row.progress_json or {},
                 "preview_totals": preview.get("totals", {}),
                 "blocker_count": sum(
-                    str(item.get("code") or "") in INGESTION_BLOCKER_CODES for item in issues
+                    str(item.get("code") or "") in blocker_codes for item in issues
                 ),
                 "warning_count": sum(
-                    str(item.get("code") or "") not in INGESTION_BLOCKER_CODES for item in issues
+                    str(item.get("code") or "") not in blocker_codes for item in issues
                 ),
                 "archived": row.archived,
                 "created_at": row.created_at,

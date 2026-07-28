@@ -32,6 +32,9 @@ class ContractProposal:
     entity_type: str
     primary_keys: tuple[str, ...]
     required_fields: tuple[str, ...]
+    canonical_entity_type: str | None = None
+    entity_identity_fields: tuple[str, ...] = ()
+    entity_dimensions: dict[str, Any] | None = None
     optional_fields: tuple[str, ...] = ()
     validators: dict[str, dict[str, Any]] | None = None
     allow_empty: bool = False

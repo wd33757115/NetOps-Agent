@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 from src.core.patrol.handlers import (
     BuildEventsHandler,
@@ -102,6 +103,97 @@ def test_start_patrol_handler_persists_batch_before_enqueuing_dispatch():
     assert result["launched_count"] == 0
     assert batches.created[0]["planned_rows"][0]["execution_plan_id"] == "plan-1"
     assert enqueued == ["batch-1"]
+
+
+def test_start_patrol_handler_freezes_check_item_plan_before_dispatch():
+    plans = _Plans()
+    batches = _Batches()
+    enqueued = []
+    effective_calls = []
+    preview = SimpleNamespace(
+        manifest_id="runtime-manifest-1",
+        manifest_digest="a" * 64,
+        collection_actions=(
+            {
+                "id": "action-1",
+                "device_id": "device-1",
+                "collector": "cli",
+                "command": "display cpu-usage",
+                "fallback_rank": 0,
+                "bindings": [
+                    {
+                        "check_item_version_id": "check-cpu-v1",
+                        "implementation_version_id": "impl-cpu-v1",
+                        "runtime_bundle_version_id": "bundle-cpu-v1",
+                        "fallback_rank": 0,
+                    }
+                ],
+            },
+        ),
+        executions=(
+            {
+                "id": "execution-1",
+                "device_id": "device-1",
+                "execution_status": "planned",
+            },
+        ),
+    )
+
+    class EffectivePlans:
+        def preview(self, request):
+            effective_calls.append(("preview", request))
+            return preview
+
+        def freeze(self, request):
+            effective_calls.append(("freeze", request))
+            return preview
+
+    handler = StartPatrolHandler(
+        plan_repository=plans,
+        batch_repository=batches,
+        effective_plan_service=EffectivePlans(),
+        batch_dispatcher=lambda batch_id: enqueued.append(batch_id) or "dispatch-1",
+        batch_id_factory=lambda: "batch-check-items",
+    )
+    command = _command()
+    command = StartPatrolCommand(
+        **{
+            **command.__dict__,
+            "target_devices": [
+                {
+                    "device_id": "device-1",
+                    "device_name": "core-1",
+                    "management_ip": "192.0.2.1",
+                    "vendor": "H3C",
+                    "family": "Comware7",
+                    "model": "S5130",
+                }
+            ],
+            "check_item_ids_by_device": {
+                "device-1": ["system.cpu_usage"]
+            },
+            "profile_version_ids_by_device": {
+                "device-1": "profile-v1"
+            },
+        }
+    )
+
+    result = handler.handle(command)
+
+    assert [item[0] for item in effective_calls] == [
+        "preview",
+        "freeze",
+    ]
+    persisted_plan = plans.created[0][0]
+    assert persisted_plan["runtime_manifest_id"] == "runtime-manifest-1"
+    assert persisted_plan["collection_items"][0][
+        "collection_item_id"
+    ] == "action-1"
+    assert batches.created[0]["planned_rows"][0][
+        "execution_plan_id"
+    ] == "plan-1"
+    assert enqueued == ["batch-check-items"]
+    assert result["check_item_mode"] is True
 
 
 def test_dispatch_patrol_batch_starts_idempotent_workflow_and_marks_target():

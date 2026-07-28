@@ -75,6 +75,12 @@ const blockerText: Record<string, string> = {
   'historical replay must be scoped by immutable run_ids': '历史回放未限定为不可变上下文中的巡检 Run',
   'historical replay run_ids do not match immutable context': '历史回放 Run 范围与不可变上下文不一致',
   'historical replay run_id_count is inconsistent': '历史回放 Run 数量与范围明细不一致',
+  'historical replay contains no Change evidence': '历史回放没有读取到任何 Change，不能证明规则有效',
+  'historical replay sampled_change_count exceeds total_change_count': '历史回放采样数量超过变化总数，统计结果不一致',
+  'historical replay sampled_run_ids exceed immutable run scope': '历史回放采样 Run 超出不可变上下文范围',
+  'historical replay sampled_run_id_count is inconsistent': '历史回放采样 Run 数量与明细不一致',
+  'historical replay Change evidence is not bound to an immutable run': '历史 Change 证据未绑定到不可变巡检 Run',
+  'some immutable runs contain no Change evidence': '部分巡检 Run 没有产生 Change，请确认这是基线周期还是数据缺口',
   'immutable sanitized context gate failed': '不可变脱敏上下文未通过隐私或一致性门禁',
   'engineering review has not accepted the generated candidates': '候选资产尚未通过工程师复核',
 }
@@ -267,11 +273,21 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
         columns={[
           {
             title: '资产语义',
-            width: 280,
+            width: 330,
             render: (_: unknown, row) => (
-              <Space direction="vertical" size={0}>
-                <Typography.Text strong>{row.observation_type || '待识别 Observation Type'}</Typography.Text>
+              <Space direction="vertical" size={3}>
+                <Typography.Text strong>
+                  {(row.observation_types || []).length > 1
+                    ? `完整命令规则资产 · ${row.observation_types?.length} 个观测语义`
+                    : row.observation_type || row.semantic_label || '待识别 Observation Type'}
+                </Typography.Text>
                 <Typography.Text type="secondary">{row.command || row.source_ref || '-'}</Typography.Text>
+                {(row.observation_types || []).length > 1 && (
+                  <Space wrap size={[4, 2]}>
+                    {(row.observation_types || []).slice(0, 3).map((item) => <Tag key={item}>{item}</Tag>)}
+                    {(row.observation_types || []).length > 3 && <Tag>另 {(row.observation_types || []).length - 3} 项</Tag>}
+                  </Space>
+                )}
               </Space>
             ),
           },
@@ -304,7 +320,7 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
                   碰撞 {String(row.replay.collision_count ?? '-')} · 替换旧规则 {row.replay.replacement_rule_ids?.length || 0}
                 </Typography.Text>
                 <Tag color={row.replay_gate?.success === false ? 'red' : 'green'}>
-                  {replayScopeSummary(row)}
+                  {row.replay_gate?.evidence_success === false ? '没有有效 Change 证据' : replayScopeSummary(row)}
                 </Tag>
               </Space>
             ),
@@ -388,6 +404,14 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
                 </Tag>
                 <Tag>预估每日事件 {String(row.replay.estimated_daily_event_count ?? '-')}</Tag>
               </Space>
+              {row.replay_gate?.evidence_success === false && (
+                <Alert
+                  type="error"
+                  showIcon
+                  message="回放样本为 0，候选资产禁止审批"
+                  description="请导入至少两个可比较周期并完成 State/Change 生成，再重新执行规则资产生成或工程修订。"
+                />
+              )}
               {row.replay.representativeness && (
                 <Space wrap size={[8, 4]}>
                   <Typography.Text strong>回放代表性</Typography.Text>
@@ -434,14 +458,22 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
                     description={displayBlockers(row.replay_gate?.errors || [])}
                   />
                 )}
+                {(row.replay_gate?.warnings || []).length > 0 && (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    message="回放范围存在未覆盖 Run"
+                    description={displayBlockers(row.replay_gate?.warnings || [])}
+                  />
+                )}
                 {(row.replay_gate?.actual_run_ids || row.replay.scope?.run_ids || []).length > 0 && (
                   <Typography.Text type="secondary" copyable>
                     巡检 Run：{compactRunIds(row.replay_gate?.actual_run_ids || row.replay.scope?.run_ids)}
                   </Typography.Text>
                 )}
-                {(row.replay.scope?.missing_run_ids || []).length > 0 && (
+                {(row.replay_gate?.missing_run_ids || row.replay.scope?.missing_run_ids || []).length > 0 && (
                   <Typography.Text type="warning" copyable>
-                    无 Change 的基线 Run：{compactRunIds(row.replay.scope?.missing_run_ids)}
+                    未产生 Change 的 Run：{compactRunIds(row.replay_gate?.missing_run_ids || row.replay.scope?.missing_run_ids)}
                   </Typography.Text>
                 )}
                 {(row.offline_job_ids || (row.offline_job_id ? [row.offline_job_id] : [])).length > 0 && (
@@ -487,7 +519,7 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
           : lifecycleRequest?.action === 'reject'
             ? '确认拒绝'
             : '确认回退'}
-        resourceName={lifecycleRequest?.row.observation_type || lifecycleRequest?.row.id || '规则资产包'}
+        resourceName={lifecycleRequest?.row.semantic_label || lifecycleRequest?.row.observation_type || lifecycleRequest?.row.id || '规则资产包'}
         impact={lifecycleRequest?.action === 'approve'
           ? 'Contract、Policy 和全部 EventRule 将在同一事务内激活；任一步失败都会整体回滚。'
           : lifecycleRequest?.action === 'reject'

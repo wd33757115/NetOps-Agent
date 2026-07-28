@@ -28,6 +28,16 @@ from src.core.parser.semantic_catalog import (  # noqa: E402
 from src.core.parser.semantic_catalog import (
     field_semantics as catalog_field_semantics,
 )
+from src.core.observation.semantic_projection import (  # noqa: E402
+    SemanticProjectionError,
+    dimension_field_references,
+    dimension_schema_signature,
+    normalize_dimensions,
+    resolve_dimensions,
+    transform_field_references,
+    validate_transform,
+    validate_unit_conversion,
+)
 from src.core.rule_control.generation_agent import (  # noqa: E402
     DEFAULT_RULE_GENERATION_PROVIDERS,
     RuleGenerationAgent,
@@ -36,6 +46,7 @@ from src.core.rule_control.planning import (  # noqa: E402
     COMPARABLE_SEMANTIC_TYPES,
     NON_TARGET_ROLES,
     enrich_contract_reference_semantics,
+    normalize_contract_semantics,
     profile_fields,
 )
 from src.core.state.observation_applicability import (  # noqa: E402
@@ -96,6 +107,8 @@ def _validate_contract_by_group(
     require_policy_targets: bool = False,
     observation_targets: list[dict[str, Any]] | None = None,
     strict_observation_targets: bool = False,
+    canonical_identity_constraint: dict[str, Any] | None = None,
+    allow_semantic_overrides: bool = False,
 ) -> dict[str, Any]:
     declared = {
         str(item)
@@ -124,10 +137,16 @@ def _validate_contract_by_group(
         require_policy_targets=require_policy_targets,
         observation_targets=observation_targets,
         strict_observation_targets=strict_observation_targets,
+        canonical_identity_constraint=canonical_identity_constraint,
         field_profiles=profile_fields(
             all_records,
             field_inventory=field_inventory,
         ),
+        sample_records=all_records,
+        allow_semantic_overrides=allow_semantic_overrides,
+    )
+    governance_errors.extend(
+        _canonical_identity_group_errors(candidate, groups=groups)
     )
     reports = [
         (
@@ -199,6 +218,53 @@ def _validate_contract_by_group(
         ],
         "proposal": first_proposal,
     }
+
+
+def _canonical_identity_group_errors(
+    candidate: dict[str, Any],
+    *,
+    groups: list[dict[str, Any]],
+) -> list[str]:
+    dimensions = candidate.get("entity_dimensions") or {}
+    identity_fields = [
+        str(item)
+        for item in candidate.get("entity_identity_fields") or []
+        if str(item).strip()
+    ]
+    if not dimensions or not identity_fields:
+        return []
+    try:
+        normalized = normalize_dimensions(dimensions)
+    except SemanticProjectionError:
+        return []
+    errors: list[str] = []
+    for group in groups:
+        group_id = str(group.get("group_id") or "default")
+        seen: set[str] = set()
+        duplicate_count = 0
+        for record in group.get("records") or []:
+            if not isinstance(record, dict):
+                continue
+            try:
+                resolved = resolve_dimensions(normalized, record)
+            except SemanticProjectionError:
+                continue
+            key = json.dumps(
+                [resolved.get(field) for field in identity_fields],
+                ensure_ascii=False,
+                separators=(",", ":"),
+                default=str,
+            )
+            if key in seen:
+                duplicate_count += 1
+            seen.add(key)
+        if duplicate_count:
+            errors.append(
+                f"canonical entity identity is not unique in snapshot group "
+                f"{group_id}: {duplicate_count} duplicate records; identifier "
+                "dimensions must preserve source primary-key uniqueness"
+            )
+    return errors
 
 
 def _governed_semantic_hints(
@@ -376,9 +442,16 @@ def _apply_observation_target_constraints(
         return candidate
     output = json.loads(json.dumps(dict(candidate)))
     semantics = dict(output.get("state_semantics") or {})
-    resolved: dict[str, str] = {}
+    resolved: dict[str, list[str]] = {}
+    allowed_types = {
+        str(item.get("observation_type") or "").strip()
+        for item in observation_targets
+        if str(item.get("observation_type") or "").strip()
+    }
     for target in observation_targets:
         observation_type = str(target.get("observation_type") or "").strip()
+        if not str(target.get("canonical_field") or "").strip():
+            continue
         matches = _target_field_matches(field_inventory, target, semantics)
         if not observation_type or len(matches) != 1:
             continue
@@ -388,9 +461,23 @@ def _apply_observation_target_constraints(
         metadata["comparison_role"] = "observation"
         metadata["monitor"] = True
         semantics[field] = metadata
-        resolved[observation_type] = field
+        resolved.setdefault(observation_type, []).append(field)
+    for field, raw in semantics.items():
+        if not isinstance(raw, dict):
+            continue
+        observation_type = str(raw.get("observation_type") or "").strip()
+        if observation_type in allowed_types:
+            resolved.setdefault(observation_type, []).append(str(field))
+    resolved = {
+        observation_type: list(dict.fromkeys(fields))
+        for observation_type, fields in resolved.items()
+    }
     if strict:
-        target_fields = set(resolved.values())
+        target_fields = {
+            field
+            for fields in resolved.values()
+            for field in fields
+        }
         for field, raw in tuple(semantics.items()):
             if field in target_fields or not isinstance(raw, dict):
                 continue
@@ -421,7 +508,10 @@ def _contract_governance_errors(
     require_policy_targets: bool = False,
     observation_targets: list[dict[str, Any]] | None = None,
     strict_observation_targets: bool = False,
+    canonical_identity_constraint: dict[str, Any] | None = None,
     field_profiles: dict[str, dict[str, Any]] | None = None,
+    sample_records: list[dict[str, Any]] | None = None,
+    allow_semantic_overrides: bool = False,
 ) -> list[str]:
     errors: list[str] = []
     required = [str(item) for item in candidate.get("required_fields") or []]
@@ -457,6 +547,133 @@ def _contract_governance_errors(
         if candidate_validators.get(field) != expected:
             errors.append(f"validators.{field} must match the approved Parser contract seed")
 
+    identity_constraint = dict(canonical_identity_constraint or {})
+    identity_dimension_rules = {
+        str(name): dict(rule)
+        for name, rule in dict(
+            identity_constraint.get("identity_dimension_rules") or {}
+        ).items()
+        if isinstance(rule, dict)
+    }
+    canonical_entity_type = str(
+        candidate.get("canonical_entity_type") or ""
+    ).strip()
+    identity_fields = [
+        str(item).strip()
+        for item in candidate.get("entity_identity_fields") or []
+        if str(item).strip()
+    ]
+    identity_dimensions = candidate.get("entity_dimensions") or {}
+    has_canonical_identity = bool(
+        canonical_entity_type or identity_fields or identity_dimensions
+    )
+    if has_canonical_identity:
+        if not canonical_entity_type:
+            errors.append("canonical_entity_type is required for canonical identity")
+        if not identity_fields:
+            errors.append("entity_identity_fields are required for canonical identity")
+        if len(identity_fields) != len(set(identity_fields)):
+            errors.append("entity_identity_fields must be unique")
+        try:
+            normalized_identity_dimensions = normalize_dimensions(
+                identity_dimensions
+            )
+        except SemanticProjectionError as exc:
+            errors.append(f"entity_dimensions is invalid: {exc}")
+            normalized_identity_dimensions = {}
+        if set(identity_fields) != set(normalized_identity_dimensions):
+            errors.append(
+                "entity_identity_fields must exactly match entity_dimensions"
+            )
+        unknown_identity_fields = sorted(
+            set(dimension_field_references(normalized_identity_dimensions))
+            - set(field_inventory)
+        )
+        if unknown_identity_fields:
+            errors.append(
+                "entity_dimensions references fields absent from the approved Parser: "
+                + ", ".join(unknown_identity_fields)
+            )
+        identity_source_fields = set(
+            dimension_field_references(normalized_identity_dimensions)
+        )
+        missing_source_keys = sorted(
+            {
+                str(item)
+                for item in candidate.get("primary_keys") or []
+                if str(item).strip()
+            }
+            - identity_source_fields
+        )
+        if missing_source_keys:
+            errors.append(
+                "entity_dimensions must preserve every approved source primary "
+                "key unless an explicit aggregation contract is approved; missing: "
+                + ", ".join(missing_source_keys)
+            )
+        for dimension, rule in identity_dimension_rules.items():
+            if (
+                str(rule.get("kind") or "") == "enum"
+                and set(normalized_identity_dimensions.get(dimension) or {})
+                != {"literal"}
+            ):
+                errors.append(
+                    f"entity_dimensions.{dimension} is an enum and must use "
+                    "one approved literal value, not a source field or operation"
+                )
+        for index, record in enumerate(sample_records or []):
+            try:
+                resolved_identity = resolve_dimensions(
+                    normalized_identity_dimensions,
+                    record,
+                )
+            except SemanticProjectionError as exc:
+                errors.append(
+                    f"entity_dimensions cannot resolve records[{index}]: {exc}"
+                )
+                break
+            for dimension, rule in identity_dimension_rules.items():
+                if dimension not in resolved_identity:
+                    continue
+                if str(rule.get("kind") or "") == "enum":
+                    allowed = {
+                        str(item).strip().casefold()
+                        for item in rule.get("allowed_values") or []
+                    }
+                    actual = str(resolved_identity[dimension]).strip()
+                    if actual.casefold() not in allowed:
+                        errors.append(
+                            f"entity_dimensions.{dimension} resolved to "
+                            f"{actual!r}, outside approved values "
+                            f"{sorted(allowed)}"
+                        )
+                        break
+            else:
+                continue
+            break
+
+    expected_entity_type = str(
+        identity_constraint.get("canonical_entity_type") or ""
+    ).strip()
+    expected_identity_fields = [
+        str(item).strip()
+        for item in identity_constraint.get("identity_dimensions") or []
+        if str(item).strip()
+    ]
+    if expected_entity_type and canonical_entity_type != expected_entity_type:
+        errors.append(
+            "canonical_entity_type must match the approved check item: "
+            + expected_entity_type
+        )
+    if (
+        expected_identity_fields
+        and identity_fields != expected_identity_fields
+    ):
+        errors.append(
+            "entity_identity_fields must match the approved check item order: "
+            + ", ".join(expected_identity_fields)
+        )
+
     semantics = dict(candidate.get("state_semantics") or {})
     policy_target_count = 0
     observation_fields: dict[str, list[str]] = {}
@@ -490,6 +707,38 @@ def _contract_governance_errors(
                     f"state_semantics.{field} cannot declare observation_type while marked "
                     "as a non-target field"
                 )
+        transform = actual.get("transform")
+        if transform is not None:
+            for message in validate_transform(transform):
+                errors.append(f"state_semantics.{field}.{message}")
+            unknown_transform_fields = sorted(
+                set(transform_field_references(transform)) - set(field_inventory)
+            )
+            if unknown_transform_fields:
+                errors.append(
+                    f"state_semantics.{field}.transform references fields absent from "
+                    "the approved Parser: "
+                    + ", ".join(unknown_transform_fields)
+                )
+        try:
+            normalize_dimensions(actual.get("dimensions"))
+            unknown_dimension_fields = sorted(
+                set(dimension_field_references(actual.get("dimensions")))
+                - set(field_inventory)
+            )
+            if unknown_dimension_fields:
+                errors.append(
+                    f"state_semantics.{field}.dimensions references fields absent from "
+                    "the approved Parser: "
+                    + ", ".join(unknown_dimension_fields)
+                )
+        except SemanticProjectionError as exc:
+            errors.append(f"state_semantics.{field}.dimensions is invalid: {exc}")
+        for message in validate_unit_conversion(
+            source_unit=actual.get("source_unit") or actual.get("unit"),
+            target_unit=actual.get("canonical_unit") or actual.get("unit"),
+        ):
+            errors.append(f"state_semantics.{field}.{message}")
         if (
             require_policy_targets
             and semantic_type in NUMERIC_SEMANTIC_TYPES
@@ -514,10 +763,34 @@ def _contract_governance_errors(
             "contract must expose at least one evidenced comparable field as a policy target"
         )
     for observation_type, fields in observation_fields.items():
-        if len(fields) > 1:
+        if len(fields) <= 1:
+            continue
+        dimension_signatures: dict[str, str] = {}
+        missing_dimensions: list[str] = []
+        duplicate_dimensions: list[str] = []
+        for field in fields:
+            dimensions = (semantics.get(field) or {}).get("dimensions")
+            if not dimensions:
+                missing_dimensions.append(field)
+                continue
+            try:
+                signature = dimension_schema_signature(dimensions)
+            except SemanticProjectionError:
+                continue
+            if signature in dimension_signatures:
+                duplicate_dimensions.extend([dimension_signatures[signature], field])
+            else:
+                dimension_signatures[signature] = field
+        if missing_dimensions:
             errors.append(
-                f"observation_type {observation_type} maps to multiple fields: "
-                + ", ".join(sorted(fields))
+                f"observation_type {observation_type} maps to multiple fields without "
+                "explicit dimensions: "
+                + ", ".join(sorted(missing_dimensions))
+            )
+        if duplicate_dimensions:
+            errors.append(
+                f"observation_type {observation_type} has duplicate dimension mappings: "
+                + ", ".join(sorted(set(duplicate_dimensions)))
             )
     expected_observation_types: set[str] = set()
     for target in observation_targets or []:
@@ -526,38 +799,93 @@ def _contract_governance_errors(
             errors.append("observation target requires observation_type")
             continue
         expected_observation_types.add(observation_type)
-        matches = _target_field_matches(field_inventory, target, semantics)
-        if len(matches) != 1:
+        mapped_fields = observation_fields.get(observation_type, [])
+        if not mapped_fields:
             errors.append(
-                f"observation target {observation_type} must resolve to exactly one field; "
-                f"matched={matches}"
+                f"observation target {observation_type} is not produced by any field"
             )
             continue
-        field = matches[0]
-        if str((semantics.get(field) or {}).get("observation_type") or "") != observation_type:
-            errors.append(
-                f"state_semantics.{field}.observation_type must match governed value "
-                f"{observation_type!r}"
-            )
+        canonical_field = str(target.get("canonical_field") or "").strip()
+        if canonical_field:
+            matches = _target_field_matches(field_inventory, target, semantics)
+            if not matches or not set(matches).intersection(mapped_fields):
+                errors.append(
+                    f"observation target {observation_type} does not map its governed "
+                    f"canonical field {canonical_field!r}"
+                )
+        expected_dimensions = {
+            str(item).strip()
+            for item in target.get("dimensions") or []
+            if str(item).strip()
+        }
+        expected_unit = str(
+            target.get("unit") or target.get("canonical_unit") or ""
+        ).strip().casefold()
+        expected_semantic_type = str(
+            target.get("semantic_type") or ""
+        ).strip().casefold()
+        for field in mapped_fields:
+            actual = dict(semantics.get(field) or {})
+            try:
+                actual_dimensions = set(
+                    normalize_dimensions(actual.get("dimensions"))
+                )
+            except SemanticProjectionError:
+                actual_dimensions = set()
+            if actual_dimensions != expected_dimensions:
+                errors.append(
+                    f"state_semantics.{field}.dimensions must match governed "
+                    f"dimensions {sorted(expected_dimensions)}"
+                )
+            actual_unit = str(
+                actual.get("canonical_unit") or actual.get("unit") or ""
+            ).strip().casefold()
+            if expected_unit and actual_unit != expected_unit:
+                errors.append(
+                    f"state_semantics.{field} must use canonical unit "
+                    f"{expected_unit!r}"
+                )
+            actual_semantic_type = str(
+                actual.get("semantic_type") or ""
+            ).strip().casefold()
+            compatible_semantics = {
+                ("gauge", "percentage"),
+                ("percentage", "gauge"),
+            }
+            if (
+                expected_semantic_type
+                and actual_semantic_type != expected_semantic_type
+                and (expected_semantic_type, actual_semantic_type)
+                not in compatible_semantics
+            ):
+                errors.append(
+                    f"state_semantics.{field}.semantic_type must match governed "
+                    f"value {expected_semantic_type!r}"
+                )
     if strict_observation_targets:
         extras = sorted(set(observation_fields) - expected_observation_types)
         if extras:
             errors.append("contract exposes unapproved observation types: " + ", ".join(extras))
-    for field, expected in _governed_semantic_hints(field_inventory, seed).items():
-        actual = semantics.get(field)
+    if not allow_semantic_overrides:
+        for field, expected in _governed_semantic_hints(field_inventory, seed).items():
+            actual = semantics.get(field)
+            if not isinstance(actual, dict):
+                continue
+            for key in (
+                "semantic_type",
+                "unit",
+                "observation_type",
+                "ignore",
+                "applicability",
+            ):
+                if key in expected and actual.get(key) != expected[key]:
+                    errors.append(
+                        f"state_semantics.{field}.{key} must match governed value "
+                        f"{expected[key]!r}"
+                    )
+    for field, actual in semantics.items():
         if not isinstance(actual, dict):
             continue
-        for key in (
-            "semantic_type",
-            "unit",
-            "observation_type",
-            "ignore",
-            "applicability",
-        ):
-            if key in expected and actual.get(key) != expected[key]:
-                errors.append(
-                    f"state_semantics.{field}.{key} must match governed value {expected[key]!r}"
-                )
         if actual.get("applicability"):
             errors.extend(
                 f"state_semantics.{field}.{message}"
@@ -638,6 +966,233 @@ def _agent_loop(
     }
 
 
+def _record_set_records(
+    records: list[dict[str, Any]],
+    name: str,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            str(key): value
+            for key, value in record.items()
+            if str(key) != "__record_set__"
+        }
+        for record in records
+        if str(record.get("__record_set__") or "") == name
+    ]
+
+
+def _record_set_groups(
+    groups: list[dict[str, Any]],
+    name: str,
+) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    for group in groups:
+        records = _record_set_records(
+            [
+                dict(item)
+                for item in group.get("records") or []
+                if isinstance(item, dict)
+            ],
+            name,
+        )
+        if records:
+            output.append(
+                {
+                    "group_id": str(group.get("group_id") or "default"),
+                    "records": records,
+                }
+            )
+    return output
+
+
+def _run_multi_record_llm_generation(
+    *,
+    params: dict[str, Any],
+    command: str,
+    records: list[dict[str, Any]],
+    record_groups: list[dict[str, Any]],
+    proposal_payload: dict[str, Any],
+    generation_provider: str,
+) -> dict[str, Any]:
+    seed_sets = [
+        dict(item)
+        for item in proposal_payload.get("record_sets") or []
+        if isinstance(item, dict)
+    ]
+    seed_by_name = {
+        str(item.get("name") or "").strip(): item
+        for item in seed_sets
+        if str(item.get("name") or "").strip()
+    }
+    if len(seed_by_name) != len(seed_sets):
+        raise ValueError("approved Parser record_sets must have unique non-empty names")
+
+    context_sets: list[dict[str, Any]] = []
+    for name, seed in seed_by_name.items():
+        set_records = _record_set_records(records, name)
+        field_inventory = sorted(
+            {
+                str(field)
+                for record in set_records
+                for field in record
+                if str(field).strip()
+            }
+        )
+        context_sets.append(
+            {
+                "name": name,
+                "field_inventory": field_inventory,
+                "field_profiles": profile_fields(
+                    set_records,
+                    field_inventory=field_inventory,
+                ),
+                "records": set_records,
+                "contract_constraints": {
+                    key: seed.get(key)
+                    for key in (
+                        "entity_type",
+                        "primary_keys",
+                        "required_fields",
+                        "optional_fields",
+                        "validators",
+                        "allow_empty",
+                        "empty_patterns",
+                        "ignore_fields",
+                    )
+                    if seed.get(key) is not None
+                },
+                "governed_semantic_hints": _governed_semantic_hints(
+                    field_inventory,
+                    seed,
+                ),
+            }
+        )
+
+    def validate_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+        candidate_sets = [
+            dict(item)
+            for item in candidate.get("record_sets") or []
+            if isinstance(item, dict)
+        ]
+        candidate_by_name = {
+            str(item.get("name") or "").strip(): item
+            for item in candidate_sets
+            if str(item.get("name") or "").strip()
+        }
+        errors: list[str] = []
+        if set(candidate_by_name) != set(seed_by_name):
+            errors.append(
+                "record_sets must match the approved Parser contract: "
+                f"expected={sorted(seed_by_name)}, actual={sorted(candidate_by_name)}"
+            )
+        validated_sets: list[dict[str, Any]] = []
+        group_reports: dict[str, Any] = {}
+        for name, seed in seed_by_name.items():
+            raw_candidate = candidate_by_name.get(name)
+            if raw_candidate is None:
+                continue
+            set_records = _record_set_records(records, name)
+            set_groups = _record_set_groups(record_groups, name)
+            if not set_groups and set_records:
+                set_groups = [{"group_id": "default", "records": set_records}]
+            field_inventory = sorted(
+                {
+                    str(field)
+                    for record in set_records
+                    for field in record
+                    if str(field).strip()
+                }
+            )
+            schema_bound = _inherit_approved_parser_schema(raw_candidate, seed)
+            schema_bound["name"] = name
+            governed = _apply_governed_semantic_hints(
+                schema_bound,
+                _governed_semantic_hints(field_inventory, seed),
+            )
+            governed = normalize_contract_semantics(governed)
+            enriched = enrich_contract_reference_semantics(
+                contract=governed,
+                records=set_records,
+            )
+            report = _validate_contract_by_group(
+                command=command,
+                groups=set_groups,
+                candidate=enriched,
+                field_inventory=field_inventory,
+                contract_seed=seed,
+                require_policy_targets=False,
+                allow_semantic_overrides=bool(
+                    params.get("allow_semantic_overrides")
+                ),
+            )
+            group_reports[name] = report
+            errors.extend(
+                f"{name}: {message}"
+                for message in report.get("errors") or []
+            )
+            validated = dict(report.get("proposal") or enriched)
+            validated["name"] = name
+            validated_sets.append(validated)
+        proposal = {
+            "category": "multi_record",
+            "entity_type": "multi_record",
+            "primary_keys": [],
+            "required_fields": [],
+            "optional_fields": [],
+            "validators": {},
+            "allow_empty": False,
+            "empty_patterns": [],
+            "ignore_fields": [],
+            "state_semantics": {},
+            "record_sets": validated_sets,
+            "source": "llm_agent",
+            "confidence": candidate.get("confidence", 0.8),
+            "evidence": dict(candidate.get("evidence") or {}),
+        }
+        return {
+            "success": not errors and len(validated_sets) == len(seed_by_name),
+            "errors": errors,
+            "record_set_count": len(validated_sets),
+            "record_sets": group_reports,
+            "proposal": proposal,
+        }
+
+    context = {
+        "command": command,
+        "vendor_hint": params.get("vendor"),
+        "model_hint": params.get("model"),
+        "field_inventory": sorted(
+            {
+                field
+                for item in context_sets
+                for field in item["field_inventory"]
+            }
+        ),
+        "records": records,
+        "record_sets": context_sets,
+        "contract_seed": proposal_payload,
+        "policy_intent": params.get("policy_intent"),
+        "event_intent": params.get("event_intent"),
+    }
+    generated = RuleGenerationAgent(
+        DEFAULT_RULE_GENERATION_PROVIDERS.create(generation_provider),
+        max_attempts=int(params.get("max_agent_attempts") or 3),
+    ).run(
+        stage="observation_contract",
+        context=context,
+        validator=validate_candidate,
+    )
+    validation = dict(generated.get("validation") or {})
+    return {
+        "success": generated.get("success") is True,
+        "mode": "llm_agent_loop",
+        "proposal": validation.pop("proposal", None) or generated.get("candidate"),
+        "validation": validation,
+        "agent_loop": generated.get("agent_loop"),
+        "generation_provider": generation_provider,
+    }
+
+
 def run_contract_generation(params: dict[str, Any]) -> dict[str, Any]:
     mode = str(params.get("mode") or "infer_and_validate").strip().lower()
     command = str(params.get("command") or "").strip()
@@ -650,6 +1205,20 @@ def run_contract_generation(params: dict[str, Any]) -> dict[str, Any]:
     proposal = proposal_from_dict(proposal_payload) if isinstance(proposal_payload, dict) else None
 
     generation_provider = str(params.get("generation_provider") or "").strip().casefold()
+    if (
+        generation_provider == "llm"
+        and mode != "validate"
+        and isinstance(proposal_payload, dict)
+        and proposal_payload.get("record_sets")
+    ):
+        return _run_multi_record_llm_generation(
+            params=params,
+            command=command,
+            records=records,
+            record_groups=record_groups,
+            proposal_payload=proposal_payload,
+            generation_provider=generation_provider,
+        )
     if generation_provider == "llm" and mode != "validate":
         field_inventory = sorted(
             {str(field) for record in records for field in record if str(field).strip()}
@@ -667,6 +1236,9 @@ def run_contract_generation(params: dict[str, Any]) -> dict[str, Any]:
         strict_observation_targets = bool(
             params.get("strict_observation_targets", bool(observation_targets))
         )
+        canonical_identity_constraint = dict(
+            params.get("canonical_identity_constraint") or {}
+        )
 
         def validate_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
             schema_bound = _inherit_approved_parser_schema(
@@ -680,6 +1252,7 @@ def run_contract_generation(params: dict[str, Any]) -> dict[str, Any]:
                 observation_targets=observation_targets,
                 strict=strict_observation_targets,
             )
+            target_bound = normalize_contract_semantics(target_bound)
             enriched = enrich_contract_reference_semantics(
                 contract=target_bound,
                 records=records,
@@ -693,6 +1266,7 @@ def run_contract_generation(params: dict[str, Any]) -> dict[str, Any]:
                 require_policy_targets=True,
                 observation_targets=observation_targets,
                 strict_observation_targets=strict_observation_targets,
+                canonical_identity_constraint=canonical_identity_constraint,
             )
 
         context = {
@@ -725,6 +1299,7 @@ def run_contract_generation(params: dict[str, Any]) -> dict[str, Any]:
             "governed_semantic_hints": governed_hints,
             "observation_targets": observation_targets,
             "strict_observation_targets": strict_observation_targets,
+            "canonical_identity_constraint": canonical_identity_constraint,
             "policy_intent": params.get("policy_intent"),
             "event_intent": params.get("event_intent"),
         }
@@ -772,6 +1347,8 @@ def run_contract_generation(params: dict[str, Any]) -> dict[str, Any]:
                 groups=record_groups,
                 candidate=proposal.to_dict(),
                 field_inventory=sorted({str(field) for record in records for field in record}),
+                require_policy_targets=bool(params.get("require_policy_targets")),
+                allow_semantic_overrides=bool(params.get("allow_semantic_overrides")),
             )
             return {
                 "success": validation.get("success") is True,

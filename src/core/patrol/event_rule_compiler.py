@@ -37,6 +37,9 @@ _ROLE_ALIASES = {
     "fault": "down",
     "up": "up",
     "recovery": "up",
+    "change": "change",
+    "changed": "change",
+    "lifecycle_change": "change",
 }
 
 
@@ -127,6 +130,9 @@ def expected_rule_roles(
         "fields": fields,
         "observation_types": [observation_type],
     }
+    dimension_selector = dict(change_policy.get("dimension_selector") or {})
+    if dimension_selector:
+        base["dimensions"] = dimension_selector
     compare_mode = str(change_policy.get("compare_mode") or "").strip()
     thresholds = {
         str(key): value
@@ -373,6 +379,20 @@ def expected_rule_roles(
             ),
         ], []
 
+    if compare_mode in {"exact", "hash_diff", "value_change"}:
+        return [
+            RuleRole(
+                "change",
+                "fault",
+                {
+                    "kind": "field_change",
+                    **base,
+                    "allow_initial": False,
+                },
+                "warning",
+            )
+        ], []
+
     return [], []
 
 
@@ -424,6 +444,8 @@ def infer_event_rule_role(rule: dict[str, Any]) -> str | None:
             return target
     if kind == "entity_status_down":
         return "down"
+    if kind == "field_change":
+        return "change"
     operator = str(condition.get("operator") or "").casefold()
     if operator in {"lt", "lte", "<", "<="} or "lt" in condition or "lte" in condition:
         return "low_recovery" if recovery else "low"

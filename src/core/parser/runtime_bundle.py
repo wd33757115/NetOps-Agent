@@ -32,6 +32,7 @@ class ParserRuntimeBundle:
     model: str
     family: str | None
     templates: dict[str, ParserTemplateRef | None]
+    output_quality_profiles: dict[str, dict[str, Any]]
     digest: str
 
     @classmethod
@@ -77,12 +78,14 @@ class ParserRuntimeBundle:
             model=identity.model or "",
             family=identity.family,
             templates=templates,
+            output_quality_profiles={},
         )
         return cls(
             vendor=identity.vendor or "",
             model=identity.model or "",
             family=identity.family,
             templates=templates,
+            output_quality_profiles={},
             digest=cls._digest(payload),
         )
 
@@ -100,11 +103,19 @@ class ParserRuntimeBundle:
             )
             for command, value in dict(data.get("templates") or {}).items()
         }
+        output_quality_profiles = {
+            str(command): dict(value)
+            for command, value in dict(
+                data.get("output_quality_profiles") or {}
+            ).items()
+            if isinstance(value, dict)
+        }
         payload = cls._payload(
             vendor=str(data.get("vendor") or ""),
             model=str(data.get("model") or ""),
             family=str(data["family"]) if data.get("family") else None,
             templates=templates,
+            output_quality_profiles=output_quality_profiles,
         )
         digest = cls._digest(payload)
         supplied_digest = str(data.get("digest") or "")
@@ -115,6 +126,7 @@ class ParserRuntimeBundle:
             model=payload["model"],
             family=payload["family"],
             templates=templates,
+            output_quality_profiles=output_quality_profiles,
             digest=digest,
         )
 
@@ -125,6 +137,7 @@ class ParserRuntimeBundle:
                 model=self.model,
                 family=self.family,
                 templates=self.templates,
+                output_quality_profiles=self.output_quality_profiles,
             ),
             "digest": self.digest,
         }
@@ -140,6 +153,13 @@ class ParserRuntimeBundle:
             raise RuntimeError(f"Pinned Parser template changed: {ref.template_id}")
         return template
 
+    def output_quality_profile(
+        self,
+        canonical_command: str,
+    ) -> dict[str, Any] | None:
+        profile = self.output_quality_profiles.get(canonical_command)
+        return dict(profile) if profile is not None else None
+
     @staticmethod
     def _payload(
         *,
@@ -147,8 +167,9 @@ class ParserRuntimeBundle:
         model: str,
         family: str | None,
         templates: dict[str, ParserTemplateRef | None],
+        output_quality_profiles: dict[str, dict[str, Any]],
     ) -> dict[str, Any]:
-        return {
+        payload = {
             "vendor": vendor,
             "model": model,
             "family": family,
@@ -157,6 +178,14 @@ class ParserRuntimeBundle:
                 for command, ref in sorted(templates.items())
             },
         }
+        if output_quality_profiles:
+            payload["output_quality_profiles"] = {
+                command: dict(profile)
+                for command, profile in sorted(
+                    output_quality_profiles.items()
+                )
+            }
+        return payload
 
     @staticmethod
     def _digest(payload: dict[str, Any]) -> str:

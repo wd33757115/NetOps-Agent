@@ -11,6 +11,13 @@ def normalize_run_ids(value: Any) -> list[str]:
     return sorted({str(item).strip() for item in value if str(item).strip()})
 
 
+def _non_negative_int(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def evaluate_historical_replay_gate(
     replay: dict[str, Any] | None,
     context_gate: dict[str, Any] | None,
@@ -22,7 +29,7 @@ def evaluate_historical_replay_gate(
     errors: list[str] = []
     outcome_success = (
         replay.get("success") is True
-        and int(replay.get("collision_count") or 0) == 0
+        and _non_negative_int(replay.get("collision_count")) == 0
     )
     if not outcome_success:
         errors.append("historical replay is missing, failed or has collisions")
@@ -34,6 +41,17 @@ def evaluate_historical_replay_gate(
     expected_run_ids = normalize_run_ids(context_gate.get("replay_run_ids"))
     scope = dict(replay.get("scope") or {})
     actual_run_ids = normalize_run_ids(scope.get("run_ids"))
+    sampled_run_ids = normalize_run_ids(scope.get("sampled_run_ids"))
+    missing_run_ids = normalize_run_ids(scope.get("missing_run_ids"))
+    sampled_change_count = _non_negative_int(replay.get("sampled_change_count"))
+    total_change_count = _non_negative_int(replay.get("total_change_count"))
+    evidence_success = sampled_change_count > 0
+    warnings: list[str] = []
+    if not evidence_success:
+        errors.append("historical replay contains no Change evidence")
+    if total_change_count and sampled_change_count > total_change_count:
+        evidence_success = False
+        errors.append("historical replay sampled_change_count exceeds total_change_count")
     scope_success = True
     if immutable_context:
         if not expected_run_ids:
@@ -48,14 +66,34 @@ def evaluate_historical_replay_gate(
         if scope.get("run_id_count") != len(actual_run_ids):
             scope_success = False
             errors.append("historical replay run_id_count is inconsistent")
+        if sampled_run_ids and not set(sampled_run_ids).issubset(actual_run_ids):
+            scope_success = False
+            errors.append("historical replay sampled_run_ids exceed immutable run scope")
+        sampled_run_id_count = scope.get("sampled_run_id_count")
+        if sampled_run_id_count is not None and _non_negative_int(sampled_run_id_count) != len(
+            sampled_run_ids
+        ):
+            scope_success = False
+            errors.append("historical replay sampled_run_id_count is inconsistent")
+        if sampled_change_count > 0 and sampled_run_ids == [] and "sampled_run_ids" in scope:
+            scope_success = False
+            errors.append("historical replay Change evidence is not bound to an immutable run")
+        if missing_run_ids:
+            warnings.append("some immutable runs contain no Change evidence")
 
     return {
-        "success": outcome_success and scope_success,
+        "success": outcome_success and scope_success and evidence_success,
         "outcome_success": outcome_success,
         "scope_success": scope_success,
+        "evidence_success": evidence_success,
         "scope_required": immutable_context,
         "scope_mode": scope.get("mode") or "missing",
         "expected_run_ids": expected_run_ids,
         "actual_run_ids": actual_run_ids,
+        "sampled_run_ids": sampled_run_ids,
+        "missing_run_ids": missing_run_ids,
+        "sampled_change_count": sampled_change_count,
+        "total_change_count": total_change_count,
+        "warnings": warnings,
         "errors": list(dict.fromkeys(errors)),
     }

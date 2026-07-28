@@ -73,6 +73,7 @@ def test_empty_offline_job_pipeline_points_to_source_upload():
             "generation",
             "review",
             "release",
+            "runtime_bundle",
         ]
         assert (
             next(item for item in result["steps"] if item["key"] == "backfill")["optional"] is True
@@ -256,6 +257,9 @@ def test_pipeline_projects_rule_rows_before_database_session_closes():
         assert next(step for step in result["steps"] if step["key"] == "review")[
             "status"
         ] == "completed"
+        assert next(
+            step for step in result["steps"] if step["key"] == "runtime_bundle"
+        )["status"] == "not_started"
     finally:
         with get_db_session() as db:
             db.query(RuleAssetCommandUnitRecord).filter(

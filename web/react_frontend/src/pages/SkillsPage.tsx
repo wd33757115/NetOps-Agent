@@ -99,16 +99,24 @@ const SkillsPage: React.FC = () => {
 
   return (
     <GrokShellLayout
-      title="Skills 和连接器"
-      subtitle="管理 Skill、编排 Workflow 插件、模板市场与聊天触发"
+      title={activeTab === 'parser' ? '巡检规则资产' : 'Skills 和连接器'}
+      subtitle={activeTab === 'parser'
+        ? '从离线命令样本生成、验证、审批并发布巡检解析与事件规则'
+        : '管理 Skill、编排 Workflow 插件、模板市场与聊天触发'}
     >
-      <Tabs
-        activeKey={activeTab}
-        onChange={(key) => navigate(key === 'skills' ? '/skills' : `/skills/${key}`)}
-        items={tabItems}
-        size={isMobile ? 'small' : 'middle'}
-        className="grok-skills-tabs"
-      />
+      {activeTab === 'parser' ? (
+        <Suspense fallback={workspaceFallback}>
+          <ParserControlTab />
+        </Suspense>
+      ) : (
+        <Tabs
+          activeKey={activeTab}
+          onChange={(key) => navigate(key === 'skills' ? '/skills' : `/skills/${key}`)}
+          items={tabItems}
+          size={isMobile ? 'small' : 'middle'}
+          className="grok-skills-tabs"
+        />
+      )}
     </GrokShellLayout>
   )
 }

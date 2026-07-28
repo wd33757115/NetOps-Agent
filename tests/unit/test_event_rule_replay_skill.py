@@ -24,6 +24,22 @@ SPEC.loader.exec_module(MODULE)
 run_replay = MODULE.run_replay
 
 
+def test_event_rule_replay_accepts_explicit_empty_candidate_set():
+    result = run_replay(
+        {
+            "candidate_rules": [],
+            "include_active_collisions": True,
+            "limit": 100,
+            "run_ids": ["pytest-no-event-rule-candidates"],
+        }
+    )
+
+    assert result["success"] is True
+    assert result["rule_count"] == 0
+    assert result["matched_change_count"] == 0
+    assert result["collision_count"] == 0
+
+
 def test_event_rule_replay_skill_replays_candidate_rules():
     change_id = str(uuid.uuid4())
     key = hashlib.sha256(change_id.encode("utf-8")).hexdigest()

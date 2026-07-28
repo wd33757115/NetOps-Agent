@@ -38,6 +38,25 @@ SUPPORTED_CONDITION_KINDS = (
 )
 
 
+class ObservationRecordSetCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    entity_type: str
+    primary_keys: list[str]
+    required_fields: list[str]
+    canonical_entity_type: str | None = None
+    entity_identity_fields: list[str] = Field(default_factory=list)
+    entity_dimensions: dict[str, Any] = Field(default_factory=dict)
+    optional_fields: list[str] = Field(default_factory=list)
+    validators: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    allow_empty: bool = False
+    empty_patterns: list[str] = Field(default_factory=list)
+    ignore_fields: list[str] = Field(default_factory=list)
+    state_semantics: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+
 class ObservationContractCandidate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -45,12 +64,16 @@ class ObservationContractCandidate(BaseModel):
     entity_type: str
     primary_keys: list[str]
     required_fields: list[str]
+    canonical_entity_type: str | None = None
+    entity_identity_fields: list[str] = Field(default_factory=list)
+    entity_dimensions: dict[str, Any] = Field(default_factory=dict)
     optional_fields: list[str] = Field(default_factory=list)
     validators: dict[str, dict[str, Any]] = Field(default_factory=dict)
     allow_empty: bool = False
     empty_patterns: list[str] = Field(default_factory=list)
     ignore_fields: list[str] = Field(default_factory=list)
     state_semantics: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    record_sets: list[ObservationRecordSetCandidate] = Field(default_factory=list)
     evidence: dict[str, Any] = Field(default_factory=dict)
     source: str = "llm_agent"
     confidence: float = 0.8
@@ -85,6 +108,7 @@ class EventRuleCandidate(BaseModel):
     priority: int = 100
     exclusive: bool = False
     event_class: str = "fault"
+    evaluation_scope: str = "both"
     recovery: dict[str, Any] = Field(default_factory=dict)
     correlation_keys: list[str] = Field(
         default_factory=lambda: ["device_id", "entity_type", "entity_key", "field"]
@@ -159,22 +183,71 @@ stable, non-empty identity fields and must uniquely identify records within one
 device snapshot. Metrics, state, timestamps, descriptions, counters and
 utilization values are never primary keys. Preserve every deterministic
 contract_constraint and governed_semantic_hint supplied by the control plane.
+When canonical_identity_constraint is supplied, preserve its
+canonical_entity_type and ordered identity_dimensions exactly. Populate
+entity_identity_fields with those ordered names and populate entity_dimensions
+with one safe expression for every identity dimension. These mappings project
+parser-native keys into stable check-item identity. They may use the same safe
+expression DSL as value transforms, including concat. Keep source primary_keys
+unchanged; never rename source fields to imitate canonical identity.
+Obey every identity_dimension_rule. An enum dimension must resolve only to one
+of its allowed_values and therefore MUST use a literal allowed value, never a
+source field. Use that enum for the entity grain and put the instance identifier
+in the corresponding identifier dimension. Identifier mappings must preserve
+the uniqueness of the approved source primary_keys within every snapshot; use
+concat with all necessary source keys when one field alone is not unique.
 Required fields must be non-empty in every record; use optional_fields for
 measurements that are legitimately absent. Declare every field in
 field_inventory exactly once and give every field a semantic_type.
+semantic_type is an executable comparison type and must be one of: boolean,
+counter, enum, gauge, percentage, raw_hash, state, or text. Put a more specific
+business meaning such as software_version, firmware_version, hardware_version,
+driver_version, state_reason, or uptime in domain_semantic_type instead.
 
 For each independently comparable operational value, set a stable,
 vendor-neutral observation_type, comparison_role=observation, and monitor=true.
 Observation types must use at least two lowercase dot-separated namespaces,
 for example interface.oper_status; never use a bare field alias such as
-link_state. A field marked for monitoring must be compatible with its observed
-data type. If a numeric semantic has no numeric values, or a descriptive field
-is not independently actionable, explicitly set monitor=false and a non-target
+link_state. Treat parser field names as source-specific implementation details:
+different vendors and commands that describe the same operational fact must map
+to the same canonical observation_type. Multiple source fields may map to the
+same observation_type only when each mapping declares distinct dimensions. For
+example cpu_5s, cpu_1m and cpu_5m may all map to
+device.cpu.utilization with literal window dimensions 5s, 1m and 5m. Use
+dimensions for window, scope, direction, sensor, address_family or another
+stable slice of one metric; do not encode these slices in observation_type.
+
+Declare source_unit and canonical_unit when normalization is needed. Supported
+unit normalization is platform-controlled; never emit executable code. When a
+canonical value must be derived, use only the safe expression DSL:
+{"field":"name"}, {"literal":value}, or
+{"op":"abs|add|coalesce|concat|divide|max|min|multiply|negate|round|subtract",
+ "args":[...]}. For example utilization derived from free_ratio is
+{"op":"subtract","args":[{"literal":100},{"field":"free_ratio"}]}.
+Every transform and dimension field reference must exist in field_inventory.
+A field marked for monitoring must be compatible with its observed data type.
+If a numeric semantic has no numeric values, or a descriptive field is not
+independently actionable, explicitly set monitor=false and a non-target
 comparison_role instead of inventing an observation.
+For every monitored field explicitly set event_generation=true or false and an
+event_role. Set true only when the value represents operational health, capacity,
+utilization, errors, availability, or a device-provided warning/alarm threshold.
+Use roles such as health, fault_state, alarm, threshold, or change_only. High
+utilization/usage/error metrics, low remaining/free/idle/health metrics, and
+unhealthy state transitions are normally event-capable. Inventory, version,
+description, identifier, and ordinary configuration fields are normally
+change-only, unless event_intent explicitly identifies a lifecycle change such
+as an unexpected software or firmware version transition as actionable.
 Do not set observation_type on identity, descriptive metadata, dimensions, or
 reference/limit fields; mark those with comparison_role identity, metadata,
 dimension, reference, or threshold. Field profiles describe evidence, not
-business policy. Never invent a threshold or event name in this stage."""
+business policy. Never invent a threshold or event name in this stage.
+
+When context.record_sets is present, the command contains independent entity
+grains. Return parent category=multi_record, entity_type=multi_record, empty
+parent field lists, and one record_sets item for every supplied name. Preserve
+each record set's structural constraints and enrich its own state_semantics.
+Never move fields between record sets or flatten them into a sparse contract."""
         )
     if stage == "change_policy":
         return (
@@ -202,11 +275,16 @@ condition.kind values are: {kinds}. Conditions may reference only declared
 fields and entity types. Generate fault and recovery rules together when the
 policy has recovery semantics. Recovery rules must use event_class=recovery,
 declare recovery.resolves using fault event_type values (not rule names), and
-must never match an initial observation. Fault
-rules should explicitly decide whether an initial abnormal value is actionable.
+must use evaluation_scope=change. Fault rules must set evaluation_scope to
+current_state, change, or both. Use current_state or both when the present value
+alone can prove a risk (for example high utilization, interface down, or optical
+power below an approved threshold); use change only when history is essential.
+Fault rules should explicitly decide whether an initial abnormal value is actionable.
 Use stable English event_type identifiers and concise Chinese descriptions.
 Set trigger_role to high, low, critical_low, high_recovery, low_recovery,
-down, or up as appropriate. The control plane compiles trigger_role against the
+down, up, or change as appropriate. Use change only for an approved lifecycle
+or version field whose ChangePolicy compares exact/hash differences. The control
+plane compiles trigger_role against the
 validated ChangePolicy; condition is only an optional intent hint. Never invent
 threshold values that disagree with the ChangePolicy. Do not add condition keys
 that the selected DSL kind does not execute. Never reuse a fault event_type
@@ -247,11 +325,14 @@ class DeepSeekRuleGenerationProvider:
         settings = get_settings()
         if not str(settings.DEEPSEEK_API_KEY or "").strip():
             raise RuntimeError("DeepSeek API key is not configured")
+        # deepseek-v4-* 默认 Thinking mode，会拒绝 with_structured_output 的
+        # tool_choice=required/any；关闭 thinking 才能稳定做 function calling。
         return ChatDeepSeek(
             model=settings.LLM_MODEL,
             temperature=0.1,
             api_key=settings.DEEPSEEK_API_KEY,
             request_timeout=120,
+            extra_body={"thinking": {"type": "disabled"}},
         )
 
     def propose(
@@ -476,6 +557,7 @@ def _candidate_summary(stage: str, candidate: dict[str, Any]) -> dict[str, Any]:
             "primary_keys": candidate.get("primary_keys") or [],
             "required_fields": candidate.get("required_fields") or [],
             "semantic_field_count": len(candidate.get("state_semantics") or {}),
+            "record_set_count": len(candidate.get("record_sets") or []),
         }
     if stage == "change_policy":
         return {

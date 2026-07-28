@@ -855,6 +855,7 @@ class PatrolCollectionResultRepository(_PatrolRepositoryBase):
         failure_code: str | None = None,
         observed_at: str | datetime | None = None,
         execution_item_id: str | None = None,
+        collection_action_id: str | None = None,
         metadata: dict[str, Any] | None = None,
         owner_token: str | None = None,
     ) -> str:
@@ -921,6 +922,9 @@ class PatrolCollectionResultRepository(_PatrolRepositoryBase):
                 )
                 db.add(row)
             row.inventory_device_id = inventory_device_id or row.inventory_device_id
+            row.collection_action_id = (
+                collection_action_id or row.collection_action_id
+            )
             # Deprecated compatibility projection. New readers use the four dimensions.
             row.status = command_status.execution_status
             row.execution_status = command_status.execution_status
@@ -1092,6 +1096,9 @@ class PatrolSnapshotRepository(_PatrolRepositoryBase):
         metadata: dict[str, Any] | None = None,
         inventory_device_id: str | None = None,
         execution_item_id: str | None = None,
+        collection_action_id: str | None = None,
+        implementation_version_id: str | None = None,
+        check_item_ids: list[str] | tuple[str, ...] | None = None,
         owner_token: str | None = None,
     ) -> tuple[str, bool]:
         if output_status not in OUTPUT_STATUSES:
@@ -1155,6 +1162,15 @@ class PatrolSnapshotRepository(_PatrolRepositoryBase):
                     inventory_device_id=inventory.id if inventory else inventory_device_id,
                     device_id=device_id,
                     execution_item_id=execution_item_id,
+                    collection_action_id=collection_action_id,
+                    implementation_version_id=implementation_version_id,
+                    check_item_ids_json=sorted(
+                        {
+                            str(item)
+                            for item in check_item_ids or []
+                            if str(item)
+                        }
+                    ),
                     device_name=device_name,
                     management_ip=ip,
                     vendor=vendor,

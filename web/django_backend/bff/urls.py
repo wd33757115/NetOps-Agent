@@ -83,6 +83,11 @@ urlpatterns = [
         name="bff_patrol_batch_devices",
     ),
     path(
+        "workflows/runs/patrol-batches/<str:patrol_batch_id>/check-results",
+        workflows.proxy_patrol_batch_check_results,
+        name="bff_patrol_batch_check_results",
+    ),
+    path(
         "workflows/runs/patrol-batches/<str:patrol_batch_id>/archive/",
         workflows.proxy_patrol_batch_archive,
         name="bff_patrol_batch_archive",
@@ -212,6 +217,11 @@ urlpatterns = [
         "patrol/offline-jobs/<path:path>/",
         patrol.proxy_offline_patrol_job_path,
         name="bff_offline_patrol_job_path",
+    ),
+    path(
+        "patrol/<path:path>",
+        patrol.proxy_patrol_path,
+        name="bff_patrol_path",
     ),
     path("maintenance/<path:path>/", maintenance.proxy_maintenance_path, name="bff_maintenance_path"),
     path("devices/", devices.proxy_devices_collection, name="bff_devices_collection"),

@@ -7,6 +7,7 @@ import json
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
 from typing import Any
 
 from sqlalchemy import or_
@@ -21,11 +22,20 @@ from src.infrastructure.db.models import (
 from src.infrastructure.db.postgres import get_db_session
 
 
+@lru_cache(maxsize=1)
+def _load_packaged_check_item_catalog():
+    from src.core.check_items.catalog import load_catalog
+
+    return load_catalog()
+
+
 @dataclass(frozen=True)
 class CollectionItem:
     command: str
     action: str
     collection_item_id: str | None = None
+    fallback_rank: int = 0
+    check_item_bindings: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -41,6 +51,10 @@ class ExecutionPlan:
     policy_source: str = "default"
     binding_id: str | None = None
     selector: dict[str, Any] | None = None
+    check_item_shadow_plan: dict[str, Any] | None = None
+    check_item_ids: tuple[str, ...] = ()
+    runtime_manifest_id: str | None = None
+    runtime_manifest_digest: str | None = None
 
     def command_texts(self) -> list[str]:
         return [item.command for item in self.commands]
@@ -57,11 +71,24 @@ class ExecutionPlan:
             "policy_source": self.policy_source,
             "binding_id": self.binding_id,
             "selector": self.selector,
+            "check_item_shadow_plan": (
+                dict(self.check_item_shadow_plan)
+                if self.check_item_shadow_plan is not None
+                else None
+            ),
+            "check_item_ids": list(self.check_item_ids),
+            "runtime_manifest_id": self.runtime_manifest_id,
+            "runtime_manifest_digest": self.runtime_manifest_digest,
             "collection_items": [
                 {
                     "command": item.command,
                     "action": item.action,
                     "collection_item_id": item.collection_item_id,
+                    "fallback_rank": item.fallback_rank,
+                    "check_item_bindings": [
+                        dict(binding)
+                        for binding in item.check_item_bindings
+                    ],
                 }
                 for item in self.commands
             ],
@@ -88,6 +115,8 @@ def execution_plan_from_metadata(data: dict[str, Any]) -> ExecutionPlan:
             command = item.strip()
             item_action = action
             collection_item_id = None
+            fallback_rank = 0
+            check_item_bindings: tuple[dict[str, Any], ...] = ()
         elif isinstance(item, dict):
             command = str(item.get("command") or "").strip()
             item_action = str(item.get("action") or action).strip()
@@ -95,6 +124,12 @@ def execution_plan_from_metadata(data: dict[str, Any]) -> ExecutionPlan:
                 str(item.get("collection_item_id"))
                 if item.get("collection_item_id")
                 else None
+            )
+            fallback_rank = int(item.get("fallback_rank") or 0)
+            check_item_bindings = tuple(
+                dict(binding)
+                for binding in item.get("check_item_bindings") or []
+                if isinstance(binding, dict)
             )
         else:
             raise ValueError("execution_plan.collection_items must contain strings or objects")
@@ -107,6 +142,8 @@ def execution_plan_from_metadata(data: dict[str, Any]) -> ExecutionPlan:
                 command=command,
                 action=item_action,
                 collection_item_id=collection_item_id,
+                fallback_rank=fallback_rank,
+                check_item_bindings=check_item_bindings,
             )
         )
     return ExecutionPlan(
@@ -129,6 +166,30 @@ def execution_plan_from_metadata(data: dict[str, Any]) -> ExecutionPlan:
         policy_source=str(data.get("policy_source") or "explicit"),
         binding_id=str(data.get("binding_id")) if data.get("binding_id") else None,
         selector=dict(data.get("selector") or {}) if data.get("selector") else None,
+        check_item_shadow_plan=(
+            dict(data.get("check_item_shadow_plan") or {})
+            if data.get("check_item_shadow_plan") is not None
+            else None
+        ),
+        check_item_ids=tuple(
+            sorted(
+                {
+                    str(item)
+                    for item in data.get("check_item_ids") or []
+                    if str(item)
+                }
+            )
+        ),
+        runtime_manifest_id=(
+            str(data.get("runtime_manifest_id"))
+            if data.get("runtime_manifest_id")
+            else None
+        ),
+        runtime_manifest_digest=(
+            str(data.get("runtime_manifest_digest"))
+            if data.get("runtime_manifest_digest")
+            else None
+        ),
     )
 
 
@@ -253,6 +314,7 @@ class CollectionPolicyResolver:
         binding_id = None
         selector = None
         profile_version_id = attributes.get(f"{action}_profile_version_id")
+        check_item_ids: tuple[str, ...] = ()
         if isinstance(configured, list) and configured:
             commands = [str(item) for item in configured]
             policy_source = "device_attributes"
@@ -271,6 +333,15 @@ class CollectionPolicyResolver:
                 active_profile.get("profile_version_id") if active_profile else None
             )
             commands = list(active_profile["commands"]) if active_profile else []
+            check_item_ids = tuple(
+                active_profile.get("check_item_ids") or ()
+                if active_profile
+                else ()
+            )
+        if profile_version_id and not check_item_ids:
+            check_item_ids = self._load_profile_check_item_ids(
+                str(profile_version_id)
+            )
         unique_commands: list[str] = []
         seen_commands: set[str] = set()
         for command in commands:
@@ -279,6 +350,11 @@ class CollectionPolicyResolver:
                 continue
             seen_commands.add(normalized)
             unique_commands.append(str(command).strip())
+        check_item_shadow_plan = self._build_check_item_shadow_plan(
+            device=device,
+            action=action,
+            commands=unique_commands,
+        )
         return ExecutionPlan(
             device_id=str(device.get("device_id") or ""),
             action=action,
@@ -294,7 +370,41 @@ class CollectionPolicyResolver:
             policy_source=policy_source,
             binding_id=binding_id,
             selector=selector,
+            check_item_shadow_plan=check_item_shadow_plan,
+            check_item_ids=check_item_ids,
         )
+
+    @staticmethod
+    def _build_check_item_shadow_plan(
+        *,
+        device: dict[str, Any],
+        action: str,
+        commands: list[str],
+    ) -> dict[str, Any] | None:
+        if action != "patrol":
+            return None
+        try:
+            from src.core.check_items.resolver import CheckItemImplementationResolver
+
+            projection = CheckItemImplementationResolver(
+                _load_packaged_check_item_catalog()
+            ).project_legacy_commands(
+                device=device,
+                commands=commands,
+            )
+            projection["catalog_source"] = "packaged_seed"
+            projection["production_commands_changed"] = False
+            return projection
+        except Exception as exc:
+            return {
+                "version": 1,
+                "mode": "legacy_command_projection",
+                "catalog_source": "packaged_seed",
+                "status": "unavailable",
+                "production_commands_changed": False,
+                "error_code": "shadow_projection_failed",
+                "error": str(exc),
+            }
 
     @staticmethod
     def _collector_options(attributes: dict[str, Any], action: str) -> dict[str, Any]:
@@ -335,12 +445,16 @@ class CollectionPolicyResolver:
                     if str(item.get("action") or action) == action
                 ]
                 commands = [str(item["command"]) for item in items if item.get("command")]
-                if not commands:
+                check_item_ids = self._load_profile_check_item_ids(
+                    str(version.id)
+                )
+                if not commands and not check_item_ids:
                     return None
                 return {
                     "profile_name": _profile.name,
                     "profile_version_id": version.id,
                     "commands": commands,
+                    "check_item_ids": check_item_ids,
                 }
         except Exception:
             return None
@@ -389,7 +503,10 @@ class CollectionPolicyResolver:
                     commands = [
                         str(item["command"]) for item in items if item.get("command")
                     ]
-                    if not commands:
+                    check_item_ids = self._load_profile_check_item_ids(
+                        str(version.id)
+                    )
+                    if not commands and not check_item_ids:
                         continue
                     return {
                         "binding_id": binding.id,
@@ -397,10 +514,26 @@ class CollectionPolicyResolver:
                         "profile_name": profile.name,
                         "profile_version_id": version.id,
                         "commands": commands,
+                        "check_item_ids": check_item_ids,
                     }
         except Exception:
             return None
         return None
+
+    @staticmethod
+    def _load_profile_check_item_ids(
+        profile_version_id: str,
+    ) -> tuple[str, ...]:
+        try:
+            from src.core.check_items.profile import (
+                PatrolProfileCheckItemRepository,
+            )
+
+            return PatrolProfileCheckItemRepository().active_check_item_ids(
+                profile_version_id
+            )
+        except Exception:
+            return ()
 
     @staticmethod
     def _selector_matches(device: dict[str, Any], selector: dict[str, Any]) -> bool:
@@ -719,6 +852,15 @@ class CommandProfileRepository:
             row = db.get(CollectionProfileBindingRecord, binding_id)
             if row is None:
                 raise ValueError(f"command profile binding not found: {binding_id}")
+            if status == "active":
+                version = db.get(
+                    CommandProfileVersionRecord,
+                    row.profile_version_id,
+                )
+                if version is None or str(version.status) != "active":
+                    raise ValueError(
+                        "only an active patrol profile version can be enabled"
+                    )
             previous_status = row.status
             row.status = status
             now = datetime.now(timezone.utc)
@@ -849,6 +991,34 @@ class CommandProfileRepository:
             coverage = dict(version.coverage_json or {})
             if not coverage:
                 raise ValueError("command profile impact evidence is required before activation")
+        check_item_ids = CollectionPolicyResolver._load_profile_check_item_ids(
+            profile_version_id
+        )
+        if not check_item_ids:
+            return
+        if str(coverage.get("profile_mode") or "") != "check_items":
+            raise ValueError(
+                "check-item profile requires check-item impact evidence"
+            )
+        matched = int(coverage.get("matched_device_count") or 0)
+        evaluated = int(coverage.get("evaluated_device_count") or 0)
+        blocked = int(coverage.get("blocked_check_item_count") or 0)
+        if matched < 1:
+            raise ValueError(
+                "check-item profile impact evidence has no matched devices"
+            )
+        if evaluated != matched:
+            raise ValueError(
+                "check-item profile impact evidence does not cover every matched device"
+            )
+        if blocked:
+            raise ValueError(
+                f"check-item profile has {blocked} blocked device-check items"
+            )
+        if not coverage.get("runtime_manifest_digest"):
+            raise ValueError(
+                "check-item profile impact evidence is missing the runtime manifest digest"
+            )
 
     def delete_profile_version(
         self,

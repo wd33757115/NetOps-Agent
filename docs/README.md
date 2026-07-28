@@ -1,11 +1,14 @@
 <!-- SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com> -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-Latest remediation plan: [patrol-runtime-concurrency-remediation-2026-07-11.md](./patrol-runtime-concurrency-remediation-2026-07-11.md)
+Latest platform remediation plan: [check-item-centered-patrol-platform-remediation-2026-07-27.md](./check-item-centered-patrol-platform-remediation-2026-07-27.md)
 
 # NetOps Agent 文档中心
 
-> 版本：2026-05-24
+> 版本：2026-07-28
+>
+> 文档治理清单：[document-governance.yaml](./document-governance.yaml)
+> 当前实施证据：[检查项平台实施与验收矩阵](./implementation/check-item-platform-completion-matrix-2026-07-28.md)
 
 ---
 
@@ -33,6 +36,7 @@ Latest remediation plan: [patrol-runtime-concurrency-remediation-2026-07-11.md](
 
 | 文档 | 说明 |
 |------|------|
+| [check-item-centered-patrol-platform-remediation-2026-07-27.md](./check-item-centered-patrol-platform-remediation-2026-07-27.md) | 检查项中心的巡检、Parser、规则资产、报告及文档/废弃代码治理总体改造方案 |
 | [SKILL_CREATION_GUIDE.md](./SKILL_CREATION_GUIDE.md) | Skill 创建与 SKILL.md v2.0 |
 | [测试手册.md](./测试手册.md) | 单元/集成/E2E 测试 |
 | [system-overall-design-and-phased-implementation-plan.md](./system-overall-design-and-phased-implementation-plan.md) | NetOps Agent 总体设计、改造方案与分阶段实施计划 |
@@ -63,6 +67,8 @@ Latest remediation plan: [patrol-runtime-concurrency-remediation-2026-07-11.md](
 | 004 | [生产加固](./adr/004-production-hardening.md) |
 | 005 | [Django + React BFF](./adr/005-django-react-architecture.md) |
 | 006 | [Docker Compose 编排](./adr/006-docker-compose-orchestration.md) |
+| 007 | [通用 Workflow Context](./adr/007-generic-workflow-context.md) |
+| 008 | [检查项作为巡检业务主身份](./adr/008-check-item-business-identity.md) |
 
 ---
 
@@ -75,6 +81,20 @@ Latest remediation plan: [patrol-runtime-concurrency-remediation-2026-07-11.md](
 | [API文档.md](./API文档.md) | → [04_API 接口文档](./04_API%20接口文档.md) |
 | [DEPLOYMENT.md](./DEPLOYMENT.md) | → [10_部署安装手册](./10_部署安装手册.md) |
 | [logging-handbook.md](./logging-handbook.md) | → [08_日志规范 & 日志字典](./08_日志规范%20&%20日志字典.md) |
+
+---
+
+## 文档治理
+
+当前架构、专项设计和历史文档的状态不再由文件名中的“最新”“最终”判断，而由
+[`document-governance.yaml`](./document-governance.yaml) 统一登记。审计命令：
+
+```powershell
+venv\Scripts\python.exe scripts\docs\audit_docs.py --today 2026-07-28
+```
+
+`active` 文档是当前权威说明；`superseded` 仅用于理解迁移前设计；`archived` 只保留审计。
+未登记文档属于待治理范围，不得作为当前架构依据。
 
 ---
 

@@ -16,6 +16,7 @@ from typing import Any
 from sqlalchemy import func, or_
 
 from src.core.parser.policy import load_yaml
+from src.core.patrol.change_policy import dimension_selector_matches
 from src.core.state.observation_applicability import (
     condition_applicability_matches,
     context_from_change,
@@ -56,6 +57,22 @@ def event_rule_digest(
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+EVALUATION_SCOPES = frozenset({"current_state", "change", "both"})
+
+
+def govern_evaluation_scope(value: Any, *, event_class: str = "fault") -> str:
+    """Return a supported evaluation scope with a safe legacy default."""
+
+    scope = str(value or "").strip().casefold()
+    if not scope:
+        return "change" if str(event_class or "fault").casefold() == "recovery" else "both"
+    if scope not in EVALUATION_SCOPES:
+        raise ValueError(f"unsupported event rule evaluation_scope: {scope}")
+    if str(event_class or "fault").casefold() == "recovery" and scope == "current_state":
+        raise ValueError("recovery rules cannot use current_state-only evaluation")
+    return scope
 
 
 _KNOWN_EVENT_RULE_ROLES = {
@@ -163,6 +180,7 @@ def event_rule_logical_key(
             }
         ),
         "applicability": _canonical_logical_value(normalized_condition.get("applicability") or {}),
+        "dimensions": _canonical_logical_value(normalized_condition.get("dimensions") or {}),
     }
     if role == "raw_config_hash":
         scope["command_markers"] = sorted(
@@ -308,6 +326,7 @@ class EventRule:
     priority: int = 100
     exclusive: bool = False
     event_class: str = "fault"
+    evaluation_scope: str = "both"
     recovery: dict[str, Any] | None = None
     correlation_keys: tuple[str, ...] = (
         "device_id",
@@ -317,6 +336,14 @@ class EventRule:
     )
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "evaluation_scope",
+            govern_evaluation_scope(
+                self.evaluation_scope,
+                event_class=self.event_class,
+            ),
+        )
         object.__setattr__(
             self,
             "correlation_keys",
@@ -338,6 +365,7 @@ class EventRuleDefinition:
     priority: int = 100
     exclusive: bool = False
     event_class: str = "fault"
+    evaluation_scope: str = "both"
     recovery: dict[str, Any] | None = None
     correlation_keys: tuple[str, ...] = (
         "device_id",
@@ -347,6 +375,14 @@ class EventRuleDefinition:
     )
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "evaluation_scope",
+            govern_evaluation_scope(
+                self.evaluation_scope,
+                event_class=self.event_class,
+            ),
+        )
         object.__setattr__(
             self,
             "correlation_keys",
@@ -366,6 +402,7 @@ class EventRuleDefinition:
             priority=self.priority,
             exclusive=self.exclusive,
             event_class=self.event_class,
+            evaluation_scope=self.evaluation_scope,
             recovery=dict(self.recovery or {}),
             correlation_keys=self.correlation_keys,
         )
@@ -378,6 +415,11 @@ def _entity_type_allowed(condition: dict[str, Any], change: dict[str, Any]) -> b
 
 def condition_matches(condition: dict[str, Any], change: dict[str, Any]) -> bool:
     if not condition_applicability_matches(condition, change):
+        return False
+    if not dimension_selector_matches(
+        condition.get("dimensions"),
+        change.get("dimensions") or change.get("dimensions_json"),
+    ):
         return False
     kind = str(condition.get("kind") or "").strip()
     if kind == "threshold":
@@ -537,6 +579,15 @@ def condition_matches(condition: dict[str, Any], change: dict[str, Any]) -> bool
                 for marker in condition.get("command_markers") or []
             )
         )
+    if kind == "field_change":
+        if not _entity_type_allowed(condition, change):
+            return False
+        fields = {norm_field(item) for item in condition.get("fields") or []}
+        if norm_field(change.get("field")) not in fields:
+            return False
+        if change.get("change_type") == "initial":
+            return bool(condition.get("allow_initial"))
+        return change.get("old") != change.get("new")
     if kind == "entity_status_down":
         entity_types = {norm(item) for item in condition.get("entity_types") or []}
         fields = {norm_field(item) for item in condition.get("fields") or []}
@@ -545,6 +596,65 @@ def condition_matches(condition: dict[str, Any], change: dict[str, Any]) -> bool
             and norm_field(change.get("field")) in fields
             and is_down(change.get("new"))
         )
+    return False
+
+
+def current_state_condition_matches(
+    condition: dict[str, Any],
+    observation: dict[str, Any],
+    *,
+    explicit_current_scope: bool = False,
+) -> bool:
+    """Evaluate a fault condition against a current Observation, not a fake Change."""
+
+    if not condition_applicability_matches(condition, observation):
+        return False
+    if not dimension_selector_matches(
+        condition.get("dimensions"),
+        observation.get("dimensions") or observation.get("dimensions_json"),
+    ):
+        return False
+    if not _entity_type_allowed(condition, observation):
+        return False
+
+    kind = str(condition.get("kind") or "").strip()
+    field = norm_field(observation.get("field") or observation.get("field_name"))
+    fields = {norm_field(item) for item in condition.get("fields") or []}
+    if fields and field not in fields:
+        return False
+    value = observation.get("value")
+    if "value" not in observation:
+        value = observation.get("value_json")
+
+    if kind == "threshold":
+        threshold = to_float(condition.get("gte"))
+        current = to_float(value)
+        return threshold is not None and current is not None and current >= threshold
+    if kind == "threshold_lte":
+        threshold = to_float(condition.get("lte"))
+        current = to_float(value)
+        return threshold is not None and current is not None and current <= threshold
+    if kind in {"threshold_field_gte", "threshold_field_lte"}:
+        context = context_from_change(observation)
+        _reference_field, reference = resolve_threshold_reference(condition, context)
+        current = to_float(value)
+        if reference is None or current is None:
+            return False
+        return current >= reference if kind == "threshold_field_gte" else current <= reference
+    if kind == "transition":
+        if is_suppressed_interface_state(value):
+            return False
+        allow_current = explicit_current_scope or bool(condition.get("allow_initial_target"))
+        return allow_current and _state_group(value) == str(condition.get("to_group") or "")
+    if kind == "bgp_transition":
+        allow_current = explicit_current_scope or bool(condition.get("allow_initial_target"))
+        return (
+            allow_current
+            and is_bgp_change(observation)
+            and (norm(value) == "established") is bool(condition.get("to_established"))
+        )
+    if kind == "entity_status_down":
+        return is_down(value)
     return False
 
 
@@ -608,6 +718,10 @@ class EventRuleRepository:
                     "priority": version.priority,
                     "exclusive": version.exclusive,
                     "event_class": version.event_class,
+                    "evaluation_scope": govern_evaluation_scope(
+                        version.evaluation_scope,
+                        event_class=version.event_class,
+                    ),
                     "recovery": version.recovery_json,
                     "correlation_keys": version.correlation_key_json,
                     "created_by": version.created_by,
@@ -703,6 +817,10 @@ class EventRuleRepository:
             "priority": version.priority,
             "exclusive": version.exclusive,
             "event_class": version.event_class,
+            "evaluation_scope": govern_evaluation_scope(
+                version.evaluation_scope,
+                event_class=version.event_class,
+            ),
             "recovery": version.recovery_json,
             "correlation_keys": version.correlation_key_json,
             "created_by": version.created_by,
@@ -743,6 +861,10 @@ class EventRuleRepository:
                     priority=int(version.priority or 100),
                     exclusive=bool(version.exclusive),
                     event_class=str(version.event_class or "fault"),
+                    evaluation_scope=govern_evaluation_scope(
+                        version.evaluation_scope,
+                        event_class=version.event_class,
+                    ),
                     recovery=dict(version.recovery_json or {}),
                     correlation_keys=tuple(
                         version.correlation_key_json
@@ -769,6 +891,7 @@ class EventRuleRepository:
                         "priority": definition.priority,
                         "exclusive": definition.exclusive,
                         "event_class": definition.event_class,
+                        "evaluation_scope": definition.evaluation_scope,
                         "recovery": dict(definition.recovery or {}),
                         "correlation_keys": list(definition.correlation_keys),
                         "source": "builtin_fallback",
@@ -832,6 +955,7 @@ class EventRuleRepository:
                             priority=definition.priority,
                             exclusive=definition.exclusive,
                             event_class=definition.event_class,
+                            evaluation_scope=definition.evaluation_scope,
                             recovery_json=definition.recovery,
                             correlation_key_json=list(definition.correlation_keys),
                             status="active",
@@ -844,6 +968,7 @@ class EventRuleRepository:
                                     "priority": definition.priority,
                                     "exclusive": definition.exclusive,
                                     "event_class": definition.event_class,
+                                    "evaluation_scope": definition.evaluation_scope,
                                     "recovery": definition.recovery,
                                     "correlation_keys": definition.correlation_keys,
                                 },
@@ -884,9 +1009,14 @@ class EventRuleRepository:
         priority: int = 100,
         exclusive: bool = False,
         event_class: str = "fault",
+        evaluation_scope: str | None = None,
         recovery: dict[str, Any] | None = None,
         correlation_keys: list[str] | tuple[str, ...] | None = None,
     ) -> str:
+        governed_scope = govern_evaluation_scope(
+            evaluation_scope,
+            event_class=event_class,
+        )
         with get_db_session() as db:
             rule = db.query(EventRuleRecord).filter(EventRuleRecord.name == name).first()
             if rule is None:
@@ -922,6 +1052,7 @@ class EventRuleRepository:
                 priority=priority,
                 exclusive=exclusive,
                 event_class=event_class,
+                evaluation_scope=governed_scope,
                 recovery_json=recovery,
                 correlation_key_json=list(govern_event_correlation_keys(correlation_keys)),
                 status="active",
@@ -936,6 +1067,7 @@ class EventRuleRepository:
                         "priority": priority,
                         "exclusive": exclusive,
                         "event_class": event_class,
+                        "evaluation_scope": governed_scope,
                         "recovery": recovery,
                         "correlation_keys": govern_event_correlation_keys(correlation_keys),
                     },
@@ -961,11 +1093,16 @@ class EventRuleRepository:
         priority: int = 100,
         exclusive: bool = False,
         event_class: str = "fault",
+        evaluation_scope: str | None = None,
         recovery: dict[str, Any] | None = None,
         correlation_keys: list[str] | tuple[str, ...] | None = None,
     ) -> str:
         if status not in {"draft", "pending_approval"}:
             raise ValueError("event rule version status must be draft or pending_approval")
+        governed_scope = govern_evaluation_scope(
+            evaluation_scope,
+            event_class=event_class,
+        )
         with get_db_session() as db:
             rule = db.query(EventRuleRecord).filter(EventRuleRecord.name == name).first()
             if rule is None:
@@ -996,6 +1133,7 @@ class EventRuleRepository:
                 priority=priority,
                 exclusive=exclusive,
                 event_class=event_class,
+                evaluation_scope=governed_scope,
                 recovery_json=recovery,
                 correlation_key_json=list(govern_event_correlation_keys(correlation_keys)),
                 status=status,
@@ -1012,6 +1150,7 @@ class EventRuleRepository:
                         "priority": priority,
                         "exclusive": exclusive,
                         "event_class": event_class,
+                        "evaluation_scope": governed_scope,
                         "recovery": recovery,
                         "correlation_keys": govern_event_correlation_keys(correlation_keys),
                     },
@@ -1101,6 +1240,10 @@ class EventRuleRepository:
                 "priority": version.priority,
                 "exclusive": version.exclusive,
                 "event_class": version.event_class,
+                "evaluation_scope": govern_evaluation_scope(
+                    version.evaluation_scope,
+                    event_class=version.event_class,
+                ),
                 "recovery": version.recovery_json,
                 "correlation_keys": version.correlation_key_json,
                 "version_status": version.status,
@@ -1200,6 +1343,10 @@ def load_event_rule_pack(path: str | Path | None = None) -> list[EventRuleDefini
                 priority=int(item.get("priority") or 100),
                 exclusive=bool(item.get("exclusive", False)),
                 event_class=str(item.get("event_class") or "fault"),
+                evaluation_scope=govern_evaluation_scope(
+                    item.get("evaluation_scope"),
+                    event_class=str(item.get("event_class") or "fault"),
+                ),
                 recovery=dict(item.get("recovery") or {}),
                 correlation_keys=tuple(
                     item.get("correlation_key")
@@ -1253,6 +1400,10 @@ def event_rules_from_snapshot(rows: list[dict[str, Any]]) -> list[EventRule]:
             priority=int(row.get("priority") or 100),
             exclusive=bool(row.get("exclusive")),
             event_class=str(row.get("event_class") or "fault"),
+            evaluation_scope=govern_evaluation_scope(
+                row.get("evaluation_scope"),
+                event_class=str(row.get("event_class") or "fault"),
+            ),
             recovery=dict(row.get("recovery") or {}),
             correlation_keys=tuple(
                 row.get("correlation_keys") or ("device_id", "entity_type", "entity_key", "field")

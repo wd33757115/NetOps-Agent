@@ -7,13 +7,13 @@ import io
 import ipaddress
 import re
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from .assets import TemplateAssetStore
 from .identity import DeviceIdentity
 from .key_contract import validate_entity_keys
 from .output_classifier import OutputClassifier
+from .parser_bundle import parse_parser_bundle
 from .policy import CategorySpec, ParserPolicy
 from .textfsm_input import prepare_textfsm_input
 
@@ -32,7 +32,7 @@ class ParserRuntimeResult:
     handling: str
     template_id: str | None = None
     template_version: str | None = None
-    structured_data: list[dict[str, Any]] | None = None
+    structured_data: Any = None
     failure_code: str | None = None
     identity_evidence: dict[str, Any] | None = None
     category: str | None = None
@@ -132,7 +132,11 @@ class ParserRuntime:
                 "coverage_status": "template_missing",
                 "failure_code": "template_missing",
             }
-        if not self.asset_store.verify(template.asset_path, template.sha256):
+        if not self.asset_store.verify(
+            template.asset_path,
+            template.sha256,
+            getattr(template, "template_text", None),
+        ):
             return {
                 **result,
                 "coverage_status": "asset_invalid",
@@ -198,7 +202,19 @@ class ParserRuntime:
                 identity_evidence=evidence,
                 output_status="data",
             )
-        classification = self.output_classifier.classify(raw_text, decision=decision)
+        output_quality_profile = (
+            self.runtime_bundle.output_quality_profile(
+                decision.canonical_command
+            )
+            if self.runtime_bundle is not None
+            and hasattr(self.runtime_bundle, "output_quality_profile")
+            else None
+        )
+        classification = self.output_classifier.classify(
+            raw_text,
+            decision=decision,
+            profile=output_quality_profile,
+        )
         common = {
             "capability": decision.capability,
             "capability_status": decision.capability_status,
@@ -221,6 +237,8 @@ class ParserRuntime:
             "empty_unverified",
             "unsupported_command",
             "command_error",
+            "truncated",
+            "paged",
         }:
             return ParserRuntimeResult(
                 policy_status="eligible",
@@ -261,13 +279,32 @@ class ParserRuntime:
                 category=decision.category,
                 **common,
             )
-        if not self.asset_store.verify(template.asset_path, template.sha256):
+        if not self.asset_store.verify(
+            template.asset_path,
+            template.sha256,
+            getattr(template, "template_text", None),
+        ):
             return self._failed(decision, identity, template, "asset_hash_mismatch", evidence)
         if textfsm is None:
             return self._failed(decision, identity, template, "textfsm_unavailable", evidence)
         spec = self._template_spec(template)
         try:
-            content = Path(template.asset_path).read_text(encoding="utf-8")
+            content = self.asset_store.read(
+                template.asset_path,
+                template.sha256,
+                getattr(template, "template_text", None),
+            )
+            bundle = parse_parser_bundle(content)
+            if bundle is not None:
+                return self._parse_bundle(
+                    bundle=bundle,
+                    raw_text=raw_text,
+                    decision=decision,
+                    identity=identity,
+                    template=template,
+                    evidence=evidence,
+                    common=common,
+                )
             parser = textfsm.TextFSM(io.StringIO(content))
             values = parser.ParseText(prepare_textfsm_input(content, raw_text or ""))
             records = [dict(zip(parser.header, row, strict=False)) for row in values]
@@ -379,15 +416,103 @@ class ParserRuntime:
             template_profile=decision.template_profile,
         )
 
-    @staticmethod
-    def _template_spec(template) -> CategorySpec:
+    def _parse_bundle(
+        self,
+        *,
+        bundle,
+        raw_text: str,
+        decision,
+        identity,
+        template,
+        evidence: dict[str, Any],
+        common: dict[str, Any],
+    ) -> ParserRuntimeResult:
         validation = dict(getattr(template, "validation_json", None) or {})
+        raw_specs = [
+            dict(item)
+            for item in validation.get("record_sets") or ()
+            if isinstance(item, dict)
+        ]
+        specs = {
+            str(item.get("name") or ""): self._category_spec_from_validation(item)
+            for item in raw_specs
+            if str(item.get("name") or "").strip()
+        }
+        bundle_names = {item.name for item in bundle.record_sets}
+        if specs and set(specs) != bundle_names:
+            return self._failed(
+                decision,
+                identity,
+                template,
+                "record_set_contract_mismatch",
+                evidence,
+            )
+        output: dict[str, list[dict[str, Any]]] = {}
+        for record_set in bundle.record_sets:
+            parser = textfsm.TextFSM(io.StringIO(record_set.template_text))
+            rows = parser.ParseText(
+                prepare_textfsm_input(record_set.template_text, raw_text or "")
+            )
+            records = [
+                dict(zip(parser.header, row, strict=False))
+                for row in rows
+            ]
+            spec = specs.get(record_set.name)
+            failure = self._validate_records(records, spec)
+            if failure:
+                return self._failed(
+                    decision,
+                    identity,
+                    template,
+                    f"{failure}:{record_set.name}",
+                    evidence,
+                )
+            output[record_set.name] = records
+        if not any(output.values()):
+            return self._failed(
+                decision,
+                identity,
+                template,
+                "unexpected_empty",
+                evidence,
+            )
+        return ParserRuntimeResult(
+            policy_status="eligible",
+            identity_status="known",
+            parser_status="success",
+            canonical_command=decision.canonical_command,
+            handling=decision.handling,
+            template_id=template.id,
+            template_version=template.version,
+            structured_data={
+                "format": "netops.structured_record_sets/v1",
+                "record_sets": output,
+            },
+            identity_evidence=evidence,
+            category="multi_record",
+            entity_type=None,
+            primary_keys=(),
+            output_status="data",
+            capability=decision.capability,
+            capability_status=decision.capability_status,
+            template_profile=decision.template_profile,
+        )
+
+    @staticmethod
+    def _category_spec_from_validation(validation: dict[str, Any]) -> CategorySpec:
         category = str(
-            validation.get("category") or getattr(template, "category", None) or "record"
+            validation.get("category")
+            or validation.get("entity_type")
+            or validation.get("entity")
+            or "record"
         )
         return CategorySpec(
             name=category,
-            entity_type=str(validation.get("entity_type") or category),
+            entity_type=str(
+                validation.get("entity_type")
+                or validation.get("entity")
+                or category
+            ),
             primary_keys=tuple(validation.get("primary_keys") or ()),
             required_fields=tuple(validation.get("required_fields") or ()),
             optional_fields=tuple(validation.get("optional_fields") or ()),
@@ -396,6 +521,37 @@ class ParserRuntime:
             empty_patterns=tuple(validation.get("empty_patterns") or ()),
             ignore_fields=tuple(validation.get("ignore_fields") or ()),
         )
+
+    @staticmethod
+    def _validate_records(
+        records: list[dict[str, Any]],
+        spec: CategorySpec | None,
+    ) -> str | None:
+        if spec is None:
+            return None
+        required = set(spec.required_fields)
+        if required and any(
+            not required.issubset(record)
+            or any(record.get(field) in (None, "") for field in required)
+            for record in records
+        ):
+            return "required_fields_missing"
+        if spec.primary_keys:
+            key_result = validate_entity_keys(records, spec.primary_keys)
+            if not key_result.valid:
+                return (
+                    "primary_key_duplicate"
+                    if key_result.duplicate_keys
+                    else "primary_key_invalid"
+                )
+        return None
+
+    @staticmethod
+    def _template_spec(template) -> CategorySpec:
+        validation = dict(getattr(template, "validation_json", None) or {})
+        if not validation.get("category"):
+            validation["category"] = getattr(template, "category", None) or "record"
+        return ParserRuntime._category_spec_from_validation(validation)
 
     @classmethod
     def _failed(cls, decision, identity, template, code, evidence):

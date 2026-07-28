@@ -246,3 +246,36 @@ def test_bundle_read_model_requires_engineering_review_before_release():
     assert result["release_ready"] is False
     assert "engineering review has not accepted the generated candidates" in result["blockers"]
     assert next(step for step in result["steps"] if step["key"] == "review")["status"] == "ready"
+
+
+def test_bundle_read_model_blocks_successful_but_empty_historical_replay():
+    children = {
+        "contract": _child("contract", "OBSERVATION_CONTRACT"),
+        "policy": _child("policy", "CHANGE_POLICY"),
+        "rule": _child("rule", "EVENT_RULE"),
+    }
+    row = _bundle_row(list(children))
+    row.validation_report_json["historical_replay"].update(
+        sampled_change_count=0,
+        total_change_count=0,
+        matched_change_count=0,
+        scope={
+            "mode": "run_ids",
+            "run_ids": ["run-a"],
+            "run_id_count": 1,
+            "sampled_run_ids": [],
+            "sampled_run_id_count": 0,
+            "missing_run_ids": ["run-a"],
+        },
+    )
+
+    result = RuleAssetBundleService._serialize(
+        row,
+        children,
+        _asset_states(children),
+    )
+
+    assert result["release_ready"] is False
+    assert result["replay_gate"]["evidence_success"] is False
+    assert "historical replay contains no Change evidence" in result["blockers"]
+    assert next(step for step in result["steps"] if step["key"] == "replay")["status"] == "blocked"

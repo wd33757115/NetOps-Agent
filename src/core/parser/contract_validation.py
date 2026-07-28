@@ -206,6 +206,15 @@ def proposal_from_dict(payload: dict[str, Any]) -> ContractProposal:
         entity_type=str(payload.get("entity_type") or payload.get("category") or "record"),
         primary_keys=tuple(str(item) for item in payload.get("primary_keys") or ()),
         required_fields=tuple(str(item) for item in payload.get("required_fields") or ()),
+        canonical_entity_type=(
+            str(payload.get("canonical_entity_type")).strip()
+            if payload.get("canonical_entity_type")
+            else None
+        ),
+        entity_identity_fields=tuple(
+            str(item) for item in payload.get("entity_identity_fields") or ()
+        ),
+        entity_dimensions=dict(payload.get("entity_dimensions") or {}),
         optional_fields=tuple(str(item) for item in payload.get("optional_fields") or ()),
         validators=dict(payload.get("validators") or {}),
         allow_empty=bool(payload.get("allow_empty", False)),

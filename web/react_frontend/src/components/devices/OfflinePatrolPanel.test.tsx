@@ -160,8 +160,9 @@ describe('OfflinePatrolPanel', () => {
       ],
     } as never)
 
-    expect(url).toContain('workspace=release')
-    expect(url).toContain('subtab=asset-bundles')
+    expect(url).toContain('workspace=production')
+    expect(url).toContain('subtab=asset-production-units')
+    expect(url).toContain('action=bundle-review')
     expect(url).toContain('offline_job_id=offline-history-1')
     expect(url).toContain('dataset_ids=dataset-q1%2Cdataset-q2')
   })
@@ -190,9 +191,11 @@ describe('OfflinePatrolPanel', () => {
     expect(screen.getAllByText('单周期资产样本').length).toBeGreaterThan(1)
     const createButton = screen.getByRole('button', { name: '创建并继续' })
     expect(createButton).toBeDisabled()
-    const observedAt = document.querySelector<HTMLInputElement>('input[type="datetime-local"]')
-    expect(observedAt).not.toBeNull()
-    fireEvent.change(observedAt!, { target: { value: '2026-03-23T09:00' } })
+    const observedAt = screen.getByLabelText('样本采集时间')
+    expect(observedAt).toHaveAttribute('placeholder', '选择原始数据采集时间')
+    expect(screen.getByText('填写原始文件实际采集时间，不是本次导入时间')).toBeInTheDocument()
+    fireEvent.change(observedAt, { target: { value: '2026-03-23 09:00' } })
+    fireEvent.keyDown(observedAt, { key: 'Enter', code: 'Enter' })
     expect(createButton).toBeEnabled()
 
     await user.click(screen.getByLabelText('Close'))

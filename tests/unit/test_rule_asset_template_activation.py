@@ -175,15 +175,6 @@ def test_publish_parser_outbox_seeds_rule_asset_generation(monkeypatch):
             assert template_id == "template-1"
             return {"success": True, "created": True, "job": {"id": "job-1"}}
 
-        def auto_build_context(self, job_id):
-            assert job_id == "job-1"
-            return {
-                "success": True,
-                "context_id": "ctx-1",
-                "ready": True,
-                "quality": {"passed": True, "record_count": 20},
-            }
-
     monkeypatch.setattr(parser_tasks, "ParserTemplateRepository", FakeRepository)
     monkeypatch.setattr(parser_tasks, "ParserOutboxRepository", FakeOutboxRepository)
     monkeypatch.setattr(parser_tasks, "RuleAssetTemplateActivationService", FakeSeedService)
@@ -197,12 +188,7 @@ def test_publish_parser_outbox_seeds_rule_asset_generation(monkeypatch):
             "success": True,
             "created": True,
             "job": {"id": "job-1"},
-            "auto_context": {
-                "success": True,
-                "context_id": "ctx-1",
-                "ready": True,
-                "quality": {"passed": True, "record_count": 20},
-            },
+            "next_action": "attach_offline_asset_source_dataset",
         }
     ]
 
@@ -380,6 +366,9 @@ def test_start_generation_workflow_uses_prepared_context(monkeypatch):
     started = []
 
     class FakeJobRepository:
+        def __init__(self):
+            self.updated = []
+
         def get_job(self, _job_id):
             return {
                 "id": "job-1",
@@ -399,6 +388,10 @@ def test_start_generation_workflow_uses_prepared_context(monkeypatch):
                     },
                 },
             }
+
+        def update_job(self, job_id, **changes):
+            self.updated.append((job_id, changes))
+            return {"id": job_id, **changes}
 
     class FakeWorkflowEngine:
         @staticmethod
@@ -420,7 +413,8 @@ def test_start_generation_workflow_uses_prepared_context(monkeypatch):
             "privacy": {"success": True, "raw_cli_included": False},
         },
     )
-    service = RuleAssetTemplateActivationService(job_repository=FakeJobRepository())
+    job_repository = FakeJobRepository()
+    service = RuleAssetTemplateActivationService(job_repository=job_repository)
 
     result = service.start_generation_workflow(
         "job-1",
@@ -434,8 +428,20 @@ def test_start_generation_workflow_uses_prepared_context(monkeypatch):
     assert started[0][1]["source_ref"] == "parser_template:template-1"
     assert started[0][1]["schema_id"] == "template-1"
     assert started[0][1]["source_template_id"] == "template-1"
+    assert started[0][1]["rule_generation_seed_job_id"] == "job-1"
     assert started[0][2]["source"] == "parser-control-plane"
     assert started[0][2]["user_id"] == "operator"
+    assert job_repository.updated[0][0] == "job-1"
+    persisted_payload = job_repository.updated[0][1]["payload_json"]
+    assert persisted_payload["latest_generation_run_id"] == "workflow-1"
+    assert persisted_payload["latest_generation_context_id"] == "context-1"
+    assert persisted_payload["generation_workflow_runs"] == [
+        {
+            "run_id": "workflow-1",
+            "context_id": "context-1",
+            "context_digest": "digest-1",
+        }
+    ]
 
 
 def test_start_generation_workflow_rejects_context_without_offline_evidence():

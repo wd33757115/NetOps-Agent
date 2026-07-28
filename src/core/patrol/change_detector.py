@@ -301,11 +301,19 @@ def _policy_compare_result(
             (current.get("metadata_json") or {}).get(APPLICABILITY_CONTEXT_KEY)
             or {}
         ),
+        dimensions=dict(
+            current.get("dimensions_json")
+            or current.get("dimensions")
+            or {}
+        ),
     )
     result["policy_id"] = active.get("policy_id")
     result["policy_version_id"] = active.get("version_id")
     result["observation_type"] = observation_type
-    result["comparison_type"] = policy_payload.get("compare_mode")
+    result["comparison_type"] = (
+        result.get("selected_compare_mode")
+        or policy_payload.get("compare_mode")
+    )
     result["decision_reason"] = (
         "threshold_unknown"
         if result.get("threshold_status") == "threshold_unknown"
@@ -1145,6 +1153,7 @@ def detect_historical_backfill_changes(
     *,
     run_id: str,
     backfill_job_id: str,
+    previous_run_id: str | None = None,
 ) -> dict[str, Any]:
     """Derive only facts introduced by one approved historical backfill."""
     state_repository = StateRepository()
@@ -1154,17 +1163,28 @@ def detect_historical_backfill_changes(
         if (item.get("metadata_json") or {}).get("backfill_job_id") == backfill_job_id
     ]
     state_keys = {str(item.get("state_key") or "") for item in current}
-    prior = [
-        item
-        for item in state_repository.list_prior_observations_for_run(run_id)
-        if str(item.get("state_key") or "") in state_keys
-    ]
+    if previous_run_id:
+        prior_candidates = state_repository.list_run_observations(previous_run_id)
+        prior = [
+            item
+            for item in prior_candidates
+            if (item.get("metadata_json") or {}).get("backfill_job_id")
+            == backfill_job_id
+            and str(item.get("state_key") or "") in state_keys
+        ]
+    else:
+        prior = [
+            item
+            for item in state_repository.list_prior_observations_for_run(run_id)
+            if str(item.get("state_key") or "") in state_keys
+        ]
     policies = ChangePolicyRepository().list_active_policies()
     bundle_digest = hashlib.sha256(
         json.dumps(policies, sort_keys=True, separators=(",", ":"), default=str).encode()
     ).hexdigest()
     return _detect_observation_changes_against_history_impl(
         current_run_id=run_id,
+        previous_run_id=previous_run_id,
         persist=True,
         missing_confirmations=2,
         policy_bundle=policies,

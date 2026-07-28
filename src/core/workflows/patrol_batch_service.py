@@ -15,7 +15,8 @@ from typing import Any
 
 from src.core.patrol.event_rules import (
     EventRuleRepository,
-    condition_matches,
+    current_state_condition_matches,
+    govern_evaluation_scope,
     norm,
     norm_field,
     resolve_threshold_reference,
@@ -131,6 +132,8 @@ class PatrolBatchService:
             or bool(parse_counts.get("parse_failed"))
             or bool(output_counts.get("command_error"))
             or bool(output_counts.get("empty_unverified"))
+            or bool(output_counts.get("truncated"))
+            or bool(output_counts.get("paged"))
             or execution_success_count < len(command_details)
         )
         return {
@@ -395,6 +398,17 @@ def _condition_applies_to_observation(
     fields = {norm_field(item) for item in condition.get("fields") or []}
     if fields and norm_field(observation.get("field")) not in fields:
         return False
+    observation_types = {
+        str(item).strip()
+        for item in condition.get("observation_types") or []
+        if str(item).strip()
+    }
+    if (
+        observation_types
+        and str(observation.get("observation_type") or "").strip()
+        not in observation_types
+    ):
+        return False
     entity_types = {norm(item) for item in condition.get("entity_types") or []}
     if entity_types and norm(observation.get("entity_type")) not in entity_types:
         return False
@@ -450,23 +464,17 @@ def evaluate_current_state(
     threshold_unknown_keys: set[tuple[str, str, str, str, str]] = set()
     partial_threshold_keys: set[tuple[str, str, str, str, str]] = set()
     by_domain: dict[str, dict[str, Any]] = {}
-    fault_rules = [row for row in rules if str(row.get("event_class") or "fault") != "recovery"]
+    fault_rules = [
+        row
+        for row in rules
+        if str(row.get("event_class") or "fault") != "recovery"
+        and govern_evaluation_scope(
+            row.get("evaluation_scope"),
+            event_class=str(row.get("event_class") or "fault"),
+        )
+        in {"current_state", "both"}
+    ]
     for observation_key, observation in latest.items():
-        synthetic_change = {
-            "device_id": observation.get("device_id"),
-            "entity_type": observation.get("entity_type"),
-            "entity_key": observation.get("entity_key"),
-            "field": observation.get("field"),
-            "old": None,
-            "new": observation.get("value"),
-            "old_value": None,
-            "new_value": observation.get("value"),
-            "change_type": "initial",
-            "command": observation.get("command"),
-            "observation_type": observation.get("observation_type"),
-            "context": observation.get("context"),
-            "dimensions": observation.get("dimensions") or {},
-        }
         applicable = []
         for row in fault_rules:
             condition = dict(row.get("effective_condition") or row.get("condition") or {})
@@ -530,7 +538,15 @@ def evaluate_current_state(
             key=lambda item: -int(item[0].get("priority") or 100),
         ):
             try:
-                matched = condition_matches(condition, synthetic_change)
+                scope = govern_evaluation_scope(
+                    row.get("evaluation_scope"),
+                    event_class=str(row.get("event_class") or "fault"),
+                )
+                matched = current_state_condition_matches(
+                    condition,
+                    observation,
+                    explicit_current_scope=scope == "current_state",
+                )
             except (TypeError, ValueError, KeyError):
                 matched = False
             if not matched:
@@ -558,7 +574,10 @@ def evaluate_current_state(
                 "event_type": row.get("event_type"),
                 "severity": row.get("severity") or "warning",
                 "rule_id": row.get("rule_id") or row.get("rule_name"),
+                "rule_version_id": row.get("version_id"),
                 "rule_version": row.get("version"),
+                "rule_digest": row.get("digest"),
+                "evaluation_scope": scope,
                 "condition": condition,
                 "dimensions": dict(observation.get("dimensions") or {}),
                 "reference_field": reference_field,
@@ -589,6 +608,12 @@ def evaluate_current_state(
         "active_fault_rule_count": len(fault_rules),
         "latest_observation_count": len(latest),
         "evaluated_observation_count": len(evaluated_keys),
+        "evaluated_entity_count": len(
+            {
+                (device_id, entity_type, entity_key)
+                for device_id, entity_type, entity_key, _field, _dimensions in evaluated_keys
+            }
+        ),
         "threshold_unknown_observation_count": len(threshold_unknown_keys),
         "partial_threshold_observation_count": len(partial_threshold_keys),
         "finding_count": len(findings),
@@ -1511,6 +1536,8 @@ def build_patrol_batch_summary(
                 or aggregate_parse_statuses.get("parse_failed")
                 or aggregate_output_statuses.get("command_error")
                 or aggregate_output_statuses.get("empty_unverified")
+                or aggregate_output_statuses.get("truncated")
+                or aggregate_output_statuses.get("paged")
                 else "ready"
             )
         ),
@@ -1570,6 +1597,18 @@ def build_patrol_batch_summary(
     command_errors = int(aggregate_output_statuses.get("command_error") or 0)
     if command_errors:
         action_items.append(f"处理命令执行错误：{command_errors} 条")
+    truncated_outputs = int(
+        aggregate_output_statuses.get("truncated") or 0
+    )
+    if truncated_outputs:
+        action_items.append(
+            f"重新采集被截断的命令输出：{truncated_outputs} 条"
+        )
+    paged_outputs = int(aggregate_output_statuses.get("paged") or 0)
+    if paged_outputs:
+        action_items.append(
+            f"关闭分页并重新采集命令输出：{paged_outputs} 条"
+        )
     if aggregate_latest_observations and not aggregate_evaluated_observations:
         action_items.append("补齐当前状态判定规则：结构化观测尚无可适用的活动 EventRule")
     if aggregate_threshold_unknown_observations:
@@ -1665,6 +1704,9 @@ def build_patrol_batch_summary(
             ),
             "technical_report_url": (
                 f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/report.md"
+            ),
+            "technical_workbook_url": (
+                f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/report.xlsx"
             ),
             "csv_url": f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/export.csv",
         },

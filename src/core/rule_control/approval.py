@@ -48,6 +48,7 @@ def _event_rule_payload(
         "event_type": version.event_type,
         "severity": version.severity,
         "condition": version.condition_json,
+        "evaluation_scope": version.evaluation_scope,
         "version_status": version.status,
         "activated_at": version.activated_at,
         "deprecated_at": version.deprecated_at,

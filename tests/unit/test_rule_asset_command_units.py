@@ -2,25 +2,93 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
 from src.core.parser.policy import ParserPolicy
-from src.core.rule_control.command_asset_units import RuleAssetCommandUnitService
+from src.core.check_items.catalog import CheckItemCatalogRepository
+from src.core.rule_control.command_asset_units import (
+    RuleAssetCommandUnitService,
+    _backfill_url,
+    _bundle_url,
+    _child_stage_status,
+    _generation_url,
+    _latest_bundle_by_context,
+    _parser_url,
+)
 from src.infrastructure.db.models import (
     CommandSnapshot,
     OfflinePatrolJobRecord,
     OfflinePatrolPeriodRecord,
+    ParserJobSample,
     ParserTemplate,
+    ParserTemplateJob,
     PatrolDataset,
     PatrolRun,
     RuleAssetCommandUnitRecord,
+    RuleAssetCommandUnitCheckItemRecord,
     RuleGenerationJobRecord,
     SnapshotParseResult,
 )
 from src.infrastructure.db.postgres import get_db_session
+
+
+def _query(url: str) -> dict[str, list[str]]:
+    return parse_qs(urlparse(url).query)
+
+
+def test_command_asset_actions_use_product_workspaces() -> None:
+    parser_query = _query(
+        _parser_url(
+            "offline-1",
+            "display memory",
+            dataset_ids=["dataset-q2", "dataset-q3"],
+        )
+    )
+    assert parser_query == {
+        "workspace": ["production"],
+        "subtab": ["asset-production-units"],
+        "action": ["parser"],
+        "source_job_id": ["offline-1"],
+        "offline_job_id": ["offline-1"],
+        "command": ["display memory"],
+        "dataset_ids": ["dataset-q2,dataset-q3"],
+    }
+
+    generation_query = _query(
+        _generation_url(
+            "offline-1",
+            "display power",
+            dataset_ids=["dataset-q2", "dataset-q3"],
+            seed_job_id="seed-1",
+        )
+    )
+    assert generation_query["workspace"] == ["production"]
+    assert generation_query["subtab"] == ["asset-production-units"]
+    assert generation_query["action"] == ["rule-generation"]
+    assert generation_query["rule_seed_job_id"] == ["seed-1"]
+    assert generation_query["dataset_ids"] == ["dataset-q2,dataset-q3"]
+
+    backfill_query = _query(
+        _backfill_url(
+            "offline-1",
+            "display power",
+            template_id="template-1",
+            dataset_ids=["dataset-q3"],
+        )
+    )
+    assert backfill_query["workspace"] == ["runtime"]
+    assert backfill_query["subtab"] == ["coverage-backfill"]
+    assert backfill_query["action"] == ["backfill"]
+
+    bundle_query = _query(_bundle_url("offline-1", "bundle-1"))
+    assert bundle_query["workspace"] == ["production"]
+    assert bundle_query["subtab"] == ["asset-production-units"]
+    assert bundle_query["action"] == ["release"]
+    assert bundle_query["bundle_id"] == ["bundle-1"]
 
 
 def _snapshot(
@@ -236,10 +304,13 @@ def test_command_units_deduplicate_evidence_and_keep_asset_boundaries():
         assert len(detail["stages"]) == 10
         assert len(detail["evidence"]) == 3
         assert all("raw_text" not in item for item in detail["evidence"])
-        policy_stage = next(
-            item for item in detail["stages"] if item["key"] == "change_policy"
-        )
-        generation_url = policy_stage["next_action"]["target_url"]
+        generation_actions = [
+            stage["next_action"]
+            for stage in detail["stages"]
+            if (stage.get("next_action") or {}).get("code") == "generate_rule_asset_bundle"
+        ]
+        assert len(generation_actions) == 1
+        generation_url = generation_actions[0]["target_url"]
         assert f"source_job_id={job_id}" in generation_url
         assert f"dataset_ids={dataset_id}" in generation_url
         paged_detail = service.get_unit(
@@ -296,6 +367,103 @@ def test_parser_job_resolution_never_reuses_an_unmatched_model_profile():
     )
 
     assert resolved is None
+
+
+def test_collecting_parser_job_is_actionable_not_reported_as_running():
+    service = RuleAssetCommandUnitService()
+    stages = service._build_stages(
+        offline_job_id="offline-parser-config",
+        dataset_ids=["dataset-parser-config"],
+        unit={
+            "command": "show interface status",
+            "vendor": "Cisco",
+            "profile": "N9K-C93180YC-FX",
+            "models": {"N9K-C93180YC-FX"},
+            "device_count": 1,
+            "sample_count": 1,
+            "parse_counts": {"template_missing": 1},
+            "structured_count": 0,
+            "asset_mode": "full_chain",
+        },
+        parser_job=SimpleNamespace(
+            id="parser-job-config",
+            status="collecting",
+            template_attempt_count=0,
+            sample_count=1,
+            last_error=None,
+            failure_code="template_missing",
+        ),
+        template=None,
+        active_contract=None,
+        seed=None,
+        context=None,
+        bundle=None,
+        children=[],
+        output_signature_count=1,
+    )
+
+    parser_stage = next(item for item in stages if item["key"] == "parser_generation")
+    assert parser_stage["status"] == "ready"
+    assert parser_stage["next_action"]["code"] == "open_parser_job"
+    assert "source_job_id=offline-parser-config" in parser_stage["next_action"]["target_url"]
+    assert "offline_job_id=offline-parser-config" in parser_stage["next_action"]["target_url"]
+    assert parser_stage["next_action"]["label"] == "配置并生成 Parser"
+
+
+def test_rejected_bundle_blocks_child_assets_and_surfaces_recovery_action():
+    children = [
+        SimpleNamespace(
+            asset_type="CHANGE_POLICY",
+            status="pending_approval",
+            validation_report_json={"success": True},
+        )
+    ]
+
+    status, matching = _child_stage_status(
+        children,
+        "CHANGE_POLICY",
+        bundle_status="rejected",
+    )
+    assert status == "blocked"
+    assert matching == children
+
+    stages = [
+        {"key": "change_policy", "status": "needs_review", "next_action": None},
+        {
+            "key": "validation_review",
+            "status": "blocked",
+            "next_action": {"code": "review_bundle"},
+        },
+        {"key": "release", "status": "blocked", "next_action": None},
+    ]
+    current, overall, _progress, next_action = RuleAssetCommandUnitService._rollup(stages)
+
+    assert current == "validation_review"
+    assert overall == "blocked"
+    assert next_action == {"code": "review_bundle"}
+
+
+def test_latest_bundle_selection_uses_immutable_creation_order():
+    context_id = "context-revision-selection"
+    parent = SimpleNamespace(
+        id="bundle-parent",
+        created_at=datetime(2026, 7, 24, 1, 0, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 7, 24, 3, 0, tzinfo=timezone.utc),
+        payload_json={"context_id": context_id},
+    )
+    replacement = SimpleNamespace(
+        id="bundle-replacement",
+        created_at=datetime(2026, 7, 24, 2, 0, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 7, 24, 2, 0, tzinfo=timezone.utc),
+        payload_json={
+            "context_id": context_id,
+            "engineering_revision": {"parent_bundle_id": parent.id},
+        },
+    )
+
+    selected = _latest_bundle_by_context([parent, replacement])
+
+    assert selected[context_id] is replacement
 
 
 def test_command_unit_projection_uses_latest_successful_reparse_as_effective_state():
@@ -411,6 +579,8 @@ def test_command_unit_projection_uses_latest_successful_reparse_as_effective_sta
         assert unit["stage_statuses"]["structured_quality"] == "passed"
         assert unit["current_stage"] == "observation_contract"
         assert unit["rule_seed_job_id"]
+        assert unit["next_action"]["code"] == "generate_rule_asset_bundle"
+        assert unit["next_action"]["label"] == "生成完整规则资产包"
 
         service.reconcile(job_id)
         with get_db_session() as db:
@@ -436,9 +606,24 @@ def test_command_unit_projection_uses_latest_successful_reparse_as_effective_sta
             item for item in detail["stages"] if item["key"] == "observation_contract"
         )
         assert contract_stage["status"] == "ready"
-        assert f"pc_rule_job_search={unit['rule_seed_job_id']}" in (
+        assert f"rule_seed_job_id={unit['rule_seed_job_id']}" in (
             contract_stage["next_action"]["target_url"]
         )
+        assert "workspace=production" in contract_stage["next_action"]["target_url"]
+        assert "action=rule-generation" in contract_stage["next_action"]["target_url"]
+
+        with get_db_session() as db:
+            stale = db.get(RuleAssetCommandUnitRecord, unit["id"])
+            stale.projection_version = 2
+            stale.next_action_json = {
+                "code": "generate_policy",
+                "label": "生成并修订 Policy",
+                "target_url": "/stale",
+            }
+        refreshed = service.list_units(job_id, page=1, page_size=10)["items"][0]
+        assert refreshed["projection_version"] == 4
+        assert refreshed["next_action"]["code"] == "generate_rule_asset_bundle"
+        assert refreshed["next_action"]["label"] == "生成完整规则资产包"
     finally:
         with get_db_session() as db:
             db.query(RuleGenerationJobRecord).filter(
@@ -452,6 +637,153 @@ def test_command_unit_projection_uses_latest_successful_reparse_as_effective_sta
             db.query(PatrolRun).filter_by(id=run_id).delete()
             db.query(PatrolDataset).filter_by(id=dataset_id).delete()
             db.query(ParserTemplate).filter_by(id=template_id).delete()
+
+
+def test_parser_job_state_changes_refresh_linked_offline_command_units():
+    suffix = uuid.uuid4().hex[:10]
+    offline_job_id = f"offline-parser-refresh-{suffix}"
+    parser_job_id = f"parser-refresh-{suffix}"
+    dataset_id = f"dataset-parser-refresh-{suffix}"
+    run_id = f"run-parser-refresh-{suffix}"
+    snapshot_id = f"snapshot-command-unit-parser-refresh-{suffix}-1"
+    command = "display interface brief"
+    with get_db_session() as db:
+        db.add(
+            PatrolDataset(
+                id=dataset_id,
+                name="Parser projection refresh test",
+                mode="parser_validation",
+                source="imported_file",
+            )
+        )
+        db.add(
+            PatrolRun(
+                id=run_id,
+                mode="parser_validation",
+                source="imported_file",
+                dataset_id=dataset_id,
+                status="completed",
+                logical_run_id=run_id,
+                device_count=1,
+                command_count=1,
+            )
+        )
+        db.add(
+            OfflinePatrolJobRecord(
+                id=offline_job_id,
+                idempotency_key=f"idempotency-parser-refresh-{suffix}",
+                purpose="rule_asset_source",
+                job_type="parser_validation",
+                name="Parser projection refresh test",
+                owner_id="pytest",
+                status="completed",
+                progress_json={},
+            )
+        )
+        db.add(
+            OfflinePatrolPeriodRecord(
+                id=f"period-parser-refresh-{suffix}",
+                job_id=offline_job_id,
+                role="sample",
+                label="Sample",
+                observed_at=datetime.now(timezone.utc),
+                dataset_id=dataset_id,
+                patrol_run_id=run_id,
+                status="completed",
+            )
+        )
+        db.flush()
+        db.add(
+            _snapshot(
+                suffix=f"parser-refresh-{suffix}",
+                run_id=run_id,
+                dataset_id=dataset_id,
+                ordinal=1,
+                vendor="H3C",
+                model="S6520",
+                command=command,
+                device_id="SW1",
+            )
+        )
+
+    service = RuleAssetCommandUnitService()
+    try:
+        service.reconcile(offline_job_id)
+        initial = service.list_units(offline_job_id, page=1, page_size=10)["items"][0]
+        assert initial["parser_job_id"] is None
+
+        with get_db_session() as db:
+            db.add(
+                ParserTemplateJob(
+                    id=parser_job_id,
+                    job_type="CREATE_TEMPLATE",
+                    source_mode="parser_validation",
+                    vendor="H3C",
+                    model="S6520",
+                    profile="S6520",
+                    canonical_command=command,
+                    output_signature="a" * 64,
+                    idempotency_key=f"parser-refresh-{suffix}",
+                    status="failed",
+                    pipeline_version="simple_v2",
+                    parser_spec_status="confirmed",
+                    sample_count=1,
+                    failure_code="generation_validation_failed",
+                    last_error="candidate did not pass validation",
+                )
+            )
+            db.add(
+                ParserJobSample(
+                    id=f"parser-sample-refresh-{suffix}",
+                    job_id=parser_job_id,
+                    snapshot_id=snapshot_id,
+                    device_id="SW1",
+                    output_signature="a" * 64,
+                    dataset_id=dataset_id,
+                    sample_role="generation",
+                    sanitization_status="sanitized",
+                    sanitized_text="Interface Status\nGE1/0/1 UP",
+                    sanitized_hash="b" * 64,
+                )
+            )
+
+        failed_refresh = service.reconcile_for_parser_job(parser_job_id)
+        assert failed_refresh["offline_job_ids"] == [offline_job_id]
+        failed = service.list_units(offline_job_id, page=1, page_size=10)["items"][0]
+        assert failed["parser_job_id"] == parser_job_id
+        assert failed["stage_statuses"]["parser_generation"] == "failed"
+
+        with get_db_session() as db:
+            parser_job = db.get(ParserTemplateJob, parser_job_id)
+            parser_job.status = "succeeded"
+            parser_job.failure_code = None
+            parser_job.last_error = None
+            parser_job.updated_at = datetime.now(timezone.utc)
+
+        succeeded_refresh = service.reconcile_for_parser_job(parser_job_id)
+        assert succeeded_refresh["reconciled_count"] == 1
+        succeeded = service.list_units(
+            offline_job_id,
+            page=1,
+            page_size=10,
+        )["items"][0]
+        assert succeeded["stage_statuses"]["parser_generation"] == "needs_review"
+        assert succeeded["stage_statuses"]["parser_validation"] == "needs_review"
+        assert succeeded["status"] == "needs_review"
+    finally:
+        with get_db_session() as db:
+            db.query(RuleAssetCommandUnitRecord).filter_by(
+                offline_job_id=offline_job_id
+            ).delete()
+            db.query(ParserJobSample).filter_by(job_id=parser_job_id).delete()
+            db.query(ParserTemplateJob).filter_by(id=parser_job_id).delete()
+            db.query(CommandSnapshot).filter_by(id=snapshot_id).delete()
+            db.query(OfflinePatrolPeriodRecord).filter_by(
+                job_id=offline_job_id
+            ).delete()
+            db.query(OfflinePatrolJobRecord).filter_by(id=offline_job_id).delete()
+            db.query(PatrolRun).filter_by(id=run_id).delete()
+            db.query(PatrolDataset).filter_by(id=dataset_id).delete()
 
 
 class _PolicyRepository:
@@ -543,3 +875,330 @@ def test_command_unit_stages_respect_semantic_asset_mode(
 
     assert by_key["change_policy"] == policy_status
     assert by_key["event_rule"] == event_status
+
+
+def test_product_command_asset_list_deduplicates_latest_units_and_enforces_owner_scope():
+    suffix = uuid.uuid4().hex[:10]
+    now = datetime.now(timezone.utc)
+    owner_id = f"user:owner-{suffix}"
+    other_owner_id = f"user:other-{suffix}"
+    job_ids = [
+        f"offline-product-old-{suffix}",
+        f"offline-product-new-{suffix}",
+        f"offline-product-other-{suffix}",
+    ]
+    unit_ids = [
+        f"command-product-old-{suffix}",
+        f"command-product-new-{suffix}",
+        f"command-product-other-{suffix}",
+    ]
+    shared_asset_key = f"asset-shared-{suffix}"
+
+    def command_unit(
+        *,
+        unit_id: str,
+        job_id: str,
+        asset_key: str,
+        command: str,
+        status: str,
+        current_stage: str,
+        updated_at: datetime,
+    ) -> RuleAssetCommandUnitRecord:
+        return RuleAssetCommandUnitRecord(
+            id=unit_id,
+            offline_job_id=job_id,
+            asset_key=asset_key,
+            vendor="H3C",
+            model="S5130S",
+            models_json=["S5130S"],
+            profile="S5130S",
+            canonical_command=command,
+            handling="structured",
+            asset_mode="full_chain",
+            status=status,
+            current_stage=current_stage,
+            progress_percent=20,
+            sample_count=1,
+            device_count=1,
+            output_signature_count=1,
+            blocker_count=0,
+            parse_counts_json={"parsed": 1},
+            stage_states_json=[
+                {"key": "parser_generation", "status": "passed"},
+                {"key": "observation_contract", "status": "ready"},
+                {"key": "change_policy", "status": "not_started"},
+                {"key": "event_rule", "status": "not_started"},
+            ],
+            next_action_json={"code": "generate", "label": "生成规则", "target_url": "/next"},
+            projection_version=3,
+            created_at=updated_at,
+            updated_at=updated_at,
+        )
+
+    with get_db_session() as db:
+        db.add_all(
+            [
+                OfflinePatrolJobRecord(
+                    id=job_ids[0],
+                    idempotency_key=f"idempotency-{job_ids[0]}",
+                    purpose="rule_asset_source",
+                    job_type="parser_validation",
+                    name=f"Older source {suffix}",
+                    owner_id=owner_id,
+                    status="completed",
+                    progress_json={},
+                    created_at=now - timedelta(days=2),
+                    updated_at=now - timedelta(days=2),
+                ),
+                OfflinePatrolJobRecord(
+                    id=job_ids[1],
+                    idempotency_key=f"idempotency-{job_ids[1]}",
+                    purpose="rule_asset_source",
+                    job_type="parser_validation",
+                    name=f"Latest source {suffix}",
+                    owner_id=owner_id,
+                    status="completed",
+                    progress_json={},
+                    created_at=now - timedelta(days=1),
+                    updated_at=now - timedelta(days=1),
+                ),
+                OfflinePatrolJobRecord(
+                    id=job_ids[2],
+                    idempotency_key=f"idempotency-{job_ids[2]}",
+                    purpose="rule_asset_source",
+                    job_type="parser_validation",
+                    name=f"Other owner source {suffix}",
+                    owner_id=other_owner_id,
+                    status="completed",
+                    progress_json={},
+                    created_at=now,
+                    updated_at=now,
+                ),
+            ]
+        )
+        db.flush()
+        db.add_all(
+            [
+                command_unit(
+                    unit_id=unit_ids[0],
+                    job_id=job_ids[0],
+                    asset_key=shared_asset_key,
+                    command="display memory",
+                    status="blocked",
+                    current_stage="parser_generation",
+                    updated_at=now - timedelta(days=2),
+                ),
+                command_unit(
+                    unit_id=unit_ids[1],
+                    job_id=job_ids[1],
+                    asset_key=shared_asset_key,
+                    command="display memory",
+                    status="needs_review",
+                    current_stage="parser_validation",
+                    updated_at=now - timedelta(days=1),
+                ),
+                command_unit(
+                    unit_id=unit_ids[2],
+                    job_id=job_ids[2],
+                    asset_key=f"asset-other-{suffix}",
+                    command="display interface brief",
+                    status="completed",
+                    current_stage="release",
+                    updated_at=now,
+                ),
+            ]
+        )
+
+    service = RuleAssetCommandUnitService()
+    try:
+        owner_page = service.list_production_units(
+            owner_id=owner_id,
+            page=1,
+            page_size=10,
+        )
+        assert owner_page["total"] == 1
+        assert owner_page["items"][0]["id"] == unit_ids[1]
+        assert owner_page["items"][0]["governance_status"] == "engineering_review"
+        assert owner_page["items"][0]["governance_bucket"] == "awaiting_approval"
+        assert owner_page["items"][0]["component_statuses"]["parser"] == "published"
+        assert owner_page["summary"]["awaiting_approval"] == 1
+
+        filtered = service.list_production_units(
+            owner_id=owner_id,
+            bucket="awaiting_approval",
+            page=1,
+            page_size=10,
+        )
+        assert filtered["total"] == 1
+
+        admin_page = service.list_production_units(
+            owner_id=owner_id,
+            is_admin=True,
+            page=1,
+            page_size=10,
+            search=suffix,
+        )
+        assert admin_page["total"] == 2
+        assert any(
+            item["governance_status"] == "published"
+            for item in admin_page["items"]
+        )
+    finally:
+        with get_db_session() as db:
+            db.query(RuleAssetCommandUnitRecord).filter(
+                RuleAssetCommandUnitRecord.id.in_(unit_ids)
+            ).delete(synchronize_session=False)
+            db.query(OfflinePatrolJobRecord).filter(
+                OfflinePatrolJobRecord.id.in_(job_ids)
+            ).delete(synchronize_session=False)
+
+
+def test_check_item_workbench_groups_catalog_implementations_and_blocks_unclassified():
+    suffix = uuid.uuid4().hex[:10]
+    owner_id = f"user:check-item-owner-{suffix}"
+    job_id = f"offline-check-item-production-{suffix}"
+    memory_unit_id = f"command-memory-{suffix}"
+    unknown_unit_id = f"command-unclassified-{suffix}"
+    now = datetime.now(timezone.utc)
+    catalog_repository = CheckItemCatalogRepository()
+    catalog_repository.bootstrap(actor="pytest-check-item-workbench")
+    catalog = catalog_repository.load_active()
+    memory_item = catalog.check_item("system.memory_usage")
+    memory_implementation = next(
+        item for item in catalog.implementations if item.id == "h3c-memory-usage"
+    )
+    assert memory_item is not None
+
+    def unit(
+        *,
+        unit_id: str,
+        asset_key: str,
+        command: str,
+    ) -> RuleAssetCommandUnitRecord:
+        return RuleAssetCommandUnitRecord(
+            id=unit_id,
+            offline_job_id=job_id,
+            asset_key=asset_key,
+            vendor="H3C",
+            model="S5130S",
+            models_json=["S5130S"],
+            profile="S5130S",
+            canonical_command=command,
+            handling="structured",
+            asset_mode="full_chain",
+            status="completed",
+            current_stage="release",
+            progress_percent=100,
+            sample_count=2,
+            device_count=2,
+            output_signature_count=1,
+            blocker_count=0,
+            parse_counts_json={"parsed": 2},
+            stage_states_json=[
+                {"key": "parser_generation", "status": "passed"},
+                {"key": "observation_contract", "status": "passed"},
+                {"key": "change_policy", "status": "passed"},
+                {"key": "event_rule", "status": "passed"},
+                {"key": "release", "status": "passed"},
+            ],
+            next_action_json=None,
+            projection_version=4,
+            created_at=now,
+            updated_at=now,
+        )
+
+    with get_db_session() as db:
+        db.add(
+            OfflinePatrolJobRecord(
+                id=job_id,
+                idempotency_key=f"idempotency-{job_id}",
+                purpose="rule_asset_source",
+                job_type="parser_validation",
+                name=f"Q3 检查项样本 {suffix}",
+                owner_id=owner_id,
+                status="completed",
+                progress_json={},
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        db.flush()
+        db.add_all(
+            [
+                unit(
+                    unit_id=memory_unit_id,
+                    asset_key=f"asset-memory-{suffix}",
+                    command="display memory",
+                ),
+                unit(
+                    unit_id=unknown_unit_id,
+                    asset_key=f"asset-unknown-{suffix}",
+                    command="display vendor-special-state",
+                ),
+            ]
+        )
+        db.flush()
+        db.add(
+            RuleAssetCommandUnitCheckItemRecord(
+                id=f"unit-check-link-{suffix}",
+                command_unit_id=memory_unit_id,
+                check_item_id=memory_item.id,
+                check_item_version_id=memory_item.version_id,
+                implementation_id=memory_implementation.id,
+                implementation_version_id=memory_implementation.version_id,
+                mapping_source="catalog_resolver",
+                created_at=now,
+            )
+        )
+
+    service = RuleAssetCommandUnitService(
+        catalog_repository=catalog_repository,
+    )
+    try:
+        page = service.list_check_item_production_units(
+            owner_id=owner_id,
+            page=1,
+            page_size=10,
+        )
+        assert page["total"] == 2
+        memory_group = next(
+            item
+            for item in page["items"]
+            if item["check_item_id"] == "system.memory_usage"
+        )
+        assert memory_group["implementation_count"] == 1
+        assert memory_group["command_count"] == 1
+        assert memory_group["implementations"][0]["canonical_command"] == (
+            "display memory"
+        )
+        assert memory_group["implementations"][0]["mapping_status"] == (
+            "catalog_resolved"
+        )
+        assert memory_group["implementations"][0]["source_job"]["name"].startswith(
+            "Q3 检查项样本"
+        )
+
+        unclassified = next(
+            item for item in page["items"] if item["check_item_id"] is None
+        )
+        assert unclassified["name"] == "待归类检查项"
+        assert unclassified["governance_status"] == "blocked"
+        assert unclassified["governance_bucket"] == "exception"
+        assert unclassified["current_stage"] == "identity_grouping"
+        assert unclassified["next_action"]["code"] == "classify_check_item"
+        assert page["summary"]["unclassified"] == 1
+    finally:
+        with get_db_session() as db:
+            db.query(RuleAssetCommandUnitCheckItemRecord).filter(
+                RuleAssetCommandUnitCheckItemRecord.command_unit_id.in_(
+                    [memory_unit_id, unknown_unit_id]
+                )
+            ).delete(synchronize_session=False)
+            db.query(RuleAssetCommandUnitRecord).filter(
+                RuleAssetCommandUnitRecord.id.in_(
+                    [memory_unit_id, unknown_unit_id]
+                )
+            ).delete(synchronize_session=False)
+            db.query(OfflinePatrolJobRecord).filter(
+                OfflinePatrolJobRecord.id == job_id
+            ).delete(synchronize_session=False)

@@ -605,6 +605,65 @@ def test_event_rule_generator_fans_out_multiple_change_policies(tmp_path: Path):
     }
 
 
+def test_event_rule_generator_scopes_same_observation_type_by_dimensions(
+    tmp_path: Path,
+):
+    result = _run_skill(
+        tmp_path,
+        {
+            "contract": {
+                "entity_type": "device",
+                "required_fields": ["device_name"],
+                "optional_fields": ["cpu_usage"],
+                "primary_keys": [],
+                "state_semantics": {
+                    "device_name": {"semantic_type": "identity"},
+                    "cpu_usage": {
+                        "semantic_type": "gauge",
+                        "observation_type": "device.cpu.utilization",
+                        "unit": "percent",
+                    },
+                },
+            },
+            "change_policies": [
+                {
+                    "observation_type": "device.cpu.utilization",
+                    "semantic_type": "gauge",
+                    "compare_mode": "threshold_and_deadband",
+                    "thresholds": {"high": 90},
+                    "recovery_threshold": 85,
+                    "deadband": 5,
+                    "dimension_selector": {"scope": "system", "window": "5s"},
+                },
+                {
+                    "observation_type": "device.cpu.utilization",
+                    "semantic_type": "gauge",
+                    "compare_mode": "threshold_and_deadband",
+                    "thresholds": {"high": 95},
+                    "recovery_threshold": 90,
+                    "deadband": 5,
+                    "dimension_selector": {"scope": "system", "window": "5m"},
+                },
+            ],
+        },
+    )
+
+    assert result["success"] is True
+    assert result["generated_rule_count"] == 4
+    assert len({rule["name"] for rule in result["rules"]}) == 4
+    assert {
+        tuple(sorted(rule["condition"]["dimensions"].items()))
+        for rule in result["rules"]
+    } == {
+        (("scope", "system"), ("window", "5s")),
+        (("scope", "system"), ("window", "5m")),
+    }
+    assert all(
+        {"scope", "window"}.issubset(rule["correlation_keys"])
+        for rule in result["rules"]
+    )
+
+
 def test_event_rule_constraints_require_complete_fault_recovery_pair(tmp_path: Path):
     result = _run_skill(
         tmp_path,
@@ -853,6 +912,96 @@ def test_llm_fanout_namespaces_event_types_reused_across_observation_targets(mon
     assert {
         repair["kind"] for repair in result["governance_repairs"]
     } == {"cross_target_event_type_namespace"}
+
+
+def test_event_rule_fanout_skips_change_only_observations(monkeypatch):
+    module = _load_skill_module()
+
+    class WeakProvider:
+        name = "fake-weak-event-model"
+
+        def propose(self, **_kwargs):
+            from src.core.rule_control.generation_agent import ProviderResult
+
+            return ProviderResult(
+                provider=self.name,
+                model_name="mock",
+                candidate={
+                    "rules": [
+                        {
+                            "name": "state-down",
+                            "event_type": "StateDown",
+                            "trigger_role": "down",
+                            "severity": "major",
+                            "event_class": "fault",
+                        },
+                        {
+                            "name": "state-up",
+                            "event_type": "StateUp",
+                            "trigger_role": "up",
+                            "severity": "info",
+                            "event_class": "recovery",
+                        },
+                    ]
+                },
+            )
+
+    monkeypatch.setitem(
+        module.DEFAULT_RULE_GENERATION_PROVIDERS._factories,
+        "llm",
+        WeakProvider,
+    )
+    result = module.run_event_rule_generation(
+        {
+            "generation_provider": "llm",
+            "contract": {
+                "entity_type": "interface",
+                "primary_keys": ["interface"],
+                "required_fields": ["interface", "status"],
+                "optional_fields": ["duplex", "speed"],
+                "state_semantics": {
+                    "interface": {"semantic_type": "identity"},
+                    "status": {
+                        "semantic_type": "state",
+                        "observation_type": "interface.oper_status",
+                    },
+                    "duplex": {
+                        "semantic_type": "state",
+                        "observation_type": "interface.duplex",
+                    },
+                    "speed": {
+                        "semantic_type": "gauge",
+                        "observation_type": "interface.speed",
+                    },
+                },
+            },
+            "change_policies": [
+                {
+                    "observation_type": "interface.oper_status",
+                    "semantic_type": "state",
+                    "compare_mode": "state_transition",
+                },
+                {
+                    "observation_type": "interface.duplex",
+                    "semantic_type": "state",
+                    "compare_mode": "state_transition",
+                },
+                {
+                    "observation_type": "interface.speed",
+                    "semantic_type": "gauge",
+                    "compare_mode": "value_change",
+                },
+            ],
+            "event_observation_types": ["interface.oper_status"],
+        }
+    )
+
+    assert result["success"] is True
+    assert result["generated_rule_count"] == 2
+    assert {
+        rule["condition"]["observation_types"][0]
+        for rule in result["rules"]
+    } == {"interface.oper_status"}
 
 
 def test_event_rule_validator_governs_unapproved_critical_and_preserves_gate():
@@ -1265,3 +1414,45 @@ def test_event_rule_ir_compiler_prefers_per_entity_reference_fields():
     assert conditions["measurement_low"]["reference_field"] == "low_reference"
     assert conditions["measurement_high_recovery"]["kind"] == ("threshold_field_high_recovery")
     assert conditions["measurement_low_recovery"]["kind"] == ("threshold_field_low_recovery")
+
+
+def test_event_rule_compiler_builds_structured_lifecycle_change_rule():
+    compiled = compile_event_rule_intents(
+        candidate_rules=[
+            {
+                "event_type": "DeviceSoftwareVersionChanged",
+                "trigger_role": "change",
+                "severity": "warning",
+            }
+        ],
+        contract={
+            "entity_type": "device",
+            "primary_keys": ["device_name"],
+            "required_fields": ["device_name", "software_version"],
+            "optional_fields": [],
+            "state_semantics": {
+                "software_version": {
+                    "semantic_type": "text",
+                    "observation_type": "device.software_version",
+                }
+            },
+        },
+        change_policy={
+            "observation_type": "device.software_version",
+            "semantic_type": "text",
+            "compare_mode": "exact",
+        },
+    )
+
+    assert compiled["success"] is True
+    assert len(compiled["rules"]) == 1
+    rule = compiled["rules"][0]
+    assert rule["event_type"] == "DeviceSoftwareVersionChanged"
+    assert rule["trigger_role"] == "change"
+    assert rule["condition"] == {
+        "kind": "field_change",
+        "entity_types": ["device"],
+        "fields": ["software_version"],
+        "observation_types": ["device.software_version"],
+        "allow_initial": False,
+    }

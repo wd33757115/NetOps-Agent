@@ -79,6 +79,34 @@ def _safe_float(value: Any, default: float) -> float:
         return default
 
 
+_UNSUPPORTED_OUTPUT_MARKERS = (
+    "% invalid input",
+    "invalid command",
+    "unknown command",
+    "unrecognized command",
+    "incomplete command",
+    "ambiguous command",
+    "command not found",
+    "not supported",
+    "unsupported command",
+    "无效命令",
+    "未知命令",
+    "不支持该命令",
+)
+
+
+def _classify_cli_output(output: str) -> tuple[bool, str]:
+    """Classify only transport usability; semantic validity is downstream."""
+
+    normalized = str(output or "").strip()
+    if not normalized:
+        return False, "empty_output"
+    folded = normalized.casefold()
+    if any(marker in folded for marker in _UNSUPPORTED_OUTPUT_MARKERS):
+        return False, "command_unsupported"
+    return True, "complete"
+
+
 def device_type_for(device: dict[str, Any]) -> str:
     attributes = dict(device.get("attributes") or {})
     explicit = str(
@@ -274,6 +302,20 @@ class CLICommandCollector(IngestionAdapter):
         )
         collection_items = list(execution_plan.commands)
         commands = execution_plan.command_texts()
+        check_item_mode = any(
+            item.check_item_bindings for item in collection_items
+        )
+        required_binding_keys = {
+            (
+                str(binding.get("check_item_version_id") or ""),
+                str(binding.get("implementation_version_id") or ""),
+            )
+            for item in collection_items
+            for binding in item.check_item_bindings
+            if binding.get("check_item_version_id")
+            and binding.get("implementation_version_id")
+        }
+        satisfied_binding_keys: set[tuple[str, str]] = set()
         command_results: list[dict[str, Any]] = []
         output_file.write_text("", encoding="utf-8")
         started_at = datetime.now(timezone.utc).isoformat()
@@ -285,6 +327,23 @@ class CLICommandCollector(IngestionAdapter):
                 "started_at": started_at,
                 "completed_at": (datetime.now(timezone.utc).isoformat() if completed else None),
                 "commands": list(command_results),
+                "check_item_fallback": {
+                    "enabled": check_item_mode,
+                    "required_binding_count": len(required_binding_keys),
+                    "satisfied_binding_count": len(
+                        satisfied_binding_keys
+                    ),
+                    "satisfied_bindings": [
+                        {
+                            "check_item_version_id": check_item_version_id,
+                            "implementation_version_id": implementation_version_id,
+                        }
+                        for (
+                            check_item_version_id,
+                            implementation_version_id,
+                        ) in sorted(satisfied_binding_keys)
+                    ],
+                },
             }
             _atomic_write_json(command_collection_manifest_path(output_file), payload)
             return payload
@@ -303,6 +362,45 @@ class CLICommandCollector(IngestionAdapter):
                         ).encode()
                     ).hexdigest()
                     observed_at = datetime.now(timezone.utc).isoformat()
+                    binding_by_key = {
+                        (
+                            str(
+                                binding.get("check_item_version_id")
+                                or ""
+                            ),
+                            str(
+                                binding.get(
+                                    "implementation_version_id"
+                                )
+                                or ""
+                            ),
+                        ): dict(binding)
+                        for binding in item.check_item_bindings
+                        if binding.get("check_item_version_id")
+                        and binding.get("implementation_version_id")
+                    }
+                    pending_binding_keys = set(binding_by_key) - (
+                        satisfied_binding_keys
+                    )
+                    if binding_by_key and not pending_binding_keys:
+                        command_results.append(
+                            {
+                                "command": command,
+                                "execution_item_id": execution_item_id,
+                                "collection_item_id": item.collection_item_id,
+                                "command_ordinal": index,
+                                "status": "fallback_not_needed",
+                                "error": None,
+                                "observed_at": None,
+                                "fallback_rank": item.fallback_rank,
+                                "check_item_bindings": list(
+                                    binding_by_key.values()
+                                ),
+                                "selected_for_bindings": [],
+                            }
+                        )
+                        write_manifest("running")
+                        continue
                     try:
                         output = connection.send_command(command, read_timeout=read_timeout)
                     except Exception as exc:
@@ -316,8 +414,16 @@ class CLICommandCollector(IngestionAdapter):
                                 "status": failure,
                                 "error": str(exc),
                                 "observed_at": observed_at,
+                                "fallback_rank": item.fallback_rank,
+                                "check_item_bindings": list(
+                                    binding_by_key.values()
+                                ),
+                                "selected_for_bindings": [],
                             }
                         )
+                        if check_item_mode:
+                            write_manifest("running")
+                            continue
                         command_results.extend(
                             {
                                 "command": pending_item.command,
@@ -333,6 +439,14 @@ class CLICommandCollector(IngestionAdapter):
                                 "status": "not_executed",
                                 "error": "previous command failed",
                                 "observed_at": None,
+                                "fallback_rank": pending_item.fallback_rank,
+                                "check_item_bindings": [
+                                    dict(binding)
+                                    for binding in (
+                                        pending_item.check_item_bindings
+                                    )
+                                ],
+                                "selected_for_bindings": [],
                             }
                             for pending_index, pending_item in enumerate(
                                 collection_items[index + 1 :],
@@ -340,18 +454,45 @@ class CLICommandCollector(IngestionAdapter):
                             )
                         )
                         break
-                    report.write(f"Command: {command}\nOutput:\n{output}\n{'-' * 50}\n")
+                    output_text = str(output or "")
+                    usable, unusable_reason = _classify_cli_output(
+                        output_text
+                    )
+                    report.write(
+                        f"Command: {command}\nOutput:\n"
+                        f"{output_text}\n{'-' * 50}\n"
+                    )
                     report.flush()
                     os.fsync(report.fileno())
+                    selected_keys = (
+                        pending_binding_keys if usable else set()
+                    )
+                    satisfied_binding_keys.update(selected_keys)
                     command_results.append(
                         {
                             "command": command,
                             "execution_item_id": execution_item_id,
                             "collection_item_id": item.collection_item_id,
                             "command_ordinal": index,
-                            "status": "complete",
-                            "error": None,
+                            "status": (
+                                "complete"
+                                if usable
+                                else unusable_reason
+                            ),
+                            "error": (
+                                None
+                                if usable
+                                else f"CLI output is {unusable_reason}"
+                            ),
                             "observed_at": observed_at,
+                            "fallback_rank": item.fallback_rank,
+                            "check_item_bindings": list(
+                                binding_by_key.values()
+                            ),
+                            "selected_for_bindings": [
+                                binding_by_key[key]
+                                for key in sorted(selected_keys)
+                            ],
                         }
                     )
                     manifest = write_manifest("running")
@@ -382,13 +523,25 @@ class CLICommandCollector(IngestionAdapter):
                 connection.disconnect()
             except Exception:
                 pass
-            completed = sum(item["status"] == "complete" for item in command_results)
-            status = (
-                "complete"
-                if completed == len(commands)
-                else "partial"
-                if completed > 0
-                else "failed"
+            completed = sum(
+                item["status"] == "complete"
+                for item in command_results
             )
+            if check_item_mode:
+                status = (
+                    "complete"
+                    if required_binding_keys <= satisfied_binding_keys
+                    else "partial"
+                    if satisfied_binding_keys
+                    else "failed"
+                )
+            else:
+                status = (
+                    "complete"
+                    if completed == len(commands)
+                    else "partial"
+                    if completed > 0
+                    else "failed"
+                )
             write_manifest(status, completed=True)
         return output_file

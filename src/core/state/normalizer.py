@@ -9,6 +9,12 @@ import uuid
 from typing import Any
 
 from src.core.observation import ObservationContractRepository
+from src.core.observation.semantic_projection import (
+    SemanticProjectionError,
+    dimension_value_signature,
+    project_value,
+    resolve_dimensions,
+)
 from src.core.parser.key_contract import EntityKeyError, build_entity_key
 from src.core.parser.repository import ParserTemplateRepository
 from src.core.state.domain import StateObservation
@@ -165,6 +171,34 @@ def _looks_like_header_artifact(
     return interface in {"ifname", "intf"} and status in {"status", "link"}
 
 
+def _reconcile_snapshot_observations(
+    observations: list[StateObservation],
+) -> list[StateObservation]:
+    """Deduplicate one canonical fact and reject ambiguous same-snapshot values."""
+
+    by_state_key: dict[str, StateObservation] = {}
+    by_observation_id: dict[str, StateObservation] = {}
+    for observation in observations:
+        existing = by_state_key.get(observation.state_key)
+        if (
+            existing is not None
+            and existing.observation_id != observation.observation_id
+        ):
+            raise SemanticProjectionError(
+                "one snapshot produced conflicting canonical values for "
+                f"{observation.observation_type or observation.field_name} "
+                f"at entity {observation.entity_key}"
+            )
+        by_state_key[observation.state_key] = observation
+        by_observation_id.setdefault(
+            observation.observation_id,
+            observation,
+        )
+    # Preserve the contract/record traversal order.  Reconciliation must not
+    # silently reorder fields consumed by reports or downstream integrations.
+    return list(by_observation_id.values())
+
+
 def observations_from_snapshot(
     snapshot: dict[str, Any],
     *,
@@ -172,18 +206,74 @@ def observations_from_snapshot(
     source: str,
     dataset_id: str | None,
     observation_contract_version: int | None = None,
+    _contract_override: dict[str, Any] | None = None,
+    _record_set_name: str | None = None,
 ) -> list[StateObservation]:
     structured = snapshot.get("structured_json")
     if structured is None:
         return []
     contract = (
-        _template_contract(
-            snapshot.get("parser_template_id"),
-            contract_version=int(observation_contract_version),
+        dict(_contract_override)
+        if _contract_override is not None
+        else (
+            _template_contract(
+                snapshot.get("parser_template_id"),
+                contract_version=int(observation_contract_version),
+            )
+            if observation_contract_version is not None
+            else _template_contract(snapshot.get("parser_template_id"))
         )
-        if observation_contract_version is not None
-        else _template_contract(snapshot.get("parser_template_id"))
     )
+    record_sets = [
+        dict(item)
+        for item in contract.get("record_sets") or ()
+        if isinstance(item, dict)
+    ]
+    if record_sets:
+        if isinstance(structured, dict) and isinstance(
+            structured.get("record_sets"), dict
+        ):
+            structured_sets = dict(structured["record_sets"])
+        elif isinstance(structured, dict) and all(
+            str(item.get("name") or "") in structured for item in record_sets
+        ):
+            structured_sets = structured
+        elif len(record_sets) == 1:
+            structured_sets = {
+                str(record_sets[0].get("name") or "default"): structured
+            }
+        else:
+            raise ValueError(
+                "multi-record ObservationContract requires structured_json.record_sets"
+            )
+        observations: list[StateObservation] = []
+        for record_set in record_sets:
+            name = str(record_set.get("name") or "").strip()
+            if not name:
+                raise ValueError("ObservationContract record set requires name")
+            child_snapshot = dict(snapshot)
+            child_snapshot["structured_json"] = structured_sets.get(name, [])
+            child_contract = {
+                **contract,
+                **record_set,
+                "schema_id": contract.get("schema_id"),
+                "contract_id": contract.get("contract_id"),
+                "contract_version": contract.get("contract_version"),
+                "contract_sha256": contract.get("contract_sha256"),
+                "record_sets": [],
+            }
+            observations.extend(
+                observations_from_snapshot(
+                    child_snapshot,
+                    mode=mode,
+                    source=source,
+                    dataset_id=dataset_id,
+                    observation_contract_version=observation_contract_version,
+                    _contract_override=child_contract,
+                    _record_set_name=name,
+                )
+            )
+        return _reconcile_snapshot_observations(observations)
     if (snapshot.get("metadata_json") or {}).get("handling") == "raw_hash_diff":
         contract = {
             "entity_type": "raw_command_output",
@@ -195,8 +285,17 @@ def observations_from_snapshot(
                 }
             },
         }
-    entity_type = str(contract.get("entity_type") or "record")
+    source_entity_type = str(contract.get("entity_type") or "record")
+    entity_type = str(
+        contract.get("canonical_entity_type") or source_entity_type
+    )
     primary_keys = [str(key) for key in contract.get("primary_keys") or []]
+    entity_identity_fields = [
+        str(key)
+        for key in contract.get("entity_identity_fields") or []
+        if str(key).strip()
+    ]
+    entity_dimensions = dict(contract.get("entity_dimensions") or {})
     ignore_fields = {str(field).strip().lower() for field in contract.get("ignore_fields") or []}
     ignore_fields.update(DEFAULT_IGNORE_FIELDS)
     state_semantics = dict(contract.get("state_semantics") or {})
@@ -208,7 +307,10 @@ def observations_from_snapshot(
     def append_observation(
         *,
         record: dict[str, Any],
+        normalized_record: dict[str, Any],
         entity_key: str,
+        source_entity_key: str,
+        canonical_identity: dict[str, Any] | None,
         field_name: str,
         raw_value: Any,
         value_index: int | None,
@@ -217,7 +319,7 @@ def observations_from_snapshot(
         validator = validators.get(field_name) or validators.get(normalized_field_name)
         if not isinstance(validator, dict):
             validator = {}
-        value = _normalize_observation_value(
+        source_value = _normalize_observation_value(
             str(field_name),
             raw_value,
             validator=validator,
@@ -234,6 +336,13 @@ def observations_from_snapshot(
             field_semantics.setdefault("unit", "%")
         elif validator_type == "ip_or_unassigned":
             field_semantics.setdefault("semantic_type", "ip_address")
+        value = project_value(
+            field_name=normalized_field_name,
+            source_value=source_value,
+            normalized_record=normalized_record,
+            field_semantics=field_semantics,
+            value_index=value_index,
+        )
         context_fields = set(
             applicability_context_fields(field_semantics.get("applicability"))
         )
@@ -249,7 +358,7 @@ def observations_from_snapshot(
                 context_validator = validators.get(context_field)
                 if not isinstance(context_validator, dict):
                     context_validator = {}
-                context_value = record.get(context_field)
+                context_value = normalized_record.get(context_field)
                 if value_index is not None and isinstance(context_value, list):
                     context_value = (
                         context_value[value_index]
@@ -300,6 +409,12 @@ def observations_from_snapshot(
                 observation_context["threshold_source"] = "device_output"
                 observation_context["threshold_confidence"] = "authoritative"
                 observation_context["threshold_fields"] = populated_thresholds
+        dimensions = resolve_dimensions(
+            field_semantics.get("dimensions"),
+            normalized_record,
+            value_index=value_index,
+        )
+        dimension_signature = dimension_value_signature(dimensions)
         value_text, value_number, value_type = _value_parts(value)
         observation_type = (
             str(field_semantics.get("observation_type"))
@@ -313,7 +428,7 @@ def observations_from_snapshot(
                 entity_type,
                 entity_key,
                 semantic_field,
-                value_index,
+                dimension_signature,
             ]
         )
         observation_key = _digest(
@@ -322,8 +437,8 @@ def observations_from_snapshot(
                 state_device_id,
                 entity_type,
                 entity_key,
-                field_name,
-                value_index,
+                semantic_field,
+                dimension_signature,
                 value,
             ]
         )
@@ -333,12 +448,6 @@ def observations_from_snapshot(
             (snapshot.get("metadata_json") or {}).get("command_ordinal") or 0
         )
         fact_order_key = f"{command_ordinal:020d}|{execution_item_id}|{observation_id}"
-        dimensions = None
-        if value_index is not None:
-            dimensions = {
-                **{str(key): record.get(key) for key in primary_keys},
-                "value_index": value_index + 1,
-            }
         observations.append(
             StateObservation(
                 observation_id=observation_id,
@@ -370,10 +479,18 @@ def observations_from_snapshot(
                     else None
                 ),
                 unit=(
-                    str(field_semantics.get("unit"))
-                    if field_semantics.get("unit")
+                    str(
+                        field_semantics.get("canonical_unit")
+                        or field_semantics.get("unit")
+                    )
+                    if (
+                        field_semantics.get("canonical_unit")
+                        or field_semantics.get("unit")
+                    )
                     else None
                 ),
+                dimensions=dimensions,
+                dimension_signature=dimension_signature,
                 value=value,
                 value_text=value_text,
                 value_number=value_number,
@@ -389,6 +506,11 @@ def observations_from_snapshot(
                 metadata={
                     "canonical_command": snapshot["canonical_command"],
                     "primary_keys": primary_keys,
+                    "source_entity_type": source_entity_type,
+                    "source_entity_key": source_entity_key,
+                    "canonical_entity_type": entity_type,
+                    "entity_identity_fields": entity_identity_fields,
+                    "canonical_identity": canonical_identity,
                     "evidence_id": snapshot.get("evidence_id"),
                     "source_type": str(snapshot.get("source_type") or "cli"),
                     "external_device_id": external_device_id,
@@ -414,6 +536,8 @@ def observations_from_snapshot(
                     "observation_type": field_semantics.get("observation_type"),
                     "semantic_type": field_semantics.get("semantic_type"),
                     "unit": field_semantics.get("unit"),
+                    "canonical_unit": field_semantics.get("canonical_unit"),
+                    "source_value": source_value if value != source_value else None,
                     "parser_contract_version": snapshot.get("contract_version"),
                     "observation_contract_id": contract.get("contract_id"),
                     "observation_contract_version": contract.get("contract_version"),
@@ -431,6 +555,8 @@ def observations_from_snapshot(
                     else None,
                     "semantics": field_semantics,
                     "dimensions": dimensions,
+                    "dimension_signature": dimension_signature,
+                    "record_set_name": _record_set_name,
                     "value_index": value_index + 1 if value_index is not None else None,
                     APPLICABILITY_CONTEXT_KEY: observation_context,
                 },
@@ -440,11 +566,69 @@ def observations_from_snapshot(
     for record in _records(structured):
         if _looks_like_header_artifact(
             record,
-            entity_type=entity_type,
+            entity_type=source_entity_type,
             primary_keys=primary_keys,
         ):
             continue
-        entity_key = build_entity_key(record, primary_keys)
+        normalized_record: dict[str, Any] = {}
+        for record_field, record_value in record.items():
+            normalized_name = str(record_field).strip().lower()
+            record_validator = validators.get(record_field) or validators.get(
+                normalized_name
+            )
+            if not isinstance(record_validator, dict):
+                record_validator = {}
+            if isinstance(record_value, list):
+                normalized_value = [
+                    _normalize_observation_value(
+                        str(record_field),
+                        item,
+                        validator=record_validator,
+                    )
+                    for item in record_value
+                ]
+            else:
+                normalized_value = _normalize_observation_value(
+                    str(record_field),
+                    record_value,
+                    validator=record_validator,
+                )
+            normalized_record[record_field] = normalized_value
+            normalized_record.setdefault(normalized_name, normalized_value)
+        source_entity_key = build_entity_key(record, primary_keys)
+        canonical_identity: dict[str, Any] | None = None
+        if entity_dimensions:
+            from src.core.check_items.identity import normalize_entity_identity
+
+            resolved_identity = resolve_dimensions(
+                entity_dimensions,
+                normalized_record,
+            )
+            identity_fields = entity_identity_fields or list(
+                entity_dimensions
+            )
+            if (
+                len(identity_fields) != len(set(identity_fields))
+                or set(identity_fields) != set(resolved_identity)
+            ):
+                raise SemanticProjectionError(
+                    "entity_identity_fields must uniquely match entity_dimensions"
+                )
+            identity_decision = normalize_entity_identity(
+                entity_type=entity_type,
+                identity_values=resolved_identity,
+                primary_keys=identity_fields,
+            )
+            entity_key = identity_decision.entity_key
+            canonical_identity = {
+                "values": identity_decision.values,
+                "policy_id": identity_decision.policy_id,
+                "policy_version": identity_decision.policy_version,
+                "policy_digest": identity_decision.policy_digest,
+                "matched_policy_index": identity_decision.matched_policy_index,
+            }
+        else:
+            entity_key = source_entity_key
         for field_name in sorted(record):
             normalized_field_name = str(field_name).strip().lower()
             if normalized_field_name in ignore_fields or field_name in primary_keys:
@@ -456,7 +640,10 @@ def observations_from_snapshot(
                         continue
                     append_observation(
                         record=record,
+                        normalized_record=normalized_record,
                         entity_key=entity_key,
+                        source_entity_key=source_entity_key,
+                        canonical_identity=canonical_identity,
                         field_name=str(field_name),
                         raw_value=item,
                         value_index=value_index,
@@ -468,12 +655,15 @@ def observations_from_snapshot(
                 continue
             append_observation(
                 record=record,
+                normalized_record=normalized_record,
                 entity_key=entity_key,
+                source_entity_key=source_entity_key,
+                canonical_identity=canonical_identity,
                 field_name=str(field_name),
                 raw_value=raw_value,
                 value_index=None,
             )
-    return observations
+    return _reconcile_snapshot_observations(observations)
 
 
 def _build_snapshot_normalization(
@@ -504,6 +694,8 @@ def _build_snapshot_normalization(
         "not_applicable": ("skipped", "not_applicable", "not_applicable"),
         "empty_unverified": ("blocked", "empty_unverified", "blocked_by_output"),
         "command_error": ("blocked", "command_error", "blocked_by_output"),
+        "truncated": ("blocked", "truncated", "blocked_by_output"),
+        "paged": ("blocked", "paged", "blocked_by_output"),
     }.get(parse_status)
     if gated is not None:
         normalization_status, reason, fact_status = gated
@@ -571,10 +763,16 @@ def _build_snapshot_normalization(
             source=str(context["source"]),
             dataset_id=context["dataset_id"],
         )
-    except (EntityKeyError, ObservationContractVersionError) as exc:
+    except (
+        EntityKeyError,
+        ObservationContractVersionError,
+        SemanticProjectionError,
+    ) as exc:
         failure_code = (
             "contract_version_unavailable"
             if isinstance(exc, ObservationContractVersionError)
+            else "semantic_projection_invalid"
+            if isinstance(exc, SemanticProjectionError)
             else "entity_key_invalid"
         )
         return (

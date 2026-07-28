@@ -24,49 +24,120 @@ from src.core.workflows.repository import (
 logger = logging.getLogger(__name__)
 
 
+def _refresh_rule_asset_projection(parser_job_id: str) -> None:
+    """Keep the rule control-plane read model aligned with Parser job state."""
+
+    try:
+        from src.core.rule_control.command_asset_units import (
+            RuleAssetCommandUnitService,
+        )
+
+        RuleAssetCommandUnitService().reconcile_for_parser_job(parser_job_id)
+    except Exception:
+        logger.exception(
+            "Rule asset projection refresh failed parser_job_id=%s",
+            parser_job_id,
+        )
+
+
+def _refresh_rule_asset_projection_from_skill_result(
+    skill_name: str,
+    result: dict | None,
+) -> None:
+    """Refresh command-unit state after a rule bundle becomes durable."""
+
+    if skill_name != "rule-asset-persister" or not isinstance(result, dict):
+        return
+    bundle = result.get("bundle")
+    if not isinstance(bundle, dict):
+        return
+    payload = bundle.get("payload_json")
+    if not isinstance(payload, dict):
+        payload = {}
+    offline_job_id = str(payload.get("offline_job_id") or "").strip()
+    if not offline_job_id:
+        return
+    try:
+        from src.core.rule_control.command_asset_units import (
+            RuleAssetCommandUnitService,
+        )
+
+        RuleAssetCommandUnitService().reconcile(offline_job_id)
+    except Exception:
+        logger.exception(
+            "Rule asset projection refresh failed offline_job_id=%s bundle_id=%s",
+            offline_job_id,
+            bundle.get("id"),
+        )
+
+
 @celery.task(bind=True, name="execute_skill_task")
 def execute_skill_task(self, skill_name: str, **params):
     """通用 Skill 执行 Celery 任务。"""
     from src.core.parser.repository import ParserJobRepository, ParserJobStateError
     from src.core.skills.executor import SkillExecutionError, execute_skill
 
-    job_id = str(params.get("job_id") or "") if skill_name == "textfsm-generator" else ""
+    manages_parser_job_lifecycle = (
+        skill_name == "textfsm-generator"
+        and str(params.get("operation") or "generate") != "suggest_spec"
+    )
+    job_id = str(params.get("job_id") or "") if manages_parser_job_lifecycle else ""
     repository = ParserJobRepository() if job_id else None
+
+    def fail_active_parser_job(error: str, failure_code: str) -> None:
+        if repository is None:
+            return
+        current = repository.get_job_lifecycle(job_id)
+        if not current or current["status"] not in {
+            "collecting",
+            "pending",
+            "running",
+            "validating",
+        }:
+            return
+        repository.transition_job_status(
+            job_id,
+            "failed",
+            error,
+            failure_code=failure_code,
+        )
+        _refresh_rule_asset_projection(job_id)
+
     if repository:
         try:
             repository.transition_job_status(job_id, "running")
+            _refresh_rule_asset_projection(job_id)
         except ParserJobStateError as exc:
             return {"success": False, "message": str(exc), "error": str(exc)}
 
     try:
         result = execute_skill(skill_name, params)
     except SkillExecutionError as exc:
-        if repository:
-            repository.transition_job_status(
-                job_id, "failed", str(exc), failure_code="skill_execution_failed"
-            )
+        fail_active_parser_job(str(exc), "skill_execution_failed")
         return {"success": False, "message": str(exc), "error": str(exc)}
     except SoftTimeLimitExceeded:
-        if repository:
-            repository.transition_job_status(
-                job_id,
-                "failed",
-                "textfsm-generator exceeded the Celery soft time limit",
-                failure_code="worker_timeout",
-            )
+        fail_active_parser_job(
+            "textfsm-generator exceeded the Celery soft time limit",
+            "worker_timeout",
+        )
         raise
     except Exception as exc:
-        if repository:
-            repository.transition_job_status(
-                job_id, "failed", str(exc), failure_code="worker_exception"
-            )
+        fail_active_parser_job(str(exc), "worker_exception")
         logger.exception("Skill execution failed skill=%s job=%s", skill_name, job_id or None)
         raise
 
     if repository:
-        current = repository.get_job(job_id)
+        current = repository.get_job_lifecycle(job_id)
         if current and current["status"] == "cancelled":
             return {"success": False, "message": "parser job cancelled", "error": "cancelled"}
+        if current and current["status"] == "succeeded" and bool((result or {}).get("success")):
+            return result
+        if current and current["status"] not in {"running", "validating"}:
+            return {
+                "success": False,
+                "message": "parser job inputs changed while generation was running",
+                "error": "stale_generation_discarded",
+            }
         success = bool((result or {}).get("success"))
         repository.transition_job_status(
             job_id,
@@ -74,6 +145,8 @@ def execute_skill_task(self, skill_name: str, **params):
             None if success else str((result or {}).get("error") or (result or {}).get("message")),
             failure_code=None if success else "generator_failed",
         )
+        _refresh_rule_asset_projection(job_id)
+    _refresh_rule_asset_projection_from_skill_result(skill_name, result)
     return result
 
 

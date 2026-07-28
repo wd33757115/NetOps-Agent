@@ -409,6 +409,24 @@ async def proxy_patrol_batch_devices(
     )
 
 
+@csrf_exempt
+@require_jwt
+@sync_bff_view
+async def proxy_patrol_batch_check_results(
+    request: HttpRequest, patrol_batch_id: str
+) -> JsonResponse:
+    return await proxy_to_fastapi(
+        method="GET",
+        fastapi_path=(
+            f"/api/v1/workflows/runs/patrol-batches/"
+            f"{patrol_batch_id}/check-results"
+        ),
+        request_id=request.bff_request_id,
+        params=dict(request.GET.items()),
+        extra_headers=forward_client_headers(request),
+    )
+
+
 async def _proxy_patrol_batch_action(
     request: HttpRequest,
     patrol_batch_id: str,

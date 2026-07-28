@@ -32,22 +32,29 @@ def _success(payload: dict[str, Any] | None) -> bool:
 
 def _merge_agent_loops(*loops: Any) -> dict[str, Any] | None:
     attempts: list[dict[str, Any]] = []
+    target_attempt_counts: list[int] = []
+    seen_loops: set[str] = set()
     ready = True
     next_actions: list[str] = []
     revision_requests: list[dict[str, Any]] = []
     for loop in loops:
         if not isinstance(loop, dict):
             continue
+        signature = json.dumps(loop, ensure_ascii=False, sort_keys=True, default=str)
+        if signature in seen_loops:
+            continue
+        seen_loops.add(signature)
+        loop_attempts = [item for item in (loop.get("attempts") or []) if isinstance(item, dict)]
+        target_attempt_counts.append(len(loop_attempts))
         ready = ready and bool(loop.get("ready_for_approval"))
         if loop.get("next_action"):
             next_actions.append(str(loop["next_action"]))
         if isinstance(loop.get("revision_request"), dict):
             revision_requests.append(loop["revision_request"])
-        for attempt in loop.get("attempts") or []:
-            if isinstance(attempt, dict):
-                if isinstance(attempt.get("revision_request"), dict):
-                    revision_requests.append(attempt["revision_request"])
-                attempts.append({**attempt, "attempt": len(attempts) + 1})
+        for attempt in loop_attempts:
+            if isinstance(attempt.get("revision_request"), dict):
+                revision_requests.append(attempt["revision_request"])
+            attempts.append({**attempt, "attempt": len(attempts) + 1})
     if not attempts:
         return None
     merged = {
@@ -56,12 +63,37 @@ def _merge_agent_loops(*loops: Any) -> dict[str, Any] | None:
         if ready
         else (next_actions[-1] if next_actions else "revise_candidate"),
         "attempt_count": len(attempts),
+        "total_attempt_count": len(attempts),
+        "target_count": len(target_attempt_counts),
+        "max_attempts_per_target": max(target_attempt_counts, default=0),
         "attempts": attempts,
     }
     if revision_requests:
         merged["revision_request"] = revision_requests[-1]
         merged["revision_requests"] = revision_requests
     return merged
+
+
+def _bundle_observation_types(params: dict[str, Any]) -> list[str]:
+    result = params.get("change_policy_result") or params.get("change_policy") or {}
+    if not isinstance(result, dict):
+        return []
+    policies: list[dict[str, Any]] = []
+    for item in result.get("results") or []:
+        if isinstance(item, dict) and isinstance(item.get("policy"), dict):
+            policies.append(dict(item["policy"]))
+    if isinstance(result.get("policy"), dict):
+        policies.append(dict(result["policy"]))
+    policies.extend(
+        dict(item) for item in (result.get("policies") or []) if isinstance(item, dict)
+    )
+    return sorted(
+        {
+            str(item.get("observation_type") or "").strip()
+            for item in policies
+            if str(item.get("observation_type") or "").strip()
+        }
+    )
 
 
 def _source_template_id(params: dict[str, Any]) -> str | None:
@@ -236,7 +268,20 @@ def _persist_change_policy(
     if not isinstance(result, dict):
         return []
     child_results = [item for item in (result.get("results") or []) if isinstance(item, dict)]
-    if child_results:
+    compiled_policies = [
+        item for item in (result.get("policies") or []) if isinstance(item, dict)
+    ]
+    if compiled_policies:
+        policy_results = [
+            {
+                "success": result.get("success"),
+                "policy": item,
+                "generation_provider": result.get("generation_provider"),
+                "agent_loop": result.get("agent_loop"),
+            }
+            for item in compiled_policies
+        ]
+    elif child_results:
         policy_results = child_results
     elif result.get("policy"):
         policy_results = [result]
@@ -359,6 +404,7 @@ def _persist_event_rules(
             priority=int(rule.get("priority") or 100),
             exclusive=bool(rule.get("exclusive", False)),
             event_class=str(rule.get("event_class") or "fault"),
+            evaluation_scope=rule.get("evaluation_scope"),
             recovery=dict(rule.get("recovery") or {}),
             correlation_keys=(rule.get("correlation_key") or rule.get("correlation_keys")),
         )
@@ -431,6 +477,7 @@ def _context_gate(params: dict[str, Any], assets: list[dict[str, Any]]) -> dict[
             "mode": "immutable_dataset_context",
             "context_id": row.id,
             "context_digest": row.context_digest,
+            "offline_job_id": row.offline_job_id,
             "dataset_ids": list(row.dataset_ids_json or []),
             "replay_run_ids": list(
                 dict(row.context_json or {}).get("replay_run_ids") or []
@@ -510,16 +557,43 @@ def _bundle_validation_report(
     }
 
 
+def _link_seed_to_bundle(
+    repo: RuleGenerationJobRepository,
+    params: dict[str, Any],
+    bundle: dict[str, Any],
+) -> None:
+    """Keep the reusable seed linked to its latest concrete generation result."""
+
+    seed_job_id = str(params.get("rule_generation_seed_job_id") or "").strip()
+    if not seed_job_id:
+        return
+    seed = repo.get_job(seed_job_id)
+    if seed is None:
+        return
+    source_ref = str(params.get("source_ref") or "")
+    if source_ref and str(seed.get("source_ref") or "") != source_ref:
+        raise ValueError("rule generation seed source_ref does not match persisted bundle")
+    payload = dict(seed.get("payload_json") or {})
+    payload["latest_bundle_id"] = str(bundle["id"])
+    payload["latest_bundle_status"] = str(bundle.get("status") or "")
+    payload["latest_bundle_context_id"] = params.get("rule_generation_context_id")
+    repo.update_payload(seed_job_id, payload=payload)
+
+
 def run_persist(params: dict[str, Any]) -> dict[str, Any]:
     source_ref = params.get("source_ref")
     created_by = params.get("created_by") or "rule-asset-persister"
+    observation_types = _bundle_observation_types(params)
+    primary_observation_type = observation_types[0] if len(observation_types) == 1 else None
     job_repo = RuleGenerationJobRepository()
     bundle = job_repo.create_job(
         job_type="RULE_ASSET_BUNDLE",
         source_ref=source_ref,
         payload={
             "source_ref": source_ref,
-            "observation_type": params.get("observation_type"),
+            "observation_type": primary_observation_type,
+            "observation_types": observation_types,
+            "asset_scope": "single_observation" if len(observation_types) == 1 else "multi_observation",
             "command": params.get("command"),
             "vendor": params.get("vendor"),
             "model": params.get("model"),
@@ -561,6 +635,8 @@ def run_persist(params: dict[str, Any]) -> dict[str, Any]:
         payload.update(
             child_job_ids=child_job_ids,
             asset_counts=(validation_report.get("bundle_gate") or {}).get("asset_counts") or {},
+            offline_job_id=(validation_report.get("context_gate") or {}).get("offline_job_id"),
+            dataset_ids=(validation_report.get("context_gate") or {}).get("dataset_ids") or [],
         )
         job_repo.update_payload(bundle["id"], payload=payload)
         job_repo.attach_asset(
@@ -583,6 +659,7 @@ def run_persist(params: dict[str, Any]) -> dict[str, Any]:
             bundle["id"],
             status="pending_approval" if validation_report["success"] else "rejected",
         )
+        _link_seed_to_bundle(job_repo, params, bundle)
     except Exception as exc:
         failure_report = {
             "success": False,

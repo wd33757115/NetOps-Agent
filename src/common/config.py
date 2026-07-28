@@ -2,21 +2,26 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import re
+from pathlib import Path
 
 from dotenv import load_dotenv
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-load_dotenv()
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+ENV_FILE = PROJECT_ROOT / ".env"
+load_dotenv(ENV_FILE)
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_ignore_empty=True, extra="ignore")
+    model_config = SettingsConfigDict(env_ignore_empty=True, extra="ignore")
 
     LLM_PROVIDER: str = "deepseek"
     DEEPSEEK_API_KEY: str = ""
-    LLM_MODEL: str = "deepseek-chat"
+    DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
+    LLM_MODEL: str = "deepseek-v4-pro"
     LLM_TEMPERATURE: float = 0.1
+    LLM_REQUEST_TIMEOUT_SECONDS: int = 240
 
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
@@ -163,6 +168,10 @@ class Settings(BaseSettings):
     PARSER_BOOTSTRAP_SHARED_TEMPLATES_ON_STARTUP: bool = False
     PARSER_BACKLOG_ALERT_THRESHOLD: int = 20
     PARSER_CANDIDATE_STALE_MINUTES: int = 60
+    # Stale parser-job reclamation: dispatched-but-unclaimed jobs and jobs whose
+    # worker died after marking them running are treated as failed past these ages.
+    PARSER_JOB_PENDING_STALE_MINUTES: int = 10
+    PARSER_JOB_RUNNING_STALE_MINUTES: int = 30
     PARSER_BLOCKED_RATIO_ALERT_THRESHOLD: float = 0.2
     # Production template_missing / parse_failed → gap ledger only (no auto LLM).
     PRODUCTION_GAP_LEDGER_ENABLED: bool = True

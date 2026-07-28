@@ -34,6 +34,46 @@ SPEC.loader.exec_module(MODULE)
 run_persist = MODULE.run_persist
 
 
+def test_persister_links_latest_bundle_to_generation_seed():
+    updates = []
+
+    class FakeRepository:
+        @staticmethod
+        def get_job(job_id):
+            assert job_id == "seed-1"
+            return {
+                "id": job_id,
+                "source_ref": "parser_template:template-1",
+                "payload_json": {"workflow": "rule-asset-generation"},
+            }
+
+        @staticmethod
+        def update_payload(job_id, *, payload):
+            updates.append((job_id, payload))
+
+    MODULE._link_seed_to_bundle(
+        FakeRepository(),
+        {
+            "rule_generation_seed_job_id": "seed-1",
+            "rule_generation_context_id": "context-1",
+            "source_ref": "parser_template:template-1",
+        },
+        {"id": "bundle-1", "status": "rejected"},
+    )
+
+    assert updates == [
+        (
+            "seed-1",
+            {
+                "workflow": "rule-asset-generation",
+                "latest_bundle_id": "bundle-1",
+                "latest_bundle_status": "rejected",
+                "latest_bundle_context_id": "context-1",
+            },
+        )
+    ]
+
+
 def _accept_engineering_review(bundle_id: str) -> None:
     RuleAssetEngineeringRevisionService().review(
         bundle_id,
@@ -94,6 +134,12 @@ def test_rule_asset_persister_creates_pending_approval_assets():
                 "category": "cpu",
                 "entity_type": "cpu",
                 "primary_keys": ["slot"],
+                "canonical_entity_type": "cpu_scope",
+                "entity_identity_fields": ["scope", "scope_id"],
+                "entity_dimensions": {
+                    "scope": {"literal": "slot"},
+                    "scope_id": {"field": "slot"},
+                },
                 "required_fields": ["slot", "cpu_5s"],
                 "optional_fields": ["cpu_1m", "cpu_5m"],
                 "validators": {"cpu_5s": {"type": "percent"}},
@@ -229,6 +275,12 @@ def test_rule_asset_persister_creates_pending_approval_assets():
             )
             assert contract is not None
             assert contract.status == "draft"
+            assert contract.canonical_entity_type == "cpu_scope"
+            assert contract.entity_identity_fields_json == ["scope", "scope_id"]
+            assert contract.entity_dimensions_json == {
+                "scope": {"literal": "slot"},
+                "scope_id": {"field": "slot"},
+            }
             policy_version_id = next(
                 job["asset_version_id"]
                 for job in result["jobs"]
@@ -440,6 +492,8 @@ def test_rule_asset_bundle_atomically_activates_multiple_change_policies():
         "event_rule_replay": {
             "success": True,
             "collision_count": 0,
+            "sampled_change_count": 1,
+            "total_change_count": 1,
             "matched_change_count": 1,
         },
     }
@@ -560,6 +614,8 @@ def _versioned_bundle_params(suffix: str, revision: int) -> dict:
         "event_rule_replay": {
             "success": True,
             "collision_count": 0,
+            "sampled_change_count": 1,
+            "total_change_count": 1,
             "matched_change_count": 1,
         },
     }

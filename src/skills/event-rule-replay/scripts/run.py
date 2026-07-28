@@ -42,9 +42,14 @@ def _definition_from_candidate(candidate: dict[str, Any], index: int) -> EventRu
 
 
 def _candidate_definitions(params: dict[str, Any]) -> list[EventRuleDefinition]:
-    candidates = params.get("candidate_rules") or params.get("rules")
-    if not isinstance(candidates, list) or not candidates:
-        raise ValueError("candidate_rules must be a non-empty list")
+    if "candidate_rules" in params:
+        candidates = params["candidate_rules"]
+    elif "rules" in params:
+        candidates = params["rules"]
+    else:
+        raise ValueError("candidate_rules is required")
+    if not isinstance(candidates, list):
+        raise ValueError("candidate_rules must be a list")
     definitions: list[EventRuleDefinition] = []
     for index, candidate in enumerate(candidates, start=1):
         if not isinstance(candidate, dict):

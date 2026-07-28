@@ -52,6 +52,7 @@ celery = Celery(
         "src.core.patrol.tasks",
         "src.core.patrol.offline_tasks",
         "src.core.rule_control.engineering_revision_async",
+        "src.core.rule_control.tasks",
     ],
 )
 
@@ -88,6 +89,7 @@ _celery_conf: dict = {
         "sanitize_parser_samples": {"queue": "netops.ai"},
         "reconcile_parser_jobs": {"queue": "netops.ai"},
         "validate_rule_asset_engineering_revision": {"queue": "netops.ai"},
+        "reconcile_rule_asset_automation": {"queue": "netops.ai"},
         "promote_parser_gap_ledger": {"queue": "netops.ai"},
     },
     "task_default_queue": "netops.default",
@@ -148,6 +150,11 @@ celery.conf.beat_schedule = {
     "reconcile-parser-jobs": {
         "task": "reconcile_parser_jobs",
         "schedule": 60.0,
+        "options": {"queue": "netops.ai"},
+    },
+    "reconcile-rule-asset-automation": {
+        "task": "reconcile_rule_asset_automation",
+        "schedule": 30.0,
         "options": {"queue": "netops.ai"},
     },
     "promote-parser-gap-ledger": {

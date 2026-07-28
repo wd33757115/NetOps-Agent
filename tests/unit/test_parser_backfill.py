@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from src.common.config import get_settings
-from src.core.parser.backfill import ParserBackfillService
+from src.core.parser.backfill import ParserBackfillService, _historical_analysis_pairs
 from src.core.parser.repository import ParserRepository
 from src.core.patrol.repository import PatrolRepository
 from src.infrastructure.db.models import (
@@ -35,6 +35,11 @@ def test_parser_backfill_is_dry_run_first_idempotent_and_silent(
     monkeypatch,
 ):
     token = uuid.uuid4().hex
+    refreshed_template_ids: list[str] = []
+    monkeypatch.setattr(
+        "src.core.parser.backfill._refresh_rule_asset_command_units",
+        lambda template_id: refreshed_template_ids.append(template_id) or 1,
+    )
     run_id = f"backfill-run-{token}"
     excluded_run_id = f"backfill-excluded-run-{token}"
     validation_run_id = f"backfill-validation-run-{token}"
@@ -183,6 +188,8 @@ Start
         )
         assert committed["status"] == "completed"
         assert committed["summary"]["created_observation_count"] == 2
+        assert committed["summary"]["rule_asset_projection_refresh_count"] == 1
+        assert refreshed_template_ids == [template_id]
         with get_db_session() as db:
             observations = (
                 db.query(StateObservationRecord)
@@ -263,6 +270,8 @@ Start
             reason="validated rule source repair",
         )
         assert validation_commit["summary"]["created_observation_count"] == 2
+        assert validation_commit["summary"]["rule_asset_projection_refresh_count"] == 1
+        assert refreshed_template_ids == [template_id, template_id]
         assert validation_commit["summary"]["production_run_count"] == 0
         assert validation_commit["summary"]["analysis_skipped_run_count"] == 1
         assert validation_commit["summary"]["change_count"] == 0
@@ -312,3 +321,48 @@ Start
             db.query(PatrolRun).filter_by(id=validation_run_id).delete()
             db.query(ObservationContractRecord).filter_by(source_template_id=template_id).delete()
             db.query(ParserTemplate).filter_by(id=template_id).delete()
+
+
+def test_historical_analysis_pairs_require_an_explicit_offline_baseline() -> None:
+    token = uuid.uuid4().hex
+    production_id = f"production-{token}"
+    baseline_id = f"baseline-{token}"
+    current_id = f"current-{token}"
+    single_id = f"single-{token}"
+    patrol = PatrolRepository()
+    try:
+        patrol.create_run(run_id=production_id, mode="production", source="unit-test")
+        patrol.create_run(run_id=baseline_id, mode="parser_validation", source="unit-test")
+        patrol.create_run(run_id=current_id, mode="parser_validation", source="unit-test")
+        patrol.create_run(run_id=single_id, mode="parser_validation", source="unit-test")
+        with get_db_session() as db:
+            baseline = db.get(PatrolRun, baseline_id)
+            current = db.get(PatrolRun, current_id)
+            single = db.get(PatrolRun, single_id)
+            baseline.started_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+            baseline.metadata_json = {
+                "offline_job_id": f"offline-pair-{token}",
+                "period_role": "baseline",
+            }
+            current.started_at = datetime(2026, 2, 1, tzinfo=timezone.utc)
+            current.metadata_json = {
+                "offline_job_id": f"offline-pair-{token}",
+                "period_role": "current",
+            }
+            single.started_at = datetime(2026, 3, 1, tzinfo=timezone.utc)
+            single.metadata_json = {
+                "offline_job_id": f"offline-single-{token}",
+                "period_role": "current",
+            }
+
+        assert _historical_analysis_pairs(
+            {production_id, baseline_id, current_id, single_id}
+        ) == [
+            (current_id, baseline_id),
+            (production_id, None),
+        ]
+    finally:
+        with get_db_session() as db:
+            db.query(PatrolRun).filter(
+                PatrolRun.id.in_([production_id, baseline_id, current_id, single_id])
+            ).delete(synchronize_session=False)
