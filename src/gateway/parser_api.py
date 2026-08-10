@@ -11,7 +11,9 @@ import uuid
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Literal
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -20,14 +22,37 @@ from src.auth.dependencies import get_current_user, require_role
 from src.auth.models import CurrentUser
 from src.core.celery_tasks.celery_app import celery
 from src.core.check_items import (
+    AssessmentPolicyAssetService,
+    AssessmentPolicyConflictError,
+    AssessmentPolicyMigrationService,
+    AssetGapRepository,
+    CatalogGovernanceConflictError,
+    CheckItemCatalogGovernanceService,
     CheckItemCatalogRepository,
     CheckItemEffectivePlanService,
     CheckItemRuntimeBundleService,
     EffectivePlanRequest,
     PatrolProfileCheckItemRepository,
+    RolloutCampaignService,
+    RolloutValidationError,
     RuntimeBundleValidationError,
     build_inventory_snapshot,
     build_target_manifest,
+    check_item_display_description,
+    check_item_display_name,
+    load_canonical_catalog,
+)
+from src.core.check_items.parser_capability import (
+    build_parser_check_item_capability,
+    parser_output_profile,
+    resolve_parser_check_item_ids,
+)
+from src.core.check_items.rollout_execution import (
+    RolloutStageExecutionService,
+)
+from src.core.check_items.rollout_legacy import (
+    LegacyRouteError,
+    RolloutLegacyRouteService,
 )
 from src.core.collection.policy import (
     CollectionItem,
@@ -43,7 +68,13 @@ from src.core.parser.backfill import ParserBackfillService
 from src.core.parser.bootstrap import bootstrap_shared_templates
 from src.core.parser.dialect_audit import TextFSMDialectAuditService
 from src.core.parser.discovery_assets import bootstrap_discovery_assets
+from src.core.parser.field_contract import build_parser_field_contract
 from src.core.parser.identity import DeviceIdentity
+from src.core.parser.manual_candidate import (
+    ManualParserCandidateSubmissionService,
+    ManualParserCandidateValidationError,
+)
+from src.core.parser.policy import PolicyDecision
 from src.core.parser.repository import (
     OPEN_JOB_STATUSES,
     ParserGovernanceProjectionRepository,
@@ -52,7 +83,9 @@ from src.core.parser.repository import (
     ParserMetadataRepository,
     ParserSampleRepository,
     ParserTemplateRepository,
+    ParserTemplateStateError,
     generated_template_activation_errors,
+    parser_semantic_review_activation_errors,
 )
 from src.core.parser.runtime import ParserRuntime
 from src.core.parser.tasks import dispatch_ready_parser_jobs
@@ -93,6 +126,7 @@ from src.core.rule_control.engineering_revision import (
     RuleAssetEngineeringRevisionError,
     RuleAssetEngineeringRevisionService,
 )
+from src.observability.deprecations import observe_legacy_path
 
 logger = logging.getLogger(__name__)
 
@@ -113,10 +147,15 @@ def _refresh_rule_asset_projection_for_template(template_id: str) -> None:
         )
 
 
-def _authenticated_actor(request: Request) -> str:
+def _authenticated_user(request: Request) -> CurrentUser:
     user = getattr(getattr(request, "state", None), "current_user", None)
     if not isinstance(user, CurrentUser):
         raise HTTPException(status_code=401, detail="authenticated user context is required")
+    return user
+
+
+def _authenticated_actor(request: Request) -> str:
+    user = _authenticated_user(request)
     actor = str(user.username or user.user_id).strip()
     if not actor:
         raise HTTPException(status_code=401, detail="authenticated user identity is empty")
@@ -130,13 +169,20 @@ def _required_reason(value: str | None, *, action: str) -> str:
     return reason
 
 
+def _raise_assessment_policy_error(exc: ValueError) -> None:
+    if isinstance(exc, AssessmentPolicyConflictError):
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    status_code = 404 if "not found" in str(exc).casefold() else 422
+    raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
 class ParserDispatchControlRequest(BaseModel):
     enabled: bool
     reason: str
 
 
 class RuleAssetAutomationControlRequest(BaseModel):
-    mode: Literal["disabled", "generate_only", "auto_publish"]
+    mode: Literal["disabled", "generate_only"]
     max_concurrency: int = 1
     max_generation_attempts: int = 3
     retry_delay_seconds: int = 300
@@ -150,7 +196,13 @@ class RuleAssetAutomationControlRequest(BaseModel):
 
 
 class ParserTemplateApprovalRequest(BaseModel):
-    reason: str
+    reason: str | None = None
+
+
+class ParserTemplateSemanticReviewRequest(BaseModel):
+    reason: str | None = None
+    result_confirmed: bool
+    primary_key_confirmed: bool
 
 
 class ParserTemplateForceActivationRequest(BaseModel):
@@ -167,7 +219,8 @@ class ParserBackfillCreateRequest(BaseModel):
 
 
 class ParserBackfillCommitRequest(BaseModel):
-    reason: str
+    reason: str | None = None
+    analyze_changes: bool = False
 
 
 class ParserBulkJobDeleteRequest(BaseModel):
@@ -190,6 +243,12 @@ class ParserSpecUpdateRequest(BaseModel):
 
 
 class ParserSpecSuggestionRequest(BaseModel):
+    reason: str | None = None
+
+
+class ParserManualCandidateRequest(BaseModel):
+    template_text: str = Field(min_length=1, max_length=2_000_000)
+    based_on_template_id: str | None = None
     reason: str | None = None
 
 
@@ -294,7 +353,7 @@ class RuleAssetGenerationContextRequest(BaseModel):
 
 class RuleAssetEngineeringReviewRequest(BaseModel):
     decision: Literal["accepted", "revision_requested"]
-    reason: str
+    reason: str | None = None
 
 
 class RuleAssetEngineeringRevisionRequest(BaseModel):
@@ -355,6 +414,61 @@ class PatrolProfileCheckItemSelectionRequest(BaseModel):
     check_item_ids: list[str] = Field(default_factory=list)
 
 
+class CollectionImplementationDraftRequest(BaseModel):
+    id: str = Field(..., min_length=3, max_length=128)
+    name: str = Field(..., min_length=2, max_length=256)
+    description: str | None = None
+    check_item_ids: list[str] = Field(..., min_length=1)
+    match: dict[str, Any]
+    commands: list[dict[str, Any]] = Field(..., min_length=1)
+    collector: str = "cli"
+    parser_requirement: Literal[
+        "structured",
+        "normalized_diff",
+        "hash_only",
+        "evidence_only",
+    ]
+    template_scope: str | None = None
+    output_quality_policy: dict[str, Any] | None = None
+    selection_priority: int = Field(default=100, ge=0, le=10000)
+    reason: str = Field(default="", max_length=2000)
+
+
+class CollectionImplementationDeleteRequest(BaseModel):
+    reason: str = Field(default="", max_length=2000)
+
+
+class CheckItemDraftRequest(BaseModel):
+    id: str = Field(..., min_length=3, max_length=128)
+    name: str = Field(..., min_length=2, max_length=256)
+    category: str = Field(..., min_length=1, max_length=64)
+    description: str | None = None
+    result_mode: Literal[
+        "structured",
+        "normalized_diff",
+        "hash_only",
+        "evidence_only",
+    ]
+    assessment_mode: Literal["health", "change", "evidence"]
+    canonical_contract: dict[str, Any]
+    report_projection: str = Field(..., min_length=1, max_length=128)
+    applicability: dict[str, Any] = Field(default_factory=dict)
+    freshness_policy: dict[str, Any] = Field(default_factory=dict)
+    empty_result_policy: dict[str, Any] = Field(default_factory=dict)
+    coverage_policy: dict[str, Any] = Field(default_factory=dict)
+    reason: str = Field(default="", max_length=2000)
+
+
+class CheckItemDeleteRequest(BaseModel):
+    reason: str = Field(default="", max_length=2000)
+
+
+class CatalogChangeLifecycleRequest(BaseModel):
+    reason: str = Field(default="", max_length=2000)
+    expected_impact_digest: str = Field(..., min_length=64, max_length=64)
+    rollout_campaign_id: str | None = None
+
+
 class RuntimeBundleAssemblyRequest(BaseModel):
     check_item_version_id: str
     implementation_version_id: str
@@ -370,7 +484,178 @@ class RuntimeBundleAssembleRequest(RuntimeBundleAssemblyRequest):
 
 
 class RuntimeBundleLifecycleRequest(BaseModel):
+    reason: str = Field(default="", max_length=2000)
+
+
+class AssessmentPolicyVersionCreateRequest(BaseModel):
+    check_item_id: str
+    check_item_version_id: str
+    observation_type: str
+    policy_role: Literal[
+        "high",
+        "critical_high",
+        "low",
+        "critical_low",
+        "expected_state",
+        "applicability",
+    ]
+    name: str
+    description: str | None = None
+    profile_id: str | None = None
+    policy: dict[str, Any]
+    evidence_refs: list[str] = Field(default_factory=list)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    valid_from: datetime | None = None
+    valid_until: datetime | None = None
+
+
+class AssessmentPolicyLifecycleRequest(BaseModel):
     reason: str
+
+
+class AssessmentPolicyReviewRequest(BaseModel):
+    decision: Literal["approved", "rejected"]
+    reason: str
+
+
+class AssessmentPolicyBindingRequest(BaseModel):
+    binding_type: Literal[
+        "inventory_profile", "scope_override", "catalog_default"
+    ]
+    scope: dict[str, Any] = Field(default_factory=dict)
+    reason: str
+    valid_from: datetime | None = None
+    valid_until: datetime | None = None
+    replaces_binding_id: str | None = None
+
+
+class AssessmentPolicyResolutionPreviewRequest(BaseModel):
+    check_item_version_id: str
+    device: dict[str, Any]
+    observation: dict[str, Any] | None = None
+    rule: dict[str, Any] | None = None
+    policy_effective_at: datetime | None = None
+    include_legacy: bool = False
+    runtime_bundle_version_id: str = "assessment-policy-preview"
+    runtime_bundle_digest: str = "0" * 64
+
+
+class AssessmentPolicyImpactPreviewRequest(BaseModel):
+    binding_type: Literal[
+        "inventory_profile", "scope_override", "catalog_default"
+    ]
+    proposed_scope: dict[str, Any] = Field(default_factory=dict)
+    target_selector: dict[str, Any] = Field(default_factory=dict)
+    policy_effective_at: datetime | None = None
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=50, ge=1, le=100)
+
+
+class AssessmentPolicyMigrationInventoryRequest(BaseModel):
+    check_item_ids: list[str] = Field(default_factory=list)
+    include_execution_snapshots: bool = True
+    after_execution_id: str | None = None
+    execution_page_size: int = Field(default=1000, ge=1, le=5000)
+
+
+class AssessmentPolicyShadowCompareRequest(BaseModel):
+    check_item_version_id: str
+    device: dict[str, Any]
+    observation: dict[str, Any]
+    rule: dict[str, Any]
+    policy_effective_at: datetime
+    runtime_bundle_version_id: str = "assessment-policy-shadow"
+    runtime_bundle_digest: str = "0" * 64
+
+
+class AssessmentPolicyCutoverRequest(BaseModel):
+    check_item_version_id: str
+    device_id: str
+    shadow_result_ids: list[str] = Field(..., min_length=1)
+    reason: str = Field(..., min_length=8, max_length=2000)
+
+
+class AssessmentPolicyCutoverRollbackRequest(BaseModel):
+    reason: str = Field(..., min_length=8, max_length=2000)
+
+
+class RolloutCampaignCreateRequest(BaseModel):
+    name: str
+    description: str | None = None
+
+
+class RolloutCampaignFreezeRequest(BaseModel):
+    target_manifest: dict[str, Any]
+    runtime_bundle_refs: list[dict[str, Any]] = Field(default_factory=list)
+    comparison_context_ids: list[str] = Field(default_factory=list)
+    baseline_window: dict[str, Any]
+    thresholds: dict[str, Any] = Field(default_factory=dict)
+    rollback_plan: dict[str, Any]
+    reason: str
+
+
+class RolloutCampaignLifecycleRequest(BaseModel):
+    reason: str
+    execution_mode: Literal[
+        "snapshot_replay",
+        "live_capture",
+    ] = "snapshot_replay"
+
+
+class RolloutLegacyRouteCreateRequest(BaseModel):
+    route_name: str = Field(..., min_length=1, max_length=256)
+    runtime_bundle_version_id: str = Field(..., min_length=1, max_length=64)
+
+
+class RolloutLegacyRouteLifecycleRequest(BaseModel):
+    reason: str
+
+
+class RolloutCampaignApprovalRequest(BaseModel):
+    comment: str
+
+
+class RolloutCampaignResumeRequest(BaseModel):
+    observed_digests: dict[str, str]
+    reason: str
+
+
+class RolloutCampaignRollbackRequest(BaseModel):
+    evidence_refs: list[dict[str, Any] | str] = Field(default_factory=list)
+    reason: str
+
+
+class RolloutRoutingDecisionRequest(BaseModel):
+    device_id: str
+    check_item_version_id: str
+    target_manifest_digest: str
+    runtime_bundle_digest: str
+    comparison_context_digest: str
+
+
+def _raise_rollout_error(exc: RolloutValidationError) -> None:
+    status_code = {
+        "not_found": 404,
+        "separation_of_duties": 409,
+        "idempotency_conflict": 409,
+        "new_campaign_required": 409,
+        "rollout_blocked": 409,
+    }.get(exc.code, 422)
+    raise HTTPException(
+        status_code=status_code,
+        detail={
+            "message": "渐进发布操作被阻断",
+            "code": exc.code,
+            "blockers": list(exc.blockers),
+        },
+    ) from exc
+
+
+def _raise_catalog_governance_error(exc: ValueError) -> None:
+    if isinstance(exc, CatalogGovernanceConflictError):
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    status_code = 404 if "not found" in str(exc).casefold() else 422
+    raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
 @router.get("/asset-production/units")
@@ -387,6 +672,11 @@ def list_asset_production_units(
     offline_job_id: str | None = None,
     user: CurrentUser = Depends(get_current_user),
 ):
+    observe_legacy_path(
+        "command-centered-rule-asset-workspace",
+        "list_command_units",
+        outcome="read",
+    )
     try:
         return RuleAssetCommandUnitService().list_production_units(
             owner_id=user.user_id,
@@ -669,6 +959,34 @@ class _TemplateRegistry:
         return self.template
 
 
+class _CandidateComparisonPolicy:
+    """Run the immutable candidate without requiring a production policy entry."""
+
+    def __init__(self, template):
+        self.template = template
+
+    def decide(self, **_: Any) -> PolicyDecision:
+        return PolicyDecision(
+            enabled=True,
+            canonical_command=str(self.template.canonical_command),
+            handling="structured",
+            asset_mode="full_chain",
+            category=str(self.template.category or "candidate"),
+            capability=str(self.template.category or "candidate"),
+            capability_status="candidate",
+            template_scope="model",
+            template_profile=str(self.template.profile or "") or None,
+        )
+
+
+class _CandidateComparisonClassifier:
+    """Leave empty/error semantics to the candidate's frozen ParserSpec."""
+
+    @staticmethod
+    def classify(*_: Any, **__: Any):
+        return SimpleNamespace(status="data", reason="candidate_comparison")
+
+
 def _parse_snapshot_with_template(template, snapshot):
     identity = DeviceIdentity(
         vendor=template.vendor,
@@ -677,7 +995,11 @@ def _parse_snapshot_with_template(template, snapshot):
         confidence=1.0,
         source="template_comparison",
     )
-    result = ParserRuntime(registry=_TemplateRegistry(template)).parse(
+    result = ParserRuntime(
+        registry=_TemplateRegistry(template),
+        policy=_CandidateComparisonPolicy(template),
+        output_classifier=_CandidateComparisonClassifier(),
+    ).parse(
         identity=identity,
         command=template.canonical_command,
         raw_text=snapshot.raw_text,
@@ -689,8 +1011,88 @@ def _parse_snapshot_with_template(template, snapshot):
     }
 
 
+def _comparison_record_sets(
+    parse_result: dict[str, Any],
+    contract: dict[str, Any],
+    *,
+    fallback_name: str,
+) -> list[dict[str, Any]]:
+    """Project runtime output into stable approval tables."""
+
+    structured = parse_result.get("records")
+    configured_sets = [
+        dict(item)
+        for item in contract.get("record_sets") or []
+        if isinstance(item, dict)
+    ]
+    if (
+        isinstance(structured, dict)
+        and structured.get("format") == "netops.structured_record_sets/v1"
+        and isinstance(structured.get("record_sets"), dict)
+    ):
+        runtime_sets = dict(structured["record_sets"])
+        configured_by_name = {
+            str(item.get("name") or ""): item for item in configured_sets
+        }
+        ordered_names = [
+            str(item.get("name") or "")
+            for item in configured_sets
+            if str(item.get("name") or "")
+        ]
+        ordered_names.extend(
+            name for name in runtime_sets if name not in configured_by_name
+        )
+        return [
+            {
+                "name": name,
+                "entity_type": configured_by_name.get(name, {}).get("entity_type"),
+                "primary_keys": list(
+                    configured_by_name.get(name, {}).get("primary_keys") or []
+                ),
+                "required_fields": list(
+                    configured_by_name.get(name, {}).get("required_fields") or []
+                ),
+                "records": [
+                    dict(record)
+                    for record in runtime_sets.get(name) or []
+                    if isinstance(record, dict)
+                ],
+            }
+            for name in ordered_names
+        ]
+    records = (
+        [dict(item) for item in structured if isinstance(item, dict)]
+        if isinstance(structured, list)
+        else []
+    )
+    return [
+        {
+            "name": str(fallback_name or "records"),
+            "entity_type": contract.get("entity_type") or fallback_name,
+            "primary_keys": list(contract.get("primary_keys") or []),
+            "required_fields": list(contract.get("required_fields") or []),
+            "records": records,
+        }
+    ]
+
+
+def _comparison_parse_result(template, snapshot) -> dict[str, Any]:
+    result = _parse_snapshot_with_template(template, snapshot)
+    contract = dict(getattr(template, "validation_json", None) or {})
+    record_sets = _comparison_record_sets(
+        result,
+        contract,
+        fallback_name=str(getattr(template, "category", None) or "records"),
+    )
+    return {
+        **result,
+        "record_sets": record_sets,
+        "record_count": sum(len(item["records"]) for item in record_sets),
+    }
+
+
 @router.get("/templates/{template_id}/comparison")
-def compare_template(template_id: str, limit: int = 20):
+def compare_template(template_id: str, request: Request, limit: int = 20):
     repository = ParserTemplateRepository()
     candidate = repository.get_template(template_id)
     if not candidate:
@@ -701,32 +1103,77 @@ def compare_template(template_id: str, limit: int = 20):
         family=candidate.family,
         command=candidate.canonical_command,
     )
-    snapshots = [
-        item
-        for item in PatrolRepository().list_dataset_snapshots(mode="parser_validation")
-        if (item.vendor or "").lower() == candidate.vendor.lower()
-        and (item.model or "").lower() == (candidate.model or candidate.profile).lower()
-        and item.command_canonical == candidate.canonical_command
-    ]
-    if candidate.source_job_id:
-        source_job = ParserJobRepository().get_job(candidate.source_job_id)
-        source_snapshot_ids = [
-            str(item.get("snapshot_id") or "")
-            for item in (source_job or {}).get("samples", [])
-            if item.get("snapshot_id")
-        ]
-        snapshots_by_id = {str(item.snapshot_id): item for item in snapshots}
+    source_evidence_errors: list[str] = []
+    frozen_samples: list[dict[str, Any]] = []
+    evidence_loader = getattr(repository, "get_candidate_sample_evidence", None)
+    if candidate.source_job_id and callable(evidence_loader):
+        evidence = evidence_loader(
+            candidate.id,
+            include_sanitized_payload=True,
+        )
+        source_evidence_errors = [str(item) for item in evidence.get("errors") or []]
+        frozen_samples = [dict(item) for item in evidence.get("items") or []]
+
+    snapshots = []
+    if not candidate.source_job_id or not callable(evidence_loader):
         snapshots = [
-            snapshots_by_id[snapshot_id]
-            for snapshot_id in source_snapshot_ids
-            if snapshot_id in snapshots_by_id
+            item
+            for item in PatrolRepository().list_dataset_snapshots(mode="parser_validation")
+            if (item.vendor or "").lower() == candidate.vendor.lower()
+            and (item.model or "").lower()
+            == (candidate.model or candidate.profile).lower()
+            and item.command_canonical == candidate.canonical_command
         ]
-    else:
-        snapshots = snapshots[: max(1, min(limit, 100))]
+        if candidate.source_job_id:
+            source_job = ParserJobRepository().get_job(candidate.source_job_id)
+            source_snapshot_ids = [
+                str(item.get("snapshot_id") or "")
+                for item in (source_job or {}).get("samples", [])
+                if item.get("snapshot_id")
+            ]
+            snapshots_by_id = {str(item.snapshot_id): item for item in snapshots}
+            snapshots = [
+                snapshots_by_id[snapshot_id]
+                for snapshot_id in source_snapshot_ids
+                if snapshot_id in snapshots_by_id
+            ]
+        else:
+            snapshots = snapshots[: max(1, min(limit, 100))]
     rows = []
+    for sample in frozen_samples:
+        sanitized_text = str(sample.get("sanitized_text") or "")
+        source_context = dict(sample.get("source_context") or {})
+        snapshot_view = SimpleNamespace(raw_text=sanitized_text)
+        proposed = _comparison_parse_result(candidate, snapshot_view)
+        current = (
+            _comparison_parse_result(active, snapshot_view) if active else None
+        )
+        rows.append(
+            {
+                "sample_id": sample.get("sample_id"),
+                "snapshot_id": sample.get("snapshot_id"),
+                "dataset_id": sample.get("dataset_id") or "legacy",
+                "device_id": sample.get("device_id"),
+                "command": source_context.get("canonical_command")
+                or candidate.canonical_command,
+                # Kept for API compatibility; this value is the frozen sanitized
+                # evidence, never CommandSnapshot.raw_text.
+                "raw_text": sanitized_text,
+                "raw_text_sha256": sample.get("sanitized_hash")
+                or hashlib.sha256(sanitized_text.encode("utf-8")).hexdigest(),
+                "raw_text_redacted": True,
+                "evidence_kind": "sanitized_candidate_sample",
+                "sample_role": sample.get("sample_role"),
+                "expectation": sample.get("expectation") or {},
+                "source_context": source_context,
+                "current": current,
+                "proposed": proposed,
+                "changed": current != proposed,
+            }
+        )
     for snapshot in snapshots:
-        proposed = _parse_snapshot_with_template(candidate, snapshot)
-        current = _parse_snapshot_with_template(active, snapshot) if active else None
+        proposed = _comparison_parse_result(candidate, snapshot)
+        current = _comparison_parse_result(active, snapshot) if active else None
         raw_text = str(snapshot.raw_text or "")
         rows.append(
             {
@@ -737,6 +1184,8 @@ def compare_template(template_id: str, limit: int = 20):
                 "raw_text": raw_text,
                 "raw_text_sha256": snapshot.raw_text_hash
                 or hashlib.sha256(raw_text.encode("utf-8")).hexdigest(),
+                "raw_text_redacted": False,
+                "evidence_kind": "legacy_snapshot",
                 "current": current,
                 "proposed": proposed,
                 "changed": current != proposed,
@@ -747,46 +1196,140 @@ def compare_template(template_id: str, limit: int = 20):
     primary_keys = [
         str(item) for item in candidate_contract.get("primary_keys") or []
     ]
-    repository.record_regression_validation(
-        candidate.id,
-        passed=bool(rows) and passed_samples == len(rows),
-        sample_count=len(rows),
-        passed_samples=passed_samples,
-        result_preview=[
-            {
-                "snapshot_id": row["snapshot_id"],
-                "raw_text_sha256": row["raw_text_sha256"],
-                "status": row["proposed"]["status"],
-                "records": row["proposed"].get("records") or [],
-                "primary_keys": [
-                    [
-                        str(record.get(key, "")).strip()
-                        for key in primary_keys
-                    ]
-                    for record in (row["proposed"].get("records") or [])
-                    if isinstance(record, dict)
-                ],
-            }
-            for row in rows
-        ],
-    )
+    if not source_evidence_errors and rows:
+        repository.record_regression_validation(
+            candidate.id,
+            passed=passed_samples == len(rows),
+            sample_count=len(rows),
+            passed_samples=passed_samples,
+            result_preview=[
+                {
+                    **(
+                        {"sample_id": row["sample_id"]}
+                        if row.get("sample_id")
+                        else {}
+                    ),
+                    "snapshot_id": row["snapshot_id"],
+                    "raw_text_sha256": row["raw_text_sha256"],
+                    "status": row["proposed"]["status"],
+                    "records": row["proposed"].get("records") or [],
+                    "record_sets": row["proposed"].get("record_sets") or [],
+                    "primary_keys": [
+                        [str(record.get(key, "")).strip() for key in primary_keys]
+                        for record in (row["proposed"].get("records") or [])
+                        if isinstance(record, dict)
+                    ],
+                    "record_set_primary_keys": {
+                        str(record_set.get("name") or "records"): [
+                            [
+                                str(record.get(key, "")).strip()
+                                for key in record_set.get("primary_keys") or []
+                            ]
+                            for record in record_set.get("records") or []
+                            if isinstance(record, dict)
+                        ]
+                        for record_set in row["proposed"].get("record_sets") or []
+                        if isinstance(record_set, dict)
+                    },
+                }
+                for row in rows
+            ],
+        )
+    candidate = repository.get_template(template_id) or candidate
+    candidate_contract = dict(candidate.validation_json or {})
     active_contract = dict(active.validation_json or {}) if active else {}
     candidate_template = _template_asset_evidence(candidate)
-    approval_blockers: list[str] = []
+    parser_field_contract = build_parser_field_contract(
+        validation=candidate_contract,
+        template_text=candidate_template.get("content"),
+    )
+    review_blockers: list[str] = []
+    if parser_field_contract["status"] in {"schema_drift", "template_invalid"}:
+        review_blockers.append(
+            "ParserSpec field inventory does not match the executable TextFSM schema"
+        )
+    elif (
+        parser_field_contract["status"] == "parser_spec_missing"
+        and candidate.source_job_id
+    ):
+        review_blockers.append(
+            "Generated Parser candidate is missing its frozen ParserSpec field inventory"
+        )
+    review_blockers.extend(source_evidence_errors)
     if not candidate_template["hash_valid"]:
-        approval_blockers.append("候选模板内容与不可变资产摘要不一致")
+        review_blockers.append("候选模板内容与不可变资产摘要不一致")
     if not rows:
-        approval_blockers.append("没有可用于审批的解析验证样本")
+        review_blockers.append("没有可用于审批的解析验证样本")
     elif passed_samples != len(rows):
-        approval_blockers.append(
+        review_blockers.append(
             f"候选模板仅通过 {passed_samples}/{len(rows)} 个解析验证样本"
         )
-    approval_blockers.extend(
+    review_blockers.extend(
         generated_template_activation_errors(
             candidate_contract,
             source_job_id=candidate.source_job_id,
         )
     )
+    activation_blockers = [
+        *review_blockers,
+        *parser_semantic_review_activation_errors(candidate, candidate_contract),
+    ]
+    semantic_review = candidate_contract.get("human_semantic_review")
+    current_user = _authenticated_user(request)
+    current_actor = str(current_user.username or current_user.user_id).strip()
+    semantic_reviewer = str(
+        (
+            (semantic_review or {}).get("reviewed_by")
+            if isinstance(semantic_review, dict)
+            else ""
+        )
+        or ""
+    ).strip()
+    same_as_semantic_reviewer = bool(
+        semantic_reviewer
+        and semantic_reviewer.casefold() == current_actor.casefold()
+    )
+    admin_override_applies = bool(
+        same_as_semantic_reviewer and current_user.is_admin()
+    )
+    actor_blockers: list[str] = []
+    if same_as_semantic_reviewer and not current_user.is_admin():
+        actor_blockers.append(
+            "当前账号已完成语义复核，发布必须由其他审批人执行"
+        )
+    activation_blockers.extend(actor_blockers)
+    parser_spec = (
+        candidate_contract.get("source_parser_spec")
+        or candidate_contract.get("parser_spec")
+        or candidate_contract
+    )
+    catalog = CheckItemCatalogRepository().load_active()
+    target_check_item_ids = resolve_parser_check_item_ids(
+        vendor=str(candidate.vendor or ""),
+        model=str(candidate.model or "") or None,
+        family=str(candidate.family or "") or None,
+        profile=str(candidate.profile or "") or None,
+        command=str(candidate.canonical_command or ""),
+        catalog=catalog,
+    )
+    check_item_capabilities = [
+        build_parser_check_item_capability(
+            check_item_id=check_item_id,
+            parser_spec=parser_spec,
+            vendor=str(candidate.vendor or ""),
+            model=str(candidate.model or "") or None,
+            family=str(candidate.family or "") or None,
+            profile=str(candidate.profile or "") or None,
+            command=str(candidate.canonical_command or ""),
+            catalog=catalog,
+        )
+        for check_item_id in target_check_item_ids
+    ]
+    for capability in check_item_capabilities:
+        capability["claim_boundary"]["parser_structure_proven"] = not review_blockers
+        capability["claim_boundary"]["parser_candidate_status"] = str(
+            candidate.status
+        )
     return {
         "template_id": candidate.id,
         "active_template_id": active.id if active else None,
@@ -799,9 +1342,34 @@ def compare_template(template_id: str, limit: int = 20):
         "candidate_template": candidate_template,
         "candidate_contract": candidate_contract,
         "active_contract": active_contract,
+        "parser_field_contract": parser_field_contract,
+        "parser_output_profile": parser_output_profile(parser_spec),
+        "check_item_capabilities": check_item_capabilities,
+        "capability_claim": (
+            "Parser approval proves structured extraction only. Canonical check-item "
+            "mapping requires an approved ObservationContract, and production readiness "
+            "requires a complete RuntimeBundle."
+        ),
+        "review_readiness": {
+            "can_review": not review_blockers,
+            "blockers": review_blockers,
+        },
+        "semantic_review": semantic_review if isinstance(semantic_review, dict) else None,
+        "release_actor": {
+            "username": current_actor,
+            "role": current_user.role,
+            "same_as_semantic_reviewer": same_as_semantic_reviewer,
+            "admin_override_applies": admin_override_applies,
+            "can_activate": not actor_blockers,
+            "blockers": actor_blockers,
+        },
+        "activation_readiness": {
+            "can_activate": not activation_blockers,
+            "blockers": activation_blockers,
+        },
         "approval_readiness": {
-            "can_approve": not approval_blockers,
-            "blockers": approval_blockers,
+            "can_approve": not activation_blockers,
+            "blockers": activation_blockers,
         },
         "rows": rows,
     }
@@ -845,6 +1413,32 @@ def list_job_generation_attempts(job_id: str, include_template: bool = False):
             include_template=include_template,
         )
     }
+
+
+@router.post("/jobs/{job_id}/manual-candidate")
+def submit_manual_parser_candidate(
+    job_id: str,
+    request: Request,
+    payload: ParserManualCandidateRequest,
+):
+    """Execute an engineer revision on frozen evidence and create an approval candidate."""
+
+    try:
+        result = ManualParserCandidateSubmissionService().submit(
+            job_id=job_id,
+            template_text=payload.template_text,
+            actor=_authenticated_actor(request),
+            reason=payload.reason,
+            based_on_template_id=payload.based_on_template_id,
+        )
+    except ManualParserCandidateValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.to_dict()) from exc
+    except ParserJobStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _refresh_rule_asset_projection_for_template(result.template_id)
+    return result.to_dict()
 
 
 @router.put("/jobs/{job_id}/spec")
@@ -941,6 +1535,50 @@ def retry_job(job_id: str):
     return {"success": True, "job_id": job_id, "status": "pending"}
 
 
+@router.post("/jobs/{job_id}/retry-dispatch")
+def retry_and_dispatch_job(job_id: str, request: Request):
+    """Retry and dispatch a governed Parser job as one operator command."""
+
+    repository = ParserJobRepository()
+    item = repository.get_job(job_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="parser job not found")
+    readiness = item.get("generation_readiness") or {}
+    if item.get("pipeline_version") == "simple_v2" and not readiness.get("ready"):
+        blockers = ", ".join(str(value) for value in readiness.get("blockers") or [])
+        raise HTTPException(
+            status_code=409,
+            detail=f"simple Parser job is not ready: {blockers or 'readiness_unknown'}",
+        )
+    try:
+        repository.retry_job(
+            job_id,
+            actor=_authenticated_actor(request),
+            reason="operator requested Parser regeneration from the control plane",
+        )
+    except ParserJobStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    result = dispatch_ready_parser_jobs(job_id=job_id, limit=1, repository=repository)
+    if not result["dispatched"]:
+        current = repository.get_job(job_id) or {}
+        if current.get("status") == "pending" and not current.get("celery_task_id"):
+            repository.transition_job_status(
+                job_id,
+                "failed",
+                "Parser regeneration could not be dispatched after retry",
+                failure_code="redispatch_failed",
+            )
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                result["failed"][0]["error"]
+                if result["failed"]
+                else "parser job readiness changed before redispatch"
+            ),
+        )
+    return {"success": True, **result}
+
+
 @router.post("/jobs/{job_id}/recover")
 def recover_parser_job(
     job_id: str,
@@ -1014,7 +1652,6 @@ def dispatch_job(job_id: str):
     result = dispatch_ready_parser_jobs(
         job_id=job_id,
         limit=1,
-        allow_production=True,
     )
     if not result["dispatched"]:
         raise HTTPException(
@@ -1062,16 +1699,44 @@ def activate_template(
     request: Request,
     payload: ParserTemplateApprovalRequest,
 ):
+    current_user = _authenticated_user(request)
     try:
         item = ParserTemplateRepository().activate_template(
             template_id,
-            approved_by=_authenticated_actor(request),
-            reason=_required_reason(payload.reason, action="template activation"),
+            approved_by=str(current_user.username or current_user.user_id).strip(),
+            reason=str(payload.reason or "").strip(),
+            allow_same_reviewer=current_user.is_admin(),
         )
+    except ParserTemplateStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     _refresh_rule_asset_projection_for_template(template_id)
     return item.to_dict()
+
+
+@router.post("/templates/{template_id}/semantic-review")
+def review_template_semantics(
+    template_id: str,
+    request: Request,
+    payload: ParserTemplateSemanticReviewRequest,
+):
+    try:
+        review = ParserTemplateRepository().record_semantic_review(
+            template_id,
+            actor=_authenticated_actor(request),
+            reason=str(payload.reason or "").strip(),
+            result_confirmed=payload.result_confirmed,
+            primary_key_confirmed=payload.primary_key_confirmed,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {
+        "success": True,
+        "template_id": template_id,
+        "template_status": "pending_approval",
+        "semantic_review": review,
+    }
 
 
 @router.post(
@@ -1091,6 +1756,8 @@ def force_activate_template(
             force=True,
             approval_kind="force_activation",
         )
+    except ParserTemplateStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     _refresh_rule_asset_projection_for_template(template_id)
@@ -1168,7 +1835,8 @@ def commit_parser_backfill(
         return ParserBackfillService().commit(
             job_id,
             actor=_authenticated_actor(request),
-            reason=_required_reason(payload.reason, action="backfill commit"),
+            reason=str(payload.reason or "").strip(),
+            analyze_changes=payload.analyze_changes,
         )
     except (ValueError, KeyError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -1447,6 +2115,88 @@ def textfsm_dialect_audit(status: str = "active"):
     return TextFSMDialectAuditService().audit(status=status)
 
 
+def _project_asset_gap(item: dict[str, Any]) -> dict[str, Any]:
+    params = {
+        "workspace": "production",
+        "subtab": "source-jobs",
+        "action": "asset-gap-source",
+        "asset_gap_id": str(item.get("id") or ""),
+        "check_item_id": str(item.get("check_item_id") or ""),
+        "implementation_version_id": str(
+            item.get("implementation_version_id") or ""
+        ),
+        "command": str(item.get("canonical_command") or ""),
+    }
+    target_url = "/skills/parser?" + urlencode(
+        {key: value for key, value in params.items() if value}
+    )
+    return {
+        **item,
+        "recommended_action": {
+            "code": "import_rule_samples",
+            "label": "导入规则样本",
+            "description": (
+                "该缺口只提供治理上下文，不会直接创建 Parser 或规则生成任务。"
+                "请导入并确认离线原始输出后再启动资产生产。"
+            ),
+            "target_url": target_url,
+        },
+    }
+
+
+@router.get("/asset-gaps")
+def list_asset_gaps(
+    status: str | None = "open",
+    check_item_id: str | None = None,
+    search: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    page = AssetGapRepository().list_page(
+        status=status,
+        check_item_id=check_item_id,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+    page["items"] = [
+        _project_asset_gap(dict(item)) for item in page.get("items") or []
+    ]
+    return page
+
+
+@router.get("/asset-gaps/{gap_id}")
+def get_asset_gap(gap_id: str):
+    item = AssetGapRepository().get(gap_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="asset gap not found")
+    return _project_asset_gap(item)
+
+
+@router.post("/asset-gaps/{gap_id}/resolve")
+def resolve_asset_gap(
+    gap_id: str,
+    request: Request,
+    payload: CommandProfileLifecycleRequest,
+):
+    try:
+        return {
+            "success": True,
+            "item": _project_asset_gap(
+                AssetGapRepository().resolve(
+                    gap_id,
+                    actor=_authenticated_actor(request),
+                    note=_required_reason(
+                        payload.reason,
+                        action="asset gap resolution",
+                    ),
+                )
+            ),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.get("/rule-gaps/from-changes")
 def rule_gaps_from_changes(days: int = 90, limit: int = 200):
     from src.core.rule_control.change_gap_analysis import ChangeGapAnalysisService
@@ -1460,12 +2210,13 @@ def seed_rule_gaps_from_changes(
     days: int = 90,
     limit: int = 20,
 ):
-    from src.core.rule_control.change_gap_analysis import ChangeGapAnalysisService
-
-    return ChangeGapAnalysisService().seed_jobs(
-        days=days,
-        limit=limit,
-        created_by=_authenticated_actor(http_request),
+    del http_request, days, limit
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            "生产 Change 缺口只用于定位证据，不能直接创建规则生成任务；"
+            "请先在 Parser 控制面导入明确的离线规则样本。"
+        ),
     )
 
 
@@ -1528,11 +2279,13 @@ def review_rule_asset_bundle(
     payload: RuleAssetEngineeringReviewRequest,
 ):
     try:
+        current_user = _authenticated_user(request)
         return RuleAssetEngineeringRevisionService().review(
             bundle_id,
             decision=payload.decision,
-            actor=_authenticated_actor(request),
+            actor=str(current_user.username or current_user.user_id).strip(),
             reason=payload.reason,
+            allow_same_actor=current_user.is_admin(),
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1716,6 +2469,485 @@ def get_runtime_rule_asset_health():
     return RuntimeRuleAssetResolver().load_inventory_bundle().to_dict()
 
 
+@router.get("/assessment-policies")
+def list_assessment_policy_profiles(
+    page: int = 1,
+    page_size: int = 25,
+    search: str | None = None,
+    check_item_id: str | None = None,
+    observation_type: str | None = None,
+    policy_role: str | None = None,
+    status: str | None = None,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    try:
+        return AssessmentPolicyAssetService().list_profiles(
+            page=page,
+            page_size=page_size,
+            search=search,
+            check_item_id=check_item_id,
+            observation_type=observation_type,
+            policy_role=policy_role,
+            status=status,
+        )
+    except ValueError as exc:
+        _raise_assessment_policy_error(exc)
+
+
+@router.post("/assessment-policies/versions")
+def create_assessment_policy_version(
+    payload: AssessmentPolicyVersionCreateRequest,
+    request: Request,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+):
+    try:
+        return AssessmentPolicyAssetService().create_version(
+            check_item_id=payload.check_item_id,
+            check_item_version_id=payload.check_item_version_id,
+            observation_type=payload.observation_type,
+            policy_role=payload.policy_role,
+            name=payload.name,
+            description=payload.description,
+            profile_id=payload.profile_id,
+            policy=payload.policy,
+            evidence_refs=payload.evidence_refs,
+            provenance=payload.provenance,
+            valid_from=payload.valid_from,
+            valid_until=payload.valid_until,
+            created_by=_authenticated_actor(request),
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        _raise_assessment_policy_error(exc)
+
+
+@router.get("/assessment-policies/versions/{version_id}")
+def get_assessment_policy_version(
+    version_id: str,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    item = AssessmentPolicyAssetService().get_version(version_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="assessment policy version not found")
+    return item
+
+
+@router.get("/assessment-policies/profiles/{profile_id}/versions")
+def list_assessment_policy_profile_versions(
+    profile_id: str,
+    page: int = 1,
+    page_size: int = 25,
+    status: str | None = None,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    try:
+        return AssessmentPolicyAssetService().list_profile_versions(
+            profile_id,
+            page=page,
+            page_size=page_size,
+            status=status,
+        )
+    except ValueError as exc:
+        _raise_assessment_policy_error(exc)
+
+
+@router.post("/assessment-policies/versions/{version_id}/submit")
+def submit_assessment_policy_version(
+    version_id: str,
+    payload: AssessmentPolicyLifecycleRequest,
+    request: Request,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+):
+    try:
+        return AssessmentPolicyAssetService().submit(
+            version_id,
+            actor=_authenticated_actor(request),
+            reason=payload.reason,
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        _raise_assessment_policy_error(exc)
+
+
+@router.post(
+    "/assessment-policies/versions/{version_id}/semantic-review",
+    dependencies=[Depends(require_role(["admin"]))],
+)
+def review_assessment_policy_semantics(
+    version_id: str,
+    payload: AssessmentPolicyReviewRequest,
+    request: Request,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+):
+    try:
+        return AssessmentPolicyAssetService().semantic_review(
+            version_id,
+            decision=payload.decision,
+            actor=_authenticated_actor(request),
+            reason=payload.reason,
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        _raise_assessment_policy_error(exc)
+
+
+@router.post(
+    "/assessment-policies/versions/{version_id}/publication-review",
+    dependencies=[Depends(require_role(["admin"]))],
+)
+def review_assessment_policy_publication(
+    version_id: str,
+    payload: AssessmentPolicyReviewRequest,
+    request: Request,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+):
+    try:
+        return AssessmentPolicyAssetService().publication_review(
+            version_id,
+            decision=payload.decision,
+            actor=_authenticated_actor(request),
+            reason=payload.reason,
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        _raise_assessment_policy_error(exc)
+
+
+@router.post(
+    "/assessment-policies/versions/{version_id}/revoke",
+    dependencies=[Depends(require_role(["admin"]))],
+)
+def revoke_assessment_policy_version(
+    version_id: str,
+    payload: AssessmentPolicyLifecycleRequest,
+    request: Request,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+):
+    try:
+        return AssessmentPolicyAssetService().revoke(
+            version_id,
+            actor=_authenticated_actor(request),
+            reason=payload.reason,
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        _raise_assessment_policy_error(exc)
+
+
+@router.post(
+    "/assessment-policies/versions/{version_id}/bindings",
+    dependencies=[Depends(require_role(["admin"]))],
+)
+def bind_assessment_policy_version(
+    version_id: str,
+    payload: AssessmentPolicyBindingRequest,
+    request: Request,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+):
+    try:
+        return AssessmentPolicyAssetService().bind(
+            version_id,
+            binding_type=payload.binding_type,
+            scope=payload.scope,
+            actor=_authenticated_actor(request),
+            reason=payload.reason,
+            valid_from=payload.valid_from,
+            valid_until=payload.valid_until,
+            replaces_binding_id=payload.replaces_binding_id,
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        _raise_assessment_policy_error(exc)
+
+
+@router.post(
+    "/assessment-policy-bindings/{binding_id}/end",
+    dependencies=[Depends(require_role(["admin"]))],
+)
+def end_assessment_policy_binding(
+    binding_id: str,
+    payload: AssessmentPolicyLifecycleRequest,
+    request: Request,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+):
+    try:
+        return AssessmentPolicyAssetService().end_binding(
+            binding_id,
+            actor=_authenticated_actor(request),
+            reason=payload.reason,
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        _raise_assessment_policy_error(exc)
+
+
+@router.post("/assessment-policies/resolution-preview")
+def preview_assessment_policy_resolution(
+    payload: AssessmentPolicyResolutionPreviewRequest,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    try:
+        return AssessmentPolicyAssetService().preview_resolution(
+            check_item_version_id=payload.check_item_version_id,
+            device=payload.device,
+            observation=payload.observation,
+            rule=payload.rule,
+            policy_effective_at=payload.policy_effective_at,
+            include_legacy=payload.include_legacy,
+            runtime_bundle_version_id=payload.runtime_bundle_version_id,
+            runtime_bundle_digest=payload.runtime_bundle_digest,
+        )
+    except ValueError as exc:
+        _raise_assessment_policy_error(exc)
+
+
+@router.post("/assessment-policies/versions/{version_id}/impact-preview")
+def preview_assessment_policy_target_impact(
+    version_id: str,
+    payload: AssessmentPolicyImpactPreviewRequest,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    try:
+        return AssessmentPolicyAssetService().preview_target_impact(
+            version_id,
+            binding_type=payload.binding_type,
+            proposed_scope=payload.proposed_scope,
+            target_selector=payload.target_selector,
+            policy_effective_at=payload.policy_effective_at,
+            page=payload.page,
+            page_size=payload.page_size,
+        )
+    except ValueError as exc:
+        _raise_assessment_policy_error(exc)
+
+
+@router.post(
+    "/assessment-policies/migration/inventory",
+    dependencies=[Depends(require_role(["admin"]))],
+)
+def inventory_legacy_assessment_policies(
+    payload: AssessmentPolicyMigrationInventoryRequest,
+    request: Request,
+    _idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+):
+    try:
+        return AssessmentPolicyMigrationService().inventory_legacy_sources(
+            actor=_authenticated_actor(request),
+            check_item_ids=payload.check_item_ids,
+            include_execution_snapshots=payload.include_execution_snapshots,
+            after_execution_id=payload.after_execution_id,
+            execution_page_size=payload.execution_page_size,
+        )
+    except ValueError as exc:
+        _raise_assessment_policy_error(exc)
+
+
+@router.get("/assessment-policies/migration/sources")
+def list_legacy_assessment_policy_sources(
+    page: int = 1,
+    page_size: int = 25,
+    search: str | None = None,
+    conversion_status: str | None = None,
+    source_type: str | None = None,
+    check_item_id: str | None = None,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    try:
+        return AssessmentPolicyMigrationService().list_sources(
+            page=page,
+            page_size=page_size,
+            search=search,
+            conversion_status=conversion_status,
+            source_type=source_type,
+            check_item_id=check_item_id,
+        )
+    except ValueError as exc:
+        _raise_assessment_policy_error(exc)
+
+
+@router.post("/assessment-policies/migration/sources/{source_id}/draft")
+def draft_legacy_assessment_policy_source(
+    source_id: str,
+    request: Request,
+    _idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+):
+    try:
+        return AssessmentPolicyMigrationService().create_draft_from_source(
+            source_id,
+            actor=_authenticated_actor(request),
+        )
+    except ValueError as exc:
+        _raise_assessment_policy_error(exc)
+
+
+@router.post("/assessment-policies/migration/shadow-compare")
+def compare_assessment_policy_shadow(
+    payload: AssessmentPolicyShadowCompareRequest,
+    request: Request,
+    _idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+):
+    try:
+        return AssessmentPolicyMigrationService().compare_shadow(
+            check_item_version_id=payload.check_item_version_id,
+            device=payload.device,
+            observation=payload.observation,
+            rule=payload.rule,
+            actor=_authenticated_actor(request),
+            policy_effective_at=payload.policy_effective_at,
+            runtime_bundle_version_id=payload.runtime_bundle_version_id,
+            runtime_bundle_digest=payload.runtime_bundle_digest,
+        )
+    except ValueError as exc:
+        _raise_assessment_policy_error(exc)
+
+
+@router.get("/assessment-policies/migration/shadow-results")
+def list_assessment_policy_shadow_results(
+    page: int = 1,
+    page_size: int = 25,
+    comparison_status: str | None = None,
+    check_item_id: str | None = None,
+    device_id: str | None = None,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    try:
+        return AssessmentPolicyMigrationService().list_shadow_results(
+            page=page,
+            page_size=page_size,
+            comparison_status=comparison_status,
+            check_item_id=check_item_id,
+            device_id=device_id,
+        )
+    except ValueError as exc:
+        _raise_assessment_policy_error(exc)
+
+
+@router.post(
+    "/assessment-policies/migration/cutovers",
+    dependencies=[Depends(require_role(["admin"]))],
+)
+def activate_assessment_policy_cutover(
+    payload: AssessmentPolicyCutoverRequest,
+    request: Request,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+):
+    try:
+        return AssessmentPolicyMigrationService().activate_cutover(
+            check_item_version_id=payload.check_item_version_id,
+            device_id=payload.device_id,
+            shadow_result_ids=payload.shadow_result_ids,
+            actor=_authenticated_actor(request),
+            reason=payload.reason,
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        _raise_assessment_policy_error(exc)
+
+
+@router.post(
+    "/assessment-policies/migration/cutovers/{cutover_id}/rollback",
+    dependencies=[Depends(require_role(["admin"]))],
+)
+def rollback_assessment_policy_cutover(
+    cutover_id: str,
+    payload: AssessmentPolicyCutoverRollbackRequest,
+    request: Request,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+):
+    try:
+        return AssessmentPolicyMigrationService().rollback_cutover(
+            cutover_id,
+            actor=_authenticated_actor(request),
+            reason=payload.reason,
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        _raise_assessment_policy_error(exc)
+
+
+@router.get("/assessment-policies/migration/cutovers")
+def list_assessment_policy_cutovers(
+    page: int = 1,
+    page_size: int = 25,
+    status: str | None = None,
+    resolver_mode: str | None = None,
+    check_item_id: str | None = None,
+    device_id: str | None = None,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    try:
+        return AssessmentPolicyMigrationService().list_cutovers(
+            page=page,
+            page_size=page_size,
+            status=status,
+            resolver_mode=resolver_mode,
+            check_item_id=check_item_id,
+            device_id=device_id,
+        )
+    except ValueError as exc:
+        _raise_assessment_policy_error(exc)
+
+
 @router.get("/check-item-runtime-bundles/health")
 def get_check_item_runtime_bundle_health(
     page: int = 1,
@@ -1824,14 +3056,13 @@ def activate_check_item_runtime_bundle(
         max_length=128,
     ),
 ):
+    current_user = _authenticated_user(request)
     try:
         return CheckItemRuntimeBundleService().activate(
             version_id,
             actor=_authenticated_actor(request),
-            reason=_required_reason(
-                payload.reason,
-                action="runtime bundle activation",
-            ),
+            reason=payload.reason.strip(),
+            allow_same_actor=current_user.is_admin(),
         )
     except RuntimeBundleValidationError as exc:
         raise HTTPException(
@@ -1881,6 +3112,361 @@ def rollback_check_item_runtime_bundle(
     except ValueError as exc:
         status_code = 404 if "not found" in str(exc).casefold() else 422
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
+@router.get("/check-item-rollout-campaigns")
+def list_check_item_rollout_campaigns(
+    page: int = 1,
+    page_size: int = 25,
+    status: str | None = None,
+    search: str | None = None,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    return RolloutCampaignService().list(
+        page=page,
+        page_size=page_size,
+        status=status,
+        search=search,
+    )
+
+
+@router.get("/check-item-rollout-legacy-routes")
+def list_check_item_rollout_legacy_routes(
+    page: int = 1,
+    page_size: int = 25,
+    status: Literal["active", "deprecated"] | None = None,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    return RolloutLegacyRouteService().list(
+        page=page,
+        page_size=page_size,
+        status=status,
+    )
+
+
+@router.post(
+    "/check-item-rollout-legacy-routes",
+    status_code=201,
+    dependencies=[Depends(require_role(["admin"]))],
+)
+def create_check_item_rollout_legacy_route(
+    payload: RolloutLegacyRouteCreateRequest,
+    request: Request,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+):
+    try:
+        return RolloutLegacyRouteService().create_runtime_bundle_route(
+            route_name=payload.route_name,
+            runtime_bundle_version_id=payload.runtime_bundle_version_id,
+            actor=_authenticated_actor(request),
+            idempotency_key=idempotency_key,
+        )
+    except LegacyRouteError as exc:
+        raise HTTPException(
+            status_code=(
+                404 if exc.code.endswith("_missing") else 409
+            ),
+            detail={
+                "message": "旧链路基线适配器登记被阻断",
+                "code": exc.code,
+                "blockers": [str(exc)],
+            },
+        ) from exc
+
+
+@router.post(
+    "/check-item-rollout-legacy-routes/{route_id}/deprecate",
+    dependencies=[Depends(require_role(["admin"]))],
+)
+def deprecate_check_item_rollout_legacy_route(
+    route_id: str,
+    payload: RolloutLegacyRouteLifecycleRequest,
+    request: Request,
+):
+    try:
+        return RolloutLegacyRouteService().deprecate(
+            route_id,
+            actor=_authenticated_actor(request),
+            reason=_required_reason(
+                payload.reason,
+                action="legacy rollout route deprecation",
+            ),
+        )
+    except LegacyRouteError as exc:
+        raise HTTPException(
+            status_code=(
+                404 if exc.code.endswith("_missing") else 409
+            ),
+            detail={
+                "message": "旧链路基线适配器停用被阻断",
+                "code": exc.code,
+                "blockers": [str(exc)],
+            },
+        ) from exc
+
+
+@router.post("/check-item-rollout-campaigns")
+def create_check_item_rollout_campaign(
+    payload: RolloutCampaignCreateRequest,
+    request: Request,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+):
+    try:
+        return RolloutCampaignService().create(
+            name=payload.name,
+            description=payload.description,
+            actor=_authenticated_actor(request),
+            idempotency_key=idempotency_key,
+        )
+    except RolloutValidationError as exc:
+        _raise_rollout_error(exc)
+
+
+@router.get("/check-item-rollout-campaigns/{campaign_id}")
+def get_check_item_rollout_campaign(
+    campaign_id: str,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    item = RolloutCampaignService().get(campaign_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="rollout campaign not found")
+    return item
+
+
+@router.post("/check-item-rollout-campaigns/{campaign_id}/freeze")
+def freeze_check_item_rollout_campaign(
+    campaign_id: str,
+    payload: RolloutCampaignFreezeRequest,
+    request: Request,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+):
+    try:
+        return RolloutCampaignService().freeze_target(
+            campaign_id,
+            target_manifest=payload.target_manifest,
+            runtime_bundle_refs=payload.runtime_bundle_refs,
+            comparison_context_ids=payload.comparison_context_ids,
+            baseline_window=payload.baseline_window,
+            thresholds=payload.thresholds,
+            rollback_plan=payload.rollback_plan,
+            actor=_authenticated_actor(request),
+            reason=_required_reason(
+                payload.reason,
+                action="rollout target freeze",
+            ),
+            idempotency_key=idempotency_key,
+        )
+    except RolloutValidationError as exc:
+        _raise_rollout_error(exc)
+
+
+@router.post(
+    "/check-item-rollout-campaigns/{campaign_id}/start",
+    status_code=202,
+)
+def start_check_item_rollout_stage(
+    campaign_id: str,
+    payload: RolloutCampaignLifecycleRequest,
+    request: Request,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+):
+    try:
+        return RolloutCampaignService().start_stage(
+            campaign_id,
+            actor=_authenticated_actor(request),
+            reason=_required_reason(
+                payload.reason,
+                action="rollout stage start",
+            ),
+            idempotency_key=idempotency_key,
+            execution_mode=payload.execution_mode,
+        )
+    except RolloutValidationError as exc:
+        _raise_rollout_error(exc)
+
+
+@router.get("/check-item-rollout-campaigns/{campaign_id}/executions")
+def list_check_item_rollout_stage_executions(
+    campaign_id: str,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    if RolloutCampaignService().get(campaign_id) is None:
+        raise HTTPException(status_code=404, detail="rollout campaign not found")
+    return {
+        "items": RolloutStageExecutionService().list_for_campaign(
+            campaign_id
+        )
+    }
+
+
+@router.get(
+    "/check-item-rollout-campaigns/{campaign_id}/executions/{execution_id}"
+)
+def get_check_item_rollout_stage_execution(
+    campaign_id: str,
+    execution_id: str,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    item = RolloutStageExecutionService().get(execution_id)
+    if item is None or str(item.get("campaign_id") or "") != campaign_id:
+        raise HTTPException(
+            status_code=404,
+            detail="rollout stage execution not found",
+        )
+    return item
+
+
+@router.post(
+    "/check-item-rollout-campaigns/{campaign_id}/approve",
+    dependencies=[Depends(require_role(["admin"]))],
+)
+def approve_check_item_rollout_stage(
+    campaign_id: str,
+    payload: RolloutCampaignApprovalRequest,
+    request: Request,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+):
+    try:
+        return RolloutCampaignService().approve_stage(
+            campaign_id,
+            actor=_authenticated_actor(request),
+            comment=_required_reason(
+                payload.comment,
+                action="rollout stage approval",
+            ),
+            idempotency_key=idempotency_key,
+        )
+    except RolloutValidationError as exc:
+        _raise_rollout_error(exc)
+
+
+@router.post("/check-item-rollout-campaigns/{campaign_id}/pause")
+def pause_check_item_rollout_campaign(
+    campaign_id: str,
+    payload: RolloutCampaignLifecycleRequest,
+    request: Request,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+):
+    try:
+        return RolloutCampaignService().pause(
+            campaign_id,
+            actor=_authenticated_actor(request),
+            reason=_required_reason(
+                payload.reason,
+                action="rollout campaign pause",
+            ),
+            idempotency_key=idempotency_key,
+        )
+    except RolloutValidationError as exc:
+        _raise_rollout_error(exc)
+
+
+@router.post("/check-item-rollout-campaigns/{campaign_id}/resume")
+def resume_check_item_rollout_campaign(
+    campaign_id: str,
+    payload: RolloutCampaignResumeRequest,
+    request: Request,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+):
+    try:
+        return RolloutCampaignService().resume(
+            campaign_id,
+            observed_digests=payload.observed_digests,
+            actor=_authenticated_actor(request),
+            reason=_required_reason(
+                payload.reason,
+                action="rollout campaign resume",
+            ),
+            idempotency_key=idempotency_key,
+        )
+    except RolloutValidationError as exc:
+        _raise_rollout_error(exc)
+
+
+@router.post(
+    "/check-item-rollout-campaigns/{campaign_id}/rollback",
+    dependencies=[Depends(require_role(["admin"]))],
+)
+def rollback_check_item_rollout_campaign(
+    campaign_id: str,
+    payload: RolloutCampaignRollbackRequest,
+    request: Request,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+):
+    try:
+        return RolloutCampaignService().rollback(
+            campaign_id,
+            evidence_refs=payload.evidence_refs,
+            actor=_authenticated_actor(request),
+            reason=_required_reason(
+                payload.reason,
+                action="rollout campaign rollback",
+            ),
+            idempotency_key=idempotency_key,
+        )
+    except RolloutValidationError as exc:
+        _raise_rollout_error(exc)
+
+
+@router.post(
+    "/check-item-rollout-campaigns/{campaign_id}/routing-decision"
+)
+def resolve_check_item_rollout_routing(
+    campaign_id: str,
+    payload: RolloutRoutingDecisionRequest,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    try:
+        return RolloutCampaignService().routing_decision(
+            campaign_id,
+            device_id=payload.device_id,
+            check_item_version_id=payload.check_item_version_id,
+            target_manifest_digest=payload.target_manifest_digest,
+            runtime_bundle_digest=payload.runtime_bundle_digest,
+            comparison_context_digest=payload.comparison_context_digest,
+        )
+    except RolloutValidationError as exc:
+        _raise_rollout_error(exc)
 
 
 @router.post("/runtime-assets/seed-builtin")
@@ -1972,12 +3558,14 @@ def approve_rule_generation_job(
     request: Request,
     payload: RuleGenerationJobApprovalRequest | None = None,
 ):
-    reason = _required_reason(payload.reason if payload else None, action="rule asset approval")
+    reason = str(payload.reason or "").strip() if payload else ""
     try:
+        current_user = _authenticated_user(request)
         return RuleAssetApprovalService().approve(
             job_id,
-            actor=_authenticated_actor(request),
+            actor=str(current_user.username or current_user.user_id).strip(),
             reason=reason,
+            allow_same_actor=current_user.is_admin(),
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -2419,6 +4007,224 @@ def _enrich_command_profile_check_items(
     return enriched
 
 
+@router.get("/catalog/canonical-observations")
+def list_canonical_observations():
+    catalog = load_canonical_catalog()
+    return {
+        "catalog_id": catalog.catalog_id,
+        "version": catalog.version,
+        "status": catalog.status,
+        "digest": catalog.digest,
+        "items": [
+            {
+                "id": item.id,
+                "description": item.description,
+                "semantic_type": item.semantic_type,
+                "value_types": list(item.value_types),
+                "canonical_unit": item.canonical_unit,
+                "dimensions": list(item.dimensions),
+                "allowed_dimension_values": {
+                    key: list(values)
+                    for key, values in item.allowed_dimension_values.items()
+                },
+                "allowed_values": list(item.allowed_values),
+                "assessment_roles": list(item.assessment_roles),
+            }
+            for item in catalog.observations
+        ],
+    }
+
+
+@router.get("/catalog/changes")
+def list_check_item_catalog_changes(
+    status: str | None = None,
+    search: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+):
+    try:
+        return CheckItemCatalogGovernanceService().list_changes(
+            status=status,
+            search=search,
+            limit=limit,
+            offset=offset,
+        )
+    except ValueError as exc:
+        _raise_catalog_governance_error(exc)
+
+
+@router.get("/catalog/changes/{change_id}")
+def get_check_item_catalog_change(change_id: str):
+    try:
+        return CheckItemCatalogGovernanceService().get_change(change_id)
+    except ValueError as exc:
+        _raise_catalog_governance_error(exc)
+
+
+@router.post("/catalog/check-items/drafts")
+def create_check_item_draft(
+    request: Request,
+    payload: CheckItemDraftRequest,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+):
+    try:
+        body = payload.model_dump(exclude={"reason"})
+        return CheckItemCatalogGovernanceService().create_check_item_draft(
+            body,
+            actor=_authenticated_actor(request),
+            reason=payload.reason,
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        _raise_catalog_governance_error(exc)
+
+
+@router.delete(
+    "/catalog/check-items/{check_item_id}",
+    dependencies=[Depends(require_role(["admin"]))],
+)
+def delete_check_item(
+    request: Request,
+    check_item_id: str,
+    payload: CheckItemDeleteRequest,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+):
+    try:
+        return CheckItemCatalogGovernanceService().delete_check_item(
+            check_item_id,
+            actor=_authenticated_actor(request),
+            reason=payload.reason,
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        _raise_catalog_governance_error(exc)
+
+
+@router.post("/catalog/implementations/drafts")
+def create_collection_implementation_draft(
+    request: Request,
+    payload: CollectionImplementationDraftRequest,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+):
+    try:
+        body = payload.model_dump(exclude={"reason"})
+        return CheckItemCatalogGovernanceService().create_implementation_draft(
+            body,
+            actor=_authenticated_actor(request),
+            reason=payload.reason,
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        _raise_catalog_governance_error(exc)
+
+
+@router.delete(
+    "/catalog/implementations/{implementation_id}",
+    dependencies=[Depends(require_role(["admin"]))],
+)
+def delete_collection_implementation(
+    request: Request,
+    implementation_id: str,
+    payload: CollectionImplementationDeleteRequest,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+):
+    try:
+        return CheckItemCatalogGovernanceService().delete_implementation(
+            implementation_id,
+            actor=_authenticated_actor(request),
+            reason=payload.reason,
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        _raise_catalog_governance_error(exc)
+
+
+@router.post("/catalog/changes/{change_id}/impact-preview")
+def preview_check_item_catalog_change(change_id: str):
+    try:
+        return CheckItemCatalogGovernanceService().preview_impact(change_id)
+    except ValueError as exc:
+        _raise_catalog_governance_error(exc)
+
+
+@router.get("/catalog/changes/{change_id}/publication-options")
+def check_item_catalog_publication_options(change_id: str):
+    try:
+        return CheckItemCatalogGovernanceService().publication_options(change_id)
+    except ValueError as exc:
+        _raise_catalog_governance_error(exc)
+
+
+@router.post("/catalog/changes/{change_id}/submit")
+def submit_check_item_catalog_change(
+    request: Request,
+    change_id: str,
+    payload: CatalogChangeLifecycleRequest,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+):
+    try:
+        return CheckItemCatalogGovernanceService().submit(
+            change_id,
+            actor=_authenticated_actor(request),
+            reason=payload.reason,
+            expected_impact_digest=payload.expected_impact_digest,
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        _raise_catalog_governance_error(exc)
+
+
+@router.post(
+    "/catalog/changes/{change_id}/approve",
+    dependencies=[Depends(require_role(["admin"]))],
+)
+def approve_check_item_catalog_change(
+    request: Request,
+    change_id: str,
+    payload: CatalogChangeLifecycleRequest,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+):
+    current_user = _authenticated_user(request)
+    try:
+        return CheckItemCatalogGovernanceService().decide(
+            change_id,
+            decision="approved",
+            actor=_authenticated_actor(request),
+            reason=payload.reason,
+            expected_impact_digest=payload.expected_impact_digest,
+            idempotency_key=idempotency_key,
+            rollout_campaign_id=payload.rollout_campaign_id,
+            allow_same_actor=current_user.is_admin(),
+        )
+    except ValueError as exc:
+        _raise_catalog_governance_error(exc)
+
+
+@router.post(
+    "/catalog/changes/{change_id}/reject",
+    dependencies=[Depends(require_role(["admin"]))],
+)
+def reject_check_item_catalog_change(
+    request: Request,
+    change_id: str,
+    payload: CatalogChangeLifecycleRequest,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+):
+    current_user = _authenticated_user(request)
+    try:
+        return CheckItemCatalogGovernanceService().decide(
+            change_id,
+            decision="rejected",
+            actor=_authenticated_actor(request),
+            reason=payload.reason,
+            expected_impact_digest=payload.expected_impact_digest,
+            idempotency_key=idempotency_key,
+            allow_same_actor=current_user.is_admin(),
+        )
+    except ValueError as exc:
+        _raise_catalog_governance_error(exc)
+
+
 @router.get("/check-items")
 def list_check_items(
     search: str | None = None,
@@ -2447,6 +4253,8 @@ def list_check_items(
                 ],
                 "collector": implementation.collector,
                 "parser_requirement": implementation.parser_requirement,
+                "template_scope": implementation.template_scope,
+                "output_quality_policy": implementation.output_quality_policy,
                 "selection_priority": implementation.selection_priority,
                 "status": implementation.status,
             }
@@ -2459,11 +4267,11 @@ def list_check_items(
         for item in catalog.check_items:
             if category_value and item.category.casefold() != category_value:
                 continue
-            searchable = " ".join(
-                [item.id, item.name, item.category, item.description]
-            ).casefold()
-            if search_value and search_value not in searchable:
-                continue
+            display_name = check_item_display_name(item.id, item.name)
+            display_description = check_item_display_description(
+                item.id,
+                item.description,
+            )
             implementations = sorted(
                 implementations_by_item.get(item.id, []),
                 key=lambda row: (
@@ -2471,19 +4279,41 @@ def list_check_items(
                     str(row["implementation_id"]),
                 ),
             )
+            searchable = " ".join(
+                [
+                    item.id,
+                    item.name,
+                    display_name,
+                    item.category,
+                    item.description,
+                    display_description,
+                    json.dumps(
+                        implementations,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                ]
+            ).casefold()
+            if search_value and search_value not in searchable:
+                continue
             items.append(
                 {
                     "check_item_id": item.id,
                     "check_item_version_id": item.version_id,
                     "version": item.version,
                     "name": item.name,
+                    "display_name": display_name,
                     "category": item.category,
                     "description": item.description,
+                    "display_description": display_description,
                     "result_mode": item.result_mode,
                     "assessment_mode": item.assessment_mode,
                     "canonical_contract": item.canonical_contract,
                     "report_projection": item.report_projection,
                     "applicability": item.applicability,
+                    "freshness_policy": item.freshness_policy,
+                    "empty_result_policy": item.empty_result_policy,
+                    "coverage_policy": item.coverage_policy,
                     "status": item.status,
                     "digest": item.digest,
                     "implementation_count": len(implementations),
@@ -2702,6 +4532,11 @@ def rollback_command_profile(
 
 @router.post("/command-profiles/activate")
 def activate_command_profile_legacy(payload: CommandProfileUpsertRequest):
+    observe_legacy_path(
+        "legacy-command-profile-activation",
+        "activate_command_profile",
+        outcome="rejected",
+    )
     raise HTTPException(
         status_code=409,
         detail=(

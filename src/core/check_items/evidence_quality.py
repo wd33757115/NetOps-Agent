@@ -6,10 +6,11 @@ import hashlib
 import json
 import re
 import uuid
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any
 
 from src.infrastructure.db.models import (
     CheckExecutionRecord,
@@ -92,7 +93,8 @@ def _digest(value: Any) -> str:
 
 
 def _utc(value: datetime) -> datetime:
-    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    aware = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    return aware.astimezone(timezone.utc)
 
 
 def _duration_seconds(value: Any) -> float | None:
@@ -136,8 +138,11 @@ class EvidenceQualificationInput:
     inventory_device_ids: tuple[str | None, ...]
     output_statuses: tuple[str, ...]
     observed_ats: tuple[datetime, ...]
-    observation_count: int
-    assessment_mode: str
+    output_reasons: tuple[str | None, ...] = ()
+    # Kept as compatibility-only inputs for older callers. Raw-evidence
+    # qualification must never depend on Parser or Observation results.
+    observation_count: int | None = None
+    assessment_mode: str | None = None
     policy_snapshot: Mapping[str, Any] = field(default_factory=dict)
     profile_version_id: str | None = None
     profile_digest: str | None = None
@@ -172,6 +177,8 @@ class CoverageDecisionInput:
     expected_entity_count: int | None = None
     denominator_ref: Mapping[str, Any] = field(default_factory=dict)
     evidence_refs: tuple[str, ...] = ()
+    evaluable: bool = True
+    evaluation_failure_reason_codes: tuple[str, ...] = ()
     decided_at: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
@@ -209,9 +216,13 @@ class EvidenceQualificationService:
             )
         )
         empty_result = EvidenceQualificationService._empty_result(
-            observation_count=max(0, int(data.observation_count)),
             output_status=output,
+            output_statuses=data.output_statuses,
+            output_reasons=data.output_reasons,
             policy=dict(policy.get("empty_result_policy") or {}),
+            applicability_decision=dict(
+                policy.get("applicability_decision") or {}
+            ),
             reasons=reasons,
         )
         policy_digest = _digest(policy)
@@ -383,25 +394,61 @@ class EvidenceQualificationService:
     @staticmethod
     def _empty_result(
         *,
-        observation_count: int,
         output_status: str,
+        output_statuses: Iterable[str],
+        output_reasons: Iterable[str | None],
         policy: Mapping[str, Any],
+        applicability_decision: Mapping[str, Any],
         reasons: list[str],
     ) -> str:
-        if observation_count > 0:
-            return "non_empty"
-        configured = str(policy.get("classification") or "").strip()
-        if configured in {
-            "expected_empty",
-            "not_applicable",
-            "unsupported",
-        } and output_status in {"empty", "unsupported"}:
-            return configured
+        if output_status == "complete":
+            return "not_evaluated"
         if output_status == "unsupported":
-            reasons.append("unsupported_without_approved_policy")
+            reasons.append("unsupported_command_cannot_be_not_applicable")
             return "unsupported_unapproved"
-        reasons.append("zero_records_unapproved")
-        return "invalid"
+        if output_status == "empty":
+            normalized_statuses = tuple(
+                _OUTPUT_STATUS_MAP.get(str(item or "").strip(), "unknown")
+                for item in output_statuses
+            )
+            if not normalized_statuses or any(
+                item != "empty" for item in normalized_statuses
+            ):
+                reasons.append("mixed_data_and_empty_output")
+                return "invalid"
+            selected = dict(
+                applicability_decision.get("selected_policy") or {}
+            )
+            classification = str(
+                selected.get("empty_result_classification") or "invalid"
+            ).strip()
+            approved_patterns = {
+                str(item)
+                for item in selected.get("legal_empty_patterns") or []
+                if str(item)
+            }
+            observed_reasons = tuple(
+                str(item) for item in output_reasons if item is not None and str(item)
+            )
+            governed = bool(selected.get("policy_version_id"))
+            if governed:
+                if (
+                    classification in {"expected_empty", "not_applicable"}
+                    and len(observed_reasons) == len(normalized_statuses)
+                    and set(observed_reasons).issubset(approved_patterns)
+                ):
+                    reasons.append("governed_legal_empty_evidence_matched")
+                    return classification
+                reasons.append("empty_output_not_authorized_by_frozen_applicability")
+                return "invalid"
+
+            configured = str(policy.get("classification") or "").strip()
+            if configured in {"expected_empty", "not_applicable"}:
+                reasons.append("legacy_empty_result_policy_used")
+                return configured
+            reasons.append("empty_output_without_approved_policy")
+            return "invalid"
+        return "not_evaluated"
 
 
 class CoverageDecisionService:
@@ -437,7 +484,19 @@ class CoverageDecisionService:
             or denominator_ref.get("model")
             or ""
         )
-        if basis == "non_exhaustive":
+        if not data.evaluable:
+            status = "not_evaluable"
+            reasons.extend(
+                [
+                    "coverage_not_evaluable",
+                    *(
+                        str(item)
+                        for item in data.evaluation_failure_reason_codes
+                        if str(item)
+                    ),
+                ]
+            )
+        elif basis == "non_exhaustive":
             status = "unbounded"
             reasons.append("coverage_non_exhaustive")
         elif basis == "unknown":
@@ -511,6 +570,7 @@ class CoverageDecisionService:
             "missing_entity_sample": missing[:100],
             "unexpected_entity_sample": unexpected[:100],
             "reason_codes": list(dict.fromkeys(reasons)),
+            "evaluable": bool(data.evaluable),
             "policy_digest": policy_digest,
             "evidence_refs": sorted(set(data.evidence_refs)),
             "decided_at": decided_at.isoformat(),

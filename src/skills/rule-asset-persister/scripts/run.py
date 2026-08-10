@@ -17,8 +17,15 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.core.observation.repository import ObservationContractRepository  # noqa: E402
 from src.core.patrol.change_policy_repository import ChangePolicyRepository  # noqa: E402
 from src.core.patrol.event_rules import EventRuleRepository  # noqa: E402
-from src.core.rule_control.replay_gate import evaluate_historical_replay_gate  # noqa: E402
+from src.core.rule_control.asset_requirements import (  # noqa: E402
+    evaluate_requirement_replay_gate,
+    normalize_rule_asset_requirements,
+    rule_asset_composition_errors,
+)
 from src.core.rule_control.repository import RuleGenerationJobRepository  # noqa: E402
+from src.core.rule_control.source_scope import (  # noqa: E402
+    require_current_rule_generation_context,
+)
 from src.infrastructure.db.models import (  # noqa: E402
     EventRuleVersionRecord,
     RuleGenerationContextRecord,
@@ -145,7 +152,15 @@ def _event_rule_validation_report(
     if not isinstance(synthetic, dict):
         synthetic = {"success": False, "error": "event_rule_validation must be an object"}
     replay = params.get("event_rule_replay") or params.get("historical_replay")
-    replay_required = params.get("require_event_rule_replay", True) is not False
+    requirements = normalize_rule_asset_requirements(
+        params.get("rule_asset_requirements")
+    )
+    if "require_event_rule_replay" in params:
+        replay_required = params.get("require_event_rule_replay") is not False
+    elif params.get("rule_asset_requirements") is not None:
+        replay_required = requirements["requires_historical_replay"] is True
+    else:
+        replay_required = True
     max_daily_events = params.get("max_estimated_daily_event_count")
 
     replay_errors: list[str] = []
@@ -187,6 +202,7 @@ def _event_rule_validation_report(
         "synthetic_validation": synthetic,
         "historical_replay": replay if isinstance(replay, dict) else None,
         "replay_required": replay_required,
+        "asset_requirements": requirements,
     }
     if replay_errors:
         report["errors"] = replay_errors
@@ -355,6 +371,7 @@ def _persist_change_policy(
                 "asset_id": persisted["policy_id"],
                 "asset_version_id": persisted["version_id"],
                 "asset_digest": persisted["digest"],
+                "observation_type": str(observation_type),
                 "job": job,
             }
         )
@@ -429,6 +446,19 @@ def _persist_event_rules(
                 "asset_id": rule_id,
                 "asset_version_id": version_id,
                 "asset_digest": digest,
+                "evaluation_scope": str(
+                    rule.get("evaluation_scope") or "both"
+                ),
+                "event_class": str(rule.get("event_class") or "fault"),
+                "event_type": str(rule.get("event_type") or ""),
+                "observation_types": [
+                    str(item)
+                    for item in dict(rule.get("condition") or {}).get(
+                        "observation_types"
+                    )
+                    or []
+                    if str(item).strip()
+                ],
                 "job": job,
             }
         )
@@ -456,6 +486,14 @@ def _context_gate(params: dict[str, Any], assets: list[dict[str, Any]]) -> dict[
             "context_digest": None,
             "privacy": {"success": not llm_generated, "raw_cli_included": False},
         }
+    if not context_digest:
+        return {
+            "success": False,
+            "mode": "immutable_dataset_context",
+            "context_id": context_id,
+            "context_digest": None,
+            "errors": ["immutable context digest is required"],
+        }
     with get_db_session() as db:
         row = db.get(RuleGenerationContextRecord, context_id)
         if row is None:
@@ -466,14 +504,25 @@ def _context_gate(params: dict[str, Any], assets: list[dict[str, Any]]) -> dict[
                 "errors": ["rule generation context not found"],
             }
         privacy = dict(row.privacy_report_json or {})
-        digest_matches = not context_digest or context_digest == str(row.context_digest)
-        success = (
-            privacy.get("success") is True
-            and privacy.get("raw_cli_included") is False
-            and digest_matches
-        )
+        try:
+            integrity = require_current_rule_generation_context(
+                db,
+                row,
+                expected_context_digest=context_digest,
+            )
+        except (KeyError, ValueError) as exc:
+            return {
+                "success": False,
+                "mode": "immutable_dataset_context",
+                "context_id": context_id,
+                "context_digest": row.context_digest,
+                "offline_job_id": row.offline_job_id,
+                "dataset_ids": list(row.dataset_ids_json or []),
+                "privacy": privacy,
+                "errors": [str(exc)],
+            }
         return {
-            "success": success,
+            "success": True,
             "mode": "immutable_dataset_context",
             "context_id": row.id,
             "context_digest": row.context_digest,
@@ -483,7 +532,8 @@ def _context_gate(params: dict[str, Any], assets: list[dict[str, Any]]) -> dict[
                 dict(row.context_json or {}).get("replay_run_ids") or []
             ),
             "privacy": privacy,
-            "errors": [] if success else ["immutable context privacy or digest gate failed"],
+            "source_integrity": integrity,
+            "errors": [],
         }
 
 
@@ -491,6 +541,9 @@ def _bundle_validation_report(
     params: dict[str, Any],
     assets: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    requirements = normalize_rule_asset_requirements(
+        params.get("rule_asset_requirements")
+    )
     counts: dict[str, int] = {}
     child_validation_success = True
     child_jobs: list[dict[str, Any]] = []
@@ -510,16 +563,27 @@ def _bundle_validation_report(
                 "validation_success": report.get("success") is True,
             }
         )
-    completeness = (
-        counts.get("OBSERVATION_CONTRACT") == 1
-        and int(counts.get("CHANGE_POLICY") or 0) >= 1
-        and int(counts.get("EVENT_RULE") or 0) >= 1
+    completeness_errors = rule_asset_composition_errors(
+        counts=counts,
+        requirements=requirements,
+        change_policy_roles=[
+            item
+            for item in assets
+            if str(item.get("asset_type") or "") == "CHANGE_POLICY"
+        ],
+        event_rule_roles=[
+            item
+            for item in assets
+            if str(item.get("asset_type") or "") == "EVENT_RULE"
+        ],
     )
+    completeness = not completeness_errors
     replay = params.get("event_rule_replay") or params.get("historical_replay")
     context_gate = _context_gate(params, assets)
-    replay_gate = evaluate_historical_replay_gate(
-        replay if isinstance(replay, dict) else None,
-        context_gate,
+    replay_gate = evaluate_requirement_replay_gate(
+        requirements=requirements,
+        replay=replay if isinstance(replay, dict) else None,
+        context_gate=context_gate,
     )
     replay_success = replay_gate["success"] is True
     success = (
@@ -527,7 +591,7 @@ def _bundle_validation_report(
     )
     blockers: list[str] = []
     if not completeness:
-        blockers.append("bundle must contain one Contract, one or more Policies and EventRules")
+        blockers.extend(completeness_errors)
     if not child_validation_success:
         blockers.append("one or more child assets failed deterministic validation")
     if not replay_success:
@@ -542,11 +606,13 @@ def _bundle_validation_report(
             "asset_counts": counts,
             "child_validation_success": child_validation_success,
             "completeness": completeness,
+            "asset_requirements": requirements,
             "replay_gate": replay_gate,
             "blockers": blockers,
         },
         "context_gate": context_gate,
         "historical_replay": replay if isinstance(replay, dict) else None,
+        "asset_requirements": requirements,
         "children": child_jobs,
         "agent_loop": _merge_agent_loops(
             *[
@@ -586,6 +652,9 @@ def run_persist(params: dict[str, Any]) -> dict[str, Any]:
     observation_types = _bundle_observation_types(params)
     primary_observation_type = observation_types[0] if len(observation_types) == 1 else None
     job_repo = RuleGenerationJobRepository()
+    requirements = normalize_rule_asset_requirements(
+        params.get("rule_asset_requirements")
+    )
     bundle = job_repo.create_job(
         job_type="RULE_ASSET_BUNDLE",
         source_ref=source_ref,
@@ -593,12 +662,17 @@ def run_persist(params: dict[str, Any]) -> dict[str, Any]:
             "source_ref": source_ref,
             "observation_type": primary_observation_type,
             "observation_types": observation_types,
-            "asset_scope": "single_observation" if len(observation_types) == 1 else "multi_observation",
+            "asset_scope": (
+                "single_observation"
+                if len(observation_types) == 1
+                else "multi_observation"
+            ),
             "command": params.get("command"),
             "vendor": params.get("vendor"),
             "model": params.get("model"),
             "context_id": params.get("rule_generation_context_id"),
             "context_digest": params.get("rule_generation_context_digest"),
+            "asset_requirements": requirements,
             "child_job_ids": [],
         },
         validation_report={"success": False, "stage": "persisting_candidates"},
@@ -635,6 +709,7 @@ def run_persist(params: dict[str, Any]) -> dict[str, Any]:
         payload.update(
             child_job_ids=child_job_ids,
             asset_counts=(validation_report.get("bundle_gate") or {}).get("asset_counts") or {},
+            asset_requirements=requirements,
             offline_job_id=(validation_report.get("context_gate") or {}).get("offline_job_id"),
             dataset_ids=(validation_report.get("context_gate") or {}).get("dataset_ids") or [],
         )

@@ -11,6 +11,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
+from src.core.check_items.report_contract import (
+    PARSER_VALIDATION,
+    SHADOW_VALIDATION,
+    normalize_report_purpose,
+    report_purpose_for_patrol_mode,
+)
 from src.core.collection import ExecutionPlanRepository
 from src.core.patrol.modes import PRODUCTION_MODE, normalize_patrol_mode
 from src.core.patrol.run_coordinator import PatrolRunCoordinator
@@ -53,6 +59,10 @@ class StartPatrolCommand:
     check_item_ids_by_device: dict[str, list[str]] | None = None
     profile_version_ids_by_device: dict[str, str | None] | None = None
     actor: str = "device-management"
+    report_purpose: str | None = None
+    scope_contract: dict[str, Any] | None = None
+    scope_exclusions: dict[str, dict[str, Any]] | None = None
+    scope_not_applicable: dict[str, dict[str, Any]] | None = None
 
 
 class StartPatrolHandler:
@@ -82,6 +92,20 @@ class StartPatrolHandler:
     def handle(self, command: StartPatrolCommand) -> dict[str, Any]:
         if command.launch_mode not in {"workflow", "direct"}:
             raise ValueError("launch_mode must be workflow or direct")
+        patrol_mode = normalize_patrol_mode(command.mode)
+        report_purpose = normalize_report_purpose(
+            command.report_purpose,
+            default=report_purpose_for_patrol_mode(patrol_mode),
+        )
+        if (
+            patrol_mode == PARSER_VALIDATION
+            and report_purpose
+            not in {PARSER_VALIDATION, SHADOW_VALIDATION}
+        ):
+            raise ValueError(
+                "non-production parser patrols must use "
+                "report_purpose=parser_validation or shadow_validation"
+            )
         patrol_batch_id = self._batch_id_factory()
         check_item_ids_by_device = {
             str(device_id): tuple(
@@ -129,7 +153,8 @@ class StartPatrolHandler:
                 patrol_batch_id=patrol_batch_id,
                 workflow_name=command.workflow_name,
                 launch_mode=command.launch_mode,
-                patrol_mode=command.mode,
+                patrol_mode=patrol_mode,
+                report_purpose=report_purpose,
                 save_baseline=command.save_baseline,
                 ticket_id=command.ticket_id,
                 target_count=command.target_count,
@@ -177,7 +202,8 @@ class StartPatrolHandler:
             "target_count": command.target_count,
             "queued_count": len(planned_rows),
             "launched_count": 0,
-            "mode": command.mode,
+            "mode": patrol_mode,
+            "report_purpose": report_purpose,
             "save_baseline": command.save_baseline,
             "ticket_id": command.ticket_id,
             "patrol_batch_id": patrol_batch_id,
@@ -274,6 +300,22 @@ class StartPatrolHandler:
             inventory_snapshot_digest=str(inventory["digest"]),
             current_observed_at=datetime.now(timezone.utc),
             actor=command.actor,
+            report_purpose=command.report_purpose,
+            scope_contract=(
+                dict(command.scope_contract)
+                if command.scope_contract is not None
+                else dict(
+                    (command.target_snapshot or {}).get(
+                        "scope_contract"
+                    )
+                    or {}
+                )
+                or None
+            ),
+            scope_exclusions=dict(command.scope_exclusions or {}),
+            scope_not_applicable=dict(
+                command.scope_not_applicable or {}
+            ),
         )
         preview = self._effective_plan().preview(request)
         actions_by_device: dict[str, list[dict[str, Any]]] = {}
@@ -508,11 +550,20 @@ class DispatchPatrolBatchHandler:
                         patrol_batch_id=patrol_batch_id,
                         **launch_fields,
                     )
-                    self._batches.mark_target_dispatched(
+                    committed = self._batches.mark_target_dispatched(
                         str(target["target_id"]),
                         claim_token=str(target["claim_token"]),
                         **launch_fields,
                     )
+                    if not committed:
+                        self._cancel_uncommitted_launch(
+                            launch_mode=str(target["launch_mode"]),
+                            dispatch_id=dispatch_id,
+                            patrol_batch_id=patrol_batch_id,
+                            device_id=str(target["device_id"]),
+                            runtime_manifest_id=plan_json.get("runtime_manifest_id"),
+                        )
+                        continue
                     dispatched += 1
                 except Exception as exc:
                     failure_code = f"{target['launch_mode']}_launch_failed"
@@ -525,12 +576,14 @@ class DispatchPatrolBatchHandler:
                             )
                         except Exception:
                             pass
-                    self._batches.mark_target_dispatch_failed(
+                    failure_recorded = self._batches.mark_target_dispatch_failed(
                         str(target["target_id"]),
                         claim_token=str(target["claim_token"]),
                         failure_code=failure_code,
                         error=str(exc),
                     )
+                    if not failure_recorded:
+                        continue
                     if plan_json.get("runtime_manifest_id"):
                         try:
                             if self._check_item_finalizer is None:
@@ -592,6 +645,41 @@ class DispatchPatrolBatchHandler:
         from src.core.workflows.engine import WorkflowEngine
 
         return WorkflowEngine.start(template_name, context, **kwargs)
+
+    def _cancel_uncommitted_launch(
+        self,
+        *,
+        launch_mode: str,
+        dispatch_id: str,
+        patrol_batch_id: str,
+        device_id: str,
+        runtime_manifest_id: str | None,
+    ) -> None:
+        reason = "batch cancellation won the dispatch commit race"
+        if launch_mode == "workflow":
+            from src.core.workflows.engine import WorkflowEngine
+
+            WorkflowEngine.cancel_run(
+                dispatch_id,
+                actor="batch-cancellation-fence",
+                reason=reason,
+            )
+        else:
+            from src.core.celery_tasks.celery_app import celery
+
+            celery.control.revoke(dispatch_id, terminate=False)
+        if runtime_manifest_id:
+            if self._check_item_finalizer is None:
+                from src.core.check_items import CheckItemRunFinalizer
+
+                self._check_item_finalizer = CheckItemRunFinalizer()
+            self._check_item_finalizer.fail_device(
+                patrol_batch_id=patrol_batch_id,
+                device_id=device_id,
+                reason_code="patrol_batch_cancelled",
+                status="cancelled",
+                evidence_refs=(dispatch_id,),
+            )
 
     @staticmethod
     def _launch_task(**kwargs: Any) -> str:

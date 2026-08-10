@@ -10,6 +10,7 @@ interface LifecycleActionDialogProps {
   blockers?: string[]
   danger?: boolean
   loading?: boolean
+  reasonRequired?: boolean
   onCancel: () => void
   onConfirm: (reason: string) => void
 }
@@ -23,6 +24,7 @@ const LifecycleActionDialog: React.FC<LifecycleActionDialogProps> = ({
   blockers = [],
   danger = false,
   loading = false,
+  reasonRequired = true,
   onCancel,
   onConfirm,
 }) => {
@@ -43,7 +45,7 @@ const LifecycleActionDialog: React.FC<LifecycleActionDialogProps> = ({
       cancelText="取消"
       okButtonProps={{
         danger,
-        disabled: blocked || normalizedReason.length < 5,
+        disabled: blocked || (reasonRequired && normalizedReason.length < 5),
       }}
       confirmLoading={loading}
       onCancel={onCancel}
@@ -66,7 +68,7 @@ const LifecycleActionDialog: React.FC<LifecycleActionDialogProps> = ({
           />
         )}
         <Space direction="vertical" size={6} style={{ width: '100%' }}>
-          <Typography.Text strong>操作理由</Typography.Text>
+          <Typography.Text strong>{reasonRequired ? '操作理由' : '操作说明（可选）'}</Typography.Text>
           <Input.TextArea
             autoFocus
             rows={4}
@@ -74,10 +76,12 @@ const LifecycleActionDialog: React.FC<LifecycleActionDialogProps> = ({
             showCount
             value={reason}
             onChange={(event) => setReason(event.target.value)}
-            placeholder="说明变更目的、依据或回退原因（至少 5 个字符）"
+            placeholder={reasonRequired
+              ? '说明变更目的、依据或回退原因（至少 5 个字符）'
+              : '可选；操作人、时间、对象和结果会自动写入审计记录'}
           />
           <Typography.Text type="secondary">
-            操作者由当前登录会话确定，理由与结果会写入审计记录。
+            操作者由当前登录会话确定，操作对象和结果会写入审计记录。
           </Typography.Text>
         </Space>
       </Space>

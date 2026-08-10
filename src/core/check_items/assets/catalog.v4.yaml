@@ -1,0 +1,627 @@
+catalog_version: 4
+
+defaults:
+  check_item:
+    freshness_policy:
+      max_observation_age: 24h
+      max_collection_span: 8h
+      clock_skew_tolerance: 10m
+    empty_result_policy:
+      classification: invalid
+  implementation:
+    output_quality_policy:
+      profile_version: 1
+      minimum_non_whitespace_chars: 1
+      unsupported_patterns:
+        - '%\s*(?:invalid input|unrecognized command)'
+        - 'error:\s*unrecognized command'
+        - '(?:wrong|invalid) parameter found'
+        - 'unrecognized command found'
+        - 'incomplete command found'
+      command_error_patterns:
+        - 'permission denied'
+        - 'authorization failed'
+        - 'insufficient privilege'
+        - 'command execution failed'
+      truncation_patterns:
+        - '(?im)^\s*(?:%|\[)?\s*output\s+(?:was\s+)?truncated\b'
+        - '(?im)^\s*\[\s*truncated\s*\]\s*$'
+        - '(?im)^\s*\.\.\.\s+(?:output\s+)?omitted\s+\.\.\.\s*$'
+      paging_patterns:
+        - '(?im)(?:--|----)\s*more\s*(?:--|----)'
+        - '(?im)^\s*press\s+(?:any\s+key|space|enter)\s+to\s+continue'
+        - '(?im)^\s*more:\s*<space>'
+
+check_items:
+  - id: device.version
+    version: 2
+    name: Device version and inventory
+    category: device
+    description: Preserve software, platform and chassis identity for audit and comparison.
+    result_mode: structured
+    assessment_mode: evidence
+    canonical_contract:
+      entity_type: device
+      identity_dimensions: [device_id]
+      observations:
+        - observation_type: device.software.version
+          semantic_type: state
+        - observation_type: device.hardware.model
+          semantic_type: state
+    report_projection: device_inventory
+    applicability: {}
+    coverage_policy:
+      model: fixed
+      expected_count: 1
+      require_rule_evaluation: false
+    status: active
+
+  - id: system.cpu_usage
+    version: 3
+    name: CPU utilization
+    category: system
+    description: Evaluate system, slot or processor CPU utilization.
+    result_mode: structured
+    assessment_mode: health
+    canonical_contract:
+      entity_type: cpu_scope
+      identity_dimensions: [scope, scope_id]
+      identity_dimension_rules:
+        scope:
+          kind: enum
+          allowed_values: [system, slot, processor]
+        scope_id:
+          kind: identifier
+      observations:
+        - observation_type: device.cpu.utilization
+          semantic_type: gauge
+          unit: percent
+          dimensions: [window]
+          mapping_guidance: Map only measured CPU utilization values; window identifies the sample interval.
+    report_projection: cpu
+    applicability: {}
+    coverage_policy:
+      model: derived_entity_set
+      source: previous_qualified_observation
+      first_observation: unable_to_determine
+    status: active
+
+  - id: system.memory_usage
+    version: 3
+    name: Memory utilization
+    category: system
+    description: Evaluate system or slot memory capacity and utilization.
+    result_mode: structured
+    assessment_mode: health
+    canonical_contract:
+      entity_type: memory_scope
+      identity_dimensions: [scope, scope_id]
+      identity_dimension_rules:
+        scope:
+          kind: enum
+          allowed_values: [system, slot, processor]
+        scope_id:
+          kind: identifier
+      observations:
+        - observation_type: device.memory.utilization
+          semantic_type: gauge
+          unit: percent
+        - observation_type: device.memory.used
+          semantic_type: gauge
+          unit: bytes
+        - observation_type: device.memory.total
+          semantic_type: gauge
+          unit: bytes
+    report_projection: memory
+    applicability: {}
+    coverage_policy:
+      model: derived_entity_set
+      source: previous_qualified_observation
+      first_observation: unable_to_determine
+    status: active
+
+  - id: interface.oper_status
+    version: 3
+    name: Interface operational status
+    category: interface
+    description: Evaluate current physical and protocol state for network interfaces.
+    result_mode: structured
+    assessment_mode: health
+    canonical_contract:
+      entity_type: interface
+      identity_dimensions: [interface]
+      observations:
+        - observation_type: interface.oper_status
+          semantic_type: state
+          canonical_field: status
+          required: true
+          mapping_guidance: Map the physical or forwarding operational state reported for the interface.
+          policy_constraints:
+            allowed_compare_modes: [state_transition, enum_transition]
+        - observation_type: interface.admin_status
+          semantic_type: state
+          canonical_field: admin_status
+          required: false
+          mapping_guidance: Map only an explicit configured administrative enable or shutdown field; never infer it from protocol or link state.
+    report_projection: interface_status
+    applicability: {}
+    coverage_policy:
+      model: derived_entity_set
+      source: previous_qualified_observation
+      first_observation: unable_to_determine
+    status: active
+
+  - id: interface.optical_power
+    version: 3
+    name: Interface optical power
+    category: interface
+    description: Evaluate transceiver presence and measured receive/transmit optical power.
+    result_mode: structured
+    assessment_mode: health
+    canonical_contract:
+      entity_type: interface_optical
+      identity_dimensions: [interface, channel]
+      observations:
+        - observation_type: interface.optical.presence
+          semantic_type: state
+          canonical_field: transceiver_present
+          required: true
+          mapping_guidance: Map explicit presence/absence evidence; an empty source status may mean present only when samples prove that convention.
+          policy_constraints:
+            allowed_compare_modes: [state_transition, enum_transition]
+        - observation_type: interface.optical.rx_power
+          semantic_type: gauge
+          unit: dbm
+          canonical_field: rx_power_dbm
+          required: true
+          mapping_guidance: Map only the current receive optical-power measurement, not alarm or warning thresholds.
+          policy_constraints:
+            allowed_compare_modes: [threshold_low_and_deadband]
+            require_structured_threshold_references: true
+            required_threshold_reference_any: [low, critical_low]
+            recovery_direction: above
+            minimum_hysteresis: 2
+            deadband_bounds: {min: 2, max: 6}
+        - observation_type: interface.optical.tx_power
+          semantic_type: gauge
+          unit: dbm
+          canonical_field: tx_power_dbm
+          required: true
+          mapping_guidance: Map only the current transmit optical-power measurement, not alarm or warning thresholds.
+          policy_constraints:
+            allowed_compare_modes: [threshold_low_and_deadband]
+            require_structured_threshold_references: true
+            required_threshold_reference_any: [low, critical_low]
+            recovery_direction: above
+            minimum_hysteresis: 2
+            deadband_bounds: {min: 2, max: 6}
+    report_projection: optical_power
+    applicability:
+      capability: optical_diagnostics
+      unknown_is: unable_to_determine
+    empty_result_policy:
+      classification: not_applicable
+    coverage_policy:
+      model: derived_entity_set
+      source: previous_qualified_observation
+      first_observation: unable_to_determine
+    status: active
+
+  - id: environment.fan
+    version: 2
+    name: Fan health
+    category: environment
+    description: Evaluate fan presence and operating state.
+    result_mode: structured
+    assessment_mode: health
+    canonical_contract:
+      entity_type: environment_fan
+      identity_dimensions: [slot, fan]
+      observations:
+        - observation_type: environment.fan.state
+          semantic_type: state
+    report_projection: fan
+    applicability: {}
+    empty_result_policy:
+      classification: not_applicable
+    coverage_policy:
+      model: derived_entity_set
+      source: previous_qualified_observation
+      first_observation: unable_to_determine
+    status: active
+
+  - id: environment.power
+    version: 2
+    name: Power supply health
+    category: environment
+    description: Evaluate power-supply presence and operating state.
+    result_mode: structured
+    assessment_mode: health
+    canonical_contract:
+      entity_type: environment_power
+      identity_dimensions: [slot, power_supply]
+      observations:
+        - observation_type: environment.power.state
+          semantic_type: state
+    report_projection: power
+    applicability: {}
+    empty_result_policy:
+      classification: not_applicable
+    coverage_policy:
+      model: derived_entity_set
+      source: previous_qualified_observation
+      first_observation: unable_to_determine
+    status: active
+
+  - id: configuration.running
+    version: 2
+    name: Running configuration change
+    category: configuration
+    description: Preserve and compare normalized running configuration evidence.
+    result_mode: normalized_diff
+    assessment_mode: change
+    canonical_contract:
+      entity_type: device_configuration
+      identity_dimensions: [device_id]
+      comparison_profile: configuration
+    report_projection: configuration_change
+    applicability: {}
+    coverage_policy:
+      model: fixed
+      expected_count: 1
+      require_rule_evaluation: false
+    status: active
+
+implementations:
+  - id: h3c-device-version
+    version: 2
+    name: H3C device version
+    check_item_ids: [device.version]
+    match: {vendor: H3C}
+    commands:
+      - {command: display version, priority: 100}
+    collector: cli
+    parser_requirement: structured
+    template_scope: family
+    selection_priority: 100
+    status: active
+
+  - id: huawei-device-version
+    version: 2
+    name: Huawei device version
+    check_item_ids: [device.version]
+    match: {vendor: Huawei}
+    commands:
+      - {command: display version, priority: 100}
+    collector: cli
+    parser_requirement: structured
+    template_scope: family
+    selection_priority: 100
+    status: active
+
+  - id: cisco-device-version
+    version: 2
+    name: Cisco device version
+    check_item_ids: [device.version]
+    match: {vendor: Cisco}
+    commands:
+      - {command: show version, priority: 100}
+    collector: cli
+    parser_requirement: structured
+    template_scope: family
+    selection_priority: 100
+    status: active
+
+  - id: h3c-cpu-usage
+    version: 2
+    name: H3C CPU utilization
+    check_item_ids: [system.cpu_usage]
+    match: {vendor: H3C}
+    commands:
+      - {command: display cpu-usage, priority: 100}
+      - {command: display cpu, priority: 50}
+    collector: cli
+    parser_requirement: structured
+    template_scope: family
+    selection_priority: 100
+    status: active
+
+  - id: huawei-cpu-usage
+    version: 2
+    name: Huawei CPU utilization
+    check_item_ids: [system.cpu_usage]
+    match: {vendor: Huawei}
+    commands:
+      - {command: display cpu-usage, priority: 100}
+    collector: cli
+    parser_requirement: structured
+    template_scope: family
+    selection_priority: 100
+    status: active
+
+  - id: cisco-ios-cpu-usage
+    version: 2
+    name: Cisco IOS CPU utilization
+    check_item_ids: [system.cpu_usage]
+    match:
+      vendor: Cisco
+      families: [IOS, IOS-XE]
+    commands:
+      - {command: show processes cpu, priority: 100}
+    collector: cli
+    parser_requirement: structured
+    template_scope: family
+    selection_priority: 100
+    status: active
+
+  - id: cisco-nxos-system-resources
+    version: 2
+    name: Cisco NX-OS system resources
+    check_item_ids: [system.cpu_usage, system.memory_usage]
+    match:
+      vendor: Cisco
+      families: [NXOS, NXOS9K]
+    commands:
+      - {command: show system resources, priority: 100}
+    collector: cli
+    parser_requirement: structured
+    template_scope: family
+    selection_priority: 100
+    status: active
+
+  - id: h3c-memory-usage
+    version: 2
+    name: H3C memory utilization
+    check_item_ids: [system.memory_usage]
+    match: {vendor: H3C}
+    commands:
+      - {command: display memory, priority: 100}
+    collector: cli
+    parser_requirement: structured
+    template_scope: family
+    selection_priority: 100
+    status: active
+
+  - id: huawei-memory-usage
+    version: 2
+    name: Huawei memory utilization
+    check_item_ids: [system.memory_usage]
+    match: {vendor: Huawei}
+    commands:
+      - {command: display memory, priority: 100}
+    collector: cli
+    parser_requirement: structured
+    template_scope: family
+    selection_priority: 100
+    status: active
+
+  - id: cisco-ios-memory-usage
+    version: 2
+    name: Cisco IOS memory utilization
+    check_item_ids: [system.memory_usage]
+    match:
+      vendor: Cisco
+      families: [IOS, IOS-XE]
+    commands:
+      - {command: show processes memory, priority: 100}
+    collector: cli
+    parser_requirement: structured
+    template_scope: family
+    selection_priority: 100
+    status: active
+
+  - id: h3c-interface-status
+    version: 2
+    name: H3C interface status
+    check_item_ids: [interface.oper_status]
+    match: {vendor: H3C}
+    commands:
+      - {command: display interface brief, priority: 100}
+      - {command: display ip interface brief, priority: 50}
+    collector: cli
+    parser_requirement: structured
+    template_scope: family
+    selection_priority: 100
+    status: active
+
+  - id: huawei-interface-status
+    version: 2
+    name: Huawei interface status
+    check_item_ids: [interface.oper_status]
+    match: {vendor: Huawei}
+    commands:
+      - {command: display interface brief, priority: 100}
+      - {command: display ip interface brief, priority: 50}
+    collector: cli
+    parser_requirement: structured
+    template_scope: family
+    selection_priority: 100
+    status: active
+
+  - id: cisco-nxos-interface-status
+    version: 2
+    name: Cisco NX-OS interface status
+    check_item_ids: [interface.oper_status]
+    match:
+      vendor: Cisco
+      families: [NXOS, NXOS9K]
+    commands:
+      - {command: show interface status, priority: 100}
+    collector: cli
+    parser_requirement: structured
+    template_scope: family
+    selection_priority: 100
+    status: active
+
+  - id: cisco-ios-interface-status
+    version: 2
+    name: Cisco IOS interface status
+    check_item_ids: [interface.oper_status]
+    match:
+      vendor: Cisco
+      families: [IOS, IOS-XE]
+    commands:
+      - {command: show ip interface brief, priority: 100}
+    collector: cli
+    parser_requirement: structured
+    template_scope: family
+    selection_priority: 100
+    status: active
+
+  - id: h3c-optical-power
+    version: 2
+    name: H3C optical diagnostics
+    check_item_ids: [interface.optical_power]
+    match: {vendor: H3C}
+    commands:
+      - {command: display transceiver diagnosis interface, priority: 100}
+    collector: cli
+    parser_requirement: structured
+    template_scope: family
+    selection_priority: 100
+    status: active
+
+  - id: huawei-optical-power
+    version: 2
+    name: Huawei optical diagnostics
+    check_item_ids: [interface.optical_power]
+    match: {vendor: Huawei}
+    commands:
+      - {command: display transceiver diagnosis interface, priority: 100}
+    collector: cli
+    parser_requirement: structured
+    template_scope: family
+    selection_priority: 100
+    status: active
+
+  - id: cisco-optical-power
+    version: 2
+    name: Cisco optical diagnostics
+    check_item_ids: [interface.optical_power]
+    match: {vendor: Cisco}
+    commands:
+      - {command: show interface transceiver detail, priority: 100}
+    collector: cli
+    parser_requirement: structured
+    template_scope: family
+    selection_priority: 100
+    status: active
+
+  - id: h3c-fan-health
+    version: 2
+    name: H3C fan health
+    check_item_ids: [environment.fan]
+    match: {vendor: H3C}
+    commands:
+      - {command: display fan, priority: 100}
+    collector: cli
+    parser_requirement: structured
+    template_scope: family
+    selection_priority: 100
+    status: active
+
+  - id: huawei-fan-health
+    version: 2
+    name: Huawei fan health
+    check_item_ids: [environment.fan]
+    match: {vendor: Huawei}
+    commands:
+      - {command: display fan, priority: 100}
+    collector: cli
+    parser_requirement: structured
+    template_scope: family
+    selection_priority: 100
+    status: active
+
+  - id: cisco-fan-health
+    version: 2
+    name: Cisco fan health
+    check_item_ids: [environment.fan]
+    match: {vendor: Cisco}
+    commands:
+      - {command: show environment fan, priority: 100}
+      - {command: show env all, priority: 50}
+    collector: cli
+    parser_requirement: structured
+    template_scope: family
+    selection_priority: 100
+    status: active
+
+  - id: h3c-power-health
+    version: 2
+    name: H3C power supply health
+    check_item_ids: [environment.power]
+    match: {vendor: H3C}
+    commands:
+      - {command: display power, priority: 100}
+    collector: cli
+    parser_requirement: structured
+    template_scope: family
+    selection_priority: 100
+    status: active
+
+  - id: huawei-power-health
+    version: 2
+    name: Huawei power supply health
+    check_item_ids: [environment.power]
+    match: {vendor: Huawei}
+    commands:
+      - {command: display power, priority: 100}
+    collector: cli
+    parser_requirement: structured
+    template_scope: family
+    selection_priority: 100
+    status: active
+
+  - id: cisco-power-health
+    version: 2
+    name: Cisco power supply health
+    check_item_ids: [environment.power]
+    match: {vendor: Cisco}
+    commands:
+      - {command: show environment power, priority: 100}
+      - {command: show env all, priority: 50}
+    collector: cli
+    parser_requirement: structured
+    template_scope: family
+    selection_priority: 100
+    status: active
+
+  - id: h3c-running-configuration
+    version: 2
+    name: H3C running configuration
+    check_item_ids: [configuration.running]
+    match: {vendor: H3C}
+    commands:
+      - {command: display current-configuration, priority: 100}
+    collector: cli
+    parser_requirement: normalized_diff
+    template_scope: null
+    selection_priority: 100
+    status: active
+
+  - id: huawei-running-configuration
+    version: 2
+    name: Huawei running configuration
+    check_item_ids: [configuration.running]
+    match: {vendor: Huawei}
+    commands:
+      - {command: display current-configuration, priority: 100}
+    collector: cli
+    parser_requirement: normalized_diff
+    template_scope: null
+    selection_priority: 100
+    status: active
+
+  - id: cisco-running-configuration
+    version: 2
+    name: Cisco running configuration
+    check_item_ids: [configuration.running]
+    match: {vendor: Cisco}
+    commands:
+      - {command: show running-config, priority: 100}
+    collector: cli
+    parser_requirement: normalized_diff
+    template_scope: null
+    selection_priority: 100
+    status: active

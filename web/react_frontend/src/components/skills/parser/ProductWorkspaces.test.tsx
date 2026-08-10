@@ -169,7 +169,8 @@ describe('rule asset product workspaces', () => {
       items: [{
         check_item_id: 'system.cpu_usage',
         check_item_version_id: 'check-cpu-v1',
-        check_item_name: 'CPU 使用率',
+        check_item_name: 'CPU utilization',
+        check_item_display_name: 'CPU 使用率',
         result_mode: 'structured',
         assessment_mode: 'health',
         implementation_id: 'h3c-cpu',
@@ -202,7 +203,8 @@ describe('rule asset product workspaces', () => {
       check_item: {
         id: 'system.cpu_usage',
         version_id: 'check-cpu-v1',
-        name: 'CPU 使用率',
+        name: 'CPU utilization',
+        display_name: 'CPU 使用率',
         result_mode: 'structured',
         assessment_mode: 'health',
       },
@@ -254,6 +256,7 @@ describe('rule asset product workspaces', () => {
 
     expect(await screen.findByText('运行包装配')).toBeInTheDocument()
     expect(screen.getAllByText('CPU 使用率').length).toBeGreaterThan(0)
+    expect(screen.queryByText('CPU utilization')).not.toBeInTheDocument()
     expect(health).toHaveBeenCalledWith(expect.objectContaining({
       search: 'system.cpu_usage',
     }))
@@ -396,6 +399,13 @@ describe('rule asset product workspaces', () => {
         code: 'parser_missing',
         message: '缺少与采集实现兼容的 Active Parser。',
         remediation: '先修复 Parser 兼容范围。',
+        remediation_action: {
+          code: 'repair_parser_asset',
+          label: '处理 Parser',
+          description: '先修复 Parser 兼容范围。',
+          target_url: '/skills/parser?workspace=production&subtab=asset-production-units&command=system.cpu_usage&action=parser',
+          asset_type: 'parser_template',
+        },
       }],
       warnings: [],
       preview_digest: 'preview-blocked',
@@ -407,10 +417,11 @@ describe('rule asset product workspaces', () => {
     expect(await screen.findByText('存在 1 个发布阻断项')).toBeInTheDocument()
     expect(screen.getByText('缺少与采集实现兼容的 Active Parser。')).toBeInTheDocument()
     expect(screen.getByText('先修复 Parser 兼容范围。')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /处理 Parser/ })).toHaveLength(2)
     expect(screen.getByRole('button', { name: /保存运行包草稿/ })).toBeDisabled()
   })
 
-  it('creates a runtime bundle draft and requires an approval reason before activation', async () => {
+  it('creates a runtime bundle draft and allows optional approval notes', async () => {
     vi.spyOn(parserApi, 'coverage').mockResolvedValue({
       templates_total: 1,
       templates_active: 1,
@@ -475,6 +486,59 @@ describe('rule asset product workspaces', () => {
         version_id: 'impl-version-v1',
         name: 'H3C 版本',
       },
+      asset_requirement_profile: {
+        schema_version: 'asset-requirement-profile/v1' as const,
+        result_mode: 'structured',
+        assessment_mode: 'evidence',
+        requirements: {
+          parser_template: {
+            required: true,
+            reason_code: 'structured_output_requires_parser',
+          },
+          observation_contract: {
+            required: true,
+            reason_code: 'structured_output_requires_canonical_projection',
+          },
+          current_state_rule: {
+            required: false,
+            reason_code: 'check_item_does_not_require_current_state_evaluation',
+          },
+          change_policy: {
+            required: false,
+            reason_code: 'check_item_does_not_emit_canonical_changes',
+          },
+          event_rule: {
+            required: false,
+            reason_code: 'catalog_declares_no_required_event_outcomes',
+          },
+          comparison_profile: {
+            required: false,
+            reason_code: 'result_mode_does_not_use_text_comparison',
+          },
+          identity_policy: {
+            required: true,
+            reason_code: 'all_evidence_requires_stable_entity_identity',
+          },
+        },
+        required_asset_types: [
+          'parser_template',
+          'observation_contract',
+          'identity_policy',
+        ],
+        not_required: {
+          current_state_rule: 'check_item_does_not_require_current_state_evaluation',
+          change_policy: 'check_item_does_not_emit_canonical_changes',
+          event_rule: 'catalog_declares_no_required_event_outcomes',
+          comparison_profile: 'result_mode_does_not_use_text_comparison',
+        },
+        required_runtime_facts: [
+          'evidence_qualification',
+          'coverage_decision',
+          'check_assessment',
+          'state_observation',
+        ],
+      },
+      asset_requirement_profile_digest: 'a'.repeat(64),
       selected: {
         parser_template_ids: ['parser-v1'],
         observation_contract_ids: ['contract-v1'],
@@ -549,6 +613,9 @@ describe('rule asset product workspaces', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /校验并装配/ }))
     expect(await screen.findByText('运行包满足发布前置条件')).toBeInTheDocument()
+    expect(screen.getByText('资产需求画像')).toBeInTheDocument()
+    expect(screen.getByText('IdentityPolicy')).toBeInTheDocument()
+    expect(screen.getByText('不适用资产')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /保存运行包草稿/ }))
     await waitFor(() => expect(assemble).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -560,17 +627,12 @@ describe('rule asset product workspaces', () => {
     ))
 
     const activateButton = await screen.findByRole('button', { name: /审批激活/ })
-    expect(activateButton).toBeDisabled()
-    fireEvent.change(
-      screen.getByPlaceholderText('填写兼容范围、验证证据和本次发布理由'),
-      { target: { value: '样本与 canonical 语义复核通过' } },
-    )
     expect(activateButton).toBeEnabled()
     fireEvent.click(activateButton)
 
     await waitFor(() => expect(activate).toHaveBeenCalledWith(
       'bundle-version-1',
-      '样本与 canonical 语义复核通过',
+      '',
       expect.stringMatching(/^runtime-bundle-activate-/),
     ))
   })
@@ -651,6 +713,65 @@ describe('rule asset product workspaces', () => {
     expect(await screen.findByText('试运行通过，请检查影响后批准写入')).toBeInTheDocument()
   })
 
+  it('shows the selected datasets and lets a pending backfill rerun before commit', async () => {
+    vi.spyOn(parserApi, 'coverage').mockResolvedValue({
+      templates_total: 1,
+      templates_active: 1,
+      jobs_total: 0,
+      jobs_pending: 0,
+      missing_candidates: 0,
+      repair_candidates: 0,
+      command_aliases: 0,
+      device_profiles: 0,
+      identity_signatures: 0,
+      auto_dispatch_enabled: true,
+      production_open_jobs: 0,
+      pending_sanitization_samples: 0,
+      sanitized_samples: 0,
+      sanitization_failed_samples: 0,
+      backfills_pending_approval: 1,
+      backfills_failed: 0,
+      alert_count: 0,
+      blocked_by_parser_ratio_24h: 0,
+      alerts: [],
+    })
+    vi.spyOn(parserApi, 'backfills').mockResolvedValue({
+      items: [{
+        id: 'backfill-pending-1',
+        template_id: 'tpl-optical-1',
+        status: 'pending_approval',
+        dry_run: true,
+        filters_json: {
+          dataset_ids: ['offline-q1', 'offline-q2'],
+          run_modes: ['parser_validation'],
+        },
+        summary_json: { snapshot_count: 2, observation_count: 16 },
+        requested_by: 'admin',
+        created_at: '2026-08-10T12:00:00Z',
+      }],
+      total: 1,
+      limit: 25,
+      offset: 0,
+    })
+    const dryRunBackfill = vi.spyOn(parserApi, 'dryRunBackfill').mockResolvedValue({
+      job_id: 'backfill-pending-1',
+      status: 'pending_approval',
+      summary: { snapshot_count: 2, observation_count: 16, failed_count: 0 },
+    })
+
+    renderWorkspace(
+      <CoverageBackfillWorkspace />,
+      ['/skills/parser?workspace=runtime&subtab=coverage-backfill&action=backfill'],
+    )
+
+    expect(await screen.findByText(/范围：2 个数据集/)).toBeInTheDocument()
+    expect(screen.getByText(/offline-q1、offline-q2/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /重新试运行/ }))
+
+    await waitFor(() => expect(dryRunBackfill).toHaveBeenCalledWith('backfill-pending-1'))
+    expect(screen.getByRole('button', { name: /批准写入/ })).toBeEnabled()
+  })
+
   it('presents governance actions as an auditable timeline', async () => {
     vi.spyOn(parserApi, 'approvalAudit').mockResolvedValue({
       items: [{
@@ -680,5 +801,258 @@ describe('rule asset product workspaces', () => {
     expect(screen.getByText('规则资产审计')).toBeInTheDocument()
     expect(screen.getAllByText('批准发布').length).toBeGreaterThan(0)
     expect(screen.getByText(/operator/)).toBeInTheDocument()
+  })
+
+  it('shows frozen scope and stage evidence in the rollout workspace', async () => {
+    vi.spyOn(parserApi, 'coverage').mockResolvedValue({
+      templates_total: 0,
+      templates_active: 0,
+      jobs_total: 0,
+      jobs_pending: 0,
+      missing_candidates: 0,
+      repair_candidates: 0,
+      command_aliases: 0,
+      device_profiles: 0,
+      identity_signatures: 0,
+      auto_dispatch_enabled: true,
+      production_open_jobs: 0,
+      pending_sanitization_samples: 0,
+      sanitized_samples: 0,
+      sanitization_failed_samples: 0,
+      backfills_pending_approval: 0,
+      backfills_failed: 0,
+      alert_count: 0,
+      blocked_by_parser_ratio_24h: 0,
+      alerts: [],
+    })
+    const campaign = {
+      id: 'campaign-1',
+      idempotency_key: 'campaign-create-1',
+      name: '西安核心网络 CPU 首批发布',
+      status: 'shadow' as const,
+      current_stage: 'shadow',
+      target_manifest_json: {
+        matrix: [{
+          device_id: 'device-1',
+          check_item_version_id: 'check-cpu-v1',
+          implementation_version_id: 'impl-cpu-v1',
+          runtime_bundle_version_id: 'bundle-cpu-v1',
+        }],
+      },
+      target_manifest_digest: 'a'.repeat(64),
+      runtime_bundle_refs_json: [{ version_id: 'bundle-cpu-v1', digest: 'b'.repeat(64) }],
+      runtime_bundle_digest: 'c'.repeat(64),
+      comparison_context_ids_json: ['context-1'],
+      comparison_context_digest: 'd'.repeat(64),
+      baseline_window_json: {
+        start_at: '2026-07-01T00:00:00Z',
+        end_at: '2026-07-28T00:00:00Z',
+      },
+      thresholds_json: {},
+      rollback_plan_json: { mode: 'legacy_route', verified: true },
+      lock_version: 3,
+      created_by: 'maker',
+      frozen_by: 'maker',
+      created_at: '2026-07-29T10:00:00Z',
+      updated_at: '2026-07-29T10:05:00Z',
+      attempts: [{
+        id: 'attempt-1',
+        campaign_id: 'campaign-1',
+        stage: 'shadow',
+        attempt_number: 1,
+        percentage: 0,
+        status: 'running' as const,
+        target_manifest_digest: 'a'.repeat(64),
+        runtime_bundle_digest: 'c'.repeat(64),
+        comparison_context_digest: 'd'.repeat(64),
+        baseline_window_json: {},
+        thresholds_json: {},
+        evidence_refs_json: [],
+        blockers_json: [],
+        created_at: '2026-07-29T10:05:00Z',
+        started_at: '2026-07-29T10:06:00Z',
+      }],
+      stage_executions: [{
+        id: 'stage-execution-1',
+        campaign_id: 'campaign-1',
+        stage_attempt_id: 'attempt-1',
+        execution_mode: 'snapshot_replay' as const,
+        status: 'running' as const,
+        selection_manifest_digest: 'e'.repeat(64),
+        selection_manifest_json: {
+          schema_version: 'rollout-selection/v1',
+          stage: 'shadow',
+          targets: [{
+            target_key: 'device-1:check-cpu-v1',
+            device_id: 'device-1',
+            check_item_version_id: 'check-cpu-v1',
+          }],
+        },
+        source_snapshot_ids_json: ['snapshot-1', 'snapshot-2'],
+        snapshot_set_digest: 'f'.repeat(64),
+        fact_high_watermark: '2026-07-29T10:06:00Z',
+        worker_owner: 'worker-1',
+        heartbeat_at: '2026-07-29T10:07:00Z',
+        attempt_count: 1,
+        created_at: '2026-07-29T10:05:00Z',
+        started_at: '2026-07-29T10:06:00Z',
+        updated_at: '2026-07-29T10:07:00Z',
+      }],
+      current_attempt: undefined as any,
+      next_action: 'await_stage_execution',
+      stage_sequence: ['shadow', 'canary_5', 'canary_20', 'canary_50', 'full_100', 'observing'],
+    }
+    campaign.current_attempt = campaign.attempts[0]
+    vi.spyOn(parserApi, 'rolloutCampaigns').mockResolvedValue({
+      items: [campaign],
+      total: 1,
+      page: 1,
+      page_size: 25,
+      page_count: 1,
+      summary: {
+        total: 1,
+        status_counts: { shadow: 1 },
+        active: 1,
+        awaiting_approval: 0,
+        paused: 0,
+        rolled_back: 0,
+      },
+    })
+    vi.spyOn(parserApi, 'getRolloutCampaign').mockResolvedValue(campaign)
+    vi.spyOn(parserApi, 'getRolloutStageExecution').mockResolvedValue({
+      ...campaign.stage_executions[0],
+      projections: [],
+      comparison_evidence: null,
+    })
+
+    renderWorkspace(
+      <CoverageBackfillWorkspace />,
+      ['/skills/parser?workspace=runtime&subtab=coverage-backfill&action=rollout'],
+    )
+
+    expect(await screen.findByText('西安核心网络 CPU 首批发布')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '渐进发布' })).toHaveAttribute('aria-selected', 'true')
+    fireEvent.click(screen.getByRole('button', { name: /查看详情/ }))
+    expect(await screen.findByText('阶段执行中')).toBeInTheDocument()
+    expect(screen.getAllByText('影子验证').length).toBeGreaterThan(0)
+    const targetLabel = screen.getByText('目标对')
+    expect(targetLabel.closest('th')?.nextElementSibling).toHaveTextContent('1')
+    expect(screen.getByText('阶段执行实例')).toBeInTheDocument()
+    expect(screen.getByText('同源回放')).toBeInTheDocument()
+  })
+
+  it('starts a rollout stage with explicit live capture mode', async () => {
+    vi.spyOn(parserApi, 'coverage').mockResolvedValue({
+      templates_total: 0,
+      templates_active: 0,
+      jobs_total: 0,
+      jobs_pending: 0,
+      missing_candidates: 0,
+      repair_candidates: 0,
+      command_aliases: 0,
+      device_profiles: 0,
+      identity_signatures: 0,
+      auto_dispatch_enabled: true,
+      production_open_jobs: 0,
+      pending_sanitization_samples: 0,
+      sanitized_samples: 0,
+      sanitization_failed_samples: 0,
+      backfills_pending_approval: 0,
+      backfills_failed: 0,
+      alert_count: 0,
+      blocked_by_parser_ratio_24h: 0,
+      alerts: [],
+    })
+    const campaign = {
+      id: 'campaign-live-1',
+      idempotency_key: 'campaign-live-create-1',
+      name: '接口状态实时影子验证',
+      status: 'target_frozen' as const,
+      current_stage: 'target_frozen',
+      target_manifest_json: {
+        matrix: [{
+          device_id: 'device-1',
+          check_item_version_id: 'check-interface-v1',
+          implementation_version_id: 'impl-interface-v1',
+          baseline_route: { mode: 'no_prior_production' },
+          candidate_runtime_bundle_version_id: 'bundle-interface-v1',
+        }],
+      },
+      target_manifest_digest: 'a'.repeat(64),
+      runtime_bundle_refs_json: [{
+        version_id: 'bundle-interface-v1',
+        digest: 'b'.repeat(64),
+      }],
+      runtime_bundle_digest: 'c'.repeat(64),
+      comparison_context_ids_json: [],
+      comparison_context_digest: 'd'.repeat(64),
+      baseline_window_json: {},
+      thresholds_json: {},
+      rollback_plan_json: {
+        mode: 'no_prior_production',
+        verified: true,
+      },
+      lock_version: 1,
+      created_by: 'maker',
+      frozen_by: 'maker',
+      created_at: '2026-07-30T10:00:00Z',
+      updated_at: '2026-07-30T10:05:00Z',
+      attempts: [],
+      stage_executions: [],
+      current_attempt: undefined,
+      next_action: 'start_stage',
+      stage_sequence: [
+        'shadow',
+        'canary_5',
+        'canary_20',
+        'canary_50',
+        'full_100',
+        'observing',
+      ],
+    }
+    vi.spyOn(parserApi, 'rolloutCampaigns').mockResolvedValue({
+      items: [campaign],
+      total: 1,
+      page: 1,
+      page_size: 25,
+      page_count: 1,
+      summary: {
+        total: 1,
+        status_counts: { target_frozen: 1 },
+        active: 1,
+        awaiting_approval: 0,
+        paused: 0,
+        rolled_back: 0,
+      },
+    } as any)
+    vi.spyOn(parserApi, 'getRolloutCampaign').mockResolvedValue(campaign as any)
+    const start = vi.spyOn(parserApi, 'startRolloutStage')
+      .mockResolvedValue({ ...campaign, status: 'shadow' } as any)
+
+    renderWorkspace(
+      <CoverageBackfillWorkspace />,
+      ['/skills/parser?workspace=runtime&subtab=coverage-backfill&action=rollout'],
+    )
+
+    expect(await screen.findByText('接口状态实时影子验证')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /查看详情/ }))
+    expect(await screen.findByText('渐进发布详情')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /启动阶段/ }))
+    expect(screen.getByText('证据获取方式')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('实时只读采集'))
+    expect(screen.getByText(/同一批原始输出供新旧规则双轨解析/)).toBeInTheDocument()
+    const reasonInput = screen.getByText('操作理由').closest('label')?.querySelector('textarea')
+    expect(reasonInput).not.toBeNull()
+    fireEvent.change(reasonInput!, {
+      target: { value: '验证实时同源证据' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '确 认' }))
+
+    await waitFor(() => expect(start).toHaveBeenCalledWith(
+      'campaign-live-1',
+      '验证实时同源证据',
+      expect.stringMatching(/^rollout-start-/),
+      'live_capture',
+    ))
   })
 })

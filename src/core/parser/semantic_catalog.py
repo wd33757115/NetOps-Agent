@@ -384,3 +384,21 @@ def canonical_schema_field(
         if target in {str(alias).strip().casefold() for alias in aliases or []}
     }
     return next(iter(matches)) if len(matches) == 1 else None
+
+
+def schema_field_aliases(
+    field_name: str,
+    *,
+    catalog_path: str | Path = CATALOG_PATH,
+) -> tuple[str, ...]:
+    """Return exact machine-field aliases for one governed Parser field.
+
+    ``field_aliases`` includes human-readable CLI labels and is useful for
+    interpreting headers.  This narrower list is safe to expose as suggested
+    TextFSM ``Value`` identifiers because every alias is explicitly governed.
+    """
+
+    catalog = load_semantic_catalog(catalog_path)
+    aliases = dict(catalog.get("schema_field_aliases") or {})
+    normalized = str(field_name or "").strip().casefold()
+    return tuple(str(item) for item in aliases.get(normalized) or ())

@@ -153,6 +153,82 @@ export interface ParserTemplateComparison {
   candidate_template: ParserTemplatePreview
   candidate_contract: Record<string, unknown>
   active_contract: Record<string, unknown>
+  parser_field_contract?: {
+    schema_version: 'parser-field-contract/v1'
+    status: 'aligned' | 'schema_drift' | 'parser_spec_missing' | 'template_invalid'
+    aligned: boolean
+    parser_spec_record_sets: Record<string, string[]>
+    template_record_sets: Record<string, string[]>
+    differences: Array<{
+      record_set: string
+      parser_spec_present: boolean
+      template_present: boolean
+      missing_in_template: string[]
+      undeclared_in_parser_spec: string[]
+    }>
+    errors: string[]
+  }
+  parser_output_profile?: Record<string, unknown>
+  capability_claim?: string
+  check_item_capabilities?: Array<{
+    schema_version: string
+    check_item_id: string
+    check_item_version?: number
+    status: string
+    shape_assessment?: {
+      status: string
+      observed_roles: string[]
+      missing_required_roles: string[]
+    }
+    target?: {
+      name?: string
+      required_semantic_roles?: string[]
+      required_observation_types?: string[]
+    } | null
+    canonical_mapping?: {
+      status: string
+      mapped_observation_types: string[]
+      missing_required_observation_types: string[]
+    }
+    blockers?: Array<{
+      code: string
+      message: string
+      context?: Record<string, unknown>
+    }>
+    claim_boundary?: {
+      parser_structure_proven?: boolean
+      canonical_mapping_proven?: boolean
+      check_item_runtime_ready?: boolean
+      statement?: string
+    }
+  }>
+  review_readiness?: {
+    can_review: boolean
+    blockers: string[]
+  }
+  semantic_review?: {
+    schema_version: string
+    status: 'accepted'
+    review_mode: 'human_after_ai' | 'human_direct'
+    reviewed_by: string
+    reviewed_at: string
+    reason: string
+    result_confirmed: boolean
+    primary_key_confirmed: boolean
+    evidence_digest: string
+  } | null
+  release_actor?: {
+    username: string
+    role: string
+    same_as_semantic_reviewer: boolean
+    admin_override_applies: boolean
+    can_activate: boolean
+    blockers: string[]
+  }
+  activation_readiness?: {
+    can_activate: boolean
+    blockers: string[]
+  }
   approval_readiness: {
     can_approve: boolean
     blockers: string[]
@@ -164,10 +240,29 @@ export interface ParserTemplateComparison {
     command: string
     raw_text: string
     raw_text_sha256: string
+    raw_text_redacted?: boolean
+    evidence_kind?: string
+    sample_role?: string
     changed: boolean
-    current?: { status: string; failure_code?: string; records?: unknown }
-    proposed: { status: string; failure_code?: string; records?: unknown }
+    current?: ParserComparisonParseResult
+    proposed: ParserComparisonParseResult
   }>
+}
+
+export interface ParserComparisonRecordSet {
+  name: string
+  entity_type?: string
+  primary_keys: string[]
+  required_fields?: string[]
+  records: Array<Record<string, unknown>>
+}
+
+export interface ParserComparisonParseResult {
+  status: string
+  failure_code?: string
+  records?: unknown
+  record_count?: number
+  record_sets?: ParserComparisonRecordSet[]
 }
 
 export interface ParserDatasetCoverage {
@@ -219,6 +314,29 @@ export interface ParserImportPreview {
   new_snapshots: number
 }
 
+export interface ParserGenerationProgress {
+  generation_run_id?: string
+  stage?: string
+  attempt_number?: number
+  started_at?: string
+  heartbeat_at?: string
+  deadline_at?: string
+  request_deadline_at?: string
+  elapsed_ms?: number
+  cancellable?: boolean
+  completed_at?: string
+  terminal_reason?: string
+  details?: {
+    model_call_id?: string
+    model_calls_used?: number
+    model_call_limit?: number
+    candidate_sha256?: string
+    diagnostic_code?: string
+    sample_count?: number
+    [key: string]: unknown
+  }
+}
+
 export interface ParserJobItem {
   id: string
   job_type: string
@@ -232,6 +350,20 @@ export interface ParserJobItem {
   parser_spec_status?: 'missing' | 'draft' | 'confirmed'
   parser_spec_json?: Record<string, unknown>
   parser_spec_sha256?: string
+  parser_spec_revision?: number
+  parser_spec_revisions?: Array<{
+    id: string
+    revision_number: number
+    parser_spec_status: 'draft' | 'confirmed'
+    parser_spec_json: Record<string, unknown>
+    parser_spec_sha256: string
+    previous_parser_spec_sha256?: string
+    source: 'engineer' | 'llm_suggestion'
+    actor: string
+    reason: string
+    invalidated_template_ids_json: string[]
+    created_at: string
+  }>
   sample_count: number
   structure_variant_count?: number
   structure_signatures?: string[]
@@ -244,7 +376,10 @@ export interface ParserJobItem {
   template_attempt_count?: number
   model_calls_used?: number
   best_attempt_id?: string
-  agent_state_json?: Record<string, unknown>
+  agent_state_json?: Record<string, unknown> & {
+    generation_progress?: ParserGenerationProgress
+    stop_reason?: string
+  }
   agent_budget_json?: Record<string, unknown>
   failure_code?: string
   last_error?: string
@@ -309,6 +444,7 @@ export interface ParserGenerationAttempt {
   train_sample_set_hash?: string
   holdout_sample_set_hash?: string
   template_sha256?: string
+  template_text?: string
   validation_report_json: Record<string, unknown>
   failure_signature?: string
   candidate_rank?: number
@@ -428,7 +564,7 @@ export interface ParserRuleGenerationContextPreview {
 export interface ParserRuleAssetBundleStep {
   key: string
   label: string
-  status: 'passed' | 'ready' | 'blocked'
+  status: 'passed' | 'ready' | 'blocked' | 'skipped'
   detail: Record<string, unknown>
 }
 
@@ -528,6 +664,15 @@ export interface ParserRuleAssetBundle {
   dataset_ids?: string[]
   asset_counts: Record<string, number>
   active_asset_counts: Record<string, number>
+  asset_requirements?: {
+    requires_observation_contract?: boolean
+    requires_change_policy?: boolean
+    requires_current_state_rule?: boolean
+    requires_event_rule?: boolean
+    requires_event_rule_assets?: boolean
+    requires_historical_replay?: boolean
+    [key: string]: unknown
+  }
   release_ready: boolean
   engineering_review?: {
     decision?: string
@@ -590,6 +735,28 @@ export interface ParserPageParams {
   [key: string]: string | number | boolean | undefined
 }
 
+export interface ParserAssetGap {
+  id: string
+  status: string
+  check_item_id: string
+  check_item_version_id?: string | null
+  implementation_version_id?: string | null
+  canonical_command?: string | null
+  gap_type: string
+  reason_code: string
+  occurrence_count: number
+  last_seen_at: string
+  patrol_batch_id?: string | null
+  sanitized_sample_refs_json?: string[]
+  evidence_refs_json?: string[]
+  recommended_action: {
+    code: 'import_rule_samples'
+    label: string
+    description: string
+    target_url: string
+  }
+}
+
 export interface ParserWorkItem {
   id: string
   task_type: 'parser' | 'backfill' | 'rule_generation'
@@ -609,6 +776,7 @@ export interface ParserWorkItem {
 
 export type OfflinePatrolJobPurpose = 'offline_patrol' | 'rule_asset_source'
 export type OfflinePatrolJobType = 'parser_validation' | 'single_patrol' | 'history_compare'
+export type OfflinePatrolReportIntent = 'historical' | 'current_attestation'
 
 export interface OfflinePatrolPeriod {
   id: string
@@ -642,12 +810,45 @@ export interface OfflinePatrolDeviceBinding {
   match_status: string
   confidence: number
   match_reason?: string | null
+  match_candidates?: Array<{
+    inventory_device_id: string
+    device_name: string
+    management_ip?: string | null
+    vendor?: string | null
+    model?: string | null
+    confidence: number
+    match_reason: string
+  }>
+}
+
+export interface OfflineOutputReviewItem {
+  review_item_id: string
+  period_role: string
+  source_relative_path: string
+  device_id?: string | null
+  device_name?: string | null
+  management_ip?: string | null
+  canonical_command: string
+  start_line?: number | null
+  end_line?: number | null
+  raw_text_hash?: string | null
+  raw_text_length: number
+  status: 'empty_unverified'
+}
+
+export interface OfflineOutputDisposition extends OfflineOutputReviewItem {
+  decision: 'ignore_valid_empty'
+  reason: string
+  decided_by: string
+  decided_at: string
+  applies_to_current_preview?: boolean
 }
 
 export interface OfflinePatrolJob {
   id: string
   purpose: OfflinePatrolJobPurpose
   job_type: OfflinePatrolJobType
+  report_intent: OfflinePatrolReportIntent
   name: string
   display_name?: string
   owner_id: string
@@ -661,6 +862,7 @@ export interface OfflinePatrolJob {
   progress: { phase?: string; percent?: number }
   preview_totals: Record<string, number>
   blocker_count: number
+  warning_count?: number
   archived: boolean
   created_at: string
   updated_at: string
@@ -668,6 +870,8 @@ export interface OfflinePatrolJob {
   periods?: OfflinePatrolPeriod[]
   source_files?: OfflinePatrolSourceFile[]
   device_bindings?: OfflinePatrolDeviceBinding[]
+  output_review_items?: OfflineOutputReviewItem[]
+  output_dispositions?: OfflineOutputDisposition[]
   preview?: Record<string, unknown>
   result?: Record<string, unknown>
   blockers?: Array<Record<string, unknown>>
@@ -893,15 +1097,29 @@ export interface RuleAssetProductionUnitPage {
   summary: RuleAssetProductionSummary
 }
 
+export interface RuleAssetCheckItemComponentStatuses {
+  identity: RuleAssetComponentStatus
+  parser: RuleAssetComponentStatus
+  contract: RuleAssetComponentStatus
+  current_state: RuleAssetComponentStatus
+  policy: RuleAssetComponentStatus
+  event: RuleAssetComponentStatus
+  comparison: RuleAssetComponentStatus
+  runtime_bundle: RuleAssetComponentStatus
+}
+
 export interface RuleAssetCheckItemProductionUnit {
   id: string
   check_item_id?: string | null
   check_item_version_id?: string | null
   name: string
+  display_name?: string
   category: string
   description: string
+  display_description?: string
   result_mode?: string | null
   assessment_mode?: string | null
+  asset_requirement_profile?: AssetRequirementProfile
   governance_status: RuleAssetGovernanceStatus
   governance_bucket: RuleAssetGovernanceBucket
   current_stage: string
@@ -914,7 +1132,14 @@ export interface RuleAssetCheckItemProductionUnit {
   implementation_count: number
   command_count: number
   vendors: string[]
-  component_statuses: RuleAssetProductionUnit['component_statuses']
+  component_statuses: RuleAssetCheckItemComponentStatuses
+  runtime_readiness?: {
+    operationally_ready: boolean
+    active_bundle?: Record<string, unknown> | null
+    blockers: RuntimeBundleAssemblyIssue[]
+    warnings: RuntimeBundleAssemblyIssue[]
+    preview_digest?: string | null
+  }
   next_action?: OfflineRuleAssetPipelineAction
   updated_at?: string | null
   coverage: {
@@ -925,11 +1150,25 @@ export interface RuleAssetCheckItemProductionUnit {
     awaiting_approval: number
     exception: number
   }
-  implementations: Array<RuleAssetProductionUnit & {
+  implementations: Array<Omit<RuleAssetProductionUnit, 'component_statuses'> & {
+    component_statuses: RuleAssetCheckItemComponentStatuses
     implementation_id?: string | null
     implementation_version_id?: string | null
     implementation_name?: string | null
-    mapping_status: 'catalog_resolved' | 'unclassified'
+    mapping_status: 'catalog_resolved' | 'unclassified' | 'not_required'
+    source_governance_status?: RuleAssetGovernanceStatus
+    source_governance_bucket?: RuleAssetGovernanceBucket
+    source_component_statuses?: Partial<
+      RuleAssetProductionUnit['component_statuses']
+    >
+    asset_requirement_profile?: AssetRequirementProfile
+    runtime_readiness?: {
+      operationally_ready: boolean
+      active_bundle?: Record<string, unknown> | null
+      blockers: RuntimeBundleAssemblyIssue[]
+      warnings: RuntimeBundleAssemblyIssue[]
+      preview_digest?: string | null
+    }
   }>
 }
 
@@ -942,7 +1181,7 @@ export interface RuleAssetCheckItemProductionUnitPage {
   summary: RuleAssetProductionSummary & { unclassified?: number }
 }
 
-export type RuleAssetAutomationMode = 'disabled' | 'generate_only' | 'auto_publish'
+export type RuleAssetAutomationMode = 'disabled' | 'generate_only'
 
 export interface RuleAssetAutomationSettings {
   mode: RuleAssetAutomationMode
@@ -1070,6 +1309,87 @@ export interface OfflinePatrolAnalysisSummary {
       source_change_count?: number
     }
   }
+}
+
+export type PatrolCurrentAuthorityStatus =
+  | 'not_requested'
+  | 'blocked'
+  | 'ready_for_attestation'
+  | 'approved'
+  | 'attesting'
+  | 'dispatching'
+  | 'completed'
+  | 'failed'
+  | 'revoked'
+  | 'expired'
+
+export interface PatrolCurrentAuthority {
+  schema_version: string
+  offline_job_id: string
+  report_intent?: OfflinePatrolReportIntent
+  request_id?: string
+  candidate_batch_id?: string | null
+  status: PatrolCurrentAuthorityStatus
+  blocker_codes: string[]
+  blockers: Array<{
+    code: string
+    message: string
+    remediation?: {
+      code?: string
+      label?: string
+      target?: 'sources' | 'proof_form' | 'new_current_job'
+    }
+  }>
+  request_digest?: string
+  source_manifest_digest?: string
+  identity_binding_digest?: string
+  scope_contract_digest?: string
+  intended_target_matrix_digest?: string
+  scope_decision_digest?: string
+  scope_reconciled?: boolean
+  source_file_count?: number
+  device_count?: number
+  selected_check_item_count?: number
+  current_period?: Record<string, unknown>
+  proof?: {
+    completeness_statement?: string
+    completeness_evidence_refs?: string[]
+    observed_at_evidence_refs?: string[]
+    collection_tool?: string
+    collector_identity?: string
+  }
+  proof_options?: {
+    observed_at_evidence_refs?: string[]
+    completeness_evidence_refs?: string[]
+  }
+  requested_by_principal_id?: string
+  requested_by_display?: string
+  prepared_at?: string
+  expires_at?: string
+  qualification?: {
+    id: string
+    status: string
+    digest: string
+    attested_by_principal_id: string
+    attested_by_display: string
+    attested_at?: string | null
+    revoked_at?: string | null
+    revocation_reason?: string | null
+  } | null
+  production_batch?: {
+    patrol_batch_id: string
+    dispatch_status: string
+    dispatch_error?: string | null
+    dispatch_error_code?: string | null
+    report_status: string
+    report_error?: string | null
+    runtime_manifest_id?: string | null
+    runtime_manifest_digest?: string | null
+    target_count: number
+    launched_count: number
+    skipped_count: number
+    workflow_status_counts: Record<string, number>
+  } | null
 }
 
 export interface OfflinePatrolJobPage {
@@ -1246,6 +1566,7 @@ export interface CheckItemRuntimeBundleHealthItem {
   check_item_id: string
   check_item_version_id: string
   check_item_name: string
+  check_item_display_name?: string
   result_mode: string
   assessment_mode: string
   implementation_id: string
@@ -1285,6 +1606,13 @@ export interface RuntimeBundleAssemblyIssue {
   code: string
   message: string
   remediation?: string | null
+  remediation_action?: {
+    code: string
+    label: string
+    description: string
+    target_url: string
+    asset_type?: string | null
+  } | null
   context?: Record<string, unknown>
 }
 
@@ -1293,10 +1621,36 @@ export interface RuntimeBundleCommandRoute {
   canonical_command: string
   priority: number
   status: 'executable' | 'unavailable' | 'ambiguous'
+  execution_mode?: string
   selected_parser_template_id?: string | null
   selected_contract_ids: string[]
   candidate_count: number
   reasons: Array<Record<string, unknown>>
+}
+
+export interface AssetRequirementDecision {
+  required: boolean
+  reason_code: string
+  required_observation_types?: string[]
+  conditional_observation_types?: string[]
+  required_event_types_by_observation?: Record<string, string[]>
+  conditional_event_types_by_observation?: Record<string, string[]>
+  required_event_classes?: Record<string, string>
+  required_event_severities?: Record<string, string>
+  required_recovery_pairs_by_observation?: Record<
+    string,
+    Array<{ fault: string; recovery: string }>
+  >
+}
+
+export interface AssetRequirementProfile {
+  schema_version: 'asset-requirement-profile/v1' | string
+  result_mode: string
+  assessment_mode: string
+  requirements: Record<string, AssetRequirementDecision>
+  required_asset_types: string[]
+  not_required: Record<string, string>
+  required_runtime_facts: string[]
 }
 
 export interface RuntimeBundleAssemblyPreview {
@@ -1305,6 +1659,7 @@ export interface RuntimeBundleAssemblyPreview {
     id?: string | null
     version_id: string
     name?: string | null
+    display_name?: string | null
     result_mode?: string
     assessment_mode?: string
   }
@@ -1324,6 +1679,8 @@ export interface RuntimeBundleAssemblyPreview {
     comparison_profile_version_id?: string | null
     entity_identity_policy_version_id?: string | null
   }
+  asset_requirement_profile?: AssetRequirementProfile | null
+  asset_requirement_profile_digest?: string | null
   candidates: {
     parsers: Array<Record<string, any>>
     observation_contracts: Array<Record<string, any>>
@@ -1339,7 +1696,11 @@ export interface RuntimeBundleAssemblyPreview {
     current_state_rule_types?: string[]
     change_policy_types?: string[]
     executable_commands?: string[]
+    unavailable_commands?: string[]
+    command_availability?: 'available' | 'unavailable' | 'not_applicable'
+    /** @deprecated Fallback command execution is disabled. */
     unavailable_fallbacks?: string[]
+    /** @deprecated Fallback command execution is disabled. */
     fallback_resilience?: 'full' | 'reduced' | 'none' | 'not_applicable'
     parser_manifests?: Record<string, Record<string, unknown>>
   }
@@ -1357,6 +1718,8 @@ export interface RuntimeBundleAssemblyPreview {
     created_at?: string | null
   }>
   operationally_ready: boolean
+  command_availability?: 'available' | 'unavailable' | 'not_applicable'
+  /** @deprecated Fallback command execution is disabled. */
   fallback_resilience: 'full' | 'reduced' | 'none' | 'not_applicable'
   blockers: RuntimeBundleAssemblyIssue[]
   warnings: RuntimeBundleAssemblyIssue[]
@@ -1387,6 +1750,509 @@ export interface RuntimeBundleAssemblyPayload {
   change_policy_version_ids?: string[]
   event_rule_version_ids?: string[]
   comparison_profile_version_id?: string | null
+}
+
+export type AssessmentPolicyRole =
+  | 'high'
+  | 'critical_high'
+  | 'low'
+  | 'critical_low'
+  | 'expected_state'
+  | 'applicability'
+
+export type AssessmentPolicyVersionStatus =
+  | 'draft'
+  | 'pending_review'
+  | 'pending_approval'
+  | 'approved'
+  | 'rejected'
+  | 'superseded'
+  | 'revoked'
+
+export type AssessmentPolicyGovernanceStatus =
+  | AssessmentPolicyVersionStatus
+  | 'bound_active'
+  | 'approved_unbound'
+  | 'empty'
+
+export interface AssessmentPolicyDecision {
+  id: string
+  policy_version_id: string
+  stage: 'submission' | 'semantic_review' | 'publication' | 'revocation'
+  decision: 'submitted' | 'approved' | 'rejected' | 'revoked'
+  actor: string
+  reason: string
+  policy_digest: string
+  request_digest: string
+  created_at: string
+}
+
+export interface AssessmentPolicyBinding {
+  id: string
+  profile_id: string
+  policy_version_id: string
+  check_item_id: string
+  observation_type: string
+  policy_role: AssessmentPolicyRole
+  binding_type: 'inventory_profile' | 'scope_override' | 'catalog_default'
+  scope_json: Record<string, unknown>
+  scope_digest: string
+  binding_digest: string
+  valid_from?: string | null
+  valid_until?: string | null
+  status: 'active' | 'ended' | 'revoked'
+  created_by: string
+  reason: string
+  ended_by?: string | null
+  end_reason?: string | null
+  ended_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface AssessmentPolicyVersionSummary {
+  id: string
+  profile_id: string
+  check_item_version_id: string
+  version: number
+  digest: string
+  status: AssessmentPolicyVersionStatus
+  created_by: string
+  valid_from?: string | null
+  valid_until?: string | null
+  submitted_at?: string | null
+  semantic_reviewed_by?: string | null
+  semantic_review_reason?: string | null
+  semantic_reviewed_at?: string | null
+  approved_by?: string | null
+  approval_reason?: string | null
+  approved_at?: string | null
+  revoked_by?: string | null
+  revoke_reason?: string | null
+  revoked_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface AssessmentPolicyProfile {
+  id: string
+  check_item_id: string
+  observation_type: string
+  policy_role: AssessmentPolicyRole
+  name: string
+  description?: string | null
+  status: 'draft' | 'active' | 'deprecated'
+  current_version: number
+  created_by: string
+  created_at: string
+  updated_at: string
+  latest_version?: AssessmentPolicyVersionSummary | null
+  latest_version_status: AssessmentPolicyVersionStatus | 'empty'
+  governance_status: AssessmentPolicyGovernanceStatus
+  production_status: 'bound_active' | 'not_bound'
+  active_binding_count: number
+}
+
+export interface AssessmentPolicyVersion extends AssessmentPolicyVersionSummary {
+  policy_json: Record<string, unknown>
+  evidence_refs_json: string[]
+  provenance_json: Record<string, unknown>
+  profile: Omit<AssessmentPolicyProfile,
+    'latest_version' | 'latest_version_status' | 'governance_status'
+    | 'production_status' | 'active_binding_count'>
+  decisions: AssessmentPolicyDecision[]
+  bindings: AssessmentPolicyBinding[]
+  capabilities: {
+    can_submit: boolean
+    can_semantic_review: boolean
+    can_publication_review: boolean
+    can_bind: boolean
+    can_revoke: boolean
+  }
+}
+
+export interface AssessmentPolicyProfilePage {
+  items: AssessmentPolicyProfile[]
+  page: number
+  page_size: number
+  total: number
+  page_count: number
+}
+
+export interface AssessmentPolicyVersionPage {
+  profile: Record<string, unknown>
+  items: AssessmentPolicyVersionSummary[]
+  page: number
+  page_size: number
+  total: number
+  page_count: number
+}
+
+export interface AssessmentPolicyVersionPayload {
+  check_item_id: string
+  check_item_version_id: string
+  observation_type: string
+  policy_role: AssessmentPolicyRole
+  name: string
+  description?: string
+  profile_id?: string
+  policy: Record<string, unknown>
+  evidence_refs: string[]
+  provenance?: Record<string, unknown>
+  valid_from?: string
+  valid_until?: string
+}
+
+export interface AssessmentPolicyResolutionPreview {
+  snapshot: Record<string, any>
+  resolution?: {
+    status: string
+    blocker_code?: string | null
+    effective_condition: Record<string, unknown>
+    should_evaluate: boolean
+    assessment_basis: Record<string, any>
+  } | null
+}
+
+export interface AssessmentPolicyImpactPreview {
+  schema_version: 'assessment-policy-impact-preview/v1'
+  policy_version_id: string
+  policy_version_digest: string
+  check_item_id: string
+  check_item_version_id: string
+  observation_type: string
+  policy_role: AssessmentPolicyRole
+  binding_type: AssessmentPolicyBinding['binding_type']
+  proposed_scope: Record<string, unknown>
+  target_selector: Record<string, unknown>
+  policy_effective_at: string
+  summary: {
+    target_count: number
+    counts: Record<string, number>
+    blocking_count: number
+  }
+  items: Array<{
+    device_id: string
+    device_name: string
+    management_ip: string
+    vendor: string
+    model: string
+    site: string
+    role: string
+    impact_status: string
+    reason_codes: string[]
+    candidate_matched: boolean
+    selected_policy?: Record<string, unknown> | null
+    snapshot_digest: string
+  }>
+  page: number
+  page_size: number
+  total: number
+  page_count: number
+  digest: string
+}
+
+export type AssessmentPolicyMigrationStatus =
+  | 'inventoried'
+  | 'draft_created'
+  | 'review_required'
+  | 'ignored'
+  | 'cutover'
+  | 'retired'
+
+export interface AssessmentPolicyMigrationSource {
+  id: string
+  source_type: string
+  source_locator: string
+  source_digest: string
+  check_item_id?: string | null
+  check_item_version_id?: string | null
+  device_id?: string | null
+  observation_type?: string | null
+  policy_role?: AssessmentPolicyRole | null
+  binding_type?: string | null
+  scope_json: Record<string, unknown>
+  source_payload_json: Record<string, unknown>
+  conversion_status: AssessmentPolicyMigrationStatus
+  reason_codes_json: string[]
+  inventoried_by: string
+  draft_policy_version_id?: string | null
+  first_seen_at: string
+  last_seen_at: string
+  converted_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface AssessmentPolicyMigrationSourcePage {
+  items: AssessmentPolicyMigrationSource[]
+  page: number
+  page_size: number
+  total: number
+  page_count: number
+}
+
+export interface AssessmentPolicyMigrationInventoryResult {
+  schema_version: 'assessment-policy-migration-inventory/v1'
+  touched_source_ids: string[]
+  counts: Record<string, number>
+  execution_scan: {
+    enabled: boolean
+    page_size: number
+    next_execution_id?: string | null
+    complete: boolean
+  }
+}
+
+export interface AssessmentPolicyShadowResult {
+  id: string
+  input_digest: string
+  check_item_id: string
+  check_item_version_id: string
+  device_id: string
+  observation_type: string
+  rule_version_id?: string | null
+  legacy_snapshot_digest: string
+  governed_snapshot_digest: string
+  legacy_result_json: Record<string, any>
+  governed_result_json: Record<string, any>
+  difference_json: Record<string, any>
+  comparison_status: 'matched' | 'different' | 'governed_missing' | 'legacy_missing' | 'error'
+  created_by: string
+  created_at: string
+  legacy_snapshot?: Record<string, any>
+  governed_snapshot?: Record<string, any>
+}
+
+export interface AssessmentPolicyShadowResultPage {
+  items: AssessmentPolicyShadowResult[]
+  page: number
+  page_size: number
+  total: number
+  page_count: number
+}
+
+export interface AssessmentPolicyCutover {
+  id: string
+  check_item_id: string
+  check_item_version_id: string
+  device_id: string
+  resolver_mode: 'legacy_compat' | 'governed_only'
+  status: 'active' | 'superseded'
+  binding_ids_json: string[]
+  shadow_result_ids_json: string[]
+  evidence_digest: string
+  request_digest: string
+  created_by: string
+  reason: string
+  supersedes_id?: string | null
+  superseded_by_id?: string | null
+  superseded_at?: string | null
+  created_at: string
+  idempotent_replay?: boolean
+}
+
+export interface AssessmentPolicyCutoverPage {
+  items: AssessmentPolicyCutover[]
+  page: number
+  page_size: number
+  total: number
+  page_count: number
+}
+
+export type RolloutCampaignStatus =
+  | 'draft'
+  | 'target_frozen'
+  | 'shadow'
+  | 'canary_5'
+  | 'canary_20'
+  | 'canary_50'
+  | 'full_100'
+  | 'observing'
+  | 'paused'
+  | 'rolled_back'
+  | 'completed'
+
+export type RolloutStageStatus =
+  | 'pending'
+  | 'running'
+  | 'awaiting_approval'
+  | 'passed'
+  | 'failed'
+  | 'paused'
+  | 'rolled_back'
+
+export interface RolloutStageAttempt {
+  id: string
+  campaign_id: string
+  stage: string
+  attempt_number: number
+  percentage: number
+  status: RolloutStageStatus
+  target_manifest_digest: string
+  runtime_bundle_digest: string
+  comparison_context_digest: string
+  baseline_window_json: Record<string, unknown>
+  thresholds_json: Record<string, unknown>
+  metrics_json?: Record<string, unknown> | null
+  comparison_result_json?: Record<string, unknown> | null
+  evidence_refs_json?: Array<Record<string, unknown>> | null
+  blockers_json?: string[] | null
+  decision_digest?: string | null
+  started_by?: string | null
+  approved_by?: string | null
+  approval_comment?: string | null
+  created_at: string
+  started_at?: string | null
+  completed_at?: string | null
+  approved_at?: string | null
+}
+
+export interface RolloutStageExecution {
+  id: string
+  campaign_id: string
+  stage_attempt_id: string
+  execution_mode: 'snapshot_replay' | 'live_capture'
+  status: 'queued' | 'capturing' | 'running' | 'evaluating' | 'completed' | 'failed' | 'cancelled'
+  selection_manifest_json?: {
+    schema_version?: string
+    stage?: string
+    targets?: Array<{
+      target_key?: string
+      device_id?: string
+      check_item_version_id?: string
+      periods?: Array<{
+        run_id?: string
+        snapshot_ids?: string[]
+      }>
+    }>
+  } | null
+  selection_manifest_digest: string
+  capture_batch_id?: string | null
+  capture_manifest_json?: Record<string, unknown> | null
+  capture_manifest_digest?: string | null
+  capture_requested_at?: string | null
+  capture_completed_at?: string | null
+  source_snapshot_ids_json?: string[] | null
+  snapshot_set_digest: string
+  fact_high_watermark: string
+  baseline_projection_digest?: string | null
+  candidate_projection_digest?: string | null
+  comparison_manifest_id?: string | null
+  decision_digest?: string | null
+  worker_owner?: string | null
+  heartbeat_at?: string | null
+  attempt_count: number
+  failure_code?: string | null
+  error?: string | null
+  created_by?: string | null
+  created_at: string
+  started_at?: string | null
+  completed_at?: string | null
+  updated_at: string
+}
+
+export interface RolloutCampaign {
+  id: string
+  idempotency_key: string
+  name: string
+  description?: string | null
+  status: RolloutCampaignStatus
+  current_stage?: string | null
+  paused_from_stage?: string | null
+  target_manifest_json?: {
+    schema_version?: string
+    selector?: Record<string, unknown>
+    matrix?: Array<Record<string, string>>
+  } | null
+  target_manifest_digest?: string | null
+  runtime_bundle_refs_json?: Array<{
+    role: 'baseline' | 'candidate'
+    version_id: string
+    digest: string
+  }> | null
+  runtime_bundle_digest?: string | null
+  comparison_context_ids_json?: string[] | null
+  comparison_context_digest?: string | null
+  baseline_window_json?: Record<string, string> | null
+  thresholds_json?: Record<string, unknown> | null
+  rollback_plan_json?: Record<string, unknown> | null
+  pause_context_json?: Record<string, unknown> | null
+  last_error?: string | null
+  lock_version: number
+  created_by: string
+  frozen_by?: string | null
+  paused_by?: string | null
+  completed_by?: string | null
+  created_at: string
+  updated_at: string
+  frozen_at?: string | null
+  paused_at?: string | null
+  rolled_back_at?: string | null
+  completed_at?: string | null
+  attempts: RolloutStageAttempt[]
+  stage_executions: RolloutStageExecution[]
+  current_attempt?: RolloutStageAttempt | null
+  next_action: string
+  stage_sequence: string[]
+}
+
+export interface RolloutCampaignPage {
+  items: RolloutCampaign[]
+  total: number
+  page: number
+  page_size: number
+  page_count: number
+  summary: {
+    total: number
+    status_counts: Record<string, number>
+    active: number
+    awaiting_approval: number
+    paused: number
+    rolled_back: number
+  }
+}
+
+export interface RolloutCampaignFreezePayload {
+  target_manifest: {
+    selector?: Record<string, unknown>
+    matrix: Array<{
+      device_id: string
+      check_item_version_id: string
+      candidate_implementation_version_id?: string
+      baseline_route:
+        | {
+          mode: 'runtime_bundle'
+          runtime_bundle_version_id: string
+          implementation_version_id?: string
+        }
+        | {
+          mode: 'legacy_route'
+          route_id: string
+          digest: string
+          implementation_version_id?: string
+        }
+        | {
+          mode: 'no_prior_production'
+        }
+      candidate_runtime_bundle_version_id: string
+    }>
+  }
+  runtime_bundle_refs: Array<{
+    role: 'baseline' | 'candidate'
+    version_id: string
+    digest: string
+  }>
+  comparison_context_ids: string[]
+  baseline_window: { start_at: string; end_at: string }
+  thresholds?: Record<string, unknown>
+  rollback_plan: {
+    mode: 'legacy_route' | 'runtime_bundle' | 'no_prior_production'
+    verified: boolean
+    evidence_refs: Array<Record<string, unknown> | string>
+    [key: string]: unknown
+  }
+  reason: string
 }
 
 export interface ParserCoverage {
@@ -1556,13 +2422,18 @@ export interface ParserCheckItem {
   check_item_version_id: string
   version: number
   name: string
+  display_name?: string
   category: string
   description: string
+  display_description?: string
   result_mode: string
   assessment_mode: string
   canonical_contract: Record<string, unknown>
   report_projection: string
   applicability: Record<string, unknown>
+  freshness_policy: Record<string, unknown>
+  empty_result_policy: Record<string, unknown>
+  coverage_policy: Record<string, unknown>
   status: string
   digest: string
   implementation_count: number
@@ -1575,9 +2446,211 @@ export interface ParserCheckItem {
     commands: Array<{ command: string; priority: number }>
     collector: string
     parser_requirement: string
+    template_scope?: string | null
+    output_quality_policy: Record<string, unknown>
     selection_priority: number
     status: string
   }>
+}
+
+export interface CheckItemCatalogImplementationCandidate {
+  implementation_id: string
+  implementation_version_id: string
+  version: number
+  name: string
+  description: string
+  check_item_ids: string[]
+  match: Record<string, unknown>
+  commands: Array<{ command: string; priority: number }>
+  collector: string
+  parser_requirement: 'structured' | 'normalized_diff' | 'hash_only' | 'evidence_only'
+  template_scope?: string | null
+  selection_priority: number
+  output_quality_policy: Record<string, unknown>
+  status: string
+  digest: string
+}
+
+export interface CheckItemCatalogCheckItemCandidate {
+  check_item_id: string
+  check_item_version_id: string
+  version: number
+  name: string
+  category: string
+  description: string
+  result_mode: 'structured' | 'normalized_diff' | 'hash_only' | 'evidence_only'
+  assessment_mode: 'health' | 'change' | 'evidence'
+  canonical_contract: Record<string, unknown>
+  report_projection: string
+  applicability: Record<string, unknown>
+  freshness_policy: Record<string, unknown>
+  empty_result_policy: Record<string, unknown>
+  coverage_policy: Record<string, unknown>
+  status: string
+  digest: string
+}
+
+export type CheckItemCatalogCandidate =
+  | CheckItemCatalogImplementationCandidate
+  | CheckItemCatalogCheckItemCandidate
+
+export interface CheckItemCatalogChange {
+  id: string
+  asset_kind: 'check_item' | 'collection_implementation'
+  asset_id: string
+  version_id: string
+  version: number
+  baseline_version_id?: string | null
+  status: 'draft' | 'pending_approval' | 'approved' | 'rejected' | 'cancelled'
+  payload_digest: string
+  impact_snapshot_json?: CheckItemCatalogImpact | null
+  impact_digest?: string | null
+  created_by: string
+  creation_reason: string
+  submitted_by?: string | null
+  submission_reason?: string | null
+  submitted_at?: string | null
+  decided_by?: string | null
+  decision_reason?: string | null
+  rollout_campaign_id?: string | null
+  cutover_bundle_version_ids_json?: string[] | null
+  cutover_evidence_json?: Record<string, unknown> | null
+  cutover_digest?: string | null
+  decided_at?: string | null
+  created_at: string
+  updated_at: string
+  candidate: CheckItemCatalogCandidate
+}
+
+export interface CheckItemCatalogImpactMessage {
+  code: string
+  message: string
+  count?: number
+  next_action: string
+}
+
+export interface CheckItemCatalogImpact {
+  schema_version: 'check-item-catalog-impact/v1'
+  change_id: string
+  asset_kind: 'check_item' | 'collection_implementation'
+  asset_id: string
+  candidate_version_id: string
+  baseline_version_id?: string | null
+  candidate_digest: string
+  inventory_device_count: number
+  target_pair_count: number
+  rollout_scope: Array<{ device_id: string; check_item_id: string }>
+  rollout_scope_count: number
+  affected_check_item_ids: string[]
+  summary: {
+    unchanged: number
+    changed: number
+    newly_supported: number
+    newly_unsupported: number
+    ambiguous: number
+  }
+  rows: Array<{
+    device_id: string
+    device_name: string
+    vendor?: string | null
+    family?: string | null
+    model?: string | null
+    check_item_id: string
+    change: string
+    before: Record<string, unknown>
+    after: Record<string, unknown>
+  }>
+  rows_truncated: boolean
+  active_runtime_bundle_version_ids: string[]
+  semantic_diff?: {
+    changed_fields: string[]
+    added_observation_types: string[]
+    removed_observation_types: string[]
+    collection_implementation_ids: string[]
+  }
+  blockers: CheckItemCatalogImpactMessage[]
+  warnings: CheckItemCatalogImpactMessage[]
+  impact_digest: string
+}
+
+export interface CheckItemCatalogPublicationOptions {
+  change_id: string
+  requires_rollout: boolean
+  eligible_campaigns: Array<{
+    campaign_id: string
+    name: string
+    completed_at?: string | null
+    candidate_runtime_bundle_version_ids: string[]
+    target_count: number
+    evidence_digest: string
+  }>
+}
+
+export interface CheckItemCatalogImplementationDraftInput {
+  id: string
+  name: string
+  description?: string
+  check_item_ids: string[]
+  match: Record<string, unknown>
+  commands: Array<{ command: string; priority: number }>
+  collector: string
+  parser_requirement: 'structured' | 'normalized_diff' | 'hash_only' | 'evidence_only'
+  template_scope?: string | null
+  output_quality_policy?: Record<string, unknown>
+  selection_priority: number
+  reason?: string
+}
+
+export interface CheckItemCatalogCheckItemDraftInput {
+  id: string
+  name: string
+  category: string
+  description?: string
+  result_mode: 'structured' | 'normalized_diff' | 'hash_only' | 'evidence_only'
+  assessment_mode: 'health' | 'change' | 'evidence'
+  canonical_contract: Record<string, unknown>
+  report_projection: string
+  applicability?: Record<string, unknown>
+  freshness_policy?: Record<string, unknown>
+  empty_result_policy?: Record<string, unknown>
+  coverage_policy?: Record<string, unknown>
+  reason?: string
+}
+
+export interface CanonicalObservationDefinition {
+  id: string
+  description: string
+  semantic_type: string
+  value_types: string[]
+  canonical_unit?: string | null
+  dimensions: string[]
+  allowed_dimension_values: Record<string, string[]>
+  allowed_values: unknown[]
+  assessment_roles: string[]
+}
+
+export interface CanonicalObservationCatalog {
+  catalog_id: string
+  version: number
+  status: string
+  digest: string
+  items: CanonicalObservationDefinition[]
+}
+
+export interface CheckItemCatalogCheckItemDeleteResult {
+  success: boolean
+  check_item_id: string
+  status: 'deprecated'
+  cancelled_change_count: number
+  idempotent_replay: boolean
+}
+
+export interface CheckItemCatalogImplementationDeleteResult {
+  success: boolean
+  implementation_id: string
+  status: 'deprecated'
+  cancelled_change_count: number
+  idempotent_replay: boolean
 }
 
 export interface ParserCommandProfileBinding {
@@ -2736,7 +3809,7 @@ export const parserApi = {
   },
   reviewRuleAssetBundle: async (
     id: string,
-    data: { decision: 'accepted' | 'revision_requested'; reason: string },
+    data: { decision: 'accepted' | 'revision_requested'; reason?: string },
   ) => (await api.post(`/parser/rule-asset-bundles/${id}/engineering-review/`, data)).data,
   reviseRuleAssetBundle: async (
     id: string,
@@ -2768,6 +3841,12 @@ export const parserApi = {
       dataset_ids: datasetIds,
     })
   ).data,
+  assetGaps: async (params: ParserPageParams = {}): Promise<ParserPage<ParserAssetGap>> => (
+    await api.get<ParserPage<ParserAssetGap>>('/parser/asset-gaps/', { params })
+  ).data,
+  resolveAssetGap: async (id: string, reason: string) => (
+    await api.post(`/parser/asset-gaps/${id}/resolve/`, { reason })
+  ).data,
   ruleGapsFromChanges: async (params: { days?: number; limit?: number } = {}) => (
     await api.get<{
       days: number
@@ -2779,9 +3858,6 @@ export const parserApi = {
       items?: Array<Record<string, unknown>>
       [key: string]: unknown
     }>('/parser/rule-gaps/from-changes/', { params })
-  ).data,
-  seedRuleGapsFromChanges: async (params: { days?: number; limit?: number } = {}) => (
-    await api.post('/parser/rule-gaps/seed-jobs/', null, { params })
   ).data,
   observationContracts: async (params: ParserPageParams = {}): Promise<ParserPage<ParserObservationContract>> => {
     const response = await api.get<ParserPage<ParserObservationContract>>('/parser/observation-contracts/', { params })
@@ -2801,6 +3877,280 @@ export const parserApi = {
   },
   runtimeAssetHealth: async (): Promise<ParserRuntimeRuleAssetBundle> => {
     const response = await api.get<ParserRuntimeRuleAssetBundle>('/parser/runtime-assets/health/')
+    return response.data
+  },
+  assessmentPolicies: async (params: {
+    page?: number
+    page_size?: number
+    search?: string
+    check_item_id?: string
+    observation_type?: string
+    policy_role?: AssessmentPolicyRole
+    status?: AssessmentPolicyGovernanceStatus | 'profile_active' | 'profile_deprecated'
+  } = {}): Promise<AssessmentPolicyProfilePage> => {
+    const response = await api.get<AssessmentPolicyProfilePage>(
+      '/parser/assessment-policies/',
+      { params },
+    )
+    return response.data
+  },
+  assessmentPolicyVersions: async (
+    profileId: string,
+    params: { page?: number; page_size?: number; status?: AssessmentPolicyVersionStatus } = {},
+  ): Promise<AssessmentPolicyVersionPage> => {
+    const response = await api.get<AssessmentPolicyVersionPage>(
+      `/parser/assessment-policies/profiles/${profileId}/versions/`,
+      { params },
+    )
+    return response.data
+  },
+  assessmentPolicyVersion: async (versionId: string): Promise<AssessmentPolicyVersion> => {
+    const response = await api.get<AssessmentPolicyVersion>(
+      `/parser/assessment-policies/versions/${versionId}/`,
+    )
+    return response.data
+  },
+  createAssessmentPolicyVersion: async (
+    data: AssessmentPolicyVersionPayload,
+    idempotencyKey: string,
+  ): Promise<AssessmentPolicyVersion> => {
+    const response = await api.post<AssessmentPolicyVersion>(
+      '/parser/assessment-policies/versions/',
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  submitAssessmentPolicyVersion: async (
+    versionId: string,
+    reason: string,
+    idempotencyKey: string,
+  ): Promise<AssessmentPolicyVersion> => {
+    const response = await api.post<AssessmentPolicyVersion>(
+      `/parser/assessment-policies/versions/${versionId}/submit/`,
+      { reason },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  reviewAssessmentPolicySemantics: async (
+    versionId: string,
+    decision: 'approved' | 'rejected',
+    reason: string,
+    idempotencyKey: string,
+  ): Promise<AssessmentPolicyVersion> => {
+    const response = await api.post<AssessmentPolicyVersion>(
+      `/parser/assessment-policies/versions/${versionId}/semantic-review/`,
+      { decision, reason },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  reviewAssessmentPolicyPublication: async (
+    versionId: string,
+    decision: 'approved' | 'rejected',
+    reason: string,
+    idempotencyKey: string,
+  ): Promise<AssessmentPolicyVersion> => {
+    const response = await api.post<AssessmentPolicyVersion>(
+      `/parser/assessment-policies/versions/${versionId}/publication-review/`,
+      { decision, reason },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  revokeAssessmentPolicyVersion: async (
+    versionId: string,
+    reason: string,
+    idempotencyKey: string,
+  ): Promise<AssessmentPolicyVersion> => {
+    const response = await api.post<AssessmentPolicyVersion>(
+      `/parser/assessment-policies/versions/${versionId}/revoke/`,
+      { reason },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  bindAssessmentPolicyVersion: async (
+    versionId: string,
+    data: {
+      binding_type: AssessmentPolicyBinding['binding_type']
+      scope: Record<string, unknown>
+      reason: string
+      valid_from?: string
+      valid_until?: string
+      replaces_binding_id?: string
+    },
+    idempotencyKey: string,
+  ): Promise<AssessmentPolicyBinding> => {
+    const response = await api.post<AssessmentPolicyBinding>(
+      `/parser/assessment-policies/versions/${versionId}/bindings/`,
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  endAssessmentPolicyBinding: async (
+    bindingId: string,
+    reason: string,
+    idempotencyKey: string,
+  ): Promise<AssessmentPolicyBinding> => {
+    const response = await api.post<AssessmentPolicyBinding>(
+      `/parser/assessment-policy-bindings/${bindingId}/end/`,
+      { reason },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  previewAssessmentPolicyResolution: async (data: {
+    check_item_version_id: string
+    device: Record<string, unknown>
+    observation?: Record<string, unknown>
+    rule?: Record<string, unknown>
+    policy_effective_at?: string
+    include_legacy?: boolean
+    runtime_bundle_version_id?: string
+    runtime_bundle_digest?: string
+  }): Promise<AssessmentPolicyResolutionPreview> => {
+    const response = await api.post<AssessmentPolicyResolutionPreview>(
+      '/parser/assessment-policies/resolution-preview/',
+      data,
+    )
+    return response.data
+  },
+  previewAssessmentPolicyImpact: async (
+    versionId: string,
+    data: {
+      binding_type: AssessmentPolicyBinding['binding_type']
+      proposed_scope?: Record<string, unknown>
+      target_selector?: Record<string, unknown>
+      policy_effective_at?: string
+      page?: number
+      page_size?: number
+    },
+  ): Promise<AssessmentPolicyImpactPreview> => {
+    const response = await api.post<AssessmentPolicyImpactPreview>(
+      `/parser/assessment-policies/versions/${versionId}/impact-preview/`,
+      data,
+    )
+    return response.data
+  },
+  inventoryLegacyAssessmentPolicies: async (
+    data: {
+      check_item_ids?: string[]
+      include_execution_snapshots?: boolean
+      after_execution_id?: string
+      execution_page_size?: number
+    },
+    idempotencyKey: string,
+  ): Promise<AssessmentPolicyMigrationInventoryResult> => {
+    const response = await api.post<AssessmentPolicyMigrationInventoryResult>(
+      '/parser/assessment-policies/migration/inventory/',
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  assessmentPolicyMigrationSources: async (params: {
+    page?: number
+    page_size?: number
+    search?: string
+    conversion_status?: AssessmentPolicyMigrationStatus
+    source_type?: string
+    check_item_id?: string
+  } = {}): Promise<AssessmentPolicyMigrationSourcePage> => {
+    const response = await api.get<AssessmentPolicyMigrationSourcePage>(
+      '/parser/assessment-policies/migration/sources/',
+      { params },
+    )
+    return response.data
+  },
+  createAssessmentPolicyMigrationDraft: async (
+    sourceId: string,
+    idempotencyKey: string,
+  ): Promise<{
+    source: AssessmentPolicyMigrationSource
+    draft?: AssessmentPolicyVersion | null
+  }> => {
+    const response = await api.post(
+      `/parser/assessment-policies/migration/sources/${sourceId}/draft/`,
+      {},
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  compareAssessmentPolicyShadow: async (
+    data: {
+      check_item_version_id: string
+      device: Record<string, unknown>
+      observation: Record<string, unknown>
+      rule: Record<string, unknown>
+      policy_effective_at: string
+      runtime_bundle_version_id?: string
+      runtime_bundle_digest?: string
+    },
+    idempotencyKey: string,
+  ): Promise<AssessmentPolicyShadowResult> => {
+    const response = await api.post<AssessmentPolicyShadowResult>(
+      '/parser/assessment-policies/migration/shadow-compare/',
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  assessmentPolicyShadowResults: async (params: {
+    page?: number
+    page_size?: number
+    comparison_status?: AssessmentPolicyShadowResult['comparison_status']
+    check_item_id?: string
+    device_id?: string
+  } = {}): Promise<AssessmentPolicyShadowResultPage> => {
+    const response = await api.get<AssessmentPolicyShadowResultPage>(
+      '/parser/assessment-policies/migration/shadow-results/',
+      { params },
+    )
+    return response.data
+  },
+  activateAssessmentPolicyCutover: async (
+    data: {
+      check_item_version_id: string
+      device_id: string
+      shadow_result_ids: string[]
+      reason: string
+    },
+    idempotencyKey: string,
+  ): Promise<AssessmentPolicyCutover> => {
+    const response = await api.post<AssessmentPolicyCutover>(
+      '/parser/assessment-policies/migration/cutovers/',
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  rollbackAssessmentPolicyCutover: async (
+    cutoverId: string,
+    reason: string,
+    idempotencyKey: string,
+  ): Promise<AssessmentPolicyCutover> => {
+    const response = await api.post<AssessmentPolicyCutover>(
+      `/parser/assessment-policies/migration/cutovers/${cutoverId}/rollback/`,
+      { reason },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  assessmentPolicyCutovers: async (params: {
+    page?: number
+    page_size?: number
+    status?: AssessmentPolicyCutover['status']
+    resolver_mode?: AssessmentPolicyCutover['resolver_mode']
+    check_item_id?: string
+    device_id?: string
+  } = {}): Promise<AssessmentPolicyCutoverPage> => {
+    const response = await api.get<AssessmentPolicyCutoverPage>(
+      '/parser/assessment-policies/migration/cutovers/',
+      { params },
+    )
     return response.data
   },
   checkItemRuntimeBundleHealth: async (params: {
@@ -2863,6 +4213,128 @@ export const parserApi = {
     const response = await api.post<CheckItemRuntimeBundleVersion>(
       `/parser/check-item-runtime-bundles/${versionId}/rollback/`,
       { reason },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  rolloutCampaigns: async (params: {
+    page?: number
+    page_size?: number
+    status?: RolloutCampaignStatus
+    search?: string
+  } = {}): Promise<RolloutCampaignPage> => {
+    const response = await api.get<RolloutCampaignPage>(
+      '/parser/check-item-rollout-campaigns/',
+      { params },
+    )
+    return response.data
+  },
+  getRolloutCampaign: async (campaignId: string): Promise<RolloutCampaign> => {
+    const response = await api.get<RolloutCampaign>(
+      `/parser/check-item-rollout-campaigns/${campaignId}/`,
+    )
+    return response.data
+  },
+  createRolloutCampaign: async (
+    data: { name: string; description?: string },
+    idempotencyKey: string,
+  ): Promise<RolloutCampaign> => {
+    const response = await api.post<RolloutCampaign>(
+      '/parser/check-item-rollout-campaigns/',
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  freezeRolloutCampaign: async (
+    campaignId: string,
+    data: RolloutCampaignFreezePayload,
+    idempotencyKey: string,
+  ): Promise<RolloutCampaign> => {
+    const response = await api.post<RolloutCampaign>(
+      `/parser/check-item-rollout-campaigns/${campaignId}/freeze/`,
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  startRolloutStage: async (
+    campaignId: string,
+    reason: string,
+    idempotencyKey: string,
+    executionMode: 'snapshot_replay' | 'live_capture' = 'snapshot_replay',
+  ): Promise<RolloutCampaign> => {
+    const response = await api.post<RolloutCampaign>(
+      `/parser/check-item-rollout-campaigns/${campaignId}/start/`,
+      { reason, execution_mode: executionMode },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  rolloutStageExecutions: async (
+    campaignId: string,
+  ): Promise<{ items: RolloutStageExecution[] }> => {
+    const response = await api.get<{ items: RolloutStageExecution[] }>(
+      `/parser/check-item-rollout-campaigns/${campaignId}/executions/`,
+    )
+    return response.data
+  },
+  getRolloutStageExecution: async (
+    campaignId: string,
+    executionId: string,
+  ): Promise<RolloutStageExecution & Record<string, unknown>> => {
+    const response = await api.get<RolloutStageExecution & Record<string, unknown>>(
+      `/parser/check-item-rollout-campaigns/${campaignId}/executions/${executionId}/`,
+    )
+    return response.data
+  },
+  approveRolloutStage: async (
+    campaignId: string,
+    comment: string,
+    idempotencyKey: string,
+  ): Promise<RolloutCampaign> => {
+    const response = await api.post<RolloutCampaign>(
+      `/parser/check-item-rollout-campaigns/${campaignId}/approve/`,
+      { comment },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  pauseRolloutCampaign: async (
+    campaignId: string,
+    reason: string,
+    idempotencyKey: string,
+  ): Promise<RolloutCampaign> => {
+    const response = await api.post<RolloutCampaign>(
+      `/parser/check-item-rollout-campaigns/${campaignId}/pause/`,
+      { reason },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  resumeRolloutCampaign: async (
+    campaignId: string,
+    data: { observed_digests: Record<string, string>; reason: string },
+    idempotencyKey: string,
+  ): Promise<RolloutCampaign> => {
+    const response = await api.post<RolloutCampaign>(
+      `/parser/check-item-rollout-campaigns/${campaignId}/resume/`,
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  rollbackRolloutCampaign: async (
+    campaignId: string,
+    data: {
+      evidence_refs: Array<Record<string, unknown> | string>
+      reason: string
+    },
+    idempotencyKey: string,
+  ): Promise<RolloutCampaign> => {
+    const response = await api.post<RolloutCampaign>(
+      `/parser/check-item-rollout-campaigns/${campaignId}/rollback/`,
+      data,
       { headers: { 'Idempotency-Key': idempotencyKey } },
     )
     return response.data
@@ -2939,6 +4411,14 @@ export const parserApi = {
     )
     return response.data.items
   },
+  submitManualCandidate: async (
+    id: string,
+    data: {
+      template_text: string
+      based_on_template_id?: string
+      reason?: string
+    },
+  ) => (await api.post(`/parser/jobs/${id}/manual-candidate/`, data)).data,
   updateJobSpec: async (
     id: string,
     data: { parser_spec: Record<string, unknown>; confirmed: boolean; reason: string },
@@ -2997,10 +4477,23 @@ export const parserApi = {
   executeImport: async (data: { source_path: string; dataset_id?: string }) => (
     await api.post('/parser/import-execute/', data)
   ).data,
-  activate: async (id: string, reason: string) => (await api.post(`/parser/templates/${id}/activate/`, { reason })).data,
+  semanticReview: async (
+    id: string,
+    data: {
+      reason: string
+      result_confirmed: boolean
+      primary_key_confirmed: boolean
+    },
+  ) => (await api.post(`/parser/templates/${id}/semantic-review/`, data)).data,
+  activate: async (id: string, reason: string) => (
+    await api.post(`/parser/templates/${id}/activate/`, { reason })
+  ).data,
   reject: async (id: string, reason: string) => (await api.post(`/parser/templates/${id}/reject/`, { reason })).data,
   deprecate: async (id: string, reason: string) => (await api.post(`/parser/templates/${id}/deprecate/`, { reason })).data,
   retryJob: async (id: string) => (await api.post(`/parser/jobs/${id}/retry/`)).data,
+  retryAndDispatchJob: async (id: string) => (
+    await api.post(`/parser/jobs/${id}/retry-dispatch/`)
+  ).data,
   cancelJob: async (id: string) => (await api.post(`/parser/jobs/${id}/cancel/`)).data,
   recoverJob: async (id: string, reason?: string) => (
     await api.post(`/parser/jobs/${id}/recover/`, reason ? { reason } : {})
@@ -3076,6 +4569,91 @@ export const parserApi = {
     const response = await api.get<ParserPage<ParserCheckItem>>('/parser/check-items/', { params })
     return response.data
   },
+  catalogChanges: async (params: ParserPageParams = {}): Promise<ParserPage<CheckItemCatalogChange>> => {
+    const response = await api.get<ParserPage<CheckItemCatalogChange>>('/parser/catalog/changes/', { params })
+    return response.data
+  },
+  getCatalogChange: async (changeId: string): Promise<CheckItemCatalogChange> => (
+    await api.get<CheckItemCatalogChange>(`/parser/catalog/changes/${changeId}/`)
+  ).data,
+  canonicalObservations: async (): Promise<CanonicalObservationCatalog> => (
+    await api.get<CanonicalObservationCatalog>('/parser/catalog/canonical-observations/')
+  ).data,
+  createCheckItemDraft: async (
+    data: CheckItemCatalogCheckItemDraftInput,
+    idempotencyKey: string,
+  ): Promise<CheckItemCatalogChange> => (
+    await api.post<CheckItemCatalogChange>('/parser/catalog/check-items/drafts/', data, {
+      headers: { 'Idempotency-Key': idempotencyKey },
+    })
+  ).data,
+  deleteCheckItem: async (
+    checkItemId: string,
+    reason: string | undefined,
+    idempotencyKey: string,
+  ): Promise<CheckItemCatalogCheckItemDeleteResult> => (
+    await api.delete<CheckItemCatalogCheckItemDeleteResult>(
+      `/parser/catalog/check-items/${checkItemId}/`,
+      {
+        data: { reason: reason?.trim() || '' },
+        headers: { 'Idempotency-Key': idempotencyKey },
+      },
+    )
+  ).data,
+  createCollectionImplementationDraft: async (
+    data: CheckItemCatalogImplementationDraftInput,
+    idempotencyKey: string,
+  ): Promise<CheckItemCatalogChange> => (
+    await api.post<CheckItemCatalogChange>('/parser/catalog/implementations/drafts/', data, {
+      headers: { 'Idempotency-Key': idempotencyKey },
+    })
+  ).data,
+  deleteCollectionImplementation: async (
+    implementationId: string,
+    reason: string | undefined,
+    idempotencyKey: string,
+  ): Promise<CheckItemCatalogImplementationDeleteResult> => (
+    await api.delete<CheckItemCatalogImplementationDeleteResult>(
+      `/parser/catalog/implementations/${implementationId}/`,
+      {
+        data: { reason: reason?.trim() || '' },
+        headers: { 'Idempotency-Key': idempotencyKey },
+      },
+    )
+  ).data,
+  previewCatalogChange: async (changeId: string): Promise<CheckItemCatalogImpact> => (
+    await api.post<CheckItemCatalogImpact>(`/parser/catalog/changes/${changeId}/impact-preview/`)
+  ).data,
+  catalogPublicationOptions: async (
+    changeId: string,
+  ): Promise<CheckItemCatalogPublicationOptions> => (
+    await api.get<CheckItemCatalogPublicationOptions>(
+      `/parser/catalog/changes/${changeId}/publication-options/`,
+    )
+  ).data,
+  submitCatalogChange: async (
+    changeId: string,
+    data: { reason?: string; expected_impact_digest: string },
+    idempotencyKey: string,
+  ): Promise<CheckItemCatalogChange> => (
+    await api.post<CheckItemCatalogChange>(`/parser/catalog/changes/${changeId}/submit/`, data, {
+      headers: { 'Idempotency-Key': idempotencyKey },
+    })
+  ).data,
+  decideCatalogChange: async (
+    changeId: string,
+    decision: 'approve' | 'reject',
+    data: {
+      reason?: string
+      expected_impact_digest: string
+      rollout_campaign_id?: string
+    },
+    idempotencyKey: string,
+  ): Promise<CheckItemCatalogChange> => (
+    await api.post<CheckItemCatalogChange>(`/parser/catalog/changes/${changeId}/${decision}/`, data, {
+      headers: { 'Idempotency-Key': idempotencyKey },
+    })
+  ).data,
   getPatrolProfileCheckItems: async (profileVersionId: string) => (
     await api.get(`/parser/command-profiles/${profileVersionId}/check-items/`)
   ).data,
@@ -3146,9 +4724,18 @@ const createOfflineJobApi = (base: string) => ({
   } = {}): Promise<OfflinePatrolJobPage> => (
     await api.get<OfflinePatrolJobPage>(`${base}/`, { params })
   ).data,
-  get: async (id: string): Promise<OfflinePatrolJob> => (
-    await api.get<OfflinePatrolJob>(`${base}/${id}/`)
-  ).data,
+  get: async (id: string): Promise<OfflinePatrolJob> => {
+    const data = (await api.get<OfflinePatrolJob>(`${base}/${id}/`)).data
+    const preview = (data.preview || {}) as {
+      output_review_items?: OfflineOutputReviewItem[]
+      output_dispositions?: OfflineOutputDisposition[]
+    }
+    return {
+      ...data,
+      output_review_items: data.output_review_items || preview.output_review_items || [],
+      output_dispositions: data.output_dispositions || preview.output_dispositions || [],
+    }
+  },
   replay: async (id: string): Promise<OfflinePatrolAnalysisSummary> => (
     await api.get<OfflinePatrolAnalysisSummary>(`${base}/${id}/replay-summary/`, {
       timeout: 300000,
@@ -3161,6 +4748,7 @@ const createOfflineJobApi = (base: string) => ({
     vendor?: string
     model?: string
     publish_events?: boolean
+    report_intent?: OfflinePatrolReportIntent
     idempotency_key: string
   }): Promise<OfflinePatrolJob> => (
     await api.post<OfflinePatrolJob>(`${base}/`, data)
@@ -3182,6 +4770,12 @@ const createOfflineJobApi = (base: string) => ({
   ).data,
   confirmBindings: async (id: string, bindings: Array<{ binding_id: string; inventory_device_id?: string | null }>) => (
     await api.post(`${base}/${id}/device-bindings/confirm/`, { bindings })
+  ).data,
+  confirmOutputDispositions: async (id: string, reviewItemIds: string[], reason: string) => (
+    await api.post(`${base}/${id}/output-dispositions/confirm/`, {
+      review_item_ids: reviewItemIds,
+      reason,
+    })
   ).data,
   execute: async (id: string, idempotencyKey: string) => (
     await api.post(`${base}/${id}/execute/`, { idempotency_key: idempotencyKey })
@@ -3236,7 +4830,45 @@ export const ruleAssetSourceApi = {
     )
   ).data,
 }
-export const offlinePatrolApi = createOfflineJobApi(OFFLINE_PATROL_JOBS_BASE)
+export const offlinePatrolApi = {
+  ...createOfflineJobApi(OFFLINE_PATROL_JOBS_BASE),
+  currentAuthority: async (id: string): Promise<PatrolCurrentAuthority> => (
+    await api.get<PatrolCurrentAuthority>(
+      `${OFFLINE_PATROL_JOBS_BASE}/${id}/current-authority/`,
+    )
+  ).data,
+  prepareCurrentAuthority: async (id: string, data: {
+    completeness_statement: string
+    completeness_evidence_refs: string[]
+    observed_at_evidence_refs: string[]
+    collection_tool: string
+    collector_identity: string
+    scope_contract?: Record<string, unknown>
+  }, idempotencyKey: string): Promise<PatrolCurrentAuthority> => (
+    await api.post<PatrolCurrentAuthority>(
+      `${OFFLINE_PATROL_JOBS_BASE}/${id}/current-authority/prepare/`,
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+  ).data,
+  attestCurrentAuthority: async (id: string, data: {
+    request_digest: string
+    reason: string
+  }, idempotencyKey: string): Promise<Record<string, unknown>> => (
+    await api.post(
+      `${OFFLINE_PATROL_JOBS_BASE}/${id}/current-authority/attest/`,
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+  ).data,
+  revokeCurrentAuthority: async (id: string, reason: string, idempotencyKey: string) => (
+    await api.post(
+      `${OFFLINE_PATROL_JOBS_BASE}/${id}/current-authority/revoke/`,
+      { reason },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+  ).data,
+}
 
 export const deviceApi = {
   list: async (params: Record<string, string | number | undefined> = {}) => {
@@ -3832,6 +5464,7 @@ export interface WorkflowRunSummary {
 export interface PatrolBatchSummary {
   patrol_batch_id: string
   workflow_name?: string
+  report_purpose?: string
   source?: string
   ticket_id?: string | null
   total: number
@@ -3851,6 +5484,9 @@ export interface PatrolBatchSummary {
   target_count?: number
   launched_count?: number
   skipped_count?: number
+  dispatch_status?: string
+  dispatch_status_counts?: Record<string, number>
+  dispatch_error?: string | null
   connection_succeeded_count?: number
   connection_failed_count?: number
   connection_pending_count?: number
@@ -3889,6 +5525,34 @@ export interface PatrolBatchGovernanceResult {
   keep_until?: string | null
 }
 
+export interface PatrolBatchCancellationResult {
+  success: boolean
+  patrol_batch_id: string
+  status: 'cancelled'
+  idempotent: boolean
+  cancelled_at: string
+  cancelled_by: string
+  reason: string
+  affected_runs: number
+  cancelled_run_count: number
+  revoked_task_count: number
+  cancelled_device_count: number
+  finalization_errors: Array<{ device_id: string; error: string }>
+}
+
+export interface PatrolConclusionDimension {
+  code: string
+  label: string
+  basis: string
+}
+
+export interface PatrolConclusionDimensions {
+  risk_conclusion: PatrolConclusionDimension
+  assessment_completeness: PatrolConclusionDimension
+  comparison_readiness: PatrolConclusionDimension
+  authority: PatrolConclusionDimension
+}
+
 export interface PatrolBatchResultSummary {
   patrol_batch_id: string
   run_count: number
@@ -3913,6 +5577,7 @@ export interface PatrolBatchResultSummary {
       trust: string
       formal: boolean
     }
+    conclusion_dimensions?: PatrolConclusionDimensions | null
     coverage: {
       target_device_count: number
       expected_check_count: number
@@ -4034,6 +5699,7 @@ export interface PatrolBatchResultSummary {
 
 export interface PatrolBatchCheckResult {
   execution_id: string
+  assessment_id?: string | null
   device_id: string
   device_name?: string | null
   management_ip?: string | null
@@ -4068,6 +5734,13 @@ export interface PatrolBatchCheckResult {
   current_finding_count: number
   runtime_bundle_version_id?: string | null
   runtime_bundle_digest?: string | null
+  assessment_policy_snapshot_digest?: string | null
+  assessment_basis_digest?: string | null
+  assessment_basis_summary?: {
+    entry_count: number
+    source_counts: Record<string, number>
+    status_counts: Record<string, number>
+  }
   comparison_context_id?: string | null
   observation_min_at?: string | null
   observation_max_at?: string | null
@@ -4081,22 +5754,196 @@ export interface PatrolBatchCheckResultPage {
   total: number
   limit: number
   offset: number
+  pagination_mode?: 'offset' | 'cursor'
+  next_cursor?: string | null
+  has_more?: boolean
   items: PatrolBatchCheckResult[]
+}
+
+export interface PatrolBatchCheckResultDetail extends PatrolBatchCheckResult {
+  schema_version: 'patrol-check-result-detail/v1'
+  assessment_policy_snapshot: Record<string, any>
+  assessment_basis: Record<string, any>
+  assessment_basis_entries: {
+    total: number
+    limit: number
+    offset: number
+    has_more: boolean
+  }
+  evidence_refs: string[]
+  integrity: {
+    policy_snapshot_present: boolean
+    policy_snapshot_valid: boolean
+    assessment_basis_present: boolean
+    assessment_basis_valid: boolean
+    policy_snapshot_digest_matches: boolean
+    assessment_basis_digest_matches: boolean
+  }
 }
 
 export type PatrolReportReleaseStatus =
   | 'facts_not_final'
+  | 'pending_content_acceptance'
   | 'pending_signoff'
   | 'released'
+
+export type PatrolReportContentReviewStatus =
+  | 'not_started'
+  | 'in_review'
+  | 'revision_required'
+  | 'accepted'
+
+export type PatrolReportContentReviewItemStatus =
+  | 'pending'
+  | 'accepted'
+  | 'rejected'
+
+export interface PatrolReportContentMachineCheck {
+  id: string
+  passed: boolean
+  detail: Record<string, unknown>
+}
+
+export interface PatrolReportContentMachineValidation {
+  schema_version: string
+  passed: boolean
+  checks: PatrolReportContentMachineCheck[]
+  failed_check_ids: string[]
+  digest: string
+}
+
+export interface PatrolReportContentReview {
+  id: string
+  report_manifest_id: string
+  patrol_batch_id: string
+  schema_version: string
+  status: Exclude<PatrolReportContentReviewStatus, 'not_started'>
+  source_facts_digest: string
+  claim_ledger_digest: string
+  artifact_sha256_json: Record<string, string>
+  review_plan_digest: string
+  machine_validation_json: PatrolReportContentMachineValidation
+  machine_validation_digest: string
+  required_item_count: number
+  accepted_item_count: number
+  rejected_item_count: number
+  pending_item_count: number
+  can_accept: boolean
+  required_confirmations_json: string[]
+  accepted_confirmations_json?: string[] | null
+  created_by: string
+  accepted_by?: string | null
+  accepted_at?: string | null
+  acceptance_comment?: string | null
+  acceptance_digest?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface PatrolReportContentReviewPreview {
+  review_status: PatrolReportContentReviewStatus
+  review: PatrolReportContentReview | null
+  machine_validation: PatrolReportContentMachineValidation
+  review_plan_digest?: string
+  required_item_count?: number
+  category_counts?: Record<string, number>
+  sampling_rule?: {
+    ordinary_fact_sample_size_per_stratum: number
+    stratum_dimensions: string[]
+    selection: string
+  }
+  can_start?: boolean
+}
+
+export interface PatrolReportContentReviewItem {
+  id: string
+  review_id: string
+  review_item_id: string
+  category: string
+  review_reasons_json: string[]
+  stratum_key?: string | null
+  fact_type: string
+  fact_id: string
+  device_id?: string | null
+  check_item_id?: string | null
+  severity?: string | null
+  conclusion_status?: string | null
+  evidence_refs_json: string[]
+  summary_json: Record<string, unknown>
+  review_status: PatrolReportContentReviewItemStatus
+  reviewed_by?: string | null
+  reviewed_at?: string | null
+  review_comment?: string | null
+}
+
+export interface PatrolReportContentReviewItemPage {
+  review: PatrolReportContentReview
+  total: number
+  page: number
+  page_size: number
+  items: PatrolReportContentReviewItem[]
+}
 
 export interface PatrolReportReleaseView {
   success?: boolean
   report_manifest_id: string
   patrol_batch_id: string
+  version: number
+  superseded?: boolean
+  report_purpose?: 'production_current'
+    | 'offline_historical'
+    | 'shadow_validation'
+    | 'parser_validation'
+    | 'rule_asset_replay'
+    | string
+  report_purpose_label?: string
+  report_purpose_disclosure?: string
+  current_state_authoritative?: boolean
+  report_authority_context?: {
+    schema_version?: string
+    report_purpose?: string
+    source_kind?: string
+    patrol_mode?: string | null
+    launch_mode?: string | null
+    workflow_name?: string | null
+    target_type?: string | null
+    observation_min_at?: string | null
+    observation_max_at?: string | null
+    current_state_eligible?: boolean
+    reason_codes?: string[]
+    digest?: string
+  }
+  conclusion_permission?: {
+    schema_version?: string
+    terminal_truth_reconciled?: boolean
+    current_conclusion_ready?: boolean
+    evaluated_scope_no_abnormality_allowed?: boolean
+    overall_healthy_allowed?: boolean
+    counts?: {
+      health_target_pair_count?: number
+      evaluated_health_target_pair_count?: number
+      healthy?: number
+      at_risk?: number
+      unable_to_determine?: number
+      not_applicable?: number
+      informational?: number
+      unresolved_in_scope_risk_case_count?: number
+      unresolved_evaluated_scope_risk_case_count?: number
+    }
+    blocker_reason_codes?: string[]
+    blocker_ref_digest?: string
+    input_fact_digest?: string
+    decision_digest?: string
+  }
   facts_status: 'draft' | 'partial' | 'final' | 'superseded' | string
   release_status: PatrolReportReleaseStatus
   report_cutoff_at?: string | null
+  fact_ingestion_high_watermark?: string | null
+  late_fact_count?: number
   source_facts_digest: string
+  claim_ledger_digest?: string
+  claim_count?: number
+  raw_evidence_set_digest?: string
   qualification_fact_digest: string
   coverage_fact_digest: string
   artifact_sha256: Record<string, string>
@@ -4106,14 +5953,27 @@ export interface PatrolReportReleaseView {
     | 'unknown_scope_disclosed'
     | 'artifact_digests_verified'
   >
+  content_review_status: PatrolReportContentReviewStatus
+  content_review?: PatrolReportContentReview | null
+  required_content_confirmations: Array<
+    'machine_reconciliation_reviewed'
+    | 'critical_unknown_and_lifecycle_reviewed'
+    | 'sampled_facts_reviewed'
+    | 'traceability_verified'
+    | 'narrative_readability_accepted'
+    | 'actions_actionable'
+  >
   conclusion?: {
+    claim_id?: string | null
     code?: string
     text?: string
     basis?: string
     trust?: string
     formal?: boolean
   }
+  conclusion_dimensions?: PatrolConclusionDimensions
   coverage?: {
+    claim_id?: string | null
     target_device_count?: number
     expected_check_count?: number
     executed_check_count?: number
@@ -4141,13 +6001,140 @@ export interface PatrolReportReleaseView {
     signoff_comment: string
     disclosure_confirmations_json: string[]
     artifact_sha256_json: Record<string, string>
+    content_review_id?: string | null
+    content_acceptance_digest?: string | null
   } | null
+}
+
+export interface PatrolReportClaim {
+  id: string
+  report_manifest_id: string
+  patrol_batch_id: string
+  claim_code: string
+  claim_scope: 'network' | 'site' | 'device_group' | 'device' | 'check_item' | 'entity'
+  assertion_level: 'observed' | 'assessed' | 'current' | 'historical' | 'limited'
+  allowed_phrase_code: string
+  subject_json: Record<string, unknown>
+  fact_refs_json: string[]
+  evidence_refs_json: string[]
+  limitation_refs_json: string[]
+  authority_context_digest: string
+  source_facts_digest: string
+  claim_digest: string
+  created_at: string
+}
+
+export interface PatrolReportClaimPage {
+  report_manifest_id: string
+  patrol_batch_id: string
+  claim_ledger_digest: string
+  count: number
+  total: number
+  page: number
+  page_size: number
+  items: PatrolReportClaim[]
 }
 
 export interface PatrolReportDownload {
   blob: Blob
   filename: string
   status?: PatrolReportReleaseStatus
+}
+
+export type ProductionFeedbackType =
+  | 'false_positive'
+  | 'missed_detection'
+  | 'wrong_severity'
+  | 'wrong_scope'
+  | 'expected_behavior'
+  | 'evidence_quality_issue'
+
+export type ProductionFeedbackStatus =
+  | 'submitted'
+  | 'triaged'
+  | 'work_item_created'
+  | 'closed'
+  | 'rejected'
+
+export type ProductionFeedbackWorkItemKind =
+  | 'rule_sample'
+  | 'assessment_policy'
+  | 'data_quality'
+
+export interface ProductionFeedbackWorkItem {
+  id: string
+  feedback_id: string
+  work_item_kind: ProductionFeedbackWorkItemKind
+  status: 'open' | 'candidate_linked' | 'completed' | 'cancelled'
+  action_payload_json: Record<string, unknown>
+  action_digest: string
+  candidate_ref_json?: Record<string, unknown> | null
+  candidate_ref_digest?: string | null
+  created_by: string
+  linked_by?: string | null
+  created_at: string
+  linked_at?: string | null
+}
+
+export interface ProductionFeedback {
+  id: string
+  feedback_type: ProductionFeedbackType
+  status: ProductionFeedbackStatus
+  triage_outcome?: 'confirmed' | 'not_confirmed' | 'inconclusive' | null
+  execution_id: string
+  assessment_id: string
+  event_occurrence_id?: string | null
+  risk_occurrence_id?: string | null
+  risk_episode_id?: string | null
+  patrol_batch_id: string
+  device_id: string
+  check_item_version_id: string
+  runtime_bundle_version_id?: string | null
+  runtime_bundle_digest?: string | null
+  evidence_digest: string
+  source_context_json: Record<string, unknown>
+  statement: string
+  reported_by: string
+  triaged_by?: string | null
+  triage_reason?: string | null
+  work_item?: ProductionFeedbackWorkItem | null
+  created_at: string
+  triaged_at?: string | null
+}
+
+export interface ProductionFeedbackPage {
+  items: ProductionFeedback[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface ProductionFeedbackContext {
+  execution_id: string
+  assessment_id?: string | null
+  patrol_batch_id: string
+  device_id: string
+  check_item_version_id: string
+  runtime_bundle_version_id?: string | null
+  runtime_bundle_digest?: string | null
+  evidence_digest?: string | null
+  feedback_ready: boolean
+  events: Array<{
+    occurrence_id: string
+    event_id: string
+    event_type: string
+    severity: string
+    occurrence_kind: string
+    observed_at: string
+  }>
+  risks: Array<{
+    occurrence_id: string
+    risk_case_id: string
+    risk_episode_id: string
+    occurrence_kind: string
+    status_after: string
+    observed_at: string
+  }>
 }
 
 export type RiskCaseStatus =
@@ -4169,7 +6156,23 @@ export type RiskRemediationStatus =
   | 'planned'
   | 'in_progress'
   | 'completed'
+  | 'accepted'
   | 'cancelled'
+
+export type RiskClosureStatus =
+  | 'open'
+  | 'technical_recovered'
+  | 'pending_remediation'
+  | 'pending_acceptance'
+  | 'ready_to_close'
+  | 'closed'
+  | 'suppressed'
+
+export type RiskVerificationStatus =
+  | 'confirmed_current'
+  | 'recovery_pending'
+  | 'not_reverified'
+  | 'resolved'
 
 export interface RiskCase {
   id: string
@@ -4185,10 +6188,20 @@ export interface RiskCase {
   risk_type: string
   severity: RiskSeverity
   status: RiskCaseStatus
+  episode_id: string
   first_seen_at: string
   last_seen_at: string
   last_successful_evaluation_at?: string | null
+  verification_status: RiskVerificationStatus
+  last_verified_at?: string | null
+  last_verification_execution_id?: string | null
   resolved_at?: string | null
+  closed_at?: string | null
+  closed_by?: string | null
+  closure_reason?: string | null
+  closure_disposition?: 'remediation_accepted' | 'no_remediation_required' | null
+  closure_evidence_refs_json?: string[] | null
+  closure_status: RiskClosureStatus
   source_finding_ids_json: string[]
   source_event_ids_json: string[]
   owner?: string | null
@@ -4204,6 +6217,7 @@ export interface RiskCase {
 export interface RiskOccurrence {
   id: string
   risk_case_id: string
+  risk_episode_id?: string | null
   occurrence_kind: string
   source_finding_id?: string | null
   source_event_id?: string | null
@@ -4225,9 +6239,31 @@ export interface RiskRemediation {
   evidence_refs_json?: string[] | null
   created_by?: string | null
   completed_by?: string | null
+  accepted_by?: string | null
   created_at: string
   completed_at?: string | null
+  accepted_at?: string | null
+  acceptance_reason?: string | null
+  acceptance_evidence_refs_json?: string[] | null
   updated_at: string
+}
+
+export interface RiskRecoveryCandidate {
+  id: string
+  kind: 'recovery_event' | 'healthy_assessment'
+  eligible: boolean
+  blocker_codes: string[]
+  execution_id?: string | null
+  assessment_id?: string | null
+  patrol_batch_id?: string | null
+  source_change_id?: string | null
+  source_event_id?: string | null
+  event_occurrence_id?: string | null
+  event_type?: string | null
+  recovery_rule_version_ids: string[]
+  recovered_at?: string | null
+  evidence_refs: string[]
+  source_event_status?: string | null
 }
 
 export interface RiskCaseDetail extends RiskCase {
@@ -4240,6 +6276,32 @@ export interface RiskCaseDetail extends RiskCase {
   }
   remediations: RiskRemediation[]
   findings: Array<Record<string, unknown>>
+  recovery_candidates: RiskRecoveryCandidate[]
+  recovery_confirmation: {
+    state: 'ready' | 'blocked' | 'not_pending' | 'not_applicable'
+    eligible_candidate_count: number
+    candidate_count: number
+    blocker_codes: string[]
+  }
+  closure: {
+    state: RiskClosureStatus | 'blocked'
+    eligible: boolean
+    allowed_dispositions: Array<
+      'remediation_accepted' | 'no_remediation_required'
+    >
+    blocker_codes: string[]
+    current_episode_id: string
+    current_remediation_count: number
+    accepted_remediation_count: number
+    closed_at?: string | null
+    closed_by?: string | null
+    closure_reason?: string | null
+    closure_disposition?:
+      | 'remediation_accepted'
+      | 'no_remediation_required'
+      | null
+    closure_evidence_refs: string[]
+  }
 }
 
 export interface RiskCasePage {
@@ -4258,6 +6320,95 @@ export interface RiskCasePage {
     by_severity: Record<string, number>
     by_remediation_status: Record<string, number>
   }
+}
+
+export type RiskEpisodeAssociationStatus =
+  | 'pending_review'
+  | 'approved'
+  | 'rejected'
+  | 'revoked'
+
+export type RiskEpisodeAssociationRelation =
+  | 'same_root_cause'
+  | 'causal_symptom'
+  | 'shared_incident'
+
+export interface RiskEpisodeAssociationRiskSummary {
+  id: string
+  episode_id: string
+  check_item_id: string
+  device_id: string
+  entity_type: string
+  entity_key: string
+  risk_type: string
+  severity: RiskSeverity
+  status: RiskCaseStatus
+}
+
+export interface RiskEpisodeAssociation {
+  id: string
+  primary_risk_case_id: string
+  primary_risk_episode_id: string
+  related_risk_case_id: string
+  related_risk_episode_id: string
+  relation_type: RiskEpisodeAssociationRelation
+  status: RiskEpisodeAssociationStatus
+  source_type: 'manual' | 'approved_policy'
+  policy_ref_json?: Record<string, unknown> | null
+  evidence_refs_json: string[]
+  reason: string
+  proposed_by: string
+  reviewed_by?: string | null
+  review_reason?: string | null
+  reviewed_at?: string | null
+  revoked_by?: string | null
+  revoke_reason?: string | null
+  revoked_at?: string | null
+  created_at: string
+  updated_at: string
+  effective: boolean
+  stale: boolean
+  primary_risk?: RiskEpisodeAssociationRiskSummary | null
+  related_risk?: RiskEpisodeAssociationRiskSummary | null
+}
+
+export interface RiskEpisodeAssociationPage {
+  items: RiskEpisodeAssociation[]
+  page: number
+  page_size: number
+  total: number
+  page_count: number
+}
+
+export interface PatrolReportVersionPage {
+  patrol_batch_id: string
+  total: number
+  page: number
+  page_size: number
+  items: PatrolReportReleaseView[]
+}
+
+export interface PatrolReportMaterializationStatus {
+  success?: boolean
+  accepted?: boolean
+  reason?: 'already_in_progress' | 'idempotent_replay' | string
+  request_id?: string
+  idempotency_key?: string
+  task_id?: string
+  requested_by?: string
+  patrol_batch_id: string
+  status:
+    | 'not_requested'
+    | 'queued'
+    | 'generating'
+    | 'completed'
+    | 'failed'
+    | string
+  requested_at?: string | null
+  completed_at?: string | null
+  error?: string | null
+  report_manifest_id?: string | null
+  report_manifest_digest?: string | null
 }
 
 export interface PatrolBatchDeviceItem {
@@ -4438,6 +6589,16 @@ export const workflowApi = {
     const response = await api.post<PatrolBatchGovernanceResult>(`/workflows/runs/patrol-batches/${batchId}/restore/`, data || {})
     return response.data
   },
+  cancelPatrolBatch: async (
+    batchId: string,
+    data: { reason: string },
+  ): Promise<PatrolBatchCancellationResult> => {
+    const response = await api.post<PatrolBatchCancellationResult>(
+      `/workflows/runs/patrol-batches/${batchId}/cancel/`,
+      data,
+    )
+    return response.data
+  },
   getPatrolBatchSummary: async (batchId: string): Promise<PatrolBatchResultSummary> => {
     const response = await api.get<PatrolBatchResultSummary>(`/workflows/runs/patrol-batches/${batchId}/summary/`)
     return response.data
@@ -4447,6 +6608,7 @@ export const workflowApi = {
     params?: {
       limit?: number
       offset?: number
+      cursor?: string
       search?: string
       assessment_status?: string
       completeness_status?: string
@@ -4458,6 +6620,17 @@ export const workflowApi = {
   ): Promise<PatrolBatchCheckResultPage> => {
     const response = await api.get<PatrolBatchCheckResultPage>(
       `/workflows/runs/patrol-batches/${batchId}/check-results`,
+      { params },
+    )
+    return response.data
+  },
+  getPatrolBatchCheckResultDetail: async (
+    batchId: string,
+    executionId: string,
+    params: { entry_limit?: number; entry_offset?: number } = {},
+  ): Promise<PatrolBatchCheckResultDetail> => {
+    const response = await api.get<PatrolBatchCheckResultDetail>(
+      `/workflows/runs/patrol-batches/${batchId}/check-results/${executionId}`,
       { params },
     )
     return response.data
@@ -4500,9 +6673,13 @@ export const workflowApi = {
     })
     return response.data
   },
-  exportPatrolBatchReport: async (batchId: string): Promise<PatrolReportDownload> => {
+  exportPatrolBatchReport: async (
+    batchId: string,
+    reportManifestId?: string,
+  ): Promise<PatrolReportDownload> => {
     const response = await api.get(`/workflows/runs/patrol-batches/${batchId}/report.docx`, {
       responseType: 'blob',
+      params: reportManifestId ? { report_manifest_id: reportManifestId } : undefined,
     })
     return {
       blob: response.data,
@@ -4513,9 +6690,13 @@ export const workflowApi = {
       status: response.headers['x-netops-report-status'],
     }
   },
-  exportPatrolBatchTechnicalWorkbook: async (batchId: string): Promise<PatrolReportDownload> => {
+  exportPatrolBatchTechnicalWorkbook: async (
+    batchId: string,
+    reportManifestId?: string,
+  ): Promise<PatrolReportDownload> => {
     const response = await api.get(`/workflows/runs/patrol-batches/${batchId}/report.xlsx`, {
       responseType: 'blob',
+      params: reportManifestId ? { report_manifest_id: reportManifestId } : undefined,
     })
     return {
       blob: response.data,
@@ -4526,9 +6707,13 @@ export const workflowApi = {
       status: response.headers['x-netops-report-status'],
     }
   },
-  exportPatrolBatchEvidencePackage: async (batchId: string): Promise<PatrolReportDownload> => {
+  exportPatrolBatchEvidencePackage: async (
+    batchId: string,
+    reportManifestId?: string,
+  ): Promise<PatrolReportDownload> => {
     const response = await api.get(`/workflows/runs/patrol-batches/${batchId}/evidence.zip`, {
       responseType: 'blob',
+      params: reportManifestId ? { report_manifest_id: reportManifestId } : undefined,
     })
     return {
       blob: response.data,
@@ -4546,10 +6731,16 @@ export const workflowApi = {
     )
     return response.data
   },
-  exportPatrolBatchRawCli: async (batchId: string): Promise<Blob> => {
+  exportPatrolBatchRawCli: async (
+    batchId: string,
+    reportManifestId?: string,
+  ): Promise<Blob> => {
     const response = await api.get(
       `/workflows/runs/patrol-batches/${batchId}/raw-cli.zip`,
-      { responseType: 'blob' },
+      {
+        responseType: 'blob',
+        params: reportManifestId ? { report_manifest_id: reportManifestId } : undefined,
+      },
     )
     return response.data
   },
@@ -4698,6 +6889,80 @@ export const workflowApi = {
 }
 
 export const patrolApi = {
+  listProductionFeedback: async (params: {
+    page?: number
+    page_size?: number
+    status?: ProductionFeedbackStatus
+    feedback_type?: ProductionFeedbackType
+    runtime_bundle_version_id?: string
+    patrol_batch_id?: string
+  } = {}): Promise<ProductionFeedbackPage> => {
+    const response = await api.get<ProductionFeedbackPage>(
+      '/patrol/production-feedback',
+      { params },
+    )
+    return response.data
+  },
+  getProductionFeedbackContext: async (
+    executionId: string,
+  ): Promise<ProductionFeedbackContext> => {
+    const response = await api.get<ProductionFeedbackContext>(
+      `/patrol/production-feedback/context/${executionId}`,
+    )
+    return response.data
+  },
+  submitProductionFeedback: async (
+    data: {
+      execution_id: string
+      assessment_id: string
+      feedback_type: ProductionFeedbackType
+      statement: string
+      event_occurrence_id?: string
+      risk_occurrence_id?: string
+    },
+    idempotencyKey: string,
+  ): Promise<ProductionFeedback> => {
+    const response = await api.post<{ success: boolean; feedback: ProductionFeedback }>(
+      '/patrol/production-feedback',
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data.feedback
+  },
+  triageProductionFeedback: async (
+    feedbackId: string,
+    data: {
+      outcome: 'confirmed' | 'not_confirmed' | 'inconclusive'
+      reason: string
+      work_item_kind?: ProductionFeedbackWorkItemKind
+    },
+    idempotencyKey: string,
+  ): Promise<ProductionFeedback> => {
+    const response = await api.post<{ success: boolean; feedback: ProductionFeedback }>(
+      `/patrol/production-feedback/${feedbackId}/triage`,
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data.feedback
+  },
+  linkProductionFeedbackCandidate: async (
+    workItemId: string,
+    data: {
+      candidate_type: 'offline_job' | 'assessment_policy_version' | 'asset_gap'
+      candidate_id: string
+    },
+    idempotencyKey: string,
+  ): Promise<ProductionFeedbackWorkItem> => {
+    const response = await api.post<{
+      success: boolean
+      work_item: ProductionFeedbackWorkItem
+    }>(
+      `/patrol/production-feedback/work-items/${workItemId}/candidate`,
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data.work_item
+  },
   getBatchReportManifest: async (
     batchId: string,
   ): Promise<PatrolReportReleaseView> => {
@@ -4706,14 +6971,129 @@ export const patrolApi = {
     )
     return response.data
   },
+  getReportContentReview: async (
+    batchId: string,
+    reportManifestId: string,
+  ): Promise<PatrolReportContentReviewPreview> => {
+    const response = await api.get<PatrolReportContentReviewPreview>(
+      `/patrol/batches/${batchId}/reports/${reportManifestId}/content-review`,
+    )
+    return response.data
+  },
+  startReportContentReview: async (
+    batchId: string,
+    reportManifestId: string,
+    idempotencyKey: string,
+  ): Promise<PatrolReportContentReview> => {
+    const response = await api.post<{
+      success: boolean
+      review: PatrolReportContentReview
+    }>(
+      `/patrol/batches/${batchId}/reports/${reportManifestId}/content-review/start`,
+      {},
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data.review
+  },
+  listReportContentReviewItems: async (
+    batchId: string,
+    reportManifestId: string,
+    params: {
+      page?: number
+      page_size?: number
+      review_status?: PatrolReportContentReviewItemStatus
+      category?: string
+    } = {},
+  ): Promise<PatrolReportContentReviewItemPage> => {
+    const response = await api.get<PatrolReportContentReviewItemPage>(
+      `/patrol/batches/${batchId}/reports/${reportManifestId}/content-review/items`,
+      { params },
+    )
+    return response.data
+  },
+  decideReportContentReviewItems: async (
+    batchId: string,
+    reportManifestId: string,
+    data: {
+      review_item_ids: string[]
+      decision: 'accepted' | 'rejected'
+      review_comment: string
+    },
+    idempotencyKey: string,
+  ): Promise<PatrolReportContentReview> => {
+    const response = await api.post<{
+      success: boolean
+      review: PatrolReportContentReview
+    }>(
+      `/patrol/batches/${batchId}/reports/${reportManifestId}/content-review/items/decision`,
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data.review
+  },
+  acceptReportContent: async (
+    batchId: string,
+    reportManifestId: string,
+    data: {
+      acceptance_comment: string
+      confirmations: PatrolReportReleaseView['required_content_confirmations']
+      verified_artifact_sha256: Record<string, string>
+    },
+    idempotencyKey: string,
+  ): Promise<PatrolReportContentReview> => {
+    const response = await api.post<{
+      success: boolean
+      review: PatrolReportContentReview
+    }>(
+      `/patrol/batches/${batchId}/reports/${reportManifestId}/content-review/accept`,
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data.review
+  },
+  listBatchReportClaims: async (
+    batchId: string,
+    params: {
+      page?: number
+      page_size?: number
+      search?: string
+      claim_scope?: PatrolReportClaim['claim_scope']
+      assertion_level?: PatrolReportClaim['assertion_level']
+    } = {},
+  ): Promise<PatrolReportClaimPage> => {
+    const response = await api.get<PatrolReportClaimPage>(
+      `/patrol/batches/${batchId}/report-claims`,
+      { params },
+    )
+    return response.data
+  },
+  listBatchReportVersions: async (
+    batchId: string,
+    page = 1,
+    pageSize = 20,
+  ): Promise<PatrolReportVersionPage> => {
+    const response = await api.get<PatrolReportVersionPage>(
+      `/patrol/batches/${batchId}/reports`,
+      { params: { page, page_size: pageSize } },
+    )
+    return response.data
+  },
   materializeBatchReport: async (
     batchId: string,
     idempotencyKey: string,
-  ): Promise<PatrolReportReleaseView> => {
-    const response = await api.post<PatrolReportReleaseView>(
+  ): Promise<PatrolReportMaterializationStatus> => {
+    const response = await api.post<PatrolReportMaterializationStatus>(
       `/patrol/batches/${batchId}/reports/materialize`,
       {},
       { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  getBatchReportMaterializationStatus: async (
+    batchId: string,
+  ): Promise<PatrolReportMaterializationStatus> => {
+    const response = await api.get<PatrolReportMaterializationStatus>(
+      `/patrol/batches/${batchId}/reports/materialization-status`,
     )
     return response.data
   },
@@ -4759,6 +7139,61 @@ export const patrolApi = {
     )
     return response.data
   },
+  listRiskEpisodeAssociations: async (
+    riskCaseId: string,
+    params: {
+      page?: number
+      page_size?: number
+      status?: RiskEpisodeAssociationStatus
+    } = {},
+  ): Promise<RiskEpisodeAssociationPage> => {
+    const response = await api.get<RiskEpisodeAssociationPage>(
+      `/patrol/risk-cases/${riskCaseId}/associations`,
+      { params },
+    )
+    return response.data
+  },
+  proposeRiskEpisodeAssociation: async (
+    riskCaseId: string,
+    data: {
+      related_risk_case_id: string
+      relation_type: RiskEpisodeAssociationRelation
+      reason: string
+      evidence_refs: string[]
+    },
+    idempotencyKey: string,
+  ): Promise<{ success: boolean; association: RiskEpisodeAssociation }> => {
+    const response = await api.post(
+      `/patrol/risk-cases/${riskCaseId}/associations`,
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  reviewRiskEpisodeAssociation: async (
+    associationId: string,
+    data: { decision: 'approved' | 'rejected'; reason: string },
+    idempotencyKey: string,
+  ): Promise<{ success: boolean; association: RiskEpisodeAssociation }> => {
+    const response = await api.post(
+      `/patrol/risk-episode-associations/${associationId}/review`,
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  revokeRiskEpisodeAssociation: async (
+    associationId: string,
+    data: { reason: string },
+    idempotencyKey: string,
+  ): Promise<{ success: boolean; association: RiskEpisodeAssociation }> => {
+    const response = await api.post(
+      `/patrol/risk-episode-associations/${associationId}/revoke`,
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
   acknowledgeRiskCase: async (
     riskCaseId: string,
     data: { reason: string },
@@ -4766,6 +7201,26 @@ export const patrolApi = {
   ): Promise<{ success: boolean; risk_case: RiskCase }> => {
     const response = await api.post(
       `/patrol/risk-cases/${riskCaseId}/acknowledge`,
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  confirmRiskRecovery: async (
+    riskCaseId: string,
+    data: { recovery_candidate_id: string; reason: string },
+    idempotencyKey: string,
+  ): Promise<{
+    success: boolean
+    risk_case: RiskCase
+    confirmation: RiskRecoveryCandidate & {
+      confirmed_at?: string
+      confirmed_by?: string
+      idempotent_replay?: boolean
+    }
+  }> => {
+    const response = await api.post(
+      `/patrol/risk-cases/${riskCaseId}/confirm-recovery`,
       data,
       { headers: { 'Idempotency-Key': idempotencyKey } },
     )
@@ -4795,6 +7250,35 @@ export const patrolApi = {
   ): Promise<{ success: boolean; remediation: RiskRemediation }> => {
     const response = await api.patch(
       `/patrol/risk-cases/${riskCaseId}/remediations/${remediationId}`,
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  acceptRiskRemediation: async (
+    riskCaseId: string,
+    remediationId: string,
+    data: { reason: string; evidence_refs: string[] },
+    idempotencyKey: string,
+  ): Promise<{ success: boolean; remediation: RiskRemediation }> => {
+    const response = await api.post(
+      `/patrol/risk-cases/${riskCaseId}/remediations/${remediationId}/accept`,
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+    return response.data
+  },
+  closeRiskCase: async (
+    riskCaseId: string,
+    data: {
+      disposition: 'remediation_accepted' | 'no_remediation_required'
+      reason: string
+      evidence_refs: string[]
+    },
+    idempotencyKey: string,
+  ): Promise<{ success: boolean; risk_case: RiskCase }> => {
+    const response = await api.post(
+      `/patrol/risk-cases/${riskCaseId}/close`,
       data,
       { headers: { 'Idempotency-Key': idempotencyKey } },
     )

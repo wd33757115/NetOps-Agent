@@ -15,21 +15,32 @@ from src.core.check_items.assessment import (
     CheckAssessmentInput,
     CheckAssessmentService,
 )
+from src.core.check_items.assessment_policy import (
+    build_assessment_basis,
+    build_target_assessment_policy_snapshot,
+)
+from src.core.check_items.assessment_policy_assets import AssessmentPolicyAssetService
+from src.core.check_items.assessment_policy_migration import (
+    AssessmentPolicyMigrationService,
+)
 from src.core.check_items.catalog import (
     CheckItemCatalog,
     CheckItemCatalogRepository,
-    CheckItemDefinition,
 )
 from src.core.check_items.comparison import (
     BaselineCandidate,
     ComparisonContextService,
     ComparisonDecision,
+    ProductionBaselineCandidateRepository,
+    build_comparison_fact_contract,
 )
 from src.core.check_items.identity import load_entity_identity_policy
 from src.core.check_items.resolver import CheckItemImplementationResolver
 from src.core.check_items.runtime_bundle import (
     CheckItemRuntimeBundleService,
 )
+from src.core.check_items.scope import ScopeResolution, resolve_patrol_scope
+from src.core.check_items.scope_repository import PatrolScopeRepository
 from src.core.parser.policy import DEFAULT_COMMAND_ALIASES, ParserPolicy
 from src.infrastructure.db.models import (
     AssetGapRecord,
@@ -66,9 +77,11 @@ def _device_id(device: Mapping[str, Any]) -> str:
 
 def _utc(value: datetime | str) -> datetime:
     if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        aware = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return aware.astimezone(timezone.utc)
     parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    aware = parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return aware.astimezone(timezone.utc)
 
 
 def build_target_manifest(
@@ -98,26 +111,40 @@ def build_target_manifest(
 
 
 def build_inventory_snapshot(devices: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
-    rows = [
-        {
-            "device_id": _device_id(item),
-            "vendor": item.get("vendor"),
-            "family": item.get("family"),
-            "platform": item.get("platform"),
-            "model": item.get("model"),
-            "os_version": item.get("os_version"),
-            "capabilities": sorted(
-                str(value)
-                for value in (
-                    item.get("capabilities")
-                    or (item.get("attributes") or {}).get("capabilities")
-                    or []
-                )
-            ),
-        }
-        for item in devices
-        if _device_id(item)
-    ]
+    rows = []
+    for item in devices:
+        if not _device_id(item):
+            continue
+        attributes = dict(
+            item.get("attributes") or item.get("attributes_json") or {}
+        )
+        policy_bindings = list(
+            attributes.get("assessment_policy_bindings")
+            or attributes.get("assessment_policies")
+            or []
+        )
+        rows.append(
+            {
+                "device_id": _device_id(item),
+                "vendor": item.get("vendor"),
+                "family": item.get("family"),
+                "platform": item.get("platform"),
+                "model": item.get("model"),
+                "os_version": item.get("os_version"),
+                "site": item.get("site"),
+                "role": item.get("role"),
+                "capabilities": sorted(
+                    str(value)
+                    for value in (
+                        item.get("capabilities")
+                        or attributes.get("capabilities")
+                        or []
+                    )
+                ),
+                "assessment_policy_source_count": len(policy_bindings),
+                "assessment_policy_sources_digest": _digest(policy_bindings),
+            }
+        )
     rows.sort(key=lambda item: item["device_id"])
     payload = {
         "schema_version": "inventory-snapshot/v1",
@@ -149,6 +176,14 @@ class EffectivePlanRequest:
     max_baseline_age_seconds: int | None = 30 * 24 * 60 * 60
     profile_version_id: str | None = None
     actor: str = "check-item-planner"
+    report_purpose: str | None = None
+    scope_contract: Mapping[str, Any] | None = None
+    scope_exclusions: Mapping[str, Mapping[str, Any]] = field(
+        default_factory=dict
+    )
+    scope_not_applicable: Mapping[str, Mapping[str, Any]] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -263,33 +298,6 @@ def _aggregate_asset_gaps(
     return tuple(result)
 
 
-def _applicability(
-    check_item: CheckItemDefinition,
-    device: Mapping[str, Any],
-) -> tuple[str, tuple[str, ...]]:
-    requirement = dict(check_item.applicability or {})
-    required_capability = str(requirement.get("capability") or "").strip()
-    if not required_capability:
-        return "applicable", ()
-    attributes = device.get("attributes") or {}
-    source_present = "capabilities" in device or (
-        isinstance(attributes, dict) and "capabilities" in attributes
-    )
-    values = device.get("capabilities")
-    if values is None and isinstance(attributes, dict):
-        values = attributes.get("capabilities")
-    capabilities = {
-        str(item).strip().casefold()
-        for item in (values or [])
-        if str(item).strip()
-    }
-    if not source_present:
-        return "unknown", ("applicability_capability_unknown",)
-    if required_capability.casefold() not in capabilities:
-        return "not_applicable", ("capability_explicitly_absent",)
-    return "applicable", ()
-
-
 class CheckItemEffectivePlanService:
     """Resolve, freeze and persist all device x check-item decisions before dispatch."""
 
@@ -341,6 +349,18 @@ class CheckItemEffectivePlanService:
         missing = sorted(all_selected_ids - set(item_by_id))
         if missing:
             raise ValueError("unknown active check items: " + ", ".join(missing))
+        scope_resolution = resolve_patrol_scope(
+            contract=request.scope_contract,
+            devices=request.devices,
+            selected_check_item_ids_by_device=selected_ids_by_device,
+            check_item_version_ids={
+                item_id: item.version_id
+                for item_id, item in item_by_id.items()
+            },
+            inventory_snapshot_digest=request.inventory_snapshot_digest,
+            exclusions=request.scope_exclusions,
+            not_applicable=request.scope_not_applicable,
+        )
         implementation_by_version = {
             item.version_id: item for item in catalog.implementations
         }
@@ -355,6 +375,51 @@ class CheckItemEffectivePlanService:
         comparison_service = ComparisonContextService()
         identity_policy = load_entity_identity_policy()
         observed_at = _utc(request.current_observed_at)
+        automatic_baseline_candidates: dict[
+            tuple[str, str], tuple[BaselineCandidate, ...]
+        ] = {}
+        if str(request.report_purpose or "") == "production_current":
+            automatic_baseline_candidates = (
+                ProductionBaselineCandidateRepository(
+                    self._session_scope
+                ).load_many(
+                    targets=(
+                        (
+                            device_id,
+                            item_by_id[check_item_id].version_id,
+                        )
+                        for device_id, check_item_ids in (
+                            selected_ids_by_device.items()
+                        )
+                        for check_item_id in check_item_ids
+                    ),
+                    current_observed_at=observed_at,
+                    current_patrol_batch_id=request.patrol_batch_id,
+                )
+            )
+        scope_policy_overrides = tuple(
+            dict(item)
+            for item in (
+                dict(request.scope_contract or {}).get(
+                    "assessment_policy_overrides",
+                    [],
+                )
+                or []
+            )
+            if isinstance(item, Mapping)
+        )
+        governed_policy_sources = AssessmentPolicyAssetService(
+            self._session_scope
+        ).list_rendered_sources(check_item_ids=all_selected_ids)
+        assessment_policy_cutovers = AssessmentPolicyMigrationService(
+            self._session_scope
+        ).effective_cutover_modes(
+            (
+                (item_by_id[check_item_id].version_id, device_id)
+                for device_id, check_item_ids in selected_ids_by_device.items()
+                for check_item_id in check_item_ids
+            )
+        )
 
         decisions: list[dict[str, Any]] = []
         contexts: list[ComparisonDecision] = []
@@ -369,9 +434,56 @@ class CheckItemEffectivePlanService:
                 raise ValueError("every effective-plan device requires device_id")
             for check_item_id in selected_ids_by_device[device_id]:
                 check_item = item_by_id[check_item_id]
-                applicability, applicability_reasons = _applicability(
-                    check_item,
-                    device,
+                cutover = assessment_policy_cutovers.get(
+                    (str(check_item.version_id), str(device_id))
+                )
+                governed_only = bool(
+                    cutover
+                    and str(cutover.get("resolver_mode") or "")
+                    == "governed_only"
+                )
+                assessment_policy_snapshot = build_target_assessment_policy_snapshot(
+                    check_item_id=check_item.id,
+                    check_item_version_id=check_item.version_id,
+                    canonical_contract=check_item.canonical_contract,
+                    device=device,
+                    scope_overrides=scope_policy_overrides,
+                    governed_sources=governed_policy_sources.get(
+                        check_item.id,
+                        (),
+                    ),
+                    applicability_requirement=check_item.applicability,
+                    policy_effective_at=observed_at,
+                    allow_legacy_sources=not governed_only,
+                    allow_legacy_rule_fallback=False,
+                    resolver_transition=(
+                        {
+                            key: cutover.get(key)
+                            for key in (
+                                "id",
+                                "resolver_mode",
+                                "evidence_digest",
+                                "binding_ids_json",
+                                "shadow_result_ids_json",
+                                "created_by",
+                                "reason",
+                                "created_at",
+                            )
+                        }
+                        if cutover
+                        else {}
+                    ),
+                )
+                applicability_decision = dict(
+                    assessment_policy_snapshot.get("applicability_decision") or {}
+                )
+                applicability = str(
+                    applicability_decision.get("status") or "unknown"
+                )
+                applicability_reasons = tuple(
+                    str(item)
+                    for item in applicability_decision.get("reason_codes") or []
+                    if str(item)
                 )
                 decision = resolver.resolve(
                     device=dict(device),
@@ -383,6 +495,11 @@ class CheckItemEffectivePlanService:
                 if applicability == "not_applicable":
                     status = "not_applicable"
                     reason_codes = list(applicability_reasons)
+                elif applicability in {"unknown", "conflict"}:
+                    status = "unsupported"
+                    reason_codes = list(applicability_reasons) or [
+                        "assessment_applicability_unknown"
+                    ]
                 elif decision.status == "resolved":
                     bundle_lookup = active_bundle_index.get(
                         (
@@ -426,17 +543,55 @@ class CheckItemEffectivePlanService:
                     if bundle
                     else f"{identity_policy.policy_id}:v{identity_policy.version}"
                 )
+                current_fact_contract = (
+                    build_comparison_fact_contract(
+                        check_item_version_id=check_item.version_id,
+                        check_item_digest=check_item.digest,
+                        result_mode=check_item.result_mode,
+                        assessment_mode=check_item.assessment_mode,
+                        implementation_version_id=str(
+                            decision.implementation_version_id or ""
+                        ),
+                        canonical_catalog_version=bundle[
+                            "canonical_catalog_version"
+                        ],
+                        canonical_catalog_digest=bundle[
+                            "canonical_catalog_digest"
+                        ],
+                        entity_identity_policy_version_id=bundle[
+                            "entity_identity_policy_version_id"
+                        ],
+                        dependency_digests=dict(
+                            bundle.get("dependency_digests") or {}
+                        ),
+                        comparison_profile_version_id=bundle.get(
+                            "comparison_profile_version_id"
+                        ),
+                    )
+                    if bundle
+                    else None
+                )
+                requested_baseline_key = (device_id, check_item_id)
+                if requested_baseline_key in request.baseline_candidates:
+                    baseline_candidates = request.baseline_candidates[
+                        requested_baseline_key
+                    ]
+                elif bundle is not None:
+                    baseline_candidates = automatic_baseline_candidates.get(
+                        (device_id, check_item.version_id),
+                        (),
+                    )
+                else:
+                    baseline_candidates = ()
                 context = comparison_service.select_online(
                     device_id=device_id,
                     check_item_version_id=check_item.version_id,
                     current_observed_at=observed_at,
-                    candidates=request.baseline_candidates.get(
-                        (device_id, check_item_id),
-                        (),
-                    ),
+                    candidates=baseline_candidates,
                     max_baseline_age_seconds=request.max_baseline_age_seconds,
                     canonical_schema_version=canonical_schema_version,
                     entity_identity_policy_version=identity_version,
+                    current_fact_contract=current_fact_contract,
                 )
                 contexts.append(context)
 
@@ -453,8 +608,29 @@ class CheckItemEffectivePlanService:
                     "blocked_asset_missing": "blocked_asset_missing",
                     "unsupported": "unsupported",
                 }.get(status, "unsupported")
+                if bundle is not None:
+                    frozen_policy = dict(
+                        dict(bundle.get("compatibility") or {}).get(
+                            "assessment_policy"
+                        )
+                        or {}
+                    )
+                    if str(frozen_policy.get("digest") or "") != str(
+                        assessment_policy_snapshot.get("contract_digest")
+                        or ""
+                    ):
+                        execution_status = "blocked_asset_missing"
+                        status = "blocked_asset_missing"
+                        reason_codes = [
+                            "runtime_assessment_policy_mismatch"
+                        ]
+                        bundle = None
                 action_keys: list[tuple[str, str, str]] = []
                 unavailable_commands: list[dict[str, Any]] = []
+                declared_command_count = 0
+                executable_command_count = 0
+                fallback_resilience = "not_applicable"
+                command_availability = "not_applicable"
                 if execution_status == "planned":
                     implementation = implementation_by_version[
                         str(decision.implementation_version_id)
@@ -477,6 +653,7 @@ class CheckItemEffectivePlanService:
                             item.command.casefold(),
                         ),
                     )
+                    declared_command_count = len(ordered_commands)
                     executable_commands = {
                         ParserPolicy._basic_normalize(str(item or ""))
                         for item in (
@@ -553,16 +730,46 @@ class CheckItemEffectivePlanService:
                                 decision.implementation_version_id
                             ),
                             "runtime_bundle_version_id": bundle["version_id"],
+                            "observation_contract_refs": sorted(
+                                (
+                                    {
+                                        "contract_id": str(
+                                            asset.get("asset_version_id")
+                                            or ""
+                                        ),
+                                        "schema_id": str(
+                                            asset.get("asset_id") or ""
+                                        ),
+                                        "digest": str(
+                                            asset.get("asset_digest") or ""
+                                        ),
+                                    }
+                                    for asset in bundle.get("assets") or []
+                                    if asset.get("asset_type")
+                                    == "observation_contract"
+                                ),
+                                key=lambda item: (
+                                    item["schema_id"],
+                                    item["contract_id"],
+                                ),
+                            ),
                             "fallback_rank": fallback_rank,
                         }
                         if binding not in action["bindings"]:
                             action["bindings"].append(binding)
                         action_keys.append((device_id, *key))
+                    executable_command_count = len(action_keys)
+                    command_availability = (
+                        "available"
+                        if executable_command_count > 0
+                        else "unavailable"
+                    )
 
                 decision_row = {
                     **decision.to_dict(),
                     "device_id": device_id,
                     "applicability": applicability,
+                    "applicability_decision": applicability_decision,
                     "status": status,
                     "reason_codes": list(dict.fromkeys(reason_codes)),
                     "runtime_bundle_id": (
@@ -572,6 +779,10 @@ class CheckItemEffectivePlanService:
                         bundle["version_id"] if bundle else None
                     ),
                     "runtime_bundle_digest": bundle["digest"] if bundle else None,
+                    "assessment_policy_snapshot": assessment_policy_snapshot,
+                    "assessment_policy_snapshot_digest": (
+                        assessment_policy_snapshot["digest"]
+                    ),
                     "entity_identity_policy_version_id": (
                         bundle["entity_identity_policy_version_id"]
                         if bundle
@@ -580,6 +791,12 @@ class CheckItemEffectivePlanService:
                     "comparison_context_id": context.id,
                     "comparison_context_digest": context.digest,
                     "execution_id": execution_id,
+                    "fallback_resilience": fallback_resilience,
+                    "command_availability": command_availability,
+                    "declared_command_count": declared_command_count,
+                    "executable_command_count": (
+                        executable_command_count
+                    ),
                     "unavailable_commands": unavailable_commands,
                     "_action_keys": action_keys,
                 }
@@ -608,6 +825,10 @@ class CheckItemEffectivePlanService:
                         bundle["version_id"] if bundle else None
                     ),
                     "runtime_bundle_digest": bundle["digest"] if bundle else None,
+                    "assessment_policy_snapshot_json": assessment_policy_snapshot,
+                    "assessment_policy_snapshot_digest": (
+                        assessment_policy_snapshot["digest"]
+                    ),
                     "comparison_context_id": context.id,
                     "execution_status": execution_status,
                     "reason_codes_json": list(dict.fromkeys(reason_codes)),
@@ -620,6 +841,17 @@ class CheckItemEffectivePlanService:
                 }
                 executions.append(execution)
                 if execution_status != "planned":
+                    terminal_basis = build_assessment_basis(
+                        entries=(),
+                        policy_snapshot_digest=assessment_policy_snapshot["digest"],
+                        runtime_bundle_version_id=(
+                            str(bundle["version_id"]) if bundle else None
+                        ),
+                        runtime_bundle_digest=(
+                            str(bundle["digest"]) if bundle else None
+                        ),
+                        applicability_decision=applicability_decision,
+                    )
                     assessment = CheckAssessmentService.assess(
                         CheckAssessmentInput(
                             execution_id=execution_id,
@@ -634,6 +866,16 @@ class CheckItemEffectivePlanService:
                             evaluated_entity_count=0,
                             rule_assets_ready=False,
                             blocking_reason_codes=tuple(reason_codes),
+                            assessment_policy_snapshot_digest=(
+                                assessment_policy_snapshot["digest"]
+                            ),
+                            assessment_basis=terminal_basis,
+                            runtime_bundle_version_id=(
+                                str(bundle["version_id"]) if bundle else None
+                            ),
+                            assessment_rule_bundle_digest=(
+                                str(bundle["digest"]) if bundle else None
+                            ),
                             comparison_context_digest=context.digest,
                             assessed_at=observed_at,
                         )
@@ -765,6 +1007,7 @@ class CheckItemEffectivePlanService:
                 )
                 for device_id in sorted(selected_ids_by_device)
             },
+            **scope_resolution.to_dict(),
             "target_manifest_digest": request.target_manifest_digest,
             "inventory_snapshot_digest": request.inventory_snapshot_digest,
             "check_item_versions": sorted(
@@ -789,6 +1032,23 @@ class CheckItemEffectivePlanService:
                     "digest": item.digest,
                     "mode": item.mode,
                     "comparison_status": item.comparison_status,
+                    "device_id": item.device_id,
+                    "check_item_version_id": item.check_item_version_id,
+                    "current_observed_at": (
+                        item.current_observed_at.isoformat()
+                        if item.current_observed_at
+                        else None
+                    ),
+                    "baseline_observed_at": (
+                        item.baseline_observed_at.isoformat()
+                        if item.baseline_observed_at
+                        else None
+                    ),
+                    "baseline_run_id": item.baseline_run_id,
+                    "baseline_snapshot_ids": list(
+                        item.baseline_snapshot_ids
+                    ),
+                    "selection_reason": item.selection_reason,
                 }
                 for item in contexts
             ],
@@ -801,6 +1061,12 @@ class CheckItemEffectivePlanService:
             ),
             "assessment_schema_version": "check-assessment/v1",
             "report_schema_version": "patrol-report/v2",
+            "report_cutoff_policy": {
+                "business_time_source": "batch_terminal_server_time",
+                "ingestion_boundary_source": "report_requested_at",
+                "clock": "server_utc",
+                "late_fact_strategy": "new_report_manifest_revision",
+            },
             "asset_gap_ids": [item["id"] for item in aggregated_gaps],
         }
         # Bundle refs intentionally repeat the immutable dependency through decisions.
@@ -872,6 +1138,50 @@ class CheckItemEffectivePlanService:
                 raise ValueError(
                     "retry check-item selection differs from the frozen runtime manifest"
                 )
+            scope_resolution = resolve_patrol_scope(
+                contract=request.scope_contract,
+                devices=request.devices,
+                selected_check_item_ids_by_device={
+                    device_id: requested_by_device.get(
+                        device_id,
+                        default_ids,
+                    )
+                    for device_id in sorted(
+                        {
+                            _device_id(device)
+                            for device in request.devices
+                            if _device_id(device)
+                        }
+                    )
+                },
+                check_item_version_ids={
+                    item_id: item.version_id
+                    for item_id, item in item_by_id.items()
+                },
+                inventory_snapshot_digest=(
+                    request.inventory_snapshot_digest
+                ),
+                exclusions=request.scope_exclusions,
+                not_applicable=request.scope_not_applicable,
+            )
+            if (
+                str(frozen.manifest.get("scope_contract_digest") or "")
+                != scope_resolution.contract_digest
+                or str(
+                    frozen.manifest.get(
+                        "intended_target_matrix_digest"
+                    )
+                    or ""
+                )
+                != scope_resolution.intended_target_matrix_digest
+                or str(
+                    frozen.manifest.get("scope_decision_digest") or ""
+                )
+                != scope_resolution.scope_decision_digest
+            ):
+                raise ValueError(
+                    "retry patrol scope differs from the frozen runtime manifest"
+                )
             requested_device_versions = {
                 _device_id(device): [
                     item_by_id[item].version_id
@@ -891,6 +1201,7 @@ class CheckItemEffectivePlanService:
                 )
             return frozen
         plan = self.preview(request)
+        scope_resolution = ScopeResolution.from_dict(plan.manifest)
         now = datetime.now(timezone.utc)
         with self._session_scope() as db:
             batch = (
@@ -917,7 +1228,43 @@ class CheckItemEffectivePlanService:
                     raise ValueError(
                         "patrol batch already has a different frozen runtime manifest"
                     )
+                persisted_scope = PatrolScopeRepository(
+                    self._session_scope
+                ).persist_in_session(
+                    db,
+                    batch=batch,
+                    resolution=scope_resolution,
+                    inventory_snapshot_digest=(
+                        request.inventory_snapshot_digest
+                    ),
+                    actor=request.actor,
+                    created_at=now,
+                )
+                existing_manifest.scope_contract_version_id = (
+                    persisted_scope.scope_contract_version_id
+                )
+                existing_manifest.scope_contract_digest = (
+                    scope_resolution.contract_digest
+                )
+                existing_manifest.intended_target_matrix_digest = (
+                    scope_resolution.intended_target_matrix_digest
+                )
+                existing_manifest.scope_decision_digest = (
+                    scope_resolution.scope_decision_digest
+                )
+                db.flush()
                 return plan
+
+            persisted_scope = PatrolScopeRepository(
+                self._session_scope
+            ).persist_in_session(
+                db,
+                batch=batch,
+                resolution=scope_resolution,
+                inventory_snapshot_digest=request.inventory_snapshot_digest,
+                actor=request.actor,
+                created_at=now,
+            )
 
             context_ids = [item.id for item in plan.comparison_contexts]
             existing_context_ids = {
@@ -1090,6 +1437,16 @@ class CheckItemEffectivePlanService:
                 schema_version=2,
                 target_manifest_digest=request.target_manifest_digest,
                 inventory_snapshot_digest=request.inventory_snapshot_digest,
+                scope_contract_version_id=(
+                    persisted_scope.scope_contract_version_id
+                ),
+                scope_contract_digest=scope_resolution.contract_digest,
+                intended_target_matrix_digest=(
+                    scope_resolution.intended_target_matrix_digest
+                ),
+                scope_decision_digest=(
+                    scope_resolution.scope_decision_digest
+                ),
                 check_item_versions_json=list(
                     plan.manifest["check_item_versions"]
                 ),
@@ -1112,6 +1469,16 @@ class CheckItemEffectivePlanService:
             db.add(manifest)
             batch.target_manifest_digest = request.target_manifest_digest
             batch.inventory_snapshot_digest = request.inventory_snapshot_digest
+            batch.scope_contract_version_id = (
+                persisted_scope.scope_contract_version_id
+            )
+            batch.scope_contract_digest = scope_resolution.contract_digest
+            batch.intended_target_matrix_digest = (
+                scope_resolution.intended_target_matrix_digest
+            )
+            batch.scope_decision_digest = (
+                scope_resolution.scope_decision_digest
+            )
             batch.runtime_manifest_id = plan.manifest_id
             batch.runtime_manifest_digest = plan.manifest_digest
             batch.updated_at = now

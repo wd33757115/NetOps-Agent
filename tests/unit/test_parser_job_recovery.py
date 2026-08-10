@@ -10,6 +10,8 @@ from sqlalchemy.orm import sessionmaker
 
 from src.core.parser import repository as parser_repository
 from src.core.parser.repository import ParserJobRepository, ParserJobStateError
+from src.core.parser_generation.publishing import RepositoryModelCallController
+from src.core.parser_generation.service import ModelCallCompletion
 from src.infrastructure.db.models import (
     AuditLogRecord,
     Base,
@@ -154,6 +156,44 @@ def test_retry_preserves_adopted_semantic_plan_and_clears_run_state(sqlite_repos
     assert retried["model_calls_used"] == 0
 
 
+def test_dispatch_does_not_overwrite_an_existing_task_owner(sqlite_repository):
+    repository, session_factory = sqlite_repository
+    job_id = _insert_job(session_factory, status="pending", started_minutes_ago=None)
+
+    with pytest.raises(ParserJobStateError, match="already dispatched"):
+        repository.mark_job_dispatched(job_id, "celery-task-duplicate")
+
+
+def test_running_job_can_only_be_claimed_by_its_pending_task_owner(sqlite_repository):
+    repository, session_factory = sqlite_repository
+    job_id = _insert_job(session_factory, status="pending", started_minutes_ago=None)
+
+    with pytest.raises(ParserJobStateError, match="different Celery task"):
+        repository.transition_job_status(
+            job_id,
+            "running",
+            expected_status="pending",
+            expected_celery_task_id="celery-task-duplicate",
+        )
+
+    claimed = repository.transition_job_status(
+        job_id,
+        "running",
+        expected_status="pending",
+        expected_celery_task_id="celery-task-1",
+    )
+    assert claimed["status"] == "running"
+    assert claimed["attempts"] == 1
+
+    with pytest.raises(ParserJobStateError, match="expected pending, found running"):
+        repository.transition_job_status(
+            job_id,
+            "running",
+            expected_status="pending",
+            expected_celery_task_id="celery-task-1",
+        )
+
+
 def test_explicit_retry_resets_run_budget_but_preserves_global_call_history(
     sqlite_repository,
 ):
@@ -188,6 +228,134 @@ def test_explicit_retry_resets_run_budget_but_preserves_global_call_history(
             "generation-run-1",
             "generation-run-2",
         ]
+        assert rows[0].status == "provider_failed"
+        assert rows[0].result_json["aborted_by_job_terminal"] is True
+
+
+def test_generation_progress_heartbeats_and_terminal_transition_close_reservations(
+    sqlite_repository,
+):
+    repository, session_factory = sqlite_repository
+    job_id = _insert_job(session_factory, status="running", started_minutes_ago=1)
+    reservation = repository.reserve_model_call(
+        job_id,
+        generation_run_id="generation-run-1",
+        max_calls=3,
+    )
+
+    progress = repository.update_generation_progress(
+        job_id,
+        generation_run_id="generation-run-1",
+        stage="model_generating",
+        attempt_number=1,
+        deadline_at="2026-08-02T10:30:00+00:00",
+        request_deadline_at="2026-08-02T10:08:00+00:00",
+        details={"model_calls_used": 1, "model_call_limit": 3},
+    )
+
+    assert progress["agent_state_json"]["generation_progress"]["stage"] == "model_generating"
+    assert progress["agent_state_json"]["generation_progress"]["heartbeat_at"]
+    terminal = repository.transition_job_status(
+        job_id,
+        "failed",
+        "provider request exceeded its deadline",
+        failure_code="model_timeout",
+    )
+    assert terminal["agent_state_json"]["generation_progress"]["stage"] == "failed"
+    assert terminal["agent_state_json"]["generation_progress"]["terminal_reason"] == "model_timeout"
+    with _session_scope(session_factory) as db:
+        call = db.get(ParserModelCallLedger, reservation["id"])
+        assert call.status == "provider_failed"
+        assert call.failure_signature == "model_timeout"
+        assert call.completed_at is not None
+
+
+def test_model_heartbeat_does_not_regress_replay_stage_or_restore_request_deadline(
+    sqlite_repository,
+):
+    repository, session_factory = sqlite_repository
+    job_id = _insert_job(session_factory, status="running", started_minutes_ago=1)
+    repository.update_generation_progress(
+        job_id,
+        generation_run_id="generation-run-1",
+        stage="model_generating",
+        attempt_number=1,
+        request_deadline_at="2026-08-02T10:08:00+00:00",
+        details={"model_calls_used": 1},
+    )
+    repository.update_generation_progress(
+        job_id,
+        generation_run_id="generation-run-1",
+        stage="sample_replaying",
+        attempt_number=1,
+        details={"candidate_sha256": "a" * 64},
+    )
+
+    heartbeat = repository.update_generation_progress(
+        job_id,
+        generation_run_id="generation-run-1",
+        stage="model_generating",
+        attempt_number=1,
+        request_deadline_at="2026-08-02T10:08:00+00:00",
+        details={"heartbeat_only": True},
+    )
+    progress = heartbeat["agent_state_json"]["generation_progress"]
+
+    assert progress["stage"] == "sample_replaying"
+    assert progress["request_deadline_at"] is None
+    assert progress["details"]["candidate_sha256"] == "a" * 64
+    assert progress["details"]["heartbeat_only"] is True
+
+    resumed = repository.update_generation_progress(
+        job_id,
+        generation_run_id="generation-run-1",
+        stage="semantic_reviewing",
+        attempt_number=1,
+        details={"reviewer": "independent"},
+    )
+    resumed_progress = resumed["agent_state_json"]["generation_progress"]
+
+    assert resumed_progress["stage"] == "semantic_reviewing"
+    assert resumed_progress["details"]["reviewer"] == "independent"
+    assert "heartbeat_only" not in resumed_progress["details"]
+
+
+def test_model_call_heartbeat_keeps_the_original_request_deadline():
+    class RecordingRepository:
+        def __init__(self):
+            self.progress_updates = []
+
+        def reserve_model_call(self, *_args, **_kwargs):
+            return {
+                "id": "model-call-1",
+                "call_number": 1,
+                "run_call_number": 1,
+                "generation_run_id": "generation-run-1",
+            }
+
+        def update_generation_progress(self, *_args, **kwargs):
+            self.progress_updates.append(kwargs)
+
+        def complete_model_call(self, *_args, **_kwargs):
+            return None
+
+    repository = RecordingRepository()
+    controller = RepositoryModelCallController(
+        job_id="parser-job-1",
+        repository=repository,  # type: ignore[arg-type]
+        heartbeat_seconds=3600,
+        request_timeout_seconds=60,
+    )
+
+    reservation = controller.reserve("generation-run-1")
+    controller._progress(reservation, heartbeat_only=True)
+    controller.complete(reservation, ModelCallCompletion(status="succeeded"))
+
+    deadlines = [
+        update["request_deadline_at"] for update in repository.progress_updates
+    ]
+    assert len(deadlines) == 2
+    assert deadlines[0] == deadlines[1]
 
 
 def test_semantic_review_failure_is_persisted_as_model_call_outcome(
@@ -383,6 +551,10 @@ def test_stale_spec_suggestion_can_be_requeued(sqlite_repository):
     suggestion = item["agent_state_json"]["parser_spec_suggestion"]
     assert suggestion["status"] == "queued"
     assert suggestion["task_id"] == "new-task"
+    assert suggestion["stage"] == "semantic_queued"
+    assert suggestion["heartbeat_at"] == suggestion["requested_at"]
+    assert suggestion["deadline_at"] > suggestion["requested_at"]
+    assert suggestion["elapsed_ms"] == 0
 
 
 def test_fresh_spec_suggestion_still_blocks_requeue(sqlite_repository):
@@ -396,3 +568,59 @@ def test_fresh_spec_suggestion_still_blocks_requeue(sqlite_repository):
             actor="engineer",
             reason="early requeue",
         )
+
+
+def test_spec_suggestion_heartbeat_preserves_fixed_deadline(sqlite_repository):
+    repository, session_factory = sqlite_repository
+    job_id = _insert_suggestion_job(session_factory, suggestion_minutes_ago=31)
+    queued = repository.queue_parser_spec_suggestion(
+        job_id,
+        task_id="new-task",
+        actor="engineer",
+        reason="start semantic analysis",
+    )
+    original_deadline = queued["agent_state_json"]["parser_spec_suggestion"][
+        "deadline_at"
+    ]
+
+    first = repository.record_parser_spec_suggestion(
+        job_id,
+        task_id="new-task",
+        status="running",
+    )
+    second = repository.record_parser_spec_suggestion(
+        job_id,
+        task_id="new-task",
+        status="running",
+    )
+
+    assert first["agent_state_json"]["parser_spec_suggestion"]["deadline_at"] == (
+        original_deadline
+    )
+    assert second["agent_state_json"]["parser_spec_suggestion"]["deadline_at"] == (
+        original_deadline
+    )
+
+
+def test_spec_suggestion_heartbeat_backfills_legacy_missing_deadline(
+    sqlite_repository,
+):
+    repository, session_factory = sqlite_repository
+    job_id = _insert_suggestion_job(session_factory, suggestion_minutes_ago=1)
+
+    first = repository.record_parser_spec_suggestion(
+        job_id,
+        task_id="old-task",
+        status="running",
+    )
+    first_state = first["agent_state_json"]["parser_spec_suggestion"]
+    second = repository.record_parser_spec_suggestion(
+        job_id,
+        task_id="old-task",
+        status="running",
+    )
+
+    assert first_state["deadline_at"] > first_state["requested_at"]
+    assert second["agent_state_json"]["parser_spec_suggestion"]["deadline_at"] == (
+        first_state["deadline_at"]
+    )

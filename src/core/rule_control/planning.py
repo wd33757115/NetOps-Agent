@@ -7,14 +7,22 @@ to approved contracts and sampled structured data.
 
 from __future__ import annotations
 
+import json
 import math
 from collections import Counter
 from typing import Any
 
+from src.core.observation.record_set_relations import (
+    apply_record_set_relations,
+    required_threshold_reference_errors,
+)
 from src.core.observation.semantic_projection import (
     SemanticProjectionError,
     dimension_schema_signature,
     normalize_dimensions,
+)
+from src.core.rule_control.asset_requirements import (
+    normalize_rule_asset_requirements,
 )
 
 COMPARABLE_SEMANTIC_TYPES = frozenset(
@@ -180,6 +188,9 @@ def _event_generation_decision(
             "low_threshold",
             "critical_threshold",
             "recovery_threshold",
+            "required_thresholds",
+            "required_recovery_threshold",
+            "required_deadband",
         )
     ):
         return True, "approved_threshold_constraint"
@@ -200,7 +211,7 @@ def _event_generation_decision(
     value_mapping = {
         str(key).strip().casefold(): str(value).strip().casefold()
         for key, value in dict(field_semantics.get("value_mapping") or {}).items()
-        if str(key).strip() and str(value).strip()
+        if str(value).strip()
     }
     canonical_values = {
         value_mapping.get(str(value).strip().casefold(), str(value).strip().casefold())
@@ -215,6 +226,24 @@ def _event_generation_decision(
     if has_healthy and has_fault:
         return True, "governed_state_polarity"
     return False, "state_has_no_fault_health_polarity"
+
+
+def _policy_constraints_apply(
+    constraints: dict[str, Any],
+    *,
+    dimension_selector: dict[str, Any],
+) -> bool:
+    """Apply an approved policy only to its declared metric dimensions."""
+
+    expected = constraints.get("applies_to_dimensions")
+    if not isinstance(expected, dict) or not expected:
+        return True
+    for name, allowed_raw in expected.items():
+        actual = dimension_selector.get(str(name))
+        allowed = allowed_raw if isinstance(allowed_raw, list) else [allowed_raw]
+        if actual not in allowed:
+            return False
+    return True
 
 
 def event_generation_decision(
@@ -463,10 +492,406 @@ def enrich_contract_reference_semantics(
     return output
 
 
+def _multi_source_target_signature(target: dict[str, Any]) -> str:
+    semantics = dict(target.get("field_semantics") or {})
+    references = {
+        str(role): {
+            "context_key": str(
+                reference.get("context_key")
+                or reference.get("field_name")
+                or ""
+            ),
+            "level": str(reference.get("level") or "reference"),
+        }
+        for role, reference in dict(
+            target.get("threshold_references") or {}
+        ).items()
+        if isinstance(reference, dict)
+    }
+    payload = {
+        "observation_type": target.get("observation_type"),
+        "canonical_entity_type": (
+            (target.get("event_contract") or {}).get(
+                "canonical_entity_type"
+            )
+            or (target.get("event_contract") or {}).get("entity_type")
+        ),
+        "entity_identity_fields": (
+            (target.get("event_contract") or {}).get(
+                "entity_identity_fields"
+            )
+            or []
+        ),
+        "dimension_selector": target.get("dimension_selector") or {},
+        "semantic_type": semantics.get("semantic_type"),
+        "domain_semantic_type": semantics.get("domain_semantic_type"),
+        "unit": semantics.get("canonical_unit") or semantics.get("unit"),
+        "applicability": semantics.get("applicability") or {},
+        "policy_constraints": target.get("policy_constraints") or {},
+        "event_constraints": target.get("event_constraints") or {},
+        "event_generation": target.get("event_generation"),
+        "threshold_references": references,
+    }
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
+def _event_semantics_signature(metadata: Any) -> str:
+    normalized = dict(metadata or {}) if isinstance(metadata, dict) else {}
+    references = {}
+    for role, raw_reference in dict(
+        normalized.get("threshold_references") or {}
+    ).items():
+        if not isinstance(raw_reference, dict):
+            continue
+        references[str(role)] = {
+            key: raw_reference.get(key)
+            for key in (
+                "field_name",
+                "context_key",
+                "level",
+                "source",
+                "match_policy",
+            )
+            if raw_reference.get(key) is not None
+        }
+    if references:
+        normalized["threshold_references"] = references
+    return json.dumps(
+        normalized,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
+def _merge_event_contract_views(
+    members: list[dict[str, Any]],
+) -> tuple[dict[str, Any], list[str]]:
+    contracts = [
+        dict(item.get("event_contract") or {})
+        for item in members
+        if isinstance(item.get("event_contract"), dict)
+    ]
+    if not contracts:
+        return {}, ["multi-source target has no event Contract view"]
+    runtime_entities = {
+        str(
+            contract.get("canonical_entity_type")
+            or contract.get("entity_type")
+            or ""
+        ).strip()
+        for contract in contracts
+    }
+    runtime_entities.discard("")
+    identity_signatures = {
+        tuple(
+            str(item)
+            for item in contract.get("entity_identity_fields")
+            or contract.get("primary_keys")
+            or []
+        )
+        for contract in contracts
+    }
+    errors: list[str] = []
+    if len(runtime_entities) != 1:
+        errors.append(
+            "multi-source event Contract views use different canonical entity types"
+        )
+    if len(identity_signatures) != 1:
+        errors.append(
+            "multi-source event Contract views use different canonical identities"
+        )
+
+    output = dict(contracts[0])
+    output["required_fields"] = list(
+        dict.fromkeys(
+            str(field)
+            for contract in contracts
+            for field in contract.get("required_fields") or []
+            if str(field).strip()
+        )
+    )
+    output["optional_fields"] = list(
+        dict.fromkeys(
+            str(field)
+            for contract in contracts
+            for field in contract.get("optional_fields") or []
+            if str(field).strip()
+            and str(field) not in output["required_fields"]
+        )
+    )
+    validators: dict[str, Any] = {}
+    semantics: dict[str, Any] = {}
+    for contract in contracts:
+        for field, validator in dict(contract.get("validators") or {}).items():
+            field = str(field)
+            if field in validators and validators[field] != validator:
+                errors.append(
+                    f"multi-source event Contract validator conflict for {field}"
+                )
+            else:
+                validators[field] = validator
+        for field, metadata in dict(
+            contract.get("state_semantics") or {}
+        ).items():
+            field = str(field)
+            if field in semantics and _event_semantics_signature(
+                semantics[field]
+            ) != _event_semantics_signature(metadata):
+                errors.append(
+                    f"multi-source event Contract semantics conflict for {field}"
+                )
+            else:
+                semantics[field] = metadata
+    output["validators"] = validators
+    output["state_semantics"] = semantics
+    output["record_sets"] = []
+    output["source_record_set_names"] = sorted(
+        {
+            str(item.get("record_set_name") or "")
+            for item in members
+            if str(item.get("record_set_name") or "")
+        }
+    )
+    return output, list(dict.fromkeys(errors))
+
+
+def _merge_multi_source_targets(
+    targets: list[dict[str, Any]],
+    *,
+    historical_values: dict[str, list[Any]],
+    field_profiles: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Merge parser-native sources that emit the same canonical observation."""
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for target in targets:
+        grouped.setdefault(str(target.get("target_id") or ""), []).append(target)
+    merged_targets: list[dict[str, Any]] = []
+    blockers: list[dict[str, Any]] = []
+    for target_id, members in grouped.items():
+        if len(members) == 1:
+            merged_targets.append(members[0])
+            continue
+        signatures = {_multi_source_target_signature(item) for item in members}
+        if len(signatures) != 1:
+            blockers.append(
+                {
+                    "code": "incompatible_multi_source_target",
+                    "target_id": target_id,
+                    "observation_type": members[0].get("observation_type"),
+                    "source_fields": sorted(
+                        str(item.get("field_ref") or item.get("field_name") or "")
+                        for item in members
+                    ),
+                    "message": (
+                        "multiple Parser record sets emit the same canonical "
+                        "observation with incompatible policy semantics"
+                    ),
+                }
+            )
+            merged_targets.append(members[0])
+            continue
+        representative = dict(members[0])
+        event_contract, contract_errors = _merge_event_contract_views(
+            members
+        )
+        if contract_errors:
+            blockers.append(
+                {
+                    "code": "incompatible_multi_source_event_contract",
+                    "target_id": target_id,
+                    "observation_type": members[0].get(
+                        "observation_type"
+                    ),
+                    "errors": contract_errors,
+                    "message": (
+                        "multiple Parser record sets cannot share one EventRule "
+                        "because their canonical Contract views differ"
+                    ),
+                }
+            )
+        source_targets = [
+            {
+                "record_set_name": str(item.get("record_set_name") or ""),
+                "field_name": str(item.get("field_name") or ""),
+                "field_ref": str(item.get("field_ref") or ""),
+                "field_profile": dict(item.get("field_profile") or {}),
+            }
+            for item in members
+        ]
+        combined_values = [
+            value
+            for item in source_targets
+            for value in historical_values.get(item["field_ref"], [])
+        ]
+        canonical_ref = f"canonical:{target_id}"
+        historical_values[canonical_ref] = combined_values
+        combined_profile = profile_fields(
+            [{"value": value} for value in combined_values],
+            field_inventory=["value"],
+        ).get("value", {})
+        field_profiles[canonical_ref] = combined_profile
+        representative.update(
+            field_ref=canonical_ref,
+            record_set_name=None,
+            source_targets=source_targets,
+            source_record_set_names=sorted(
+                {
+                    item["record_set_name"]
+                    for item in source_targets
+                    if item["record_set_name"]
+                }
+            ),
+            field_profile=combined_profile,
+            event_contract=event_contract,
+        )
+        merged_targets.append(representative)
+    return merged_targets, blockers
+
+
+def _rule_asset_targets(
+    targets: list[dict[str, Any]],
+    requirements: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Select every observation that needs a CurrentState or change EventRule."""
+
+    current_state_types = set(
+        requirements.get("current_state_observation_types") or []
+    )
+    selected: list[dict[str, Any]] = []
+    for target in targets:
+        observation_type = str(target.get("observation_type") or "")
+        roles: list[str] = []
+        if observation_type in current_state_types:
+            roles.append("current_state")
+        # A field-level event hint can select a target only when the check-item
+        # requirement profile authorizes change-driven EventRules.  Current-state
+        # only profiles deliberately reuse the same state polarity metadata, but
+        # must not silently grow transition/recovery roles.
+        if (
+            requirements.get("requires_event_rule") is True
+            and target.get("event_generation") is True
+        ):
+            roles.append("change_event")
+        if roles:
+            selected.append(
+                {
+                    **target,
+                    "required_rule_roles": roles,
+                }
+            )
+    return selected
+
+
+def _scope_rule_asset_requirements(
+    requirements: dict[str, Any],
+    *,
+    policy_targets: list[dict[str, Any]],
+    event_targets: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Scope catalog requirements to observations this implementation can emit.
+
+    Check-item requirements describe the complete business capability. A concrete
+    command may expose only a subset of the required metric dimensions (for
+    example, instant CPU rather than a governed five-minute window). Downstream
+    generation must not invent unavailable event semantics merely to satisfy the
+    catalog-wide profile.
+    """
+
+    normalized = normalize_rule_asset_requirements(requirements)
+    available_observation_types = {
+        str(target.get("observation_type") or "").strip()
+        for target in policy_targets
+        if str(target.get("observation_type") or "").strip()
+    }
+    current_state_types = {
+        str(target.get("observation_type") or "").strip()
+        for target in event_targets
+        if "current_state" in set(target.get("required_rule_roles") or [])
+        and str(target.get("observation_type") or "").strip()
+    }
+    change_event_types = {
+        str(target.get("observation_type") or "").strip()
+        for target in event_targets
+        if "change_event" in set(target.get("required_rule_roles") or [])
+        and str(target.get("observation_type") or "").strip()
+    }
+    declared_change_types = set(
+        normalized.get("change_policy_observation_types") or []
+    )
+    effective_change_types = (
+        available_observation_types & declared_change_types
+        if declared_change_types
+        else available_observation_types
+    )
+    declared_event_types = dict(
+        normalized.get("required_event_types_by_observation") or {}
+    )
+    effective_event_types = {
+        observation_type: list(declared_event_types[observation_type])
+        for observation_type in sorted(change_event_types)
+        if observation_type in declared_event_types
+    }
+
+    requires_current = bool(
+        normalized.get("requires_current_state_rule") and current_state_types
+    )
+    requires_change = bool(
+        normalized.get("requires_change_policy") and effective_change_types
+    )
+    requires_event = bool(
+        normalized.get("requires_event_rule") and change_event_types
+    )
+    required_asset_types = {
+        str(item)
+        for item in normalized.get("required_asset_types") or []
+        if str(item)
+        not in {"current_state_rule", "change_policy", "event_rule"}
+    }
+    if requires_current:
+        required_asset_types.add("current_state_rule")
+    if requires_change:
+        required_asset_types.add("change_policy")
+    if requires_event:
+        required_asset_types.add("event_rule")
+
+    suppressed_event_types = {
+        observation_type: list(event_types)
+        for observation_type, event_types in sorted(declared_event_types.items())
+        if observation_type not in change_event_types
+    }
+    return {
+        **normalized,
+        "required_asset_types": sorted(required_asset_types),
+        "requires_change_policy": requires_change,
+        "requires_current_state_rule": requires_current,
+        "requires_event_rule": requires_event,
+        "requires_event_rule_assets": requires_current or requires_event,
+        "requires_historical_replay": bool(
+            requires_event and normalized.get("requires_historical_replay")
+        ),
+        "current_state_observation_types": sorted(current_state_types),
+        "change_policy_observation_types": sorted(effective_change_types),
+        "required_event_types_by_observation": effective_event_types,
+        "suppressed_event_types_by_observation": suppressed_event_types,
+        "scope_reason": "compiled_from_observed_fields_and_dimensions",
+    }
+
+
 def compile_rule_targets(
     *,
     contract: dict[str, Any],
     records: list[dict[str, Any]],
+    record_groups: list[dict[str, Any]] | None = None,
+    rule_asset_requirements: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compile a validated Contract into deterministic ChangePolicy targets."""
 
@@ -474,6 +899,29 @@ def compile_rule_targets(
         raise ValueError("contract must be an object")
     if not isinstance(records, list) or not all(isinstance(item, dict) for item in records):
         raise ValueError("records must be a list of objects")
+    requirements = normalize_rule_asset_requirements(rule_asset_requirements)
+    if not any(
+        (
+            requirements["requires_change_policy"],
+            requirements["requires_current_state_rule"],
+            requirements["requires_event_rule_assets"],
+        )
+    ):
+        return {
+            "success": True,
+            "policy_targets": [],
+            "event_policy_targets": [],
+            "event_observation_types": [],
+            "historical_values_by_field": {},
+            "field_profiles": profile_fields(records),
+            "contract": contract,
+            "unmapped_comparable_fields": [],
+            "blockers": [],
+            "field_name": None,
+            "observation_type": None,
+            "planning_mode": "observation_contract_only",
+            "rule_asset_requirements": requirements,
+        }
     raw_record_sets = [
         dict(item)
         for item in contract.get("record_sets") or []
@@ -486,6 +934,27 @@ def compile_rule_targets(
         historical_values: dict[str, list[Any]] = {}
         field_profiles: dict[str, Any] = {}
         normalized_sets: list[dict[str, Any]] = []
+        relation_validation = apply_record_set_relations(
+            contract=contract,
+            record_groups=(
+                record_groups
+                if record_groups is not None
+                else [{"group_id": "default", "records": records}]
+            ),
+        )
+        contract = dict(relation_validation.get("contract") or contract)
+        blockers.extend(
+            {
+                "code": "record_set_relation_invalid",
+                "message": str(message),
+            }
+            for message in relation_validation.get("errors") or []
+        )
+        raw_record_sets = [
+            dict(item)
+            for item in contract.get("record_sets") or []
+            if isinstance(item, dict)
+        ]
         for record_set in raw_record_sets:
             name = str(record_set.get("name") or "").strip()
             if not name:
@@ -508,6 +977,7 @@ def compile_rule_targets(
             result = compile_rule_targets(
                 contract={**record_set, "record_sets": []},
                 records=set_records,
+                rule_asset_requirements=rule_asset_requirements,
             )
             normalized_set = dict(result.get("contract") or record_set)
             normalized_set["name"] = name
@@ -516,6 +986,7 @@ def compile_rule_targets(
                 target = dict(target)
                 target["record_set_name"] = name
                 target["field_ref"] = f"{name}.{target['field_name']}"
+                target["event_contract"] = normalized_set
                 targets.append(target)
             for blocker in result.get("blockers") or []:
                 if blocker.get("code") == "no_policy_targets":
@@ -531,6 +1002,12 @@ def compile_rule_targets(
                 historical_values[f"{name}.{field}"] = list(values)
             for field, profile in dict(result.get("field_profiles") or {}).items():
                 field_profiles[f"{name}.{field}"] = profile
+        targets, merge_blockers = _merge_multi_source_targets(
+            targets,
+            historical_values=historical_values,
+            field_profiles=field_profiles,
+        )
+        blockers.extend(merge_blockers)
         if not targets:
             blockers.append(
                 {
@@ -545,9 +1022,15 @@ def compile_rule_targets(
             **contract,
             "record_sets": normalized_sets,
         }
-        event_targets = [
-            item for item in targets if item.get("event_generation") is True
-        ]
+        blockers.extend(
+            required_threshold_reference_errors(normalized_contract)
+        )
+        event_targets = _rule_asset_targets(targets, requirements)
+        effective_requirements = _scope_rule_asset_requirements(
+            requirements,
+            policy_targets=targets,
+            event_targets=event_targets,
+        )
         return {
             "success": not blockers,
             "policy_targets": targets,
@@ -562,6 +1045,11 @@ def compile_rule_targets(
             "contract": normalized_contract,
             "unmapped_comparable_fields": unmapped,
             "blockers": blockers,
+            "record_set_relation_validation": {
+                "success": relation_validation.get("success") is True,
+                "reports": relation_validation.get("reports") or [],
+            },
+            "rule_asset_requirements": effective_requirements,
             "field_name": targets[0]["field_name"] if targets else None,
             "observation_type": (
                 targets[0]["observation_type"] if targets else None
@@ -570,6 +1058,7 @@ def compile_rule_targets(
 
     contract = normalize_contract_semantics(contract)
     contract = enrich_contract_reference_semantics(contract=contract, records=records)
+    reference_blockers = required_threshold_reference_errors(contract)
     declared_fields = {
         str(field)
         for key in ("required_fields", "optional_fields")
@@ -581,7 +1070,7 @@ def compile_rule_targets(
         raise ValueError("contract.state_semantics must be an object")
     profiles = profile_fields(records, field_inventory=sorted(declared_fields))
     targets: list[dict[str, Any]] = []
-    blockers: list[dict[str, Any]] = []
+    blockers: list[dict[str, Any]] = list(reference_blockers)
     unmapped: list[dict[str, Any]] = []
     historical_values_by_field: dict[str, list[Any]] = {}
 
@@ -662,9 +1151,15 @@ def compile_rule_targets(
         target["target_id"] = (
             f"{observation_type}:{target['dimension_selector_signature']}"
         )
-        constraints = field_semantics.get("policy_constraints")
-        if isinstance(constraints, dict) and constraints:
-            target["policy_constraints"] = constraints
+        raw_constraints = field_semantics.get("policy_constraints")
+        constraints_apply = True
+        if isinstance(raw_constraints, dict) and raw_constraints:
+            constraints_apply = _policy_constraints_apply(
+                raw_constraints,
+                dimension_selector=target["dimension_selector"],
+            )
+            if constraints_apply:
+                target["policy_constraints"] = raw_constraints
         references = field_semantics.get("threshold_references")
         if isinstance(references, dict) and references:
             target["threshold_references"] = {
@@ -676,12 +1171,19 @@ def compile_rule_targets(
                 for role, reference in references.items()
                 if isinstance(reference, dict)
             }
-        event_generation, event_reason = _event_generation_decision(
-            field_semantics=field_semantics,
-            values=values,
-        )
+        if isinstance(raw_constraints, dict) and raw_constraints and not constraints_apply:
+            event_generation = False
+            event_reason = "policy_constraints_dimension_not_applicable"
+        else:
+            event_generation, event_reason = _event_generation_decision(
+                field_semantics=field_semantics,
+                values=values,
+            )
         target["event_generation"] = event_generation
         target["event_generation_reason"] = event_reason
+        event_constraints = field_semantics.get("event_constraints")
+        if isinstance(event_constraints, dict) and event_constraints:
+            target["event_constraints"] = event_constraints
         targets.append(target)
 
     observation_types = [item["observation_type"] for item in targets]
@@ -717,17 +1219,20 @@ def compile_rule_targets(
             }
         )
 
+    event_targets = _rule_asset_targets(targets, requirements)
+    effective_requirements = _scope_rule_asset_requirements(
+        requirements,
+        policy_targets=targets,
+        event_targets=event_targets,
+    )
     return {
         "success": not blockers,
         "policy_targets": targets,
-        "event_policy_targets": [
-            item for item in targets if item.get("event_generation") is True
-        ],
+        "event_policy_targets": event_targets,
         "event_observation_types": list(
             dict.fromkeys(
                 item["observation_type"]
-                for item in targets
-                if item.get("event_generation") is True
+                for item in event_targets
             )
         ),
         "historical_values_by_field": historical_values_by_field,
@@ -735,6 +1240,7 @@ def compile_rule_targets(
         "contract": contract,
         "unmapped_comparable_fields": unmapped,
         "blockers": blockers,
+        "rule_asset_requirements": effective_requirements,
         "field_name": targets[0]["field_name"] if targets else None,
         "observation_type": targets[0]["observation_type"] if targets else None,
     }

@@ -14,12 +14,19 @@ from typing import Any
 
 from sqlalchemy import and_, func, or_
 
+from src.core.check_items.canonical import load_canonical_catalog
+from src.core.check_items.runtime_bundle_assembly import (
+    derive_asset_requirement_profile,
+)
 from src.core.rule_control.planning import profile_fields
-from src.core.rule_control.source_scope import require_rule_asset_source_job
+from src.core.rule_control.source_scope import (
+    require_current_rule_generation_context,
+    require_immutable_rule_asset_source_datasets,
+    rule_generation_context_digest,
+)
 from src.infrastructure.db.models import (
     CheckItemVersionRecord,
     CommandSnapshot,
-    OfflinePatrolPeriodRecord,
     ParserTemplate,
     RuleAssetCommandUnitCheckItemRecord,
     RuleAssetCommandUnitRecord,
@@ -28,6 +35,7 @@ from src.infrastructure.db.models import (
     SnapshotParseResult,
 )
 from src.infrastructure.db.postgres import get_db_session
+
 
 def assess_context_quality(
     records: list[dict[str, Any]],
@@ -45,7 +53,14 @@ def assess_context_quality(
     from src.common.config import get_settings
 
     settings = get_settings()
-    required_records = max(1, int(min_records if min_records is not None else settings.RULE_CONTEXT_MIN_RECORDS))
+    required_records = max(
+        1,
+        int(
+            min_records
+            if min_records is not None
+            else settings.RULE_CONTEXT_MIN_RECORDS
+        ),
+    )
     required_fill = float(
         min_field_fill_rate
         if min_field_fill_rate is not None
@@ -267,7 +282,11 @@ def sanitize_structured_records(
     }
 
 
-def _approved_field_whitelist(template: ParserTemplate, *, require_approval: bool = True) -> set[str]:
+def _approved_field_whitelist(
+    template: ParserTemplate,
+    *,
+    require_approval: bool = True,
+) -> set[str]:
     validation = dict(template.validation_json or {})
     if require_approval and validation.get("contract_approval_status") != "approved":
         raise ValueError("parser template field contract is not approved")
@@ -291,31 +310,117 @@ def _approved_field_whitelist(template: ParserTemplate, *, require_approval: boo
     return fields
 
 
-def _field_whitelist_relaxed(template: ParserTemplate) -> set[str]:
-    try:
-        return _approved_field_whitelist(template, require_approval=True)
-    except ValueError:
-        return _approved_field_whitelist(template, require_approval=False)
-
-
 def _round_robin_snapshot_records(
     candidates: list[tuple[str, str, dict[str, Any]]],
     *,
     max_records: int,
 ) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
-    grouped: dict[tuple[str, str], deque[dict[str, Any]]] = {}
-    for dataset_id, group_id, record in candidates:
-        grouped.setdefault((dataset_id, group_id), deque()).append(record)
+    # A parser bundle can emit several named record sets from one snapshot. A
+    # large table (for example, one row per interface) must not exhaust the
+    # context budget before singleton measurements or threshold sets are seen.
+    # Keep the snapshot boundary for replay evidence, but sample independently
+    # within every named record set.
+    grouped: dict[
+        tuple[str, str, str],
+        deque[tuple[int, dict[str, Any]]],
+    ] = {}
+    for index, (dataset_id, group_id, record) in enumerate(candidates):
+        record_set = str(record.get("__record_set__") or "__default__")
+        grouped.setdefault((dataset_id, group_id, record_set), deque()).append(
+            (index, record)
+        )
     records: list[dict[str, Any]] = []
     selected_groups: dict[str, list[dict[str, Any]]] = {}
     group_order = sorted(grouped)
+
+    # Large CLI tables are usually ordered by entity identity. Plain head
+    # sampling can therefore hide rare operational states near the tail. Build
+    # a bounded vocabulary only for low-cardinality fields; identifiers and
+    # free text naturally exceed the cap and do not consume this budget.
+    value_sets: dict[str, set[tuple[str, str]]] = {}
+    record_tokens: dict[int, set[tuple[str, str, str]]] = {}
+    for index, (_dataset_id, _group_id, record) in enumerate(candidates):
+        tokens: set[tuple[str, str, str]] = set()
+        for raw_field, raw_value in record.items():
+            field = str(raw_field)
+            if field == "__record_set__":
+                continue
+            values = raw_value if isinstance(raw_value, list) else [raw_value]
+            for value in values:
+                if value in (None, "") or isinstance(value, (dict, list)):
+                    continue
+                if isinstance(value, str):
+                    token = ("string", value.strip().casefold())
+                else:
+                    token = (type(value).__name__, str(value))
+                value_sets.setdefault(field, set()).add(token)
+                tokens.add((field, *token))
+        record_tokens[index] = tokens
+    diversity_fields = {
+        field
+        for field, values in value_sets.items()
+        if 1 < len(values) <= 20
+    }
+    eligible_tokens = {
+        (field, *token)
+        for field in diversity_fields
+        for token in value_sets[field]
+    }
+    selected_indices: set[int] = set()
+
+    def select(index: int, record: dict[str, Any], group_id: str) -> None:
+        selected_indices.add(index)
+        records.append(record)
+        selected_groups.setdefault(group_id, []).append(record)
+
+    # Preserve every immutable snapshot / named record-set boundary first.
+    for group_key in group_order:
+        if len(records) >= max_records:
+            break
+        bucket = grouped[group_key]
+        if bucket:
+            index, record = bucket.popleft()
+            select(index, record, group_key[1])
+
+    # Then greedily cover rare values that head sampling would otherwise miss.
+    covered_tokens = {
+        token
+        for index in selected_indices
+        for token in record_tokens.get(index, set())
+        if token in eligible_tokens
+    }
+    uncovered_tokens = eligible_tokens - covered_tokens
+    while uncovered_tokens and len(records) < max_records:
+        best_index: int | None = None
+        best_group_id = ""
+        best_record: dict[str, Any] | None = None
+        best_score: tuple[int, int, str] | None = None
+        for index, (_dataset_id, group_id, record) in enumerate(candidates):
+            if index in selected_indices:
+                continue
+            gain = len(record_tokens.get(index, set()) & uncovered_tokens)
+            if gain <= 0:
+                continue
+            score = (gain, -len(selected_groups.get(group_id, [])), group_id)
+            if best_score is None or score > best_score:
+                best_index = index
+                best_group_id = group_id
+                best_record = record
+                best_score = score
+        if best_index is None or best_record is None:
+            break
+        select(best_index, best_record, best_group_id)
+        uncovered_tokens -= record_tokens.get(best_index, set())
+
+    # Fill the remaining budget in stable round-robin order.
     while len(records) < max_records and any(grouped.values()):
         for group_key in group_order:
             bucket = grouped[group_key]
+            while bucket and bucket[0][0] in selected_indices:
+                bucket.popleft()
             if bucket and len(records) < max_records:
-                record = bucket.popleft()
-                records.append(record)
-                selected_groups.setdefault(group_key[1], []).append(record)
+                index, record = bucket.popleft()
+                select(index, record, group_key[1])
     return records, selected_groups
 
 
@@ -383,7 +488,8 @@ def _check_item_generation_governance(
             == RuleAssetCommandUnitCheckItemRecord.check_item_version_id,
         )
         .filter(
-            RuleAssetCommandUnitCheckItemRecord.command_unit_id.in_(unit_ids)
+            RuleAssetCommandUnitCheckItemRecord.command_unit_id.in_(unit_ids),
+            CheckItemVersionRecord.status == "active",
         )
         .order_by(
             RuleAssetCommandUnitCheckItemRecord.check_item_id,
@@ -391,6 +497,7 @@ def _check_item_generation_governance(
         )
         .all()
     )
+    canonical_catalog = load_canonical_catalog()
     targets: list[dict[str, Any]] = []
     seen_links: set[tuple[str, str]] = set()
     for link, version in rows:
@@ -402,6 +509,16 @@ def _check_item_generation_governance(
             continue
         seen_links.add(key)
         canonical_contract = dict(version.canonical_contract_json or {})
+        asset_requirement_profile = derive_asset_requirement_profile(
+            result_mode=str(version.result_mode),
+            assessment_mode=str(version.assessment_mode),
+            canonical_rows=[
+                dict(item)
+                for item in canonical_contract.get("observations") or []
+                if isinstance(item, dict)
+            ],
+            canonical_catalog=canonical_catalog,
+        )
         targets.append(
             {
                 "check_item_id": str(link.check_item_id),
@@ -410,6 +527,9 @@ def _check_item_generation_governance(
                 "implementation_version_id": str(
                     link.implementation_version_id
                 ),
+                "result_mode": str(version.result_mode),
+                "assessment_mode": str(version.assessment_mode),
+                "asset_requirement_profile": asset_requirement_profile,
                 "canonical_entity_type": str(
                     canonical_contract.get("entity_type") or ""
                 ),
@@ -424,7 +544,43 @@ def _check_item_generation_governance(
                     canonical_contract.get("identity_dimension_rules") or {}
                 ),
                 "observations": [
-                    dict(item)
+                    {
+                        **dict(item),
+                        "check_item_id": str(link.check_item_id),
+                        "canonical_entity_type": str(
+                            canonical_contract.get("entity_type") or ""
+                        ),
+                        "identity_dimensions": [
+                            str(dimension)
+                            for dimension in canonical_contract.get(
+                                "identity_dimensions"
+                            )
+                            or []
+                        ],
+                        "identity_dimension_rules": dict(
+                            canonical_contract.get(
+                                "identity_dimension_rules"
+                            )
+                            or {}
+                        ),
+                        **(
+                            {
+                                "canonical_description": definition.description,
+                                "allowed_values": list(definition.allowed_values),
+                                "value_types": list(definition.value_types),
+                                "assessment_roles": list(
+                                    definition.assessment_roles
+                                ),
+                            }
+                            if (
+                                definition := canonical_catalog.get(
+                                    str(item.get("observation_type") or "")
+                                )
+                            )
+                            is not None
+                            else {}
+                        ),
+                    }
                     for item in canonical_contract.get("observations") or []
                     if isinstance(item, dict)
                 ],
@@ -461,15 +617,113 @@ def _check_item_generation_governance(
         if len(identity_constraints) == 1
         else {}
     )
+    canonical_identity_constraints = [
+        json.loads(item) for item in sorted(identity_constraints)
+    ]
+    required_asset_types = {
+        str(asset_type)
+        for target in targets
+        for asset_type in (
+            target.get("asset_requirement_profile", {}).get(
+                "required_asset_types"
+            )
+            or []
+        )
+    }
+    requirement_profiles = [
+        dict(
+            target.get("asset_requirement_profile", {}).get(
+                "requirements"
+            )
+            or {}
+        )
+        for target in targets
+    ]
+    current_state_observation_types = sorted(
+        {
+            str(observation_type)
+            for profile in requirement_profiles
+            for observation_type in (
+                profile.get("current_state_rule", {}).get(
+                    "required_observation_types"
+                )
+                or []
+            )
+            if str(observation_type).strip()
+        }
+    )
+    change_policy_observation_types = sorted(
+        {
+            str(observation_type)
+            for profile in requirement_profiles
+            for observation_type in (
+                profile.get("change_policy", {}).get(
+                    "required_observation_types"
+                )
+                or []
+            )
+            if str(observation_type).strip()
+        }
+    )
+    required_event_types_by_observation: dict[str, set[str]] = {}
+    for profile in requirement_profiles:
+        for observation_type, event_types in dict(
+            profile.get("event_rule", {}).get(
+                "required_event_types_by_observation"
+            )
+            or {}
+        ).items():
+            required_event_types_by_observation.setdefault(
+                str(observation_type), set()
+            ).update(
+                str(event_type)
+                for event_type in event_types or []
+                if str(event_type).strip()
+            )
+    requires_current_state_rule = "current_state_rule" in required_asset_types
+    requires_event_rule = "event_rule" in required_asset_types
+    rule_asset_requirements = {
+        "schema_version": "rule-asset-requirements/v1",
+        "required_asset_types": sorted(required_asset_types),
+        "requires_observation_contract": (
+            "observation_contract" in required_asset_types
+        ),
+        "requires_change_policy": (
+            "change_policy" in required_asset_types
+        ),
+        "requires_current_state_rule": requires_current_state_rule,
+        "requires_event_rule": requires_event_rule,
+        # CurrentStateRule reuses immutable EventRuleVersion storage but remains
+        # a separate logical role and assembly gate.
+        "requires_event_rule_assets": (
+            requires_current_state_rule or requires_event_rule
+        ),
+        "requires_historical_replay": requires_event_rule,
+        "current_state_observation_types": (
+            current_state_observation_types
+        ),
+        "change_policy_observation_types": (
+            change_policy_observation_types
+        ),
+        "required_event_types_by_observation": {
+            observation_type: sorted(event_types)
+            for observation_type, event_types in sorted(
+                required_event_types_by_observation.items()
+            )
+        },
+        "check_item_target_count": len(targets),
+    }
     return {
         "check_item_targets": targets,
         "observation_targets": observation_targets,
         "strict_observation_targets": bool(observation_targets),
         "canonical_identity_constraint": canonical_identity_constraint,
+        "canonical_identity_constraints": canonical_identity_constraints,
+        "rule_asset_requirements": rule_asset_requirements,
         "target_resolution": (
             "resolved"
             if targets and len(identity_constraints) <= 1
-            else "multi_entity_partition_required"
+            else "resolved_multi_entity"
             if targets
             else "unclassified"
         ),
@@ -507,40 +761,22 @@ class DatasetRuleGenerationContextService:
             validation = dict(template.validation_json or {})
             selected_field = str(field_name or "").strip()
             selected_observation = str(observation_type or "").strip()
-            period_rows = (
-                db.query(
-                    OfflinePatrolPeriodRecord.dataset_id,
-                    OfflinePatrolPeriodRecord.patrol_run_id,
-                    OfflinePatrolPeriodRecord.job_id,
-                )
-                .filter(OfflinePatrolPeriodRecord.dataset_id.in_(dataset_ids))
-                .all()
+            source_scope = require_immutable_rule_asset_source_datasets(
+                db,
+                dataset_ids,
             )
-            if not period_rows:
-                raise ValueError(
-                    "rule generation datasets must come from a Parser control asset-source job"
-                )
-            source_job_ids = sorted({str(item[2]) for item in period_rows})
-            for source_job_id in source_job_ids:
-                require_rule_asset_source_job(db, source_job_id)
-            period_scope = {
-                str(dataset_id): str(run_id or "").strip()
-                for dataset_id, run_id, _job_id in period_rows
-            }
-            missing_periods = sorted(set(dataset_ids) - set(period_scope))
-            if missing_periods:
-                raise ValueError(
-                    "offline dataset selection mixes governed and ungoverned periods: "
-                    + ", ".join(missing_periods)
-                )
-            missing_runs = sorted(
-                dataset_id for dataset_id, run_id in period_scope.items() if not run_id
+            period_scope = dict(source_scope["period_scope"])
+            offline_job_ids = list(source_scope["job_ids"])
+            # Catalog activation can race a user's explicit context rebuild.
+            # Refresh the materialized command/check-item links before freezing
+            # their immutable version IDs into the new generation context.
+            from src.core.rule_control.command_asset_units import (
+                RuleAssetCommandUnitService,
             )
-            if missing_runs:
-                raise ValueError(
-                    "offline patrol periods have no authoritative patrol run: "
-                    + ", ".join(missing_runs)
-                )
+
+            projection_service = RuleAssetCommandUnitService()
+            for offline_job_id in offline_job_ids:
+                projection_service.ensure_projection_current(offline_job_id)
             snapshot_scope = or_(
                 *[
                     and_(
@@ -617,7 +853,6 @@ class DatasetRuleGenerationContextService:
                         structured,
                     )
                 )
-            offline_job_ids = sorted({str(job_id) for _dataset_id, _run_id, job_id in period_rows})
             generation_governance = _check_item_generation_governance(
                 db,
                 template=template,
@@ -710,16 +945,19 @@ class DatasetRuleGenerationContextService:
         historical_values = [
             number for record in records for number in _numeric_scalars(record.get(selected_field))
         ]
+        full_field_profiles = profile_fields(
+            [record for _dataset_id, _group_id, record in candidates],
+            field_inventory=sorted(allowed_fields),
+        )
         context = {
             "records": records,
             "record_groups": [
                 {"group_id": group_id, "records": group_records}
                 for group_id, group_records in sorted(selected_groups.items())
             ],
-            "field_profiles": profile_fields(
-                records,
-                field_inventory=sorted(allowed_fields),
-            ),
+            # The model sees a bounded sample, while deterministic validation
+            # receives statistics from the complete approved structured source.
+            "field_profiles": full_field_profiles,
             "field_name": selected_field,
             "observation_type": selected_observation or None,
             "replay_run_ids": replay_run_ids,
@@ -754,23 +992,31 @@ class DatasetRuleGenerationContextService:
             "source_resolution": "latest_successful_reparse_then_capture",
             "candidate_record_count": len(candidates),
             "sampled_record_count": len(records),
+            "profiled_record_count": len(candidates),
+            "sampling_strategy": "snapshot_round_robin_with_value_coverage_v2",
             "approved_field_whitelist": sorted(allowed_fields),
             "dropped_unapproved_fields": dropped_unapproved,
             "removed_fields": removed,
             "pseudonymized_fields": pseudonymized,
+            "source_scope_digest": source_scope["scope_digest"],
+            "source_scope_manifest": source_scope["manifest"],
         }
-        digest_payload = {
-            "job_id": job_id,
-            "dataset_ids": dataset_ids,
-            "context": context,
-            "privacy": privacy,
-        }
-        digest = hashlib.sha256(
-            json.dumps(
-                digest_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-            ).encode("utf-8")
-        ).hexdigest()
+        digest = rule_generation_context_digest(
+            job_id=job_id,
+            dataset_ids=dataset_ids,
+            context=context,
+            privacy=privacy,
+        )
         with get_db_session() as db:
+            current_scope = require_immutable_rule_asset_source_datasets(
+                db,
+                dataset_ids,
+            )
+            if current_scope["scope_digest"] != source_scope["scope_digest"]:
+                raise ValueError(
+                    "offline source evidence changed while the generation context "
+                    "was being prepared"
+                )
             existing = (
                 db.query(RuleGenerationContextRecord)
                 .filter(RuleGenerationContextRecord.context_digest == digest)
@@ -794,209 +1040,12 @@ class DatasetRuleGenerationContextService:
                 )
                 db.add(row)
                 db.flush()
-            return {
-                "success": True,
-                "context_id": row.id,
-                "context_digest": row.context_digest,
-                "dataset_ids": list(row.dataset_ids_json or []),
-                "context": dict(row.context_json or {}),
-                "privacy": dict(row.privacy_report_json or {}),
-            }
-
-    def prepare_from_parser_template(
-        self,
-        *,
-        job_id: str,
-        created_by: str | None = None,
-        max_records: int = 120,
-    ) -> dict[str, Any]:
-        """Build immutable context from structured snapshots for an activated template."""
-        max_records = max(1, min(int(max_records), 500))
-        with get_db_session() as db:
-            job = db.get(RuleGenerationJobRecord, job_id)
-            if not job:
-                raise KeyError("rule generation job not found")
-            payload = dict(job.payload_json or {})
-            defaults = dict(payload.get("workflow_context_defaults") or {})
-            template_id = str(payload.get("template_id") or "").strip()
-            if not template_id:
-                raise ValueError("rule generation job is not linked to a parser template")
-            template = db.get(ParserTemplate, template_id)
-            if not template or template.status != "active":
-                raise ValueError("rule generation job parser template is not active")
-            allowed_fields = _field_whitelist_relaxed(template)
-            validation = dict(template.validation_json or {})
-            generation_governance = _check_item_generation_governance(
+            require_current_rule_generation_context(
                 db,
-                template=template,
+                row,
+                expected_context_digest=digest,
+                current_source_scope=current_scope,
             )
-            vendor = str(template.vendor or "").strip()
-            command = str(template.canonical_command or "").strip()
-            if not vendor or not command:
-                raise ValueError("parser template missing vendor or canonical_command")
-            rows = (
-                db.query(CommandSnapshot)
-                .filter(
-                    func.lower(CommandSnapshot.vendor) == vendor.lower(),
-                    func.lower(CommandSnapshot.canonical_command) == command.lower(),
-                    CommandSnapshot.parse_status.in_(("parsed", "success")),
-                    CommandSnapshot.structured_json.isnot(None),
-                )
-                .order_by(CommandSnapshot.observed_at.desc())
-                .limit(max(50, max_records * 3))
-                .all()
-            )
-            if not rows:
-                # Prefer SnapshotParseResult join path when snapshots lack structured_json
-                from src.infrastructure.db.models import SnapshotParseResult
-
-                parse_rows = (
-                    db.query(CommandSnapshot, SnapshotParseResult)
-                    .join(
-                        SnapshotParseResult,
-                        SnapshotParseResult.snapshot_id == CommandSnapshot.id,
-                    )
-                    .filter(
-                        func.lower(CommandSnapshot.vendor) == vendor.lower(),
-                        func.lower(CommandSnapshot.canonical_command) == command.lower(),
-                        SnapshotParseResult.structured_json.isnot(None),
-                    )
-                    .order_by(CommandSnapshot.observed_at.desc())
-                    .limit(max(50, max_records * 3))
-                    .all()
-                )
-                rows = []
-                for snapshot, parse in parse_rows:
-                    snapshot.structured_json = parse.structured_json
-                    rows.append(snapshot)
-            if not rows:
-                raise ValueError(
-                    "no structured snapshots available for parser template context"
-                )
-
-            removed: dict[str, int] = {}
-            pseudonymized: dict[str, int] = {}
-            dropped_unapproved: dict[str, int] = {}
-            candidates: list[tuple[str, str, dict[str, Any]]] = []
-            replay_run_ids: list[str] = []
-            dataset_id = f"parser_template:{template_id}"
-            for snapshot in rows:
-                run_id = str(snapshot.run_id or "").strip()
-                if run_id and run_id not in replay_run_ids:
-                    replay_run_ids.append(run_id)
-                group_id = _stable_alias(
-                    "snapshot",
-                    f"{dataset_id}|{snapshot.run_id}|{snapshot.device_id}|{snapshot.observed_at}",
-                )
-                structured = snapshot.structured_json
-                records = _structured_records(structured)
-                for record in records:
-                    if not isinstance(record, dict):
-                        continue
-                    whitelisted = {}
-                    for key, value in record.items():
-                        field = str(key)
-                        if field == "__record_set__":
-                            whitelisted[field] = value
-                            continue
-                        if field not in allowed_fields:
-                            dropped_unapproved[field] = dropped_unapproved.get(field, 0) + 1
-                            continue
-                        whitelisted[field] = value
-                    candidates.append(
-                        (
-                            dataset_id,
-                            group_id,
-                            _sanitize(
-                                whitelisted,
-                                removed=removed,
-                                pseudonymized=pseudonymized,
-                            ),
-                        )
-                    )
-            records, selected_groups = _round_robin_snapshot_records(
-                candidates,
-                max_records=max_records,
-            )
-            if not records:
-                raise ValueError("sanitized records are empty for parser template context")
-            selected_field = self._first_comparable_field(
-                records,
-                semantics=dict(validation.get("state_semantics") or {}),
-            ) or str(defaults.get("field_name") or "").strip() or self._first_scalar_field(records)
-            if not selected_field:
-                raise ValueError("unable to infer a rule target field from structured records")
-            selected_observation = str(defaults.get("observation_type") or "").strip() or None
-            historical_values = [
-                number
-                for record in records
-                for number in _numeric_scalars(record.get(selected_field))
-            ]
-            context = {
-                "records": records,
-                "record_groups": [
-                    {"group_id": group_id, "records": group_records}
-                    for group_id, group_records in sorted(selected_groups.items())
-                ],
-                "field_profiles": profile_fields(
-                    records,
-                    field_inventory=sorted(allowed_fields),
-                ),
-                "field_name": selected_field,
-                "observation_type": selected_observation,
-                "replay_run_ids": replay_run_ids,
-                **generation_governance,
-            }
-            if historical_values:
-                context["historical_values"] = historical_values
-            privacy = {
-                "success": True,
-                "raw_cli_included": False,
-                "scope_type": "parser_template_snapshots",
-                "template_id": template_id,
-                "source_snapshot_count": len(rows),
-                "sampled_record_count": len(records),
-                "approved_field_whitelist": sorted(allowed_fields),
-                "dropped_unapproved_fields": dropped_unapproved,
-                "removed_fields": removed,
-                "pseudonymized_fields": pseudonymized,
-            }
-            quality = assess_context_quality(records, selected_field)
-            privacy["quality"] = quality
-            digest_payload = {
-                "job_id": job_id,
-                "dataset_ids": [dataset_id],
-                "context": context,
-                "privacy": privacy,
-            }
-            digest = hashlib.sha256(
-                json.dumps(
-                    digest_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-                ).encode("utf-8")
-            ).hexdigest()
-            existing = (
-                db.query(RuleGenerationContextRecord)
-                .filter(RuleGenerationContextRecord.context_digest == digest)
-                .first()
-            )
-            if existing:
-                row = existing
-            else:
-                row = RuleGenerationContextRecord(
-                    id=f"rule-context-{uuid.uuid4().hex[:20]}",
-                    job_id=job_id,
-                    offline_job_id=None,
-                    dataset_ids_json=[dataset_id],
-                    observation_type=selected_observation,
-                    field_name=selected_field,
-                    context_json=context,
-                    context_digest=digest,
-                    privacy_report_json=privacy,
-                    created_by=created_by or "parser-template-activation",
-                    created_at=_now(),
-                )
-                db.add(row)
-                db.flush()
             return {
                 "success": True,
                 "context_id": row.id,
@@ -1011,27 +1060,18 @@ class DatasetRuleGenerationContextService:
             row = db.get(RuleGenerationContextRecord, context_id)
             if not row or row.job_id != job_id:
                 raise KeyError("rule generation context not found")
-            privacy = dict(row.privacy_report_json or {})
-            scope_type = privacy.get("scope_type")
-            if scope_type == "parser_template_snapshots":
-                return {
-                    "context_id": row.id,
-                    "context_digest": row.context_digest,
-                    "dataset_ids": list(row.dataset_ids_json or []),
-                    "context": dict(row.context_json or {}),
-                    "privacy": privacy,
-                }
-            if not row.offline_job_id or scope_type != (
-                "offline_period_authoritative_runs"
-            ):
-                raise ValueError("rule generation context is not backed by an offline patrol job")
-            require_rule_asset_source_job(db, str(row.offline_job_id))
+            integrity = require_current_rule_generation_context(
+                db,
+                row,
+                expected_context_digest=str(row.context_digest or ""),
+            )
             return {
                 "context_id": row.id,
                 "context_digest": row.context_digest,
                 "dataset_ids": list(row.dataset_ids_json or []),
                 "context": dict(row.context_json or {}),
-                "privacy": privacy,
+                "privacy": dict(row.privacy_report_json or {}),
+                "source_integrity": integrity,
             }
 
     @staticmethod

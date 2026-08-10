@@ -399,6 +399,12 @@ def test_command_profile_binding_status_change_is_audited(monkeypatch, tmp_path)
         selector={"vendor": "H3C", "role": "core"},
         status="active",
     )
+    repeated_binding_id = repository.upsert_binding(
+        profile_version_id=version_id,
+        selector={"vendor": "H3C", "role": "core"},
+        status="active",
+    )
+    assert repeated_binding_id == binding_id
 
     result = repository.set_binding_status(
         binding_id,

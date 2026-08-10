@@ -459,6 +459,13 @@ async def proxy_patrol_batch_restore(request: HttpRequest, patrol_batch_id: str)
 @csrf_exempt
 @require_jwt
 @sync_bff_view
+async def proxy_patrol_batch_cancel(request: HttpRequest, patrol_batch_id: str) -> JsonResponse:
+    return await _proxy_patrol_batch_action(request, patrol_batch_id, "cancel")
+
+
+@csrf_exempt
+@require_jwt
+@sync_bff_view
 async def proxy_patrol_batch_rerun(request: HttpRequest, patrol_batch_id: str) -> JsonResponse:
     return await _proxy_patrol_batch_action(request, patrol_batch_id, "rerun")
 
@@ -492,6 +499,7 @@ async def proxy_patrol_batch_export(request: HttpRequest, patrol_batch_id: str):
 
 @csrf_exempt
 @require_jwt
+@require_role("admin")
 @sync_bff_view
 async def proxy_patrol_batch_raw_data(request: HttpRequest, patrol_batch_id: str):
     return await proxy_binary_to_fastapi(
@@ -505,12 +513,14 @@ async def proxy_patrol_batch_raw_data(request: HttpRequest, patrol_batch_id: str
 
 @csrf_exempt
 @require_jwt
+@require_role("admin")
 @sync_bff_view
 async def proxy_patrol_batch_raw_cli(request: HttpRequest, patrol_batch_id: str):
     return await proxy_binary_to_fastapi(
         method="GET",
         fastapi_path=f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/raw-cli.zip",
         request_id=request.bff_request_id,
+        params=request.GET.dict(),
         timeout=TASK_TIMEOUT,
         extra_headers=forward_client_headers(request),
     )
@@ -537,6 +547,7 @@ async def proxy_patrol_batch_report(request: HttpRequest, patrol_batch_id: str):
         method="GET",
         fastapi_path=f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/report.md",
         request_id=request.bff_request_id,
+        params=request.GET.dict(),
         timeout=TASK_TIMEOUT,
         extra_headers=forward_client_headers(request),
     )
@@ -554,6 +565,25 @@ async def proxy_patrol_batch_leadership_report(
             f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/report.docx"
         ),
         request_id=request.bff_request_id,
+        params=request.GET.dict(),
+        timeout=TASK_TIMEOUT,
+        extra_headers=forward_client_headers(request),
+    )
+
+
+@csrf_exempt
+@require_jwt
+@sync_bff_view
+async def proxy_patrol_batch_technical_workbook(
+    request: HttpRequest, patrol_batch_id: str
+):
+    return await proxy_binary_to_fastapi(
+        method="GET",
+        fastapi_path=(
+            f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/report.xlsx"
+        ),
+        request_id=request.bff_request_id,
+        params=request.GET.dict(),
         timeout=TASK_TIMEOUT,
         extra_headers=forward_client_headers(request),
     )
@@ -571,6 +601,25 @@ async def proxy_patrol_batch_leadership_report_json(
             f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/report.json"
         ),
         request_id=request.bff_request_id,
+        params=request.GET.dict(),
+        timeout=TASK_TIMEOUT,
+        extra_headers=forward_client_headers(request),
+    )
+
+
+@csrf_exempt
+@require_jwt
+@sync_bff_view
+async def proxy_patrol_batch_evidence_package(
+    request: HttpRequest, patrol_batch_id: str
+):
+    return await proxy_binary_to_fastapi(
+        method="GET",
+        fastapi_path=(
+            f"/api/v1/workflows/runs/patrol-batches/{patrol_batch_id}/evidence.zip"
+        ),
+        request_id=request.bff_request_id,
+        params=request.GET.dict(),
         timeout=TASK_TIMEOUT,
         extra_headers=forward_client_headers(request),
     )

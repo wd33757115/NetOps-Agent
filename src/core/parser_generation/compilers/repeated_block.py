@@ -55,7 +55,7 @@ class RepeatedBlockCompiler:
             re.MULTILINE,
         )
         for sample in samples:
-            for match in pattern.finditer(sample.raw_text):
+            for match in pattern.finditer(sample.validation_text):
                 raw_label = re.sub(r"\s+", " ", match.group(1).strip())
                 metric_rows.setdefault(
                     normalize_label(raw_label),
@@ -131,7 +131,7 @@ class RepeatedBlockCompiler:
             len(
                 [
                     line
-                    for line in sample.raw_text.splitlines()
+                    for line in sample.validation_text.splitlines()
                     if re.fullmatch(rf"\s*{parent_pattern}\s*", line)
                 ]
             )
@@ -352,7 +352,7 @@ class RepeatedBlockCompiler:
         for sample in generation_samples:
             anchors = [
                 line
-                for line in sample.raw_text.splitlines()
+                for line in sample.validation_text.splitlines()
                 if re.match(rf"^\s*\S+\s+{re.escape(anchor_suffix)}:\s*$", line)
             ]
             if not anchors:
@@ -647,7 +647,7 @@ class RepeatedBlockCompiler:
         for sample, expectation in zip(generation_samples, expectations):
             actual_keys = {
                 tuple(str(match.group(field_name)) for field_name in spec.primary_keys)
-                for line in sample.raw_text.splitlines()
+                for line in sample.validation_text.splitlines()
                 if (match := anchor_matcher.fullmatch(line))
             }
             expected_keys = {
@@ -677,7 +677,7 @@ class RepeatedBlockCompiler:
             if any(
                 sum(
                     bool(matcher.fullmatch(line))
-                    for line in sample.raw_text.splitlines()
+                    for line in sample.validation_text.splitlines()
                 )
                 < (
                     len(expectation.primary_keys)
@@ -748,7 +748,7 @@ class RepeatedBlockCompiler:
         for sample in generation_samples:
             anchors: list[re.Match[str]] = []
             mapped_rows: list[tuple[str, str]] = []
-            for line in sample.raw_text.splitlines():
+            for line in sample.validation_text.splitlines():
                 anchor = re.match(r"^\s*([A-Za-z][\w /-]*?)\s+(\S+)\s*:\s*$", line)
                 if anchor and normalize_label(anchor.group(1)) in anchor_labels:
                     anchors.append(anchor)

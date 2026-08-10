@@ -4,7 +4,7 @@ import { ArrowRightOutlined, DatabaseOutlined, ReloadOutlined } from '@ant-desig
 import { useQuery } from 'react-query'
 import { useNavigate } from 'react-router-dom'
 import { ruleAssetSourceApi, type OfflineRuleAssetPipelineStep } from '../../services/api'
-import OfflineCommandAssetUnits from './OfflineCommandAssetUnits'
+import RuleAssetProductionWorkbench from '../skills/parser/RuleAssetProductionWorkbench'
 
 const statusLabel: Record<string, string> = {
   not_started: '未开始',
@@ -108,12 +108,17 @@ const OfflineRuleAssetPipeline: React.FC<{ jobId: string }> = ({ jobId }) => {
       </Space>
       <Divider style={{ marginBlock: 4 }} />
       <Space direction="vertical" size={2}>
-        <Typography.Text strong>按命令生产规则资产</Typography.Text>
+        <Typography.Text strong>按巡检检查项生产规则资产</Typography.Text>
         <Typography.Text type="secondary">
-          同一厂家、适配 Profile 和规范命令归并为一个资产单元；每个单元独立经过 Parser、规则生成、回放、复核和发布。
+          规则需求由检查项的 AssetRequirementProfile 决定；命令、厂家和适配 Profile 作为兼容实现展开查看。
         </Typography.Text>
       </Space>
-      <OfflineCommandAssetUnits jobId={jobId} />
+      <RuleAssetProductionWorkbench
+        embedded
+        view="commands"
+        onViewChange={() => undefined}
+        focusOfflineJobId={jobId}
+      />
     </Space>
   )
 }

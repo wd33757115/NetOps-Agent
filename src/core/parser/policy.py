@@ -21,6 +21,7 @@ DEFAULT_COMMAND_ALIASES = {
     "show env power": "show environment power",
     "show env fan": "show environment fan",
     "show env temperature": "show environment temperature",
+    "show environment all": "show env all",
     "show int status": "show interface status",
     "show int transceiver detail": "show interface transceiver detail",
     "show interfaces transceiver detail": "show interface transceiver detail",
@@ -47,6 +48,7 @@ class CategorySpec:
     allow_empty: bool = False
     empty_patterns: tuple[str, ...] = ()
     ignore_fields: tuple[str, ...] = ()
+    presence: str = "required"
 
 
 @dataclass(frozen=True)
@@ -109,7 +111,6 @@ class ParserPolicy:
             "dis": "display",
             "int": "interface",
             "proc": "processes",
-            "env": "environment",
             "mem": "memory",
             "ver": "version",
             "statis": "statistics",

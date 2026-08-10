@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
   Alert, Button, Descriptions, Drawer, Empty, Grid, Input, InputNumber, List, Modal,
   Pagination, Progress, Select, Space, Table, Tag, Typography, message,
@@ -18,8 +18,10 @@ import {
   type ParserBackfillJob,
   type RuntimeBundleAssemblyPayload,
 } from '../../../services/api'
+import RolloutCampaignWorkspace from './RolloutCampaignWorkspace'
+import RuleGapsWorkspace from './RuleGapsWorkspace'
 
-type CoverageView = 'coverage' | 'backfill'
+type CoverageView = 'coverage' | 'backfill' | 'rollout' | 'gaps'
 
 type RuntimeBundleAssemblySelection = Omit<
   RuntimeBundleAssemblyPayload,
@@ -36,6 +38,16 @@ const backfillStatusMeta: Record<string, { label: string; className: string }> =
   failed: { label: '执行失败', className: 'is-failed' },
 }
 
+const assetTypeLabels: Record<string, string> = {
+  parser_template: 'Parser',
+  observation_contract: 'ObservationContract',
+  current_state_rule: 'CurrentStateRule',
+  change_policy: 'ChangePolicy',
+  event_rule: 'EventRule',
+  comparison_profile: 'TextComparisonProfile',
+  identity_policy: 'IdentityPolicy',
+}
+
 const formatTime = (value?: string | null) => {
   if (!value) return '-'
   const date = new Date(value)
@@ -48,17 +60,44 @@ const ratioPercent = (value: unknown) => {
   return Math.round(Math.max(0, Math.min(1, numeric)) * 100)
 }
 
+const backfillFilterValues = (row: ParserBackfillJob, key: string): string[] => {
+  const value = row.filters_json?.[key]
+  return Array.isArray(value) ? value.map(String).filter(Boolean) : []
+}
+
+const backfillScopeLabel = (row: ParserBackfillJob) => {
+  const datasets = backfillFilterValues(row, 'dataset_ids')
+  if (datasets.length > 0) return `${datasets.length} 个数据集：${datasets.join('、')}`
+  const runs = backfillFilterValues(row, 'run_ids')
+  if (runs.length > 0) return `${runs.length} 个 Run：${runs.join('、')}`
+  const devices = backfillFilterValues(row, 'device_ids')
+  if (devices.length > 0) return `${devices.length} 台设备`
+  return '全部符合条件的历史数据'
+}
+
 const CoverageBackfillWorkspace: React.FC = () => {
   const screens = Grid.useBreakpoint()
   const isMobile = !screens.md
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
-  const [view, setView] = useState<CoverageView>(
-    searchParams.get('action') === 'backfill' || searchParams.get('open_backfill') === '1'
-      ? 'backfill'
-      : 'coverage',
-  )
+  const view: CoverageView = searchParams.get('subtab') === 'rule-gaps'
+    ? 'gaps'
+    : searchParams.get('action') === 'rollout'
+      ? 'rollout'
+      : searchParams.get('action') === 'backfill' || searchParams.get('open_backfill') === '1'
+        ? 'backfill'
+        : 'coverage'
+  const changeView = (nextView: CoverageView) => {
+    const next = new URLSearchParams(searchParams)
+    next.set('workspace', 'runtime')
+    next.set('subtab', nextView === 'gaps' ? 'rule-gaps' : 'coverage-backfill')
+    next.delete('action')
+    next.delete('open_backfill')
+    if (nextView === 'backfill') next.set('action', 'backfill')
+    if (nextView === 'rollout') next.set('action', 'rollout')
+    navigate(`/skills/parser?${next.toString()}`, { replace: true })
+  }
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
   const [runtimePage, setRuntimePage] = useState(1)
@@ -254,7 +293,10 @@ const CoverageBackfillWorkspace: React.FC = () => {
 
   const coverage = coverageQuery.data
   const runtimeBundleSummary = runtimeBundleQuery.data?.summary
-  const runtimeBundleRows = runtimeBundleQuery.data?.items || []
+  const runtimeBundleRows = useMemo(
+    () => runtimeBundleQuery.data?.items || [],
+    [runtimeBundleQuery.data?.items],
+  )
   const readyRate = ratioPercent(runtimeBundleSummary?.ready_rate)
   const runtimeDataAvailable = Boolean(runtimeBundleSummary)
   const runtimeCatalogReady = Boolean(runtimeBundleSummary?.ready)
@@ -300,6 +342,13 @@ const CoverageBackfillWorkspace: React.FC = () => {
         <Space direction="vertical" size={0}>
           <Typography.Text strong>{row.template_id}</Typography.Text>
           <Typography.Text type="secondary">{row.id}</Typography.Text>
+          <Typography.Text
+            type="secondary"
+            ellipsis={{ tooltip: backfillScopeLabel(row) }}
+            style={{ maxWidth: 280 }}
+          >
+            范围：{backfillScopeLabel(row)}
+          </Typography.Text>
         </Space>
       ),
     },
@@ -347,18 +396,18 @@ const CoverageBackfillWorkspace: React.FC = () => {
     {
       title: '操作',
       key: 'actions',
-      width: 150,
+      width: 230,
       fixed: 'right' as const,
       render: (_: unknown, row: ParserBackfillJob) => (
         <Space>
-          {['draft', 'validation_failed'].includes(row.status) && (
+          {['draft', 'validation_failed', 'pending_approval'].includes(row.status) && (
             <Button
               type="text"
               icon={<PlayCircleOutlined />}
               loading={backfillMutation.isLoading}
               onClick={() => backfillMutation.mutate({ action: 'dry-run', id: row.id })}
             >
-              试运行
+              {row.status === 'pending_approval' ? '重新试运行' : '试运行'}
             </Button>
           )}
           {row.status === 'pending_approval' && (
@@ -382,7 +431,34 @@ const CoverageBackfillWorkspace: React.FC = () => {
     observedFrom && observedTo && new Date(observedFrom) > new Date(observedTo),
   )
   const assembly = assemblyQuery.data
+  const assetRequirementProfile = assembly?.asset_requirement_profile
+  const assetRequirements = assetRequirementProfile?.requirements || {}
+  const parserRequired = Boolean(assetRequirements.parser_template?.required)
+  const contractRequired = Boolean(assetRequirements.observation_contract?.required)
+  const policyRelevant = Boolean(
+    assetRequirements.change_policy?.required
+    || assetRequirements.change_policy?.conditional_observation_types?.length,
+  )
+  const eventRuleRelevant = Boolean(
+    assetRequirements.current_state_rule?.required
+    || assetRequirements.current_state_rule?.conditional_observation_types?.length
+    || assetRequirements.event_rule?.required
+    || Object.keys(
+      assetRequirements.event_rule?.conditional_event_types_by_observation || {},
+    ).length,
+  )
+  const comparisonRequired = Boolean(assetRequirements.comparison_profile?.required)
+  const hasSelectableAssets = (
+    parserRequired
+    || contractRequired
+    || policyRelevant
+    || eventRuleRelevant
+    || comparisonRequired
+  )
   const assemblyDraftVersionId = draftBundle?.version_id || assembly?.drafts?.[0]?.version_id
+  const primaryRemediationAction = assembly?.blockers.find(
+    (item) => Boolean(item.remediation_action?.target_url),
+  )?.remediation_action
   const assemblyErrorDetail = (assemblyQuery.error as any)?.response?.data?.detail
   const assemblyErrorText = typeof assemblyErrorDetail === 'string'
     ? assemblyErrorDetail
@@ -390,31 +466,35 @@ const CoverageBackfillWorkspace: React.FC = () => {
 
   return (
     <div className="coverage-backfill-workspace">
-      <div className="product-workspace-header">
-        <div>
-          <Typography.Title level={4}>覆盖与历史回填</Typography.Title>
-          <Typography.Text type="secondary">生产规则覆盖、运行时完整性与历史数据修复</Typography.Text>
-        </div>
-        <Button aria-label="刷新覆盖与回填" icon={<ReloadOutlined />} onClick={refresh} />
-      </div>
+      {view !== 'rollout' && (
+        <>
+          <div className="product-workspace-header">
+            <div>
+              <Typography.Title level={4}>覆盖与历史回填</Typography.Title>
+              <Typography.Text type="secondary">生产规则覆盖、运行时完整性与历史数据修复</Typography.Text>
+            </div>
+            <Button aria-label="刷新覆盖与回填" icon={<ReloadOutlined />} onClick={refresh} />
+          </div>
 
-      <div className="coverage-metrics">
-        <div>
-          <span>生产运行包就绪率</span>
-          <strong>{runtimeDataAvailable ? `${readyRate}%` : '-'}</strong>
-        </div>
-        <div>
-          <span>活动目录实现</span>
-          <strong>{runtimeDataAvailable ? runtimeBundleSummary?.implementation_pair_count : '-'}</strong>
-        </div>
-        <div>
-          <span>Active RuntimeBundle</span>
-          <strong>{runtimeDataAvailable ? runtimeBundleSummary?.ready_count : '-'}</strong>
-        </div>
-        <div><span>运行包缺口</span><strong>{runtimeDataAvailable ? runtimeGapCount : '-'}</strong></div>
-        <div><span>待批准回填</span><strong>{coverage?.backfills_pending_approval || 0}</strong></div>
-        <div><span>失败回填</span><strong>{coverage?.backfills_failed || 0}</strong></div>
-      </div>
+          <div className="coverage-metrics">
+            <div>
+              <span>生产运行包就绪率</span>
+              <strong>{runtimeDataAvailable ? `${readyRate}%` : '-'}</strong>
+            </div>
+            <div>
+              <span>活动目录实现</span>
+              <strong>{runtimeDataAvailable ? runtimeBundleSummary?.implementation_pair_count : '-'}</strong>
+            </div>
+            <div>
+              <span>Active RuntimeBundle</span>
+              <strong>{runtimeDataAvailable ? runtimeBundleSummary?.ready_count : '-'}</strong>
+            </div>
+            <div><span>运行包缺口</span><strong>{runtimeDataAvailable ? runtimeGapCount : '-'}</strong></div>
+            <div><span>待批准回填</span><strong>{coverage?.backfills_pending_approval || 0}</strong></div>
+            <div><span>失败回填</span><strong>{coverage?.backfills_failed || 0}</strong></div>
+          </div>
+        </>
+      )}
 
       <div className="rule-asset-view-switch coverage-view-switch" role="tablist">
         <button
@@ -422,7 +502,7 @@ const CoverageBackfillWorkspace: React.FC = () => {
           role="tab"
           aria-selected={view === 'coverage'}
           className={view === 'coverage' ? 'is-active' : ''}
-          onClick={() => setView('coverage')}
+          onClick={() => changeView('coverage')}
         >
           覆盖健康
         </button>
@@ -431,13 +511,35 @@ const CoverageBackfillWorkspace: React.FC = () => {
           role="tab"
           aria-selected={view === 'backfill'}
           className={view === 'backfill' ? 'is-active' : ''}
-          onClick={() => setView('backfill')}
+          onClick={() => changeView('backfill')}
         >
           历史回填
         </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === 'rollout'}
+          className={view === 'rollout' ? 'is-active' : ''}
+          onClick={() => changeView('rollout')}
+        >
+          渐进发布
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === 'gaps'}
+          className={view === 'gaps' ? 'is-active' : ''}
+          onClick={() => changeView('gaps')}
+        >
+          治理缺口
+        </button>
       </div>
 
-      {view === 'coverage' ? (
+      {view === 'rollout' ? (
+        <RolloutCampaignWorkspace />
+      ) : view === 'gaps' ? (
+        <RuleGapsWorkspace />
+      ) : view === 'coverage' ? (
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
           {runtimeBundleQuery.isError && (
             <Alert
@@ -566,7 +668,9 @@ const CoverageBackfillWorkspace: React.FC = () => {
                 <List.Item>
                   <div className="product-mobile-item">
                     <div className="product-mobile-item__header">
-                      <Typography.Text strong>{row.check_item_name}</Typography.Text>
+                      <Typography.Text strong>
+                        {row.check_item_display_name || row.check_item_name}
+                      </Typography.Text>
                       <Tag className={`product-status-tag ${row.ready ? 'is-published' : 'is-failed'}`}>
                         {row.status === 'ready' ? '已就绪' : row.status === 'invalid' ? '依赖失效' : '缺运行包'}
                       </Tag>
@@ -599,7 +703,9 @@ const CoverageBackfillWorkspace: React.FC = () => {
                   width: 250,
                   render: (_: unknown, row: CheckItemRuntimeBundleHealthItem) => (
                     <Space direction="vertical" size={0}>
-                      <Typography.Text strong>{row.check_item_name}</Typography.Text>
+                      <Typography.Text strong>
+                        {row.check_item_display_name || row.check_item_name}
+                      </Typography.Text>
                       <Typography.Text code>{row.check_item_id}</Typography.Text>
                     </Space>
                   ),
@@ -719,12 +825,15 @@ const CoverageBackfillWorkspace: React.FC = () => {
                         <Tag className={`product-status-tag ${meta.className}`}>{meta.label}</Tag>
                       </div>
                       <Typography.Text type="secondary">{row.id}</Typography.Text>
+                      <Typography.Text type="secondary">
+                        范围：{backfillScopeLabel(row)}
+                      </Typography.Text>
                       <Typography.Text>
                         Observation {row.summary_json?.observation_count || 0} · Change {row.summary_json?.change_count || 0} · Event {row.summary_json?.event_count || 0}
                       </Typography.Text>
-                      {['draft', 'validation_failed'].includes(row.status) && (
+                      {['draft', 'validation_failed', 'pending_approval'].includes(row.status) && (
                         <Button icon={<PlayCircleOutlined />} onClick={() => backfillMutation.mutate({ action: 'dry-run', id: row.id })}>
-                          执行试运行
+                          {row.status === 'pending_approval' ? '重新试运行' : '执行试运行'}
                         </Button>
                       )}
                       {row.status === 'pending_approval' && (
@@ -770,7 +879,15 @@ const CoverageBackfillWorkspace: React.FC = () => {
         onClose={() => setAssemblyTarget(undefined)}
         footer={(
           <Space wrap style={{ width: '100%', justifyContent: 'space-between' }}>
-            <Button onClick={openProduction}>修复规则资产</Button>
+            <Button
+              icon={<ArrowRightOutlined />}
+              onClick={() => navigate(
+                primaryRemediationAction?.target_url
+                || '/skills/parser?workspace=production&subtab=asset-production-units',
+              )}
+            >
+              {primaryRemediationAction?.label || '修复规则资产'}
+            </Button>
             <Space wrap>
               <Button onClick={() => setAssemblyTarget(undefined)}>关闭</Button>
               <Button
@@ -786,7 +903,7 @@ const CoverageBackfillWorkspace: React.FC = () => {
                 type="primary"
                 icon={<CheckOutlined />}
                 loading={runtimeBundleMutation.isLoading}
-                disabled={!assemblyDraftVersionId || !activationReason.trim()}
+                disabled={!assemblyDraftVersionId}
                 onClick={() => runtimeBundleMutation.mutate({
                   action: 'activate',
                   versionId: assemblyDraftVersionId,
@@ -801,7 +918,10 @@ const CoverageBackfillWorkspace: React.FC = () => {
         <Space direction="vertical" size={18} style={{ width: '100%' }}>
           <Descriptions bordered size="small" column={isMobile ? 1 : 2}>
             <Descriptions.Item label="巡检检查项">
-              {assemblyTarget?.check_item_name || '-'}
+              {assembly?.check_item?.display_name
+                || assemblyTarget?.check_item_display_name
+                || assemblyTarget?.check_item_name
+                || '-'}
             </Descriptions.Item>
             <Descriptions.Item label="采集实现">
               {assemblyTarget?.implementation_name || '-'}
@@ -834,7 +954,7 @@ const CoverageBackfillWorkspace: React.FC = () => {
               message={assembly.operationally_ready ? '运行包满足发布前置条件' : `存在 ${assembly.blockers.length} 个发布阻断项`}
               description={(
                 assembly.operationally_ready
-                  ? `可执行命令 ${assembly.compatibility.executable_commands?.length || 0} 条，fallback 韧性：${assembly.fallback_resilience}`
+                  ? `主命令可用，可执行命令 ${assembly.compatibility.executable_commands?.length || 0} 条。`
                   : '先处理下方阻断项；平台不会把 Active Parser 或已发布规则资产冒充成运行就绪。'
               )}
             />
@@ -842,15 +962,68 @@ const CoverageBackfillWorkspace: React.FC = () => {
 
           {assembly && (
             <>
+              {assetRequirementProfile && (
+                <div>
+                  <Typography.Title level={5}>资产需求画像</Typography.Title>
+                  <Descriptions bordered size="small" column={isMobile ? 1 : 2}>
+                    <Descriptions.Item label="结果模式">
+                      {assetRequirementProfile.result_mode}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="评估模式">
+                      {assetRequirementProfile.assessment_mode}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="必需资产" span={isMobile ? 1 : 2}>
+                      <Space wrap>
+                        {assetRequirementProfile.required_asset_types.map((item) => (
+                          <Tag className="product-status-tag is-published" key={item}>
+                            {assetTypeLabels[item] || item}
+                          </Tag>
+                        ))}
+                      </Space>
+                    </Descriptions.Item>
+                    <Descriptions.Item label="不适用资产" span={isMobile ? 1 : 2}>
+                      <Space wrap>
+                        {Object.keys(assetRequirementProfile.not_required).map((item) => (
+                          <Tag className="product-status-tag is-neutral" key={item}>
+                            {assetTypeLabels[item] || item}
+                          </Tag>
+                        ))}
+                      </Space>
+                    </Descriptions.Item>
+                    <Descriptions.Item label="运行事实" span={isMobile ? 1 : 2}>
+                      <Space wrap>
+                        {assetRequirementProfile.required_runtime_facts.map((item) => (
+                          <Tag key={item}>{item}</Tag>
+                        ))}
+                      </Space>
+                    </Descriptions.Item>
+                    <Descriptions.Item label="画像指纹" span={isMobile ? 1 : 2}>
+                      <Typography.Text
+                        code
+                        copyable={{ text: assembly.asset_requirement_profile_digest || '' }}
+                      >
+                        {assembly.asset_requirement_profile_digest
+                          ? `${assembly.asset_requirement_profile_digest.slice(0, 12)}…${assembly.asset_requirement_profile_digest.slice(-8)}`
+                          : '-'}
+                      </Typography.Text>
+                    </Descriptions.Item>
+                  </Descriptions>
+                </div>
+              )}
+
               <div className="product-section-header">
                 <div>
                   <Typography.Title level={5}>命令执行路径</Typography.Title>
                   <Typography.Text type="secondary">
-                    只会把具有完整 Parser 与 Canonical Contract 的命令冻结到生产计划
+                    {parserRequired
+                      ? '结构化命令路径'
+                      : comparisonRequired
+                        ? '文本比较命令路径'
+                        : '证据采集命令路径'}
                   </Typography.Text>
                 </div>
-                <Tag className={`product-status-tag ${assembly.fallback_resilience === 'full' ? 'is-published' : 'is-review'}`}>
-                  fallback {assembly.fallback_resilience}
+                <Tag className={`product-status-tag ${assembly.compatibility.command_availability === 'available' ? 'is-published' : 'is-review'}`}>
+                  {assembly.compatibility.command_availability === 'available' ? '主命令可用' : '主命令待处理'}
                 </Tag>
               </div>
               <Table
@@ -881,52 +1054,72 @@ const CoverageBackfillWorkspace: React.FC = () => {
                       </Tag>
                     ),
                   },
-                  {
-                    title: '冻结资产',
-                    render: (_: unknown, row: any) => (
-                      <Space direction="vertical" size={0}>
-                        <Typography.Text type="secondary">
-                          Parser {row.selected_parser_template_id || '-'}
-                        </Typography.Text>
-                        <Typography.Text type="secondary">
-                          Contract {row.selected_contract_ids?.length || 0} 个
-                        </Typography.Text>
-                      </Space>
-                    ),
-                  },
+                   {
+                     title: '冻结资产',
+                     render: (_: unknown, row: any) => (
+                       <Space direction="vertical" size={0}>
+                         {parserRequired ? (
+                           <>
+                             <Typography.Text type="secondary">
+                               Parser {row.selected_parser_template_id || '-'}
+                             </Typography.Text>
+                             <Typography.Text type="secondary">
+                               Contract {row.selected_contract_ids?.length || 0} 个
+                             </Typography.Text>
+                           </>
+                         ) : comparisonRequired ? (
+                           <Typography.Text type="secondary">
+                             TextComparisonProfile
+                           </Typography.Text>
+                         ) : (
+                           <Typography.Text type="secondary">
+                             Evidence policy
+                           </Typography.Text>
+                         )}
+                       </Space>
+                     ),
+                   },
                 ]}
               />
 
-              <div>
-                <Typography.Title level={5}>标准语义覆盖</Typography.Title>
-                <Descriptions bordered size="small" column={1}>
-                  <Descriptions.Item label="检查项要求">
-                    <Space wrap>
-                      {(assembly.compatibility.expected_observation_types || []).map((item) => <Tag key={item}>{item}</Tag>)}
-                    </Space>
-                  </Descriptions.Item>
-                  <Descriptions.Item label="Contract 产生">
-                    <Space wrap>
-                      {(assembly.compatibility.produced_observation_types || []).map((item) => <Tag key={item}>{item}</Tag>)}
-                    </Space>
-                  </Descriptions.Item>
-                  <Descriptions.Item label="本运行包投影">
-                    <Space wrap>
-                      {(assembly.compatibility.observation_projection || []).map((item) => (
-                        <Tag className="product-status-tag is-published" key={item}>{item}</Tag>
-                      ))}
-                    </Space>
-                  </Descriptions.Item>
-                </Descriptions>
-              </div>
+              {contractRequired && (
+                <div>
+                  <Typography.Title level={5}>标准语义覆盖</Typography.Title>
+                  <Descriptions bordered size="small" column={1}>
+                    <Descriptions.Item label="检查项要求">
+                      <Space wrap>
+                        {(assembly.compatibility.expected_observation_types || []).map((item) => <Tag key={item}>{item}</Tag>)}
+                      </Space>
+                    </Descriptions.Item>
+                    <Descriptions.Item label="Contract 产生">
+                      <Space wrap>
+                        {(assembly.compatibility.produced_observation_types || []).map((item) => <Tag key={item}>{item}</Tag>)}
+                      </Space>
+                    </Descriptions.Item>
+                    <Descriptions.Item label="本运行包投影">
+                      <Space wrap>
+                        {(assembly.compatibility.observation_projection || []).map((item) => (
+                          <Tag className="product-status-tag is-published" key={item}>{item}</Tag>
+                        ))}
+                      </Space>
+                    </Descriptions.Item>
+                  </Descriptions>
+                </div>
+              )}
 
               <div>
                 <Typography.Title level={5}>资产选择</Typography.Title>
-                <Typography.Text type="secondary">
-                  默认使用唯一可证明兼容的 Active 资产；出现歧义时可在此显式选择并重新预检。
-                </Typography.Text>
-                <Descriptions bordered size="small" column={1} style={{ marginTop: 10 }}>
-                  <Descriptions.Item label="Parser">
+                {!hasSelectableAssets && (
+                  <Alert
+                    type="info"
+                    showIcon
+                    message="当前检查项无需人工选择运行资产"
+                  />
+                )}
+                {hasSelectableAssets && (
+                  <Descriptions bordered size="small" column={1} style={{ marginTop: 10 }}>
+                  {parserRequired && (
+                    <Descriptions.Item label="Parser">
                     <Select
                       allowClear
                       mode="multiple"
@@ -943,7 +1136,9 @@ const CoverageBackfillWorkspace: React.FC = () => {
                       }))}
                     />
                   </Descriptions.Item>
-                  <Descriptions.Item label="ObservationContract">
+                  )}
+                  {contractRequired && (
+                    <Descriptions.Item label="ObservationContract">
                     <Select
                       allowClear
                       mode="multiple"
@@ -960,7 +1155,9 @@ const CoverageBackfillWorkspace: React.FC = () => {
                       }))}
                     />
                   </Descriptions.Item>
-                  <Descriptions.Item label="ChangePolicy">
+                  )}
+                  {policyRelevant && (
+                    <Descriptions.Item label="ChangePolicy">
                     <Select
                       allowClear
                       mode="multiple"
@@ -977,7 +1174,9 @@ const CoverageBackfillWorkspace: React.FC = () => {
                       }))}
                     />
                   </Descriptions.Item>
-                  <Descriptions.Item label="EventRule">
+                  )}
+                  {eventRuleRelevant && (
+                    <Descriptions.Item label="CurrentStateRule / EventRule">
                     <Select
                       allowClear
                       mode="multiple"
@@ -994,8 +1193,9 @@ const CoverageBackfillWorkspace: React.FC = () => {
                       }))}
                     />
                   </Descriptions.Item>
-                  {assembly.candidates.comparison_profiles.length > 0 && (
-                    <Descriptions.Item label="ComparisonProfile">
+                  )}
+                  {comparisonRequired && (
+                    <Descriptions.Item label="TextComparisonProfile">
                       <Select
                         allowClear
                         placeholder="选择非结构化比较规则"
@@ -1013,6 +1213,7 @@ const CoverageBackfillWorkspace: React.FC = () => {
                     </Descriptions.Item>
                   )}
                 </Descriptions>
+                )}
               </div>
 
               {assembly.blockers.length > 0 && (
@@ -1035,6 +1236,18 @@ const CoverageBackfillWorkspace: React.FC = () => {
                                 <Typography.Text type="secondary">{item.remediation}</Typography.Text>
                               </>
                             )}
+                            {item.remediation_action?.target_url && (
+                              <>
+                                <br />
+                                <Button
+                                  size="small"
+                                  icon={<ArrowRightOutlined />}
+                                  onClick={() => navigate(item.remediation_action!.target_url)}
+                                >
+                                  {item.remediation_action.label}
+                                </Button>
+                              </>
+                            )}
                           </div>
                         </Space>
                       </List.Item>
@@ -1047,8 +1260,15 @@ const CoverageBackfillWorkspace: React.FC = () => {
                 <Alert
                   type="warning"
                   showIcon
-                  message="可运行但存在降级项"
-                  description={assembly.warnings.map((item) => item.message).join('；')}
+                  message={assembly.operationally_ready
+                    ? '可运行但存在降级项'
+                    : '附加注意事项'}
+                  description={[
+                    ...(!assembly.operationally_ready
+                      ? ['当前仍不可发布，以下说明不改变上方阻断状态']
+                      : []),
+                    ...assembly.warnings.map((item) => item.message),
+                  ].join('；')}
                 />
               )}
 
@@ -1061,7 +1281,7 @@ const CoverageBackfillWorkspace: React.FC = () => {
                   <Input.TextArea
                     rows={3}
                     value={activationReason}
-                    placeholder="填写兼容范围、验证证据和本次发布理由"
+                    placeholder="发布说明（可选）"
                     onChange={(event) => setActivationReason(event.target.value)}
                     style={{ marginTop: 10 }}
                   />
@@ -1181,7 +1401,7 @@ const CoverageBackfillWorkspace: React.FC = () => {
         open={Boolean(commitJob)}
         okText="批准写入"
         cancelText="取消"
-        okButtonProps={{ className: 'product-primary-button', disabled: !commitReason.trim() }}
+        okButtonProps={{ className: 'product-primary-button' }}
         confirmLoading={backfillMutation.isLoading}
         onCancel={() => {
           setCommitJob(undefined)
@@ -1202,7 +1422,7 @@ const CoverageBackfillWorkspace: React.FC = () => {
           <Input.TextArea
             rows={4}
             value={commitReason}
-            placeholder="填写批准理由，内容将进入审计记录"
+            placeholder="审批说明（可选）"
             onChange={(event) => setCommitReason(event.target.value)}
           />
         </Space>

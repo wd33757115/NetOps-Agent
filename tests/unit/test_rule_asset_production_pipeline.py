@@ -62,6 +62,7 @@ def test_empty_offline_job_pipeline_points_to_source_upload():
         assert result["next_action"]["code"] == "upload_sources"
         assert result["next_action"]["target_url"].startswith("/skills/parser?")
         assert "workspace=production" in result["next_action"]["target_url"]
+        assert "source_job_tab=sources" in result["next_action"]["target_url"]
         assert "/devices" not in result["next_action"]["target_url"]
         assert [item["key"] for item in result["steps"]] == [
             "source",

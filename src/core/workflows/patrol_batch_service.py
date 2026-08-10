@@ -13,13 +13,16 @@ from collections.abc import Iterator
 from datetime import datetime
 from typing import Any
 
+from src.core.check_items.assessment_policy import (
+    build_assessment_basis,
+    resolve_assessment_basis,
+)
 from src.core.patrol.event_rules import (
     EventRuleRepository,
     current_state_condition_matches,
     govern_evaluation_scope,
     norm,
     norm_field,
-    resolve_threshold_reference,
 )
 from src.core.patrol.leadership_report import build_leadership_report
 from src.core.patrol.unstructured_diff import (
@@ -36,6 +39,7 @@ from src.infrastructure.db.models import (
     PatrolBatchDeviceRecord,
     PatrolBatchRecord,
     PatrolCollectionResult,
+    PatrolRun,
     StateObservationRecord,
     WorkflowStepRecord,
 )
@@ -433,6 +437,8 @@ def evaluate_current_state(
     *,
     rule_source: str,
     rule_bundle_digest: str | None = None,
+    runtime_bundle_version_id: str | None = None,
+    assessment_policy_snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Evaluate latest state against fault rules without inventing a historical change."""
 
@@ -463,6 +469,11 @@ def evaluate_current_state(
     evaluated_keys: set[tuple[str, str, str, str, str]] = set()
     threshold_unknown_keys: set[tuple[str, str, str, str, str]] = set()
     partial_threshold_keys: set[tuple[str, str, str, str, str]] = set()
+    policy_missing_keys: set[tuple[str, str, str, str, str]] = set()
+    policy_conflict_keys: set[tuple[str, str, str, str, str]] = set()
+    expected_state_unknown_keys: set[tuple[str, str, str, str, str]] = set()
+    policy_blocker_codes: set[str] = set()
+    assessment_basis_entries: list[dict[str, Any]] = []
     by_domain: dict[str, dict[str, Any]] = {}
     fault_rules = [
         row
@@ -491,49 +502,94 @@ def evaluate_current_state(
                 "finding_count": 0,
                 "threshold_unknown_observation_count": 0,
                 "partial_threshold_observation_count": 0,
+                "assessment_policy_missing_observation_count": 0,
+                "assessment_policy_conflict_observation_count": 0,
+                "expected_state_unknown_observation_count": 0,
                 "missing_threshold_reference_fields": [],
             },
         )
-        evaluable: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        evaluable: list[
+            tuple[dict[str, Any], dict[str, Any], dict[str, Any]]
+        ] = []
         missing_reference_fields: set[str] = set()
+        threshold_binding_resolved = False
+        threshold_binding_blocked = False
+        observation_resolved = False
+        observation_policy_missing = False
+        observation_policy_conflict = False
+        observation_expected_state_missing = False
         for row, condition in applicable:
-            if str(condition.get("kind") or "") in {
-                "threshold_field_gte",
-                "threshold_field_lte",
-            }:
-                _resolved_field, resolved_value = resolve_threshold_reference(
-                    condition,
-                    dict(observation.get("context") or {}),
+            resolution = resolve_assessment_basis(
+                rule=row,
+                observation=observation,
+                policy_snapshot=assessment_policy_snapshot,
+                runtime_bundle_version_id=runtime_bundle_version_id,
+                runtime_bundle_digest=rule_bundle_digest,
+            )
+            basis = dict(resolution.basis)
+            assessment_basis_entries.append(basis)
+            threshold_binding = dict(basis.get("threshold_binding") or {})
+            if threshold_binding.get("status") == "resolved":
+                threshold_binding_resolved = True
+            elif threshold_binding.get("status") in {"missing", "conflict"}:
+                threshold_binding_blocked = True
+                missing_reference_fields.update(
+                    str(field)
+                    for field in [
+                        condition.get("reference_field"),
+                        *(condition.get("fallback_reference_fields") or []),
+                    ]
+                    if str(field or "").strip()
                 )
-                if resolved_value is None:
-                    missing_reference_fields.update(
-                        str(field)
-                        for field in [
-                            condition.get("reference_field"),
-                            *(condition.get("fallback_reference_fields") or []),
-                        ]
-                        if str(field or "").strip()
-                    )
-                    continue
-            evaluable.append((row, condition))
-        if missing_reference_fields:
-            if evaluable:
+            if resolution.status != "resolved":
+                blocker = str(resolution.blocker_code or "assessment_policy_missing")
+                policy_blocker_codes.add(blocker)
+                if blocker == "expected_state_missing":
+                    observation_expected_state_missing = True
+                elif blocker in {
+                    "assessment_policy_conflict",
+                    "assessment_policy_source_invalid",
+                    "assessment_policy_snapshot_invalid",
+                    "assessment_policy_unit_mismatch",
+                }:
+                    observation_policy_conflict = True
+                else:
+                    observation_policy_missing = True
+                continue
+            observation_resolved = True
+            if resolution.should_evaluate:
+                evaluable.append(
+                    (row, dict(resolution.effective_condition), basis)
+                )
+        if observation_policy_missing:
+            policy_missing_keys.add(observation_key)
+            domain_row["assessment_policy_missing_observation_count"] += 1
+        if observation_policy_conflict:
+            policy_conflict_keys.add(observation_key)
+            domain_row["assessment_policy_conflict_observation_count"] += 1
+        if observation_expected_state_missing:
+            expected_state_unknown_keys.add(observation_key)
+            domain_row["expected_state_unknown_observation_count"] += 1
+        if threshold_binding_blocked:
+            if threshold_binding_resolved or observation_resolved:
                 partial_threshold_keys.add(observation_key)
                 domain_row["partial_threshold_observation_count"] += 1
             else:
                 threshold_unknown_keys.add(observation_key)
                 domain_row["threshold_unknown_observation_count"] += 1
+        if missing_reference_fields:
             domain_row["missing_threshold_reference_fields"] = sorted(
                 {
                     *domain_row["missing_threshold_reference_fields"],
                     *missing_reference_fields,
                 }
             )
+        if observation_resolved:
+            evaluated_keys.add(observation_key)
+            domain_row["evaluated_observation_count"] += 1
         if not evaluable:
             continue
-        evaluated_keys.add(observation_key)
-        domain_row["evaluated_observation_count"] += 1
-        for row, condition in sorted(
+        for row, condition, basis in sorted(
             evaluable,
             key=lambda item: -int(item[0].get("priority") or 100),
         ):
@@ -545,15 +601,28 @@ def evaluate_current_state(
                 matched = current_state_condition_matches(
                     condition,
                     observation,
-                    explicit_current_scope=scope == "current_state",
+                    explicit_current_scope=scope in {"current_state", "both"},
                 )
             except (TypeError, ValueError, KeyError):
                 matched = False
             if not matched:
                 continue
-            reference_field, reference_value = resolve_threshold_reference(
-                condition,
-                dict(observation.get("context") or {}),
+            threshold_binding = dict(basis.get("threshold_binding") or {})
+            expected_state_binding = dict(
+                basis.get("expected_state_binding") or {}
+            )
+            reference_binding = (
+                threshold_binding
+                if threshold_binding.get("status") == "resolved"
+                else expected_state_binding
+                if expected_state_binding.get("status") == "resolved"
+                else {}
+            )
+            reference_field = reference_binding.get("reference_field")
+            reference_value = (
+                reference_binding.get("value")
+                if "value" in reference_binding
+                else reference_binding.get("expected_states")
             )
             finding = {
                 "finding_id": (
@@ -582,6 +651,7 @@ def evaluate_current_state(
                 "dimensions": dict(observation.get("dimensions") or {}),
                 "reference_field": reference_field,
                 "reference_value": reference_value,
+                "reference_source": reference_binding.get("source_kind"),
                 "command": observation.get("command"),
                 "observation_id": observation.get("id"),
                 "snapshot_id": observation.get("snapshot_id"),
@@ -595,12 +665,22 @@ def evaluate_current_state(
                 "observation_contract_digest": observation.get("observation_contract_digest"),
                 "rule_source": rule_source,
                 "rule_bundle_digest": rule_bundle_digest,
+                "assessment_basis": basis,
             }
             findings.append(finding)
             domain_row["finding_count"] += 1
             if bool(row.get("exclusive")):
                 break
     severity_counts = Counter(str(item.get("severity") or "unknown") for item in findings)
+    assessment_basis = build_assessment_basis(
+        entries=assessment_basis_entries,
+        policy_snapshot_digest=(
+            str(dict(assessment_policy_snapshot or {}).get("digest") or "")
+            or None
+        ),
+        runtime_bundle_version_id=runtime_bundle_version_id,
+        runtime_bundle_digest=rule_bundle_digest,
+    )
     return {
         "available": True,
         "rule_source": rule_source,
@@ -616,6 +696,15 @@ def evaluate_current_state(
         ),
         "threshold_unknown_observation_count": len(threshold_unknown_keys),
         "partial_threshold_observation_count": len(partial_threshold_keys),
+        "assessment_policy_missing_observation_count": len(policy_missing_keys),
+        "assessment_policy_conflict_observation_count": len(policy_conflict_keys),
+        "expected_state_unknown_observation_count": len(
+            expected_state_unknown_keys
+        ),
+        "assessment_policy_blocking_reason_codes": sorted(
+            policy_blocker_codes
+        ),
+        "assessment_basis": assessment_basis,
         "finding_count": len(findings),
         "severity_counts": dict(severity_counts),
         "by_domain": by_domain,
@@ -861,6 +950,36 @@ def list_patrol_raw_output_artifacts(
             artifact = dict((step.output_artifacts or {}).get("raw_outputs_archive") or {})
             if artifact:
                 artifacts[str(step.run_id)] = artifact
+    return artifacts
+
+
+def list_patrol_run_raw_output_artifacts(
+    snapshot_run_ids: list[str],
+) -> dict[str, dict[str, Any]]:
+    """Return immutable collector archives keyed by PatrolRun identity."""
+
+    normalized_ids = sorted({str(item) for item in snapshot_run_ids if str(item)})
+    if not normalized_ids:
+        return {}
+    artifacts: dict[str, dict[str, Any]] = {}
+    with get_db_session() as db:
+        rows = (
+            db.query(PatrolRun)
+            .filter(PatrolRun.id.in_(normalized_ids))
+            .order_by(PatrolRun.id.asc())
+            .all()
+        )
+        for row in rows:
+            metadata = dict(row.metadata_json or {})
+            value = metadata.get("raw_outputs_archive")
+            if isinstance(value, dict):
+                artifact = dict(value)
+            elif value:
+                artifact = {"download_url": str(value)}
+            else:
+                continue
+            if artifact.get("download_url"):
+                artifacts[str(row.id)] = artifact
     return artifacts
 
 

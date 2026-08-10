@@ -10,6 +10,8 @@ from typing import Any
 
 _FIELD_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 _DIMENSION_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+_CONTEXT_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+ALLOWED_DIMENSION_CONTEXT_FIELDS = frozenset({"device_id"})
 _ALLOWED_OPERATIONS = frozenset(
     {
         "abs",
@@ -25,6 +27,8 @@ _ALLOWED_OPERATIONS = frozenset(
         "subtract",
     }
 )
+_VALUE_MAPPING_MODES = frozenset({"casefold", "exact"})
+_UNMAPPED_VALUE_POLICIES = frozenset({"reject", "passthrough"})
 _UNIT_ALIASES = {
     "%": "percent",
     "b": "bytes",
@@ -117,6 +121,7 @@ def _evaluate_expression(
     record: dict[str, Any],
     *,
     value_index: int | None,
+    context: dict[str, Any] | None = None,
     depth: int = 0,
 ) -> Any:
     if depth > 8:
@@ -132,6 +137,20 @@ def _evaluate_expression(
             str(expression["field"]),
             value_index=value_index,
         )
+    if keys == {"context"}:
+        context_name = str(expression.get("context") or "").strip()
+        if (
+            not _CONTEXT_RE.fullmatch(context_name)
+            or context_name not in ALLOWED_DIMENSION_CONTEXT_FIELDS
+        ):
+            raise SemanticProjectionError(
+                f"unsupported transform context: {context_name or '<empty>'}"
+            )
+        if context is None or context_name not in context:
+            raise SemanticProjectionError(
+                f"transform context is unavailable: {context_name}"
+            )
+        return context[context_name]
     operation = str(expression.get("op") or "").strip().casefold()
     if operation not in _ALLOWED_OPERATIONS:
         raise SemanticProjectionError(f"unsupported transform operation: {operation or '<empty>'}")
@@ -139,7 +158,13 @@ def _evaluate_expression(
     if not isinstance(args, list) or not args or len(args) > 8:
         raise SemanticProjectionError("transform args must contain between 1 and 8 items")
     values = [
-        _evaluate_expression(item, record, value_index=value_index, depth=depth + 1)
+        _evaluate_expression(
+            item,
+            record,
+            value_index=value_index,
+            context=context,
+            depth=depth + 1,
+        )
         for item in args
     ]
     if operation == "coalesce":
@@ -210,6 +235,17 @@ def validate_transform(expression: Any) -> tuple[str, ...]:
             if not _FIELD_RE.fullmatch(field_name):
                 errors.append(f"{path}.field is invalid")
             return
+        if keys == {"context"}:
+            context_name = str(value.get("context") or "").strip()
+            if (
+                not _CONTEXT_RE.fullmatch(context_name)
+                or context_name not in ALLOWED_DIMENSION_CONTEXT_FIELDS
+            ):
+                errors.append(
+                    f"{path}.context is unsupported: "
+                    f"{context_name or '<empty>'}"
+                )
+            return
         operation = str(value.get("op") or "").strip().casefold()
         if operation not in _ALLOWED_OPERATIONS:
             errors.append(f"{path}.op is unsupported: {operation or '<empty>'}")
@@ -244,6 +280,28 @@ def transform_field_references(expression: Any) -> tuple[str, ...]:
 
     visit(expression)
     return tuple(sorted(fields))
+
+
+def transform_context_references(expression: Any) -> tuple[str, ...]:
+    """Return approved collection-context values referenced by an expression."""
+
+    contexts: set[str] = set()
+
+    def visit(value: Any) -> None:
+        if not isinstance(value, dict):
+            return
+        if set(value) == {"context"}:
+            context_name = str(value.get("context") or "").strip()
+            if context_name in ALLOWED_DIMENSION_CONTEXT_FIELDS:
+                contexts.add(context_name)
+            return
+        args = value.get("args")
+        if isinstance(args, list):
+            for item in args:
+                visit(item)
+
+    visit(expression)
+    return tuple(sorted(contexts))
 
 
 def normalize_dimensions(dimensions: Any) -> dict[str, Any]:
@@ -283,6 +341,21 @@ def dimension_field_references(dimensions: Any) -> tuple[str, ...]:
     )
 
 
+def dimension_context_references(dimensions: Any) -> tuple[str, ...]:
+    """Return approved collection-context values used by dimensions."""
+
+    declared = normalize_dimensions(dimensions)
+    return tuple(
+        sorted(
+            {
+                context
+                for source in declared.values()
+                for context in transform_context_references(source)
+            }
+        )
+    )
+
+
 def dimension_schema_signature(dimensions: Any) -> str:
     """Return a stable signature for the declared dimension mapping."""
 
@@ -294,6 +367,7 @@ def resolve_dimensions(
     record: dict[str, Any],
     *,
     value_index: int | None = None,
+    context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     declared = normalize_dimensions(dimensions)
     resolved: dict[str, Any] = {}
@@ -302,6 +376,7 @@ def resolve_dimensions(
             source,
             record,
             value_index=value_index,
+            context=context,
         )
         if value in (None, ""):
             raise SemanticProjectionError(f"dimension {name} resolved to an empty value")
@@ -344,6 +419,100 @@ def validate_unit_conversion(*, source_unit: Any, target_unit: Any) -> tuple[str
     return (f"unsupported unit conversion: {source} -> {target}",)
 
 
+def _value_mapping_key(value: Any, *, mode: str) -> str:
+    text = "" if value is None else str(value).strip()
+    return text if mode == "exact" else text.casefold()
+
+
+def validate_value_mapping(
+    mapping: Any,
+    *,
+    mode: Any = "casefold",
+    on_unmapped: Any = "reject",
+) -> tuple[str, ...]:
+    """Validate an approved source-enum to canonical-value mapping."""
+
+    errors: list[str] = []
+    normalized_mode = str(mode or "casefold").strip().casefold()
+    normalized_policy = str(on_unmapped or "reject").strip().casefold()
+    if normalized_mode not in _VALUE_MAPPING_MODES:
+        errors.append(
+            "value_mapping_mode must be one of: "
+            + ", ".join(sorted(_VALUE_MAPPING_MODES))
+        )
+    if normalized_policy not in _UNMAPPED_VALUE_POLICIES:
+        errors.append(
+            "on_unmapped must be one of: "
+            + ", ".join(sorted(_UNMAPPED_VALUE_POLICIES))
+        )
+    if not isinstance(mapping, dict) or not mapping:
+        errors.append("value_mapping must be a non-empty object")
+        return tuple(dict.fromkeys(errors))
+    if len(mapping) > 512:
+        errors.append("value_mapping cannot contain more than 512 entries")
+    seen: dict[str, str] = {}
+    for raw_key, mapped_value in mapping.items():
+        key_text = str(raw_key)
+        if len(key_text) > 512:
+            errors.append("value_mapping source keys cannot exceed 512 characters")
+        normalized_key = _value_mapping_key(
+            raw_key,
+            mode=(
+                normalized_mode
+                if normalized_mode in _VALUE_MAPPING_MODES
+                else "casefold"
+            ),
+        )
+        previous = seen.get(normalized_key)
+        if previous is not None and previous != key_text:
+            errors.append(
+                "value_mapping contains duplicate normalized source values: "
+                f"{previous!r}, {key_text!r}"
+            )
+        seen[normalized_key] = key_text
+        if mapped_value is None or isinstance(mapped_value, (dict, list)):
+            errors.append(
+                f"value_mapping[{key_text!r}] must map to a non-null scalar"
+            )
+        elif isinstance(mapped_value, str) and not mapped_value.strip():
+            errors.append(
+                f"value_mapping[{key_text!r}] cannot map to an empty string"
+            )
+    return tuple(dict.fromkeys(errors))
+
+
+def apply_value_mapping(
+    value: Any,
+    mapping: Any,
+    *,
+    mode: Any = "casefold",
+    on_unmapped: Any = "reject",
+) -> Any:
+    """Map one source value through an immutable, fail-closed Contract table."""
+
+    errors = validate_value_mapping(
+        mapping,
+        mode=mode,
+        on_unmapped=on_unmapped,
+    )
+    if errors:
+        raise SemanticProjectionError("; ".join(errors))
+    normalized_mode = str(mode or "casefold").strip().casefold()
+    normalized_policy = str(on_unmapped or "reject").strip().casefold()
+    indexed = {
+        _value_mapping_key(key, mode=normalized_mode): mapped
+        for key, mapped in mapping.items()
+    }
+    source_key = _value_mapping_key(value, mode=normalized_mode)
+    if source_key in indexed:
+        return indexed[source_key]
+    if normalized_policy == "passthrough":
+        return value
+    raise SemanticProjectionError(
+        f"source value {value!r} is not covered by the approved value_mapping"
+    )
+
+
 def project_value(
     *,
     field_name: str,
@@ -365,6 +534,14 @@ def project_value(
             transform,
             normalized_record,
             value_index=value_index,
+        )
+    mapping = field_semantics.get("value_mapping")
+    if mapping is not None:
+        value = apply_value_mapping(
+            value,
+            mapping,
+            mode=field_semantics.get("value_mapping_mode") or "casefold",
+            on_unmapped=field_semantics.get("on_unmapped") or "reject",
         )
     source_unit = field_semantics.get("source_unit") or field_semantics.get("unit")
     target_unit = field_semantics.get("canonical_unit") or field_semantics.get("unit")

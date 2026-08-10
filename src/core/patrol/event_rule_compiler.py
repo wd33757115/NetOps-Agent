@@ -114,10 +114,17 @@ def expected_rule_roles(
 
     errors: list[str] = []
     observation_type = str(change_policy.get("observation_type") or "").strip()
-    entity_type = str(contract.get("entity_type") or "").strip()
+    entity_type = str(
+        contract.get("canonical_entity_type")
+        or contract.get("entity_type")
+        or ""
+    ).strip()
     fields = _target_fields(contract, observation_type)
     if not entity_type:
-        errors.append("contract entity_type is required for EventRule compilation")
+        errors.append(
+            "contract canonical_entity_type or entity_type is required for "
+            "EventRule compilation"
+        )
     if not fields:
         errors.append(
             "change policy observation_type is not mapped to a Contract observation field"
@@ -165,11 +172,17 @@ def expected_rule_roles(
             high_condition = (
                 {
                     "kind": "threshold_field_gte",
+                    "threshold_role": "high",
                     **base,
                     "reference_field": high_reference["field_name"],
                 }
                 if high_reference
-                else {"kind": "threshold", **base, "gte": high}
+                else {
+                    "kind": "threshold",
+                    "threshold_role": "high",
+                    **base,
+                    "gte": high,
+                }
             )
             roles.append(
                 RuleRole(
@@ -191,11 +204,17 @@ def expected_rule_roles(
             critical_high_condition = (
                 {
                     "kind": "threshold_field_gte",
+                    "threshold_role": "critical_high",
                     **base,
                     "reference_field": critical_high_reference["field_name"],
                 }
                 if critical_high_reference
-                else {"kind": "threshold", **base, "gte": critical_high}
+                else {
+                    "kind": "threshold",
+                    "threshold_role": "critical_high",
+                    **base,
+                    "gte": critical_high,
+                }
             )
             roles.append(
                 RuleRole(
@@ -208,6 +227,9 @@ def expected_rule_roles(
             high_fault_roles.append("critical_high")
         effective_high = high if high is not None else critical_high
         effective_high_reference = high_reference or critical_high_reference
+        effective_high_role = (
+            "high" if high is not None or high_reference else "critical_high"
+        )
         if high_fault_roles:
             recovery_high = (
                 explicit_recovery
@@ -221,6 +243,7 @@ def expected_rule_roles(
             if effective_high_reference and deadband:
                 high_recovery_condition = {
                     "kind": "threshold_field_high_recovery",
+                    "threshold_role": effective_high_role,
                     **base,
                     "reference_field": effective_high_reference["field_name"],
                     "hysteresis": deadband,
@@ -237,6 +260,7 @@ def expected_rule_roles(
             elif recovery_high is not None:
                 high_recovery_condition = {
                     "kind": "threshold_recovery",
+                    "threshold_role": effective_high_role,
                     **base,
                     "lt": recovery_high,
                 }
@@ -257,11 +281,17 @@ def expected_rule_roles(
             low_condition = (
                 {
                     "kind": "threshold_field_lte",
+                    "threshold_role": "low",
                     **base,
                     "reference_field": low_reference["field_name"],
                 }
                 if low_reference
-                else {"kind": "threshold_lte", **base, "lte": low}
+                else {
+                    "kind": "threshold_lte",
+                    "threshold_role": "low",
+                    **base,
+                    "lte": low,
+                }
             )
             roles.append(
                 RuleRole(
@@ -283,11 +313,17 @@ def expected_rule_roles(
             critical_condition = (
                 {
                     "kind": "threshold_field_lte",
+                    "threshold_role": "critical_low",
                     **base,
                     "reference_field": critical_low_reference["field_name"],
                 }
                 if critical_low_reference
-                else {"kind": "threshold_lte", **base, "lte": critical_low}
+                else {
+                    "kind": "threshold_lte",
+                    "threshold_role": "critical_low",
+                    **base,
+                    "lte": critical_low,
+                }
             )
             roles.append(
                 RuleRole(
@@ -300,6 +336,9 @@ def expected_rule_roles(
             low_fault_roles.append("critical_low")
         effective_low = low if low is not None else critical_low
         effective_low_reference = low_reference or critical_low_reference
+        effective_low_role = (
+            "low" if low is not None or low_reference else "critical_low"
+        )
         if low_fault_roles:
             recovery_low = (
                 explicit_recovery
@@ -314,6 +353,7 @@ def expected_rule_roles(
             if effective_low_reference and deadband:
                 low_recovery_condition = {
                     "kind": "threshold_field_low_recovery",
+                    "threshold_role": effective_low_role,
                     **base,
                     "reference_field": effective_low_reference["field_name"],
                     "hysteresis": deadband,
@@ -330,6 +370,7 @@ def expected_rule_roles(
             elif recovery_low is not None:
                 low_recovery_condition = {
                     "kind": "threshold_low_recovery",
+                    "threshold_role": effective_low_role,
                     **base,
                     "low": effective_low,
                     "gt": recovery_low,
@@ -459,6 +500,72 @@ def _fallback_event_type(observation_type: str, role: str) -> str:
     return f"{prefix}_{role}"
 
 
+def _requires_current_state_only(
+    requirements: dict[str, Any] | None,
+    *,
+    observation_type: str,
+) -> bool:
+    policy = dict(requirements or {})
+    if policy.get("requires_current_state_rule") is not True:
+        return False
+    if policy.get("requires_event_rule") is True:
+        return False
+    scoped_types = {
+        str(item).strip()
+        for item in policy.get("current_state_observation_types") or []
+        if str(item).strip()
+    }
+    return not scoped_types or observation_type in scoped_types
+
+
+def _compile_current_state_roles(
+    roles: list[RuleRole],
+) -> tuple[list[RuleRole], list[str]]:
+    """Remove history-only roles and make state faults executable on a snapshot."""
+
+    compiled: list[RuleRole] = []
+    errors: list[str] = []
+    for role in roles:
+        if role.event_class == "recovery":
+            continue
+        condition = dict(role.condition)
+        kind = str(condition.get("kind") or "")
+        if kind in {"transition", "bgp_transition"}:
+            if role.name != "down":
+                errors.append(
+                    f"current-state rule cannot compile transition role: {role.name}"
+                )
+                continue
+            condition = {
+                key: value
+                for key, value in condition.items()
+                if key in {
+                    "entity_types",
+                    "fields",
+                    "observation_types",
+                    "dimensions",
+                    "applicability",
+                }
+            }
+            condition["kind"] = "entity_status_down"
+        elif kind in {"field_change", "raw_config_hash"}:
+            errors.append(
+                f"current-state rule cannot compile history-only condition: {kind}"
+            )
+            continue
+        compiled.append(
+            RuleRole(
+                name=role.name,
+                event_class=role.event_class,
+                condition=condition,
+                default_severity=role.default_severity,
+            )
+        )
+    if not compiled and not errors:
+        errors.append("current-state profile produced no executable fault role")
+    return compiled, errors
+
+
 def _govern_event_type_for_role(
     *,
     proposed_event_type: str,
@@ -518,6 +625,7 @@ def compile_event_rule_intents(
     contract: dict[str, Any],
     change_policy: dict[str, Any],
     event_constraints: dict[str, Any] | None = None,
+    rule_asset_requirements: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compile permissive LLM intent objects into executable, policy-bound rules."""
 
@@ -535,6 +643,20 @@ def compile_event_rule_intents(
         }
 
     observation_type = str(change_policy.get("observation_type") or "")
+    current_state_only = _requires_current_state_only(
+        rule_asset_requirements,
+        observation_type=observation_type,
+    )
+    if current_state_only:
+        roles, current_state_errors = _compile_current_state_roles(roles)
+        if current_state_errors:
+            return {
+                "success": False,
+                "rules": [dict(rule) for rule in candidate_rules],
+                "errors": current_state_errors,
+                "normalizations": [],
+                "compiled": False,
+            }
     classified: dict[str, list[tuple[int, dict[str, Any]]]] = {}
     for index, rule in enumerate(candidate_rules):
         if not isinstance(rule, dict):
@@ -589,6 +711,13 @@ def compile_event_rule_intents(
             "priority": int(source.get("priority") or 100),
             "exclusive": bool(source.get("exclusive", False)),
             "event_class": role.event_class,
+            "evaluation_scope": (
+                "current_state"
+                if current_state_only
+                else "change"
+                if role.event_class == "recovery"
+                else str(source.get("evaluation_scope") or "both")
+            ),
             "recovery": {},
             "correlation_keys": list(
                 source.get("correlation_keys")
@@ -621,6 +750,15 @@ def compile_event_rule_intents(
                 "event_type": event_type,
             }
         )
+        if current_state_only:
+            normalizations.append(
+                {
+                    "kind": "current_state_profile_compiled",
+                    "trigger_role": role.name,
+                    "source_rule_index": selected_index,
+                    "event_type": event_type,
+                }
+            )
 
     for role in roles:
         if not role.resolves_roles:

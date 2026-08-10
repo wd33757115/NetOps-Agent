@@ -10,8 +10,8 @@ from typing import Any
 
 from src.core.check_items.catalog import (
     CheckItemCatalog,
-    CheckItemDefinition,
     CollectionImplementation,
+    primary_collection_commands,
 )
 from src.core.parser.policy import DEFAULT_COMMAND_ALIASES, ParserPolicy
 
@@ -185,9 +185,10 @@ class CheckItemImplementationResolver:
             if decision.status != "resolved" or not decision.implementation_version_id:
                 continue
             implementation = implementation_by_version[decision.implementation_version_id]
-            ordered_commands = sorted(
+            ordered_commands = primary_collection_commands(
                 implementation.commands,
-                key=lambda item: (-item.priority, item.command.lower()),
+                implementation_id=implementation.id,
+                version_id=implementation.version_id,
             )
             for fallback_rank, command in enumerate(ordered_commands):
                 key = " ".join(command.command.lower().split())

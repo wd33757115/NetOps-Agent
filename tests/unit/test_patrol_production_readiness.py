@@ -45,8 +45,9 @@ def _stub_checks(monkeypatch, service, *, beat_status: str = "ok"):
         lambda: _check("celery_broker"),
     )
 
-    def queue_check(queues):
+    def queue_check(queues, *, executing_worker_queues=None):
         assert queues == ["netops.patrol"]
+        assert executing_worker_queues in (None, [])
         return _check("celery_patrol_queues")
 
     monkeypatch.setattr(service, "_check_celery_queues", queue_check)
@@ -146,3 +147,30 @@ def test_queue_check_requires_a_worker_for_every_workflow_queue(monkeypatch):
     assert result.status == "blocked"
     assert result.detail["missing_queues"] == ["netops.patrol"]
 
+
+def test_queue_check_accepts_the_trusted_current_task_delivery(monkeypatch):
+    service = PatrolProductionReadinessService()
+
+    class UnexpectedControl:
+        @staticmethod
+        def inspect(*, timeout):
+            raise AssertionError("the solo worker must not inspect itself")
+
+    from src.core.celery_tasks import celery_app
+
+    monkeypatch.setattr(
+        celery_app,
+        "celery",
+        SimpleNamespace(control=UnexpectedControl()),
+    )
+
+    result = service._check_celery_queues(
+        ["netops.patrol"],
+        executing_worker_queues=["netops.patrol"],
+    )
+
+    assert result.status == "ok"
+    assert result.detail["current_task_queues"] == ["netops.patrol"]
+    assert result.detail["queue_consumers"]["netops.patrol"] == [
+        "current-task@trusted-delivery"
+    ]

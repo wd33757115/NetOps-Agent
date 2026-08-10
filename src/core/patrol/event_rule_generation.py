@@ -93,7 +93,11 @@ def generate_event_rule_definitions(
         if isinstance(change_policy, ChangePolicyProposal)
         else policy_from_dict(dict(change_policy or {}))
     )
-    entity_type = str(contract.get("entity_type") or "")
+    entity_type = str(
+        contract.get("canonical_entity_type")
+        or contract.get("entity_type")
+        or ""
+    )
     observation_type = str(policy.observation_type or "")
     definitions: list[EventRuleDefinition] = []
 
@@ -199,7 +203,10 @@ def generate_event_rule_definitions(
             )
     elif policy.compare_mode == "threshold_and_deadband":
         fields = _gauge_fields(contract) or [observation_type or "value"]
-        high = float((policy.thresholds or {}).get("high") or 90)
+        high_value = (policy.thresholds or {}).get("high")
+        if high_value is None:
+            return definitions
+        high = float(high_value)
         lowered = " ".join([observation_type, *fields]).lower()
         is_cpu = observation_type == "device.cpu.utilization" or "cpu" in lowered
         is_memory = (
@@ -218,27 +225,30 @@ def generate_event_rule_definitions(
                 description="Generated threshold high rule candidate.",
                 condition={
                     "kind": "threshold",
+                    "threshold_role": "high",
                     "entity_types": [entity_type] if entity_type else [],
                     "fields": fields,
                     "gte": high,
                 },
             )
         )
-        definitions.append(
-            EventRuleDefinition(
-                rule_id="memory-recovered" if is_memory else "cpu-recovered",
-                version=1,
-                event_type="MemoryRecovered" if is_memory else "CPURecovered",
-                severity="info",
-                description="Generated threshold recovery rule candidate.",
-                condition={
-                    "kind": "threshold_recovery",
-                    "entity_types": [entity_type] if entity_type else [],
-                    "fields": fields,
-                    "lt": float(policy.recovery_threshold or high),
-                },
+        if policy.recovery_threshold is not None:
+            definitions.append(
+                EventRuleDefinition(
+                    rule_id="memory-recovered" if is_memory else "cpu-recovered",
+                    version=1,
+                    event_type="MemoryRecovered" if is_memory else "CPURecovered",
+                    severity="info",
+                    description="Generated threshold recovery rule candidate.",
+                    condition={
+                        "kind": "threshold_recovery",
+                        "threshold_role": "high",
+                        "entity_types": [entity_type] if entity_type else [],
+                        "fields": fields,
+                        "lt": float(policy.recovery_threshold),
+                    },
+                )
             )
-        )
     elif policy.compare_mode == "threshold_low_and_deadband":
         fields = _policy_gauge_fields(contract, observation_type) or [
             observation_type or "value"
@@ -282,11 +292,13 @@ def generate_event_rule_definitions(
                 )
                 condition = {
                     "kind": "threshold_field_lte",
+                    "threshold_role": role,
                     "entity_types": scoped_entity_types,
                     "fields": [field],
                     "reference_field": reference["field_name"],
                 } if reference else {
                     "kind": "threshold_lte",
+                    "threshold_role": role,
                     "entity_types": scoped_entity_types,
                     "fields": [field],
                     "lte": float(threshold),
@@ -308,10 +320,11 @@ def generate_event_rule_definitions(
                 )
                 fault_event_types.append(event_type)
 
-            _role, primary_threshold, primary_reference = primary_role
+            primary_threshold_role, primary_threshold, primary_reference = primary_role
             if primary_reference and deadband:
                 recovery_condition = {
                     "kind": "threshold_field_low_recovery",
+                    "threshold_role": primary_threshold_role,
                     "entity_types": scoped_entity_types,
                     "fields": [field],
                     "reference_field": primary_reference["field_name"],
@@ -336,6 +349,7 @@ def generate_event_rule_definitions(
                 )
                 recovery_condition = {
                     "kind": "threshold_low_recovery",
+                    "threshold_role": primary_threshold_role,
                     "entity_types": scoped_entity_types,
                     "fields": [field],
                     "low": low,

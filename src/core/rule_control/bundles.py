@@ -6,7 +6,14 @@ from typing import Any
 
 from sqlalchemy import String, cast, or_
 
-from src.core.rule_control.replay_gate import evaluate_historical_replay_gate
+from src.core.rule_control.asset_requirements import (
+    evaluate_requirement_replay_gate,
+    normalize_rule_asset_requirements,
+    rule_asset_composition_errors,
+)
+from src.core.rule_control.source_scope import (
+    require_current_rule_generation_context,
+)
 from src.infrastructure.db.models import (
     ChangePolicyVersionRecord,
     EventRuleVersionRecord,
@@ -149,9 +156,21 @@ class RuleAssetBundleService:
             }
             if item.offline_job_id:
                 offline_job_ids.add(str(item.offline_job_id))
+            try:
+                source_integrity = require_current_rule_generation_context(
+                    db,
+                    item,
+                    expected_context_digest=str(item.context_digest or ""),
+                )
+            except (KeyError, ValueError) as exc:
+                source_integrity = {
+                    "success": False,
+                    "error": str(exc),
+                }
             result[str(item.id)] = {
                 "record": item,
                 "offline_job_ids": sorted(offline_job_ids),
+                "source_integrity": source_integrity,
             }
         return result
 
@@ -196,6 +215,42 @@ class RuleAssetBundleService:
                     "digest_matches": bool(
                         record is not None and expected_digest and actual_digest == expected_digest
                     ),
+                    "evaluation_scope": (
+                        getattr(record, "evaluation_scope", None)
+                        if asset_type == "EVENT_RULE"
+                        else None
+                    ),
+                    "event_class": (
+                        getattr(record, "event_class", None)
+                        if asset_type == "EVENT_RULE"
+                        else None
+                    ),
+                    "event_type": (
+                        getattr(record, "event_type", None)
+                        if asset_type == "EVENT_RULE"
+                        else None
+                    ),
+                    "observation_types": (
+                        list(
+                            dict(getattr(record, "condition_json", None) or {}).get(
+                                "observation_types"
+                            )
+                            or []
+                        )
+                        if asset_type == "EVENT_RULE"
+                        else sorted(
+                            {
+                                str(metadata.get("observation_type") or "").strip()
+                                for metadata in dict(
+                                    getattr(record, "state_semantics_json", None) or {}
+                                ).values()
+                                if isinstance(metadata, dict)
+                                and str(metadata.get("observation_type") or "").strip()
+                            }
+                        )
+                        if asset_type == "OBSERVATION_CONTRACT"
+                        else []
+                    ),
                 }
         return states
 
@@ -231,6 +286,14 @@ class RuleAssetBundleService:
                     "asset_status": asset_state.get("status"),
                     "asset_digest_matches": asset_state.get("digest_matches") is True,
                     "observation_type": policy.get("observation_type"),
+                    "evaluation_scope": asset_state.get(
+                        "evaluation_scope"
+                    ),
+                    "event_class": asset_state.get("event_class"),
+                    "event_type": asset_state.get("event_type"),
+                    "observation_types": list(
+                        asset_state.get("observation_types") or []
+                    ),
                 }
             )
         counts: dict[str, int] = {}
@@ -248,16 +311,32 @@ class RuleAssetBundleService:
         context_id = str(context_gate.get("context_id") or payload.get("context_id") or "")
         context_meta = dict((context_by_id or {}).get(context_id) or {})
         context_row = context_meta.get("record")
+        source_integrity = dict(context_meta.get("source_integrity") or {})
         offline_job_ids = list(context_meta.get("offline_job_ids") or [])
         bundle_gate = dict(report.get("bundle_gate") or {})
         replay = dict(report.get("historical_replay") or {})
         expected_child_count = len(set(child_ids))
         children_complete = expected_child_count > 0 and len(children) == expected_child_count
-        composition_complete = (
-            counts.get("OBSERVATION_CONTRACT") == 1
-            and int(counts.get("CHANGE_POLICY") or 0) >= 1
-            and int(counts.get("EVENT_RULE") or 0) >= 1
+        requirements = normalize_rule_asset_requirements(
+            bundle_gate.get("asset_requirements")
+            or report.get("asset_requirements")
+            or payload.get("asset_requirements")
         )
+        composition_errors = rule_asset_composition_errors(
+            counts=counts,
+            requirements=requirements,
+            change_policy_roles=[
+                item
+                for item in child_items
+                if item.get("asset_type") == "CHANGE_POLICY"
+            ],
+            event_rule_roles=[
+                item
+                for item in child_items
+                if item.get("asset_type") == "EVENT_RULE"
+            ],
+        )
+        composition_complete = not composition_errors
         children_release_ready = children_complete and all(
             child.get("status") == "pending_approval"
             and child.get("validation_success") is True
@@ -266,14 +345,26 @@ class RuleAssetBundleService:
             and child.get("asset_status") in {"draft", "pending_approval", "active"}
             for child in child_items
         )
-        replay_gate = evaluate_historical_replay_gate(replay, context_gate)
+        replay_gate = evaluate_requirement_replay_gate(
+            requirements=requirements,
+            replay=replay,
+            context_gate=context_gate,
+        )
         replay_ready = replay_gate["success"] is True
+        context_mode = str(context_gate.get("mode") or "")
+        source_integrity_ready = context_mode == "legacy_manual" or (
+            source_integrity.get("success") is True
+            and context_row is not None
+            and str(context_gate.get("context_digest") or "")
+            == str(context_row.context_digest or "")
+        )
         release_ready = (
             row.status == "pending_approval"
             and report.get("success") is True
             and bundle_gate.get("success") is True
             and context_gate.get("success") is True
             and replay_ready
+            and source_integrity_ready
             and composition_complete
             and children_release_ready
             and engineering_review_ready
@@ -287,11 +378,14 @@ class RuleAssetBundleService:
         if not children_complete:
             add_blocker("bundle child jobs are incomplete")
         if not composition_complete:
-            add_blocker("bundle must contain one Contract, one or more Policies and EventRules")
+            for error in composition_errors:
+                add_blocker(error)
         if children_complete and not children_release_ready and row.status == "pending_approval":
             add_blocker("one or more child assets are missing, mutated, invalid or not releasable")
         if context_gate.get("success") is not True:
             add_blocker("immutable sanitized context gate failed")
+        if not source_integrity_ready:
+            add_blocker("immutable source evidence is stale or unavailable")
         if not replay_ready:
             for error in replay_gate["errors"]:
                 add_blocker(error)
@@ -314,10 +408,40 @@ class RuleAssetBundleService:
             RuleAssetBundleService._asset_step(
                 "contract", "Observation Contract", "OBSERVATION_CONTRACT", child_items
             ),
-            RuleAssetBundleService._asset_step(
-                "policy", "Change Policy", "CHANGE_POLICY", child_items
+            (
+                RuleAssetBundleService._asset_step(
+                    "policy",
+                    "Change Policy",
+                    "CHANGE_POLICY",
+                    child_items,
+                )
+                if requirements["requires_change_policy"]
+                else {
+                    "key": "policy",
+                    "label": "Change Policy",
+                    "status": "skipped",
+                    "detail": {
+                        "reason": "asset_requirement_profile_not_required"
+                    },
+                }
             ),
-            RuleAssetBundleService._asset_step("rules", "Event Rules", "EVENT_RULE", child_items),
+            (
+                RuleAssetBundleService._asset_step(
+                    "rules",
+                    "Current State / Event Rules",
+                    "EVENT_RULE",
+                    child_items,
+                )
+                if requirements["requires_event_rule_assets"]
+                else {
+                    "key": "rules",
+                    "label": "Current State / Event Rules",
+                    "status": "skipped",
+                    "detail": {
+                        "reason": "asset_requirement_profile_not_required"
+                    },
+                }
+            ),
             {
                 "key": "replay",
                 "label": "历史回放",
@@ -332,6 +456,9 @@ class RuleAssetBundleService:
                     "estimated_daily_event_count": replay.get("estimated_daily_event_count"),
                     "scope": replay.get("scope"),
                     "scope_gate": replay_gate,
+                    "required": requirements[
+                        "requires_historical_replay"
+                    ],
                 },
             },
             {
@@ -355,6 +482,11 @@ class RuleAssetBundleService:
                 for item in [
                     *(payload.get("observation_types") or []),
                     *(child.get("observation_type") for child in child_items),
+                    *(
+                        observation_type
+                        for child in child_items
+                        for observation_type in child.get("observation_types") or []
+                    ),
                 ]
                 if str(item or "").strip()
             }
@@ -367,7 +499,10 @@ class RuleAssetBundleService:
         semantic_label = (
             primary_observation_type
             if len(observation_types) == 1
-            else f"{payload.get('command') or 'command rule assets'} ({len(observation_types)} observation types)"
+            else (
+                f"{payload.get('command') or 'command rule assets'} "
+                f"({len(observation_types)} observation types)"
+            )
         )
         return {
             "id": row.id,
@@ -399,6 +534,7 @@ class RuleAssetBundleService:
                     "candidate_record_count": context_privacy.get("candidate_record_count"),
                     "sampled_record_count": context_privacy.get("sampled_record_count"),
                 },
+                "source_integrity": source_integrity,
             },
             "offline_job_id": (
                 context_row.offline_job_id
@@ -411,6 +547,7 @@ class RuleAssetBundleService:
             "dataset_ids": list(context_row.dataset_ids_json or []) if context_row else [],
             "asset_counts": counts,
             "active_asset_counts": active_counts,
+            "asset_requirements": requirements,
             "release_ready": release_ready,
             "engineering_review": engineering_review,
             "blockers": blockers,

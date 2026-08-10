@@ -1,4 +1,4 @@
-version: 1
+version: 2
 
 mappings:
   - id: h3c-comware
@@ -25,6 +25,8 @@ mappings:
     match:
       vendors: [Cisco]
       families: [NXOS, NXOS9K, Nexus]
+      family_patterns: ['^(?:NXOS|NEXUS)']
+      model_patterns: ['^(?:N[3579]K|NEXUS)']
     platforms: [cisco_nxos]
 
   - id: cisco-ios
@@ -32,6 +34,8 @@ mappings:
     match:
       vendors: [Cisco]
       families: [IOS, IOS-XE, IOSXE]
+      family_patterns: ['^IOS(?:-|$)']
+      model_patterns: ['^(?:WS-C|C(?:8|9)\d{3})']
     platforms: [cisco_ios]
 
   - id: cisco-ios-xr

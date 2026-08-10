@@ -22,15 +22,19 @@ def _ensure_import_path() -> None:
 
 _ensure_import_path()
 
-from src.core.parser.textfsm_dialect import (  # noqa: E402
-    DEFAULT_TEXTFSM_DIALECT,
-    build_textfsm_system_prompt,
-    dialect_hash,
+from src.common.deadline import (  # noqa: E402
+    WallClockTimeoutError,
+    call_with_wall_clock_timeout,
 )
 from src.core.parser.parser_bundle import (  # noqa: E402
     ParserBundleError,
     build_parser_bundle,
     parse_parser_bundle,
+)
+from src.core.parser.textfsm_dialect import (  # noqa: E402
+    DEFAULT_TEXTFSM_DIALECT,
+    build_textfsm_system_prompt,
+    dialect_hash,
 )
 
 
@@ -233,10 +237,14 @@ class DeepSeekTextFSMToolSession:
         client: Any,
         model_name: str,
         bundle_mode: bool = False,
+        hard_timeout_seconds: int = 480,
+        max_completion_tokens: int = 32768,
     ) -> None:
         self.client = client
         self.model_name = model_name
         self.bundle_mode = bool(bundle_mode)
+        self.hard_timeout_seconds = max(1, int(hard_timeout_seconds))
+        self.max_completion_tokens = max(1024, int(max_completion_tokens))
         self.tools = PARSER_BUNDLE_TOOLS if self.bundle_mode else TEXTFSM_TOOLS
         submission_instruction = (
             "Generate one complete TextFSM template for every frozen record set, "
@@ -308,12 +316,28 @@ class DeepSeekTextFSMToolSession:
 
         started = time.monotonic()
         try:
-            response = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=self.messages,
-                tools=self.tools,
-                reasoning_effort="high",
-                extra_body={"thinking": {"type": "enabled"}},
+            response = call_with_wall_clock_timeout(
+                lambda: self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=self.messages,
+                    tools=self.tools,
+                    reasoning_effort="high",
+                    max_tokens=self.max_completion_tokens,
+                    extra_body={"thinking": {"type": "enabled"}},
+                ),
+                timeout_seconds=self.hard_timeout_seconds,
+                operation="Parser model request",
+            )
+        except WallClockTimeoutError as exc:
+            latency_ms = round((time.monotonic() - started) * 1000)
+            return TextFSMToolTurn(
+                None,
+                "provider_error",
+                self.model_name,
+                {},
+                latency_ms,
+                protocol_error=f"model_timeout: {exc}",
+                retryable=False,
             )
         except Exception as exc:
             latency_ms = round((time.monotonic() - started) * 1000)
@@ -570,6 +594,8 @@ def create_textfsm_tool_session(
         client=client,
         model_name=settings.LLM_MODEL,
         bundle_mode=bundle_mode,
+        hard_timeout_seconds=settings.PARSER_MODEL_REQUEST_HARD_TIMEOUT_SECONDS,
+        max_completion_tokens=settings.PARSER_LLM_MAX_COMPLETION_TOKENS,
     )
 
 
@@ -659,6 +685,10 @@ classification.
 
 Sanitized training samples:
 {cli_output}
+
+The platform may replace a repeated middle section with a
+<CLI_SAMPLE_EXCERPT_OMITTED .../> marker to bound prompt size. That marker is
+metadata, not CLI evidence: ignore it and never create a TextFSM rule for it.
 """
 
 
@@ -743,11 +773,33 @@ exactly one complete TextFSM template for every record_set and submit all of the
 one validate_parser_bundle_candidate call. Record-set names must match the frozen
 ParserSpec exactly. A template may ignore sections owned by another record set.
 Every emitted record must contain that record set's required fields and primary keys.
+For presence=optional record sets, emit zero records when that source branch is absent;
+never fabricate a placeholder record. For presence=required record sets, every positive
+sample must produce a record unless its explicit valid-empty pattern matches.
+Capture every primary-key value from the current source record. Never synthesize a
+missing key and never let a Filldown child key leak from a previous parent block. Do
+not emit a record whose required values are empty merely to flush state. If the frozen
+ParserSpec requires a value that the source record does not contain, call
+request_engineer_review with reason_code=contract_conflict instead of inventing data.
+Expected values are literal capture targets, not semantic labels. Do not emit normalized
+constants such as present, healthy, unsupported, primary, or active unless that exact
+token occurs in the corresponding source record. Capture the visible source phrase and
+leave enum normalization to the later ObservationContract.
+For number or percent fields with unavailable_tokens, capture both numeric values and
+the declared source tokens exactly. The runtime maps those tokens to unavailable/null
+semantics after parsing; do not replace them with 0 and do not change the field to text.
+Do not pivot columns into synthetic rows or use a column heading as a captured record
+value. TextFSM output must preserve a source-backed row or repeated-block grain;
+cross-record-set unions and unpivoting happen after Parser approval.
 Do not flatten different entity grains into one sparse record. Do not rename, add or
 remove fields, and do not return Markdown or explanations.
 
 Sanitized training samples:
 {cli_output}
+
+The platform may replace a repeated middle section with a
+<CLI_SAMPLE_EXCERPT_OMITTED .../> marker to bound prompt size. That marker is
+metadata, not CLI evidence: ignore it and never create a TextFSM rule for it.
 """
     profile = DEFAULT_TEXTFSM_DIALECT
     return PromptBundle(

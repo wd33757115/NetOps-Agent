@@ -3,19 +3,38 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import logging
 import uuid
 from collections import Counter, defaultdict
 from datetime import date, datetime
 from typing import Any
 from urllib.parse import urlencode
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import case, cast, func, or_, select
+from sqlalchemy.dialects.postgresql import JSONB
 
 from src.core.check_items.catalog import CheckItemCatalog, CheckItemCatalogRepository
+from src.core.check_items.presentation import (
+    check_item_display_description,
+    check_item_display_name,
+)
 from src.core.check_items.resolver import CheckItemImplementationResolver
+from src.core.check_items.runtime_bundle_assembly import (
+    RuntimeBundleAssemblyPlanner,
+)
 from src.core.parser.policy import DEFAULT_COMMAND_ALIASES, ParserPolicy
-from src.core.parser.repository import parser_job_asset_key
-from src.core.rule_control.replay_gate import evaluate_historical_replay_gate
+from src.core.parser.repository import (
+    ParserJobRepository,
+    ParserMetadataRepository,
+    ParserTemplateRepository,
+    output_signature,
+    parser_job_asset_key,
+)
+from src.core.rule_control.asset_requirements import (
+    evaluate_requirement_replay_gate,
+    normalize_rule_asset_requirements,
+)
 from src.core.rule_control.source_scope import require_rule_asset_source_job
 from src.core.rule_control.template_activation import RuleAssetTemplateActivationService
 from src.infrastructure.db.models import (
@@ -27,15 +46,79 @@ from src.infrastructure.db.models import (
     ParserJobSample,
     ParserTemplate,
     ParserTemplateJob,
-    RuleAssetCommandUnitRecord,
     RuleAssetCommandUnitCheckItemRecord,
+    RuleAssetCommandUnitRecord,
     RuleGenerationContextRecord,
     RuleGenerationJobRecord,
     SnapshotParseResult,
 )
 from src.infrastructure.db.postgres import get_db_session
 
-PROJECTION_VERSION = 4
+PROJECTION_VERSION = 9
+logger = logging.getLogger(__name__)
+
+CHECK_ITEM_COMPONENT_ORDER = (
+    "identity",
+    "parser",
+    "contract",
+    "current_state",
+    "policy",
+    "event",
+    "comparison",
+    "runtime_bundle",
+)
+CHECK_ITEM_COMPONENT_REQUIREMENTS = {
+    "identity": "identity_policy",
+    "parser": "parser_template",
+    "contract": "observation_contract",
+    "current_state": "current_state_rule",
+    "policy": "change_policy",
+    "event": "event_rule",
+    "comparison": "comparison_profile",
+}
+
+
+def _catalog_projection_version(catalog: CheckItemCatalog) -> int:
+    """Fingerprint every active catalog dependency used by the persisted projection."""
+
+    payload = {
+        "schema_version": PROJECTION_VERSION,
+        "check_items": sorted(
+            (
+                item.id,
+                item.version_id,
+                item.digest,
+                item.status,
+            )
+            for item in catalog.check_items
+        ),
+        "implementations": sorted(
+            (
+                item.id,
+                item.version_id,
+                item.digest,
+                item.status,
+            )
+            for item in catalog.implementations
+        ),
+    }
+    digest = hashlib.sha256(
+        json.dumps(
+            payload,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return (int(digest[:8], 16) & 0x7FFFFFFF) or 1
+
+
+def _models_contain(model: str):
+    """Use PostgreSQL JSONB containment instead of invalid JSON string matching."""
+
+    return cast(RuleAssetCommandUnitRecord.models_json, JSONB).contains([str(model)])
+
+
 STAGE_ORDER = (
     "output_slicing",
     "identity_grouping",
@@ -121,6 +204,20 @@ def _latest_bundle_by_context(
     return selected
 
 
+def _latest_context_by_seed_for_source(
+    contexts: list[RuleGenerationContextRecord],
+    offline_job_id: str,
+) -> dict[str, RuleGenerationContextRecord]:
+    """Keep generation evidence scoped to the current explicit source job."""
+
+    selected: dict[str, RuleGenerationContextRecord] = {}
+    for item in contexts:
+        if str(item.offline_job_id or "") != offline_job_id:
+            continue
+        selected.setdefault(str(item.job_id), item)
+    return selected
+
+
 def _unit_id(offline_job_id: str, asset_key: str) -> str:
     digest = hashlib.sha256(f"{offline_job_id}|{asset_key}".encode()).hexdigest()
     return f"command-unit-{digest[:40]}"
@@ -133,6 +230,24 @@ def _action(code: str, label: str, description: str, target_url: str) -> dict[st
         "description": description,
         "target_url": target_url,
     }
+
+
+def _runtime_bundle_url(
+    *,
+    check_item_id: str,
+    check_item_version_id: str,
+    implementation_version_id: str,
+) -> str:
+    query = urlencode(
+        {
+            "workspace": "runtime",
+            "subtab": "coverage-backfill",
+            "check_item_version_id": check_item_version_id,
+            "implementation_version_id": implementation_version_id,
+            "search": check_item_id,
+        }
+    )
+    return f"/skills/parser?{query}"
 
 
 def _stage(
@@ -387,8 +502,220 @@ class RuleAssetCommandUnitService:
             for key in sorted(mappings)
         ]
 
+    @staticmethod
+    def _apply_catalog_asset_mode(
+        unit: dict[str, Any],
+        mappings: list[dict[str, str]],
+        *,
+        catalog: CheckItemCatalog,
+    ) -> None:
+        """Let approved check-item contracts override legacy command policy."""
+
+        if not mappings or not unit.get("has_non_empty_output"):
+            return
+        check_items = {item.id: item for item in catalog.check_items}
+        result_modes = {
+            check_items[item["check_item_id"]].result_mode
+            for item in mappings
+            if item["check_item_id"] in check_items
+        }
+        if "structured" in result_modes:
+            unit["handling"] = "structured"
+            unit["asset_mode"] = "full_chain"
+        elif result_modes.intersection({"normalized_diff", "hash_only"}):
+            unit["handling"] = "raw_hash_diff"
+            unit["asset_mode"] = "raw_hash"
+
+    def _ensure_catalog_parser_jobs(
+        self,
+        offline_job_id: str,
+        *,
+        catalog: CheckItemCatalog,
+    ) -> dict[str, int]:
+        """Create missing Parser jobs from approved structured implementations.
+
+        Import-time command policy only describes built-in knowledge. Once an
+        engineer publishes a catalog binding, that immutable binding becomes the
+        source of truth for whether a command requires structured parsing.
+        """
+
+        with get_db_session() as db:
+            require_rule_asset_source_job(db, offline_job_id)
+            run_ids = [
+                str(item.patrol_run_id)
+                for item in (
+                    db.query(OfflinePatrolPeriodRecord)
+                    .filter(OfflinePatrolPeriodRecord.job_id == offline_job_id)
+                    .all()
+                )
+                if item.patrol_run_id
+            ]
+            if not run_ids:
+                return {"created_or_updated": 0, "eligible_groups": 0}
+            source_rows = [
+                {
+                    "snapshot_id": str(item.id),
+                    "device_id": str(item.device_id),
+                    "vendor": str(item.vendor or "Unknown"),
+                    "model": str(item.model or "Unknown"),
+                    "command": str(item.canonical_command or ""),
+                    "parse_status": str(item.parse_status or ""),
+                    "output_status": str(item.output_status or ""),
+                    "raw_text": str(item.raw_text or ""),
+                    "dataset_id": str(item.dataset_id or "") or None,
+                    "metadata": dict(item.metadata_json or {}),
+                }
+                for item in (
+                    db.query(CommandSnapshot)
+                    .filter(CommandSnapshot.run_id.in_(run_ids))
+                    .order_by(CommandSnapshot.observed_at, CommandSnapshot.id)
+                    .all()
+                )
+            ]
+            source_commands = {row["command"] for row in source_rows}
+            source_vendors = {row["vendor"].casefold() for row in source_rows}
+            existing_job_rows = [
+                {
+                    "vendor": str(item.vendor or "Unknown"),
+                    "model": str(item.model or "Unknown"),
+                    "family": str(item.family or "").strip() or None,
+                    "profile": str(item.profile or item.model or "Unknown"),
+                    "command": str(item.canonical_command or ""),
+                    "sample_count": int(item.sample_count or 0),
+                    "updated_at": item.updated_at,
+                }
+                for item in (
+                    db.query(ParserTemplateJob)
+                    .filter(
+                        ParserTemplateJob.canonical_command.in_(source_commands),
+                        func.lower(ParserTemplateJob.vendor).in_(source_vendors),
+                    )
+                    .all()
+                )
+            ]
+
+        grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+        for row in source_rows:
+            grouped[(row["vendor"], row["model"], row["command"])].append(row)
+        existing_jobs: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+        for row in existing_job_rows:
+            existing_jobs[
+                (
+                    row["vendor"].casefold(),
+                    row["model"].casefold(),
+                    row["command"].casefold(),
+                )
+            ].append(row)
+
+        implementations = {
+            item.version_id: item for item in catalog.implementations
+        }
+        metadata_repository = ParserMetadataRepository()
+        template_repository = ParserTemplateRepository()
+        job_repository = ParserJobRepository()
+        created_or_updated = 0
+        eligible_groups = 0
+        for (vendor, model, command), rows in grouped.items():
+            profile_record = metadata_repository.find_device_profile(vendor, model) or {}
+            family = str(profile_record.get("family") or "").strip() or None
+            provisional_profile = model
+            unit = {
+                "vendor": vendor,
+                "models": {model},
+                "family": family,
+                "profile": provisional_profile,
+                "command": command,
+            }
+            mappings = self._resolve_check_item_mappings(unit, catalog=catalog)
+            mapped_implementations = [
+                implementations[item["implementation_version_id"]]
+                for item in mappings
+                if item["implementation_version_id"] in implementations
+            ]
+            structured_implementations = [
+                item
+                for item in mapped_implementations
+                if item.parser_requirement == "structured"
+            ]
+            if not structured_implementations:
+                continue
+            eligible_groups += 1
+            scopes = {
+                str(item.template_scope or "model")
+                for item in structured_implementations
+            }
+            existing = sorted(
+                existing_jobs.get(
+                    (vendor.casefold(), model.casefold(), command.casefold()),
+                    [],
+                ),
+                key=lambda item: (
+                    int(item["sample_count"]),
+                    str(item["updated_at"] or ""),
+                ),
+                reverse=True,
+            )
+            if existing:
+                profile = str(existing[0]["profile"])
+                family = existing[0]["family"] or family
+            else:
+                profile = family if scopes == {"family"} and family else model
+            if template_repository.resolve_active(
+                vendor=vendor,
+                model=model,
+                family=family,
+                command=command,
+            ) is not None:
+                continue
+            for row in rows:
+                # Empty, unsupported and failed command outputs are evidence for
+                # applicability review, not material for synthesizing a Parser.
+                if not row["raw_text"].strip() or row["output_status"] not in {
+                    "data",
+                    "content",
+                    "not_classified",
+                }:
+                    continue
+                failure_code = str(
+                    row["metadata"].get("parser_failure_code")
+                    or row["parse_status"]
+                    or "template_missing"
+                )
+                if failure_code in {"ignored", "raw_hashed", "success", "empty"}:
+                    failure_code = "template_missing"
+                job_repository.create_candidate(
+                    job_type="CREATE_TEMPLATE",
+                    vendor=vendor,
+                    model=model,
+                    family=family,
+                    profile=profile,
+                    command=command,
+                    snapshot_id=row["snapshot_id"],
+                    device_id=row["device_id"],
+                    failure_code=failure_code,
+                    dataset_id=row["dataset_id"],
+                )
+                created_or_updated += 1
+        return {
+            "created_or_updated": created_or_updated,
+            "eligible_groups": eligible_groups,
+        }
+
     def _ensure_projection_current(self, offline_job_id: str) -> None:
         """Rebuild persisted command units when the projection contract changes."""
+        self.ensure_projection_current(offline_job_id)
+
+    def ensure_projection_current(self, offline_job_id: str) -> bool:
+        """Synchronize a source job with the active check-item catalog.
+
+        Context construction calls this public boundary before freezing version
+        references. This prevents a catalog activation and a simultaneous
+        context rebuild from producing an immutable but unclassified context.
+        """
+
+        expected_projection_version = _catalog_projection_version(
+            self.catalog_repository.load_active()
+        )
         with get_db_session() as db:
             require_rule_asset_source_job(db, offline_job_id)
             versions = (
@@ -397,8 +724,13 @@ class RuleAssetCommandUnitService:
                 .distinct()
                 .all()
             )
-        if not versions or any(int(version or 0) != PROJECTION_VERSION for (version,) in versions):
+        stale = not versions or any(
+            int(version or 0) != expected_projection_version
+            for (version,) in versions
+        )
+        if stale:
             self.reconcile(offline_job_id)
+        return stale
 
     def reconcile_for_parser_job(self, parser_job_id: str) -> dict[str, Any]:
         """Refresh every offline source whose command units depend on a Parser job."""
@@ -505,8 +837,16 @@ class RuleAssetCommandUnitService:
         if not catalog.check_items:
             self.catalog_repository.bootstrap(actor="rule-asset-projection")
             catalog = self.catalog_repository.load_active()
+        parser_job_sync = self._ensure_catalog_parser_jobs(
+            offline_job_id,
+            catalog=catalog,
+        )
+        projection_version = _catalog_projection_version(catalog)
         with get_db_session() as db:
-            require_rule_asset_source_job(db, offline_job_id)
+            # Parser completions for one source job can arrive concurrently. Lock
+            # the source row for the whole delete-and-rebuild transaction so two
+            # projections cannot insert the same deterministic mapping IDs.
+            require_rule_asset_source_job(db, offline_job_id, for_update=True)
             periods = (
                 db.query(OfflinePatrolPeriodRecord)
                 .filter(OfflinePatrolPeriodRecord.job_id == offline_job_id)
@@ -619,6 +959,17 @@ class RuleAssetCommandUnitService:
                 .distinct()
                 .all()
             )
+            signature_rows = (
+                db.query(
+                    CommandSnapshot.vendor,
+                    CommandSnapshot.model,
+                    CommandSnapshot.canonical_command,
+                    CommandSnapshot.raw_text,
+                    CommandSnapshot.output_status,
+                )
+                .filter(CommandSnapshot.run_id.in_(run_ids))
+                .all()
+            )
 
             base_groups: dict[tuple[str, str, str], dict[str, Any]] = {}
             for vendor, model, command, parse_status, template_id, count, structured in status_rows:
@@ -633,6 +984,8 @@ class RuleAssetCommandUnitService:
                         "structured_count": 0,
                         "template_ids": set(),
                         "device_keys": set(),
+                        "output_signatures": set(),
+                        "has_non_empty_output": False,
                     },
                 )
                 group["parse_counts"][str(parse_status or "unknown")] += int(count or 0)
@@ -643,6 +996,18 @@ class RuleAssetCommandUnitService:
                 key = (str(vendor or "Unknown"), str(model or "Unknown"), str(command or ""))
                 if key in base_groups:
                     base_groups[key]["device_keys"].add(str(device_key or "unknown"))
+            for vendor, model, command, raw_text, output_status in signature_rows:
+                key = (str(vendor or "Unknown"), str(model or "Unknown"), str(command or ""))
+                if key in base_groups:
+                    base_groups[key]["output_signatures"].add(
+                        output_signature(str(raw_text or ""))
+                    )
+                    if (
+                        str(raw_text or "").strip()
+                        and str(output_status or "")
+                        in {"data", "content", "not_classified"}
+                    ):
+                        base_groups[key]["has_non_empty_output"] = True
 
             commands = {item[2] for item in base_groups}
             vendors = {item[0] for item in base_groups}
@@ -741,6 +1106,8 @@ class RuleAssetCommandUnitService:
                         "structured_count": 0,
                         "sample_count": 0,
                         "device_keys": set(),
+                        "output_signatures": set(),
+                        "has_non_empty_output": False,
                         "template": template,
                         "parser_job": parser_job,
                     },
@@ -750,27 +1117,15 @@ class RuleAssetCommandUnitService:
                 unit["structured_count"] += int(group["structured_count"])
                 unit["sample_count"] += sum(group["parse_counts"].values())
                 unit["device_keys"].update(group["device_keys"])
+                unit["output_signatures"].update(group["output_signatures"])
+                unit["has_non_empty_output"] = bool(
+                    unit["has_non_empty_output"]
+                    or group["has_non_empty_output"]
+                )
                 if template and (unit["template"] is None or str(template.status) == "active"):
                     unit["template"] = template
                 if parser_job and unit["parser_job"] is None:
                     unit["parser_job"] = parser_job
-
-            parser_job_ids = {
-                str(item["parser_job"].id)
-                for item in resolved_groups.values()
-                if item["parser_job"] is not None
-            }
-            signature_counts = dict(
-                db.query(
-                    ParserJobSample.job_id,
-                    func.count(func.distinct(ParserJobSample.output_signature)),
-                )
-                .filter(ParserJobSample.job_id.in_(parser_job_ids))
-                .group_by(ParserJobSample.job_id)
-                .all()
-                if parser_job_ids
-                else []
-            )
 
             active_template_ids = {
                 str(item["template"].id)
@@ -834,22 +1189,13 @@ class RuleAssetCommandUnitService:
                 if seed_ids
                 else []
             )
-            context_by_seed: dict[str, RuleGenerationContextRecord] = {}
-            for item in contexts:
-                seed_key = str(item.job_id)
-                existing = context_by_seed.get(seed_key)
-                if existing is None:
-                    if item.offline_job_id in {None, offline_job_id}:
-                        context_by_seed[seed_key] = item
-                    continue
-                # Prefer contexts that explicitly belong to this offline job.
-                if existing.offline_job_id == offline_job_id:
-                    continue
-                if item.offline_job_id == offline_job_id:
-                    context_by_seed[seed_key] = item
+            context_by_seed = _latest_context_by_seed_for_source(
+                contexts,
+                offline_job_id,
+            )
             context_ids = {str(item.id) for item in context_by_seed.values()}
-            # Seed payload may already reference a context that was created without
-            # offline_job_id (template-scoped sanitize). Still bind it to the unit.
+            # A seed is shared by compatible Parser implementations, but its
+            # generated context and candidate bundle are source-job evidence.
             for seed in seed_by_ref.values():
                 seed_key = str(seed.id)
                 if seed_key in context_by_seed:
@@ -865,6 +1211,8 @@ class RuleAssetCommandUnitService:
                         continue
                     row = db.get(RuleGenerationContextRecord, context_id)
                     if row is None or str(row.job_id) != seed_key:
+                        continue
+                    if str(row.offline_job_id or "") != offline_job_id:
                         continue
                     context_by_seed[seed_key] = row
                     context_ids.add(str(row.id))
@@ -906,6 +1254,15 @@ class RuleAssetCommandUnitService:
             mapped_link_count = 0
             for unit in resolved_groups.values():
                 unit["device_count"] = len(unit["device_keys"])
+                mappings = self._resolve_check_item_mappings(
+                    unit,
+                    catalog=catalog,
+                )
+                self._apply_catalog_asset_mode(
+                    unit,
+                    mappings,
+                    catalog=catalog,
+                )
                 template = unit["template"]
                 parser_job = unit["parser_job"]
                 template_id = str(template.id) if template is not None else None
@@ -933,11 +1290,14 @@ class RuleAssetCommandUnitService:
                     context=context,
                     bundle=bundle,
                     children=bundle_children,
-                    output_signature_count=int(
-                        signature_counts.get(str(parser_job.id), 0) if parser_job else 0
-                    ),
+                    output_signature_count=len(unit["output_signatures"]),
                 )
                 current_stage, overall_status, progress, next_action = self._rollup(stages)
+                # Expose one authoritative next action. Future-stage actions stay
+                # hidden until that stage becomes current.
+                for stage in stages:
+                    if stage["key"] != current_stage:
+                        stage["next_action"] = None
                 blocker_count = sum(len(item["blockers"]) for item in stages)
                 record_id = _unit_id(offline_job_id, unit["asset_key"])
                 keep_ids.add(record_id)
@@ -947,10 +1307,6 @@ class RuleAssetCommandUnitService:
                     db.add(record)
                 models = sorted(str(item) for item in unit["models"] if item)
                 record.offline_job_id = offline_job_id
-                mappings = self._resolve_check_item_mappings(
-                    unit,
-                    catalog=catalog,
-                )
                 mapped_check_item_ids = sorted(
                     {item["check_item_id"] for item in mappings}
                 )
@@ -973,9 +1329,7 @@ class RuleAssetCommandUnitService:
                 record.progress_percent = progress
                 record.sample_count = unit["sample_count"]
                 record.device_count = len(unit["device_keys"])
-                record.output_signature_count = int(
-                    signature_counts.get(str(parser_job.id), 0) if parser_job else 0
-                )
+                record.output_signature_count = len(unit["output_signatures"])
                 record.blocker_count = blocker_count
                 record.parse_counts_json = dict(unit["parse_counts"])
                 record.stage_states_json = stages
@@ -985,7 +1339,7 @@ class RuleAssetCommandUnitService:
                 record.rule_seed_job_id = str(seed.id) if seed else None
                 record.context_id = str(context.id) if context else None
                 record.bundle_id = str(bundle.id) if bundle else None
-                record.projection_version = PROJECTION_VERSION
+                record.projection_version = projection_version
                 db.flush([record])
                 db.query(RuleAssetCommandUnitCheckItemRecord).filter(
                     RuleAssetCommandUnitCheckItemRecord.command_unit_id == record_id
@@ -1019,6 +1373,7 @@ class RuleAssetCommandUnitService:
                 "offline_job_id": offline_job_id,
                 "unit_count": len(keep_ids),
                 "check_item_link_count": mapped_link_count,
+                "parser_job_sync": parser_job_sync,
                 "deleted": int(deleted or 0),
             }
 
@@ -1061,7 +1416,7 @@ class RuleAssetCommandUnitService:
             if vendor:
                 query = query.filter(RuleAssetCommandUnitRecord.vendor == vendor)
             if model:
-                query = query.filter(RuleAssetCommandUnitRecord.models_json.contains([model]))
+                query = query.filter(_models_contain(model))
             if asset_mode:
                 query = query.filter(RuleAssetCommandUnitRecord.asset_mode == asset_mode)
             total = query.count()
@@ -1190,7 +1545,7 @@ class RuleAssetCommandUnitService:
             if vendor:
                 query = query.filter(RuleAssetCommandUnitRecord.vendor == vendor)
             if model:
-                query = query.filter(RuleAssetCommandUnitRecord.models_json.contains([model]))
+                query = query.filter(_models_contain(model))
             if asset_mode:
                 query = query.filter(RuleAssetCommandUnitRecord.asset_mode == asset_mode)
 
@@ -1309,9 +1664,7 @@ class RuleAssetCommandUnitService:
             if vendor:
                 query = query.filter(RuleAssetCommandUnitRecord.vendor == vendor)
             if model:
-                query = query.filter(
-                    RuleAssetCommandUnitRecord.models_json.contains([model])
-                )
+                query = query.filter(_models_contain(model))
             if asset_mode:
                 query = query.filter(
                     RuleAssetCommandUnitRecord.asset_mode == asset_mode
@@ -1350,6 +1703,51 @@ class RuleAssetCommandUnitService:
                 self._serialize_production_row(unit, source_job)
                 for unit, source_job in rows
             ]
+            assembly_planner = RuntimeBundleAssemblyPlanner(db)
+            assembly_plans: dict[tuple[str, str], dict[str, Any]] = {}
+            for link in link_rows:
+                plan_key = (
+                    link["check_item_version_id"],
+                    link["implementation_version_id"],
+                )
+                if plan_key in assembly_plans:
+                    continue
+                try:
+                    assembly_plans[plan_key] = assembly_planner.build(
+                        check_item_version_id=plan_key[0],
+                        implementation_version_id=plan_key[1],
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "runtime bundle projection failed for %s / %s",
+                        *plan_key,
+                    )
+                    assembly_plans[plan_key] = {
+                        "check_item": {
+                            "version_id": plan_key[0],
+                        },
+                        "implementation": {
+                            "version_id": plan_key[1],
+                        },
+                        "asset_requirement_profile": {},
+                        "selected": {},
+                        "compatibility": {},
+                        "candidates": {},
+                        "operationally_ready": False,
+                        "active_bundle": None,
+                        "blockers": [
+                            {
+                                "code": "runtime_bundle_projection_failed",
+                                "message": (
+                                    "运行包装配预检失败，不能判定生产就绪状态。"
+                                ),
+                                "context": {
+                                    "error_type": type(exc).__name__,
+                                },
+                            }
+                        ],
+                        "warnings": [],
+                    }
 
         links_by_unit: dict[str, list[dict[str, str]]] = defaultdict(list)
         for link in link_rows:
@@ -1362,10 +1760,31 @@ class RuleAssetCommandUnitService:
                 links = [None]
             for link in links:
                 check_item_id = link["check_item_id"] if link is not None else ""
-                group_key = check_item_id or "__unclassified__"
+                ignored_without_catalog = bool(
+                    link is None
+                    and str(serialized.get("asset_mode") or "") == "ignored"
+                )
+                group_key = (
+                    check_item_id
+                    or (
+                        "__not_applicable__"
+                        if ignored_without_catalog
+                        else "__unclassified__"
+                    )
+                )
                 check_item = check_items.get(check_item_id)
                 implementation = (
                     implementations.get(link["implementation_version_id"])
+                    if link is not None
+                    else None
+                )
+                assembly_plan = (
+                    assembly_plans.get(
+                        (
+                            link["check_item_version_id"],
+                            link["implementation_version_id"],
+                        )
+                    )
                     if link is not None
                     else None
                 )
@@ -1379,11 +1798,27 @@ class RuleAssetCommandUnitService:
                         "name": (
                             check_item.name if check_item is not None else "待归类检查项"
                         ),
+                        "display_name": (
+                            check_item_display_name(
+                                check_item.id,
+                                check_item.name,
+                            )
+                            if check_item is not None
+                            else "待归类检查项"
+                        ),
                         "category": (
                             check_item.category if check_item is not None else "unclassified"
                         ),
                         "description": (
                             check_item.description
+                            if check_item is not None
+                            else "命令输出尚未绑定已审批的检查项目录，不能进入生产运行包。"
+                        ),
+                        "display_description": (
+                            check_item_display_description(
+                                check_item.id,
+                                check_item.description,
+                            )
                             if check_item is not None
                             else "命令输出尚未绑定已审批的检查项目录，不能进入生产运行包。"
                         ),
@@ -1393,27 +1828,62 @@ class RuleAssetCommandUnitService:
                         "assessment_mode": (
                             check_item.assessment_mode if check_item is not None else None
                         ),
+                        "asset_requirement_profile": (
+                            dict(
+                                (assembly_plan or {}).get(
+                                    "asset_requirement_profile"
+                                )
+                                or {}
+                            )
+                            if assembly_plan is not None
+                            else {}
+                        ),
                         "implementations": [],
                     },
                 )
+                if check_item is None and ignored_without_catalog:
+                    group.update(
+                        {
+                            "name": "No rule required",
+                            "display_name": "无需规则命令",
+                            "category": "not_applicable",
+                            "description": (
+                                "The collection policy explicitly ignores these "
+                                "commands, so Parser and rule assets are not required."
+                            ),
+                            "display_description": (
+                                "采集策略已明确忽略这些命令，不需要 Parser 或规则资产。"
+                            ),
+                        }
+                    )
+                child = {
+                    **serialized,
+                    "implementation_id": (
+                        implementation.id if implementation is not None else None
+                    ),
+                    "implementation_version_id": (
+                        implementation.version_id
+                        if implementation is not None
+                        else None
+                    ),
+                    "implementation_name": (
+                        implementation.name if implementation is not None else None
+                    ),
+                    "mapping_status": (
+                        "catalog_resolved"
+                        if link is not None
+                        else "not_required"
+                        if ignored_without_catalog
+                        else "unclassified"
+                    ),
+                }
                 group["implementations"].append(
-                    {
-                        **serialized,
-                        "implementation_id": (
-                            implementation.id if implementation is not None else None
-                        ),
-                        "implementation_version_id": (
-                            implementation.version_id
-                            if implementation is not None
-                            else None
-                        ),
-                        "implementation_name": (
-                            implementation.name if implementation is not None else None
-                        ),
-                        "mapping_status": (
-                            "catalog_resolved" if link is not None else "unclassified"
-                        ),
-                    }
+                    self._project_check_item_implementation(
+                        child,
+                        assembly_plan,
+                    )
+                    if assembly_plan is not None
+                    else child
                 )
 
         groups = [
@@ -1431,6 +1901,8 @@ class RuleAssetCommandUnitService:
                         [
                             str(item.get("check_item_id") or ""),
                             str(item.get("name") or ""),
+                            str(item.get("display_name") or ""),
+                            str(item.get("display_description") or ""),
                             str(item.get("category") or ""),
                             *[
                                 " ".join(
@@ -1505,6 +1977,9 @@ class RuleAssetCommandUnitService:
         is_admin: bool,
         offline_job_id: str | None,
     ) -> None:
+        expected_projection_version = _catalog_projection_version(
+            self.catalog_repository.load_active()
+        )
         with get_db_session() as db:
             query = (
                 db.query(RuleAssetCommandUnitRecord.offline_job_id)
@@ -1515,7 +1990,8 @@ class RuleAssetCommandUnitService:
                 .filter(
                     OfflinePatrolJobRecord.purpose == "rule_asset_source",
                     OfflinePatrolJobRecord.archived.is_(False),
-                    RuleAssetCommandUnitRecord.projection_version != PROJECTION_VERSION,
+                    RuleAssetCommandUnitRecord.projection_version
+                    != expected_projection_version,
                 )
             )
             if not is_admin:
@@ -1529,6 +2005,297 @@ class RuleAssetCommandUnitService:
             )
         for job_id in stale_job_ids:
             self.reconcile(job_id)
+
+    @staticmethod
+    def _plan_blocker_matches(component: str, code: str) -> bool:
+        normalized = str(code or "").casefold()
+        if component == "event" and "current_state" in normalized:
+            return False
+        markers = {
+            "identity": ("identity_policy", "entity_identity_policy"),
+            "parser": (
+                "parser",
+                "structured_command",
+                "command_route",
+                "no_executable_structured_command",
+                "implementation_scope",
+            ),
+            "contract": (
+                "observation_contract",
+                "canonical_observation",
+                "contract_",
+                "entity_type",
+                "identity_dimension",
+            ),
+            "current_state": ("current_state",),
+            "policy": ("change_policy",),
+            "event": (
+                "event_rule",
+                "event_type",
+                "event_class",
+                "event_severity",
+                "recovery_pair",
+            ),
+            "comparison": ("comparison_profile",),
+        }
+        return any(marker in normalized for marker in markers.get(component, ()))
+
+    @classmethod
+    def _project_check_item_implementation(
+        cls,
+        child: dict[str, Any],
+        plan: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Project one command source through the check item's immutable asset contract."""
+
+        projected = dict(child)
+        source_component_statuses = dict(child.get("component_statuses") or {})
+        profile = dict(plan.get("asset_requirement_profile") or {})
+        requirements = dict(profile.get("requirements") or {})
+        selected = dict(plan.get("selected") or {})
+        compatibility = dict(plan.get("compatibility") or {})
+        candidates = dict(plan.get("candidates") or {})
+        blockers = [
+            dict(item)
+            for item in plan.get("blockers") or []
+            if isinstance(item, dict)
+        ]
+        if (
+            child.get("handling") == "not_applicable"
+            and child.get("asset_mode") == "ignored"
+        ):
+            component_statuses = {
+                component: "not_applicable"
+                for component in CHECK_ITEM_COMPONENT_ORDER
+            }
+            projected.update(
+                {
+                    "source_governance_status": child.get("governance_status"),
+                    "source_governance_bucket": child.get("governance_bucket"),
+                    "source_component_statuses": dict(
+                        child.get("component_statuses") or {}
+                    ),
+                    "governance_status": "not_applicable",
+                    "governance_bucket": "not_applicable",
+                    "component_statuses": component_statuses,
+                    "current_stage": "release",
+                    "current_stage_label": "无需规则",
+                    "progress_percent": 100,
+                    "blocker_count": 0,
+                    "next_action": None,
+                    "asset_requirement_profile": profile,
+                    "runtime_readiness": {
+                        "operationally_ready": False,
+                        "active_bundle": None,
+                        "blockers": [],
+                        "warnings": [],
+                        "preview_digest": plan.get("preview_digest"),
+                        "applicability": "not_applicable",
+                    },
+                }
+            )
+            return projected
+        blocker_codes = {
+            str(item.get("code") or "").strip()
+            for item in blockers
+            if str(item.get("code") or "").strip()
+        }
+        required_current_types = set(
+            requirements.get("current_state_rule", {}).get(
+                "required_observation_types"
+            )
+            or []
+        )
+        covered_current_types = set(
+            compatibility.get("current_state_rule_types") or []
+        )
+        required_policy_types = set(
+            requirements.get("change_policy", {}).get(
+                "required_observation_types"
+            )
+            or []
+        )
+        covered_policy_types = set(
+            compatibility.get("change_policy_types") or []
+        )
+        candidate_rows = {
+            "parser": list(candidates.get("parsers") or []),
+            "contract": list(candidates.get("observation_contracts") or []),
+            "current_state": list(candidates.get("event_rules") or []),
+            "policy": list(candidates.get("change_policies") or []),
+            "event": list(candidates.get("event_rules") or []),
+            "comparison": list(candidates.get("comparison_profiles") or []),
+        }
+        selected_assets = {
+            "identity": bool(selected.get("entity_identity_policy_version_id")),
+            "parser": bool(selected.get("parser_template_ids")),
+            "contract": bool(selected.get("observation_contract_ids")),
+            "current_state": bool(
+                required_current_types
+                and required_current_types <= covered_current_types
+            ),
+            "policy": bool(
+                required_policy_types
+                and required_policy_types <= covered_policy_types
+            ),
+            "event": bool(selected.get("event_rule_version_ids")),
+            "comparison": bool(selected.get("comparison_profile_version_id")),
+        }
+        fallback_keys = {
+            "parser": "parser",
+            "contract": "contract",
+            "current_state": "event",
+            "policy": "policy",
+            "event": "event",
+        }
+
+        component_statuses: dict[str, str] = {}
+        for component, requirement_key in CHECK_ITEM_COMPONENT_REQUIREMENTS.items():
+            requirement = dict(requirements.get(requirement_key) or {})
+            if requirement.get("required") is not True:
+                component_statuses[component] = "not_applicable"
+                continue
+            has_component_blocker = any(
+                cls._plan_blocker_matches(component, code)
+                for code in blocker_codes
+            )
+            if selected_assets.get(component) and not has_component_blocker:
+                component_statuses[component] = "published"
+                continue
+            fallback_status = str(
+                source_component_statuses.get(
+                    fallback_keys.get(component, ""),
+                    "",
+                )
+                or ""
+            )
+            if fallback_status in {
+                "generating",
+                "engineering_review",
+                "failed",
+                "ready_to_generate",
+            }:
+                component_statuses[component] = fallback_status
+            elif candidate_rows.get(component) or fallback_status == "published":
+                component_statuses[component] = "blocked"
+            elif component == "identity":
+                component_statuses[component] = "blocked"
+            else:
+                component_statuses[component] = "ready_to_generate"
+
+        active_bundle = dict(plan.get("active_bundle") or {})
+        operationally_ready = plan.get("operationally_ready") is True
+        if active_bundle and operationally_ready:
+            runtime_status = "published"
+        elif operationally_ready:
+            runtime_status = "ready_to_generate"
+        else:
+            runtime_status = "blocked"
+        component_statuses["runtime_bundle"] = runtime_status
+
+        relevant_statuses = [
+            status
+            for status in component_statuses.values()
+            if status != "not_applicable"
+        ]
+        if runtime_status == "published":
+            governance_status = "published"
+            governance_bucket = "published"
+        elif "failed" in relevant_statuses:
+            governance_status = "failed"
+            governance_bucket = "exception"
+        elif "generating" in relevant_statuses:
+            governance_status = "generating"
+            governance_bucket = "in_progress"
+        elif "engineering_review" in relevant_statuses:
+            governance_status = "engineering_review"
+            governance_bucket = "awaiting_approval"
+        elif "blocked" in relevant_statuses:
+            governance_status = "blocked"
+            governance_bucket = "action_required"
+        else:
+            governance_status = "ready_to_generate"
+            governance_bucket = "action_required"
+
+        runtime_url = _runtime_bundle_url(
+            check_item_id=str(plan.get("check_item", {}).get("id") or ""),
+            check_item_version_id=str(
+                plan.get("check_item", {}).get("version_id") or ""
+            ),
+            implementation_version_id=str(
+                plan.get("implementation", {}).get("version_id") or ""
+            ),
+        )
+        source_next_action = child.get("next_action")
+        source_action_pending = bool(source_next_action) and child.get(
+            "governance_bucket"
+        ) not in {"published", "not_applicable"}
+        if runtime_status == "published":
+            next_action = None
+        elif source_action_pending:
+            # Runtime assembly is the final production step. Keep the direct
+            # Parser/rule-production action visible while an upstream asset is
+            # unresolved so the operator lands where the blocker can be fixed.
+            next_action = dict(source_next_action)
+        elif runtime_status == "ready_to_generate":
+            next_action = _action(
+                "assemble_runtime_bundle",
+                "装配运行包",
+                "所需资产已齐备；复核预检结果并原子发布冻结运行包。",
+                runtime_url,
+            )
+        else:
+            next_action = _action(
+                "inspect_runtime_bundle",
+                "处理运行包缺口",
+                "查看该检查项与采集实现的精确资产缺口和修复入口。",
+                runtime_url,
+            )
+
+        resolved_count = sum(
+            status in {"published", "not_applicable"}
+            for status in component_statuses.values()
+        )
+        current_stage = (
+            str(child.get("current_stage") or "runtime_bundle")
+            if source_action_pending
+            else "runtime_bundle"
+        )
+        current_stage_label = (
+            str(child.get("current_stage_label") or "")
+            if source_action_pending
+            else "生产运行包"
+        )
+        projected.update(
+            {
+                "source_governance_status": child.get("governance_status"),
+                "source_governance_bucket": child.get("governance_bucket"),
+                "source_component_statuses": source_component_statuses,
+                "governance_status": governance_status,
+                "governance_bucket": governance_bucket,
+                "component_statuses": component_statuses,
+                "current_stage": current_stage,
+                "current_stage_label": current_stage_label,
+                "progress_percent": round(
+                    resolved_count * 100 / max(len(component_statuses), 1)
+                ),
+                "blocker_count": len(blockers),
+                "next_action": next_action,
+                "asset_requirement_profile": profile,
+                "runtime_readiness": {
+                    "operationally_ready": operationally_ready,
+                    "active_bundle": active_bundle or None,
+                    "blockers": blockers,
+                    "warnings": [
+                        dict(item)
+                        for item in plan.get("warnings") or []
+                        if isinstance(item, dict)
+                    ],
+                    "preview_digest": plan.get("preview_digest"),
+                },
+            }
+        )
+        return projected
 
     @classmethod
     def _rollup_check_item_group(
@@ -1571,7 +2338,7 @@ class RuleAssetCommandUnitService:
                 ),
                 key=lambda status: component_rank.get(status, 99),
             )
-            for component in ("parser", "contract", "policy", "event")
+            for component in CHECK_ITEM_COMPONENT_ORDER
         }
         updated_values = [
             datetime.fromisoformat(str(child["updated_at"]).replace("Z", "+00:00"))
@@ -1582,24 +2349,29 @@ class RuleAssetCommandUnitService:
         published_count = sum(
             child.get("governance_bucket") == "published" for child in children
         )
-        unclassified = not group.get("check_item_id")
+        unclassified = group_key == "__unclassified__"
+        all_not_applicable = bool(children) and all(
+            child.get("governance_bucket") == "not_applicable"
+            for child in children
+        )
+        classification_required = unclassified and not all_not_applicable
         governance_status = (
-            "blocked" if unclassified else lead["governance_status"]
+            "blocked" if classification_required else lead["governance_status"]
         )
         governance_bucket = (
-            "exception" if unclassified else lead["governance_bucket"]
+            "exception" if classification_required else lead["governance_bucket"]
         )
         current_stage = (
-            "identity_grouping" if unclassified else lead["current_stage"]
+            "identity_grouping" if classification_required else lead["current_stage"]
         )
         current_stage_label = (
-            "检查项归类" if unclassified else lead["current_stage_label"]
+            "检查项归类" if classification_required else lead["current_stage_label"]
         )
         blocker_count = sum(
             int(child.get("blocker_count") or 0) for child in children
-        ) + (1 if unclassified else 0)
-        next_action = lead.get("next_action")
-        if unclassified:
+        ) + (1 if classification_required else 0)
+        next_action = None if all_not_applicable else lead.get("next_action")
+        if classification_required:
             first_child = children[0]
             next_action = _action(
                 "classify_check_item",
@@ -1614,6 +2386,7 @@ class RuleAssetCommandUnitService:
         return {
             "id": f"check-item:{group_key}",
             **{key: value for key, value in group.items() if key != "implementations"},
+            "classification_required": classification_required,
             "governance_status": governance_status,
             "governance_bucket": governance_bucket,
             "current_stage": current_stage,
@@ -1690,7 +2463,7 @@ class RuleAssetCommandUnitService:
             "not_applicable": int(by_bucket["not_applicable"]),
             "exception": int(by_bucket["exception"]),
             "unclassified": sum(
-                item.get("check_item_id") is None for item in groups
+                bool(item.get("classification_required")) for item in groups
             ),
             "by_bucket": dict(by_bucket),
             "by_status": dict(by_status),
@@ -2009,6 +2782,38 @@ class RuleAssetCommandUnitService:
             seed_job_id=str(seed.id) if seed is not None else None,
         )
         bundle_url = _bundle_url(offline_job_id, str(bundle.id) if bundle else None)
+        bundle_payload = dict(bundle.payload_json or {}) if bundle else {}
+        bundle_report = dict(bundle.validation_report_json or {}) if bundle else {}
+        bundle_gate = dict(bundle_report.get("bundle_gate") or {})
+        context_payload = dict(context.context_json or {}) if context else {}
+        explicit_requirements = (
+            bundle_gate.get("asset_requirements")
+            or bundle_report.get("asset_requirements")
+            or bundle_payload.get("asset_requirements")
+            or context_payload.get("rule_asset_requirements")
+        )
+        if not explicit_requirements:
+            asset_mode = str(unit.get("asset_mode") or "full_chain")
+            explicit_requirements = {
+                "schema_version": "rule-asset-requirements/command-mode-v1",
+                "requires_observation_contract": True,
+                "requires_change_policy": asset_mode in {"change_only", "full_chain"},
+                "requires_current_state_rule": False,
+                "requires_event_rule": asset_mode == "full_chain",
+                "requires_event_rule_assets": asset_mode == "full_chain",
+                "requires_historical_replay": asset_mode == "full_chain",
+            }
+            requirements_are_governed = False
+        else:
+            requirements_are_governed = True
+        requirements = normalize_rule_asset_requirements(explicit_requirements)
+        if requirements_are_governed:
+            if requirements["requires_event_rule_assets"]:
+                unit["asset_mode"] = "full_chain"
+            elif requirements["requires_change_policy"]:
+                unit["asset_mode"] = "change_only"
+            elif requirements["requires_observation_contract"]:
+                unit["asset_mode"] = "observation_only"
         parse_counts = dict(unit["parse_counts"])
         stages = [
             _stage(
@@ -2135,16 +2940,13 @@ class RuleAssetCommandUnitService:
         else:
             validation_status = "not_started"
             validation_blockers = []
-        validation = dict(template.validation_json or {}) if template else {}
-        parser_agent = dict(validation.get("parser_agent") or {})
         stages.append(
             _stage(
                 "parser_validation",
                 validation_status,
-                "编译、训练样本、隐藏 holdout、回归与实体覆盖门禁。",
+                "展示 TextFSM 编译、逐样本执行与解析错误等客观证据，不替代语义审批。",
                 metrics={
                     "output_signature_count": output_signature_count,
-                    "hard_gates": parser_agent.get("hard_gates") or {},
                 },
                 blockers=validation_blockers,
                 artifacts=parser_artifacts,
@@ -2177,7 +2979,7 @@ class RuleAssetCommandUnitService:
             _stage(
                 "structured_quality",
                 quality_status,
-                "检查解析覆盖、关键实体覆盖和结构化记录规模。",
+                "确认历史快照已使用 Active Parser 回填，并显式暴露缺模板、解析失败或身份未知。",
                 metrics={
                     "parse_counts": parse_counts,
                     "structured_record_count": unit["structured_count"],
@@ -2236,7 +3038,7 @@ class RuleAssetCommandUnitService:
         policy_status, policy_children = _child_stage_status(
             children, "CHANGE_POLICY", bundle_status=bundle_status
         )
-        if unit["asset_mode"] == "observation_only":
+        if not requirements["requires_change_policy"]:
             policy_status = "skipped"
         elif policy_status == "not_started" and context:
             policy_status = "ready"
@@ -2270,7 +3072,7 @@ class RuleAssetCommandUnitService:
         event_status, event_children = _child_stage_status(
             children, "EVENT_RULE", bundle_status=bundle_status
         )
-        if unit["asset_mode"] in {"observation_only", "change_only"}:
+        if not requirements["requires_event_rule_assets"]:
             event_status = "skipped"
         elif event_status == "not_started" and context:
             event_status = "ready"
@@ -2302,10 +3104,14 @@ class RuleAssetCommandUnitService:
             )
         )
 
-        report = dict(bundle.validation_report_json or {}) if bundle else {}
+        report = bundle_report
         replay = dict(report.get("historical_replay") or {})
         context_gate = dict(report.get("context_gate") or {})
-        replay_gate = evaluate_historical_replay_gate(replay, context_gate)
+        replay_gate = evaluate_requirement_replay_gate(
+            requirements=requirements,
+            replay=replay,
+            context_gate=context_gate,
+        )
         review = dict((report.get("governance") or {}).get("engineering_review") or {})
         validation_success = report.get("success") is True
         replay_success = replay_gate.get("success") is True

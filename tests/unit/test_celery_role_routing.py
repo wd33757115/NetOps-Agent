@@ -50,7 +50,7 @@ def test_workflow_dispatch_routes_patrol_step_to_patrol_worker(monkeypatch):
     monkeypatch.setattr(
         engine,
         "update_run_step_index",
-        lambda *args, **kwargs: run_updates.append((args, kwargs)),
+        lambda *args, **kwargs: run_updates.append((args, kwargs)) or True,
     )
     monkeypatch.setattr(
         engine,
@@ -60,7 +60,7 @@ def test_workflow_dispatch_routes_patrol_step_to_patrol_worker(monkeypatch):
     monkeypatch.setattr(
         engine,
         "mark_step_queued",
-        lambda *args: queued_steps.append(args),
+        lambda *args: queued_steps.append(args) or True,
     )
     monkeypatch.setattr(
         tasks.dispatch_workflow_step_task,

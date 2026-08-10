@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable, Iterable
 from contextlib import AbstractContextManager
 from datetime import datetime, timezone
-from typing import Any, Callable, Iterable
+from typing import Any
 
+from src.core.check_items.presentation import check_item_display_name
 from src.infrastructure.db.models import (
     CheckItemRecord,
     CheckItemVersionRecord,
@@ -150,7 +152,10 @@ class PatrolProfileCheckItemRepository:
                     {
                         **binding.to_dict(),
                         "check_item_id": version.check_item_id,
-                        "check_item_name": check_item.name,
+                        "check_item_name": check_item_display_name(
+                            check_item.id,
+                            check_item.name,
+                        ),
                         "check_item_category": check_item.category,
                         "check_item_version": version.version,
                         "result_mode": version.result_mode,

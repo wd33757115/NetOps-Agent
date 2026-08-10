@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -30,6 +31,7 @@ REQUIRED_GATES = {
     "tests_and_migrations_passed",
     "rollback_rehearsed",
 }
+SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _date(value: Any, *, label: str) -> date:
@@ -41,6 +43,122 @@ def _date(value: Any, *, label: str) -> date:
         return date.fromisoformat(str(value))
     except ValueError as exc:
         raise ValueError(f"{label} must use YYYY-MM-DD") from exc
+
+
+def _timestamp(value: Any, *, label: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{label} must use ISO-8601") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"{label} must include a timezone")
+    return parsed
+
+
+def _artifact_errors(value: Any, *, label: str) -> list[str]:
+    if not isinstance(value, dict):
+        return [f"{label} must be an object"]
+    errors: list[str] = []
+    uri = str(value.get("artifact_uri") or "").strip()
+    digest = str(value.get("sha256") or "").strip().lower()
+    if not uri or "://" not in uri:
+        errors.append(f"{label}.artifact_uri must be an immutable URI")
+    if not SHA256_PATTERN.fullmatch(digest):
+        errors.append(f"{label}.sha256 must be a lowercase SHA-256 digest")
+    return errors
+
+
+def _removal_evidence_errors(
+    candidate_id: str,
+    candidate: dict[str, Any],
+) -> list[str]:
+    evidence = candidate.get("evidence")
+    if not isinstance(evidence, dict):
+        return [f"{candidate_id}: ready/removed state requires evidence object"]
+
+    errors: list[str] = []
+    if int(evidence.get("schema_version") or 0) != 1:
+        errors.append(f"{candidate_id}: evidence.schema_version must be 1")
+    try:
+        _timestamp(
+            evidence.get("generated_at"),
+            label=f"{candidate_id}.evidence.generated_at",
+        )
+    except ValueError as exc:
+        errors.append(str(exc))
+
+    gate_evidence = evidence.get("gate_evidence")
+    if not isinstance(gate_evidence, dict):
+        errors.append(f"{candidate_id}: evidence.gate_evidence must be an object")
+    else:
+        missing = sorted(REQUIRED_GATES - set(gate_evidence))
+        if missing:
+            errors.append(
+                f"{candidate_id}: evidence missing gate artifacts " + ", ".join(missing)
+            )
+        for gate in sorted(REQUIRED_GATES & set(gate_evidence)):
+            errors.extend(
+                _artifact_errors(
+                    gate_evidence[gate],
+                    label=f"{candidate_id}.evidence.gate_evidence.{gate}",
+                )
+            )
+
+    observation = evidence.get("runtime_observation")
+    if not isinstance(observation, dict):
+        errors.append(f"{candidate_id}: evidence.runtime_observation must be an object")
+        return errors
+    metric = str(observation.get("metric") or "").strip()
+    expected_metric = str(candidate.get("telemetry_metric") or "").strip()
+    if metric != expected_metric:
+        errors.append(
+            f"{candidate_id}: runtime observation metric must be "
+            f"{expected_metric or '<configured>'}"
+        )
+    windows = observation.get("windows")
+    if not isinstance(windows, list) or len(windows) < 2:
+        errors.append(
+            f"{candidate_id}: runtime observation requires at least two release-cycle windows"
+        )
+        return errors
+
+    parsed_windows: list[tuple[datetime, datetime, str]] = []
+    release_cycles: set[str] = set()
+    for index, window in enumerate(windows, start=1):
+        label = f"{candidate_id}.evidence.runtime_observation.windows[{index}]"
+        if not isinstance(window, dict):
+            errors.append(f"{label} must be an object")
+            continue
+        release_cycle = str(window.get("release_cycle") or "").strip()
+        if not release_cycle:
+            errors.append(f"{label}.release_cycle is required")
+        release_cycles.add(release_cycle)
+        try:
+            started_at = _timestamp(window.get("started_at"), label=f"{label}.started_at")
+            ended_at = _timestamp(window.get("ended_at"), label=f"{label}.ended_at")
+            if ended_at <= started_at:
+                errors.append(f"{label}.ended_at must be after started_at")
+            parsed_windows.append((started_at, ended_at, release_cycle))
+        except ValueError as exc:
+            errors.append(str(exc))
+        if window.get("call_count") != 0:
+            errors.append(f"{label}.call_count must be 0")
+        errors.extend(_artifact_errors(window, label=label))
+
+    if "" in release_cycles:
+        release_cycles.discard("")
+    if len(release_cycles) < 2:
+        errors.append(
+            f"{candidate_id}: runtime observation must span two distinct release cycles"
+        )
+    ordered = sorted(parsed_windows, key=lambda item: item[0])
+    for previous, current in zip(ordered, ordered[1:]):
+        if current[0] < previous[1]:
+            errors.append(
+                f"{candidate_id}: runtime observation windows must not overlap"
+            )
+            break
+    return errors
 
 
 def audit(path: Path, *, today: date) -> dict[str, Any]:
@@ -76,6 +194,8 @@ def audit(path: Path, *, today: date) -> dict[str, Any]:
         for field in ("owner", "replacement", "rollback"):
             if not str(raw.get(field) or "").strip():
                 errors.append(f"{candidate_id}: {field} is required")
+        if not str(raw.get("telemetry_metric") or "").strip():
+            errors.append(f"{candidate_id}: telemetry_metric is required")
         try:
             deprecated_at = _date(
                 raw.get("deprecated_at"),
@@ -131,6 +251,8 @@ def audit(path: Path, *, today: date) -> dict[str, Any]:
                 errors.append(
                     f"{candidate_id}: {status} requires immutable evidence"
                 )
+            else:
+                errors.extend(_removal_evidence_errors(candidate_id, raw))
         if status == "removed" and not raw.get("removed_at"):
             errors.append(f"{candidate_id}: removed_at is required")
 

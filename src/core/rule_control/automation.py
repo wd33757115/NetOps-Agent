@@ -1,26 +1,31 @@
-"""Unattended orchestration for governed rule-asset production."""
+"""Governed automation for preparing rule-asset candidates."""
 
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import func
+from sqlalchemy import case, func
 
 from src.core.celery_tasks.beat_health import (
     CeleryBeatHeartbeatUnavailableError,
     read_celery_beat_heartbeat,
 )
-from src.core.rule_control.approval import RuleAssetApprovalService
+from src.core.rule_control.asset_requirements import (
+    evaluate_requirement_replay_gate,
+    normalize_rule_asset_requirements,
+    rule_asset_composition_errors,
+)
 from src.core.rule_control.dataset_context import (
     DatasetRuleGenerationContextService,
     assess_context_quality,
 )
-from src.core.rule_control.engineering_revision import (
-    RuleAssetEngineeringRevisionService,
+from src.core.rule_control.source_scope import (
+    require_current_rule_generation_context,
 )
-from src.core.rule_control.replay_gate import evaluate_historical_replay_gate
 from src.core.rule_control.template_activation import (
     RuleAssetTemplateActivationService,
 )
@@ -38,9 +43,23 @@ from src.infrastructure.db.models import (
 from src.infrastructure.db.postgres import get_db_session
 
 AUTOMATION_SETTING_KEY = "rule_asset_unattended"
-AUTOMATION_MODES = {"disabled", "generate_only", "auto_publish"}
+AUTOMATION_MODES = {"disabled", "generate_only"}
+LEGACY_AUTOMATION_MODE_MAP = {"auto_publish": "generate_only"}
 ACTIVE_WORKFLOW_STATUSES = {"pending", "queued", "dispatching", "running", "in_progress"}
 AUTOMATION_ACTOR = "rule-asset-unattended"
+
+
+def _configured_storage_timezone():
+    """Return the timezone used by PostgreSQL for naive timestamp columns."""
+
+    name = str(os.getenv("TZ") or "Asia/Shanghai").strip()
+    try:
+        return ZoneInfo(name)
+    except ZoneInfoNotFoundError:
+        return timezone.utc
+
+
+_STORAGE_TIMEZONE = _configured_storage_timezone()
 
 DEFAULT_AUTOMATION_SETTINGS: dict[str, Any] = {
     "mode": "disabled",
@@ -61,13 +80,16 @@ def _now() -> datetime:
 
 
 def _iso(value: datetime | None) -> str | None:
-    return value.isoformat() if value else None
+    normalized = _as_utc(value)
+    return normalized.isoformat() if normalized else None
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
-    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=_STORAGE_TIMEZONE)
+    return value.astimezone(timezone.utc)
 
 
 def _parse_time(value: Any) -> datetime | None:
@@ -100,6 +122,7 @@ def validate_automation_settings(value: dict[str, Any]) -> dict[str, Any]:
 
     merged = {**DEFAULT_AUTOMATION_SETTINGS, **dict(value or {})}
     mode = str(merged.get("mode") or "disabled").strip().casefold()
+    mode = LEGACY_AUTOMATION_MODE_MAP.get(mode, mode)
     if mode not in AUTOMATION_MODES:
         raise ValueError(f"unsupported rule asset automation mode: {mode}")
     return {
@@ -319,20 +342,35 @@ def evaluate_unattended_publish_gate(
     unit: RuleAssetCommandUnitRecord | None,
     settings: dict[str, Any],
     children: list[RuleGenerationJobRecord],
+    source_integrity: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Apply stricter gates than interactive approval before automatic release."""
+    """Prepare deterministic readiness evidence for mandatory human approval.
+
+    The historical function name is retained for API compatibility. This
+    function never grants publish authority and the automation service never
+    calls the approval service.
+    """
 
     report = dict(bundle.validation_report_json or {})
     bundle_gate = dict(report.get("bundle_gate") or {})
     context_gate = dict(report.get("context_gate") or {})
     replay = dict(report.get("historical_replay") or {})
-    replay_gate = evaluate_historical_replay_gate(replay, context_gate)
+    requirements = normalize_rule_asset_requirements(
+        bundle_gate.get("asset_requirements")
+        or report.get("asset_requirements")
+        or (bundle.payload_json or {}).get("asset_requirements")
+    )
+    replay_gate = evaluate_requirement_replay_gate(
+        requirements=requirements,
+        replay=replay,
+        context_gate=context_gate,
+    )
     privacy = dict(context.privacy_report_json or {})
     counts = dict(bundle_gate.get("asset_counts") or {})
     blockers: list[str] = []
 
-    if settings.get("mode") != "auto_publish":
-        blockers.append("automation mode does not permit automatic publishing")
+    if not source_integrity or source_integrity.get("success") is not True:
+        blockers.append("immutable source evidence was not revalidated")
     if bundle.status != "pending_approval":
         blockers.append("bundle is not pending approval")
     if report.get("success") is not True or bundle_gate.get("success") is not True:
@@ -347,41 +385,58 @@ def evaluate_unattended_publish_gate(
         "offline_period_authoritative_runs"
     ):
         blockers.append("context is not backed by an offline patrol asset-source job")
-    if len(context.dataset_ids_json or []) < int(settings["min_period_count"]):
+    if requirements["requires_historical_replay"] and (
+        len(context.dataset_ids_json or []) < int(settings["min_period_count"])
+    ):
         blockers.append("insufficient independent patrol periods")
-    if int(privacy.get("sampled_record_count") or 0) < int(settings["min_record_count"]):
+    if requirements["requires_historical_replay"] and (
+        int(privacy.get("sampled_record_count") or 0)
+        < int(settings["min_record_count"])
+    ):
         blockers.append("insufficient sanitized structured records")
     if unit is None:
         blockers.append("command production unit is missing")
-    elif int(unit.device_count or 0) < int(settings["min_device_count"]):
+    elif requirements["requires_historical_replay"] and (
+        int(unit.device_count or 0) < int(settings["min_device_count"])
+    ):
         blockers.append("insufficient device coverage")
-    if int(counts.get("OBSERVATION_CONTRACT") or 0) != 1:
-        blockers.append("bundle must contain exactly one ObservationContract")
-    if int(counts.get("CHANGE_POLICY") or 0) < 1:
-        blockers.append("bundle contains no ChangePolicy")
-    if int(counts.get("EVENT_RULE") or 0) < 1:
-        blockers.append("bundle contains no EventRule")
-    if int(replay.get("matched_change_count") or 0) < 1:
-        blockers.append("historical replay matched no Change")
-    if int(replay.get("collision_count") or 0) > 0:
-        blockers.append("historical replay has collisions")
-    estimated = float(replay.get("estimated_daily_event_count") or 0)
-    if estimated > float(settings["max_estimated_daily_events"]):
-        blockers.append("estimated daily event volume exceeds the automation limit")
-    if not settings.get("allow_critical"):
-        critical = [
-            child.id
+    composition_errors = rule_asset_composition_errors(
+        counts=counts,
+        requirements=requirements,
+        change_policy_roles=[
+            dict((child.payload_json or {}).get("policy") or {})
+            for child in children
+            if child.job_type == "CHANGE_POLICY"
+        ],
+        event_rule_roles=[
+            {
+                **dict((child.payload_json or {}).get("rule") or {}),
+                "observation_types": list(
+                    dict(
+                        (
+                            (child.payload_json or {}).get("rule")
+                            or {}
+                        ).get("condition")
+                        or {}
+                    ).get("observation_types")
+                    or []
+                ),
+            }
             for child in children
             if child.job_type == "EVENT_RULE"
-            and str(((child.payload_json or {}).get("rule") or {}).get("severity") or "").casefold()
-            == "critical"
-        ]
-        if critical:
-            blockers.append("critical EventRules require human approval")
+        ],
+    )
+    blockers.extend(composition_errors)
+    estimated = float(replay.get("estimated_daily_event_count") or 0)
+    if (
+        requirements["requires_historical_replay"]
+        and estimated > float(settings["max_estimated_daily_events"])
+    ):
+        blockers.append("estimated daily event volume exceeds the automation limit")
 
     automation = dict((seed.payload_json or {}).get("automation") or {})
-    if automation.get("requested_mode") != "auto_publish":
-        blockers.append("seed was not dispatched under auto-publish mode")
+    if automation.get("managed_by") != AUTOMATION_ACTOR:
+        blockers.append("seed is not managed by rule asset automation")
     return {
         "success": not blockers,
         "blockers": list(dict.fromkeys(blockers)),
@@ -391,11 +446,13 @@ def evaluate_unattended_publish_gate(
         "dataset_count": len(context.dataset_ids_json or []),
         "device_count": int(unit.device_count or 0) if unit else 0,
         "record_count": int(privacy.get("sampled_record_count") or 0),
+        "asset_requirements": requirements,
+        "publish_authority": "human_only",
     }
 
 
 class RuleAssetAutomationService:
-    """Continuously advance offline rule assets and preserve human takeover."""
+    """Advance offline candidates while preserving mandatory human release gates."""
 
     def __init__(
         self,
@@ -403,16 +460,12 @@ class RuleAssetAutomationService:
         settings_repository: RuleAssetAutomationSettingsRepository | None = None,
         context_service: DatasetRuleGenerationContextService | None = None,
         activation_service: RuleAssetTemplateActivationService | None = None,
-        review_service: RuleAssetEngineeringRevisionService | None = None,
-        approval_service: RuleAssetApprovalService | None = None,
     ) -> None:
         self.settings_repository = (
             settings_repository or RuleAssetAutomationSettingsRepository()
         )
         self.context_service = context_service or DatasetRuleGenerationContextService()
         self.activation_service = activation_service or RuleAssetTemplateActivationService()
-        self.review_service = review_service or RuleAssetEngineeringRevisionService()
-        self.approval_service = approval_service or RuleAssetApprovalService()
 
     def run_once(self, *, limit: int | None = None, force: bool = False) -> dict[str, Any]:
         settings = self.settings_repository.get()
@@ -441,7 +494,8 @@ class RuleAssetAutomationService:
         )
         recovered = self._reconcile_stale_runs(settings=settings, limit=batch_limit * 4)
         advanced = self._advance_pending_bundles(settings=settings, limit=batch_limit)
-        available_slots = max(0, batch_limit - int(advanced["published_count"]))
+        active_generation_runs = self._active_generation_run_count()
+        available_slots = max(0, batch_limit - active_generation_runs)
         dispatched = self._dispatch_ready_seeds(
             settings=settings,
             limit=available_slots,
@@ -459,6 +513,7 @@ class RuleAssetAutomationService:
             "review_required": review_required,
             "recovered": recovered["recovered"],
             "failed": [*advanced["failed"], *dispatched["failed"]],
+            "active_generation_runs": active_generation_runs,
             "dispatched_count": len(dispatched["dispatched"]),
             "published_count": len(advanced["published"]),
             "review_required_count": len(review_required),
@@ -473,6 +528,18 @@ class RuleAssetAutomationService:
         }
         self.settings_repository.record_run(result)
         return result
+
+    @staticmethod
+    def _active_generation_run_count() -> int:
+        with get_db_session() as db:
+            return int(
+                db.query(WorkflowRun)
+                .filter(
+                    WorkflowRun.template_name == "rule-asset-generation",
+                    WorkflowRun.status.in_(ACTIVE_WORKFLOW_STATUSES),
+                )
+                .count()
+            )
 
     @staticmethod
     def _reconcile_stale_runs(
@@ -606,72 +673,33 @@ class RuleAssetAutomationService:
         failed: list[dict[str, str]] = []
         for candidate in candidates:
             bundle_id = candidate["bundle_id"]
-            if settings["mode"] != "auto_publish":
-                review_required.append(
-                    {
-                        "bundle_id": bundle_id,
-                        "reason": "automatic generation completed; human release approval required",
-                    }
-                )
-                self._record_seed_state(
-                    candidate["seed_id"],
-                    status="awaiting_approval",
-                    blockers=[],
-                )
-                continue
             gate = candidate["gate"]
-            if not gate["success"]:
-                review_required.append(
-                    {
-                        "bundle_id": bundle_id,
-                        "reason": "automatic publish gate blocked",
-                        "blockers": gate["blockers"],
-                    }
-                )
-                self._record_seed_state(
-                    candidate["seed_id"],
-                    status="needs_review",
-                    blockers=gate["blockers"],
-                )
-                continue
-            try:
-                self.review_service.review(
-                    bundle_id,
-                    decision="accepted",
-                    actor=AUTOMATION_ACTOR,
-                    reason=(
-                        "无人值守工程复核：脱敏、完整性、历史回放、冲突和事件量门禁均已通过。"
+            blockers = list(gate.get("blockers") or [])
+            review_required.append(
+                {
+                    "bundle_id": bundle_id,
+                    "reason": (
+                        "automatic generation completed; independent human "
+                        "review and release approval are mandatory"
                     ),
-                )
-                self.approval_service.approve(
-                    bundle_id,
-                    actor=AUTOMATION_ACTOR,
-                    reason=(
-                        "无人值守发布：双周期离线证据与严格自动发布门禁全部通过。"
+                    "readiness": (
+                        "ready_for_review"
+                        if gate.get("success") is True
+                        else "engineering_revision_required"
                     ),
-                )
-                published.append(bundle_id)
-                self._record_seed_state(
-                    candidate["seed_id"],
-                    status="published",
-                    blockers=[],
-                    bundle_id=bundle_id,
-                )
-                if candidate.get("offline_job_id"):
-                    from src.core.rule_control.command_asset_units import (
-                        RuleAssetCommandUnitService,
-                    )
-
-                    RuleAssetCommandUnitService().reconcile(
-                        str(candidate["offline_job_id"])
-                    )
-            except Exception as exc:
-                failed.append({"bundle_id": bundle_id, "error": str(exc)})
-                self._record_seed_state(
-                    candidate["seed_id"],
-                    status="needs_review",
-                    blockers=[str(exc)],
-                )
+                    "blockers": blockers,
+                }
+            )
+            self._record_seed_state(
+                candidate["seed_id"],
+                status=(
+                    "awaiting_approval"
+                    if gate.get("success") is True
+                    else "needs_review"
+                ),
+                blockers=blockers,
+                bundle_id=bundle_id,
+            )
         return {
             "published": published,
             "review_required": review_required,
@@ -682,13 +710,13 @@ class RuleAssetAutomationService:
     def _pending_bundle_candidates(self, *, limit: int) -> list[dict[str, Any]]:
         from sqlalchemy.orm import aliased
 
-        Seed = aliased(RuleGenerationJobRecord)
+        seed_model = aliased(RuleGenerationJobRecord)
         with get_db_session() as db:
             rows = (
                 db.query(
                     RuleGenerationJobRecord,
                     RuleGenerationContextRecord,
-                    Seed,
+                    seed_model,
                     RuleAssetCommandUnitRecord,
                 )
                 .join(
@@ -696,10 +724,13 @@ class RuleAssetAutomationService:
                     RuleGenerationContextRecord.id
                     == RuleGenerationJobRecord.payload_json["context_id"].as_string(),
                 )
-                .join(Seed, Seed.id == RuleGenerationContextRecord.job_id)
+                .join(
+                    seed_model,
+                    seed_model.id == RuleGenerationContextRecord.job_id,
+                )
                 .outerjoin(
                     RuleAssetCommandUnitRecord,
-                    RuleAssetCommandUnitRecord.rule_seed_job_id == Seed.id,
+                    RuleAssetCommandUnitRecord.rule_seed_job_id == seed_model.id,
                 )
                 .filter(
                     RuleGenerationJobRecord.job_type == "RULE_ASSET_BUNDLE",
@@ -732,6 +763,25 @@ class RuleAssetAutomationService:
                     if child_ids
                     else []
                 )
+                try:
+                    context_gate = dict(
+                        (bundle.validation_report_json or {}).get("context_gate")
+                        or {}
+                    )
+                    source_integrity = require_current_rule_generation_context(
+                        db,
+                        context,
+                        expected_context_digest=str(
+                            context_gate.get("context_digest")
+                            or (bundle.payload_json or {}).get("context_digest")
+                            or ""
+                        ),
+                    )
+                except (KeyError, ValueError) as exc:
+                    source_integrity = {
+                        "success": False,
+                        "error": str(exc),
+                    }
                 gate = evaluate_unattended_publish_gate(
                     bundle=bundle,
                     context=context,
@@ -739,7 +789,17 @@ class RuleAssetAutomationService:
                     unit=unit,
                     settings=settings,
                     children=children,
+                    source_integrity=source_integrity,
                 )
+                if source_integrity.get("success") is not True:
+                    gate["blockers"] = list(
+                        dict.fromkeys(
+                            [
+                                *gate["blockers"],
+                                str(source_integrity.get("error") or ""),
+                            ]
+                        )
+                    )
                 candidates.append(
                     {
                         "bundle_id": str(bundle.id),
@@ -761,7 +821,9 @@ class RuleAssetAutomationService:
     ) -> dict[str, list[Any]]:
         if limit <= 0:
             return {"dispatched": [], "review_required": [], "failed": []}
-        candidates = self._seed_candidates(limit=max(limit * 5, 10))
+        # Scan beyond the dispatch quota because evidence-blocked historical
+        # seeds must not starve newer production-ready candidates.
+        candidates = self._seed_candidates(limit=max(limit * 20, 100))
         dispatched: list[dict[str, Any]] = []
         review_required: list[dict[str, Any]] = []
         failed: list[dict[str, str]] = []
@@ -857,6 +919,9 @@ class RuleAssetAutomationService:
     @staticmethod
     def _seed_candidates(*, limit: int) -> list[dict[str, Any]]:
         with get_db_session() as db:
+            automation_status = RuleGenerationJobRecord.payload_json["automation"][
+                "status"
+            ].as_string()
             rows = (
                 db.query(
                     RuleGenerationJobRecord,
@@ -877,14 +942,17 @@ class RuleAssetAutomationService:
                     RuleGenerationJobRecord.job_type == "OBSERVATION_CONTRACT",
                     RuleAssetCommandUnitRecord.asset_mode == "full_chain",
                     RuleAssetCommandUnitRecord.parser_template_id.isnot(None),
+                    RuleAssetCommandUnitRecord.current_stage == "change_policy",
                     RuleAssetCommandUnitRecord.status.notin_(["completed", "running"]),
                     OfflinePatrolJobRecord.status == "completed",
+                    OfflinePatrolJobRecord.archived.is_(False),
                 )
                 .order_by(
+                    case((automation_status == "needs_evidence", 1), else_=0),
                     RuleAssetCommandUnitRecord.updated_at,
                     RuleAssetCommandUnitRecord.id,
                 )
-                .limit(max(1, min(limit, 100)))
+                .limit(max(1, min(limit, 500)))
                 .all()
             )
             output: list[dict[str, Any]] = []

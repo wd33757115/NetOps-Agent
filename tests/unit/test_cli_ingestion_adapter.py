@@ -284,13 +284,18 @@ def test_check_item_collection_skips_fallback_after_usable_primary(tmp_path):
     assert calls == ["display cpu-usage"]
     assert [item["status"] for item in manifest["commands"]] == [
         "complete",
-        "fallback_not_needed",
+        "ignored_legacy_fallback",
     ]
     assert manifest["status"] == "complete"
+    assert manifest["command_selection"] == {
+        "policy": "primary_only",
+        "unsupported_action": "log_only",
+    }
+    assert manifest["check_item_fallback"]["enabled"] is False
     assert manifest["check_item_fallback"]["satisfied_binding_count"] == 1
 
 
-def test_check_item_collection_uses_fallback_after_unsupported_primary(tmp_path):
+def test_check_item_collection_logs_primary_failure_without_using_fallback(tmp_path):
     calls = []
     binding = {
         "check_item_version_id": "check-cpu-v1",
@@ -337,10 +342,10 @@ def test_check_item_collection_uses_fallback_after_unsupported_primary(tmp_path)
     )
 
     manifest = load_command_collection_manifest(output_file)
-    assert calls == ["display cpu-usage", "display cpu"]
+    assert calls == ["display cpu-usage"]
     assert [item["status"] for item in manifest["commands"]] == [
         "command_unsupported",
-        "complete",
+        "ignored_legacy_fallback",
     ]
-    assert manifest["commands"][1]["selected_for_bindings"]
-    assert manifest["status"] == "complete"
+    assert not manifest["commands"][1]["selected_for_bindings"]
+    assert manifest["status"] == "failed"

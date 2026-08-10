@@ -151,3 +151,69 @@ def test_parser_spec_rejects_unqualified_canonical_candidate():
                 },
             }
         )
+
+
+def test_parser_spec_v2_supports_optional_record_sets_and_numeric_unavailability():
+    payload = {
+        "version": 2,
+        "business_purpose": "Inspect optional optical diagnostics",
+        "record_sets": [
+            {
+                "name": "optical_channels",
+                "entity": "interface_optical_channel",
+                "cardinality": "repeated",
+                "presence": "optional",
+                "primary_keys": ["interface", "channel"],
+                "fields": {
+                    "interface": {"required": True, "type": "interface_name"},
+                    "channel": {"required": True, "type": "number"},
+                    "rx_power_dbm": {
+                        "required": True,
+                        "type": "number",
+                        "unavailable_tokens": ["N/A", "--"],
+                    },
+                },
+                "allow_empty": False,
+                "empty_patterns": [],
+            }
+        ],
+    }
+
+    document = ParserSpecDocument.from_dict(payload)
+
+    assert document.to_dict() == {**payload, "record_sets": [{**payload["record_sets"][0], "expected_records": []}]}
+    record_set = document.record_sets[0]
+    assert record_set.presence == "optional"
+    assert record_set.field_map["rx_power_dbm"].validator() == {
+        "type": "number",
+        "unavailable_tokens": ["N/A", "--"],
+    }
+
+
+def test_parser_spec_v2_treats_single_unavailable_token_as_one_value():
+    payload = {
+        "version": 2,
+        "business_purpose": "Inspect optical receive power",
+        "record_sets": [
+            {
+                "name": "optical_power",
+                "entity": "interface_optical",
+                "cardinality": "repeated",
+                "primary_keys": ["interface"],
+                "fields": {
+                    "interface": {"required": True, "type": "interface_name"},
+                    "rx_power_dbm": {
+                        "required": True,
+                        "type": "number",
+                        "unavailable_tokens": "N/A",
+                    },
+                },
+            }
+        ],
+    }
+
+    document = ParserSpecDocument.from_dict(payload)
+
+    assert document.record_sets[0].field_map["rx_power_dbm"].unavailable_tokens == (
+        "N/A",
+    )

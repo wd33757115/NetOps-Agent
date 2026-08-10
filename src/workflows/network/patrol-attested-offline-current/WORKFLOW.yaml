@@ -1,0 +1,62 @@
+# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
+# SPDX-License-Identifier: Apache-2.0
+
+name: patrol-attested-offline-current
+description: 经独立证明的离线当前证据按冻结生产规则执行巡检分析
+version: "1.0"
+
+test:
+  context:
+    execution_plan: {}
+    execution_plan_id: ""
+    patrol_batch_id: ""
+    device_id: ""
+    publish_events: false
+  required_context:
+    - execution_plan
+    - execution_plan_id
+    - patrol_batch_id
+    - device_id
+
+steps:
+  - name: source_replay
+    label: 核验并重放当前证据
+    skill: patrol-attested-offline-replay
+    inputs:
+      execution_plan: ${context.execution_plan}
+      execution_plan_id: ${context.execution_plan_id}
+
+  - name: state_normalization
+    label: 生成标准状态观察
+    skill: state-normalizer
+    inputs:
+      run_id: ${steps.source_replay.result.snapshot_run_id}
+      update_current_state: true
+
+  - name: change_detection
+    label: 检测网络变化
+    skill: change-detector
+    inputs:
+      current_run_id: ${steps.source_replay.result.snapshot_run_id}
+      device_id: ${context.device_id}
+      use_state_observations: true
+      persist: true
+      runtime_asset_manifest: ${steps.source_replay.result.runtime_asset_manifest}
+
+  - name: event_building
+    label: 评估事件并形成检查项结论
+    skill: event-builder
+    inputs:
+      run_id: ${steps.source_replay.result.snapshot_run_id}
+      persist: true
+      publish: ${context.publish_events}
+      runtime_asset_manifest: ${steps.source_replay.result.runtime_asset_manifest}
+      patrol_batch_id: ${context.patrol_batch_id}
+      device_id: ${context.device_id}
+
+on_complete:
+  message: 经证明的离线当前巡检分析已完成
+  notification:
+    title: 当前巡检分析已完成
+    body: 证据重放、状态、变化、事件和检查项结论已经形成。
+    level: success

@@ -300,14 +300,10 @@ export const CommandAssetDetail: React.FC<{
                               ))}
                             </Space>
                           )}
-                          {stage.next_action?.target_url && stage.status !== 'passed' && (
-                            <Button
-                              size="small"
-                              icon={<ArrowRightOutlined />}
-                              onClick={() => handleStageAction(stage.next_action?.target_url || '')}
-                            >
-                              {stage.next_action.label}
-                            </Button>
+                          {stage.key === detail.current_stage && detail.next_action?.description && (
+                            <Typography.Text type="secondary">
+                              当前下一步：{detail.next_action.description}
+                            </Typography.Text>
                           )}
                         </Space>
                       ),

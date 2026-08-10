@@ -6,8 +6,12 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from src.core.rule_control.repository import RuleGenerationJobRepository
+from src.common.governance import actor_matches_any
 from src.core.rule_control.replay_gate import evaluate_historical_replay_gate
+from src.core.rule_control.repository import RuleGenerationJobRepository
+from src.core.rule_control.source_scope import (
+    require_current_rule_generation_context,
+)
 from src.core.skills.executor import SkillExecutionError, execute_skill
 from src.infrastructure.db.models import (
     ObservationContractRecord,
@@ -123,13 +127,15 @@ class RuleAssetEngineeringRevisionService:
         *,
         decision: str,
         actor: str,
-        reason: str,
+        reason: str | None = None,
+        allow_same_actor: bool = False,
     ) -> dict[str, Any]:
         normalized = str(decision or "").strip().lower()
         if normalized not in {"accepted", "revision_requested"}:
             raise ValueError("engineering review decision must be accepted or revision_requested")
-        if len(str(reason or "").strip()) < 5:
-            raise ValueError("engineering review reason must contain at least 5 characters")
+        normalized_reason = str(reason or "").strip()
+        if normalized == "revision_requested" and len(normalized_reason) < 5:
+            raise ValueError("engineering revision request must contain at least 5 characters")
         with get_db_session() as db:
             bundle = (
                 db.query(RuleGenerationJobRecord)
@@ -144,14 +150,65 @@ class RuleAssetEngineeringRevisionService:
                 raise KeyError("rule asset bundle not found")
             if bundle.status != "pending_approval":
                 raise ValueError("only a pending approval bundle can be reviewed")
+            child_ids = [
+                str(item)
+                for item in dict(bundle.payload_json or {}).get("child_job_ids") or []
+                if str(item)
+            ]
+            child_creators = (
+                [
+                    row.created_by
+                    for row in (
+                        db.query(RuleGenerationJobRecord)
+                        .filter(RuleGenerationJobRecord.id.in_(child_ids))
+                        .all()
+                    )
+                ]
+                if child_ids
+                else []
+            )
+            same_as_creator = actor_matches_any(
+                actor,
+                [bundle.created_by, *child_creators],
+            )
+            if same_as_creator and not allow_same_actor:
+                raise ValueError(
+                    "engineering review requires a reviewer different from "
+                    "the candidate creator"
+                )
             report = dict(bundle.validation_report_json or {})
+            context_gate = dict(report.get("context_gate") or {})
+            if context_gate.get("mode") == "immutable_dataset_context":
+                context_id = str(context_gate.get("context_id") or "").strip()
+                context = (
+                    db.query(RuleGenerationContextRecord)
+                    .filter(RuleGenerationContextRecord.id == context_id)
+                    .with_for_update()
+                    .one_or_none()
+                )
+                if context is None:
+                    raise ValueError(
+                        "engineering review immutable context is unavailable"
+                    )
+                require_current_rule_generation_context(
+                    db,
+                    context,
+                    expected_context_digest=str(
+                        context_gate.get("context_digest")
+                        or (bundle.payload_json or {}).get("context_digest")
+                        or ""
+                    ),
+                )
             governance = dict(report.get("governance") or {})
             history = list(governance.get("engineering_review_history") or [])
             review = {
                 "decision": normalized,
                 "actor": actor,
-                "reason": str(reason).strip(),
+                "reason": normalized_reason,
                 "reviewed_at": _now_iso(),
+                "separation_of_duties_override": bool(
+                    same_as_creator and allow_same_actor
+                ),
                 "base_digest": bundle.asset_digest,
             }
             history.append(review)
@@ -206,14 +263,17 @@ class RuleAssetEngineeringRevisionService:
             context = db.get(RuleGenerationContextRecord, context_id) if context_id else None
             if context is None:
                 raise ValueError("engineering revision requires the original immutable context")
-            privacy = dict(context.privacy_report_json or {})
-            if (
-                not context.offline_job_id
-                or privacy.get("scope_type") != "offline_period_authoritative_runs"
-                or privacy.get("success") is not True
-                or privacy.get("raw_cli_included") is not False
-            ):
-                raise ValueError("engineering revision immutable context privacy gate failed")
+            parent_report = dict(parent.validation_report_json or {})
+            parent_context_gate = dict(parent_report.get("context_gate") or {})
+            source_integrity = require_current_rule_generation_context(
+                db,
+                context,
+                expected_context_digest=str(
+                    parent_context_gate.get("context_digest")
+                    or payload.get("context_digest")
+                    or ""
+                ),
+            )
             child_ids = [str(item) for item in payload.get("child_job_ids") or []]
             contract_child = (
                 db.query(RuleGenerationJobRecord)
@@ -244,6 +304,7 @@ class RuleAssetEngineeringRevisionService:
                 "schema_id": contract_record.schema_id,
                 "schema_ref": contract_record.schema_ref,
                 "source_template_id": contract_record.source_template_id,
+                "source_integrity": source_integrity,
             }
 
         contract_result = _execute_revision_skill(
@@ -286,6 +347,9 @@ class RuleAssetEngineeringRevisionService:
             "event-rule-replay",
             {
                 "candidate_rules": event_rules,
+                "candidate_contract": (
+                    contract_result.get("proposal") or contract
+                ),
                 "limit": 1000,
                 "run_ids": detached["context"].get("replay_run_ids") or [],
                 "include_active_collisions": True,
@@ -298,6 +362,7 @@ class RuleAssetEngineeringRevisionService:
             "context_id": detached["context_id"],
             "context_digest": detached["context_digest"],
             "replay_run_ids": detached["context"].get("replay_run_ids") or [],
+            "source_integrity": detached["source_integrity"],
         }
         replay_gate = evaluate_historical_replay_gate(replay, context_gate)
         validation = {

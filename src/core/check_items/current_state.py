@@ -5,11 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from collections.abc import Callable
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any
 
+from src.core.check_items.assessment_policy import validate_assessment_basis
 from src.core.state.observation_applicability import APPLICABILITY_CONTEXT_KEY
 from src.infrastructure.db.models import (
     CheckExecutionRecord,
@@ -81,12 +83,14 @@ class CurrentStateEvaluationInput:
     rules: tuple[dict[str, Any], ...]
     runtime_assets: tuple[dict[str, Any], ...]
     assessed_at: datetime
+    assessment_policy_snapshot: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
 class CurrentStateEvaluationResult:
     coverage: dict[str, Any]
     finding_values: tuple[dict[str, Any], ...]
+    assessment_basis: dict[str, Any] = field(default_factory=dict)
 
     @property
     def finding_ids(self) -> tuple[str, ...]:
@@ -140,7 +144,12 @@ class CurrentStateEvaluationService:
             frozen_rules,
             rule_source="check_item_runtime_bundle",
             rule_bundle_digest=data.runtime_bundle_digest,
+            runtime_bundle_version_id=data.runtime_bundle_version_id,
+            assessment_policy_snapshot=data.assessment_policy_snapshot,
         )
+        assessment_basis = dict(coverage.get("assessment_basis") or {})
+        if not validate_assessment_basis(assessment_basis):
+            raise ValueError("current-state aggregate AssessmentBasis is invalid")
         values: list[dict[str, Any]] = []
         for finding in coverage["findings"]:
             observation_id = str(finding.get("observation_id") or "")
@@ -150,6 +159,10 @@ class CurrentStateEvaluationService:
                 raise ValueError(
                     "frozen current-state Finding lacks observation or rule version evidence"
                 )
+            finding_basis = dict(finding.get("assessment_basis") or {})
+            if not validate_assessment_basis(finding_basis):
+                raise ValueError("current-state Finding AssessmentBasis is invalid")
+            finding_basis_digest = str(finding_basis["digest"])
             evidence_refs = sorted(
                 {
                     str(value)
@@ -162,11 +175,17 @@ class CurrentStateEvaluationService:
                         rule_version_id,
                         data.runtime_bundle_version_id,
                         data.check_execution_id,
+                        f"assessment-basis:{finding_basis_digest}",
                     )
                     if str(value or "").strip()
                 }
             )
-            evidence_digest = _digest(evidence_refs)
+            evidence_digest = _digest(
+                {
+                    "evidence_refs": evidence_refs,
+                    "assessment_basis_digest": finding_basis_digest,
+                }
+            )
             identity_payload = {
                 "batch_id": data.patrol_batch_id,
                 "execution_id": data.check_execution_id,
@@ -174,6 +193,7 @@ class CurrentStateEvaluationService:
                 "rule_version_id": rule_version_id,
                 "dimensions": dict(finding.get("dimensions") or {}),
                 "runtime_bundle_digest": data.runtime_bundle_digest,
+                "assessment_basis_digest": finding_basis_digest,
             }
             idempotency_key = _digest(identity_payload)
             finding_id = str(
@@ -209,9 +229,7 @@ class CurrentStateEvaluationService:
                     ),
                     "reference_value_number": _number(reference),
                     "reference_source": (
-                        "device_output"
-                        if finding.get("reference_field")
-                        else "approved_rule_constant"
+                        str(finding.get("reference_source") or "") or None
                     ),
                     "severity": str(finding.get("severity") or "warning"),
                     "event_type": str(finding.get("event_type") or ""),
@@ -223,12 +241,15 @@ class CurrentStateEvaluationService:
                     "assessed_at": data.assessed_at,
                     "evidence_refs_json": evidence_refs,
                     "evidence_digest": evidence_digest,
+                    "assessment_basis_json": finding_basis,
+                    "assessment_basis_digest": finding_basis_digest,
                     "created_at": datetime.now(timezone.utc),
                 }
             )
         return CurrentStateEvaluationResult(
             coverage=coverage,
             finding_values=tuple(values),
+            assessment_basis=assessment_basis,
         )
 
 

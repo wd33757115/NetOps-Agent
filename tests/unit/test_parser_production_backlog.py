@@ -215,6 +215,109 @@ def test_simple_parser_job_dispatch_accepts_one_confirmed_generation_sample():
             db.query(PatrolRun).filter_by(id=run_id).delete(synchronize_session=False)
 
 
+def test_new_data_sample_inherits_a_safe_role_after_parser_spec_confirmation():
+    token = uuid.uuid4().hex
+    run_id = f"parser-role-{token}"
+    model = f"N9K-{token}"
+    parser = ParserJobRepository()
+    patrol = PatrolRepository()
+    patrol.create_run(run_id=run_id, mode="parser_validation", source="unit-test")
+    job_id = ""
+    try:
+        first_snapshot_id, _ = patrol.save_snapshot_idempotent(
+            run_id=run_id,
+            device_id=f"SW1-{token}",
+            device_name="SW1",
+            vendor="Cisco",
+            model=model,
+            command="show inventory",
+            command_canonical="show inventory",
+            raw_text='NAME: "Chassis", DESCR: "Nexus chassis"\nPID: N9K, VID: V01, SN: ONE\n',
+            parse_status="template_missing",
+            execution_item_id=f"item-1-{token}",
+            import_fingerprint=f"fingerprint-1-{token}",
+        )
+        job_id = parser.create_candidate(
+            job_type="CREATE_TEMPLATE",
+            vendor="Cisco",
+            model=model,
+            family=None,
+            profile=model,
+            command="show inventory",
+            snapshot_id=first_snapshot_id,
+            device_id=f"SW1-{token}",
+            failure_code="template_missing",
+        )
+        parser.set_parser_spec(
+            job_id,
+            parser_spec={
+                "entity": "inventory_item",
+                "primary_keys": ["name"],
+                "fields": {
+                    "name": {"required": True, "type": "text"},
+                    "serial": {"required": True, "type": "text"},
+                },
+            },
+            confirmed=True,
+            actor="unit-test",
+            reason="confirm inventory semantic fields",
+        )
+
+        second_snapshot_id, _ = patrol.save_snapshot_idempotent(
+            run_id=run_id,
+            device_id=f"SW2-{token}",
+            device_name="SW2",
+            vendor="Cisco",
+            model=model,
+            command="show inventory",
+            command_canonical="show inventory",
+            raw_text='NAME: "Chassis", DESCR: "Nexus chassis"\nPID: N9K, VID: V01, SN: TWO\n',
+            parse_status="template_missing",
+            execution_item_id=f"item-2-{token}",
+            import_fingerprint=f"fingerprint-2-{token}",
+        )
+        assert parser.create_candidate(
+            job_type="CREATE_TEMPLATE",
+            vendor="Cisco",
+            model=model,
+            family=None,
+            profile=model,
+            command="show inventory",
+            snapshot_id=second_snapshot_id,
+            device_id=f"SW2-{token}",
+            failure_code="template_missing",
+        ) == job_id
+
+        job = parser.get_job(job_id)
+        roles_by_device = {
+            sample["device_id"]: sample["sample_role"] for sample in job["samples"]
+        }
+        assert roles_by_device[f"SW1-{token}"] == "unassigned"
+        assert roles_by_device[f"SW2-{token}"] == "generation"
+    finally:
+        with get_db_session() as db:
+            if job_id:
+                sample_ids = [
+                    row[0]
+                    for row in db.query(ParserJobSample.id)
+                    .filter(ParserJobSample.job_id == job_id)
+                    .all()
+                ]
+                db.query(AuditLogRecord).filter(
+                    AuditLogRecord.resource_id.in_([job_id, *sample_ids])
+                ).delete(synchronize_session=False)
+                db.query(ParserOutboxEvent).filter_by(aggregate_id=job_id).delete(
+                    synchronize_session=False
+                )
+                db.query(ParserJobSample).filter_by(job_id=job_id).delete(
+                    synchronize_session=False
+                )
+                db.query(ParserTemplateJob).filter_by(id=job_id).delete(
+                    synchronize_session=False
+                )
+            db.query(PatrolRun).filter_by(id=run_id).delete(synchronize_session=False)
+
+
 def test_duplicate_asset_cleanup_hard_deletes_history_without_merging():
     token = uuid.uuid4().hex
     historical_id = f"historical-{token}"

@@ -3,26 +3,29 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import yaml
 
 DEFAULT_CANONICAL_CATALOG_PATH = (
-    Path(__file__).parent / "assets" / "canonical_observations.v1.yaml"
+    Path(__file__).parent / "assets" / "canonical_observations.v3.yaml"
 )
 
 
 @dataclass(frozen=True, slots=True)
 class CanonicalObservationDefinition:
     id: str
+    description: str
     semantic_type: str
     value_types: tuple[str, ...]
     canonical_unit: str | None
     dimensions: tuple[str, ...]
     allowed_dimension_values: dict[str, tuple[str, ...]]
+    allowed_values: tuple[Any, ...]
     assessment_roles: tuple[str, ...]
 
 
@@ -86,6 +89,7 @@ def load_canonical_catalog(
         observations.append(
             CanonicalObservationDefinition(
                 id=observation_type,
+                description=str(raw.get("description") or "").strip(),
                 semantic_type=semantic_type,
                 value_types=value_types,
                 canonical_unit=(
@@ -95,6 +99,7 @@ def load_canonical_catalog(
                 ),
                 dimensions=dimensions,
                 allowed_dimension_values=allowed,
+                allowed_values=tuple(raw.get("allowed_values") or ()),
                 assessment_roles=roles,
             )
         )
@@ -105,6 +110,198 @@ def load_canonical_catalog(
         digest=hashlib.sha256(content).hexdigest(),
         observations=tuple(observations),
     )
+
+
+def _validate_event_constraints(
+    *,
+    prefix: str,
+    raw: Any,
+) -> list[str]:
+    if raw is None:
+        return []
+    if not isinstance(raw, dict):
+        return [f"{prefix}.event_constraints must be an object"]
+
+    errors: list[str] = []
+    role_event_types_raw = raw.get("role_event_types")
+    if not isinstance(role_event_types_raw, dict) or not role_event_types_raw:
+        return [
+            f"{prefix}.event_constraints.role_event_types "
+            "must be a non-empty object"
+        ]
+    role_event_types = {
+        str(role).strip(): str(event_type).strip()
+        for role, event_type in role_event_types_raw.items()
+        if str(role).strip() and str(event_type).strip()
+    }
+    if len(role_event_types) != len(role_event_types_raw):
+        errors.append(
+            f"{prefix}.event_constraints.role_event_types "
+            "must contain non-empty string pairs"
+        )
+
+    declared_event_types = raw.get("required_event_types")
+    if declared_event_types is None:
+        event_types = set(role_event_types.values())
+    elif not isinstance(declared_event_types, list):
+        errors.append(
+            f"{prefix}.event_constraints.required_event_types "
+            "must be a list"
+        )
+        event_types = set()
+    else:
+        event_types = {
+            str(item).strip()
+            for item in declared_event_types
+            if str(item).strip()
+        }
+        if len(event_types) != len(declared_event_types):
+            errors.append(
+                f"{prefix}.event_constraints.required_event_types "
+                "must contain unique non-empty strings"
+            )
+        missing_role_types = sorted(
+            set(role_event_types.values()) - event_types
+        )
+        if missing_role_types:
+            errors.append(
+                f"{prefix}.event_constraints.required_event_types "
+                "does not include role event types: "
+                + ", ".join(missing_role_types)
+            )
+
+    event_classes_raw = raw.get("required_event_classes")
+    event_classes = (
+        {
+            str(event_type).strip(): str(event_class).strip()
+            for event_type, event_class in event_classes_raw.items()
+            if str(event_type).strip() and str(event_class).strip()
+        }
+        if isinstance(event_classes_raw, dict)
+        else {}
+    )
+    if not isinstance(event_classes_raw, dict):
+        errors.append(
+            f"{prefix}.event_constraints.required_event_classes "
+            "must be an object"
+        )
+    elif set(event_classes) != event_types:
+        errors.append(
+            f"{prefix}.event_constraints.required_event_classes "
+            "must cover exactly the required event types"
+        )
+    invalid_classes = sorted(
+        {
+            value
+            for value in event_classes.values()
+            if value not in {"fault", "recovery"}
+        }
+    )
+    if invalid_classes:
+        errors.append(
+            f"{prefix}.event_constraints has invalid event classes: "
+            + ", ".join(invalid_classes)
+        )
+
+    severities_raw = raw.get("required_severities")
+    severities = (
+        {
+            str(event_type).strip(): str(severity).strip().casefold()
+            for event_type, severity in severities_raw.items()
+            if str(event_type).strip() and str(severity).strip()
+        }
+        if isinstance(severities_raw, dict)
+        else {}
+    )
+    if not isinstance(severities_raw, dict):
+        errors.append(
+            f"{prefix}.event_constraints.required_severities "
+            "must be an object"
+        )
+    elif set(severities) != event_types:
+        errors.append(
+            f"{prefix}.event_constraints.required_severities "
+            "must cover exactly the required event types"
+        )
+    invalid_severities = sorted(
+        {
+            value
+            for value in severities.values()
+            if value
+            not in {"info", "warning", "minor", "major", "critical"}
+        }
+    )
+    if invalid_severities:
+        errors.append(
+            f"{prefix}.event_constraints has invalid severities: "
+            + ", ".join(invalid_severities)
+        )
+
+    recovery_pairs_raw = raw.get("required_recovery_pairs")
+    if not isinstance(recovery_pairs_raw, list):
+        errors.append(
+            f"{prefix}.event_constraints.required_recovery_pairs "
+            "must be a list"
+        )
+        recovery_pairs_raw = []
+    recovery_pairs: set[tuple[str, str]] = set()
+    for index, item in enumerate(recovery_pairs_raw):
+        if not isinstance(item, dict):
+            errors.append(
+                f"{prefix}.event_constraints.required_recovery_pairs"
+                f"[{index}] must be an object"
+            )
+            continue
+        pair = (
+            str(item.get("fault") or "").strip(),
+            str(item.get("recovery") or "").strip(),
+        )
+        if not all(pair):
+            errors.append(
+                f"{prefix}.event_constraints.required_recovery_pairs"
+                f"[{index}] requires fault and recovery"
+            )
+            continue
+        recovery_pairs.add(pair)
+        fault_type, recovery_type = pair
+        if event_classes.get(fault_type) != "fault":
+            errors.append(
+                f"{prefix}.{fault_type} must be declared as fault"
+            )
+        if event_classes.get(recovery_type) != "recovery":
+            errors.append(
+                f"{prefix}.{recovery_type} must be declared as recovery"
+            )
+    paired_recovery_types = {
+        recovery_type for _fault_type, recovery_type in recovery_pairs
+    }
+    unpaired_recovery_types = sorted(
+        {
+            event_type
+            for event_type, event_class in event_classes.items()
+            if event_class == "recovery"
+        }
+        - paired_recovery_types
+    )
+    if unpaired_recovery_types:
+        errors.append(
+            f"{prefix}.event_constraints has recovery events without "
+            "fault pairs: "
+            + ", ".join(unpaired_recovery_types)
+        )
+
+    max_rule_count = raw.get("max_rule_count")
+    if max_rule_count is not None:
+        try:
+            maximum = int(max_rule_count)
+        except (TypeError, ValueError):
+            maximum = 0
+        if maximum < len(event_types):
+            errors.append(
+                f"{prefix}.event_constraints.max_rule_count must be "
+                f"at least {len(event_types)}"
+            )
+    return errors
 
 
 def validate_check_item_contract(
@@ -206,6 +403,17 @@ def validate_check_item_contract(
                 f"{check_item_id}.{observation_type} uses unapproved dimensions: "
                 + ", ".join(unknown_dimensions)
             )
+        required = row.get("required", True)
+        if not isinstance(required, bool):
+            errors.append(
+                f"{check_item_id}.{observation_type} required must be a boolean"
+            )
+        errors.extend(
+            _validate_event_constraints(
+                prefix=f"{check_item_id}.{observation_type}",
+                raw=row.get("event_constraints"),
+            )
+        )
     return tuple(dict.fromkeys(errors))
 
 

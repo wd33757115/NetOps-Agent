@@ -22,7 +22,7 @@ class KeyValueCompiler:
         orders: list[list[tuple[str, str]]] = []
         for sample in generation_samples:
             rows: list[tuple[str, str]] = []
-            for line in sample.raw_text.splitlines():
+            for line in sample.validation_text.splitlines():
                 match = re.match(r"^\s*([^:]{1,80}?)\s*:\s*(.*?)\s*$", line)
                 if not match:
                     continue

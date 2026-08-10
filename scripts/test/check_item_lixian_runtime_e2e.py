@@ -4,13 +4,14 @@
 The script temporarily binds the already-approved H3C MSR5620 ``display
 version`` Parser to a check-item-compatible ObservationContract and
 RuntimeBundle. Every database write lives inside one outer transaction and is
-rolled back by default, so the evidence run cannot activate test assets in
+always rolled back, so the evidence run cannot activate test assets in
 production.
 """
 
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import sys
@@ -27,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from src.core.check_items.canonical import load_canonical_catalog
 from src.core.check_items.catalog import (
     CheckItemCatalog,
     CheckItemCatalogRepository,
@@ -37,7 +39,15 @@ from src.core.check_items.planning import (
     build_inventory_snapshot,
     build_target_manifest,
 )
+from src.core.check_items.report_contract import (
+    OFFLINE_HISTORICAL,
+    report_authority_context_is_valid,
+)
 from src.core.check_items.report_manifest import ReportManifestService
+from src.core.check_items.report_content_review import (
+    REQUIRED_CONTENT_CONFIRMATIONS,
+    ReportContentReviewService,
+)
 from src.core.check_items.report_release import ReportReleaseService
 from src.core.check_items.reporting import (
     CheckItemReportMaterializer,
@@ -46,6 +56,9 @@ from src.core.check_items.reporting import (
 )
 from src.core.check_items.run_finalizer import CheckItemRunFinalizer
 from src.core.check_items.runtime_bundle import CheckItemRuntimeBundleService
+from src.core.check_items.runtime_bundle_assembly import (
+    derive_asset_requirement_profile,
+)
 from src.core.observation import ObservationContractRepository
 from src.core.parser_generation.validation import TextFSMValidationBackend
 from src.core.patrol.command_splitter import (
@@ -55,15 +68,15 @@ from src.core.patrol.command_splitter import (
 from src.core.state.normalizer import observations_from_snapshot
 from src.core.state.repository import StateRepository
 from src.infrastructure.db.models import (
-    CheckAssessmentRecord,
-    CheckItemImplementationLinkRecord,
-    CheckItemCollectionActionRecord,
-    CheckItemRuntimeBundleVersionRecord,
     ChangePolicyRecord,
     ChangePolicyVersionRecord,
+    CheckAssessmentRecord,
+    CheckItemCollectionActionRecord,
+    CheckItemImplementationLinkRecord,
+    CheckItemRuntimeBundleVersionRecord,
+    CollectionImplementationParserBindingRecord,
     CollectionImplementationRecord,
     CollectionImplementationVersionRecord,
-    CollectionImplementationParserBindingRecord,
     CommandSnapshot,
     CoverageDecisionRecord,
     EvidenceQualificationRecord,
@@ -83,12 +96,6 @@ PARSER_MODEL = "MSR5620"
 CANONICAL_COMMAND = "display version"
 CHECK_ITEM_ID = "device.version"
 IMPLEMENTATION_ID = "h3c-device-version"
-EXPECTED_OBSERVATION_TYPES = {
-    "device.hardware.model",
-    "device.software.version",
-}
-
-
 def _database_baseline(parser_id: str | None = None) -> dict[str, Any]:
     with get_db_session() as db:
         active_contract = None
@@ -137,7 +144,10 @@ def _load_real_sample(source_file: Path) -> dict[str, Any]:
     }
 
 
-def _contract_validation(parsed_records: list[dict[str, Any]]) -> dict[str, Any]:
+def _contract_validation(
+    parsed_records: list[dict[str, Any]],
+    canonical_contract: dict[str, Any],
+) -> dict[str, Any]:
     emitted_fields = {
         str(field)
         for record in parsed_records
@@ -150,10 +160,31 @@ def _contract_validation(parsed_records: list[dict[str, Any]]) -> dict[str, Any]
             "approved Parser output lacks device identity fields: "
             + ", ".join(missing)
         )
+    canonical_entity_type = str(
+        canonical_contract.get("entity_type") or ""
+    ).strip()
+    identity_fields = [
+        str(item)
+        for item in canonical_contract.get("identity_dimensions") or []
+    ]
+    unsupported_identity_fields = sorted(
+        set(identity_fields) - {"device_id"}
+    )
+    if unsupported_identity_fields:
+        raise AssertionError(
+            "device.version E2E cannot project unsupported canonical identity "
+            "dimensions: " + ", ".join(unsupported_identity_fields)
+        )
     ignored = sorted(emitted_fields - {"software_version", "model"})
     return {
         "entity_type": "device",
         "primary_keys": [],
+        "canonical_entity_type": canonical_entity_type,
+        "entity_identity_fields": identity_fields,
+        "entity_dimensions": {
+            field: {"context": field}
+            for field in identity_fields
+        },
         "required_fields": sorted(required),
         "optional_fields": sorted(emitted_fields - required),
         "validators": {
@@ -185,11 +216,72 @@ def _contract_validation(parsed_records: list[dict[str, Any]]) -> dict[str, Any]
     }
 
 
+def _clone_parser(
+    db: Any,
+    source: dict[str, Any],
+    *,
+    run_token: str,
+    now: datetime,
+) -> ParserTemplate:
+    values = {
+        key: copy.deepcopy(value)
+        for key, value in source.items()
+        if key in ParserTemplate.__table__.columns.keys()
+    }
+    parser_id = str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"netops/lixian-runtime-e2e/parser/{source['id']}/{run_token}",
+        )
+    )
+    validation = copy.deepcopy(values.get("validation_json") or {})
+    compatibility = copy.deepcopy(validation.get("compatibility") or {})
+    compatibility.update(
+        {
+            "manifest_version": 1,
+            "scope": "model",
+            "vendor": "H3C",
+            "family": "Comware7",
+            "model": PARSER_MODEL,
+            "canonical_command": CANONICAL_COMMAND,
+        }
+    )
+    validation.update(
+        {
+            "compatibility": compatibility,
+            "sample_count": max(
+                1,
+                int(validation.get("sample_count") or 0),
+            ),
+            "unique_sample_count": max(
+                1,
+                int(validation.get("unique_sample_count") or 0),
+            ),
+        }
+    )
+    values.update(
+        id=parser_id,
+        profile=f"lixian-e2e-{run_token}-{source['profile']}"[:128],
+        version=f"lixian-e2e-{run_token}",
+        asset_path=f"transaction://lixian-runtime-e2e/{parser_id}",
+        status="active",
+        validation_json=validation,
+        source_job_id=None,
+        created_at=now,
+        updated_at=now,
+        activated_at=now,
+        deprecated_at=None,
+    )
+    parser = ParserTemplate(**values)
+    db.add(parser)
+    db.flush()
+    return parser
+
+
 def run_e2e(
     *,
     source_file: Path,
     output_dir: Path,
-    commit: bool,
 ) -> dict[str, Any]:
     source = _load_real_sample(source_file)
     block = source["block"]
@@ -217,9 +309,10 @@ def run_e2e(
             raise AssertionError(
                 "active H3C MSR5620 display version Parser is missing"
             )
-        parser_id = str(parser.id)
+        source_parser = parser.to_dict(include_content=True)
+        source_parser_id = str(parser.id)
         parser_text = str(parser.template_text or "")
-        parser_version = str(parser.version)
+        source_parser_version = str(parser.version)
 
     parsed_records = TextFSMValidationBackend().parse(
         parser_text,
@@ -245,9 +338,11 @@ def run_e2e(
     expected_full_version = (
         f"{expected_version}, Release {expected_release}"
     )
-    before = _database_baseline(parser_id)
+    before = _database_baseline(source_parser_id)
 
-    connection = engine.connect()
+    connection = engine.connect().execution_options(
+        isolation_level="REPEATABLE READ"
+    )
     outer_transaction = connection.begin()
     uploaded_report_prefix: str | None = None
     session_factory = sessionmaker(
@@ -287,6 +382,19 @@ def run_e2e(
             raise AssertionError(
                 "device.version catalog assets are not active"
             )
+        expected_observation_types = {
+            str(item.get("observation_type") or "")
+            for item in check_item.canonical_contract.get(
+                "observations"
+            )
+            or []
+            if isinstance(item, dict)
+            and str(item.get("observation_type") or "")
+        }
+        if not expected_observation_types:
+            raise AssertionError(
+                "device.version has no canonical observations"
+            )
         implementation_id = (
             f"h3c-msr5620-device-version-e2e-{run_token}"
         )
@@ -306,10 +414,9 @@ def run_e2e(
             },
             "commands": [
                 {
-                    "command": item.command,
-                    "priority": item.priority,
+                    "command": CANONICAL_COMMAND,
+                    "priority": 100,
                 }
-                for item in implementation.commands
             ],
             "collector": implementation.collector,
             "parser_requirement": implementation.parser_requirement,
@@ -329,6 +436,14 @@ def run_e2e(
             ).encode("utf-8")
         ).hexdigest()
         with scope() as db:
+            runtime_parser = _clone_parser(
+                db,
+                source_parser,
+                run_token=run_token,
+                now=now,
+            )
+            parser_id = str(runtime_parser.id)
+            parser_version = str(runtime_parser.version)
             db.add(
                 CollectionImplementationRecord(
                     id=implementation_id,
@@ -402,7 +517,10 @@ def run_e2e(
             ),
         )
 
-        validation = _contract_validation(parsed_records)
+        validation = _contract_validation(
+            parsed_records,
+            check_item.canonical_contract,
+        )
         with scope() as db:
             old_contract = (
                 db.query(ObservationContractRecord)
@@ -476,28 +594,53 @@ def run_e2e(
             contract_id = str(contract.contract_id)
 
         change_policy_version_ids: list[str] = []
+        canonical_catalog = load_canonical_catalog()
+        requirement_profile = derive_asset_requirement_profile(
+            result_mode=check_item.result_mode,
+            assessment_mode=check_item.assessment_mode,
+            canonical_rows=check_item.canonical_contract.get(
+                "observations"
+            )
+            or [],
+            canonical_catalog=canonical_catalog,
+        )
+        change_requirement = requirement_profile["requirements"][
+            "change_policy"
+        ]
+        change_required = set(
+            change_requirement.get("required_observation_types") or []
+        )
+        change_required.update(
+            set(
+                change_requirement.get(
+                    "conditional_observation_types"
+                )
+                or []
+            )
+            & expected_observation_types
+        )
         with scope() as db:
-            for observation_type in sorted(
-                EXPECTED_OBSERVATION_TYPES
-            ):
-                existing_policy = (
+            for observation_type in sorted(change_required):
+                (
                     db.query(ChangePolicyVersionRecord)
                     .filter(
                         ChangePolicyVersionRecord.observation_type
                         == observation_type,
                         ChangePolicyVersionRecord.status == "active",
                     )
-                    .first()
-                )
-                if existing_policy is not None:
-                    change_policy_version_ids.append(
-                        str(existing_policy.id)
+                    .update(
+                        {
+                            "status": "deprecated",
+                            "deprecated_at": now,
+                        },
+                        synchronize_session=False,
                     )
-                    continue
+                )
                 policy_id = str(
                     uuid.uuid5(
                         uuid.NAMESPACE_URL,
-                        f"netops/e2e-change-policy/{observation_type}",
+                        f"netops/e2e-change-policy/{run_token}/"
+                        f"{observation_type}",
                     )
                 )
                 version_id = str(
@@ -519,12 +662,11 @@ def run_e2e(
                         separators=(",", ":"),
                     ).encode("utf-8")
                 ).hexdigest()
-                policy_root = db.get(ChangePolicyRecord, policy_id)
-                if policy_root is None:
-                    policy_root = ChangePolicyRecord(
+                db.add(
+                    ChangePolicyRecord(
                         id=policy_id,
                         name=(
-                            "e2e:"
+                            f"e2e:{run_token}:"
                             + observation_type.replace(".", "_")
                         ),
                         observation_type=observation_type,
@@ -536,7 +678,7 @@ def run_e2e(
                         created_at=now,
                         updated_at=now,
                     )
-                    db.add(policy_root)
+                )
                 db.add(
                     ChangePolicyVersionRecord(
                         id=version_id,
@@ -561,18 +703,35 @@ def run_e2e(
                 change_policy_version_ids.append(version_id)
 
         bundle_service = CheckItemRuntimeBundleService(scope)
-        bundle = bundle_service.create_version(
+        bundle_preview = bundle_service.preview_assembly(
             check_item_version_id=check_item.version_id,
             implementation_version_id=implementation.version_id,
             parser_template_ids=[parser_id],
             observation_contract_ids=[contract_id],
             change_policy_version_ids=change_policy_version_ids,
-            event_rule_bindings={},
+            event_rule_version_ids=[],
+        )
+        if bundle_preview.get("blockers"):
+            raise AssertionError(
+                "runtime bundle preview is blocked: "
+                + json.dumps(
+                    bundle_preview["blockers"],
+                    ensure_ascii=False,
+                )
+            )
+        bundle = bundle_service.assemble(
+            check_item_version_id=check_item.version_id,
+            implementation_version_id=implementation.version_id,
+            parser_template_ids=[parser_id],
+            observation_contract_ids=[contract_id],
+            change_policy_version_ids=change_policy_version_ids,
+            event_rule_version_ids=[],
+            preview_digest=str(bundle_preview["preview_digest"]),
             actor="lixian-runtime-e2e",
         )
         bundle = bundle_service.activate(
             str(bundle["version_id"]),
-            actor="lixian-runtime-e2e",
+            actor="lixian-runtime-e2e-approver",
             reason="transactional real-sample acceptance test",
         )
 
@@ -633,7 +792,8 @@ def run_e2e(
                     workflow_name="check-item-lixian-runtime-e2e",
                     launch_mode="workflow",
                     patrol_mode="production",
-                    target_type="devices",
+                    report_purpose=OFFLINE_HISTORICAL,
+                    target_type="offline_import",
                     target_label="lixian real-sample runtime E2E",
                     selector_json={
                         "source": "lixian",
@@ -795,11 +955,11 @@ def run_e2e(
             canonical_observations = [
                 item
                 for item in domain_observations
-                if item.observation_type in EXPECTED_OBSERVATION_TYPES
+                if item.observation_type in expected_observation_types
             ]
             if {
                 item.observation_type for item in canonical_observations
-            } != EXPECTED_OBSERVATION_TYPES:
+            } != expected_observation_types:
                 raise AssertionError(
                     "canonical device.version observations are incomplete"
                 )
@@ -872,9 +1032,51 @@ def run_e2e(
             path = output_dir / artifact.filename
             path.write_bytes(artifact.content)
             artifact_paths[name] = str(path.resolve())
+        content_review_service = ReportContentReviewService(scope)
+        content_review = content_review_service.start(
+            str(manifest["id"]),
+            created_by="lixian-runtime-e2e-content-reviewer",
+        )
+        while int(content_review.get("pending_item_count") or 0) > 0:
+            pending_page = content_review_service.list_items(
+                str(manifest["id"]),
+                page=1,
+                page_size=200,
+                review_status="pending",
+            )
+            pending_ids = [
+                str(item["review_item_id"])
+                for item in pending_page["items"]
+            ]
+            if not pending_ids:
+                raise AssertionError(
+                    "content review reports pending items but none are readable"
+                )
+            content_review = content_review_service.decide_items(
+                str(manifest["id"]),
+                review_item_ids=pending_ids,
+                decision="accepted",
+                reviewed_by="lixian-runtime-e2e-content-reviewer",
+                review_comment=(
+                    "Transaction-scoped review of every required and sampled fact."
+                ),
+            )
+        content_acceptance = content_review_service.accept(
+            str(manifest["id"]),
+            accepted_by="lixian-runtime-e2e-content-reviewer",
+            acceptance_comment=(
+                "Transaction-scoped acceptance of content, evidence and "
+                "action wording."
+            ),
+            confirmations=REQUIRED_CONTENT_CONFIRMATIONS,
+            verified_artifact_sha256=dict(
+                manifest["artifact_sha256_json"]
+            ),
+            accepted_at=now,
+        )
         release = ReportReleaseService(scope).release(
             str(manifest["id"]),
-            signed_by="lixian-runtime-e2e",
+            signed_by="lixian-runtime-e2e-signer",
             signoff_comment=(
                 "Transactional acceptance confirms facts, disclosure "
                 "boundaries and exact artifact digests."
@@ -918,7 +1120,7 @@ def run_e2e(
             result = {
                 "schema_version": "check-item-lixian-runtime-e2e/v1",
                 "generated_at": now.isoformat(),
-                "rolled_back": not commit,
+                "rolled_back": True,
                 "source": {
                     "file": str(source_file.resolve()),
                     "sha256": source["source_sha256"],
@@ -927,6 +1129,8 @@ def run_e2e(
                     "command": CANONICAL_COMMAND,
                 },
                 "parser": {
+                    "source_template_id": source_parser_id,
+                    "source_version": source_parser_version,
                     "template_id": parser_id,
                     "version": parser_version,
                     "parsed_record_count": len(parsed_records),
@@ -939,6 +1143,9 @@ def run_e2e(
                 "runtime_bundle": {
                     "version_id": bundle["version_id"],
                     "digest": bundle["digest"],
+                    "assembly_preview_digest": bundle_preview[
+                        "preview_digest"
+                    ],
                     "expected_observation_types": sorted(
                         bundle["compatibility"][
                             "expected_observation_types"
@@ -978,6 +1185,15 @@ def run_e2e(
                         coverage_decision.observed_entity_count
                     ),
                     "report_manifest_status": manifest["status"],
+                    "report_purpose": report_view[
+                        "report_purpose"
+                    ],
+                    "conclusion_dimensions": report_view[
+                        "conclusion_dimensions"
+                    ],
+                    "report_authority_context": report_view[
+                        "report_authority_context"
+                    ],
                     "report_conclusion": report_view["conclusion"],
                     "source_facts_digest": manifest["source_digest"],
                 },
@@ -993,9 +1209,25 @@ def run_e2e(
                     "status": release["status"],
                     "release_digest": release["release_digest"],
                     "signed_by": release["signed_by"],
+                    "content_review_id": release[
+                        "content_review_id"
+                    ],
+                    "content_acceptance_digest": release[
+                        "content_acceptance_digest"
+                    ],
                     "artifact_sha256": dict(
                         release["artifact_sha256_json"]
                     ),
+                },
+                "content_acceptance": {
+                    "id": content_acceptance["id"],
+                    "acceptance_digest": content_acceptance[
+                        "acceptance_digest"
+                    ],
+                    "accepted_by": content_acceptance["accepted_by"],
+                    "accepted_item_count": content_acceptance[
+                        "accepted_item_count"
+                    ],
                 },
             }
         if result["facts"]["assessment_status"] != "informational":
@@ -1005,6 +1237,30 @@ def run_e2e(
         if result["facts"]["completeness_status"] != "complete":
             raise AssertionError(
                 "real device.version evidence must be complete"
+            )
+        if (
+            result["facts"]["report_purpose"]
+            != OFFLINE_HISTORICAL
+            or result["facts"]["conclusion_dimensions"]["authority"][
+                "code"
+            ]
+            != "historical"
+            or result["facts"]["report_conclusion"].get(
+                "current_state_authoritative"
+            )
+            is not False
+            or not report_authority_context_is_valid(
+                result["facts"]["report_authority_context"],
+                expected_purpose=OFFLINE_HISTORICAL,
+            )
+            or result["facts"]["report_authority_context"].get(
+                "current_state_eligible"
+            )
+            is not False
+        ):
+            raise AssertionError(
+                "offline historical evidence was promoted to current "
+                "production authority"
             )
         if (
             result["facts"]["source_identity_status"] != "confirmed"
@@ -1037,10 +1293,10 @@ def run_e2e(
             )
         if (
             result["facts"]["report_conclusion"]["code"]
-            != "informational_only"
+            != "historical_result"
         ):
             raise AssertionError(
-                "an evidence-only scope must not be reported as healthy"
+                "offline evidence must be reported as a historical result"
             )
         summary_path = output_dir / "summary.json"
         summary_path.write_text(
@@ -1049,26 +1305,23 @@ def run_e2e(
         )
         result["summary_path"] = str(summary_path.resolve())
 
-        if commit:
-            outer_transaction.commit()
-        else:
-            outer_transaction.rollback()
+        outer_transaction.rollback()
     except Exception:
         if outer_transaction.is_active:
             outer_transaction.rollback()
         raise
     finally:
         connection.close()
-        if not commit and uploaded_report_prefix:
+        if uploaded_report_prefix:
             get_minio_storage().delete_objects_by_prefix(
                 uploaded_report_prefix
             )
 
-    after = _database_baseline(parser_id)
+    after = _database_baseline(source_parser_id)
     result["database_baseline_before"] = before
     result["database_baseline_after"] = after
     result["database_unchanged"] = before == after
-    if not commit and before != after:
+    if before != after:
         raise AssertionError(
             "transactional E2E changed production runtime assets"
         )
@@ -1098,16 +1351,10 @@ def main() -> int:
         type=Path,
         default=ROOT / ".tmp" / "check-item-lixian-e2e",
     )
-    parser.add_argument(
-        "--commit",
-        action="store_true",
-        help="Commit test assets and facts (unsafe; rollback is the default)",
-    )
     args = parser.parse_args()
     result = run_e2e(
         source_file=args.source_file.resolve(),
         output_dir=args.output_dir.resolve(),
-        commit=bool(args.commit),
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0

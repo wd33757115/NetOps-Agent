@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import re
 from collections.abc import Callable
@@ -23,7 +24,13 @@ from src.core.ingestion.adapters.cli import (
 )
 from src.core.parser.identity import DeviceIdentity, DeviceIdentityResolver
 from src.core.parser.runtime import ParserRuntime
-from src.core.patrol.concurrency import DistributedPatrolSemaphore
+from src.core.patrol.concurrency import (
+    DistributedPatrolSemaphore,
+    HierarchicalConcurrencyLease,
+    HierarchicalPatrolLeaseManager,
+    PatrolConcurrencyLeaseLostError,
+    PatrolConcurrencyUnavailableError,
+)
 from src.core.patrol.modes import PRODUCTION_MODE, normalize_patrol_mode
 
 
@@ -260,6 +267,49 @@ class PatrolTool:
             enabled=settings.PATROL_DISTRIBUTED_CONCURRENCY_ENABLED,
             fail_closed=settings.PATROL_CONCURRENCY_FAIL_CLOSED,
         )
+        self.hierarchical_lease_manager = HierarchicalPatrolLeaseManager(
+            global_semaphore=self.distributed_semaphore,
+            site_limit=settings.PATROL_SITE_MAX_CONCURRENCY,
+            lease_seconds=settings.PATROL_CONCURRENCY_LEASE_SECONDS,
+            wait_seconds=settings.PATROL_CONCURRENCY_WAIT_SECONDS,
+            enabled=settings.PATROL_DISTRIBUTED_CONCURRENCY_ENABLED,
+            fail_closed=settings.PATROL_CONCURRENCY_FAIL_CLOSED,
+        )
+
+    @staticmethod
+    def _site_scope(device: dict[str, Any]) -> str:
+        attributes = dict(device.get("attributes") or {})
+        return str(
+            device.get("site")
+            or attributes.get("site")
+            or device.get("group")
+            or attributes.get("group")
+            or "__unassigned__"
+        )
+
+    def _assert_concurrency_lease(self, lease: Any) -> None:
+        if isinstance(lease, HierarchicalConcurrencyLease):
+            self.hierarchical_lease_manager.assert_lease(lease)
+            return
+        self.distributed_semaphore.assert_lease(lease)
+
+    @staticmethod
+    def _concurrency_failure_code(exc: Exception) -> str:
+        if isinstance(exc, PatrolConcurrencyLeaseLostError):
+            return "concurrency_lease_lost"
+        if isinstance(exc, PatrolConcurrencyUnavailableError):
+            return "concurrency_control_unavailable"
+        if isinstance(exc, TimeoutError):
+            return "concurrency_lease_timeout"
+        return "device_task_failed"
+
+    @staticmethod
+    def _decorate_concurrency_result(
+        result: dict[str, Any],
+        lease: HierarchicalConcurrencyLease,
+    ) -> None:
+        result["concurrency_mode"] = lease.effective_mode
+        result["device_fencing_token"] = lease.fencing_token
 
     @staticmethod
     def _production_coverage(device: dict[str, Any], commands: list[str]) -> list[dict[str, Any]]:
@@ -293,7 +343,21 @@ class PatrolTool:
             _validate_plan_for_device(device=device, plan=plan, action="patrol", mode=mode)
             coverage_preflight: list[dict[str, Any]] = []
             coverage_decision: dict[str, Any] | None = None
-            if mode == PRODUCTION_MODE:
+            check_item_plan = any(
+                item.check_item_bindings for item in plan.commands
+            )
+            if mode == PRODUCTION_MODE and check_item_plan:
+                # The Effective Plan already resolved and froze an approved
+                # RuntimeBundle. Re-running the legacy global Parser lookup
+                # here can disagree with that immutable decision after cache
+                # refreshes or asset rollout and must not override it.
+                coverage_decision = {
+                    "decision": "allow",
+                    "failure_code": None,
+                    "authority": "frozen_runtime_bundle",
+                    "violations": [],
+                }
+            elif mode == PRODUCTION_MODE:
                 from src.core.patrol.coverage_policy import decide_parser_coverage
 
                 coverage_decision = decide_parser_coverage(
@@ -328,15 +392,26 @@ class PatrolTool:
                         "coverage_preflight": coverage_preflight,
                         "coverage_decision": coverage_decision,
                     }
+            collector = copy.copy(self.cli_collector)
+            collection_device = dict(device)
             if concurrency_lease is not None:
-                self.cli_collector.continuation_guard = lambda: (
-                    self.distributed_semaphore.assert_lease(concurrency_lease)
+                collector.continuation_guard = lambda: (
+                    self._assert_concurrency_lease(concurrency_lease)
                 )
+                if isinstance(concurrency_lease, HierarchicalConcurrencyLease):
+                    collection_device["concurrency_mode"] = (
+                        concurrency_lease.effective_mode
+                    )
+                    collection_device["device_fencing_token"] = (
+                        concurrency_lease.fencing_token
+                    )
             output_file = await asyncio.to_thread(
-                self.cli_collector.collect_command_outputs,
-                device=device,
+                collector.collect_command_outputs,
+                device=collection_device,
                 execution_plan=plan,
             )
+            if concurrency_lease is not None:
+                self._assert_concurrency_lease(concurrency_lease)
             manifest = load_command_collection_manifest(output_file)
             command_results = list(manifest.get("commands") or [])
             collection_status = str(manifest.get("status") or "unknown")
@@ -367,11 +442,16 @@ class PatrolTool:
                 "coverage_decision": coverage_decision,
             }
         except Exception as exc:
+            failure_code = self._concurrency_failure_code(exc)
             _record_connection_health(
                 self.db_manager,
                 device,
                 status="failed",
-                failure_code="connection_failed",
+                failure_code=(
+                    failure_code
+                    if failure_code != "device_task_failed"
+                    else "connection_failed"
+                ),
                 error=str(exc),
                 source="device-patrol",
             )
@@ -381,6 +461,11 @@ class PatrolTool:
                 "ip": device.get("ip"),
                 "success": False,
                 "error": str(exc),
+                "failure_code": (
+                    failure_code
+                    if failure_code != "device_task_failed"
+                    else "connection_failed"
+                ),
                 "collection_status": "failed",
                 "execution_plan": (plan.to_metadata() if "plan" in locals() else None),
             }
@@ -411,31 +496,47 @@ class PatrolTool:
                 except asyncio.QueueEmpty:
                     return
                 try:
+                    callback_invoked = False
                     try:
-                        lease = await asyncio.to_thread(self.distributed_semaphore.acquire)
-                        with self.distributed_semaphore.maintain(lease):
+                        lease = await asyncio.to_thread(
+                            self.hierarchical_lease_manager.acquire,
+                            device_id=str(
+                                device.get("device_id")
+                                or device.get("ip")
+                                or device.get("management_ip")
+                                or device.get("device_name")
+                                or "unknown"
+                            ),
+                            site=self._site_scope(device),
+                        )
+                        with self.hierarchical_lease_manager.maintain(lease):
                             result = await self.patrol_device(
                                 device,
                                 save_baseline,
                                 mode=mode,
                                 concurrency_lease=lease,
                             )
-                        result["concurrency_mode"] = lease.effective_mode
+                            self._decorate_concurrency_result(result, lease)
+                            self.hierarchical_lease_manager.assert_lease(lease)
+                            await self._notify_result(result)
+                            callback_invoked = True
+                            self.hierarchical_lease_manager.assert_lease(lease)
                     except Exception as exc:
+                        failure_code = self._concurrency_failure_code(exc)
                         result = {
                             "inventory_device_id": device.get("device_id"),
                             "device_name": device.get("device_name"),
                             "ip": device.get("ip") or device.get("management_ip"),
                             "success": False,
-                            "failure_code": (
-                                "concurrency_lease_timeout"
-                                if isinstance(exc, TimeoutError)
-                                else "device_task_failed"
-                            ),
+                            "failure_code": failure_code,
                             "error": str(exc),
                             "collection_status": "failed",
                         }
-                    await self._notify_result(result)
+                    if (
+                        not callback_invoked
+                        and result.get("failure_code") != "concurrency_lease_lost"
+                    ):
+                        await self._notify_result(result)
                     indexed_results[index] = result
                 finally:
                     queue.task_done()
@@ -465,9 +566,20 @@ class PatrolTool:
                 action=ActionType.PATROL,
                 message=f"Execution plan device not found: {execution_plan.device_id}",
             )
+        callback_invoked = False
         try:
-            lease = await asyncio.to_thread(self.distributed_semaphore.acquire)
-            with self.distributed_semaphore.maintain(lease):
+            lease = await asyncio.to_thread(
+                self.hierarchical_lease_manager.acquire,
+                device_id=str(
+                    device.get("device_id")
+                    or device.get("ip")
+                    or device.get("management_ip")
+                    or device.get("device_name")
+                    or "unknown"
+                ),
+                site=self._site_scope(device),
+            )
+            with self.hierarchical_lease_manager.maintain(lease):
                 result = await self.patrol_device(
                     device,
                     save_baseline,
@@ -475,23 +587,25 @@ class PatrolTool:
                     execution_plan=execution_plan,
                     concurrency_lease=lease,
                 )
-            result["concurrency_mode"] = lease.effective_mode
+                self._decorate_concurrency_result(result, lease)
+                self.hierarchical_lease_manager.assert_lease(lease)
+                await self._notify_result(result)
+                callback_invoked = True
+                self.hierarchical_lease_manager.assert_lease(lease)
         except Exception as exc:
+            failure_code = self._concurrency_failure_code(exc)
             result = {
                 "inventory_device_id": device.get("device_id"),
                 "device_name": device.get("device_name"),
                 "ip": device.get("ip") or device.get("management_ip"),
                 "success": False,
-                "failure_code": (
-                    "concurrency_lease_timeout"
-                    if isinstance(exc, TimeoutError)
-                    else "device_task_failed"
-                ),
+                "failure_code": failure_code,
                 "error": str(exc),
                 "collection_status": "failed",
                 "execution_plan": execution_plan.to_metadata(),
             }
-        await self._notify_result(result)
+        if not callback_invoked and result.get("failure_code") != "concurrency_lease_lost":
+            await self._notify_result(result)
         return _task_result(ActionType.PATROL, [device], [result], started_at)
 
     async def _notify_result(self, result: dict[str, Any]) -> None:
@@ -503,6 +617,8 @@ class PatrolTool:
                 result["snapshot_persistence"] = persisted
         except Exception as exc:
             error = f"device result persistence failed: {exc}"
+            result["success"] = False
+            result["failure_code"] = "snapshot_persistence_failed"
             result["persistence_error"] = error
             result["snapshot_persistence"] = {
                 "snapshot_devices": 0,

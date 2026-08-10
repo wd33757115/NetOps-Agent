@@ -1,8 +1,21 @@
 """Bounded, job-oriented Parser generation primitives."""
 
 from .compilers import KeyValueCompiler, RepeatedBlockCompiler, TableCompiler
+from .ntc_resolver import (
+    NtcPlatformDecision,
+    NtcPlatformMapper,
+    NtcResolution,
+    NtcTemplateResolver,
+)
+from .ntc_upgrade import (
+    NTC_REGRESSION_BASELINE_VERSION,
+    NTC_REGRESSION_DECISION_VERSION,
+    compare_ntc_resolution,
+    freeze_ntc_resolution,
+)
 from .publishing import (
     PersistedGeneration,
+    RepositoryGenerationObserver,
     RepositoryModelCallController,
     latest_reusable_candidate,
     outcome_records,
@@ -11,32 +24,33 @@ from .publishing import (
     sample_set_digest,
 )
 from .samples import ParserSample, SampleExpectation, SampleRole, SampleSet
-from .ntc_resolver import (
-    NtcPlatformDecision,
-    NtcPlatformMapper,
-    NtcResolution,
-    NtcTemplateResolver,
-)
 from .service import (
     MAX_PARSER_MODEL_CALLS,
     PARSER_TOOL_PROTOCOL_VERSION,
     GenerationAttempt,
     GenerationOutcome,
     InMemoryModelCallController,
-    ModelCallBudgetExhausted,
+    ModelCallBudgetExhaustedError,
     ParserCandidateReviewer,
     ParserModelTurn,
     ParserReviewReport,
     SimpleParserGenerationService,
     TemplateCandidate,
 )
-from .spec import FieldSpec, ParserSpec, ParserSpecDocument
+from .spec import (
+    FieldSpec,
+    ParserSpec,
+    ParserSpecDocument,
+    normalize_parser_spec_payload,
+    parser_spec_digest,
+)
 from .validation import (
     TextFSMValidationBackend,
     ValidationReport,
     execute_template_candidate,
     validate_template_candidate,
     validate_template_execution,
+    validate_template_runtime_compatibility,
 )
 
 __all__ = [
@@ -52,13 +66,18 @@ __all__ = [
     "ParserReviewReport",
     "ParserSpec",
     "ParserSpecDocument",
+    "normalize_parser_spec_payload",
+    "parser_spec_digest",
     "PersistedGeneration",
+    "RepositoryGenerationObserver",
     "RepositoryModelCallController",
-    "ModelCallBudgetExhausted",
+    "ModelCallBudgetExhaustedError",
     "NtcPlatformDecision",
     "NtcPlatformMapper",
     "NtcResolution",
     "NtcTemplateResolver",
+    "NTC_REGRESSION_BASELINE_VERSION",
+    "NTC_REGRESSION_DECISION_VERSION",
     "SampleExpectation",
     "SampleRole",
     "SampleSet",
@@ -70,8 +89,11 @@ __all__ = [
     "TextFSMValidationBackend",
     "ValidationReport",
     "execute_template_candidate",
+    "freeze_ntc_resolution",
+    "compare_ntc_resolution",
     "validate_template_candidate",
     "validate_template_execution",
+    "validate_template_runtime_compatibility",
     "latest_reusable_candidate",
     "outcome_records",
     "persist_generation",

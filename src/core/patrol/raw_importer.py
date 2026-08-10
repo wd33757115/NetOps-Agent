@@ -144,6 +144,77 @@ def _import_fingerprint(
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def build_output_review_item_id(
+    *,
+    period_role: str,
+    source_relative_path: str,
+    device_id: str,
+    canonical_command: str,
+    start_line: int | None,
+    end_line: int | None,
+    raw_text_hash: str,
+) -> str:
+    """Build a stable ID for a job-local output disposition decision."""
+
+    payload = json.dumps(
+        {
+            "version": 1,
+            "period_role": str(period_role or "").strip().lower(),
+            "source_relative_path": str(source_relative_path or "")
+            .replace("\\", "/")
+            .strip("/"),
+            "device_id": str(device_id or "").strip(),
+            "canonical_command": " ".join(
+                str(canonical_command or "").strip().lower().split()
+            ),
+            "start_line": int(start_line or 0),
+            "end_line": int(end_line or 0),
+            "raw_text_hash": str(raw_text_hash or "").strip().lower(),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return f"output-review-{digest[:32]}"
+
+
+def _confirmed_output_disposition(
+    *,
+    metadata: dict[str, Any] | None,
+    device_id: str,
+    canonical_command: str,
+    start_line: int | None,
+    end_line: int | None,
+    raw_text: str,
+) -> dict[str, Any] | None:
+    if (raw_text or "").strip():
+        return None
+    period_role = str((metadata or {}).get("period_role") or "").strip()
+    source_relative_path = str(
+        (metadata or {}).get("source_relative_path") or ""
+    ).strip()
+    if not period_role or not source_relative_path:
+        return None
+    review_item_id = build_output_review_item_id(
+        period_role=period_role,
+        source_relative_path=source_relative_path,
+        device_id=device_id,
+        canonical_command=canonical_command,
+        start_line=start_line,
+        end_line=end_line,
+        raw_text_hash=hashlib.sha256((raw_text or "").encode("utf-8")).hexdigest(),
+    )
+    for raw in (metadata or {}).get("output_dispositions") or []:
+        item = dict(raw) if isinstance(raw, dict) else {}
+        if (
+            str(item.get("review_item_id") or "") == review_item_id
+            and str(item.get("decision") or "") == "ignore_valid_empty"
+        ):
+            return item
+    return None
+
+
 def _preview_parse_status(parsed: ParserRuntimeResult) -> str:
     """Project runtime outcomes onto the user-facing preview buckets."""
     if parsed.policy_status == "raw":
@@ -189,6 +260,27 @@ def _check_item_binding_metadata(
             if item.get("implementation_version_id")
         }
     )
+    contract_ref_by_id: dict[str, dict[str, str]] = {}
+    for binding in effective:
+        for raw_ref in binding.get("observation_contract_refs") or []:
+            if not isinstance(raw_ref, dict):
+                continue
+            contract_id = str(raw_ref.get("contract_id") or "").strip()
+            schema_id = str(raw_ref.get("schema_id") or "").strip()
+            digest = str(raw_ref.get("digest") or "").strip()
+            if not contract_id or not schema_id or len(digest) != 64:
+                continue
+            ref = {
+                "contract_id": contract_id,
+                "schema_id": schema_id,
+                "digest": digest,
+            }
+            existing = contract_ref_by_id.get(contract_id)
+            if existing is not None and existing != ref:
+                raise ValueError(
+                    "runtime bindings contain conflicting ObservationContract refs"
+                )
+            contract_ref_by_id[contract_id] = ref
     return {
         "collection_action_id": (
             str(command_collection.get("collection_item_id"))
@@ -221,9 +313,88 @@ def _check_item_binding_metadata(
                 if item.get("runtime_bundle_version_id")
             }
         ),
+        "observation_contract_refs": sorted(
+            contract_ref_by_id.values(),
+            key=lambda item: (item["schema_id"], item["contract_id"]),
+        ),
         "all_bindings": all_bindings,
         "selected_bindings": selected_bindings,
     }
+
+
+def _parse_capture_blocks(
+    *,
+    runtime: ParserRuntime,
+    identity: Any,
+    blocks: list[Any],
+) -> list[tuple[Any, ParserRuntimeResult]]:
+    parsed_blocks: list[tuple[Any, ParserRuntimeResult]] = []
+    for block in blocks:
+        try:
+            parsed = runtime.parse(
+                identity=identity,
+                command=block.command_canonical,
+                raw_text=block.raw_output,
+            )
+        except Exception as exc:
+            parsed = ParserRuntimeResult(
+                policy_status="eligible",
+                identity_status=identity.status,
+                parser_status="failed",
+                canonical_command=block.command_canonical,
+                handling="structured",
+                failure_code=f"parser_exception:{type(exc).__name__}",
+                identity_evidence={
+                    "confidence": identity.confidence,
+                    "source": identity.source,
+                    "command": identity.evidence_command,
+                    "text": identity.evidence_text,
+                },
+            )
+        parsed_blocks.append((block, parsed))
+    return parsed_blocks
+
+
+def _project_parser_result(
+    parsed: ParserRuntimeResult,
+) -> tuple[str, Any, str | None, str | None]:
+    parse_status = "raw_only"
+    structured = None
+    if (
+        parsed.handling == "raw_hash_diff"
+        and parsed.parser_status == "not_required"
+    ):
+        parse_status = "raw_hashed"
+        structured = parsed.structured_data
+    elif parsed.policy_status == "ignored":
+        parse_status = "ignored"
+    elif parsed.failure_code == "unsupported_command":
+        parse_status = "not_applicable"
+    elif parsed.failure_code in {
+        "empty_unverified",
+        "command_error",
+        "truncated",
+        "paged",
+    }:
+        parse_status = str(parsed.failure_code)
+    elif parsed.identity_status != "known":
+        parse_status = "identity_unknown"
+    elif parsed.parser_status == "unavailable":
+        parse_status = "template_missing"
+    elif parsed.parser_status == "empty":
+        parse_status = "parse_empty"
+        structured = []
+    elif parsed.parser_status == "success":
+        parse_status = "parsed"
+        structured = parsed.structured_data
+    else:
+        parse_status = "parse_failed"
+    return (
+        parse_status,
+        structured,
+        parsed.template_id,
+        parsed.template_version,
+    )
 
 
 def preview_raw_path(
@@ -263,6 +434,10 @@ def preview_raw_path(
         "ignored": 0,
         "raw_compare": 0,
         "identity_unknown": 0,
+        "empty_unverified": 0,
+        "command_error": 0,
+        "truncated": 0,
+        "paged": 0,
         "duplicate_snapshots": 0,
         "new_snapshots": 0,
     }
@@ -273,6 +448,11 @@ def preview_raw_path(
     for candidate in files:
         text = _read_text_best_effort(candidate)
         file_hash = hashlib.sha256(candidate.read_bytes()).hexdigest()
+        relative_path = (
+            candidate.name
+            if path.is_file()
+            else candidate.relative_to(path).as_posix()
+        )
         resolved_name, resolved_ip, _inspected = _resolve_capture_device(
             path=candidate,
             text=text,
@@ -317,12 +497,31 @@ def preview_raw_path(
                 raw_text=block.raw_output,
             )
             status = _preview_parse_status(parsed)
-            totals[status] += 1
+            totals[status] = totals.get(status, 0) + 1
             statuses[status] = statuses.get(status, 0) + 1
+            raw_text_hash = hashlib.sha256(
+                (block.raw_output or "").encode("utf-8")
+            ).hexdigest()
+            review_item_id = None
+            if status == "empty_unverified":
+                review_item_id = build_output_review_item_id(
+                    period_role=str((metadata or {}).get("period_role") or ""),
+                    source_relative_path=relative_path,
+                    device_id=device_id,
+                    canonical_command=block.command_canonical,
+                    start_line=block.start_line,
+                    end_line=block.end_line,
+                    raw_text_hash=raw_text_hash,
+                )
             command_results.append(
                 {
                     "command": block.command_canonical,
                     "status": status,
+                    "review_item_id": review_item_id,
+                    "start_line": block.start_line,
+                    "end_line": block.end_line,
+                    "raw_text_hash": raw_text_hash,
+                    "raw_text_length": len(block.raw_output or ""),
                     "template_id": parsed.template_id,
                     "template_version": parsed.template_version,
                     "failure_code": parsed.failure_code,
@@ -341,6 +540,7 @@ def preview_raw_path(
         file_results.append(
             {
                 "file_path": str(candidate),
+                "relative_path": relative_path,
                 "device_id": device_id,
                 "device_name": resolved_name,
                 "management_ip": resolved_ip,
@@ -414,65 +614,23 @@ def import_raw_capture(
 
         runtime_bundle = ParserRuntimeBundle.from_dict(parser_runtime_bundle)
     runtime = ParserRuntime(runtime_bundle=runtime_bundle)
+    block_output_dispositions = [
+        _confirmed_output_disposition(
+            metadata=metadata,
+            device_id=device_id,
+            canonical_command=block.command_canonical,
+            start_line=block.start_line,
+            end_line=block.end_line,
+            raw_text=block.raw_output,
+        )
+        for block in blocks
+    ]
     coverage = [
         runtime.check_coverage(
             identity=identity,
             command=block.command_canonical,
         )
         for block in blocks
-    ]
-    parsed_blocks = []
-    for block in blocks:
-        try:
-            parsed = runtime.parse(
-                identity=identity,
-                command=block.command_canonical,
-                raw_text=block.raw_output,
-            )
-        except Exception as exc:
-            parsed = ParserRuntimeResult(
-                policy_status="eligible",
-                identity_status=identity.status,
-                parser_status="failed",
-                canonical_command=block.command_canonical,
-                handling="structured",
-                failure_code=f"parser_exception:{type(exc).__name__}",
-                identity_evidence={
-                    "confidence": identity.confidence,
-                    "source": identity.source,
-                    "command": identity.evidence_command,
-                    "text": identity.evidence_text,
-                },
-            )
-        parsed_blocks.append((block, parsed))
-    for coverage_item, (_, parsed) in zip(coverage, parsed_blocks, strict=True):
-        if parsed.parser_status == "empty":
-            coverage_item["coverage_status"] = "not_required_for_empty"
-            coverage_item["failure_code"] = None
-        elif parsed.failure_code == "unsupported_command":
-            coverage_item["coverage_status"] = "not_applicable"
-            coverage_item["failure_code"] = "unsupported_command"
-        elif parsed.policy_status == "raw":
-            coverage_item["coverage_status"] = "ready"
-            coverage_item["failure_code"] = None
-    blocking = [
-        item
-        for item in coverage
-        if item["policy_status"] == "eligible"
-        and item["coverage_status"] not in {"ready", "not_required_for_empty", "not_applicable"}
-    ]
-    parse_violations = [
-        {
-            "canonical_command": parsed.canonical_command,
-            "parser_status": parsed.parser_status,
-            "failure_code": parsed.failure_code,
-            "template_id": parsed.template_id,
-            "template_version": parsed.template_version,
-        }
-        for _, parsed in parsed_blocks
-        if parsed.policy_status == "eligible"
-        and parsed.parser_status not in {"success", "empty"}
-        and parsed.failure_code != "unsupported_command"
     ]
 
     from src.core.patrol.repository import (
@@ -497,12 +655,13 @@ def import_raw_capture(
         canonical = " ".join(str(item.get("command") or "").strip().lower().split())
         status_queues.setdefault(canonical, []).append(item)
     block_collection_statuses = [
-        (status_queues.get(block.command_canonical) or [{}]).pop(0) for block, _ in parsed_blocks
+        (status_queues.get(block.command_canonical) or [{}]).pop(0)
+        for block in blocks
     ]
     command_observed_ats = [
         (command_collection.get("observed_at") or observed_at or inspected.observed_at_text)
-        for (block, _), command_collection in zip(
-            parsed_blocks, block_collection_statuses, strict=True
+        for block, command_collection in zip(
+            blocks, block_collection_statuses, strict=True
         )
     ]
     fingerprints = [
@@ -519,8 +678,8 @@ def import_raw_capture(
             command_ordinal=block.start_line,
             execution_item_id=command_collection.get("execution_item_id"),
         )
-        for (block, _), command_observed_at, command_collection in zip(
-            parsed_blocks,
+        for block, command_observed_at, command_collection in zip(
+            blocks,
             command_observed_ats,
             block_collection_statuses,
             strict=True,
@@ -544,8 +703,8 @@ def import_raw_capture(
                 fact_version="v1",
             )
         )
-        for (block, _), command_observed_at, command_collection in zip(
-            parsed_blocks,
+        for block, command_observed_at, command_collection in zip(
+            blocks,
             command_observed_ats,
             block_collection_statuses,
             strict=True,
@@ -558,22 +717,455 @@ def import_raw_capture(
         legacy if legacy and legacy in existing else current
         for current, legacy in zip(fingerprints, legacy_fingerprints, strict=True)
     ]
-    if fingerprints and all(fingerprint in existing for fingerprint in fingerprints):
-        existing_snapshots = [existing[fingerprint] for fingerprint in fingerprints]
+    all_preexisting = bool(
+        fingerprints
+        and all(fingerprint in existing for fingerprint in fingerprints)
+    )
+    import_source = str((metadata or {}).get("source") or "imported_file")
+    run_repository.ensure_dataset(
+        dataset_id=dataset_id,
+        name=str((metadata or {}).get("dataset_name") or dataset_id),
+        mode=mode,
+        source=import_source,
+        metadata={
+            "source_path": str(path.parent),
+            **(metadata or {}),
+        },
+    )
+    rid = run_repository.create_run(
+        run_id=run_id,
+        source=import_source,
+        mode=mode,
+        dataset_id=dataset_id,
+        metadata={
+            "file_path": str(path),
+            "prompt_style": inspected.prompt_style,
+            "patrol_mode": mode,
+            "dataset_id": dataset_id,
+            "parser_runtime_bundle_digest": (
+                runtime_bundle.digest if runtime_bundle is not None else None
+            ),
+            **(metadata or {}),
+        },
+        started_at=observed_at,
+        run_purpose=str(
+            (metadata or {}).get("run_purpose") or "scheduled_patrol"
+        ),
+        owner_token=run_owner_token,
+    )
+    output_facts = [
+        runtime.classify_output(
+            identity=identity,
+            command=block.command_canonical,
+            raw_text=block.raw_output,
+        )
+        for block in blocks
+    ]
+    persisted_snapshots: list[tuple[Any, bool]] = []
+    qualification_facts_by_execution: dict[
+        str,
+        list[dict[str, Any]],
+    ] = {}
+    patrol_batch_id = str(
+        (metadata or {}).get("patrol_batch_id") or ""
+    ).strip()
+    for (
+        block,
+        output_fact,
+        fingerprint,
+        command_observed_at,
+        command_collection,
+        output_disposition,
+    ) in zip(
+        blocks,
+        output_facts,
+        fingerprints,
+        command_observed_ats,
+        block_collection_statuses,
+        block_output_dispositions,
+        strict=True,
+    ):
+        binding_metadata = _check_item_binding_metadata(
+            command_collection
+        )
+        deterministic_snapshot_id = (
+            str(uuid.uuid5(uuid.NAMESPACE_URL, fingerprint))
+            if run_id
+            else None
+        )
+        snapshot_id, snapshot_created = (
+            snapshot_repository.save_snapshot_idempotent(
+                run_id=rid,
+                device_id=device_id,
+                device_name=device_name,
+                ip=ip,
+                vendor=vendor,
+                model=model,
+                command=block.command,
+                command_canonical=block.command_canonical,
+                raw_text=block.raw_output,
+                observed_at=command_observed_at,
+                structured_json=None,
+                parser_name=None,
+                parser_version=None,
+                parse_status="not_attempted",
+                output_status=str(
+                    output_fact.get("output_status")
+                    or "not_classified"
+                ),
+                dataset_id=dataset_id,
+                source_file_hash=source_file_hash,
+                import_fingerprint=fingerprint,
+                snapshot_id=deterministic_snapshot_id,
+                start_line=block.start_line,
+                end_line=block.end_line,
+                metadata={
+                    "patrol_mode": mode,
+                    "source_path": str(path),
+                    "collector_complete": collector_complete,
+                    "execution_item_id": command_collection.get(
+                        "execution_item_id"
+                    ),
+                    "collection_item_id": command_collection.get(
+                        "collection_item_id"
+                    ),
+                    "command_ordinal": command_collection.get(
+                        "command_ordinal"
+                    ),
+                    "handling": output_fact.get("handling"),
+                    "comparison_profile": output_fact.get(
+                        "comparison_profile"
+                    ),
+                    "comparison_profile_version": output_fact.get(
+                        "comparison_profile_version"
+                    ),
+                    "output_status": output_fact.get("output_status"),
+                    "output_reason": output_fact.get("output_reason"),
+                    "capability": output_fact.get("capability"),
+                    "capability_status": output_fact.get(
+                        "capability_status"
+                    ),
+                    "operator_output_disposition": output_disposition,
+                    "parser_runtime_bundle_digest": (
+                        runtime_bundle.digest
+                        if runtime_bundle is not None
+                        else None
+                    ),
+                    "check_item_version_ids": binding_metadata[
+                        "check_item_version_ids"
+                    ],
+                    "runtime_bundle_version_ids": binding_metadata[
+                        "runtime_bundle_version_ids"
+                    ],
+                    "observation_contract_refs": binding_metadata[
+                        "observation_contract_refs"
+                    ],
+                    "check_item_bindings": binding_metadata[
+                        "all_bindings"
+                    ],
+                    "selected_check_item_bindings": binding_metadata[
+                        "selected_bindings"
+                    ],
+                },
+                inventory_device_id=inventory_device_id,
+                execution_item_id=command_collection.get(
+                    "execution_item_id"
+                ),
+                collection_action_id=binding_metadata[
+                    "collection_action_id"
+                ],
+                implementation_version_id=binding_metadata[
+                    "implementation_version_id"
+                ],
+                check_item_ids=binding_metadata["check_item_ids"],
+                owner_token=run_owner_token,
+            )
+        )
+        stored_snapshot = snapshot_repository.get_snapshot(snapshot_id)
+        if (
+            stored_snapshot is None
+            or not stored_snapshot.execution_item_id
+        ):
+            raise RuntimeError(
+                f"persisted snapshot identity is unavailable: {snapshot_id}"
+            )
+        persisted_snapshots.append((stored_snapshot, snapshot_created))
+        if (
+            mode == PRODUCTION_MODE
+            and patrol_batch_id
+            and inventory_device_id
+            and binding_metadata["selected_bindings"]
+        ):
+            for binding in binding_metadata["selected_bindings"]:
+                check_item_version_id = str(
+                    binding.get("check_item_version_id") or ""
+                )
+                if not check_item_version_id:
+                    continue
+                execution_id = str(
+                    uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        f"netops/check-execution/{patrol_batch_id}/"
+                        f"{inventory_device_id}/{check_item_version_id}",
+                    )
+                )
+                qualification_facts_by_execution.setdefault(
+                    execution_id,
+                    [],
+                ).append(
+                    {
+                        "id": stored_snapshot.snapshot_id,
+                        "device_id": inventory_device_id,
+                        "source_device_id": inventory_device_id,
+                        "inventory_device_id": inventory_device_id,
+                        "output_status": stored_snapshot.output_status,
+                        "observed_at": stored_snapshot.observed_at,
+                    }
+                )
+
+    if collector_complete is False:
+        provisional_ids: list[str] = []
+        provisional_duplicates: list[str] = []
+        for (
+            block,
+            (snapshot, snapshot_created),
+            command_collection,
+        ) in zip(
+            blocks,
+            persisted_snapshots,
+            block_collection_statuses,
+            strict=True,
+        ):
+            provisional_ids.append(snapshot.snapshot_id)
+            if not snapshot_created:
+                provisional_duplicates.append(snapshot.snapshot_id)
+            execution_status = normalize_execution_status(
+                command_collection.get("status") or "failed"
+            )
+            parse_status = str(
+                snapshot.parse_status or "not_attempted"
+            )
+            command_status = derive_command_status(
+                execution_status=execution_status,
+                parse_status=parse_status,
+            )
+            binding_metadata = _check_item_binding_metadata(
+                command_collection
+            )
+            collection_repository.save_collection_result(
+                run_id=str(snapshot.run_id),
+                inventory_device_id=inventory_device_id,
+                device_id=str(inventory_device_id or snapshot.device_id),
+                canonical_command=block.command_canonical,
+                status=command_status.execution_status,
+                execution_status=command_status.execution_status,
+                parse_status=command_status.parse_status,
+                output_status=str(snapshot.output_status),
+                fact_status=command_status.fact_status,
+                normalization_status=(
+                    command_status.normalization_status
+                ),
+                authoritative_for_deletion=False,
+                baseline_eligible=False,
+                observed_entity_count=None,
+                failure_code=(
+                    None
+                    if execution_status == "complete"
+                    else execution_status
+                ),
+                observed_at=(
+                    command_collection.get("observed_at")
+                    or snapshot.observed_at
+                ),
+                execution_item_id=snapshot.execution_item_id,
+                collection_action_id=binding_metadata[
+                    "collection_action_id"
+                ],
+                metadata={
+                    "parse_status": parse_status,
+                    "execution_status": (
+                        command_status.execution_status
+                    ),
+                    "fact_status": command_status.fact_status,
+                    "normalization_status": (
+                        command_status.normalization_status
+                    ),
+                    "snapshot_id": snapshot.snapshot_id,
+                    "collector_complete": False,
+                    "parser_deferred": True,
+                    "collection_item_id": command_collection.get(
+                        "collection_item_id"
+                    ),
+                    "command_ordinal": command_collection.get(
+                        "command_ordinal"
+                    ),
+                    "check_item_version_ids": binding_metadata[
+                        "check_item_version_ids"
+                    ],
+                    "runtime_bundle_version_ids": binding_metadata[
+                        "runtime_bundle_version_ids"
+                    ],
+                    "observation_contract_refs": binding_metadata[
+                        "observation_contract_refs"
+                    ],
+                    "selected_check_item_bindings": (
+                        binding_metadata["selected_bindings"]
+                    ),
+                },
+                owner_token=run_owner_token,
+            )
+        provisional_blocking = [
+            item
+            for item in coverage
+            if item["policy_status"] == "eligible"
+            and item["coverage_status"] not in {"ready", "not_applicable"}
+        ]
+        return {
+            "success": True,
+            "run_id": rid,
+            "device_id": device_id,
+            "device_name": device_name,
+            "ip": ip,
+            "command_count": len(blocks),
+            "snapshot_ids": provisional_ids,
+            "new_snapshot_count": (
+                len(provisional_ids) - len(provisional_duplicates)
+            ),
+            "duplicate_snapshot_count": len(
+                provisional_duplicates
+            ),
+            "duplicate_snapshot_ids": provisional_duplicates,
+            "commands": [
+                block.command_canonical for block in blocks
+            ],
+            "vendor": vendor,
+            "model": model,
+            "family": identity.family,
+            "identity_status": identity.status,
+            "mode": mode,
+            "dataset_id": dataset_id,
+            "storage": "postgresql",
+            "legacy_db_path_ignored": (
+                str(db_path) if db_path else None
+            ),
+            "coverage": coverage,
+            "coverage_violations": provisional_blocking,
+            "parse_violations": [],
+            "production_parser_ready": False,
+            "collection_status": "running",
+            "parser_readiness_status": "pending",
+            "fact_readiness_status": "pending",
+            "parser_results": [
+                {
+                    "snapshot_id": snapshot.snapshot_id,
+                    "command": snapshot.command_canonical,
+                    "parse_status": snapshot.parse_status,
+                    "candidate_job_id": None,
+                    "parser_deferred": True,
+                }
+                for snapshot, _created in persisted_snapshots
+            ],
+        }
+
+    if qualification_facts_by_execution:
+        from src.core.check_items.execution import (
+            CheckItemExecutionService,
+        )
+
+        execution_service = CheckItemExecutionService()
+        for execution_id, raw_facts in sorted(
+            qualification_facts_by_execution.items()
+        ):
+            facts_by_snapshot_id = {
+                str(item["id"]): item for item in raw_facts
+            }
+            frozen_facts = tuple(
+                facts_by_snapshot_id[snapshot_id]
+                for snapshot_id in sorted(facts_by_snapshot_id)
+            )
+            execution_service.qualify_evidence(
+                execution_id,
+                snapshot_facts=frozen_facts,
+                evidence_refs=tuple(
+                    str(item["id"]) for item in frozen_facts
+                ),
+            )
+
+    parsed_blocks = _parse_capture_blocks(
+        runtime=runtime,
+        identity=identity,
+        blocks=blocks,
+    )
+    for coverage_item, (_, parsed), output_disposition in zip(
+        coverage,
+        parsed_blocks,
+        block_output_dispositions,
+        strict=True,
+    ):
+        if output_disposition:
+            coverage_item["coverage_status"] = "not_applicable"
+            coverage_item["failure_code"] = None
+            coverage_item["output_disposition"] = "ignore_valid_empty"
+        elif parsed.parser_status == "empty":
+            coverage_item["coverage_status"] = "not_required_for_empty"
+            coverage_item["failure_code"] = None
+        elif parsed.failure_code == "unsupported_command":
+            coverage_item["coverage_status"] = "not_applicable"
+            coverage_item["failure_code"] = "unsupported_command"
+        elif parsed.policy_status == "raw":
+            coverage_item["coverage_status"] = "ready"
+            coverage_item["failure_code"] = None
+    blocking = [
+        item
+        for item in coverage
+        if item["policy_status"] == "eligible"
+        and item["coverage_status"]
+        not in {"ready", "not_required_for_empty", "not_applicable"}
+    ]
+    parse_violations = [
+        {
+            "canonical_command": parsed.canonical_command,
+            "parser_status": parsed.parser_status,
+            "failure_code": parsed.failure_code,
+            "template_id": parsed.template_id,
+            "template_version": parsed.template_version,
+        }
+        for (_, parsed), output_disposition in zip(
+            parsed_blocks,
+            block_output_dispositions,
+            strict=True,
+        )
+        if parsed.policy_status == "eligible"
+        and parsed.parser_status not in {"success", "empty"}
+        and parsed.failure_code != "unsupported_command"
+        and not output_disposition
+    ]
+    if all_preexisting and all(
+        snapshot.parse_status != "not_attempted"
+        for snapshot, _created in persisted_snapshots
+    ):
+        existing_snapshots = [
+            snapshot for snapshot, _created in persisted_snapshots
+        ]
         # Streaming collection imports the growing capture repeatedly. The final
         # pass must reconcile command statuses even though the immutable snapshots
         # already exist; otherwise provisional failures remain stuck forever.
-        for (block, parsed), command_collection, snapshot in zip(
+        for (block, parsed), command_collection, snapshot, output_disposition in zip(
             parsed_blocks,
             block_collection_statuses,
             existing_snapshots,
+            block_output_dispositions,
             strict=True,
         ):
             execution_status = normalize_execution_status(
                 command_collection.get("status")
                 or ("failed" if collector_complete is False else "complete")
             )
-            parse_status = str(snapshot.parse_status or "not_attempted")
+            parse_status = (
+                "not_applicable"
+                if output_disposition
+                else str(snapshot.parse_status or "not_attempted")
+            )
             command_status = derive_command_status(
                 execution_status=execution_status,
                 parse_status=parse_status,
@@ -611,7 +1203,23 @@ def import_raw_capture(
                 authoritative_for_deletion=authoritative,
                 baseline_eligible=authoritative,
                 observed_entity_count=entity_count,
-                failure_code=parsed.failure_code,
+                failure_code=(
+                    None
+                    if output_disposition
+                    else parsed.failure_code
+                    or (
+                        str(snapshot.output_status)
+                        if parse_status
+                        in {
+                            "not_applicable",
+                            "empty_unverified",
+                            "command_error",
+                            "truncated",
+                            "paged",
+                        }
+                        else None
+                    )
+                ),
                 observed_at=command_collection.get("observed_at") or snapshot.observed_at,
                 execution_item_id=snapshot.execution_item_id,
                 collection_action_id=binding_metadata[
@@ -632,9 +1240,13 @@ def import_raw_capture(
                     "runtime_bundle_version_ids": binding_metadata[
                         "runtime_bundle_version_ids"
                     ],
+                    "observation_contract_refs": binding_metadata[
+                        "observation_contract_refs"
+                    ],
                     "selected_check_item_bindings": binding_metadata[
                         "selected_bindings"
                     ],
+                    "operator_output_disposition": output_disposition,
                 },
                 owner_token=run_owner_token,
             )
@@ -668,158 +1280,116 @@ def import_raw_capture(
                 {
                     "snapshot_id": snapshot.snapshot_id,
                     "command": snapshot.command_canonical,
-                    "parse_status": snapshot.parse_status,
+                    "parse_status": (
+                        "not_applicable"
+                        if output_disposition
+                        else snapshot.parse_status
+                    ),
                     "candidate_job_id": None,
+                    "output_disposition": output_disposition,
                 }
-                for snapshot in existing_snapshots
+                for snapshot, output_disposition in zip(
+                    existing_snapshots,
+                    block_output_dispositions,
+                    strict=True,
+                )
             ],
         }
-    import_source = str((metadata or {}).get("source") or "imported_file")
-    run_repository.ensure_dataset(
-        dataset_id=dataset_id,
-        name=str((metadata or {}).get("dataset_name") or dataset_id),
-        mode=mode,
-        source=import_source,
-        metadata={
-            "source_path": str(path.parent),
-            **(metadata or {}),
-        },
-    )
-    rid = run_repository.create_run(
-        run_id=run_id,
-        source=import_source,
-        mode=mode,
-        dataset_id=dataset_id,
-        metadata={
-            "file_path": str(path),
-            "prompt_style": inspected.prompt_style,
-            "patrol_mode": mode,
-            "dataset_id": dataset_id,
-            "parser_runtime_bundle_digest": (
-                runtime_bundle.digest if runtime_bundle is not None else None
-            ),
-            **(metadata or {}),
-        },
-        started_at=observed_at,
-        run_purpose=str((metadata or {}).get("run_purpose") or "scheduled_patrol"),
-        owner_token=run_owner_token,
-    )
-
     snapshot_ids: list[str] = []
     duplicate_snapshot_ids: list[str] = []
     parser_results: list[dict[str, Any]] = []
-    for (block, parsed), fingerprint, command_observed_at, command_collection in zip(
+    for (
+        (block, parsed),
+        (preparse_snapshot, snapshot_created),
+        command_observed_at,
+        command_collection,
+        output_disposition,
+    ) in zip(
         parsed_blocks,
-        fingerprints,
+        persisted_snapshots,
         command_observed_ats,
         block_collection_statuses,
+        block_output_dispositions,
         strict=True,
     ):
-        parse_status = "raw_only"
-        structured = None
-        parser_name = None
-        parser_version = None
-        if parsed.handling == "raw_hash_diff" and parsed.parser_status == "not_required":
-            parse_status = "raw_hashed"
-            structured = parsed.structured_data
-        elif parsed.policy_status == "ignored":
-            parse_status = "ignored"
-        elif parsed.failure_code == "unsupported_command":
-            parse_status = "not_applicable"
-        elif parsed.failure_code == "empty_unverified":
-            parse_status = "empty_unverified"
-        elif parsed.failure_code == "command_error":
-            parse_status = "command_error"
-        elif parsed.failure_code == "truncated":
-            parse_status = "truncated"
-        elif parsed.failure_code == "paged":
-            parse_status = "paged"
-        elif parsed.identity_status != "known":
-            parse_status = "identity_unknown"
-        elif parsed.parser_status == "unavailable":
-            parse_status = "template_missing"
-        elif parsed.parser_status == "empty":
-            parse_status = "parse_empty"
-            structured = []
-        elif parsed.parser_status == "success":
-            parse_status = "parsed"
-            structured = parsed.structured_data
-        else:
-            parse_status = "parse_failed"
-        parser_name = parsed.template_id
-        parser_version = parsed.template_version
-        deterministic_snapshot_id = (
-            str(uuid.uuid5(uuid.NAMESPACE_URL, fingerprint)) if run_id else None
+        (
+            projected_parse_status,
+            projected_structured,
+            projected_parser_name,
+            projected_parser_version,
+        ) = _project_parser_result(parsed)
+        preparse_output_status = str(
+            preparse_snapshot.output_status or "not_classified"
         )
-        binding_metadata = _check_item_binding_metadata(
-            command_collection
-        )
-        snapshot_id, snapshot_created = snapshot_repository.save_snapshot_idempotent(
-            run_id=rid,
-            device_id=device_id,
-            device_name=device_name,
-            ip=ip,
-            vendor=vendor,
-            model=model,
-            command=block.command,
-            command_canonical=block.command_canonical,
-            raw_text=block.raw_output,
-            observed_at=command_observed_at,
-            structured_json=structured,
-            parser_name=parser_name,
-            parser_version=parser_version,
-            parse_status=parse_status,
-            output_status=parsed.output_status,
-            dataset_id=dataset_id,
-            source_file_hash=source_file_hash,
-            import_fingerprint=fingerprint,
-            snapshot_id=deterministic_snapshot_id,
-            start_line=block.start_line,
-            end_line=block.end_line,
-            metadata={
-                "patrol_mode": mode,
-                "source_path": str(path),
-                "collector_complete": collector_complete,
-                "execution_item_id": command_collection.get("execution_item_id"),
-                "collection_item_id": command_collection.get("collection_item_id"),
-                "command_ordinal": command_collection.get("command_ordinal"),
-                "handling": parsed.handling,
-                "comparison_profile": parsed.comparison_profile,
-                "comparison_profile_version": parsed.comparison_profile_version,
-                "output_status": parsed.output_status,
-                "capability": parsed.capability,
-                "capability_status": parsed.capability_status,
-                "parser_runtime_bundle_digest": (
-                    runtime_bundle.digest if runtime_bundle is not None else None
-                ),
-                "check_item_version_ids": binding_metadata[
-                    "check_item_version_ids"
-                ],
-                "runtime_bundle_version_ids": binding_metadata[
-                    "runtime_bundle_version_ids"
-                ],
-                "check_item_bindings": binding_metadata["all_bindings"],
-                "selected_check_item_bindings": binding_metadata[
-                    "selected_bindings"
-                ],
-            },
-            inventory_device_id=inventory_device_id,
-            execution_item_id=command_collection.get("execution_item_id"),
-            collection_action_id=binding_metadata[
-                "collection_action_id"
-            ],
-            implementation_version_id=binding_metadata[
-                "implementation_version_id"
-            ],
-            check_item_ids=binding_metadata["check_item_ids"],
-            owner_token=run_owner_token,
-        )
+        if output_disposition:
+            projected_parse_status = "not_applicable"
+            projected_structured = None
+            projected_parser_name = None
+            projected_parser_version = None
+        elif preparse_output_status == "unsupported_command":
+            projected_parse_status = "not_applicable"
+            projected_structured = None
+            projected_parser_name = None
+            projected_parser_version = None
+        elif preparse_output_status in {
+            "empty_unverified",
+            "command_error",
+            "truncated",
+            "paged",
+        }:
+            projected_parse_status = preparse_output_status
+            projected_structured = None
+            projected_parser_name = None
+            projected_parser_version = None
+        snapshot_id = preparse_snapshot.snapshot_id
+        parser_attached = False
+        if preparse_snapshot.parse_status == "not_attempted":
+            _snapshot_id, parser_attached = (
+                snapshot_repository.attach_parser_result(
+                    snapshot_id=snapshot_id,
+                    expected_raw_text_hash=(
+                        preparse_snapshot.raw_text_hash
+                    ),
+                    parse_status=projected_parse_status,
+                    structured_json=projected_structured,
+                    parser_name=projected_parser_name,
+                    parser_version=projected_parser_version,
+                    metadata={
+                        "handling": parsed.handling,
+                        "comparison_profile": (
+                            parsed.comparison_profile
+                        ),
+                        "comparison_profile_version": (
+                            parsed.comparison_profile_version
+                        ),
+                        "capability": parsed.capability,
+                        "capability_status": (
+                            parsed.capability_status
+                        ),
+                        "parser_failure_code": parsed.failure_code,
+                        "operator_output_disposition": output_disposition,
+                    },
+                    owner_token=run_owner_token,
+                )
+            )
+        stored_snapshot = snapshot_repository.get_snapshot(snapshot_id)
+        if (
+            stored_snapshot is None
+            or not stored_snapshot.execution_item_id
+        ):
+            raise RuntimeError(
+                f"persisted snapshot identity is unavailable: {snapshot_id}"
+            )
+        parse_status = str(stored_snapshot.parse_status)
+        structured = stored_snapshot.structured_json
+        parser_name = stored_snapshot.parser_name
+        parser_version = stored_snapshot.parser_version
         snapshot_ids.append(snapshot_id)
         if not snapshot_created:
             duplicate_snapshot_ids.append(snapshot_id)
-        stored_snapshot = snapshot_repository.get_snapshot(snapshot_id)
-        if stored_snapshot is None or not stored_snapshot.execution_item_id:
-            raise RuntimeError(f"persisted snapshot identity is unavailable: {snapshot_id}")
+        binding_metadata = _check_item_binding_metadata(
+            command_collection
+        )
         candidate_job_id = None
         candidate_error = None
         candidate_failure_codes = {
@@ -835,9 +1405,12 @@ def import_raw_capture(
         # Production patrol records the gap as evidence but never starts asset
         # generation. Only explicitly imported parser-validation evidence may
         # create Parser candidates. Production gaps are registered in the ledger.
-        should_create_candidate = snapshot_created and mode == PARSER_VALIDATION_MODE
+        should_create_candidate = (
+            (snapshot_created or parser_attached)
+            and mode == PARSER_VALIDATION_MODE
+        )
         if (
-            snapshot_created
+            (snapshot_created or parser_attached)
             and mode == PRODUCTION_MODE
             and parse_status in {"template_missing", "parse_failed"}
         ):
@@ -893,6 +1466,7 @@ def import_raw_capture(
                 "parse_status": parse_status,
                 "candidate_job_id": candidate_job_id,
                 "candidate_error": candidate_error,
+                "output_disposition": output_disposition,
             }
         )
         if isinstance(structured, list):
@@ -925,14 +1499,30 @@ def import_raw_capture(
             status=command_status.execution_status,
             execution_status=command_status.execution_status,
             parse_status=command_status.parse_status,
-            output_status=parsed.output_status,
+            output_status=str(stored_snapshot.output_status),
             fact_status=command_status.fact_status,
             normalization_status=command_status.normalization_status,
             parser_candidate_id=candidate_job_id,
             authoritative_for_deletion=authoritative,
             baseline_eligible=authoritative,
             observed_entity_count=entity_count,
-            failure_code=parsed.failure_code,
+            failure_code=(
+                None
+                if output_disposition
+                else parsed.failure_code
+                or (
+                    str(stored_snapshot.output_status)
+                    if parse_status
+                    in {
+                        "not_applicable",
+                        "empty_unverified",
+                        "command_error",
+                        "truncated",
+                        "paged",
+                    }
+                    else None
+                )
+            ),
             observed_at=command_observed_at,
             execution_item_id=stored_snapshot.execution_item_id,
             collection_action_id=binding_metadata[
@@ -954,9 +1544,13 @@ def import_raw_capture(
                 "runtime_bundle_version_ids": binding_metadata[
                     "runtime_bundle_version_ids"
                 ],
+                "observation_contract_refs": binding_metadata[
+                    "observation_contract_refs"
+                ],
                 "selected_check_item_bindings": binding_metadata[
                     "selected_bindings"
                 ],
+                "operator_output_disposition": output_disposition,
             },
             owner_token=run_owner_token,
         )
@@ -981,8 +1575,13 @@ def import_raw_capture(
         if parsed_blocks
         and all(
             parsed.parser_status not in {"success", "empty"}
-            for _, parsed in parsed_blocks
+            for (_, parsed), output_disposition in zip(
+                parsed_blocks,
+                block_output_dispositions,
+                strict=True,
+            )
             if parsed.policy_status == "eligible"
+            and not output_disposition
         )
         else "partial"
     )
@@ -1053,7 +1652,12 @@ def import_raw_path(
             vendor=vendor,
             model=model,
             observed_at=observed_at,
-            metadata=metadata,
+            metadata={
+                **(metadata or {}),
+                "source_relative_path": str(
+                    (metadata or {}).get("source_relative_path") or path.name
+                ),
+            },
             inventory_device_id=(inventory_bindings or {}).get(external_id),
         )
     if not path.is_dir():
@@ -1109,6 +1713,7 @@ def import_raw_path(
                     "source_directory": str(path),
                     "dataset_id": dataset_id,
                     **(metadata or {}),
+                    "source_relative_path": candidate.relative_to(path).as_posix(),
                 },
                 inventory_device_id=(inventory_bindings or {}).get(external_id),
                 finalize_run=False,

@@ -5,15 +5,24 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from src.common.governance import actor_matches_any
 from src.core.patrol.event_rules import event_rule_logical_key
+from src.core.rule_control.asset_requirements import (
+    evaluate_requirement_replay_gate,
+    normalize_rule_asset_requirements,
+    rule_asset_composition_errors,
+)
 from src.core.rule_control.jobs import RuleGenerationJobStateError
-from src.core.rule_control.replay_gate import evaluate_historical_replay_gate
+from src.core.rule_control.source_scope import (
+    require_current_rule_generation_context,
+)
 from src.infrastructure.db.models import (
     ChangePolicyRecord,
     ChangePolicyVersionRecord,
     EventRuleRecord,
     EventRuleVersionRecord,
     ObservationContractRecord,
+    RuleGenerationContextRecord,
     RuleGenerationJobRecord,
 )
 from src.infrastructure.db.postgres import get_db_session
@@ -353,6 +362,7 @@ class RuleAssetApprovalService:
         actor: str | None,
         reason: str | None,
         now: datetime,
+        allow_same_actor: bool = False,
     ) -> dict[str, Any]:
         if bundle.status != "pending_approval":
             raise RuleGenerationJobStateError(
@@ -362,7 +372,16 @@ class RuleAssetApprovalService:
         gate = dict(report.get("bundle_gate") or {})
         context_gate = dict(report.get("context_gate") or {})
         replay = dict(report.get("historical_replay") or {})
-        replay_gate = evaluate_historical_replay_gate(replay, context_gate)
+        requirements = normalize_rule_asset_requirements(
+            gate.get("asset_requirements")
+            or report.get("asset_requirements")
+            or (bundle.payload_json or {}).get("asset_requirements")
+        )
+        replay_gate = evaluate_requirement_replay_gate(
+            requirements=requirements,
+            replay=replay,
+            context_gate=context_gate,
+        )
         engineering_review = dict((report.get("governance") or {}).get("engineering_review") or {})
         if (
             report.get("success") is not True
@@ -374,6 +393,49 @@ class RuleAssetApprovalService:
             raise RuleGenerationJobStateError(
                 "rule asset bundle cannot be approved before validation, replay, "
                 "engineering review and all release gates pass"
+            )
+        source_integrity: dict[str, Any] | None = None
+        context_mode = str(context_gate.get("mode") or "")
+        if context_mode == "immutable_dataset_context":
+            gate_context_id = str(context_gate.get("context_id") or "").strip()
+            payload_context_id = str(
+                (bundle.payload_json or {}).get("context_id") or ""
+            ).strip()
+            if (
+                not gate_context_id
+                or not payload_context_id
+                or gate_context_id != payload_context_id
+            ):
+                raise RuleGenerationJobStateError(
+                    "rule asset bundle immutable context identity is inconsistent"
+                )
+            context = (
+                db.query(RuleGenerationContextRecord)
+                .filter(RuleGenerationContextRecord.id == gate_context_id)
+                .with_for_update()
+                .one_or_none()
+            )
+            if context is None:
+                raise RuleGenerationJobStateError(
+                    "rule asset bundle immutable context no longer exists"
+                )
+            try:
+                source_integrity = require_current_rule_generation_context(
+                    db,
+                    context,
+                    expected_context_digest=str(
+                        context_gate.get("context_digest")
+                        or (bundle.payload_json or {}).get("context_digest")
+                        or ""
+                    ),
+                )
+            except (KeyError, ValueError) as exc:
+                raise RuleGenerationJobStateError(
+                    f"rule asset bundle source evidence is no longer releasable: {exc}"
+                ) from exc
+        elif context_mode != "legacy_manual":
+            raise RuleGenerationJobStateError(
+                "rule asset bundle has no governed release context"
             )
         child_ids = self._bundle_child_ids(bundle)
         if not child_ids:
@@ -389,6 +451,23 @@ class RuleAssetApprovalService:
         )
         if len(children) != len(set(child_ids)):
             raise RuleGenerationJobStateError("rule asset bundle child jobs are incomplete")
+        same_as_creator = actor_matches_any(
+            actor,
+            [bundle.created_by, *(child.created_by for child in children)],
+        )
+        if same_as_creator and not allow_same_actor:
+            raise RuleGenerationJobStateError(
+                "rule asset approval requires an approver different from "
+                "the candidate creator"
+            )
+        same_as_engineering_reviewer = actor_matches_any(
+            actor, [engineering_review.get("actor")]
+        )
+        if same_as_engineering_reviewer and not allow_same_actor:
+            raise RuleGenerationJobStateError(
+                "rule asset approval requires an approver different from "
+                "the engineering reviewer"
+            )
         expected_source = f"rule_asset_bundle:{bundle.id}"
         for child in children:
             if child.source_ref != expected_source:
@@ -405,13 +484,46 @@ class RuleAssetApprovalService:
         by_type: dict[str, list[RuleGenerationJobRecord]] = {}
         for child in children:
             by_type.setdefault(str(child.job_type), []).append(child)
-        if (
-            len(by_type.get("OBSERVATION_CONTRACT") or []) != 1
-            or len(by_type.get("CHANGE_POLICY") or []) < 1
-            or len(by_type.get("EVENT_RULE") or []) < 1
-        ):
+        event_version_ids = [
+            str(child.asset_version_id)
+            for child in by_type.get("EVENT_RULE") or []
+            if child.asset_version_id
+        ]
+        event_versions = (
+            db.query(EventRuleVersionRecord)
+            .filter(EventRuleVersionRecord.id.in_(event_version_ids))
+            .all()
+            if event_version_ids
+            else []
+        )
+        composition_errors = rule_asset_composition_errors(
+            counts={
+                asset_type: len(items)
+                for asset_type, items in by_type.items()
+            },
+            requirements=requirements,
+            change_policy_roles=[
+                dict((child.payload_json or {}).get("policy") or {})
+                for child in by_type.get("CHANGE_POLICY") or []
+            ],
+            event_rule_roles=[
+                {
+                    "evaluation_scope": item.evaluation_scope,
+                    "event_class": item.event_class,
+                    "event_type": item.event_type,
+                    "observation_types": list(
+                        dict(item.condition_json or {}).get(
+                            "observation_types"
+                        )
+                        or []
+                    ),
+                }
+                for item in event_versions
+            ],
+        )
+        if composition_errors:
             raise RuleGenerationJobStateError(
-                "bundle requires one ObservationContract, one or more ChangePolicies and EventRules"
+                "; ".join(composition_errors)
             )
 
         activations: list[dict[str, Any]] = []
@@ -419,9 +531,16 @@ class RuleAssetApprovalService:
             "captured_at": now.isoformat(),
             "bundle_id": bundle.id,
             "assets": [],
+            "source_integrity": source_integrity,
+            "asset_requirements": requirements,
         }
         replaced_source_job_ids: set[str] = set()
-        contract_job = by_type["OBSERVATION_CONTRACT"][0]
+        contract_jobs = by_type.get("OBSERVATION_CONTRACT") or []
+        if not contract_jobs:
+            raise RuleGenerationJobStateError(
+                "rule asset bundle cannot activate without an ObservationContract"
+            )
+        contract_job = contract_jobs[0]
         contract = (
             db.query(ObservationContractRecord)
             .filter(ObservationContractRecord.id == contract_job.asset_version_id)
@@ -485,7 +604,7 @@ class RuleAssetApprovalService:
             }
         )
 
-        for policy_job in by_type["CHANGE_POLICY"]:
+        for policy_job in by_type.get("CHANGE_POLICY") or []:
             policy_version = (
                 db.query(ChangePolicyVersionRecord)
                 .filter(ChangePolicyVersionRecord.id == policy_job.asset_version_id)
@@ -561,7 +680,7 @@ class RuleAssetApprovalService:
             )
 
         candidate_event_logical_keys: set[str] = set()
-        for event_job in by_type["EVENT_RULE"]:
+        for event_job in by_type.get("EVENT_RULE") or []:
             version = (
                 db.query(EventRuleVersionRecord)
                 .filter(EventRuleVersionRecord.id == event_job.asset_version_id)
@@ -659,7 +778,13 @@ class RuleAssetApprovalService:
             self._mark_job_active(child, actor=actor, reason=reason, now=now)
         bundle.validation_report_json = _merge_governance(
             dict(bundle.validation_report_json or {}),
-            {"activation_snapshot": activation_snapshot},
+            {
+                "activation_snapshot": activation_snapshot,
+                "separation_of_duties_override": bool(
+                    allow_same_actor
+                    and (same_as_creator or same_as_engineering_reviewer)
+                ),
+            },
         )
         self._mark_job_active(bundle, actor=actor, reason=reason, now=now)
         db.flush()
@@ -956,6 +1081,7 @@ class RuleAssetApprovalService:
         *,
         actor: str | None = None,
         reason: str | None = None,
+        allow_same_actor: bool = False,
     ) -> dict[str, Any]:
         now = _utcnow()
         with get_db_session() as db:
@@ -968,8 +1094,23 @@ class RuleAssetApprovalService:
             if job is None:
                 raise KeyError("rule generation job not found")
             if job.job_type == "RULE_ASSET_BUNDLE":
-                return self._approve_bundle(db, job, actor=actor, reason=reason, now=now)
+                return self._approve_bundle(
+                    db,
+                    job,
+                    actor=actor,
+                    reason=reason,
+                    now=now,
+                    allow_same_actor=allow_same_actor,
+                )
             self._assert_direct_action_allowed(job)
+            if (
+                actor_matches_any(actor, [job.created_by])
+                and not allow_same_actor
+            ):
+                raise RuleGenerationJobStateError(
+                    "rule asset approval requires an approver different from "
+                    "the candidate creator"
+                )
             if job.status != "pending_approval":
                 raise RuleGenerationJobStateError(
                     "rule generation job must be pending_approval before approval"

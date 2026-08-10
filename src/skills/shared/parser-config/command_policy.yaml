@@ -86,6 +86,7 @@ commands:
   show system resources: {enabled: true}
   display memory: {enabled: true}
   show processes memory: {enabled: true}
+  display interface: {enabled: true}
   display interface brief: {enabled: true}
   display ip interface brief: {enabled: true}
   show ip interface brief: {enabled: true}
@@ -104,6 +105,11 @@ commands:
   display irf: {enabled: true}
   display m-lag system: {enabled: true}
   show vpc: {enabled: true}
+  display arp: {enabled: true}
+  show ip arp: {enabled: true}
+  display mac-address: {enabled: true}
+  show mac address-table: {enabled: true}
+  show switch detail: {enabled: true}
   display vrf:
     enabled: true
     capability: vrf.inventory
@@ -125,6 +131,7 @@ commands:
     template_scope: family
 
   display current-configuration: {enabled: false, handling: raw_hash_diff, comparison_profile: configuration}
+  display startup: {enabled: false, handling: raw_hash_diff, comparison_profile: configuration}
   display saved-configuration: {enabled: false, handling: raw_hash_diff, comparison_profile: configuration}
   show running-config: {enabled: false, handling: raw_hash_diff, comparison_profile: configuration}
   show startup-config: {enabled: false, handling: raw_hash_diff, comparison_profile: configuration}

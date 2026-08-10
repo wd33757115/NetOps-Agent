@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import uuid
+from collections.abc import Callable, Iterable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, ContextManager
+from typing import Any
 
 import yaml
 
@@ -22,7 +25,7 @@ from src.infrastructure.db.models import (
 )
 from src.infrastructure.db.postgres import get_db_session
 
-DEFAULT_CATALOG_PATH = Path(__file__).parent / "assets" / "catalog.v3.yaml"
+DEFAULT_CATALOG_PATH = Path(__file__).parent / "assets" / "catalog.v10.yaml"
 _ASSET_ID_RE = re.compile(r"^[a-z][a-z0-9_.-]+$")
 _RESULT_MODES = {"structured", "normalized_diff", "hash_only", "evidence_only"}
 _ASSESSMENT_MODES = {"health", "change", "evidence"}
@@ -47,6 +50,9 @@ _OUTPUT_PATTERN_KEYS = {
     "paging_patterns",
     "valid_empty_patterns",
 }
+
+logger = logging.getLogger(__name__)
+_WARNED_MULTI_COMMAND_IMPLEMENTATIONS: set[tuple[str, str]] = set()
 
 
 class CatalogConflictError(ValueError):
@@ -77,6 +83,37 @@ class CheckItemDefinition:
 class CollectionCommand:
     command: str
     priority: int
+
+
+def primary_collection_commands(
+    commands: Iterable[CollectionCommand],
+    *,
+    implementation_id: str,
+    version_id: str = "",
+) -> tuple[CollectionCommand, ...]:
+    """Return the single declared command and warn for legacy fallback rows."""
+
+    ordered = tuple(
+        sorted(
+            commands,
+            key=lambda item: (-int(item.priority), item.command.casefold()),
+        )
+    )
+    if len(ordered) > 1:
+        warning_key = (str(implementation_id), str(version_id))
+        if warning_key not in _WARNED_MULTI_COMMAND_IMPLEMENTATIONS:
+            _WARNED_MULTI_COMMAND_IMPLEMENTATIONS.add(warning_key)
+            logger.warning(
+                "collection fallback commands are ignored; only the primary command is used",
+                extra={
+                    "event": "collection_fallback_commands_ignored",
+                    "implementation_id": str(implementation_id),
+                    "implementation_version_id": str(version_id),
+                    "primary_command": ordered[0].command,
+                    "ignored_commands": [item.command for item in ordered[1:]],
+                },
+            )
+    return ordered[:1]
 
 
 @dataclass(frozen=True)
@@ -306,6 +343,94 @@ def _load_implementation(
     )
 
 
+def load_catalog_defaults(
+    path: str | Path = DEFAULT_CATALOG_PATH,
+) -> dict[str, dict[str, Any]]:
+    """Load reusable catalog defaults for governed UI-created revisions."""
+
+    payload = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    defaults = payload.get("defaults") or {}
+    if not isinstance(defaults, dict):
+        raise ValueError("check-item catalog defaults must be an object")
+    check_item = defaults.get("check_item") or {}
+    implementation = defaults.get("implementation") or {}
+    if not isinstance(check_item, dict) or not isinstance(implementation, dict):
+        raise ValueError("check-item catalog defaults contain invalid sections")
+    return {
+        "check_item": dict(check_item),
+        "implementation": dict(implementation),
+    }
+
+
+def build_check_item_definition(
+    raw: dict[str, Any],
+    *,
+    defaults: dict[str, Any] | None = None,
+) -> CheckItemDefinition:
+    """Validate and canonicalize one check-item revision payload."""
+
+    return _load_check_item(dict(raw), defaults=defaults)
+
+
+def validate_check_item_definition(item: CheckItemDefinition) -> None:
+    """Validate one UI-authored check item before it enters governance."""
+
+    from src.core.check_items.canonical import validate_check_item_contract
+
+    errors = list(validate_check_item_contract(item))
+    contract = dict(item.canonical_contract or {})
+    if not str(contract.get("entity_type") or "").strip():
+        errors.append(f"{item.id}.canonical_contract.entity_type is required")
+    identity_dimensions = contract.get("identity_dimensions")
+    if not isinstance(identity_dimensions, list) or not all(
+        str(value).strip() for value in identity_dimensions
+    ):
+        errors.append(
+            f"{item.id}.canonical_contract.identity_dimensions must be a non-empty list"
+        )
+    if item.result_mode == "structured" and not contract.get("observations"):
+        errors.append(
+            f"{item.id}.canonical_contract.observations is required for structured results"
+        )
+    from src.core.check_items.report_projection import (
+        load_report_projection_catalog,
+        normalize_projection_ref,
+    )
+
+    projection_ref = normalize_projection_ref(item.report_projection)
+    if projection_ref != "auto@1":
+        profile = load_report_projection_catalog().get(projection_ref)
+        if profile is None:
+            errors.append(f"{item.id} references unknown report projection {projection_ref}")
+        elif profile.check_item_id != item.id:
+            errors.append(
+                f"{item.id} cannot use report projection {projection_ref}: "
+                "check item mismatch"
+            )
+    if errors:
+        raise ValueError("invalid check item definition: " + "; ".join(errors))
+    _validate_evidence_policies(
+        catalog_version=2,
+        check_items=(item,),
+        implementations=(),
+    )
+
+
+def build_collection_implementation(
+    raw: dict[str, Any],
+    *,
+    known_check_item_ids: set[str],
+    defaults: dict[str, Any] | None = None,
+) -> CollectionImplementation:
+    """Validate and canonicalize one collection implementation revision."""
+
+    return _load_implementation(
+        dict(raw),
+        known_check_item_ids=set(known_check_item_ids),
+        defaults=defaults,
+    )
+
+
 def load_catalog(path: str | Path = DEFAULT_CATALOG_PATH) -> CheckItemCatalog:
     source = Path(path)
     payload = yaml.safe_load(source.read_text(encoding="utf-8")) or {}
@@ -318,16 +443,9 @@ def load_catalog(path: str | Path = DEFAULT_CATALOG_PATH) -> CheckItemCatalog:
         raise ValueError("check-item catalog requires check_items")
     if not isinstance(raw_implementations, list) or not raw_implementations:
         raise ValueError("check-item catalog requires implementations")
-    defaults = payload.get("defaults") or {}
-    if not isinstance(defaults, dict):
-        raise ValueError("check-item catalog defaults must be an object")
-    check_item_defaults = defaults.get("check_item") or {}
-    implementation_defaults = defaults.get("implementation") or {}
-    if not isinstance(check_item_defaults, dict) or not isinstance(
-        implementation_defaults,
-        dict,
-    ):
-        raise ValueError("check-item catalog defaults contain invalid sections")
+    defaults = load_catalog_defaults(source)
+    check_item_defaults = defaults["check_item"]
+    implementation_defaults = defaults["implementation"]
     check_items = tuple(
         _load_check_item(
             dict(item),
@@ -454,7 +572,9 @@ class CheckItemCatalogRepository:
 
     def __init__(
         self,
-        session_scope: Callable[[], ContextManager[Any]] = get_db_session,
+        session_scope: Callable[
+            [], AbstractContextManager[Any]
+        ] = get_db_session,
     ) -> None:
         self._session_scope = session_scope
 
@@ -472,6 +592,7 @@ class CheckItemCatalogRepository:
         with self._session_scope() as db:
             for item in catalog.check_items:
                 root = db.get(CheckItemRecord, item.id)
+                activated_new_version = False
                 if root is None:
                     root = CheckItemRecord(
                         id=item.id,
@@ -489,15 +610,6 @@ class CheckItemCatalogRepository:
                 if version is not None and version.digest != item.digest:
                     raise CatalogConflictError(
                         f"check item {item.id} v{item.version} was changed in place"
-                    )
-                if (
-                    version is not None
-                    and item.status == "active"
-                    and str(version.status) != "active"
-                ):
-                    raise CatalogConflictError(
-                        f"check item {item.id} v{item.version} cannot be "
-                        "reactivated after deprecation"
                     )
                 if version is None:
                     self._retire_older_active_check_item(
@@ -532,16 +644,33 @@ class CheckItemCatalogRepository:
                             activated_at=now if item.status == "active" else None,
                         )
                     )
+                    activated_new_version = item.status == "active"
                 root.name = item.name
                 root.category = item.category
                 root.description = item.description
                 root.updated_at = now
-                if item.status == "active":
+                active_item_version = None if activated_new_version else (
+                    db.query(CheckItemVersionRecord)
+                    .filter(CheckItemVersionRecord.check_item_id == item.id)
+                    .filter(CheckItemVersionRecord.status == "active")
+                    .first()
+                )
+                if (
+                    item.status == "active"
+                    and (
+                        activated_new_version
+                        or (
+                            active_item_version is not None
+                            and str(active_item_version.id) == item.version_id
+                        )
+                    )
+                ):
                     root.status = "active"
                     root.current_version = item.version
 
             for implementation in catalog.implementations:
                 root = db.get(CollectionImplementationRecord, implementation.id)
+                activated_new_version = False
                 if root is None:
                     root = CollectionImplementationRecord(
                         id=implementation.id,
@@ -566,16 +695,6 @@ class CheckItemCatalogRepository:
                     raise CatalogConflictError(
                         f"implementation {implementation.id} v{implementation.version} "
                         "was changed in place"
-                    )
-                if (
-                    version is not None
-                    and implementation.status == "active"
-                    and str(version.status) != "active"
-                ):
-                    raise CatalogConflictError(
-                        f"implementation {implementation.id} "
-                        f"v{implementation.version} cannot be reactivated "
-                        "after deprecation"
                     )
                 if version is None:
                     self._retire_older_active_implementation(
@@ -613,10 +732,30 @@ class CheckItemCatalogRepository:
                             ),
                         )
                     )
+                    activated_new_version = implementation.status == "active"
                 root.name = implementation.name
                 root.description = implementation.description
                 root.updated_at = now
-                if implementation.status == "active":
+                active_implementation_version = None if activated_new_version else (
+                    db.query(CollectionImplementationVersionRecord)
+                    .filter(
+                        CollectionImplementationVersionRecord.implementation_id
+                        == implementation.id
+                    )
+                    .filter(CollectionImplementationVersionRecord.status == "active")
+                    .first()
+                )
+                if (
+                    implementation.status == "active"
+                    and (
+                        activated_new_version
+                        or (
+                            active_implementation_version is not None
+                            and str(active_implementation_version.id)
+                            == implementation.version_id
+                        )
+                    )
+                ):
                     root.status = "active"
                     root.current_version = implementation.version
 
@@ -828,12 +967,16 @@ class CheckItemCatalogRepository:
                         )
                     ),
                     match=dict(version.match_json or {}),
-                    commands=tuple(
-                        CollectionCommand(
-                            command=str(row.get("command") or ""),
-                            priority=int(row.get("priority") or 0),
-                        )
-                        for row in (version.commands_json or [])
+                    commands=primary_collection_commands(
+                        (
+                            CollectionCommand(
+                                command=str(row.get("command") or ""),
+                                priority=int(row.get("priority") or 0),
+                            )
+                            for row in (version.commands_json or [])
+                        ),
+                        implementation_id=str(root.id),
+                        version_id=str(version.id),
                     ),
                     collector=str(version.collector),
                     parser_requirement=str(version.parser_requirement),

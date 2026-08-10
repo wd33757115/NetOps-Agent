@@ -1,5 +1,9 @@
 # 巡检容量基线（估算）
 
+<!-- document-status: superseded -->
+> **历史文档，已被取代。** 本文中的估算仅作历史参考，不代表当前容量或生产承诺。
+> 当前权威方案见[检查项中心的巡检与规则资产平台总体改造方案](check-item-centered-patrol-platform-remediation-2026-07-27.md)。
+
 基于 `scripts/test/patrol_capacity_benchmark.py` 的串行 SSH 估算模型：
 
 假设：每台设备平均 5 条命令，每条命令平均 3 秒，目标窗口 60 分钟，4 个 patrol worker。

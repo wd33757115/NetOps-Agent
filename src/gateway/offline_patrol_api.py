@@ -5,12 +5,27 @@ from __future__ import annotations
 import uuid
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import Response
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from pydantic import BaseModel, Field
 
 from src.auth.dependencies import get_current_user, require_role
 from src.auth.models import CurrentUser
+from src.core.check_items.current_authority import (
+    COMPLETENESS_EVIDENCE_OPTIONS,
+    CURRENT_AUTHORITY_REQUEST_SCHEMA,
+    OBSERVED_AT_EVIDENCE_OPTIONS,
+    CurrentAuthorityError,
+    PatrolCurrentAuthorityService,
+)
 from src.core.patrol.offline_jobs import OfflinePatrolJobService
 from src.core.patrol.offline_tasks import preview_offline_patrol_job
 from src.core.rule_control.command_asset_units import RuleAssetCommandUnitService
@@ -24,6 +39,7 @@ from src.storage.schemas import FolderCreateRequest
 
 routes = APIRouter()
 asset_source_routes = APIRouter()
+current_authority_routes = APIRouter()
 
 
 class OfflinePatrolPeriodRequest(BaseModel):
@@ -39,6 +55,9 @@ class OfflinePatrolJobCreateRequest(BaseModel):
     vendor: str | None = None
     model: str | None = None
     publish_events: bool = False
+    report_intent: Literal["historical", "current_attestation"] = (
+        "historical"
+    )
     idempotency_key: str = Field(
         default_factory=lambda: uuid.uuid4().hex, min_length=8, max_length=128
     )
@@ -61,10 +80,39 @@ class OfflinePatrolBindingConfirmRequest(BaseModel):
     bindings: list[OfflinePatrolBindingItem]
 
 
+class OfflineOutputDispositionConfirmRequest(BaseModel):
+    review_item_ids: list[str] = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=1000)
+
+
 class OfflinePatrolExecuteRequest(BaseModel):
     idempotency_key: str = Field(
         default_factory=lambda: uuid.uuid4().hex, min_length=8, max_length=128
     )
+
+
+class CurrentAuthorityPrepareRequest(BaseModel):
+    completeness_statement: str = Field(default="", max_length=4000)
+    completeness_evidence_refs: list[str] = Field(
+        default_factory=list,
+        max_length=20,
+    )
+    observed_at_evidence_refs: list[str] = Field(
+        default_factory=list,
+        max_length=20,
+    )
+    collection_tool: str = Field(default="", max_length=256)
+    collector_identity: str = Field(default="", max_length=256)
+    scope_contract: dict[str, Any] | None = None
+
+
+class CurrentAuthorityAttestRequest(BaseModel):
+    request_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    reason: str = Field(min_length=5, max_length=4000)
+
+
+class CurrentAuthorityRevokeRequest(BaseModel):
+    reason: str = Field(min_length=5, max_length=4000)
 
 
 def _api_purpose(request: Request) -> str:
@@ -106,6 +154,13 @@ def _detail_or_http(job_id: str, user: CurrentUser) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+def _current_authority_error(exc: CurrentAuthorityError) -> HTTPException:
+    return HTTPException(
+        status_code=exc.http_status,
+        detail=exc.to_detail(),
+    )
 
 
 def _enforce_workspace_scope(
@@ -151,6 +206,7 @@ def create_offline_patrol_job(
             periods=[item.model_dump() for item in payload.periods],
             folder_id=None,
             purpose=purpose,
+            report_intent=payload.report_intent,
             vendor=payload.vendor,
             model=payload.model,
             publish_events=payload.publish_events,
@@ -201,6 +257,170 @@ def list_offline_patrol_jobs(
 @routes.get("/{job_id}")
 def get_offline_patrol_job(job_id: str, user: CurrentUser = Depends(get_current_user)):
     return _detail_or_http(job_id, user)
+
+
+@current_authority_routes.get("/{job_id}/current-authority")
+def get_offline_current_authority(
+    job_id: str,
+    user: CurrentUser = Depends(get_current_user),
+):
+    job = _detail_or_http(job_id, user)
+    authority = PatrolCurrentAuthorityService().get_for_job(job_id)
+    if authority is not None:
+        return authority
+    return {
+        "schema_version": CURRENT_AUTHORITY_REQUEST_SCHEMA,
+        "offline_job_id": job_id,
+        "report_intent": str(job.get("report_intent") or "historical"),
+        "status": "not_requested",
+        "blocker_codes": [],
+        "blockers": [],
+        "proof_options": {
+            "observed_at_evidence_refs": list(
+                OBSERVED_AT_EVIDENCE_OPTIONS
+            ),
+            "completeness_evidence_refs": list(
+                COMPLETENESS_EVIDENCE_OPTIONS
+            ),
+        },
+    }
+
+
+@current_authority_routes.post(
+    "/{job_id}/current-authority/prepare",
+    status_code=status.HTTP_201_CREATED,
+)
+def prepare_offline_current_authority(
+    job_id: str,
+    payload: CurrentAuthorityPrepareRequest,
+    request: Request,
+    response: Response,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+    user: CurrentUser = Depends(require_role(["admin", "operator"])),
+):
+    _detail_or_http(job_id, user)
+    try:
+        result = PatrolCurrentAuthorityService().prepare(
+            offline_job_id=job_id,
+            requested_by_principal_id=user.user_id,
+            requested_by_display=user.username,
+            idempotency_key=idempotency_key,
+            completeness_statement=payload.completeness_statement,
+            completeness_evidence_refs=(
+                payload.completeness_evidence_refs
+            ),
+            observed_at_evidence_refs=(
+                payload.observed_at_evidence_refs
+            ),
+            collection_tool=payload.collection_tool,
+            collector_identity=payload.collector_identity,
+            scope_contract=payload.scope_contract,
+        )
+    except CurrentAuthorityError as exc:
+        raise _current_authority_error(exc) from exc
+    if result.get("idempotent_replay"):
+        response.status_code = status.HTTP_200_OK
+    _audit(
+        request,
+        user,
+        "offline_patrol_current_authority_prepare",
+        job_id,
+        {
+            "request_id": result.get("request_id"),
+            "request_digest": result.get("request_digest"),
+            "status": result.get("status"),
+            "blocker_codes": result.get("blocker_codes"),
+        },
+    )
+    return result
+
+
+@current_authority_routes.post(
+    "/{job_id}/current-authority/attest",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def attest_offline_current_authority(
+    job_id: str,
+    payload: CurrentAuthorityAttestRequest,
+    request: Request,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+    user: CurrentUser = Depends(require_role(["admin"])),
+):
+    _detail_or_http(job_id, user)
+    try:
+        result = PatrolCurrentAuthorityService().attest(
+            offline_job_id=job_id,
+            request_digest=payload.request_digest,
+            attested_by_principal_id=user.user_id,
+            attested_by_display=user.username,
+            idempotency_key=idempotency_key,
+            reason=payload.reason,
+        )
+    except CurrentAuthorityError as exc:
+        raise _current_authority_error(exc) from exc
+    _audit(
+        request,
+        user,
+        "offline_patrol_current_authority_attest",
+        job_id,
+        {
+            "request_id": result.get("request_id"),
+            "qualification_id": result.get("qualification_id"),
+            "candidate_batch_id": result.get("candidate_batch_id"),
+            "status": result.get("status"),
+        },
+    )
+    return result
+
+
+@current_authority_routes.post(
+    "/{job_id}/current-authority/revoke"
+)
+def revoke_offline_current_authority(
+    job_id: str,
+    payload: CurrentAuthorityRevokeRequest,
+    request: Request,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+    user: CurrentUser = Depends(require_role(["admin"])),
+):
+    _detail_or_http(job_id, user)
+    try:
+        result = PatrolCurrentAuthorityService().revoke(
+            offline_job_id=job_id,
+            revoked_by_principal_id=user.user_id,
+            revoked_by_display=user.username,
+            idempotency_key=idempotency_key,
+            reason=payload.reason,
+        )
+    except CurrentAuthorityError as exc:
+        raise _current_authority_error(exc) from exc
+    _audit(
+        request,
+        user,
+        "offline_patrol_current_authority_revoke",
+        job_id,
+        {
+            "request_id": result.get("request_id"),
+            "qualification_id": result.get("qualification_id"),
+            "status": result.get("status"),
+        },
+    )
+    return result
 
 
 @asset_source_routes.get("/{job_id}/asset-production-pipeline")
@@ -401,6 +621,38 @@ def confirm_offline_patrol_bindings(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+@routes.post("/{job_id}/output-dispositions/confirm")
+def confirm_offline_output_dispositions(
+    job_id: str,
+    request: Request,
+    payload: OfflineOutputDispositionConfirmRequest,
+    user: CurrentUser = Depends(require_role(["admin", "operator"])),
+):
+    _detail_or_http(job_id, user)
+    try:
+        result = OfflinePatrolJobService().confirm_output_dispositions(
+            job_id=job_id,
+            actor=user.user_id,
+            review_item_ids=payload.review_item_ids,
+            reason=payload.reason,
+        )
+        _audit(
+            request,
+            user,
+            "rule_asset_source_output_disposition_confirm",
+            job_id,
+            {
+                "review_item_ids": payload.review_item_ids,
+                "reason": payload.reason,
+            },
+        )
+        return result
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @routes.post("/{job_id}/execute", status_code=status.HTTP_202_ACCEPTED)
 def execute_offline_patrol_job(
     job_id: str,
@@ -526,5 +778,11 @@ router.include_router(
     routes,
     prefix="/api/v1/patrol/offline-jobs",
     tags=["Offline Patrol"],
+    dependencies=[Depends(_enforce_workspace_scope)],
+)
+router.include_router(
+    current_authority_routes,
+    prefix="/api/v1/patrol/offline-jobs",
+    tags=["Offline Patrol Current Authority"],
     dependencies=[Depends(_enforce_workspace_scope)],
 )

@@ -54,7 +54,19 @@ class ObservationRecordSetCandidate(BaseModel):
     empty_patterns: list[str] = Field(default_factory=list)
     ignore_fields: list[str] = Field(default_factory=list)
     state_semantics: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    source_field_hints: dict[str, dict[str, Any]] = Field(default_factory=dict)
     evidence: dict[str, Any] = Field(default_factory=dict)
+
+
+class ObservationRecordSetRelationCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = ""
+    source_record_set: str
+    target_record_set: str
+    join_keys: dict[str, str]
+    threshold_bindings: dict[str, dict[str, str]]
+    match_policy: str = "partial"
 
 
 class ObservationContractCandidate(BaseModel):
@@ -73,7 +85,11 @@ class ObservationContractCandidate(BaseModel):
     empty_patterns: list[str] = Field(default_factory=list)
     ignore_fields: list[str] = Field(default_factory=list)
     state_semantics: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    source_field_hints: dict[str, dict[str, Any]] = Field(default_factory=dict)
     record_sets: list[ObservationRecordSetCandidate] = Field(default_factory=list)
+    record_set_relations: list[ObservationRecordSetRelationCandidate] = Field(
+        default_factory=list
+    )
     evidence: dict[str, Any] = Field(default_factory=dict)
     source: str = "llm_agent"
     confidence: float = 0.8
@@ -188,17 +204,27 @@ canonical_entity_type and ordered identity_dimensions exactly. Populate
 entity_identity_fields with those ordered names and populate entity_dimensions
 with one safe expression for every identity dimension. These mappings project
 parser-native keys into stable check-item identity. They may use the same safe
-expression DSL as value transforms, including concat. Keep source primary_keys
-unchanged; never rename source fields to imitate canonical identity.
+expression DSL as value transforms, including concat. The only approved
+collection-context expression is {"context":"device_id"}; use it only when the
+canonical identity dimension itself is device_id, because device identity comes
+from the authenticated collection snapshot rather than CLI text. Keep source
+primary_keys unchanged; never rename source fields to imitate canonical identity.
+Entity identity belongs in entity_dimensions. Do not repeat scope, scope_id,
+device_id, interface or another canonical identity expression inside a field's
+dimensions unless the same name is explicitly listed in target.dimensions.
+Field-level dimensions contain only those governed metric slices, such as window,
+direction, channel or address_family.
 Obey every identity_dimension_rule. An enum dimension must resolve only to one
 of its allowed_values and therefore MUST use a literal allowed value, never a
 source field. Use that enum for the entity grain and put the instance identifier
 in the corresponding identifier dimension. Identifier mappings must preserve
 the uniqueness of the approved source primary_keys within every snapshot; use
 concat with all necessary source keys when one field alone is not unique.
-Required fields must be non-empty in every record; use optional_fields for
-measurements that are legitimately absent. Declare every field in
-field_inventory exactly once and give every field a semantic_type.
+Required fields are required Parser schema columns, but a non-identity value may
+legitimately be empty for one entity (for example no IP address or an absent
+transceiver measurement). Primary-key values must always be non-empty. Use
+optional_fields only for columns the Parser schema does not guarantee. Declare
+every field in field_inventory exactly once and give every field a semantic_type.
 semantic_type is an executable comparison type and must be one of: boolean,
 counter, enum, gauge, percentage, raw_hash, state, or text. Put a more specific
 business meaning such as software_version, firmware_version, hardware_version,
@@ -217,6 +243,30 @@ device.cpu.utilization with literal window dimensions 5s, 1m and 5m. Use
 dimensions for window, scope, direction, sensor, address_family or another
 stable slice of one metric; do not encode these slices in observation_type.
 
+For state or enum observations, obey target.allowed_values when supplied.
+Treat target.canonical_description and target.mapping_guidance as authoritative
+business meaning. Map a source field only when the sanitized values and field
+role directly support that meaning. Similar names or overlapping values are not
+enough: for example an operational/protocol state is not evidence of an
+administrative state. When a target is optional and no direct source evidence
+exists, omit it rather than manufacture a mapping.
+When target.projection_recipes is present, it is an approved, vendor-neutral
+safe-expression recipe owned by the check-item catalog. Prefer a compatible
+recipe over inventing another formula. The platform will resolve its semantic
+bindings against Parser fields and execute the compiled expression on every
+approved sample before accepting it.
+Parser values are source-specific, so emit value_mapping from every distinct
+sample value to one allowed canonical value. Matching is trim-and-casefold by
+default. Set on_unmapped=reject so an unseen runtime value becomes an explicit
+data-quality failure instead of silently passing through. If an empty Parser
+field has a proven business meaning, set emit_when_empty=true and include the
+empty string key in value_mapping; otherwise empty fields are not observations.
+field_profiles are calculated from the complete approved structured dataset,
+not only the bounded records sample. When a profile contains observed_values,
+the value_mapping must cover every one of them.
+Optional observation targets may be omitted when the Parser has no supporting
+field. Every required target must be produced.
+
 Declare source_unit and canonical_unit when normalization is needed. Supported
 unit normalization is platform-controlled; never emit executable code. When a
 canonical value must be derived, use only the safe expression DSL:
@@ -224,6 +274,16 @@ canonical value must be derived, use only the safe expression DSL:
 {"op":"abs|add|coalesce|concat|divide|max|min|multiply|negate|round|subtract",
  "args":[...]}. For example utilization derived from free_ratio is
 {"op":"subtract","args":[{"literal":100},{"field":"free_ratio"}]}.
+When a required target has no direct source column but the sanitized fields prove
+an exact derivation, bind the target to one otherwise non-target source field and
+use transform to calculate the canonical value. A source field can emit only one
+observation, so never replace an already required direct mapping merely to host a
+derived target. Common evidence-backed forms include CPU utilization as
+100 - cpu_idle_percent and memory utilization as
+100 * memory_used / memory_total. Use the actual measurement interval shown by
+the source: current CPU state is window=instant, and must never be labelled 5m.
+Do not derive a target when inputs are missing, units are incompatible, or the
+meaning is only guessed from a similar field name.
 Every transform and dimension field reference must exist in field_inventory.
 A field marked for monitoring must be compatible with its observed data type.
 If a numeric semantic has no numeric values, or a descriptive field is not
@@ -247,7 +307,43 @@ When context.record_sets is present, the command contains independent entity
 grains. Return parent category=multi_record, entity_type=multi_record, empty
 parent field lists, and one record_sets item for every supplied name. Preserve
 each record set's structural constraints and enrich its own state_semantics.
-Never move fields between record sets or flatten them into a sparse contract."""
+Never move fields between record sets or flatten them into a sparse contract.
+One command may implement multiple approved check items. Each allowed
+observation target can therefore carry its own canonical_entity_type,
+identity_dimensions, and identity_dimension_rules. Bind each target only to the
+record set whose fields directly evidence that check item. A single Parser
+record set must not emit targets with different canonical entity identities;
+when the command has separate CPU and memory record sets, keep those targets on
+their corresponding record sets. After selecting the targets for one record
+set, copy their shared canonical identity to that record set. Do not reject the
+whole command merely because its check items use different identities.
+The top-level canonical_identity_constraint belongs to the required check-item
+observation target; it is not an instruction to force every record set into the
+same entity grain. Apply that identity only to record sets that actually emit a
+required allowed_observation_target. Supporting record sets that do not emit a
+required target must keep their own source identity, or omit canonical identity,
+and must never replace their Parser primary keys with device_id. When a required
+target has no canonical_field hint, select exactly one directly supported source
+field whose sampled meaning best matches canonical_description. Prefer the
+overall operational or adjacency state over configuration, role, timer, reason,
+or count fields. Do not leave every field as metadata when a required target is
+present. Map a required target more than once only when the target explicitly
+declares dimensions that distinguish every mapping.
+
+When a monitored numeric value and its device-provided threshold are in
+different record sets, describe that relationship in record_set_relations.
+For each relation, name the source measurement record set, target threshold
+record set, exact join_keys, and threshold_bindings in the form
+{measurement_field: {low|high|critical_low|critical_high: threshold_field}}.
+Use match_policy=partial when some measured entities legitimately lack a
+threshold row, and required only when every source row must match. Alarm limits
+map to critical_low/critical_high; warning limits map to low/high. Do not infer
+global constants and do not claim a relation unless the supplied sanitized
+records contain matching join-key evidence. The platform will execute and
+validate the proposed joins locally before accepting them. Treat
+source_field_hints.source_labels and role as approved, sanitized source
+semantics: labels containing Alarm are alarm/critical limits, while labels
+containing Warning are warning limits. Raw evidence is deliberately absent."""
         )
     if stage == "change_policy":
         return (
@@ -262,7 +358,10 @@ thresholds from historical_stats or explicit policy_intent; explain the basis in
 reason. Do not speculate about physical causes or operator actions. Recovery
 thresholds must implement hysteresis in the safe direction. When the control
 plane supplies threshold_references, preserve those structured reference fields
-and prefer them over inferred global constants."""
+and prefer them over inferred global constants. policy_constraints are approved
+business policy, not suggestions. When required_thresholds,
+required_recovery_threshold, or required_deadband are supplied, copy those
+values exactly and do not infer replacements from the sample distribution."""
         )
     if stage == "event_rules":
         kinds = ", ".join(SUPPORTED_CONDITION_KINDS)
@@ -272,7 +371,9 @@ and prefer them over inferred global constants."""
 
 Create a small EventRule set for the supplied Contract and ChangePolicy. Allowed
 condition.kind values are: {kinds}. Conditions may reference only declared
-fields and entity types. Generate fault and recovery rules together when the
+fields and entity types. When canonical_entity_type is present, all EventRule
+conditions must use it because StateObservation runtime identity has already
+been projected from the parser-native entity_type. Generate fault and recovery rules together when the
 policy has recovery semantics. Recovery rules must use event_class=recovery,
 declare recovery.resolves using fault event_type values (not rule names), and
 must use evaluation_scope=change. Fault rules must set evaluation_scope to
@@ -280,6 +381,12 @@ current_state, change, or both. Use current_state or both when the present value
 alone can prove a risk (for example high utilization, interface down, or optical
 power below an approved threshold); use change only when history is essential.
 Fault rules should explicitly decide whether an initial abnormal value is actionable.
+When rule_asset_requirements requires a current-state rule but does not require
+an event rule, generate only non-recovery fault rules with
+evaluation_scope=current_state. In that profile, do not generate recovery rules
+and do not use evaluation_scope=change or both because the catalog has not
+approved change-event outcomes. Use evaluation_scope=both only when the same
+observation explicitly requires both current-state assessment and change events.
 Use stable English event_type identifiers and concise Chinese descriptions.
 Set trigger_role to high, low, critical_low, high_recovery, low_recovery,
 down, up, or change as appropriate. Use change only for an approved lifecycle

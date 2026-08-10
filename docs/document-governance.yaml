@@ -6,7 +6,7 @@ documents:
     topic: documentation-index
     status: active
     owner: NetOps Platform
-    last_verified: 2026-07-28
+    last_verified: 2026-07-30
 
   - path: 01_系统架构设计.md
     topic: system-architecture
@@ -132,13 +132,19 @@ documents:
     topic: patrol-platform-architecture
     status: active
     owner: NetOps Platform
-    last_verified: 2026-07-28
+    last_verified: 2026-07-30
 
   - path: implementation/check-item-platform-completion-matrix-2026-07-28.md
     topic: patrol-platform-implementation-status
     status: active
     owner: NetOps Platform
-    last_verified: 2026-07-28
+    last_verified: 2026-07-30
+
+  - path: implementation/check-item-platform-e2e-evidence-matrix-2026-07-30.md
+    topic: patrol-platform-e2e-evidence
+    status: active
+    owner: NetOps Platform
+    last_verified: 2026-07-30
 
   - path: simple-parser-pipeline-v2-2026-07-22.md
     topic: parser-generation-architecture
@@ -180,7 +186,7 @@ documents:
     topic: patrol-change-event-operations
     status: active
     owner: NetOps Platform
-    last_verified: 2026-07-28
+    last_verified: 2026-07-30
 
   - path: patrol-parser-dual-mode-guide.md
     topic: patrol-parser-dual-mode
@@ -192,7 +198,7 @@ documents:
     topic: rule-asset-automation
     status: active
     owner: Rule Asset Platform
-    last_verified: 2026-07-28
+    last_verified: 2026-07-30
 
   - path: textfsm-deepseek-thinking-tool-loop-2026-07-26.md
     topic: parser-model-tool-protocol

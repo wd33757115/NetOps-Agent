@@ -18,12 +18,280 @@ from generate_templates import (  # noqa: E402
 )
 from llm_generator import TextFSMToolTurn  # noqa: E402
 from parser_model import canonicalize_model_fields, strip_model_template  # noqa: E402
-from src.core.parser_generation import ParserReviewReport  # noqa: E402
 from spec_suggester import (  # noqa: E402
+    _build_prompt,
     _enrich_structural_spec,
     _nested_record_layout,
+    _normalize_spec,
+    _ntc_parser_spec_draft,
+    _representative_data_samples,
+    _semantic_valid_empty_spec_draft,
     suggest_parser_spec,
 )
+
+from src.core.parser_generation import ParserReviewReport  # noqa: E402
+from src.core.check_items.parser_capability import (  # noqa: E402
+    build_parser_field_naming_context,
+)
+
+
+def test_parser_spec_prompt_keeps_derived_and_pivoted_values_out_of_textfsm():
+    prompt = _build_prompt(
+        {
+            "vendor": "H3C",
+            "profile": "S6850",
+            "canonical_command": "display transceiver diagnosis interface",
+        },
+        [{"id": "sample-1", "sanitized_text": "Current values"}],
+        [],
+    )
+
+    assert "Never invent an implicit, default, ordinal" in prompt
+    assert "into synthetic records" in prompt
+    assert "ObservationContract may unpivot or union them" in prompt
+    assert "Do not return expected_records" in prompt
+    assert "model-authored record list is not an acceptance" in prompt
+    assert "do not create several required boolean fields" in prompt
+    assert "presence=optional" in prompt
+    assert "never downgrade a numeric field to text" in prompt
+
+
+def test_semantic_valid_empty_spec_draft_accepts_governed_header_only_table():
+    draft = _semantic_valid_empty_spec_draft(
+        job={
+            "canonical_command": "show ip interface brief",
+        },
+        samples=[
+            {
+                "sanitized_text": (
+                    'IP Interface Status for VRF "default"(1)\n'
+                    "Interface            IP Address      Interface Status\n"
+                )
+            }
+        ],
+    )
+
+    assert draft is not None
+    spec, profile_id = draft
+    assert profile_id == "interface-l3"
+    record_set = spec["record_sets"][0]
+    assert record_set["allow_empty"] is True
+    assert record_set["presence"] == "optional"
+    assert record_set["primary_keys"] == ["interface"]
+    assert set(record_set["fields"]) >= {
+        "interface",
+        "oper_status",
+        "protocol_status",
+    }
+
+
+def test_semantic_valid_empty_spec_draft_accepts_governed_vrrp_header():
+    draft = _semantic_valid_empty_spec_draft(
+        job={"canonical_command": "show vrrp brief"},
+        samples=[
+            {
+                "sanitized_text": (
+                    "Interface          Grp Pri Time  Own Pre State   "
+                    "Master addr     Group addr\n"
+                )
+            }
+        ],
+    )
+
+    assert draft is not None
+    spec, profile_id = draft
+    assert profile_id == "vrrp-generic"
+    assert spec["record_sets"][0]["allow_empty"] is True
+
+
+def test_parser_spec_prompt_uses_trusted_parser_value_shapes_as_execution_evidence():
+    prompt = _build_prompt(
+        {
+            "vendor": "Cisco",
+            "model": "N9K-C9364C",
+            "canonical_command": "show interface status",
+        },
+        [{"id": "sample-1", "sanitized_text": "Eth1/1 connected trunk auto 40G"}],
+        [],
+        [
+            {
+                "provider": "ntc_templates",
+                "template_name": "cisco_nxos_show_interface_status.textfsm",
+                "field_profiles": {
+                    "speed": {
+                        "examples": ["auto", "40G", "100G"],
+                        "value_shape": "text",
+                    },
+                    "vlan_id": {
+                        "examples": ["trunk", "routed"],
+                        "value_shape": "text",
+                    },
+                },
+            }
+        ],
+    )
+
+    assert "cisco_nxos_show_interface_status.textfsm" in prompt
+    assert '"speed"' in prompt
+    assert '"vlan_id"' in prompt
+    assert "do not replace them with an" in prompt
+    assert "auto, 40G, routed or trunk" in prompt
+
+
+def test_parser_spec_prompt_prefers_check_item_field_names_without_making_them_a_gate():
+    prompt = _build_prompt(
+        {
+            "vendor": "Cisco",
+            "model": "N9K-C9364C",
+            "canonical_command": "show interface status",
+        },
+        [{"id": "sample-1", "sanitized_text": "Eth1/1 connected"}],
+        [],
+        [],
+        {
+            "schema_version": "parser-field-naming-guidance/v1",
+            "resolved": True,
+            "check_items": [
+                {
+                    "check_item_id": "interface.oper_status",
+                    "preferred_identity_fields": ["interface"],
+                    "preferred_observation_fields": [
+                        {
+                            "preferred_name": "status",
+                            "observation_type": "interface.oper_status",
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    assert "Approved check-item field naming guidance" in prompt
+    assert '"preferred_name": "status"' in prompt
+    assert "keeps TextFSM Value names stable across vendors and models" in prompt
+    assert "naming difference by itself" in prompt
+    assert "ObservationContract is the final" in prompt
+
+
+def test_parser_spec_normalization_prefers_unambiguous_check_item_field_name():
+    warnings: list[str] = []
+    spec = _normalize_spec(
+        {
+            "parser_spec": {
+                "version": 2,
+                "business_purpose": "Inspect optical power by interface and channel.",
+                "record_sets": [
+                    {
+                        "name": "interface_lane",
+                        "entity": "interface_lane",
+                        "primary_keys": ["interface", "lane"],
+                        "fields": {
+                            "interface": {"required": True, "type": "interface_name"},
+                            "lane": {
+                                "required": True,
+                                "type": "number",
+                                "canonical_candidate": "interface_optical.channel",
+                            },
+                            "rx_power": {
+                                "required": True,
+                                "type": "number",
+                                "canonical_candidate": "interface.optical.rx_power",
+                            },
+                        },
+                    }
+                ],
+            }
+        },
+        warnings=warnings,
+        field_naming_context={
+            "check_items": [
+                {
+                    "preferred_identity_fields": ["interface", "channel"],
+                    "preferred_observation_fields": [
+                        {
+                            "preferred_name": "rx_power_dbm",
+                            "observation_type": "interface.optical.rx_power",
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+
+    record_set = spec["record_sets"][0]
+    assert record_set["primary_keys"] == ["interface", "channel"]
+    assert set(record_set["fields"]) == {"interface", "channel", "rx_power_dbm"}
+    assert "preferred approved check-item field name channel over lane" in warnings
+    assert "preferred approved check-item field name rx_power_dbm over rx_power" in warnings
+
+
+def test_parser_spec_normalization_unifies_governed_optical_value_aliases():
+    context = build_parser_field_naming_context(
+        vendor="Cisco",
+        model="N9K-C9364C",
+        family="NXOS9K",
+        profile="NEXUS9000",
+        command="show interface transceiver detail",
+        sample_text="Ethernet1/1 Rx Power -3.10 dBm",
+    )
+    warnings: list[str] = []
+
+    spec = _normalize_spec(
+        {
+            "parser_spec": {
+                "version": 2,
+                "business_purpose": "Inspect per-lane optical diagnostics.",
+                "record_sets": [
+                    {
+                        "name": "optical_lane",
+                        "entity": "interface_optical",
+                        "primary_keys": ["interface", "lane_number"],
+                        "fields": {
+                            "interface": {
+                                "required": True,
+                                "type": "interface_name",
+                            },
+                            "lane_number": {"required": True, "type": "number"},
+                            "temperature": {"required": True, "type": "number"},
+                            "rx_power": {"required": True, "type": "number"},
+                            "rx_power_high_alarm": {
+                                "required": True,
+                                "type": "number",
+                            },
+                        },
+                    }
+                ],
+            }
+        },
+        warnings=warnings,
+        field_naming_context=context,
+    )
+
+    record_set = spec["record_sets"][0]
+    assert record_set["primary_keys"] == ["interface", "channel"]
+    assert set(record_set["fields"]) == {
+        "interface",
+        "channel",
+        "temperature_celsius",
+        "rx_power_dbm",
+        "rx_high_alarm_dbm",
+    }
+    assert any("channel over lane_number" in item for item in warnings)
+    assert any("rx_high_alarm_dbm over rx_power_high_alarm" in item for item in warnings)
+
+
+def test_parser_spec_prompt_samples_are_deduplicated_and_bounded():
+    samples = [
+        {"id": "one-a", "sanitized_text": "same"},
+        {"id": "one-b", "sanitized_text": "same"},
+        {"id": "two", "sanitized_text": "two"},
+        {"id": "three", "sanitized_text": "three"},
+        {"id": "four", "sanitized_text": "four"},
+    ]
+
+    selected = _representative_data_samples(samples, limit=3)
+
+    assert [item["id"] for item in selected] == ["one-a", "two", "three"]
 
 
 def _job() -> dict:
@@ -78,7 +346,7 @@ def _job() -> dict:
                     "primary_keys": [["GE1/0/1"]],
                 },
                 "sanitization_status": "sanitized",
-                "sanitized_text": "must-not-enter-model",
+                "sanitized_text": "Interface Link\nGE1/0/1 UP\n",
             },
         ],
     }
@@ -129,6 +397,7 @@ Start
 @patch("parser_model.create_textfsm_tool_session")
 def test_simple_job_uses_deterministic_pipeline_without_llm(mock_session, tmp_path):
     job = _job()
+    job["model"] = None
     contexts = {
         snapshot_id: {
             "mode": "parser_validation",
@@ -162,6 +431,9 @@ def test_simple_job_uses_deterministic_pipeline_without_llm(mock_session, tmp_pa
     assert report.agent_loop["pipeline_version"] == "simple_v2"
     assert report.agent_loop["model_calls"] == 0
     assert [item["action"] for item in attempts] == ["deterministic:table"]
+    assert ntc_resolver.return_value.resolve.call_args.kwargs["device"]["model"] == (
+        job["profile"]
+    )
     mock_session.assert_not_called()
 
 
@@ -252,7 +524,7 @@ Swap:            0         0         0
 
 
 @patch("parser_model.create_textfsm_tool_session")
-def test_failed_report_distinguishes_compilation_from_parse_validation(
+def test_third_semantic_rejection_yields_executable_human_review_candidate(
     mock_session,
     tmp_path,
 ):
@@ -266,8 +538,11 @@ Start
   ^NEVER\\s+${interface}\\s+${status} -> Record
 """
 
+    feedbacks = []
+
     class FailedSession:
-        def next(self, _feedback=None):
+        def next(self, feedback=None):
+            feedbacks.append(feedback)
             return TextFSMToolTurn(
                 candidate_text=template,
                 submission_mode="native_tool_call",
@@ -332,10 +607,21 @@ Start
                     dry_run=True,
                 )
 
-    assert report.accepted is False
+    assert report.accepted is True
     assert report.compile_success is True
+    assert report.record_count == 0
     assert report.passed_samples == 1
-    assert any("positive sample produced no records" in item for item in report.errors)
+    assert report.validation_pass_rate == 1.0
+    assert report.agent_loop["stop_reason"] == (
+        "human_review_required:independent_semantic_review_failed"
+    )
+    assert feedbacks[0] is None
+    assert len(feedbacks) == 3
+    assert all(
+        item["failure_type"] == "independent_semantic_review_failed"
+        for item in feedbacks[1:]
+    )
+    assert all(item["parsed_results"] for item in feedbacks[1:])
     assert len(attempts) == 3
 
 
@@ -463,12 +749,377 @@ def test_spec_suggester_normalizes_and_validates_a_weaker_model_response(monkeyp
     assert spec["entity"] == "temperature_sensor"
     assert spec["primary_keys"] == ["sensor"]
     assert spec["fields"]["sensor"] == {"required": True, "type": "text"}
-    assert spec["fields"]["temperature"]["type"] == "number"
+    assert spec["fields"]["temperature_celsius"]["type"] == "number"
     assert result["suggestion"]["normalization_warnings"] == [
-        "ignored invalid canonical_candidate for sensor: environment.sensor.5m"
+        "ignored invalid canonical_candidate for sensor: environment.sensor.5m",
+        "preferred approved check-item field name temperature_celsius over temperature",
     ]
     assert recorded[-1]["status"] == "ready"
     assert recorded[-1]["auto_adopt"] is True
+
+
+def test_spec_suggester_uses_executed_ntc_schema_before_calling_llm(monkeypatch):
+    recorded: list[dict] = []
+
+    class Repository:
+        def record_parser_spec_suggestion(self, job_id, **payload):
+            recorded.append({"job_id": job_id, **payload})
+
+        def get_job(self, job_id, **_kwargs):
+            return {
+                "id": job_id,
+                "vendor": "Cisco",
+                "model": "WS-C2960XR-24TS-I",
+                "family": "IOS",
+                "profile": "IOS-C2960",
+                "canonical_command": "show ip interface brief",
+                "samples": [
+                    {
+                        "id": "sample-data",
+                        "sanitization_status": "sanitized",
+                        "sanitized_text": (
+                            "Interface IP-Address OK? Method Status Protocol\n"
+                            "Vlan1 10.0.0.1 YES manual up up\n"
+                        ),
+                    }
+                ],
+            }
+
+    monkeypatch.setattr("spec_suggester.ParserJobRepository", Repository)
+    monkeypatch.setattr(
+        "spec_suggester._field_naming_context",
+        lambda *_args, **_kwargs: {
+            "semantic_profile_id": "interface-l3",
+            "preferred_value_names": [
+                "interface",
+                "ip_address",
+                "oper_status",
+                "protocol_status",
+            ],
+            "check_items": [
+                {"preferred_identity_fields": ["interface"]}
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        "spec_suggester.call_llm",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("an executable trusted template must be reviewed after parsing")
+        ),
+    )
+
+    result = suggest_parser_spec(
+        {"job_id": "job-ntc", "suggestion_task_id": "task-ntc"}
+    )
+
+    suggestion = result["suggestion"]
+    record_set = suggestion["parser_spec"]["record_sets"][0]
+    assert suggestion["draft_source"] == "ntc_templates_objective_execution"
+    assert suggestion["model_called"] is False
+    assert record_set["primary_keys"] == ["interface"]
+    assert set(record_set["fields"]) == {
+        "interface",
+        "ip_address",
+        "protocol_status",
+        "oper_status",
+    }
+    assert recorded[-1]["status"] == "ready"
+    assert recorded[-1]["auto_adopt"] is True
+
+
+def test_ntc_parser_spec_keeps_version_identifiers_as_text():
+    draft = _ntc_parser_spec_draft(
+        job={"canonical_command": "show version"},
+        data_samples=[{"sanitized_text": "BIOS: version 05.31"}],
+        evidence=[
+            {
+                "template_name": "cisco_nxos_show_version.textfsm",
+                "sample_record_counts": {"sample-1": 1},
+                "field_profiles": {
+                    "bios_version": {
+                        "value_shape": "number",
+                        "examples": ["05.31"],
+                        "observed_non_empty_count": 1,
+                    },
+                    "os_version": {
+                        "value_shape": "number",
+                        "examples": ["9.3"],
+                        "observed_non_empty_count": 1,
+                    },
+                    "uptime_days": {
+                        "value_shape": "number",
+                        "examples": ["12"],
+                        "observed_non_empty_count": 1,
+                    },
+                },
+            }
+        ],
+        field_naming_context={"check_items": []},
+    )
+
+    fields = draft["record_sets"][0]["fields"]
+    assert fields["bios_version"]["type"] == "text"
+    assert fields["os_version"]["type"] == "text"
+    assert fields["uptime_days"]["type"] == "number"
+
+
+def test_ntc_parser_spec_uses_check_item_vocabulary_and_preserves_source_label():
+    context = build_parser_field_naming_context(
+        vendor="Cisco",
+        model="WS-C2960XR-24TS-I",
+        family="IOS",
+        profile="CISCO_IOS",
+        command="show version",
+    )
+    draft = _ntc_parser_spec_draft(
+        job={"canonical_command": "show version"},
+        data_samples=[{"sanitized_text": "System image file is flash:/image.bin"}],
+        evidence=[
+            {
+                "template_name": "cisco_ios_show_version.textfsm",
+                "sample_record_counts": {"sample-1": 1},
+                "field_profiles": {
+                    "running_image": {
+                        "value_shape": "text",
+                        "examples": ["flash:/image.bin"],
+                        "observed_non_empty_count": 1,
+                    },
+                    "rommon_version": {
+                        "value_shape": "text",
+                        "examples": ["15.2(3r)E1"],
+                        "observed_non_empty_count": 1,
+                    },
+                },
+            }
+        ],
+        field_naming_context=context,
+    )
+
+    fields = draft["record_sets"][0]["fields"]
+    assert set(fields) == {"boot_image", "bootloader_version"}
+    assert fields["boot_image"]["source_labels"] == ["running_image"]
+    assert fields["bootloader_version"]["source_labels"] == ["rommon_version"]
+
+
+def test_spec_suggester_promotes_ip_when_evidence_contains_unassigned_values(
+    monkeypatch,
+):
+    recorded: list[dict] = []
+
+    class Repository:
+        def record_parser_spec_suggestion(self, job_id, **payload):
+            recorded.append({"job_id": job_id, **payload})
+
+        def get_job(self, job_id, **_kwargs):
+            return {
+                "id": job_id,
+                "vendor": "Generic",
+                "profile": "Router",
+                "canonical_command": "inspect interface brief",
+                "samples": [
+                    {
+                        "id": "sample-interface",
+                        "sanitization_status": "sanitized",
+                        "sanitized_text": (
+                            "Interface Link Primary IP\n"
+                            "GE1/0/1 UP --\n"
+                        ),
+                    }
+                ],
+            }
+
+    model_response = json.dumps(
+        {
+            "parser_spec": {
+                "version": 2,
+                "business_purpose": "Inspect routed interfaces.",
+                "record_sets": [
+                    {
+                        "name": "interfaces",
+                        "entity": "interface",
+                        "cardinality": "repeated",
+                        "primary_keys": ["interface"],
+                        "fields": {
+                            "interface": {
+                                "required": True,
+                                "type": "interface",
+                            },
+                            "primary_ip": {
+                                "required": True,
+                                "type": "ip",
+                                "evidence": ["GE1/0/1 UP --"],
+                            },
+                        },
+                        "expected_records": [
+                            {
+                                "sample_id": "sample-interface",
+                                "records": [
+                                    {
+                                        "interface": "GE1/0/1",
+                                        "primary_ip": None,
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
+            "sample_plans": [],
+        }
+    )
+    monkeypatch.setattr("spec_suggester.ParserJobRepository", Repository)
+    monkeypatch.setattr("spec_suggester.call_llm", lambda *_args, **_kwargs: model_response)
+
+    result = suggest_parser_spec(
+        {
+            "job_id": "job-interface",
+            "suggestion_task_id": "task-interface",
+        }
+    )
+
+    spec = result["suggestion"]["parser_spec"]
+    assert (
+        spec["record_sets"][0]["fields"]["primary_ip"]["type"]
+        == "ip_or_unassigned"
+    )
+    assert "expected_records" not in spec["record_sets"][0]
+    assert result["suggestion"]["normalization_warnings"] == [
+        "promoted primary_ip from ip to ip_or_unassigned because "
+        "the sample evidence contains an unassigned value"
+    ]
+    assert recorded[-1]["status"] == "ready"
+
+
+def test_spec_suggester_preserves_optional_branches_and_numeric_missing_tokens(
+    monkeypatch,
+):
+    recorded: list[dict] = []
+
+    class Repository:
+        def record_parser_spec_suggestion(self, job_id, **payload):
+            recorded.append({"job_id": job_id, **payload})
+
+        def get_job(self, job_id, **_kwargs):
+            return {
+                "id": job_id,
+                "vendor": "H3C",
+                "profile": "S6850",
+                "canonical_command": "display transceiver diagnosis interface",
+                "samples": [
+                    {
+                        "id": "sample-optical",
+                        "sanitization_status": "sanitized",
+                        "sanitized_text": "FortyGigE1/0/1 Current Rx Power -4.70 N/A",
+                    }
+                ],
+            }
+
+    model_response = json.dumps(
+        {
+            "parser_spec": {
+                "version": 2,
+                "business_purpose": "Inspect optical power.",
+                "record_sets": [
+                    {
+                        "name": "optical_channels",
+                        "entity": "interface_optical_channel",
+                        "cardinality": "repeated",
+                        "presence": "optional",
+                        "primary_keys": ["interface", "channel"],
+                        "fields": {
+                            "interface": {
+                                "required": True,
+                                "type": "interface_name",
+                            },
+                            "channel": {"required": True, "type": "number"},
+                            "rx_power_dbm": {
+                                "required": True,
+                                "type": "number",
+                                "role": "metric",
+                                "unavailable_tokens": "N/A",
+                                "evidence": ["Current Rx Power -4.70 N/A"],
+                            },
+                        },
+                    }
+                ],
+            },
+            "sample_plans": [],
+        }
+    )
+    monkeypatch.setattr("spec_suggester.ParserJobRepository", Repository)
+    monkeypatch.setattr("spec_suggester.call_llm", lambda *_args, **_kwargs: model_response)
+
+    result = suggest_parser_spec(
+        {"job_id": "job-optical", "suggestion_task_id": "task-optical"}
+    )
+
+    record_set = result["suggestion"]["parser_spec"]["record_sets"][0]
+    assert record_set["presence"] == "optional"
+    assert record_set["fields"]["rx_power_dbm"]["type"] == "number"
+    assert record_set["fields"]["rx_power_dbm"]["unavailable_tokens"] == ["N/A"]
+    assert result["suggestion"]["normalization_warnings"] == []
+    assert recorded[-1]["status"] == "ready"
+
+
+def test_spec_suggester_does_not_override_explicit_composite_metric_type(monkeypatch):
+    recorded: list[dict] = []
+
+    class Repository:
+        def record_parser_spec_suggestion(self, job_id, **payload):
+            recorded.append({"job_id": job_id, **payload})
+
+        def get_job(self, job_id, **_kwargs):
+            return {
+                "id": job_id,
+                "vendor": "Cisco",
+                "profile": "WS-C2960XR-24TS-I",
+                "canonical_command": "show env all",
+                "samples": [
+                    {
+                        "id": "sample-environment",
+                        "sanitization_status": "sanitized",
+                        "sanitized_text": "1A PWR-C2-250WAC SERIAL OK Good N/A 250/0",
+                    }
+                ],
+            }
+
+    model_response = json.dumps(
+        {
+            "parser_spec": {
+                "version": 2,
+                "business_purpose": "Inspect power supplies.",
+                "record_sets": [
+                    {
+                        "name": "power_supplies",
+                        "entity": "power_supply",
+                        "cardinality": "repeated",
+                        "primary_keys": ["slot"],
+                        "fields": {
+                            "slot": {"required": True, "type": "text"},
+                            "watts": {
+                                "required": True,
+                                "type": "text",
+                                "role": "metric",
+                                "evidence": ["250/0"],
+                            },
+                        },
+                    }
+                ],
+            },
+            "sample_plans": [],
+        }
+    )
+    monkeypatch.setattr("spec_suggester.ParserJobRepository", Repository)
+    monkeypatch.setattr("spec_suggester.call_llm", lambda *_args, **_kwargs: model_response)
+
+    result = suggest_parser_spec(
+        {"job_id": "job-environment", "suggestion_task_id": "task-environment"}
+    )
+
+    watts = result["suggestion"]["parser_spec"]["record_sets"][0]["fields"]["watts"]
+    assert watts["type"] == "text"
+    assert result["suggestion"]["normalization_warnings"] == []
+    assert recorded[-1]["status"] == "ready"
 
 
 def test_spec_suggester_keeps_record_plan_advisory_without_compiler_derived_expectations(

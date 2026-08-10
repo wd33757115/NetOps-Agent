@@ -69,7 +69,12 @@ describe('hasFocusMatched', () => {
 
 describe('parser workspace navigation', () => {
   it('keeps offline evidence ingestion inside rule asset production', () => {
-    expect(parserWorkspaceTabs.production).toEqual(['asset-production-units', 'source-jobs'])
+    expect(parserWorkspaceTabs.production).toEqual([
+      'asset-production-units',
+      'source-jobs',
+      'catalog-management',
+      'assessment-policies',
+    ])
     expect(resolve('')).toMatchObject({
       workspace: 'production',
       subWorkspace: null,
@@ -85,7 +90,7 @@ describe('parser workspace navigation', () => {
     expect(parserWorkspaceTabs.generation).toContain('agent-loop-attempts')
     expect(parserWorkspaceTabs.release).toContain('replay-reports')
     expect(parserWorkspaceTabs.inventory).toEqual(['published-assets'])
-    expect(parserWorkspaceTabs.runtime).toEqual(['coverage-backfill'])
+    expect(parserWorkspaceTabs.runtime).toEqual(['coverage-backfill', 'rule-gaps'])
     expect(parserWorkspaceTabs.audit).toEqual(['audit-log'])
   })
 
@@ -97,6 +102,11 @@ describe('parser workspace navigation', () => {
     expect(resolve('workspace=runtime&subtab=asset-chain')).toMatchObject({
       workspace: 'runtime',
       subWorkspace: 'coverage-backfill',
+    })
+    expect(resolve('workspace=generation&subtab=rule-gaps')).toMatchObject({
+      workspace: 'runtime',
+      subWorkspace: 'rule-gaps',
+      legacyRedirect: true,
     })
     expect(resolve('workspace=audit&subtab=approval-audit')).toMatchObject({
       workspace: 'audit',

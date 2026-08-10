@@ -5,14 +5,20 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from collections.abc import Callable, Iterable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable, Iterable
+from types import SimpleNamespace
+from typing import Any
 
 from src.core.check_items.assessment import (
     CheckAssessmentInput,
     CheckAssessmentService,
+)
+from src.core.check_items.assessment_policy import (
+    build_assessment_basis,
+    validate_assessment_policy_snapshot,
 )
 from src.core.check_items.current_state import (
     CurrentStateEvaluationInput,
@@ -39,9 +45,12 @@ from src.infrastructure.db.models import (
     CheckItemVersionRecord,
     CommandSnapshot,
     ComparisonContextRecord,
+    CoverageDecisionRecord,
     EventRuleRecord,
     EventRuleVersionRecord,
+    EvidenceQualificationRecord,
     NetworkChangeRecord,
+    NetworkEventOccurrenceRecord,
     NetworkEventRecord,
     RiskCaseRecord,
 )
@@ -85,6 +94,7 @@ class StructuredExecutionResultInput:
     snapshot_facts: tuple[dict[str, Any], ...] = ()
     change_ids: tuple[str, ...] = ()
     event_ids: tuple[str, ...] = ()
+    event_occurrence_ids: tuple[str, ...] = ()
     expected_entity_keys: tuple[Any, ...] = ()
     expected_entity_count: int | None = None
     coverage_denominator_ref: dict[str, Any] = field(default_factory=dict)
@@ -114,6 +124,14 @@ class EvidenceExecutionResultInput:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class TerminalFailureInput:
+    execution_id: str
+    status: str
+    reason_codes: tuple[str, ...]
+    evidence_refs: tuple[str, ...] = ()
+
+
 class CheckItemExecutionService:
     """Create exactly one terminal Assessment for every planned execution."""
 
@@ -127,12 +145,160 @@ class CheckItemExecutionService:
         "unsupported",
         "blocked_asset_missing",
     }
+    _NON_EVALUABLE_COVERAGE_STATUSES = {
+        "parse_failed",
+        "normalization_failed",
+    }
 
     def __init__(
         self,
         session_scope: Callable[[], AbstractContextManager[Any]] = get_db_session,
     ) -> None:
         self._session_scope = session_scope
+
+    def qualify_evidence(
+        self,
+        execution_id: str,
+        *,
+        snapshot_facts: Iterable[dict[str, Any]],
+        evidence_refs: Iterable[str] = (),
+        qualified_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Persist raw-evidence qualification without consulting Parser output."""
+        snapshots = tuple(dict(item) for item in snapshot_facts)
+        if not snapshots:
+            raise ValueError("raw evidence qualification requires a snapshot")
+        with self._session_scope() as db:
+            execution = db.get(CheckExecutionRecord, execution_id)
+            if execution is None:
+                raise ValueError("check execution not found")
+            existing = (
+                db.get(
+                    EvidenceQualificationRecord,
+                    execution.evidence_qualification_id,
+                )
+                if execution.evidence_qualification_id
+                else None
+            )
+            if existing is not None:
+                return existing.to_dict()
+            execution_values = execution.to_dict()
+
+        execution = SimpleNamespace(**execution_values)
+        bundle = self._frozen_bundle(execution)
+        policy_snapshot = self._evidence_policy_snapshot(bundle)
+        assessment_policy_snapshot = dict(
+            getattr(execution, "assessment_policy_snapshot_json", None) or {}
+        )
+        if validate_assessment_policy_snapshot(assessment_policy_snapshot):
+            policy_snapshot["applicability_decision"] = dict(
+                assessment_policy_snapshot.get("applicability_decision") or {}
+            )
+        observed_ats = tuple(
+            value
+            for value in (
+                self._as_datetime(item.get("observed_at"))
+                for item in snapshots
+            )
+            if value is not None
+        )
+        at = _utc(qualified_at)
+        decision = EvidenceQualificationService.qualify(
+            EvidenceQualificationInput(
+                execution_id=str(execution.id),
+                patrol_batch_id=str(execution.patrol_batch_id),
+                device_id=str(execution.device_id),
+                check_item_version_id=str(
+                    execution.check_item_version_id
+                ),
+                implementation_version_id=(
+                    str(execution.implementation_version_id)
+                    if execution.implementation_version_id
+                    else None
+                ),
+                runtime_bundle_version_id=(
+                    str(execution.runtime_bundle_version_id)
+                    if execution.runtime_bundle_version_id
+                    else None
+                ),
+                runtime_bundle_digest=(
+                    str(execution.runtime_bundle_digest)
+                    if execution.runtime_bundle_digest
+                    else None
+                ),
+                snapshot_ids=tuple(
+                    str(item.get("id") or "")
+                    for item in snapshots
+                    if item.get("id")
+                ),
+                source_device_ids=tuple(
+                    str(
+                        item.get("source_device_id")
+                        or item.get("inventory_device_id")
+                        or item.get("device_id")
+                        or ""
+                    )
+                    for item in snapshots
+                ),
+                inventory_device_ids=tuple(
+                    (
+                        str(item.get("inventory_device_id"))
+                        if item.get("inventory_device_id")
+                        else None
+                    )
+                    for item in snapshots
+                ),
+                output_statuses=tuple(
+                    str(item.get("output_status") or "unknown")
+                    for item in snapshots
+                ),
+                output_reasons=tuple(
+                    (
+                        str(dict(item.get("metadata_json") or {}).get("output_reason"))
+                        if dict(item.get("metadata_json") or {}).get("output_reason")
+                        is not None
+                        else None
+                    )
+                    for item in snapshots
+                ),
+                observed_ats=observed_ats,
+                policy_snapshot=policy_snapshot,
+                profile_version_id=(
+                    dict(
+                        policy_snapshot.get(
+                            "output_quality_profile"
+                        )
+                        or {}
+                    ).get("version_id")
+                ),
+                profile_digest=(
+                    dict(
+                        policy_snapshot.get(
+                            "output_quality_profile"
+                        )
+                        or {}
+                    ).get("digest")
+                ),
+                evidence_refs=tuple(
+                    {
+                        *(
+                            str(item)
+                            for item in evidence_refs
+                            if str(item)
+                        ),
+                        *(
+                            str(item.get("id") or "")
+                            for item in snapshots
+                            if item.get("id")
+                        ),
+                    }
+                ),
+                qualified_at=at,
+            )
+        )
+        return EvidenceQualityRepository(
+            self._session_scope
+        ).save_qualification(decision)
 
     def fail_execution(
         self,
@@ -145,10 +311,23 @@ class CheckItemExecutionService:
     ) -> dict[str, Any]:
         if status not in self._FAILURE_STATUSES:
             raise ValueError(f"unsupported terminal failure status: {status}")
+        supplied_reasons = tuple(
+            str(item) for item in reason_codes if str(item)
+        )
+        supplied_evidence = tuple(
+            str(item) for item in evidence_refs if str(item)
+        )
         existing = self._existing_result(execution_id)
         if existing is not None:
             return existing
         at = _utc(assessed_at)
+        self._ensure_failure_coverage(
+            execution_id,
+            status=status,
+            reason_codes=supplied_reasons,
+            evidence_refs=supplied_evidence,
+            decided_at=at,
+        )
         with self._session_scope() as db:
             execution, check_version, context = self._locked_context(
                 db,
@@ -158,14 +337,14 @@ class CheckItemExecutionService:
                 dict.fromkeys(
                     [
                         *(str(item) for item in execution.reason_codes_json or []),
-                        *(str(item) for item in reason_codes if str(item)),
+                        *supplied_reasons,
                     ]
                 )
             )
             evidence = sorted(
                 {
                     *(str(item) for item in execution.evidence_refs_json or []),
-                    *(str(item) for item in evidence_refs if str(item)),
+                    *supplied_evidence,
                     execution.id,
                 }
             )
@@ -209,10 +388,43 @@ class CheckItemExecutionService:
                     unresolved_risk_case_ids=tuple(
                         str(item.id) for item in open_risks
                     ),
+                    evidence_qualification_id=(
+                        execution.evidence_qualification_id
+                    ),
+                    coverage_decision_id=execution.coverage_decision_id,
+                    source_identity_status=str(
+                        execution.source_identity_status or "unknown"
+                    ),
+                    output_quality_status=str(
+                        execution.output_quality_status or "unknown"
+                    ),
+                    freshness_status=str(
+                        execution.freshness_status or "unknown"
+                    ),
+                    empty_result_classification=str(
+                        execution.empty_result_classification
+                        or "not_evaluated"
+                    ),
+                    coverage_status=str(
+                        execution.coverage_status or "unknown"
+                    ),
+                    coverage_basis=str(
+                        execution.coverage_basis or "unknown"
+                    ),
                     blocking_reason_codes=reasons,
                     evidence_refs=tuple(evidence),
                     assessment_rule_bundle_digest=(
                         execution.runtime_bundle_digest
+                    ),
+                    runtime_bundle_version_id=(
+                        str(execution.runtime_bundle_version_id)
+                        if execution.runtime_bundle_version_id
+                        else None
+                    ),
+                    assessment_policy_snapshot_digest=(
+                        str(execution.assessment_policy_snapshot_digest)
+                        if execution.assessment_policy_snapshot_digest
+                        else None
                     ),
                     comparison_context_digest=(
                         str(context.digest) if context else None
@@ -233,6 +445,332 @@ class CheckItemExecutionService:
             )
         return result
 
+    def fail_executions_bulk(
+        self,
+        failures: Iterable[TerminalFailureInput],
+        *,
+        assessed_at: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        """Settle non-parser terminal failures in one database transaction."""
+
+        items = tuple(failures)
+        if not items:
+            return []
+        ids = [str(item.execution_id) for item in items]
+        if len(ids) != len(set(ids)):
+            raise ValueError("bulk terminal failures contain duplicate execution ids")
+        for item in items:
+            if item.status not in self._FAILURE_STATUSES:
+                raise ValueError(
+                    f"unsupported terminal failure status: {item.status}"
+                )
+            if item.status in self._NON_EVALUABLE_COVERAGE_STATUSES:
+                raise ValueError(
+                    "parse and normalization failures require individual "
+                    "coverage reconciliation"
+                )
+
+        at = _utc(assessed_at)
+        with self._session_scope() as db:
+            rows = (
+                db.query(CheckExecutionRecord, CheckItemVersionRecord)
+                .join(
+                    CheckItemVersionRecord,
+                    CheckItemVersionRecord.id
+                    == CheckExecutionRecord.check_item_version_id,
+                )
+                .filter(CheckExecutionRecord.id.in_(ids))
+                .with_for_update()
+                .all()
+            )
+            row_by_id = {
+                str(execution.id): (execution, check_version)
+                for execution, check_version in rows
+            }
+            missing = sorted(set(ids) - set(row_by_id))
+            if missing:
+                raise ValueError(
+                    "one or more check executions were not found: "
+                    + ",".join(missing)
+                )
+            context_ids = {
+                str(execution.comparison_context_id)
+                for execution, _check_version in row_by_id.values()
+                if execution.comparison_context_id
+            }
+            contexts = (
+                db.query(ComparisonContextRecord)
+                .filter(ComparisonContextRecord.id.in_(context_ids))
+                .all()
+                if context_ids
+                else []
+            )
+            context_by_id = {str(item.id): item for item in contexts}
+            device_ids = {
+                str(execution.device_id)
+                for execution, _check_version in row_by_id.values()
+            }
+            check_item_ids = {
+                str(check_version.check_item_id)
+                for _execution, check_version in row_by_id.values()
+            }
+            risk_rows = (
+                db.query(RiskCaseRecord)
+                .filter(
+                    RiskCaseRecord.device_id.in_(device_ids),
+                    RiskCaseRecord.check_item_id.in_(check_item_ids),
+                    RiskCaseRecord.status.in_(
+                        ["open", "acknowledged", "recovering"]
+                    ),
+                )
+                .order_by(RiskCaseRecord.first_seen_at, RiskCaseRecord.id)
+                .all()
+            )
+            risks_by_pair: dict[tuple[str, str], list[RiskCaseRecord]] = {}
+            for risk in risk_rows:
+                risks_by_pair.setdefault(
+                    (str(risk.device_id), str(risk.check_item_id)),
+                    [],
+                ).append(risk)
+
+            results: list[dict[str, Any]] = []
+            for item in items:
+                execution, check_version = row_by_id[str(item.execution_id)]
+                if execution.assessment_id:
+                    assessment = db.get(
+                        CheckAssessmentRecord,
+                        execution.assessment_id,
+                    )
+                    if assessment is None:
+                        raise ValueError(
+                            "terminal execution has a missing Assessment"
+                        )
+                    results.append(
+                        self._result_payload(execution, assessment.to_dict())
+                    )
+                    continue
+
+                reasons = tuple(
+                    dict.fromkeys(
+                        [
+                            *(
+                                str(value)
+                                for value in execution.reason_codes_json or []
+                                if str(value)
+                            ),
+                            *(
+                                str(value)
+                                for value in item.reason_codes
+                                if str(value)
+                            ),
+                        ]
+                    )
+                )
+                evidence = sorted(
+                    {
+                        *(
+                            str(value)
+                            for value in execution.evidence_refs_json or []
+                            if str(value)
+                        ),
+                        *(
+                            str(value)
+                            for value in item.evidence_refs
+                            if str(value)
+                        ),
+                        str(execution.id),
+                    }
+                )
+                execution.execution_status = item.status
+                execution.reason_codes_json = list(reasons)
+                execution.evidence_refs_json = evidence
+                execution.completed_at = at
+                execution.updated_at = at
+                risks = risks_by_pair.get(
+                    (
+                        str(execution.device_id),
+                        str(check_version.check_item_id),
+                    ),
+                    [],
+                )
+                for risk in risks:
+                    risk.verification_status = "not_reverified"
+                    risk.updated_at = at
+                    RiskCaseService._append_occurrence(
+                        db,
+                        case=risk,
+                        kind="unable_to_confirm",
+                        observed_at=at,
+                        status_after=str(risk.status),
+                        patrol_batch_id=str(execution.patrol_batch_id),
+                        reason=",".join(reasons),
+                        evidence_refs=evidence,
+                    )
+                context = (
+                    context_by_id.get(str(execution.comparison_context_id))
+                    if execution.comparison_context_id
+                    else None
+                )
+                decision = CheckAssessmentService.assess(
+                    CheckAssessmentInput(
+                        execution_id=execution.id,
+                        patrol_batch_id=execution.patrol_batch_id,
+                        device_id=execution.device_id,
+                        check_item_version_id=execution.check_item_version_id,
+                        execution_status=item.status,
+                        assessment_mode=check_version.assessment_mode,
+                        comparison_status=_comparison_status(context),
+                        observation_count=int(execution.observation_count or 0),
+                        observed_entity_count=int(
+                            execution.observed_entity_count or 0
+                        ),
+                        evaluated_entity_count=0,
+                        unresolved_risk_case_ids=tuple(
+                            str(risk.id) for risk in risks
+                        ),
+                        evidence_qualification_id=(
+                            execution.evidence_qualification_id
+                        ),
+                        coverage_decision_id=execution.coverage_decision_id,
+                        source_identity_status=str(
+                            execution.source_identity_status or "unknown"
+                        ),
+                        output_quality_status=str(
+                            execution.output_quality_status or "unknown"
+                        ),
+                        freshness_status=str(
+                            execution.freshness_status or "unknown"
+                        ),
+                        empty_result_classification=str(
+                            execution.empty_result_classification
+                            or "not_evaluated"
+                        ),
+                        coverage_status=str(
+                            execution.coverage_status or "unknown"
+                        ),
+                        coverage_basis=str(
+                            execution.coverage_basis or "unknown"
+                        ),
+                        blocking_reason_codes=reasons,
+                        evidence_refs=tuple(evidence),
+                        assessment_rule_bundle_digest=(
+                            execution.runtime_bundle_digest
+                        ),
+                        runtime_bundle_version_id=(
+                            str(execution.runtime_bundle_version_id)
+                            if execution.runtime_bundle_version_id
+                            else None
+                        ),
+                        assessment_policy_snapshot_digest=(
+                            str(execution.assessment_policy_snapshot_digest)
+                            if execution.assessment_policy_snapshot_digest
+                            else None
+                        ),
+                        comparison_context_digest=(
+                            str(context.digest) if context else None
+                        ),
+                        assessed_at=at,
+                    )
+                )
+                db.add(CheckAssessmentRecord(**decision.values))
+                execution.assessment_id = decision.id
+                execution.risk_verification_status = decision.values[
+                    "risk_verification_status"
+                ]
+                results.append(
+                    self._result_payload(
+                        execution,
+                        decision.values,
+                        risks=[risk.to_dict() for risk in risks],
+                    )
+                )
+            db.flush()
+            return results
+
+    def _ensure_failure_coverage(
+        self,
+        execution_id: str,
+        *,
+        status: str,
+        reason_codes: Iterable[str],
+        evidence_refs: Iterable[str],
+        decided_at: datetime,
+    ) -> dict[str, Any] | None:
+        if status not in self._NON_EVALUABLE_COVERAGE_STATUSES:
+            return None
+        with self._session_scope() as db:
+            execution = db.get(CheckExecutionRecord, execution_id)
+            if execution is None:
+                raise ValueError("check execution not found")
+            existing = (
+                db.get(
+                    CoverageDecisionRecord,
+                    execution.coverage_decision_id,
+                )
+                if execution.coverage_decision_id
+                else None
+            )
+            if existing is not None:
+                return existing.to_dict()
+            if not execution.evidence_qualification_id:
+                return None
+            execution_values = execution.to_dict()
+            existing_reasons = tuple(
+                str(item)
+                for item in execution.reason_codes_json or []
+                if str(item)
+            )
+
+        frozen_execution = SimpleNamespace(**execution_values)
+        bundle = self._frozen_bundle(frozen_execution)
+        policy_snapshot = self._evidence_policy_snapshot(bundle)
+        qualification_id = str(
+            frozen_execution.evidence_qualification_id
+        )
+        decision = CoverageDecisionService.decide(
+            CoverageDecisionInput(
+                execution_id=str(frozen_execution.id),
+                patrol_batch_id=str(frozen_execution.patrol_batch_id),
+                device_id=str(frozen_execution.device_id),
+                check_item_version_id=str(
+                    frozen_execution.check_item_version_id
+                ),
+                observed_entity_keys=(),
+                evaluated_entity_count=0,
+                policy_snapshot=dict(
+                    policy_snapshot.get("coverage_policy") or {}
+                ),
+                evidence_refs=tuple(
+                    {
+                        qualification_id,
+                        *(
+                            str(item)
+                            for item in evidence_refs
+                            if str(item)
+                        ),
+                    }
+                ),
+                evaluable=False,
+                evaluation_failure_reason_codes=tuple(
+                    dict.fromkeys(
+                        [
+                            status,
+                            *existing_reasons,
+                            *(
+                                str(item)
+                                for item in reason_codes
+                                if str(item)
+                            ),
+                        ]
+                    )
+                ),
+                decided_at=decided_at,
+            )
+        )
+        return EvidenceQualityRepository(
+            self._session_scope
+        ).save_coverage(decision)
+
     def finalize_structured(
         self,
         data: StructuredExecutionResultInput,
@@ -241,6 +779,12 @@ class CheckItemExecutionService:
         if existing is not None:
             return existing
         at = _utc(data.assessed_at)
+        qualification = self.qualify_evidence(
+            data.execution_id,
+            snapshot_facts=data.snapshot_facts,
+            evidence_refs=data.evidence_refs,
+            qualified_at=at,
+        )
         with self._session_scope() as db:
             execution, check_version, context = self._locked_context(
                 db,
@@ -260,85 +804,19 @@ class CheckItemExecutionService:
             )
             rules = self._load_current_state_rules(db, assets)
             check_item_id = str(check_version.check_item_id)
-            policy_snapshot = self._evidence_policy_snapshot(bundle)
-            snapshot_facts = tuple(dict(item) for item in data.snapshot_facts)
-            observed_ats = tuple(
-                item
-                for item in [
-                    *(
-                        self._as_datetime(fact.get("observed_at"))
-                        for fact in snapshot_facts
-                    ),
-                    *(
-                        self._as_datetime(item.get("observed_at"))
-                        for item in observations
-                    ),
-                ]
-                if item is not None
+            evidence_policy_snapshot = self._evidence_policy_snapshot(bundle)
+            assessment_policy_snapshot = dict(
+                execution.assessment_policy_snapshot_json or {}
             )
-            qualification_decision = EvidenceQualificationService.qualify(
-                EvidenceQualificationInput(
-                    execution_id=execution.id,
-                    patrol_batch_id=execution.patrol_batch_id,
-                    device_id=execution.device_id,
-                    check_item_version_id=execution.check_item_version_id,
-                    implementation_version_id=(
-                        execution.implementation_version_id
-                    ),
-                    runtime_bundle_version_id=(
-                        execution.runtime_bundle_version_id
-                    ),
-                    runtime_bundle_digest=execution.runtime_bundle_digest,
-                    snapshot_ids=tuple(
-                        str(item.get("id") or "")
-                        for item in snapshot_facts
-                        if item.get("id")
-                    ),
-                    source_device_ids=tuple(
-                        str(item.get("device_id") or "")
-                        for item in snapshot_facts
-                    ),
-                    inventory_device_ids=tuple(
-                        (
-                            str(item.get("inventory_device_id"))
-                            if item.get("inventory_device_id")
-                            else None
-                        )
-                        for item in snapshot_facts
-                    ),
-                    output_statuses=tuple(
-                        str(item.get("output_status") or "unknown")
-                        for item in snapshot_facts
-                    ),
-                    observed_ats=observed_ats,
-                    observation_count=len(observations),
-                    assessment_mode=str(check_version.assessment_mode),
-                    policy_snapshot=policy_snapshot,
-                    profile_version_id=(
-                        dict(policy_snapshot.get("output_quality_profile") or {})
-                        .get("version_id")
-                    ),
-                    profile_digest=(
-                        dict(policy_snapshot.get("output_quality_profile") or {})
-                        .get("digest")
-                    ),
-                    evidence_refs=tuple(
-                        {
-                            *(str(item) for item in data.evidence_refs if str(item)),
-                            *(
-                                str(item.get("id") or "")
-                                for item in snapshot_facts
-                                if item.get("id")
-                            ),
-                        }
-                    ),
-                    qualified_at=at,
-                )
+            assessment_policy_snapshot_digest = (
+                str(execution.assessment_policy_snapshot_digest or "")
+                or str(assessment_policy_snapshot.get("digest") or "")
+                or None
             )
             trusted_current_evidence = (
-                qualification_decision.source_identity_status == "confirmed"
-                and qualification_decision.output_quality_status == "complete"
-                and qualification_decision.freshness_status == "fresh"
+                qualification["source_identity_status"] == "confirmed"
+                and qualification["output_quality_status"] == "complete"
+                and qualification["freshness_status"] == "fresh"
             )
             finding_result = (
                 CurrentStateEvaluationService.evaluate(
@@ -361,6 +839,9 @@ class CheckItemExecutionService:
                         rules=rules,
                         runtime_assets=assets,
                         assessed_at=at,
+                        assessment_policy_snapshot=(
+                            assessment_policy_snapshot
+                        ),
                     )
                 )
                 if observations
@@ -373,6 +854,21 @@ class CheckItemExecutionService:
                     "evaluated_entity_count": 0,
                     "threshold_unknown_observation_count": 0,
                     "partial_threshold_observation_count": 0,
+                    "assessment_policy_blocking_reason_codes": [],
+                    "assessment_basis": build_assessment_basis(
+                        entries=(),
+                        policy_snapshot_digest=(
+                            assessment_policy_snapshot_digest
+                        ),
+                        runtime_bundle_version_id=(
+                            str(execution.runtime_bundle_version_id or "")
+                            or None
+                        ),
+                        runtime_bundle_digest=(
+                            str(execution.runtime_bundle_digest or "")
+                            or None
+                        ),
+                    ),
                 }
             )
             observed_entities = tuple(
@@ -389,7 +885,7 @@ class CheckItemExecutionService:
                 )
             )
             coverage_policy = dict(
-                policy_snapshot.get("coverage_policy") or {}
+                evidence_policy_snapshot.get("coverage_policy") or {}
             )
             coverage_basis = str(
                 coverage_policy.get("model") or "unknown"
@@ -429,7 +925,7 @@ class CheckItemExecutionService:
                     denominator_ref=denominator_ref,
                     evidence_refs=tuple(
                         {
-                            qualification_decision.id,
+                            str(qualification["id"]),
                             *(str(item) for item in data.evidence_refs if str(item)),
                         }
                     ),
@@ -438,9 +934,6 @@ class CheckItemExecutionService:
             )
 
         quality_repository = EvidenceQualityRepository(self._session_scope)
-        qualification = quality_repository.save_qualification(
-            qualification_decision
-        )
         coverage_record = quality_repository.save_coverage(coverage_decision)
         findings = (
             CurrentStateFindingRepository(self._session_scope).save(
@@ -472,6 +965,12 @@ class CheckItemExecutionService:
                 execution=execution,
                 check_item_id=str(check_version.check_item_id),
             )
+            event_occurrences = self._bind_event_occurrences(
+                db,
+                ids=data.event_occurrence_ids,
+                execution=execution,
+                changes=changes,
+            )
             open_risks = self._open_risks(
                 db,
                 check_item_id=str(check_version.check_item_id),
@@ -488,6 +987,7 @@ class CheckItemExecutionService:
                     *(str(item["id"]) for item in risks),
                     *(str(item.id) for item in changes),
                     *(str(item.id) for item in events),
+                    *(str(item.id) for item in event_occurrences),
                     str(qualification["id"]),
                     str(coverage_record["id"]),
                     execution.id,
@@ -500,7 +1000,11 @@ class CheckItemExecutionService:
             execution.observation_count = len(data.observations)
             execution.observed_entity_count = len(observed_entities)
             execution.change_count = len(changes)
-            execution.event_count = len(events)
+            execution.event_count = (
+                len(event_occurrences)
+                if data.event_occurrence_ids
+                else len(events)
+            )
             execution.current_finding_count = len(findings)
             execution.evidence_refs_json = evidence
             execution.completed_at = at
@@ -562,9 +1066,28 @@ class CheckItemExecutionService:
                         ]
                     )
                     or check_version.assessment_mode != "health",
+                    blocking_reason_codes=tuple(
+                        str(item)
+                        for item in coverage.get(
+                            "assessment_policy_blocking_reason_codes"
+                        )
+                        or []
+                        if str(item)
+                    ),
                     evidence_refs=tuple(evidence),
                     assessment_rule_bundle_digest=(
                         execution.runtime_bundle_digest
+                    ),
+                    runtime_bundle_version_id=(
+                        str(execution.runtime_bundle_version_id)
+                        if execution.runtime_bundle_version_id
+                        else None
+                    ),
+                    assessment_policy_snapshot_digest=(
+                        assessment_policy_snapshot_digest
+                    ),
+                    assessment_basis=dict(
+                        coverage.get("assessment_basis") or {}
                     ),
                     comparison_context_digest=(
                         str(context.digest) if context else None
@@ -631,7 +1154,12 @@ class CheckItemExecutionService:
             if profile is None:
                 raise ValueError("frozen text comparison profile is missing")
             current = db.get(CommandSnapshot, data.current_snapshot_id)
-            if current is None or str(current.device_id) != execution.device_id:
+            current_device_id = (
+                str(current.inventory_device_id or current.device_id)
+                if current is not None
+                else ""
+            )
+            if current is None or current_device_id != execution.device_id:
                 raise ValueError("current snapshot does not belong to the execution")
             previous = None
             comparison_status = _comparison_status(context)
@@ -711,6 +1239,16 @@ class CheckItemExecutionService:
                     assessment_rule_bundle_digest=(
                         execution.runtime_bundle_digest
                     ),
+                    runtime_bundle_version_id=(
+                        str(execution.runtime_bundle_version_id)
+                        if execution.runtime_bundle_version_id
+                        else None
+                    ),
+                    assessment_policy_snapshot_digest=(
+                        str(execution.assessment_policy_snapshot_digest)
+                        if execution.assessment_policy_snapshot_digest
+                        else None
+                    ),
                     comparison_context_digest=(
                         str(context.digest) if context else None
                     ),
@@ -781,6 +1319,16 @@ class CheckItemExecutionService:
                     assessment_rule_bundle_digest=(
                         execution.runtime_bundle_digest
                     ),
+                    runtime_bundle_version_id=(
+                        str(execution.runtime_bundle_version_id)
+                        if execution.runtime_bundle_version_id
+                        else None
+                    ),
+                    assessment_policy_snapshot_digest=(
+                        str(execution.assessment_policy_snapshot_digest)
+                        if execution.assessment_policy_snapshot_digest
+                        else None
+                    ),
                     comparison_context_digest=(
                         str(context.digest) if context else None
                     ),
@@ -810,6 +1358,39 @@ class CheckItemExecutionService:
             execution.implementation_version_id
         ):
             raise ValueError("runtime bundle implementation version mismatch")
+        frozen_policy_contract = dict(
+            dict(bundle.get("compatibility") or {}).get(
+                "assessment_policy"
+            )
+            or {}
+        )
+        if frozen_policy_contract:
+            target_snapshot = dict(
+                getattr(execution, "assessment_policy_snapshot_json", None)
+                or {}
+            )
+            if not validate_assessment_policy_snapshot(target_snapshot):
+                raise ValueError(
+                    "frozen assessment policy snapshot is missing or invalid"
+                )
+            snapshot_digest = str(target_snapshot.get("digest") or "")
+            if snapshot_digest != str(
+                getattr(
+                    execution,
+                    "assessment_policy_snapshot_digest",
+                    None,
+                )
+                or ""
+            ):
+                raise ValueError(
+                    "assessment policy snapshot digest differs from execution"
+                )
+            if str(target_snapshot.get("contract_digest") or "") != str(
+                frozen_policy_contract.get("digest") or ""
+            ):
+                raise ValueError(
+                    "assessment policy snapshot differs from runtime bundle"
+                )
         return bundle
 
     @staticmethod
@@ -1032,6 +1613,35 @@ class CheckItemExecutionService:
         return rows
 
     @staticmethod
+    def _bind_event_occurrences(
+        db: Any,
+        *,
+        ids: Iterable[str],
+        execution: CheckExecutionRecord,
+        changes: Iterable[NetworkChangeRecord],
+    ) -> list[NetworkEventOccurrenceRecord]:
+        normalized = sorted(set(str(item) for item in ids if str(item)))
+        if not normalized:
+            return []
+        rows = (
+            db.query(NetworkEventOccurrenceRecord)
+            .filter(NetworkEventOccurrenceRecord.id.in_(normalized))
+            .all()
+        )
+        if len(rows) != len(normalized):
+            raise ValueError("one or more supplied Event occurrences do not exist")
+        change_ids = {str(item.id) for item in changes}
+        for row in rows:
+            if str(row.source_change_id or "") not in change_ids:
+                raise ValueError(
+                    "Event occurrence is not linked to this check execution"
+                )
+            payload = dict(row.payload_json or {})
+            if str(payload.get("device_id") or "") != str(execution.device_id):
+                raise ValueError("Event occurrence belongs to another device")
+        return rows
+
+    @staticmethod
     def _save_text_change(
         db: Any,
         *,
@@ -1074,12 +1684,12 @@ class CheckItemExecutionService:
             check_item_id=check_version.check_item_id,
             check_item_version_id=check_version.id,
             check_execution_id=execution.id,
-            device_id=current.device_id,
+            device_id=execution.device_id,
             canonical_command=current.canonical_command,
             entity_type=str(
                 contract.get("entity_type") or "raw_command_output"
             ),
-            entity_key=str(current.device_id),
+            entity_key=str(execution.device_id),
             dimensions_json={
                 "comparison_profile_version_id": profile.version_id,
                 "redacted_preview": list(comparison.redacted_preview),

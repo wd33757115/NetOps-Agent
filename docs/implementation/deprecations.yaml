@@ -13,7 +13,7 @@ candidates:
     api_routes: []
     celery_tasks: []
     db_writes: []
-    telemetry_metric: legacy_path_call_count
+    telemetry_metric: netops_legacy_path_call_count
     rollback: Re-enable read-only history rendering; production generation remains job_id-only.
     gates:
       static_references_cleared: false
@@ -38,7 +38,7 @@ candidates:
     celery_tasks: []
     db_writes:
       - netops_command_profile_versions
-    telemetry_metric: legacy_path_call_count
+    telemetry_metric: netops_legacy_path_call_count
     rollback: Keep existing active command profiles readable for one release cycle.
     gates:
       static_references_cleared: false
@@ -52,22 +52,21 @@ candidates:
   - id: command-centered-rule-asset-workspace
     owner: Rule Asset Platform
     status: read_only
-    replacement: Check-item rule asset production workbench
+    replacement: Check-item rule asset production list
     deprecated_at: 2026-07-28
     remove_after: 2026-09-15
     code_refs:
-      - src/core/rule_control/command_asset_units.py
-      - web/react_frontend/src/components/devices/OfflineCommandAssetUnits.tsx
-    api_routes: []
+      - src/gateway/parser_api.py
+    api_routes:
+      - GET /api/v1/parser/asset-production/units
     celery_tasks: []
-    db_writes:
-      - netops_rule_asset_command_units
-    telemetry_metric: legacy_path_call_count
-    rollback: Preserve command-unit projection as an audit-only compatibility view.
+    db_writes: []
+    telemetry_metric: netops_legacy_path_call_count
+    rollback: Re-enable the command-centered top-level list; command-level evidence and source progress remain supported drill-down views.
     gates:
       static_references_cleared: false
       runtime_traffic_zero: false
-      database_writes_zero: false
+      database_writes_zero: true
       task_registry_cleared: true
       replacement_coverage_complete: false
       tests_and_migrations_passed: true
@@ -86,7 +85,7 @@ candidates:
       - GET /api/workflows/runs/patrol-batches
     celery_tasks: []
     db_writes: []
-    telemetry_metric: legacy_path_call_count
+    telemetry_metric: netops_legacy_path_call_count
     rollback: Re-enable merged legacy history until all historical runs have manifests.
     gates:
       static_references_cleared: false
@@ -111,7 +110,7 @@ candidates:
       - materialize_patrol_batch_report
     db_writes:
       - netops_patrol_batch_reports
-    telemetry_metric: legacy_path_call_count
+    telemetry_metric: netops_legacy_path_call_count
     rollback: Feature-toggle report reads back to the existing immutable projection.
     gates:
       static_references_cleared: false

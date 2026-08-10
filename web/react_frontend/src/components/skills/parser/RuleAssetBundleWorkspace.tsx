@@ -45,14 +45,28 @@ const statusColor = (status: string) => {
 const stepStatus = (step: ParserRuleAssetBundleStep) => {
   if (step.status === 'passed') return 'finish' as const
   if (step.status === 'ready') return 'process' as const
+  if (step.status === 'skipped') return 'wait' as const
   return 'error' as const
+}
+
+const requiresHistoricalReplay = (row: ParserRuleAssetBundle) => (
+  row.asset_requirements?.requires_historical_replay !== false
+)
+
+const releaseImpact = (row: ParserRuleAssetBundle) => {
+  const labels = [
+    row.asset_counts.OBSERVATION_CONTRACT ? 'Observation Contract' : '',
+    row.asset_counts.CHANGE_POLICY ? 'Change Policy' : '',
+    row.asset_counts.EVENT_RULE ? 'Current State / Event Rule' : '',
+  ].filter(Boolean)
+  return `${labels.join('、') || '候选规则资产'}将在同一事务内激活；任一步失败都会整体回滚。`
 }
 
 const stepLabel: Record<string, string> = {
   context: '脱敏数据上下文',
   contract: '观测契约',
   policy: '变化策略',
-  rules: '事件规则',
+  rules: '当前状态 / 事件规则',
   replay: '历史回放',
   release: '审批发布',
   review: '工程师复核',
@@ -222,7 +236,7 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
         type="info"
         showIcon
         message="候选资产按 Bundle 整体验证、审批和发布"
-        description="一套 Bundle 必须同时包含 Observation Contract、Change Policy 和 Event Rules，并通过脱敏上下文、确定性校验与历史回放。子资产不能绕过 Bundle 单独激活。"
+        description="每套 Bundle 只包含检查项声明需要的资产，并通过脱敏上下文、确定性校验以及必要时的历史回放。子资产不能绕过 Bundle 单独激活。"
       />
       {initialSearch && (
         <Alert
@@ -304,14 +318,14 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
               <Space wrap size={4}>
                 <Tag>观测契约 {row.asset_counts.OBSERVATION_CONTRACT || 0}</Tag>
                 <Tag>变化策略 {row.asset_counts.CHANGE_POLICY || 0}</Tag>
-                <Tag>事件规则 {row.asset_counts.EVENT_RULE || 0}</Tag>
+                <Tag>当前状态 / 事件规则 {row.asset_counts.EVENT_RULE || 0}</Tag>
               </Space>
             ),
           },
           {
             title: '历史回放',
             width: 250,
-            render: (_: unknown, row) => (
+            render: (_: unknown, row) => requiresHistoricalReplay(row) ? (
               <Space direction="vertical" size={0}>
                 <Typography.Text>
                   命中 {String(row.replay.matched_change_count ?? '-')} / 样本 {String(row.replay.sampled_change_count ?? '-')}
@@ -323,7 +337,7 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
                   {row.replay_gate?.evidence_success === false ? '没有有效 Change 证据' : replayScopeSummary(row)}
                 </Tag>
               </Space>
-            ),
+            ) : <Tag>不需要历史回放</Tag>,
           },
           {
             title: '上下文',
@@ -361,7 +375,9 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
                   title: stepLabel[step.key] || step.label,
                   status: stepStatus(step),
                   description: step.key === 'replay'
-                    ? `命中 ${String(step.detail.matched_change_count ?? '-')}，碰撞 ${String(step.detail.collision_count ?? '-')}`
+                    ? requiresHistoricalReplay(row)
+                      ? `命中 ${String(step.detail.matched_change_count ?? '-')}，碰撞 ${String(step.detail.collision_count ?? '-')}`
+                      : '该资产模式不依赖双周期 Change'
                     : undefined,
                 }))}
               />
@@ -521,7 +537,7 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
             : '确认回退'}
         resourceName={lifecycleRequest?.row.semantic_label || lifecycleRequest?.row.observation_type || lifecycleRequest?.row.id || '规则资产包'}
         impact={lifecycleRequest?.action === 'approve'
-          ? 'Contract、Policy 和全部 EventRule 将在同一事务内激活；任一步失败都会整体回滚。'
+          ? releaseImpact(lifecycleRequest.row)
           : lifecycleRequest?.action === 'reject'
             ? '整套候选资产将被拒绝，不会进入生产运行时；候选内容和验证证据仍会保留。'
             : '当前资产包的全部 active 版本将一起废弃，并尝试恢复各资产最近的上一版本。'}

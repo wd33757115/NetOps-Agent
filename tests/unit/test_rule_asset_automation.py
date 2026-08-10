@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -8,6 +9,7 @@ from src.core.celery_tasks.celery_app import celery
 from src.core.rule_control.automation import (
     DEFAULT_AUTOMATION_SETTINGS,
     RuleAssetAutomationService,
+    _as_utc,
     build_unattended_intents,
     evaluate_unattended_publish_gate,
     validate_automation_settings,
@@ -25,7 +27,7 @@ def test_validate_automation_settings_normalizes_and_bounds_values():
         }
     )
 
-    assert settings["mode"] == "auto_publish"
+    assert settings["mode"] == "generate_only"
     assert settings["max_concurrency"] == 10
     assert settings["max_generation_attempts"] == 1
     assert settings["min_period_count"] == 2
@@ -34,6 +36,12 @@ def test_validate_automation_settings_normalizes_and_bounds_values():
 
     with pytest.raises(ValueError, match="unsupported rule asset automation mode"):
         validate_automation_settings({"mode": "publish_everything"})
+
+
+def test_naive_postgres_timestamp_uses_configured_storage_timezone():
+    normalized = _as_utc(datetime(2026, 8, 10, 5, 35, 37))
+
+    assert normalized == datetime(2026, 8, 9, 21, 35, 37, tzinfo=timezone.utc)
 
 
 def test_unattended_intents_are_generic_and_evidence_aware():
@@ -116,7 +124,7 @@ def _bundle_fixture():
         payload_json={
             "automation": {
                 "managed_by": "rule-asset-unattended",
-                "requested_mode": "auto_publish",
+                "requested_mode": "generate_only",
             }
         },
     )
@@ -135,7 +143,7 @@ def test_unattended_publish_gate_requires_strict_offline_replay_evidence():
     bundle, context, seed, unit, children = _bundle_fixture()
     settings = {
         **DEFAULT_AUTOMATION_SETTINGS,
-        "mode": "auto_publish",
+        "mode": "generate_only",
     }
 
     gate = evaluate_unattended_publish_gate(
@@ -145,6 +153,7 @@ def test_unattended_publish_gate_requires_strict_offline_replay_evidence():
         unit=unit,
         settings=settings,
         children=children,
+        source_integrity={"success": True},
     )
 
     assert gate["success"] is True
@@ -152,13 +161,13 @@ def test_unattended_publish_gate_requires_strict_offline_replay_evidence():
     assert gate["collision_count"] == 0
 
 
-def test_unattended_publish_gate_routes_critical_or_single_period_to_review():
+def test_unattended_readiness_gate_routes_single_period_to_revision():
     bundle, context, seed, unit, children = _bundle_fixture()
     context.dataset_ids_json = ["q1"]
     children[0].payload_json["rule"]["severity"] = "critical"
     settings = {
         **DEFAULT_AUTOMATION_SETTINGS,
-        "mode": "auto_publish",
+        "mode": "generate_only",
     }
 
     gate = evaluate_unattended_publish_gate(
@@ -168,11 +177,63 @@ def test_unattended_publish_gate_routes_critical_or_single_period_to_review():
         unit=unit,
         settings=settings,
         children=children,
+        source_integrity={"success": True},
     )
 
     assert gate["success"] is False
     assert "insufficient independent patrol periods" in gate["blockers"]
-    assert "critical EventRules require human approval" in gate["blockers"]
+    assert "critical EventRules require human approval" not in gate["blockers"]
+    assert gate["publish_authority"] == "human_only"
+
+
+def test_unattended_readiness_gate_uses_evidence_only_asset_profile():
+    bundle, context, seed, unit, _children = _bundle_fixture()
+    requirements = {
+        "schema_version": "rule-asset-requirements/v1",
+        "requires_observation_contract": True,
+        "requires_change_policy": False,
+        "requires_current_state_rule": False,
+        "requires_event_rule": False,
+        "requires_event_rule_assets": False,
+        "requires_historical_replay": False,
+    }
+    bundle.payload_json = {
+        "child_job_ids": ["contract"],
+        "asset_requirements": requirements,
+    }
+    bundle.validation_report_json["bundle_gate"] = {
+        "success": True,
+        "asset_counts": {"OBSERVATION_CONTRACT": 1},
+        "asset_requirements": requirements,
+    }
+    bundle.validation_report_json["historical_replay"] = None
+    context.dataset_ids_json = ["q1"]
+    context.privacy_report_json["sampled_record_count"] = 1
+    unit.device_count = 1
+    children = [
+        SimpleNamespace(
+            id="contract",
+            job_type="OBSERVATION_CONTRACT",
+            payload_json={},
+        )
+    ]
+
+    gate = evaluate_unattended_publish_gate(
+        bundle=bundle,
+        context=context,
+        seed=seed,
+        unit=unit,
+        settings={
+            **DEFAULT_AUTOMATION_SETTINGS,
+            "mode": "generate_only",
+        },
+        children=children,
+        source_integrity={"success": True},
+    )
+
+    assert gate["success"] is True
+    assert gate["asset_requirements"]["requires_historical_replay"] is False
+    assert gate["publish_authority"] == "human_only"
 
 
 def test_disabled_automation_does_not_dispatch_work():

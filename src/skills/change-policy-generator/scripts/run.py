@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -135,6 +136,72 @@ def _compile_reference_policy_candidate(
     return output
 
 
+def _compile_approved_static_policy_constraints(
+    candidate: dict[str, Any],
+    constraints: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Bind generated candidates to explicit CheckItem policy decisions.
+
+    Historical statistics remain useful evidence, but they must not override
+    thresholds that the CheckItem catalog has already approved. Manual
+    ``validate`` mode intentionally does not call this compiler so engineers can
+    still see and correct a mismatching proposal instead of having it rewritten.
+    """
+
+    approved = dict(constraints or {})
+    required_thresholds = approved.get("required_thresholds")
+    required_recovery = approved.get("required_recovery_threshold")
+    required_deadband = approved.get("required_deadband")
+    if (
+        not isinstance(required_thresholds, dict)
+        and required_recovery is None
+        and required_deadband is None
+    ):
+        return dict(candidate)
+
+    output = dict(candidate)
+    if isinstance(required_thresholds, dict):
+        output["thresholds"] = {
+            str(key): value for key, value in required_thresholds.items()
+        }
+    if required_recovery is not None:
+        output["recovery_threshold"] = required_recovery
+    if required_deadband is not None:
+        output["deadband"] = required_deadband
+
+    allowed_modes = sorted(
+        {
+            str(item)
+            for item in approved.get("allowed_compare_modes") or []
+            if str(item)
+        }
+    )
+    if len(allowed_modes) == 1:
+        output["compare_mode"] = allowed_modes[0]
+
+    allowed_durations = list(approved.get("allowed_minimum_durations") or [])
+    if (
+        "allowed_minimum_durations" in approved
+        and output.get("minimum_duration") not in allowed_durations
+    ):
+        output["minimum_duration"] = (
+            None
+            if None in allowed_durations
+            else sorted(allowed_durations, key=lambda item: str(item))[0]
+            if allowed_durations
+            else None
+        )
+
+    output["source"] = "approved_check_item_policy"
+    output["confidence"] = max(float(output.get("confidence") or 0), 0.99)
+    output["reason"] = (
+        "Threshold, recovery and deadband values are compiled from the approved "
+        "CheckItem policy constraints; historical statistics are retained as "
+        "validation evidence only."
+    )
+    return output
+
+
 def _validate_policy_constraints(policy: Any, constraints: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     allowed_modes = {str(item) for item in constraints.get("allowed_compare_modes") or []}
@@ -147,6 +214,27 @@ def _validate_policy_constraints(policy: Any, constraints: dict[str, Any]) -> li
     missing_keys = sorted(required_keys - set(policy.thresholds))
     if missing_keys:
         errors.append("required threshold keys are missing: " + ", ".join(missing_keys))
+    required_thresholds = constraints.get("required_thresholds")
+    if isinstance(required_thresholds, dict):
+        expected_keys = {str(key) for key in required_thresholds}
+        actual_keys = {str(key) for key in policy.thresholds}
+        for key, expected in required_thresholds.items():
+            actual = policy.thresholds.get(str(key))
+            if actual is None or not math.isclose(
+                float(actual),
+                float(expected),
+                rel_tol=0,
+                abs_tol=1e-9,
+            ):
+                errors.append(
+                    f"threshold {key} must equal the approved value {expected}"
+                )
+        if constraints.get("allow_additional_thresholds") is not True:
+            unexpected = sorted(actual_keys - expected_keys)
+            if unexpected:
+                errors.append(
+                    "unapproved threshold keys are present: " + ", ".join(unexpected)
+                )
     references = dict(policy.threshold_references or {})
     if constraints.get("require_structured_threshold_references") is True:
         if not references or policy.source != "structured_threshold_reference":
@@ -204,6 +292,18 @@ def _validate_policy_constraints(policy: Any, constraints: dict[str, Any]) -> li
             recovery_bounds["max"]
         ):
             errors.append("recovery_threshold exceeds the allowed maximum")
+    if constraints.get("required_recovery_threshold") is not None:
+        expected_recovery = float(constraints["required_recovery_threshold"])
+        if recovery is None or not math.isclose(
+            float(recovery),
+            expected_recovery,
+            rel_tol=0,
+            abs_tol=1e-9,
+        ):
+            errors.append(
+                "recovery_threshold must equal the approved value "
+                f"{constraints['required_recovery_threshold']}"
+            )
     deadband_bounds = constraints.get("deadband_bounds") or {}
     if policy.deadband is not None and isinstance(deadband_bounds, dict):
         if deadband_bounds.get("min") is not None and float(policy.deadband) < float(
@@ -214,6 +314,17 @@ def _validate_policy_constraints(policy: Any, constraints: dict[str, Any]) -> li
             deadband_bounds["max"]
         ):
             errors.append("deadband exceeds the allowed maximum")
+    if constraints.get("required_deadband") is not None:
+        expected_deadband = float(constraints["required_deadband"])
+        if policy.deadband is None or not math.isclose(
+            float(policy.deadband),
+            expected_deadband,
+            rel_tol=0,
+            abs_tol=1e-9,
+        ):
+            errors.append(
+                f"deadband must equal the approved value {constraints['required_deadband']}"
+            )
     if "allowed_minimum_durations" in constraints:
         allowed_durations = set(constraints.get("allowed_minimum_durations") or [])
         if policy.minimum_duration not in allowed_durations:
@@ -322,17 +433,37 @@ def run_change_policy_generation(params: dict[str, Any]) -> dict[str, Any]:
             observation_type = str(target.get("observation_type") or "").strip()
             field_semantics = dict(target.get("field_semantics") or {})
             record_set_name = str(target.get("record_set_name") or "").strip()
+            source_targets = [
+                dict(item)
+                for item in target.get("source_targets") or []
+                if isinstance(item, dict)
+            ]
             if not field_name or not observation_type:
                 raise ValueError(
                     f"policy_targets[{index}] requires field_name and observation_type"
                 )
-            child_params = {
-                **params,
-                "policy_targets": None,
-                "field_name": field_name,
-                "observation_type": observation_type,
-                "field_semantics": field_semantics,
-                "records": [
+            if source_targets:
+                target_records = [
+                    {field_name: record.get(source_field)}
+                    for source_target in source_targets
+                    for source_record_set in [
+                        str(source_target.get("record_set_name") or "")
+                    ]
+                    for source_field in [
+                        str(source_target.get("field_name") or "")
+                    ]
+                    for record in params.get("records") or []
+                    if isinstance(record, dict)
+                    and source_field
+                    and source_field in record
+                    and (
+                        not source_record_set
+                        or str(record.get("__record_set__") or "")
+                        == source_record_set
+                    )
+                ]
+            else:
+                target_records = [
                     {
                         str(key): value
                         for key, value in record.items()
@@ -345,7 +476,14 @@ def run_change_policy_generation(params: dict[str, Any]) -> dict[str, Any]:
                         or str(record.get("__record_set__") or "")
                         == record_set_name
                     )
-                ],
+                ]
+            child_params = {
+                **params,
+                "policy_targets": None,
+                "field_name": field_name,
+                "observation_type": observation_type,
+                "field_semantics": field_semantics,
+                "records": target_records,
                 "historical_values": _target_historical_values(
                     params,
                     field_name,
@@ -398,6 +536,10 @@ def run_change_policy_generation(params: dict[str, Any]) -> dict[str, Any]:
             compiled_candidate = _compile_reference_policy_candidate(
                 candidate,
                 threshold_references,
+                policy_constraints,
+            )
+            compiled_candidate = _compile_approved_static_policy_constraints(
+                compiled_candidate,
                 policy_constraints,
             )
             compiled_candidate["dimension_selector"] = dimension_selector
@@ -455,9 +597,12 @@ def run_change_policy_generation(params: dict[str, Any]) -> dict[str, Any]:
             dimension_selector=dimension_selector,
         )
         policy = policy_from_dict(
-            _compile_reference_policy_candidate(
-                inferred.to_dict(),
-                dict(params.get("threshold_references") or {}),
+            _compile_approved_static_policy_constraints(
+                _compile_reference_policy_candidate(
+                    inferred.to_dict(),
+                    dict(params.get("threshold_references") or {}),
+                    dict(params.get("policy_constraints") or {}),
+                ),
                 dict(params.get("policy_constraints") or {}),
             )
         )
@@ -513,9 +658,12 @@ def run_change_policy_generation(params: dict[str, Any]) -> dict[str, Any]:
         )
         candidate["dimension_selector"] = dimension_selector
         policy = policy_from_dict(
-            _compile_reference_policy_candidate(
-                candidate,
-                dict(params.get("threshold_references") or {}),
+            _compile_approved_static_policy_constraints(
+                _compile_reference_policy_candidate(
+                    candidate,
+                    dict(params.get("threshold_references") or {}),
+                    dict(params.get("policy_constraints") or {}),
+                ),
                 dict(params.get("policy_constraints") or {}),
             )
         )

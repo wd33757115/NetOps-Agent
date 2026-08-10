@@ -33,6 +33,14 @@ test:
     policy_intent: CPU 高利用率需要产生告警，恢复阈值必须低于告警阈值
     event_intent: 生成 CPUHigh 与 CPURecovered 候选规则
     replay_limit: 1000
+    rule_asset_requirements:
+      schema_version: rule-asset-requirements/v1
+      requires_observation_contract: true
+      requires_change_policy: true
+      requires_current_state_rule: true
+      requires_event_rule: true
+      requires_event_rule_assets: true
+      requires_historical_replay: true
   required_context:
     - command
     - records
@@ -48,6 +56,7 @@ steps:
       model: ${context.model}
       records: ${context.records}
       record_groups: ${context.record_groups}
+      field_profiles: ${context.field_profiles}
       proposal: ${context.proposal}
       observation_targets: ${context.observation_targets}
       strict_observation_targets: ${context.strict_observation_targets}
@@ -64,10 +73,13 @@ steps:
     inputs:
       contract: ${steps.observation_contract.result.proposal}
       records: ${context.records}
+      record_groups: ${context.record_groups}
+      rule_asset_requirements: ${context.rule_asset_requirements}
 
   - name: change_policy
     label: 生成变化策略
     skill: change-policy-generator
+    when: ${steps.rule_target_planning.result.rule_asset_requirements.requires_change_policy}
     inputs:
       mode: infer_and_validate
       observation_type: ${steps.rule_target_planning.result.observation_type}
@@ -85,14 +97,17 @@ steps:
   - name: event_rule
     label: 生成事件规则候选
     skill: event-rule-generator
+    when: ${steps.rule_target_planning.result.rule_asset_requirements.requires_event_rule_assets}
     inputs:
       contract: ${steps.observation_contract.result.proposal}
       change_policy: ${steps.change_policy.result.policy}
       change_policies: ${steps.change_policy.result.target_policies}
+      event_policy_targets: ${steps.rule_target_planning.result.event_policy_targets}
       event_observation_types: ${steps.rule_target_planning.result.event_observation_types}
       intent: ${context.event_intent}
       event_constraints: ${context.event_constraints}
       event_constraints_by_observation_type: ${context.event_constraints_by_observation_type}
+      rule_asset_requirements: ${steps.rule_target_planning.result.rule_asset_requirements}
       generation_provider: ${context.generation_provider}
       max_agent_attempts: ${context.max_agent_attempts}
       agent_loop: true
@@ -100,6 +115,7 @@ steps:
   - name: event_rule_validation
     label: 验证全部事件规则候选
     skill: event-rule-validator
+    when: ${steps.rule_target_planning.result.rule_asset_requirements.requires_event_rule_assets}
     inputs:
       mode: candidates
       candidate_rules: ${steps.event_rule.result.rules}
@@ -108,8 +124,10 @@ steps:
   - name: event_rule_replay
     label: 历史回放事件规则候选
     skill: event-rule-replay
+    when: ${steps.rule_target_planning.result.rule_asset_requirements.requires_historical_replay}
     inputs:
       candidate_rules: ${steps.event_rule.result.rules}
+      candidate_contract: ${steps.observation_contract.result.proposal}
       limit: ${context.replay_limit}
       run_ids: ${context.replay_run_ids}
       include_active_collisions: true
@@ -129,6 +147,8 @@ steps:
       rule_generation_seed_job_id: ${context.rule_generation_seed_job_id}
       rule_generation_context_id: ${context.rule_generation_context_id}
       rule_generation_context_digest: ${context.rule_generation_context_digest}
+      created_by: ${context.rule_generation_actor}
+      rule_asset_requirements: ${steps.rule_target_planning.result.rule_asset_requirements}
       contract_result: ${steps.observation_contract.result}
       change_policy_result: ${steps.change_policy.result}
       event_rule_result: ${steps.event_rule.result}

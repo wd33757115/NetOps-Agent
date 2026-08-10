@@ -10,18 +10,25 @@ from contextlib import AbstractContextManager
 from datetime import datetime, timezone
 from typing import Any
 
+from src.common.governance import actor_matches_any
+from src.core.check_items.assessment_policy import (
+    normalize_assessment_policy_contract,
+)
 from src.core.check_items.canonical import load_canonical_catalog
 from src.core.check_items.catalog import CheckItemCatalogRepository
 from src.core.check_items.identity import EntityIdentityPolicyRepository
+from src.core.check_items.presentation import check_item_display_name
 from src.core.check_items.runtime_bundle_assembly import (
     RuntimeBundleAssemblyPlanner,
     contract_observation_types,
+    derive_asset_requirement_profile,
     event_rule_observation_types,
     normalize_rule_bindings,
 )
 from src.core.patrol.event_rules import govern_evaluation_scope
 from src.infrastructure.db.models import (
     AuditLogRecord,
+    ChangePolicyRecord,
     ChangePolicyVersionRecord,
     CheckItemImplementationLinkRecord,
     CheckItemRecord,
@@ -266,7 +273,16 @@ class CheckItemRuntimeBundleService:
                 blockers.append("implementation is not linked to the check item version")
             if check_version.status != "active":
                 blockers.append("check item version is not active")
-            if implementation_version.status != "active":
+            catalog_candidate = dict(
+                dict(assembly_plan.get("compatibility") or {}).get(
+                    "catalog_candidate"
+                )
+                or {}
+            )
+            if (
+                implementation_version.status != "active"
+                and str(catalog_candidate.get("change_id") or "") == ""
+            ):
                 blockers.append("implementation version is not active")
 
             parser_ids = tuple(sorted(set(str(item) for item in parser_template_ids if item)))
@@ -370,12 +386,29 @@ class CheckItemRuntimeBundleService:
             canonical_rows = list(
                 dict(check_version.canonical_contract_json or {}).get("observations") or []
             )
+            asset_requirement_profile = dict(
+                assembly_plan.get("asset_requirement_profile") or {}
+            )
+            if not asset_requirement_profile:
+                blockers.append("asset requirement profile is missing")
+            asset_requirements = dict(
+                asset_requirement_profile.get("requirements") or {}
+            )
             expected_types = {
                 str(item.get("observation_type") or "")
                 for item in canonical_rows
                 if isinstance(item, dict) and item.get("observation_type")
             }
-            missing_types = sorted(expected_types - produced_types)
+            required_types = {
+                str(item.get("observation_type") or "")
+                for item in canonical_rows
+                if (
+                    isinstance(item, dict)
+                    and item.get("observation_type")
+                    and item.get("required", True) is not False
+                )
+            }
+            missing_types = sorted(required_types - produced_types)
             approved_types = {
                 item.id for item in canonical_catalog.observations
             }
@@ -397,30 +430,38 @@ class CheckItemRuntimeBundleService:
             for policy in policy_rows:
                 if policy.status != "active":
                     blockers.append(f"ChangePolicy is not active: {policy.id}")
-            change_required = {
-                observation_type
-                for observation_type in expected_types
-                if (
-                    (definition := canonical_catalog.get(observation_type)) is not None
-                    and "change" in definition.assessment_roles
-                )
-            }
-            if str(check_version.assessment_mode) in {"health", "change"}:
-                missing_policies = sorted(change_required - set(policy_by_type))
-                if missing_policies:
-                    blockers.append(
-                        "ChangePolicy coverage is incomplete: "
-                        + ", ".join(missing_policies)
+            change_requirement = dict(
+                asset_requirements.get("change_policy") or {}
+            )
+            change_required = set(
+                change_requirement.get("required_observation_types")
+                or []
+            )
+            change_required.update(
+                set(
+                    change_requirement.get(
+                        "conditional_observation_types"
                     )
-
-            current_required = {
-                observation_type
-                for observation_type in expected_types
-                if (
-                    (definition := canonical_catalog.get(observation_type)) is not None
-                    and "current_state" in definition.assessment_roles
+                    or []
                 )
-            }
+                & produced_types
+            )
+            missing_policies = sorted(
+                change_required - set(policy_by_type)
+            )
+            if missing_policies:
+                blockers.append(
+                    "ChangePolicy coverage is incomplete: "
+                    + ", ".join(missing_policies)
+                )
+
+            current_requirement = dict(
+                asset_requirements.get("current_state_rule") or {}
+            )
+            current_required = set(
+                current_requirement.get("required_observation_types")
+                or []
+            )
             current_rule_types: set[str] = set()
             for rule_version, _rule in rule_rows:
                 observation_types = rule_bindings[str(rule_version.id)]
@@ -486,6 +527,12 @@ class CheckItemRuntimeBundleService:
                 "coverage_policy": _digest(
                     dict(check_version.coverage_policy_json or {})
                 ),
+                "assessment_policy": str(
+                    dict(assembly_plan.get("compatibility") or {})
+                    .get("assessment_policy", {})
+                    .get("digest")
+                    or ""
+                ),
                 "output_quality_policy": _digest(
                     dict(
                         implementation_version.output_quality_policy_json
@@ -493,6 +540,9 @@ class CheckItemRuntimeBundleService:
                     )
                 ),
                 "canonical_catalog": canonical_catalog.digest,
+                "asset_requirement_profile": _digest(
+                    asset_requirement_profile
+                ),
                 "identity_policy": str(identity_version.digest),
                 "parser_templates": {
                     str(item.id): str(item.sha256) for item in parser_rows
@@ -749,71 +799,123 @@ class CheckItemRuntimeBundleService:
         version_id: str,
         *,
         actor: str,
-        reason: str,
+        reason: str = "",
         allow_deprecated_dependencies: bool = False,
+        allow_same_actor: bool = False,
         _audit_action: str = "runtime_bundle_activated",
     ) -> dict[str, Any]:
-        if not actor.strip() or not reason.strip():
-            raise ValueError("runtime bundle activation requires actor and reason")
+        if not actor.strip():
+            raise ValueError("runtime bundle activation requires actor")
         now = datetime.now(timezone.utc)
         with self._session_scope() as db:
-            version = db.get(CheckItemRuntimeBundleVersionRecord, version_id)
-            if version is None:
-                raise ValueError("runtime bundle version not found")
-            root = db.get(CheckItemRuntimeBundleRecord, version.bundle_id)
-            if root is None:
-                raise ValueError("runtime bundle root not found")
-            if version.status == "active":
-                return self._serialize(db, root, version)
-            blockers = self._dependency_blockers(
+            version = self.activate_in_session(
                 db,
-                version,
-                require_active=not allow_deprecated_dependencies,
+                version_id,
+                actor=actor,
+                reason=reason,
+                now=now,
+                require_active_dependencies=not allow_deprecated_dependencies,
+                allow_same_actor=allow_same_actor,
+                audit_action=_audit_action,
             )
-            if blockers:
-                raise RuntimeBundleValidationError(blockers)
-            (
-                db.query(CheckItemRuntimeBundleVersionRecord)
-                .filter(
-                    CheckItemRuntimeBundleVersionRecord.bundle_id == version.bundle_id,
-                    CheckItemRuntimeBundleVersionRecord.status == "active",
-                    CheckItemRuntimeBundleVersionRecord.id != version.id,
-                )
-                .update(
-                    {
-                        "status": "deprecated",
-                        "deprecated_at": now,
-                    },
-                    synchronize_session=False,
-                )
-            )
-            version.status = "active"
-            version.activated_at = now
-            version.deprecated_at = None
-            root.status = "active"
-            root.current_version = int(version.version)
-            root.updated_at = now
-            db.add(
-                AuditLogRecord(
-                    id=str(uuid.uuid4()),
-                    idempotency_key=f"{_audit_action}:{version.id}",
-                    user_id=actor,
-                    username=actor,
-                    action=_audit_action,
-                    resource_type="check_item_runtime_bundle_version",
-                    resource_id=str(version.id),
-                    detail={
-                        "bundle_id": str(version.bundle_id),
-                        "version": int(version.version),
-                        "digest": str(version.digest),
-                        "reason": reason.strip(),
-                    },
-                    status="success",
-                    created_at=now,
-                )
-            )
-            db.flush()
+            root = db.get(CheckItemRuntimeBundleRecord, version.bundle_id)
             return self._serialize(db, root, version)
+
+    def activate_in_session(
+        self,
+        db: Any,
+        version_id: str,
+        *,
+        actor: str,
+        reason: str,
+        now: datetime,
+        require_active_dependencies: bool = True,
+        allowed_draft_implementation_version_id: str | None = None,
+        allow_same_actor: bool = False,
+        audit_action: str = "runtime_bundle_activated",
+    ) -> CheckItemRuntimeBundleVersionRecord:
+        """Activate one bundle inside the caller's transaction."""
+
+        version = (
+            db.query(CheckItemRuntimeBundleVersionRecord)
+            .filter(CheckItemRuntimeBundleVersionRecord.id == version_id)
+            .with_for_update()
+            .one_or_none()
+        )
+        if version is None:
+            raise ValueError("runtime bundle version not found")
+        root = db.get(CheckItemRuntimeBundleRecord, version.bundle_id)
+        if root is None:
+            raise ValueError("runtime bundle root not found")
+        if version.status == "active":
+            return version
+        if (
+            audit_action == "runtime_bundle_activated"
+            and actor_matches_any(actor, [version.created_by])
+            and not allow_same_actor
+        ):
+            raise RuntimeBundleValidationError(
+                [
+                    "runtime bundle activation requires an approver "
+                    "different from the version creator"
+                ]
+            )
+        blockers = self._dependency_blockers(
+            db,
+            version,
+            require_active=require_active_dependencies,
+            allowed_draft_implementation_version_id=(
+                allowed_draft_implementation_version_id
+            ),
+        )
+        if blockers:
+            raise RuntimeBundleValidationError(blockers)
+        (
+            db.query(CheckItemRuntimeBundleVersionRecord)
+            .filter(
+                CheckItemRuntimeBundleVersionRecord.bundle_id == version.bundle_id,
+                CheckItemRuntimeBundleVersionRecord.status == "active",
+                CheckItemRuntimeBundleVersionRecord.id != version.id,
+            )
+            .update(
+                {"status": "deprecated", "deprecated_at": now},
+                synchronize_session=False,
+            )
+        )
+        version.status = "active"
+        version.activated_at = now
+        version.deprecated_at = None
+        root.status = "active"
+        root.current_version = int(version.version)
+        root.updated_at = now
+        db.add(
+            AuditLogRecord(
+                id=str(uuid.uuid4()),
+                idempotency_key=f"{audit_action}:{version.id}",
+                user_id=actor,
+                username=actor,
+                action=audit_action,
+                resource_type="check_item_runtime_bundle_version",
+                resource_id=str(version.id),
+                detail={
+                    "bundle_id": str(version.bundle_id),
+                    "version": int(version.version),
+                    "digest": str(version.digest),
+                    "reason": reason.strip(),
+                    "allowed_draft_implementation_version_id": (
+                        allowed_draft_implementation_version_id
+                    ),
+                    "separation_of_duties_override": bool(
+                        allow_same_actor
+                        and actor_matches_any(actor, [version.created_by])
+                    ),
+                },
+                status="success",
+                created_at=now,
+            )
+        )
+        db.flush()
+        return version
 
     def rollback(
         self,
@@ -960,6 +1062,10 @@ class CheckItemRuntimeBundleService:
                     "check_item_id": check_item.id,
                     "check_item_version_id": check_item.version_id,
                     "check_item_name": check_item.name,
+                    "check_item_display_name": check_item_display_name(
+                        check_item.id,
+                        check_item.name,
+                    ),
                     "result_mode": check_item.result_mode,
                     "assessment_mode": check_item.assessment_mode,
                     "implementation_id": implementation.id,
@@ -1027,6 +1133,7 @@ class CheckItemRuntimeBundleService:
                     [
                         str(item["check_item_id"]),
                         str(item["check_item_name"]),
+                        str(item["check_item_display_name"]),
                         str(item["implementation_id"]),
                         str(item["implementation_name"]),
                         *[str(command) for command in item["commands"]],
@@ -1070,12 +1177,121 @@ class CheckItemRuntimeBundleService:
                 raise RuntimeBundleValidationError(blockers)
             return self._serialize(db, root, version)
 
+    def get_rule_assets(self, version_id: str) -> dict[str, Any] | None:
+        """Read the exact rule assets frozen into one RuntimeBundle version."""
+
+        with self._session_scope() as db:
+            version = db.get(CheckItemRuntimeBundleVersionRecord, version_id)
+            if version is None:
+                return None
+            root = db.get(CheckItemRuntimeBundleRecord, version.bundle_id)
+            if root is None:
+                raise RuntimeBundleValidationError(["runtime bundle root is missing"])
+            blockers = self._dependency_blockers(db, version, require_active=False)
+            if blockers:
+                raise RuntimeBundleValidationError(blockers)
+
+            bundle = self._serialize(db, root, version)
+            assets = list(bundle.get("assets") or [])
+            policy_ids = sorted(
+                {
+                    str(item["asset_version_id"])
+                    for item in assets
+                    if item.get("asset_type") == "change_policy"
+                }
+            )
+            event_rule_ids = sorted(
+                {
+                    str(item["asset_version_id"])
+                    for item in assets
+                    if item.get("asset_type") == "event_rule"
+                }
+            )
+            policy_rows = (
+                db.query(ChangePolicyRecord, ChangePolicyVersionRecord)
+                .join(
+                    ChangePolicyVersionRecord,
+                    ChangePolicyVersionRecord.policy_id
+                    == ChangePolicyRecord.id,
+                )
+                .filter(ChangePolicyVersionRecord.id.in_(policy_ids))
+                .all()
+                if policy_ids
+                else []
+            )
+            if len(policy_rows) != len(policy_ids):
+                raise RuntimeBundleValidationError(
+                    ["one or more frozen ChangePolicies are missing"]
+                )
+            rule_rows = (
+                db.query(EventRuleVersionRecord, EventRuleRecord)
+                .join(
+                    EventRuleRecord,
+                    EventRuleRecord.id == EventRuleVersionRecord.rule_id,
+                )
+                .filter(EventRuleVersionRecord.id.in_(event_rule_ids))
+                .all()
+                if event_rule_ids
+                else []
+            )
+            if len(rule_rows) != len(event_rule_ids):
+                raise RuntimeBundleValidationError(
+                    ["one or more frozen EventRules are missing"]
+                )
+
+            return {
+                "bundle": bundle,
+                "change_policies": [
+                    {
+                        **policy.to_dict(),
+                        "policy_id": str(policy.id),
+                        "policy_name": str(policy.name),
+                        "version_id": str(policy_version.id),
+                        "version": int(policy_version.version),
+                        "observation_type": str(
+                            policy_version.observation_type
+                        ),
+                        "semantic_type": str(policy_version.semantic_type),
+                        "compare_mode": str(policy_version.compare_mode),
+                        "policy": dict(policy_version.policy_json or {}),
+                        "digest": str(policy_version.digest or ""),
+                    }
+                    for policy, policy_version in policy_rows
+                ],
+                "event_rules": [
+                    {
+                        "rule_id": str(rule.id),
+                        "rule_name": str(rule.name),
+                        "version_id": str(rule_version.id),
+                        "version": int(rule_version.version),
+                        "event_type": str(rule_version.event_type),
+                        "severity": str(rule_version.severity),
+                        "condition": dict(rule_version.condition_json or {}),
+                        "priority": int(rule_version.priority or 100),
+                        "exclusive": bool(rule_version.exclusive),
+                        "event_class": str(
+                            rule_version.event_class or "fault"
+                        ),
+                        "evaluation_scope": str(
+                            rule_version.evaluation_scope or "both"
+                        ),
+                        "recovery": dict(rule_version.recovery_json or {}),
+                        "correlation_keys": list(
+                            rule_version.correlation_key_json or []
+                        ),
+                        "digest": str(rule_version.digest or ""),
+                    }
+                    for rule_version, rule in rule_rows
+                ],
+            }
+
     def _dependency_blockers(
         self,
         db: Any,
         version: CheckItemRuntimeBundleVersionRecord,
         *,
         require_active: bool,
+        allowed_draft_implementation_version_id: str | None = None,
     ) -> list[str]:
         blockers: list[str] = []
         expected_dependencies = dict(version.dependency_digests_json or {})
@@ -1090,6 +1306,8 @@ class CheckItemRuntimeBundleService:
         if check_version is None:
             blockers.append("runtime check-item version is missing")
         else:
+            if require_active and str(check_version.status) != "active":
+                blockers.append("runtime check-item version is not active")
             current_check_dependencies = {
                 "check_item": str(check_version.digest),
                 "freshness_policy": _digest(
@@ -1101,6 +1319,12 @@ class CheckItemRuntimeBundleService:
                 "coverage_policy": _digest(
                     dict(check_version.coverage_policy_json or {})
                 ),
+                "assessment_policy": str(
+                    normalize_assessment_policy_contract(
+                        dict(check_version.canonical_contract_json or {}),
+                        dict(check_version.applicability_json or {}),
+                    )["digest"]
+                ),
             }
             for key, current_digest in current_check_dependencies.items():
                 if str(expected_dependencies.get(key) or "") != current_digest:
@@ -1110,6 +1334,13 @@ class CheckItemRuntimeBundleService:
         if implementation_version is None:
             blockers.append("runtime implementation version is missing")
         else:
+            if (
+                require_active
+                and str(implementation_version.status) != "active"
+                and str(implementation_version.id)
+                != str(allowed_draft_implementation_version_id or "")
+            ):
+                blockers.append("runtime implementation version is not active")
             current_implementation_dependencies = {
                 "implementation": str(implementation_version.digest),
                 "output_quality_policy": _digest(
@@ -1126,6 +1357,83 @@ class CheckItemRuntimeBundleService:
                     blockers.append(
                         f"runtime dependency digest changed: {key}"
                     )
+        canonical_catalog = load_canonical_catalog()
+        if (
+            str(expected_dependencies.get("canonical_catalog") or "")
+            != str(canonical_catalog.digest)
+            or str(version.canonical_catalog_digest or "")
+            != str(canonical_catalog.digest)
+        ):
+            blockers.append(
+                "runtime dependency digest changed: canonical_catalog"
+            )
+        if check_version is not None and implementation_version is not None:
+            canonical_rows = [
+                dict(item)
+                for item in dict(
+                    check_version.canonical_contract_json or {}
+                ).get("observations")
+                or []
+                if isinstance(item, dict)
+            ]
+            current_requirement_profile = (
+                derive_asset_requirement_profile(
+                    result_mode=str(check_version.result_mode),
+                    assessment_mode=str(
+                        check_version.assessment_mode
+                    ),
+                    canonical_rows=canonical_rows,
+                    canonical_catalog=canonical_catalog,
+                )
+            )
+            current_requirement_digest = _digest(
+                current_requirement_profile
+            )
+            if (
+                str(
+                    expected_dependencies.get(
+                        "asset_requirement_profile"
+                    )
+                    or ""
+                )
+                != current_requirement_digest
+            ):
+                blockers.append(
+                    "runtime dependency digest changed: "
+                    "asset_requirement_profile"
+                )
+            frozen_requirement_profile = dict(
+                dict(version.compatibility_json or {}).get(
+                    "asset_requirement_profile"
+                )
+                or {}
+            )
+            if (
+                not frozen_requirement_profile
+                or _digest(frozen_requirement_profile)
+                != current_requirement_digest
+            ):
+                blockers.append(
+                    "runtime asset requirement profile is missing or stale"
+                )
+            current_assessment_policy = normalize_assessment_policy_contract(
+                dict(check_version.canonical_contract_json or {}),
+                dict(check_version.applicability_json or {}),
+            )
+            frozen_assessment_policy = dict(
+                dict(version.compatibility_json or {}).get(
+                    "assessment_policy"
+                )
+                or {}
+            )
+            if (
+                not frozen_assessment_policy
+                or str(frozen_assessment_policy.get("digest") or "")
+                != str(current_assessment_policy["digest"])
+            ):
+                blockers.append(
+                    "runtime assessment policy is missing or stale"
+                )
         assets = (
             db.query(RuntimeBundleAssetRecord)
             .filter(RuntimeBundleAssetRecord.bundle_version_id == version.id)
@@ -1257,6 +1565,15 @@ class CheckItemRuntimeBundleService:
             "comparison_profile_version_id": version.comparison_profile_version_id,
             "dependency_digests": dict(version.dependency_digests_json or {}),
             "compatibility": dict(version.compatibility_json or {}),
+            "asset_requirement_profile": dict(
+                dict(version.compatibility_json or {}).get(
+                    "asset_requirement_profile"
+                )
+                or {}
+            ),
+            "asset_requirement_profile_digest": dict(
+                version.dependency_digests_json or {}
+            ).get("asset_requirement_profile"),
             "validation_report": dict(version.validation_report_json or {}),
             "assets": [item.to_dict() for item in assets],
             "activated_at": version.activated_at,

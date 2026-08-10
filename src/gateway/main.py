@@ -130,6 +130,7 @@ require_database_schema_current()
 from src.core.parser.bootstrap import bootstrap_shared_templates
 from src.core.check_items.catalog import CheckItemCatalogRepository
 from src.core.check_items.identity import EntityIdentityPolicyRepository
+from src.core.check_items.text_comparison import TextComparisonProfileRepository
 
 parser_bootstrap = (
     bootstrap_shared_templates()
@@ -147,6 +148,11 @@ identity_policy_bootstrap = EntityIdentityPolicyRepository().bootstrap(
     actor="gateway-startup"
 )
 log.info("entity_identity_policy_bootstrapped", **identity_policy_bootstrap)
+
+text_comparison_bootstrap = TextComparisonProfileRepository().bootstrap(
+    actor="gateway-startup"
+)
+log.info("text_comparison_profiles_bootstrapped", **text_comparison_bootstrap)
 
 
 # =============================================================================

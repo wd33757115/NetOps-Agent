@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from typing import Any
 
 from sqlalchemy import func
@@ -18,13 +20,21 @@ from src.infrastructure.db.postgres import get_db_session
 class ParserRuntimeRepository:
     """Keep runtime parsing independent from jobs, approvals and outbox writes."""
 
-    def __init__(self, backend: Any | None = None) -> None:
+    def __init__(
+        self,
+        backend: Any | None = None,
+        *,
+        session_scope: Callable[[], AbstractContextManager[Any]] = (
+            get_db_session
+        ),
+    ) -> None:
         self._backend = backend
+        self._session_scope = session_scope
 
     def list_command_aliases(self, *, status: str = "confirmed") -> list[dict[str, Any]]:
         if self._backend is not None:
             return self._backend.list_command_aliases(status=status)
-        with get_db_session() as db:
+        with self._session_scope() as db:
             return [
                 row.to_dict()
                 for row in db.query(ParserCommandAlias)
@@ -49,7 +59,7 @@ class ParserRuntimeRepository:
                 command=command,
             )
         profiles = [model] + ([family] if family and family != model else [])
-        with get_db_session() as db:
+        with self._session_scope() as db:
             rows = (
                 db.query(ParserTemplate)
                 .filter(
@@ -69,7 +79,7 @@ class ParserRuntimeRepository:
     def get_template(self, template_id: str) -> ParserTemplate | None:
         if self._backend is not None:
             return self._backend.get_template(template_id)
-        with get_db_session() as db:
+        with self._session_scope() as db:
             row = db.get(ParserTemplate, template_id)
             if row is not None:
                 db.expunge(row)
@@ -78,7 +88,7 @@ class ParserRuntimeRepository:
     def find_device_profile(self, vendor: str, model: str) -> dict[str, Any] | None:
         if self._backend is not None:
             return self._backend.find_device_profile(vendor, model)
-        with get_db_session() as db:
+        with self._session_scope() as db:
             row = (
                 db.query(ParserDeviceProfile)
                 .filter(
@@ -97,7 +107,7 @@ class ParserRuntimeRepository:
     ) -> list[dict[str, Any]]:
         if self._backend is not None:
             return self._backend.list_identity_signatures(status=status)
-        with get_db_session() as db:
+        with self._session_scope() as db:
             return [
                 row.to_dict()
                 for row in db.query(ParserIdentitySignature)
@@ -109,7 +119,7 @@ class ParserRuntimeRepository:
     def has_trusted_family(self, *, vendor: str, family: str) -> bool:
         if self._backend is not None:
             return self._backend.has_trusted_family(vendor=vendor, family=family)
-        with get_db_session() as db:
+        with self._session_scope() as db:
             return (
                 db.query(ParserTemplate)
                 .filter(

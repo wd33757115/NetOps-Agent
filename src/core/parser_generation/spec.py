@@ -2,12 +2,23 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from dataclasses import dataclass
 from typing import Any
 
 _FIELD_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-_ALLOWED_TYPES = {"text", "number", "percent", "enum", "interface_name", "ip", "regex"}
+_ALLOWED_TYPES = {
+    "text",
+    "number",
+    "percent",
+    "enum",
+    "interface_name",
+    "ip",
+    "ip_or_unassigned",
+    "regex",
+}
 _ALLOWED_FIELD_ROLES = {
     "context",
     "identity",
@@ -17,6 +28,18 @@ _ALLOWED_FIELD_ROLES = {
 }
 _ALLOWED_CHANGE_BEHAVIORS = {"counter", "gauge", "stable", "volatile"}
 _ALLOWED_CARDINALITIES = {"repeated", "singleton"}
+_ALLOWED_PRESENCE = {"required", "optional"}
+
+
+def _string_tuple(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    items = (value,) if isinstance(value, str) else value
+    if not isinstance(items, (list, tuple, set)):
+        raise ValueError("ParserSpec string collections must be arrays or strings")
+    return tuple(
+        dict.fromkeys(str(item).strip() for item in items if str(item).strip())
+    )
 
 
 @dataclass(frozen=True)
@@ -33,6 +56,7 @@ class FieldSpec:
     monitor: bool | None = None
     canonical_candidate: str | None = None
     evidence: tuple[str, ...] = ()
+    unavailable_tokens: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not _FIELD_NAME_RE.fullmatch(self.name):
@@ -49,23 +73,32 @@ class FieldSpec:
             self.change_behavior is not None
             and self.change_behavior not in _ALLOWED_CHANGE_BEHAVIORS
         ):
-            raise ValueError(
-                f"unsupported ParserSpec change behavior: {self.change_behavior}"
-            )
+            raise ValueError(f"unsupported ParserSpec change behavior: {self.change_behavior}")
         if self.canonical_candidate and not re.fullmatch(
             r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$",
             self.canonical_candidate,
         ):
+            raise ValueError(f"invalid ParserSpec canonical candidate: {self.canonical_candidate}")
+        if self.unavailable_tokens and self.value_type not in {"number", "percent"}:
             raise ValueError(
-                f"invalid ParserSpec canonical candidate: {self.canonical_candidate}"
+                "ParserSpec unavailable_tokens are supported only for number or percent fields"
             )
+        if any(not str(item).strip() for item in self.unavailable_tokens):
+            raise ValueError("ParserSpec unavailable_tokens cannot contain blank values")
 
     def validator(self) -> dict[str, Any]:
         if self.value_type == "enum":
             return {"type": "enum", "values": list(self.values)}
         if self.value_type == "regex":
             return {"type": "regex", "pattern": self.pattern}
-        return {"type": self.value_type}
+        return {
+            "type": self.value_type,
+            **(
+                {"unavailable_tokens": list(self.unavailable_tokens)}
+                if self.unavailable_tokens
+                else {}
+            ),
+        }
 
 
 @dataclass(frozen=True)
@@ -78,6 +111,7 @@ class ParserSpec:
     name: str | None = None
     cardinality: str = "repeated"
     expected_records: tuple[dict[str, Any], ...] = ()
+    presence: str = "required"
 
     def __post_init__(self) -> None:
         if not _FIELD_NAME_RE.fullmatch(self.entity):
@@ -85,9 +119,9 @@ class ParserSpec:
         if self.name is not None and not _FIELD_NAME_RE.fullmatch(self.name):
             raise ValueError(f"invalid ParserSpec record-set name: {self.name}")
         if self.cardinality not in _ALLOWED_CARDINALITIES:
-            raise ValueError(
-                f"unsupported ParserSpec record-set cardinality: {self.cardinality}"
-            )
+            raise ValueError(f"unsupported ParserSpec record-set cardinality: {self.cardinality}")
+        if self.presence not in _ALLOWED_PRESENCE:
+            raise ValueError(f"unsupported ParserSpec record-set presence: {self.presence}")
         names = [field.name for field in self.fields]
         if not names or len(names) != len(set(names)):
             raise ValueError("ParserSpec fields must be non-empty and unique")
@@ -98,9 +132,7 @@ class ParserSpec:
         missing_keys = sorted(set(self.primary_keys) - set(names))
         if missing_keys:
             raise ValueError(f"ParserSpec primary keys are not fields: {', '.join(missing_keys)}")
-        optional_keys = [
-            key for key in self.primary_keys if not self.field_map[key].required
-        ]
+        optional_keys = [key for key in self.primary_keys if not self.field_map[key].required]
         if optional_keys:
             raise ValueError(
                 f"ParserSpec primary keys must be required: {', '.join(optional_keys)}"
@@ -130,15 +162,12 @@ class ParserSpec:
 
     def to_dict(self, *, include_record_set_metadata: bool = False) -> dict[str, Any]:
         return {
-            **(
-                {"name": self.name}
-                if include_record_set_metadata and self.name
-                else {}
-            ),
+            **({"name": self.name} if include_record_set_metadata and self.name else {}),
             "entity": self.entity,
+            **({"cardinality": self.cardinality} if include_record_set_metadata else {}),
             **(
-                {"cardinality": self.cardinality}
-                if include_record_set_metadata
+                {"presence": self.presence}
+                if include_record_set_metadata and self.presence != "required"
                 else {}
             ),
             "primary_keys": list(self.primary_keys),
@@ -155,11 +184,7 @@ class ParserSpec:
                         if field.operational_reason
                         else {}
                     ),
-                    **(
-                        {"change_behavior": field.change_behavior}
-                        if field.change_behavior
-                        else {}
-                    ),
+                    **({"change_behavior": field.change_behavior} if field.change_behavior else {}),
                     **({"monitor": field.monitor} if field.monitor is not None else {}),
                     **(
                         {"canonical_candidate": field.canonical_candidate}
@@ -167,17 +192,18 @@ class ParserSpec:
                         else {}
                     ),
                     **({"evidence": list(field.evidence)} if field.evidence else {}),
+                    **(
+                        {"unavailable_tokens": list(field.unavailable_tokens)}
+                        if field.unavailable_tokens
+                        else {}
+                    ),
                 }
                 for field in self.fields
             },
             "allow_empty": self.allow_empty,
             "empty_patterns": list(self.empty_patterns),
             **(
-                {
-                    "expected_records": [
-                        dict(item) for item in self.expected_records
-                    ]
-                }
+                {"expected_records": [dict(item) for item in self.expected_records]}
                 if include_record_set_metadata
                 else {}
             ),
@@ -207,8 +233,7 @@ class ParserSpec:
                         str(raw_config.get("operational_reason") or "").strip() or None
                     ),
                     change_behavior=(
-                        str(raw_config.get("change_behavior") or "").strip().casefold()
-                        or None
+                        str(raw_config.get("change_behavior") or "").strip().casefold() or None
                     ),
                     monitor=(
                         bool(raw_config.get("monitor"))
@@ -218,8 +243,9 @@ class ParserSpec:
                     canonical_candidate=(
                         str(raw_config.get("canonical_candidate") or "").strip() or None
                     ),
-                    evidence=tuple(
-                        str(item) for item in raw_config.get("evidence") or ()
+                    evidence=tuple(str(item) for item in raw_config.get("evidence") or ()),
+                    unavailable_tokens=_string_tuple(
+                        raw_config.get("unavailable_tokens")
                     ),
                 )
             )
@@ -230,9 +256,7 @@ class ParserSpec:
         raw_expected = payload.get("expected_records") or ()
         if not isinstance(raw_expected, (list, tuple)):
             raise ValueError("ParserSpec expected_records must be an array")
-        expected_records = tuple(
-            dict(item) for item in raw_expected if isinstance(item, dict)
-        )
+        expected_records = tuple(dict(item) for item in raw_expected if isinstance(item, dict))
         if len(expected_records) != len(raw_expected):
             raise ValueError("ParserSpec expected_records must contain only objects")
         return cls(
@@ -244,6 +268,7 @@ class ParserSpec:
             name=str(payload.get("name") or "").strip() or None,
             cardinality=cardinality,
             expected_records=expected_records,
+            presence=str(payload.get("presence") or "required").strip().casefold(),
         )
 
     @classmethod
@@ -321,8 +346,7 @@ class ParserSpecDocument:
             "version": self.version,
             "business_purpose": self.business_purpose,
             "record_sets": [
-                item.to_dict(include_record_set_metadata=True)
-                for item in self.record_sets
+                item.to_dict(include_record_set_metadata=True) for item in self.record_sets
             ],
         }
 
@@ -341,6 +365,7 @@ class ParserSpecDocument:
                     name=spec.entity,
                     cardinality=spec.cardinality,
                     expected_records=spec.expected_records,
+                    presence=spec.presence,
                 )
             return cls(
                 business_purpose=str(
@@ -360,9 +385,7 @@ class ParserSpecDocument:
         else:
             raise ValueError("ParserSpec v2 record_sets must be an array or object")
         record_sets = tuple(
-            ParserSpec.from_dict(dict(item))
-            for item in normalized_sets
-            if isinstance(item, dict)
+            ParserSpec.from_dict(dict(item)) for item in normalized_sets if isinstance(item, dict)
         )
         if len(record_sets) != len(normalized_sets):
             raise ValueError("ParserSpec v2 record_sets must contain only objects")
@@ -371,3 +394,23 @@ class ParserSpecDocument:
             business_purpose=str(payload.get("business_purpose") or "").strip(),
             record_sets=record_sets,
         )
+
+
+def normalize_parser_spec_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return the canonical persisted representation of a ParserSpec payload."""
+
+    if payload.get("record_sets") is not None or str(payload.get("version") or "") == "2":
+        return ParserSpecDocument.from_dict(payload).to_dict()
+    return ParserSpec.from_dict(payload).to_dict()
+
+
+def parser_spec_digest(payload: dict[str, Any]) -> str:
+    """Return a stable digest for an already normalized ParserSpec payload."""
+
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

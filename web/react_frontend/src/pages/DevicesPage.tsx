@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { Alert, AutoComplete, Button, Descriptions, Drawer, Dropdown, Form, Input, Modal, Progress, Row, Col, Select, Space, Switch, Table, Tabs, Tag, Tooltip, Typography, Upload, message } from 'antd'
-import { DeleteOutlined, DownloadOutlined, EditOutlined, EyeOutlined, ImportOutlined, LinkOutlined, MoreOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined, SafetyCertificateOutlined, SearchOutlined } from '@ant-design/icons'
+import { DeleteOutlined, DownloadOutlined, EditOutlined, EyeOutlined, ImportOutlined, LinkOutlined, MoreOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined, SafetyCertificateOutlined, SearchOutlined, StopOutlined } from '@ant-design/icons'
 import { useMutation, useQuery } from 'react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import GrokShellLayout from '../components/layout/GrokShellLayout'
@@ -9,6 +9,7 @@ import AgentModuleControlTab from '../components/devices/AgentModuleControlTab'
 import ControlPlaneOverview from '../components/devices/ControlPlaneOverview'
 import DeviceAssetInventoryPanel, { type DeviceAssetFilters } from '../components/devices/DeviceAssetInventoryPanel'
 import PatrolOperationsPanel from '../components/devices/PatrolOperationsPanel'
+import { canCancelPatrolBatch } from '../components/devices/patrolBatchLifecycle'
 import EvidenceTimeline from '../components/devices/EvidenceTimeline'
 import {
   deviceApi,
@@ -1251,6 +1252,66 @@ const DevicesPage: React.FC = () => {
     },
   )
 
+  const cancelPatrolBatch = useMutation(
+    ({ batchId, reason }: { batchId: string; reason: string }) =>
+      workflowApi.cancelPatrolBatch(batchId, { reason }),
+    {
+      onSuccess: async (result) => {
+        if (result.finalization_errors?.length) {
+          message.warning(
+            `批次已停止，但 ${result.finalization_errors.length} 台设备未完成取消结算，请在设备明细中处理`,
+          )
+        } else if (result.idempotent) {
+          message.info('该巡检批次已处于取消终态，未重复写入')
+        } else {
+          message.success(
+            `已停止后续分发，取消 ${result.cancelled_run_count} 个运行，结算 ${result.cancelled_device_count} 台未完成设备`,
+          )
+        }
+        await Promise.all([
+          refetchPatrolBatches(),
+          refetchActiveBatchRuns(),
+          refetchActiveBatchResultSummary(),
+        ])
+      },
+      onError: (error: any) =>
+        message.error(extractErrorMessage(error, '取消巡检批次失败')),
+    },
+  )
+
+  const confirmCancelPatrolBatch = (batchId: string) => {
+    let reason = ''
+    Modal.confirm({
+      title: '取消巡检批次',
+      icon: <StopOutlined />,
+      content: (
+        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+          <Typography.Text type="secondary">
+            系统将停止继续分发，并把尚未完成的检查项标记为“已取消/无法判断”。已完成结果不会被删除。
+          </Typography.Text>
+          <Input.TextArea
+            rows={3}
+            maxLength={1000}
+            showCount
+            placeholder="请输入取消原因（必填）"
+            onChange={(event) => { reason = event.target.value }}
+          />
+        </Space>
+      ),
+      okText: '确认取消',
+      okButtonProps: { danger: true },
+      cancelText: '继续运行',
+      onOk: async () => {
+        const normalized = reason.trim()
+        if (normalized.length < 3) {
+          message.warning('请输入至少 3 个字符的取消原因')
+          throw new Error('cancellation reason is required')
+        }
+        await cancelPatrolBatch.mutateAsync({ batchId, reason: normalized })
+      },
+    })
+  }
+
   const archivePatrolBatch = useMutation(
     (batchId: string) => workflowApi.archivePatrolBatch(batchId, { reason: 'manual archive from Device Management' }),
     {
@@ -1913,6 +1974,12 @@ const DevicesPage: React.FC = () => {
     { title: '操作', dataIndex: 'patrol_batch_id', width: isMobile ? 84 : 108, fixed: 'right' as const,
       render: (value: string, row: PatrolBatchSummary) => {
         const hasActiveRuns = row.running_count + row.pending_count > 0
+        const canCancel = canCancelPatrolBatch({
+          archived: row.archived,
+          dispatchStatus: row.dispatch_status,
+          runningCount: row.running_count,
+          pendingCount: row.pending_count,
+        })
         const canRetry = !row.archived && Boolean(row.failed_count || row.cancelled_count)
         return (
         <Space size={2} className="patrol-history-table__actions">
@@ -1936,6 +2003,13 @@ const DevicesPage: React.FC = () => {
             <Dropdown
               menu={{
                 items: [
+                  ...(canCancel ? [{
+                    key: 'cancel',
+                    label: '取消运行',
+                    icon: <StopOutlined />,
+                    danger: true,
+                    disabled: cancelPatrolBatch.isLoading,
+                  }] : []),
                   ...(canRetry ? [{
                   key: 'retry',
                   label: '重试失败项',
@@ -1957,6 +2031,7 @@ const DevicesPage: React.FC = () => {
                   },
                 ],
                 onClick: ({ key }) => {
+                  if (key === 'cancel') confirmCancelPatrolBatch(value)
                   if (key === 'retry') retryPatrolBatch.mutate(value)
                   if (key === 'rerun') rerunPatrolBatch.mutate(value)
                   if (key === 'restore') restorePatrolBatch.mutate(value)
@@ -2338,6 +2413,7 @@ const DevicesPage: React.FC = () => {
           patrolBatchColumns={patrolBatchColumns}
           showArchivedBatches={showArchivedPatrolBatches}
           onClearActiveBatch={() => setActivePatrolBatchId(null)}
+          onCancelBatch={confirmCancelPatrolBatch}
           onExportBatchReport={(batchId) => exportPatrolBatchReport.mutate(batchId)}
           onExportBatchTechnicalWorkbook={(batchId) => exportPatrolBatchTechnicalWorkbook.mutate(batchId)}
           onExportBatchEvidencePackage={(batchId) => exportPatrolBatchEvidencePackage.mutate(batchId)}
@@ -2378,6 +2454,7 @@ const DevicesPage: React.FC = () => {
           exportBatchRawCliLoading={exportPatrolBatchRawCli.isLoading}
           exportBatchEventsLoading={exportPatrolBatchEvents.isLoading}
           retryRunLoading={retryWorkflowRun.isLoading}
+          cancelBatchLoading={cancelPatrolBatch.isLoading}
         />,
           },
           {
@@ -3174,7 +3251,7 @@ const DevicesPage: React.FC = () => {
               placeholder="选择 CPU、内存、接口、光功率等检查项"
               options={checkItems.map((item) => ({
                 value: item.check_item_id,
-                label: `${item.name} · ${item.check_item_id} · ${item.implementation_count} 个兼容实现`,
+                label: `${item.display_name || item.name} · ${item.check_item_id} · ${item.implementation_count} 个兼容实现`,
               }))}
             />
           </Form.Item>
@@ -3189,7 +3266,10 @@ const DevicesPage: React.FC = () => {
                   pagination={false}
                   dataSource={selectedItems}
                   columns={[
-                    { title: '检查项', render: (_: unknown, item: ParserCheckItem) => item.name },
+                    {
+                      title: '检查项',
+                      render: (_: unknown, item: ParserCheckItem) => item.display_name || item.name,
+                    },
                     { title: '结果模式', dataIndex: 'result_mode', width: 130 },
                     { title: '评估模式', dataIndex: 'assessment_mode', width: 120 },
                     { title: '兼容实现', dataIndex: 'implementation_count', width: 100 },

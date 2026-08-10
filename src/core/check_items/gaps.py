@@ -5,9 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from collections.abc import Callable, Iterable
 from contextlib import AbstractContextManager
 from datetime import datetime, timezone
-from typing import Any, Callable, Iterable
+from typing import Any
+
+from sqlalchemy import or_
 
 from src.infrastructure.db.models import AssetGapRecord
 from src.infrastructure.db.postgres import get_db_session
@@ -159,6 +162,11 @@ class AssetGapRepository:
             db.flush()
             return row.to_dict()
 
+    def get(self, gap_id: str) -> dict[str, Any] | None:
+        with self._session_scope() as db:
+            row = db.get(AssetGapRecord, gap_id)
+            return row.to_dict() if row is not None else None
+
     def list_page(
         self,
         *,
@@ -166,6 +174,7 @@ class AssetGapRepository:
         offset: int = 0,
         status: str | None = None,
         check_item_id: str | None = None,
+        search: str | None = None,
     ) -> dict[str, Any]:
         page_limit = max(1, min(int(limit), 200))
         page_offset = max(0, int(offset))
@@ -176,6 +185,17 @@ class AssetGapRepository:
             if check_item_id:
                 query = query.filter(
                     AssetGapRecord.check_item_id == check_item_id
+                )
+            normalized_search = str(search or "").strip()
+            if normalized_search:
+                pattern = f"%{normalized_search}%"
+                query = query.filter(
+                    or_(
+                        AssetGapRecord.check_item_id.ilike(pattern),
+                        AssetGapRecord.canonical_command.ilike(pattern),
+                        AssetGapRecord.reason_code.ilike(pattern),
+                        AssetGapRecord.gap_type.ilike(pattern),
+                    )
                 )
             total = query.count()
             rows = (

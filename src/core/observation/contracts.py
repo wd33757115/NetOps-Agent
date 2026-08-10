@@ -7,6 +7,10 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from src.core.observation.record_set_relations import (
+    normalize_record_set_relations,
+)
+
 
 CONTRACT_DIGEST_FIELDS = (
     "source_type",
@@ -24,6 +28,7 @@ CONTRACT_DIGEST_FIELDS = (
     "empty_patterns",
     "state_semantics",
     "record_sets",
+    "record_set_relations",
 )
 
 
@@ -46,6 +51,7 @@ class ObservationContract:
     empty_patterns: tuple[str, ...] = ()
     state_semantics: dict[str, Any] | None = None
     record_sets: tuple[dict[str, Any], ...] = ()
+    record_set_relations: tuple[dict[str, Any], ...] = ()
     version: int = 1
     contract_sha256: str | None = None
     status: str = "active"
@@ -76,6 +82,9 @@ class ObservationContract:
             "empty_patterns": list(self.empty_patterns),
             "state_semantics": self.state_semantics or {},
             "record_sets": [dict(item) for item in self.record_sets],
+            "record_set_relations": [
+                dict(item) for item in self.record_set_relations
+            ],
             "contract_version": self.version,
             "contract_sha256": self.contract_sha256,
             "compatibility": self.compatibility or {},
@@ -183,6 +192,11 @@ def build_contract_payload(
         "empty_patterns": _string_tuple(validation.get("empty_patterns")),
         "state_semantics": _mapping(validation.get("state_semantics")),
         "record_sets": _record_sets(validation.get("record_sets")),
+        "record_set_relations": tuple(
+            normalize_record_set_relations(
+                validation.get("record_set_relations")
+            )
+        ),
         "version": int(version or validation.get("contract_version") or 1),
         "status": str(status),
     }

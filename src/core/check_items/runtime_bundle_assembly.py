@@ -4,19 +4,35 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping
 from typing import Any
+from urllib.parse import urlencode
 
+from src.core.check_items.assessment_policy import (
+    normalize_assessment_policy_contract,
+)
 from src.core.check_items.canonical import load_canonical_catalog
+from src.core.check_items.catalog import (
+    CollectionCommand,
+    primary_collection_commands,
+)
+from src.core.check_items.presentation import check_item_display_name
 from src.core.observation.semantic_projection import (
     SemanticProjectionError,
     dimension_field_references,
     normalize_dimensions,
+    transform_field_references,
+)
+from src.core.parser.field_contract import build_parser_field_contract
+from src.core.patrol.event_constraint_governance import (
+    scope_event_constraints_to_policy,
 )
 from src.core.patrol.event_rules import govern_evaluation_scope
 from src.infrastructure.db.models import (
     ChangePolicyVersionRecord,
+    CheckItemCatalogChangeRecord,
     CheckItemImplementationLinkRecord,
     CheckItemRecord,
     CheckItemRuntimeBundleRecord,
@@ -258,6 +274,198 @@ def contract_identity_blockers(
     return blockers
 
 
+def _contract_source_record_sets(
+    contract: ObservationContractRecord,
+) -> tuple[dict[str, Any], ...]:
+    record_sets = tuple(
+        dict(item)
+        for item in contract.record_sets_json or []
+        if isinstance(item, dict)
+    )
+    if record_sets:
+        return record_sets
+    return (
+        {
+            "name": "default",
+            "primary_keys": list(contract.primary_keys_json or []),
+            "required_fields": list(contract.required_fields_json or []),
+            "optional_fields": list(contract.optional_fields_json or []),
+            "validators": dict(contract.validators_json or {}),
+            "ignore_fields": list(contract.ignore_fields_json or []),
+            "entity_dimensions": dict(contract.entity_dimensions_json or {}),
+            "state_semantics": dict(contract.state_semantics_json or {}),
+        },
+    )
+
+
+def contract_source_field_blockers(
+    contract: ObservationContractRecord,
+    *,
+    parser_field_contract: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Prove every Contract source reference exists in the frozen Parser schema."""
+
+    parser_sets = {
+        str(name): {str(field) for field in fields or []}
+        for name, fields in dict(
+            parser_field_contract.get("template_record_sets") or {}
+        ).items()
+    }
+    blockers: list[dict[str, Any]] = []
+    contract_sets = {
+        str(item.get("name") or "default"): item
+        for item in _contract_source_record_sets(contract)
+    }
+
+    def missing_fields(
+        *,
+        record_set: str,
+        fields: Iterable[Any],
+        reference_kind: str,
+    ) -> None:
+        if record_set not in parser_sets:
+            blockers.append(
+                {
+                    "code": "observation_contract_record_set_missing",
+                    "message": "Contract 引用了 Parser 不存在的 record set。",
+                    "record_set": record_set,
+                    "reference_kind": reference_kind,
+                }
+            )
+            return
+        missing = sorted(
+            {
+                str(field)
+                for field in fields
+                if str(field).strip()
+            }
+            - parser_sets[record_set]
+        )
+        if missing:
+            blockers.append(
+                {
+                    "code": "observation_contract_source_field_missing",
+                    "message": "Contract 引用了 Parser 未输出的源字段。",
+                    "record_set": record_set,
+                    "reference_kind": reference_kind,
+                    "fields": missing,
+                }
+            )
+
+    for name, item in contract_sets.items():
+        semantics = dict(item.get("state_semantics") or {})
+        direct_fields = {
+            str(field)
+            for key in (
+                "primary_keys",
+                "required_fields",
+                "optional_fields",
+                "ignore_fields",
+            )
+            for field in item.get(key) or []
+            if str(field).strip()
+        }
+        direct_fields.update(
+            str(field) for field in dict(item.get("validators") or {})
+        )
+        direct_fields.update(str(field) for field in semantics)
+        direct_fields.update(
+            dimension_field_references(item.get("entity_dimensions") or {})
+        )
+        for raw_semantics in semantics.values():
+            if not isinstance(raw_semantics, Mapping):
+                continue
+            direct_fields.update(
+                transform_field_references(raw_semantics.get("transform"))
+            )
+            direct_fields.update(
+                str(field)
+                for field in raw_semantics.get("context_fields") or []
+                if str(field).strip()
+            )
+            for reference in dict(
+                raw_semantics.get("threshold_references") or {}
+            ).values():
+                if not isinstance(reference, Mapping):
+                    continue
+                target_set = str(
+                    reference.get("record_set_name") or name
+                ).strip()
+                field_name = str(
+                    reference.get("field_name") or ""
+                ).strip()
+                missing_fields(
+                    record_set=target_set,
+                    fields=[field_name],
+                    reference_kind="threshold_reference",
+                )
+                join_keys = dict(reference.get("join_keys") or {})
+                missing_fields(
+                    record_set=name,
+                    fields=join_keys.keys(),
+                    reference_kind="threshold_join_source",
+                )
+                missing_fields(
+                    record_set=target_set,
+                    fields=join_keys.values(),
+                    reference_kind="threshold_join_target",
+                )
+        missing_fields(
+            record_set=name,
+            fields=direct_fields,
+            reference_kind="contract_schema",
+        )
+
+    for relation in contract.record_set_relations_json or []:
+        if not isinstance(relation, Mapping):
+            continue
+        source_set = str(
+            relation.get("source_record_set") or ""
+        ).strip()
+        target_set = str(
+            relation.get("target_record_set") or ""
+        ).strip()
+        join_keys = dict(relation.get("join_keys") or {})
+        missing_fields(
+            record_set=source_set,
+            fields=join_keys.keys(),
+            reference_kind="relation_join_source",
+        )
+        missing_fields(
+            record_set=target_set,
+            fields=join_keys.values(),
+            reference_kind="relation_join_target",
+        )
+        threshold_bindings = dict(
+            relation.get("threshold_bindings") or {}
+        )
+        missing_fields(
+            record_set=source_set,
+            fields=threshold_bindings.keys(),
+            reference_kind="relation_measurement_source",
+        )
+        missing_fields(
+            record_set=target_set,
+            fields=[
+                field
+                for bindings in threshold_bindings.values()
+                if isinstance(bindings, Mapping)
+                for field in bindings.values()
+            ],
+            reference_kind="relation_threshold_target",
+        )
+
+    unique: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in blockers:
+        signature = canonical_digest(item)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        unique.append(item)
+    return unique
+
+
 def event_rule_observation_types(rule: EventRuleVersionRecord) -> tuple[str, ...]:
     raw = dict(rule.condition_json or {}).get("observation_types")
     if not isinstance(raw, list):
@@ -271,6 +479,318 @@ def event_rule_observation_types(rule: EventRuleVersionRecord) -> tuple[str, ...
             }
         )
     )
+
+
+_ASSET_REQUIREMENT_ORDER = (
+    "parser_template",
+    "observation_contract",
+    "current_state_rule",
+    "change_policy",
+    "event_rule",
+    "comparison_profile",
+    "identity_policy",
+)
+
+
+def _event_constraints(
+    row: Mapping[str, Any],
+) -> dict[str, Any]:
+    constraints = row.get("event_constraints")
+    if not isinstance(constraints, Mapping):
+        return {
+            "event_types": (),
+            "event_classes": {},
+            "event_severities": {},
+            "recovery_pairs": (),
+            "role_event_types": {},
+            "evidence_bound_roles": False,
+            "raw": {},
+        }
+    role_event_types = {
+        str(role).strip(): str(event_type).strip()
+        for role, event_type in dict(
+            constraints.get("role_event_types") or {}
+        ).items()
+        if str(role).strip() and str(event_type).strip()
+    }
+    declared_required = constraints.get("required_event_types")
+    if isinstance(declared_required, (list, tuple, set, frozenset)):
+        required_event_types = {
+            str(item).strip()
+            for item in declared_required
+            if str(item).strip()
+        }
+    else:
+        required_event_types = set(role_event_types.values())
+    event_classes = {
+        str(event_type).strip(): str(event_class).strip()
+        for event_type, event_class in dict(
+            constraints.get("required_event_classes") or {}
+        ).items()
+        if str(event_type).strip() and str(event_class).strip()
+    }
+    event_severities = {
+        str(event_type).strip(): str(severity).strip().casefold()
+        for event_type, severity in dict(
+            constraints.get("required_severities") or {}
+        ).items()
+        if str(event_type).strip() and str(severity).strip()
+    }
+    recovery_pairs = tuple(
+        sorted(
+            (
+                {
+                    "fault": str(item.get("fault") or "").strip(),
+                    "recovery": str(item.get("recovery") or "").strip(),
+                }
+                for item in constraints.get("required_recovery_pairs") or []
+                if isinstance(item, Mapping)
+                and str(item.get("fault") or "").strip()
+                and str(item.get("recovery") or "").strip()
+            ),
+            key=lambda item: (item["fault"], item["recovery"]),
+        )
+    )
+    return {
+        "event_types": tuple(sorted(required_event_types)),
+        "event_classes": event_classes,
+        "event_severities": event_severities,
+        "recovery_pairs": recovery_pairs,
+        "role_event_types": role_event_types,
+        "evidence_bound_roles": constraints.get("evidence_bound_roles")
+        is True,
+        "raw": dict(constraints),
+    }
+
+
+def derive_asset_requirement_profile(
+    *,
+    result_mode: str,
+    assessment_mode: str,
+    canonical_rows: Iterable[Mapping[str, Any]],
+    canonical_catalog: Any,
+) -> dict[str, Any]:
+    """Derive the immutable asset contract for one check-item version."""
+
+    rows = [
+        dict(item)
+        for item in canonical_rows
+        if isinstance(item, Mapping)
+        and str(item.get("observation_type") or "").strip()
+    ]
+    required_types = {
+        str(item["observation_type"]).strip()
+        for item in rows
+        if item.get("required", True) is not False
+    }
+    optional_types = {
+        str(item["observation_type"]).strip()
+        for item in rows
+        if item.get("required", True) is False
+    }
+
+    def types_with_role(values: set[str], role: str) -> set[str]:
+        return {
+            observation_type
+            for observation_type in values
+            if (
+                (
+                    definition := canonical_catalog.get(
+                        observation_type
+                    )
+                )
+                is not None
+                and role in definition.assessment_roles
+            )
+        }
+
+    structured = result_mode == "structured"
+    comparison = result_mode in {"normalized_diff", "hash_only"}
+    evaluates_state = assessment_mode == "health"
+    evaluates_change = assessment_mode in {"health", "change"}
+
+    current_required = (
+        types_with_role(required_types, "current_state")
+        if structured and evaluates_state
+        else set()
+    )
+    current_conditional = (
+        types_with_role(optional_types, "current_state")
+        if structured and evaluates_state
+        else set()
+    )
+    change_required = (
+        types_with_role(required_types, "change")
+        if structured and evaluates_change
+        else set()
+    )
+    change_conditional = (
+        types_with_role(optional_types, "change")
+        if structured and evaluates_change
+        else set()
+    )
+
+    required_events: dict[str, list[str]] = {}
+    conditional_events: dict[str, list[str]] = {}
+    required_event_classes: dict[str, str] = {}
+    required_event_severities: dict[str, str] = {}
+    required_recovery_pairs: dict[str, list[dict[str, str]]] = {}
+    evidence_bound_event_constraints: dict[str, dict[str, Any]] = {}
+    if structured and evaluates_change:
+        for row in rows:
+            observation_type = str(row["observation_type"]).strip()
+            event_constraints = _event_constraints(row)
+            event_types = tuple(event_constraints["event_types"])
+            if not event_types:
+                continue
+            if event_constraints["evidence_bound_roles"]:
+                evidence_bound_event_constraints[observation_type] = {
+                    "constraints": dict(event_constraints["raw"]),
+                    "required_observation": row.get("required", True)
+                    is not False,
+                }
+            else:
+                target = (
+                    conditional_events
+                    if row.get("required", True) is False
+                    else required_events
+                )
+                target[observation_type] = list(event_types)
+            required_event_classes.update(
+                event_constraints["event_classes"]
+            )
+            required_event_severities.update(
+                event_constraints["event_severities"]
+            )
+            recovery_pairs = list(
+                event_constraints["recovery_pairs"]
+            )
+            if recovery_pairs:
+                required_recovery_pairs[observation_type] = (
+                    recovery_pairs
+                )
+
+    requirements: dict[str, dict[str, Any]] = {
+        "parser_template": {
+            "required": structured,
+            "reason_code": (
+                "structured_output_requires_parser"
+                if structured
+                else "result_mode_does_not_use_parser"
+            ),
+        },
+        "observation_contract": {
+            "required": structured,
+            "reason_code": (
+                "structured_output_requires_canonical_projection"
+                if structured
+                else "result_mode_does_not_emit_observations"
+            ),
+            "required_observation_types": sorted(required_types),
+            "conditional_observation_types": sorted(optional_types),
+        },
+        "current_state_rule": {
+            "required": bool(current_required),
+            "reason_code": (
+                "health_assessment_requires_current_state_evaluation"
+                if current_required
+                else "check_item_does_not_require_current_state_evaluation"
+            ),
+            "required_observation_types": sorted(current_required),
+            "conditional_observation_types": sorted(
+                current_conditional
+            ),
+        },
+        "change_policy": {
+            "required": bool(change_required),
+            "reason_code": (
+                "canonical_change_semantics_require_policy"
+                if change_required
+                else (
+                    "text_comparison_profile_owns_change_policy"
+                    if comparison
+                    else "check_item_does_not_emit_canonical_changes"
+                )
+            ),
+            "required_observation_types": sorted(change_required),
+            "conditional_observation_types": sorted(
+                change_conditional
+            ),
+        },
+        "event_rule": {
+            "required": bool(
+                required_events or evidence_bound_event_constraints
+            ),
+            "reason_code": (
+                "catalog_declares_required_event_outcomes"
+                if required_events or evidence_bound_event_constraints
+                else "catalog_declares_no_required_event_outcomes"
+            ),
+            "required_event_types_by_observation": dict(
+                sorted(required_events.items())
+            ),
+            "conditional_event_types_by_observation": dict(
+                sorted(conditional_events.items())
+            ),
+            "required_event_classes": dict(
+                sorted(required_event_classes.items())
+            ),
+            "required_event_severities": dict(
+                sorted(required_event_severities.items())
+            ),
+            "required_recovery_pairs_by_observation": dict(
+                sorted(required_recovery_pairs.items())
+            ),
+            "evidence_bound_event_constraints_by_observation": dict(
+                sorted(evidence_bound_event_constraints.items())
+            ),
+        },
+        "comparison_profile": {
+            "required": comparison,
+            "reason_code": (
+                "text_result_requires_frozen_comparison_policy"
+                if comparison
+                else "result_mode_does_not_use_text_comparison"
+            ),
+        },
+        "identity_policy": {
+            "required": True,
+            "reason_code": "all_evidence_requires_stable_entity_identity",
+        },
+    }
+    required_asset_types = [
+        asset_type
+        for asset_type in _ASSET_REQUIREMENT_ORDER
+        if requirements[asset_type]["required"]
+    ]
+    not_required = {
+        asset_type: str(requirements[asset_type]["reason_code"])
+        for asset_type in _ASSET_REQUIREMENT_ORDER
+        if not requirements[asset_type]["required"]
+    }
+    runtime_facts = [
+        "evidence_qualification",
+        "coverage_decision",
+        "check_assessment",
+    ]
+    if structured:
+        runtime_facts.append("state_observation")
+    elif comparison:
+        runtime_facts.extend(
+            ["comparison_context", "network_change"]
+        )
+    else:
+        runtime_facts.append("qualified_evidence")
+
+    return {
+        "schema_version": "asset-requirement-profile/v1",
+        "result_mode": result_mode,
+        "assessment_mode": assessment_mode,
+        "requirements": requirements,
+        "required_asset_types": required_asset_types,
+        "not_required": not_required,
+        "required_runtime_facts": runtime_facts,
+    }
 
 
 def normalize_rule_bindings(
@@ -316,6 +836,42 @@ def _selector_values(selector: Mapping[str, Any], singular: str, plural: str) ->
     return tuple(sorted(set(values)))
 
 
+def _exact_models_from_patterns(patterns: Iterable[str]) -> set[str]:
+    exact_models: set[str] = set()
+    for raw_pattern in patterns:
+        pattern = str(raw_pattern or "").strip()
+        if not (pattern.startswith("^") and pattern.endswith("$")):
+            continue
+        body = pattern[1:-1]
+        literal: list[str] = []
+        index = 0
+        is_exact = True
+        while index < len(body):
+            character = body[index]
+            if character == "\\":
+                index += 1
+                if index >= len(body) or body[index].isalnum():
+                    # Character classes such as \d and dangling escapes describe
+                    # a set of models, not one exact model identity.
+                    is_exact = False
+                    break
+                literal.append(body[index])
+            elif character in ".^$*+?{}[]()|":
+                is_exact = False
+                break
+            else:
+                literal.append(character)
+            index += 1
+        value = "".join(literal)
+        if (
+            is_exact
+            and value
+            and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:/-]*", value)
+        ):
+            exact_models.add(value.casefold())
+    return exact_models
+
+
 def parser_compatibility(
     implementation: CollectionImplementationVersionRecord,
     parser: ParserTemplate,
@@ -344,24 +900,37 @@ def parser_compatibility(
             "Parser 兼容范围必须明确为 model、family 或 vendor。",
         )
 
-    implementation_vendor = str(selector.get("vendor") or "").strip().casefold()
+    implementation_vendors = {
+        value.casefold()
+        for value in _selector_values(selector, "vendor", "vendors")
+    }
     parser_vendor = str(manifest.get("vendor") or parser.vendor or "").strip().casefold()
-    if not implementation_vendor:
+    if not implementation_vendors:
         block(
             "implementation_vendor_missing",
             "采集实现未声明厂商，无法证明 Parser 兼容范围。",
         )
-    elif implementation_vendor != parser_vendor:
+    elif implementation_vendors != {parser_vendor}:
         block(
             "parser_vendor_mismatch",
-            f"采集实现厂商 {selector.get('vendor')} 与 Parser 厂商 "
+            f"采集实现厂商 {sorted(implementation_vendors)} 与 Parser 厂商 "
             f"{manifest.get('vendor') or parser.vendor} 不一致。",
         )
 
+    primary_commands = primary_collection_commands(
+        (
+            CollectionCommand(
+                command=str(item.get("command") or ""),
+                priority=int(item.get("priority") or 0),
+            )
+            for item in implementation.commands_json or []
+            if isinstance(item, dict) and normalize_command(item.get("command"))
+        ),
+        implementation_id=str(implementation.implementation_id),
+        version_id=str(implementation.id),
+    )
     implementation_commands = {
-        normalize_command(item.get("command"))
-        for item in implementation.commands_json or []
-        if isinstance(item, dict) and normalize_command(item.get("command"))
+        normalize_command(item.command) for item in primary_commands
     }
     parser_command = normalize_command(
         manifest.get("canonical_command") or parser.canonical_command
@@ -378,6 +947,9 @@ def parser_compatibility(
     implementation_models = set(_selector_values(selector, "model", "models"))
     implementation_model_patterns = set(
         _string_values(selector.get("model_patterns"))
+    )
+    implementation_exact_models = implementation_models | _exact_models_from_patterns(
+        implementation_model_patterns
     )
     parser_families = set(
         _selector_values(
@@ -412,8 +984,8 @@ def parser_compatibility(
                 "采集实现范围宽于 family 级 Parser 证据，请拆分实现或补充兼容样本。",
             )
     elif scope == "model":
-        if implementation_models:
-            if not implementation_models.issubset(parser_models):
+        if implementation_exact_models:
+            if not implementation_exact_models.issubset(parser_models):
                 block(
                     "implementation_scope_broader_than_parser",
                     "采集实现覆盖的型号超出 Parser 已验证型号。",
@@ -497,6 +1069,154 @@ def _issue(
         "remediation": remediation,
         "context": {key: value for key, value in context.items() if value is not None},
     }
+
+
+def _remediation_profile(code: str) -> tuple[str, str, str, str | None]:
+    """Map stable assembly diagnostics to one product action."""
+
+    normalized = str(code or "runtime_bundle_invalid").strip().casefold()
+    source_required_assets = {
+        "observation_contract_missing": "observation_contract",
+        "change_policy_missing": "change_policy",
+        "current_state_event_rule_missing": "event_rule",
+        "required_event_rule_missing": "event_rule",
+        "comparison_profile_missing": "comparison_profile",
+    }
+    if normalized in source_required_assets:
+        return (
+            "先导入包含该检查项命令的离线原始输出；平台将建立生产单元并生成、验证和审批缺失资产。",
+            "import_rule_samples",
+            "导入规则样本",
+            source_required_assets[normalized],
+        )
+    if normalized.endswith("_ambiguous"):
+        return (
+            "在运行包装配页显式选择唯一兼容版本，然后重新执行预检。",
+            "review_runtime_selection",
+            "选择资产版本",
+            None,
+        )
+    if (
+        "parser" in normalized
+        or normalized in {
+            "command_route_unavailable",
+            "no_executable_structured_command",
+        }
+    ):
+        return (
+            "在规则资产生产工作台补齐或修复兼容 Parser，并完成验证与发布。",
+            "repair_parser_asset",
+            "处理 Parser",
+            "parser_template",
+        )
+    if (
+        "contract" in normalized
+        or "canonical_identity" in normalized
+        or "canonical_observation" in normalized
+        or "observation_projection" in normalized
+        or normalized == "unapproved_observation_type"
+    ):
+        return (
+            "在规则资产生产工作台修订 ObservationContract 的标准语义和实体映射，验证后发布。",
+            "repair_observation_contract",
+            "处理 Contract",
+            "observation_contract",
+        )
+    if "change_policy" in normalized:
+        return (
+            "在规则资产生产工作台生成或修订 ChangePolicy，完成回放、复核与发布。",
+            "repair_change_policy",
+            "处理变化策略",
+            "change_policy",
+        )
+    if "event_rule" in normalized or "current_state" in normalized:
+        return (
+            "在规则资产生产工作台生成或修订 CurrentStateRule / EventRule，完成回放、复核与发布。",
+            "repair_event_rule",
+            "处理事件规则",
+            "event_rule",
+        )
+    if "comparison_profile" in normalized:
+        return (
+            "在规则资产生产工作台补齐或选择 TextComparisonProfile，验证后发布。",
+            "repair_comparison_profile",
+            "处理比较规则",
+            "comparison_profile",
+        )
+    if "entity_identity_policy" in normalized:
+        return (
+            "在规则资产生产工作台检查并激活实体身份策略，然后重新装配运行包。",
+            "repair_identity_policy",
+            "处理身份策略",
+            "identity_policy",
+        )
+    return (
+        "在规则资产生产工作台修正检查项或采集实现的版本化配置，然后重新装配运行包。",
+        "repair_check_item_configuration",
+        "处理检查项配置",
+        "check_item",
+    )
+
+
+def _actionable_issues(
+    issues: Iterable[Mapping[str, Any]],
+    *,
+    check_item_id: str | None,
+    check_item_version_id: str,
+    implementation_version_id: str,
+) -> list[dict[str, Any]]:
+    """Give every blocker a deterministic explanation and navigation target."""
+
+    result: list[dict[str, Any]] = []
+    for raw in issues:
+        issue = dict(raw)
+        code = str(issue.get("code") or "runtime_bundle_invalid")
+        default_remediation, action_code, action_label, asset_type = (
+            _remediation_profile(code)
+        )
+        remediation = str(issue.get("remediation") or default_remediation)
+        if action_code == "review_runtime_selection":
+            params = {
+                "workspace": "runtime",
+                "subtab": "coverage-backfill",
+                "check_item_version_id": check_item_version_id,
+                "implementation_version_id": implementation_version_id,
+            }
+            if check_item_id:
+                params["search"] = check_item_id
+        elif action_code == "import_rule_samples":
+            params = {
+                "workspace": "production",
+                "subtab": "source-jobs",
+            }
+            if check_item_id:
+                params["check_item_id"] = check_item_id
+        else:
+            params = {
+                "workspace": "production",
+                "subtab": "asset-production-units",
+            }
+            if check_item_id:
+                params["command"] = check_item_id
+            if action_code == "repair_parser_asset":
+                params["action"] = "parser"
+            elif action_code in {
+                "repair_observation_contract",
+                "repair_change_policy",
+                "repair_event_rule",
+                "repair_comparison_profile",
+            }:
+                params["action"] = "rule-generation"
+        issue["remediation"] = remediation
+        issue["remediation_action"] = {
+            "code": action_code,
+            "label": action_label,
+            "description": remediation,
+            "target_url": f"/skills/parser?{urlencode(params)}",
+            "asset_type": asset_type,
+        }
+        result.append(issue)
+    return result
 
 
 class RuntimeBundleAssemblyPlanner:
@@ -583,7 +1303,24 @@ class RuntimeBundleAssemblyPlanner:
             blockers.append(
                 _issue("check_item_not_active", "检查项版本不是 Active。")
             )
-        if implementation_version.status != "active":
+        governed_candidate_change = None
+        if implementation_version.status == "draft":
+            governed_candidate_change = (
+                db.query(CheckItemCatalogChangeRecord)
+                .filter(
+                    CheckItemCatalogChangeRecord.version_id
+                    == implementation_version.id,
+                    CheckItemCatalogChangeRecord.asset_kind
+                    == "collection_implementation",
+                    CheckItemCatalogChangeRecord.status
+                    == "pending_approval",
+                )
+                .one_or_none()
+            )
+        if (
+            implementation_version.status != "active"
+            and governed_candidate_change is None
+        ):
             blockers.append(
                 _issue("implementation_not_active", "采集实现版本不是 Active。")
             )
@@ -600,6 +1337,12 @@ class RuntimeBundleAssemblyPlanner:
             str(item.get("observation_type") or "").strip()
             for item in canonical_rows
             if str(item.get("observation_type") or "").strip()
+        }
+        required_types = {
+            str(item.get("observation_type") or "").strip()
+            for item in canonical_rows
+            if str(item.get("observation_type") or "").strip()
+            and item.get("required", True) is not False
         }
         canonical_contract = dict(
             check_version.canonical_contract_json or {}
@@ -621,6 +1364,18 @@ class RuntimeBundleAssemblyPlanner:
         coverage_policy = dict(check_version.coverage_policy_json or {})
         output_quality_policy = dict(
             implementation_version.output_quality_policy_json or {}
+        )
+        asset_requirement_profile = derive_asset_requirement_profile(
+            result_mode=result_mode,
+            assessment_mode=assessment_mode,
+            canonical_rows=canonical_rows,
+            canonical_catalog=canonical_catalog,
+        )
+        asset_requirement_profile_digest = canonical_digest(
+            asset_requirement_profile
+        )
+        asset_requirements = dict(
+            asset_requirement_profile["requirements"]
         )
         if assessment_mode == "health":
             for code, policy, message in (
@@ -648,18 +1403,26 @@ class RuntimeBundleAssemblyPlanner:
                 if not policy:
                     blockers.append(_issue(code, message))
 
-        commands = sorted(
-            [
-                {
-                    "command": str(item.get("command") or "").strip(),
-                    "canonical_command": normalize_command(item.get("command")),
-                    "priority": int(item.get("priority") or 0),
-                }
+        primary_commands = primary_collection_commands(
+            (
+                CollectionCommand(
+                    command=str(item.get("command") or "").strip(),
+                    priority=int(item.get("priority") or 0),
+                )
                 for item in implementation_version.commands_json or []
                 if isinstance(item, dict) and normalize_command(item.get("command"))
-            ],
-            key=lambda item: (-item["priority"], item["canonical_command"]),
+            ),
+            implementation_id=str(implementation_version.implementation_id),
+            version_id=str(implementation_version.id),
         )
+        commands = [
+            {
+                "command": item.command,
+                "canonical_command": normalize_command(item.command),
+                "priority": item.priority,
+            }
+            for item in primary_commands
+        ]
         command_names = {item["canonical_command"] for item in commands}
 
         requested_parser_ids = {
@@ -739,6 +1502,10 @@ class RuntimeBundleAssemblyPlanner:
         for parser in parser_rows:
             parser_id = str(parser.id)
             compatibility = parser_compatibility(implementation_version, parser)
+            parser_field_contract = build_parser_field_contract(
+                validation=dict(parser.validation_json or {}),
+                template_text=parser.template_text,
+            )
             available_contracts = [
                 item
                 for item in contracts_by_parser.get(parser_id, [])
@@ -763,9 +1530,27 @@ class RuntimeBundleAssemblyPlanner:
                 for contract in relevant_contracts
                 for observation_type in contract_observation_types(contract)
             }
-            missing_types = sorted(expected_types - produced_types)
+            missing_types = sorted(required_types - produced_types)
             unapproved_types = sorted(produced_types - approved_types)
             route_blockers = list(compatibility["blockers"])
+            if parser_field_contract["status"] != "aligned":
+                route_blockers.append(
+                    {
+                        "code": (
+                            "parser_field_contract_drift"
+                            if parser_field_contract["status"] == "schema_drift"
+                            else "parser_field_contract_missing"
+                        ),
+                        "message": (
+                            "ParserSpec 与实际 TextFSM 输出字段不一致。"
+                            if parser_field_contract["status"] == "schema_drift"
+                            else "Parser 缺少可验证的字段合同。"
+                        ),
+                        "field_contract_status": parser_field_contract["status"],
+                        "differences": parser_field_contract.get("differences") or [],
+                        "errors": parser_field_contract.get("errors") or [],
+                    }
+                )
             for contract in relevant_contracts:
                 route_blockers.extend(
                     contract_identity_blockers(
@@ -775,6 +1560,13 @@ class RuntimeBundleAssemblyPlanner:
                         expected_observation_types=expected_types,
                     )
                 )
+                if parser_field_contract["status"] == "aligned":
+                    route_blockers.extend(
+                        contract_source_field_blockers(
+                            contract,
+                            parser_field_contract=parser_field_contract,
+                        )
+                    )
             if not relevant_contracts:
                 route_blockers.append(
                     {
@@ -786,7 +1578,7 @@ class RuntimeBundleAssemblyPlanner:
                 route_blockers.append(
                     {
                         "code": "canonical_observation_missing",
-                        "message": "Contract 未覆盖全部检查项标准语义。",
+                        "message": "Contract 未覆盖检查项全部必需标准语义。",
                         "observation_types": missing_types,
                     }
                 )
@@ -816,6 +1608,7 @@ class RuntimeBundleAssemblyPlanner:
                 "version": parser.version,
                 "sha256": parser.sha256,
                 "compatibility": compatibility,
+                "field_contract": parser_field_contract,
                 "contract_ids": [str(item.id) for item in relevant_contracts],
                 "produced_observation_types": sorted(produced_types),
                 "missing_observation_types": missing_types,
@@ -829,6 +1622,19 @@ class RuntimeBundleAssemblyPlanner:
         selected_routes: list[dict[str, Any]] = []
         for command in commands:
             canonical_command = command["canonical_command"]
+            if result_mode != "structured":
+                command_routes.append(
+                    {
+                        **command,
+                        "status": "executable",
+                        "execution_mode": result_mode,
+                        "selected_parser_template_id": None,
+                        "selected_contract_ids": [],
+                        "candidate_count": 0,
+                        "reasons": [],
+                    }
+                )
+                continue
             candidates = route_candidates_by_command.get(canonical_command, [])
             eligible = [
                 item
@@ -881,6 +1687,7 @@ class RuntimeBundleAssemblyPlanner:
                 {
                     **command,
                     "status": route_status,
+                    "execution_mode": result_mode,
                     "selected_parser_template_id": (
                         selected["parser_template_id"] if selected else None
                     ),
@@ -938,12 +1745,22 @@ class RuntimeBundleAssemblyPlanner:
                         _issue(
                             code,
                             message,
-                            parser_template_id=candidate[
-                                "parser_template_id"
-                            ],
-                            observation_types=item.get(
-                                "observation_types"
-                            ),
+                            **{
+                                "parser_template_id": candidate[
+                                    "parser_template_id"
+                                ],
+                                **{
+                                    key: value
+                                    for key, value in item.items()
+                                    if key
+                                    not in {
+                                        "code",
+                                        "message",
+                                        "remediation",
+                                        "context",
+                                    }
+                                },
+                            },
                         )
                     )
             blockers.append(
@@ -961,14 +1778,40 @@ class RuntimeBundleAssemblyPlanner:
         }
         selected_projection = sorted(expected_types & produced_types)
 
-        change_required = {
-            observation_type
-            for observation_type in expected_types
-            if (
-                (definition := canonical_catalog.get(observation_type)) is not None
-                and "change" in definition.assessment_roles
+        change_requirement = dict(
+            asset_requirements["change_policy"]
+        )
+        change_required = set(
+            change_requirement.get("required_observation_types") or []
+        )
+        change_required.update(
+            set(
+                change_requirement.get(
+                    "conditional_observation_types"
+                )
+                or []
             )
-        }
+            & produced_types
+        )
+        if requested_policy_ids and not (
+            change_required
+            or change_requirement.get(
+                "conditional_observation_types"
+            )
+        ):
+            blockers.append(
+                _issue(
+                    "change_policy_not_required",
+                    "当前检查项模式不使用 Canonical ChangePolicy。",
+                    remediation=(
+                        "非结构化变化由 TextComparisonProfile 管理；"
+                        "只有标准 Observation 变化才绑定 ChangePolicy。"
+                    ),
+                    change_policy_version_ids=sorted(
+                        requested_policy_ids
+                    ),
+                )
+            )
         policy_rows = (
             db.query(ChangePolicyVersionRecord)
             .filter(
@@ -1004,10 +1847,14 @@ class RuntimeBundleAssemblyPlanner:
         for item in selected_policy_pool:
             policies_by_type[str(item.observation_type)].append(item)
         selected_policy_ids: set[str] = set()
+        selected_policy_by_type: dict[
+            str, ChangePolicyVersionRecord
+        ] = {}
         for observation_type in sorted(change_required):
             candidates = policies_by_type.get(observation_type, [])
             if len(candidates) == 1:
                 selected_policy_ids.add(str(candidates[0].id))
+                selected_policy_by_type[observation_type] = candidates[0]
             elif not candidates:
                 blockers.append(
                     _issue(
@@ -1028,6 +1875,177 @@ class RuntimeBundleAssemblyPlanner:
                     )
                 )
 
+        current_requirement = dict(
+            asset_requirements["current_state_rule"]
+        )
+        event_requirement = dict(
+            asset_requirements["event_rule"]
+        )
+        current_rule_types_allowed = set(
+            current_requirement.get("required_observation_types") or []
+        )
+        current_rule_types_allowed.update(
+            set(
+                current_requirement.get(
+                    "conditional_observation_types"
+                )
+                or []
+            )
+            & produced_types
+        )
+        required_event_types_by_observation = {
+            str(observation_type): {
+                str(event_type)
+                for event_type in event_types or []
+                if str(event_type)
+            }
+            for observation_type, event_types in dict(
+                event_requirement.get(
+                    "required_event_types_by_observation"
+                )
+                or {}
+            ).items()
+        }
+        conditional_event_types_by_observation = {
+            str(observation_type): {
+                str(event_type)
+                for event_type in event_types or []
+                if str(event_type)
+            }
+            for observation_type, event_types in dict(
+                event_requirement.get(
+                    "conditional_event_types_by_observation"
+                )
+                or {}
+            ).items()
+            if str(observation_type) in produced_types
+        }
+        required_event_types_by_observation.update(
+            conditional_event_types_by_observation
+        )
+        required_recovery_pairs_by_observation = {
+            str(observation_type): tuple(
+                {
+                    "fault": str(item.get("fault") or ""),
+                    "recovery": str(item.get("recovery") or ""),
+                }
+                for item in pairs or []
+                if isinstance(item, Mapping)
+                and str(item.get("fault") or "")
+                and str(item.get("recovery") or "")
+            )
+            for observation_type, pairs in dict(
+                event_requirement.get(
+                    "required_recovery_pairs_by_observation"
+                )
+                or {}
+            ).items()
+            if str(observation_type)
+            in required_event_types_by_observation
+        }
+        effective_event_role_bindings: dict[str, dict[str, Any]] = {}
+        evidence_bound_constraints = dict(
+            event_requirement.get(
+                "evidence_bound_event_constraints_by_observation"
+            )
+            or {}
+        )
+        for observation_type, raw_profile in sorted(
+            evidence_bound_constraints.items()
+        ):
+            if not isinstance(raw_profile, Mapping):
+                continue
+            if (
+                raw_profile.get("required_observation") is False
+                and str(observation_type) not in produced_types
+            ):
+                continue
+            policy_record = selected_policy_by_type.get(
+                str(observation_type)
+            )
+            if policy_record is None:
+                continue
+            scoped = scope_event_constraints_to_policy(
+                dict(raw_profile.get("constraints") or {}),
+                dict(policy_record.policy_json or {}),
+            )
+            if scoped.get("success") is not True:
+                blockers.append(
+                    _issue(
+                        "evidence_bound_event_roles_unresolved",
+                        (
+                            f"{observation_type} 的事件角色无法从已选 "
+                            "ChangePolicy 阈值证据中确定。"
+                        ),
+                        observation_type=str(observation_type),
+                        change_policy_version_id=str(policy_record.id),
+                        errors=list(scoped.get("errors") or []),
+                    )
+                )
+                continue
+            event_types = {
+                str(item)
+                for item in scoped.get("active_event_types") or []
+                if str(item)
+            }
+            required_event_types_by_observation[
+                str(observation_type)
+            ] = event_types
+            effective_constraints = dict(
+                scoped.get("constraints") or {}
+            )
+            effective_event_role_bindings[str(observation_type)] = {
+                "change_policy_version_id": str(policy_record.id),
+                "active_roles": list(scoped.get("active_roles") or []),
+                "event_types": sorted(event_types),
+            }
+            recovery_pairs = tuple(
+                {
+                    "fault": str(item.get("fault") or ""),
+                    "recovery": str(item.get("recovery") or ""),
+                }
+                for item in effective_constraints.get(
+                    "required_recovery_pairs"
+                )
+                or []
+                if isinstance(item, Mapping)
+                and str(item.get("fault") or "")
+                and str(item.get("recovery") or "")
+            )
+            if recovery_pairs:
+                required_recovery_pairs_by_observation[
+                    str(observation_type)
+                ] = recovery_pairs
+        required_event_classes = {
+            str(event_type): str(event_class)
+            for event_type, event_class in dict(
+                event_requirement.get("required_event_classes")
+                or {}
+            ).items()
+            if str(event_type) and str(event_class)
+        }
+        required_event_severities = {
+            str(event_type): str(severity).casefold()
+            for event_type, severity in dict(
+                event_requirement.get("required_event_severities")
+                or {}
+            ).items()
+            if str(event_type) and str(severity)
+        }
+        allowed_rule_observation_types = (
+            current_rule_types_allowed
+            | set(required_event_types_by_observation)
+        )
+        if requested_rule_ids and not allowed_rule_observation_types:
+            blockers.append(
+                _issue(
+                    "event_rule_not_required",
+                    "当前检查项模式未声明 CurrentStateRule 或 EventRule 需求。",
+                    event_rule_version_ids=sorted(
+                        requested_rule_ids
+                    ),
+                )
+            )
         rule_rows = (
             db.query(EventRuleVersionRecord, EventRuleRecord)
             .join(EventRuleRecord, EventRuleRecord.id == EventRuleVersionRecord.rule_id)
@@ -1039,6 +2057,8 @@ class RuntimeBundleAssemblyPlanner:
                 EventRuleVersionRecord.id,
             )
             .all()
+            if allowed_rule_observation_types or requested_rule_ids
+            else []
         )
         rule_candidates: list[dict[str, Any]] = []
         selected_rule_bindings: dict[str, tuple[str, ...]] = {}
@@ -1056,7 +2076,11 @@ class RuntimeBundleAssemblyPlanner:
         for version, root in rule_rows:
             version_id = str(version.id)
             observation_types = event_rule_observation_types(version)
-            intersects = bool(set(observation_types) & expected_types)
+            matched_observation_types = (
+                set(observation_types)
+                & allowed_rule_observation_types
+            )
+            intersects = bool(matched_observation_types)
             explicitly_selected = version_id in requested_rule_ids
             if not intersects and not explicitly_selected:
                 continue
@@ -1070,6 +2094,10 @@ class RuntimeBundleAssemblyPlanner:
                 )
             unknown_types = sorted(set(observation_types) - approved_types)
             outside_check = sorted(set(observation_types) - expected_types)
+            outside_profile = sorted(
+                set(observation_types)
+                - allowed_rule_observation_types
+            )
             if unknown_types:
                 rule_blockers.append(
                     {
@@ -1086,17 +2114,135 @@ class RuntimeBundleAssemblyPlanner:
                         "observation_types": outside_check,
                     }
                 )
+            if outside_profile:
+                rule_blockers.append(
+                    {
+                        "code": "event_rule_outside_asset_profile",
+                        "message": (
+                            "EventRule 引用了当前资产需求画像未声明的语义。"
+                        ),
+                        "observation_types": outside_profile,
+                    }
+                )
             scope = govern_evaluation_scope(
                 version.evaluation_scope,
                 event_class=version.event_class,
             )
+            event_type = str(version.event_type or "")
+            if scope in {"change", "both"}:
+                undeclared_event_observations = sorted(
+                    observation_type
+                    for observation_type in matched_observation_types
+                    if event_type
+                    not in required_event_types_by_observation.get(
+                        observation_type,
+                        set(),
+                    )
+                )
+                if undeclared_event_observations:
+                    rule_blockers.append(
+                        {
+                            "code": (
+                                "event_rule_type_outside_asset_profile"
+                            ),
+                            "message": (
+                                "EventRule emits an event type that the "
+                                "check-item profile does not declare."
+                            ),
+                            "event_type": event_type,
+                            "observation_types": (
+                                undeclared_event_observations
+                            ),
+                        }
+                    )
+            expected_event_class = required_event_classes.get(event_type)
+            actual_event_class = str(version.event_class or "fault")
+            if (
+                expected_event_class
+                and actual_event_class != expected_event_class
+            ):
+                rule_blockers.append(
+                    {
+                        "code": "event_rule_class_mismatch",
+                        "message": (
+                            "EventRule class does not match the "
+                            "check-item catalog."
+                        ),
+                        "event_type": event_type,
+                        "expected_event_class": expected_event_class,
+                        "actual_event_class": actual_event_class,
+                    }
+                )
+            expected_severity = required_event_severities.get(event_type)
+            actual_severity = str(version.severity or "").casefold()
+            if (
+                expected_severity
+                and actual_severity != expected_severity
+            ):
+                rule_blockers.append(
+                    {
+                        "code": "event_rule_severity_mismatch",
+                        "message": (
+                            "EventRule severity does not match the "
+                            "check-item catalog."
+                        ),
+                        "event_type": event_type,
+                        "expected_severity": expected_severity,
+                        "actual_severity": actual_severity,
+                    }
+                )
+            expected_recovery_targets = {
+                pair["fault"]
+                for observation_type in matched_observation_types
+                for pair in (
+                    required_recovery_pairs_by_observation.get(
+                        observation_type,
+                        (),
+                    )
+                )
+                if pair["recovery"] == event_type
+            }
+            if expected_recovery_targets:
+                actual_recovery_targets_raw = dict(
+                    version.recovery_json or {}
+                ).get("resolves") or []
+                if isinstance(actual_recovery_targets_raw, str):
+                    actual_recovery_targets_raw = [
+                        actual_recovery_targets_raw
+                    ]
+                actual_recovery_targets = {
+                    str(item)
+                    for item in actual_recovery_targets_raw
+                    if str(item)
+                }
+                if actual_recovery_targets != (
+                    expected_recovery_targets
+                ):
+                    rule_blockers.append(
+                        {
+                            "code": "event_rule_recovery_pair_mismatch",
+                            "message": (
+                                "Recovery targets do not match the "
+                                "check-item catalog."
+                            ),
+                            "event_type": event_type,
+                            "expected_recovery_targets": sorted(
+                                expected_recovery_targets
+                            ),
+                            "actual_recovery_targets": sorted(
+                                actual_recovery_targets
+                            ),
+                        }
+                    )
             candidate = {
                 "event_rule_id": str(root.id),
                 "event_rule_version_id": version_id,
                 "name": root.name,
                 "event_type": version.event_type,
+                "severity": version.severity,
                 "event_class": version.event_class,
                 "evaluation_scope": scope,
+                "recovery": dict(version.recovery_json or {}),
                 "observation_types": list(observation_types),
                 "digest": version.digest,
                 "blockers": rule_blockers,
@@ -1108,8 +2254,14 @@ class RuntimeBundleAssemblyPlanner:
                     _issue(
                         str(item.get("code") or "event_rule_invalid"),
                         str(item.get("message") or "所选 EventRule 不满足运行包装配要求。"),
-                        event_rule_version_id=version_id,
-                        observation_types=item.get("observation_types"),
+                        **{
+                            "event_rule_version_id": version_id,
+                            **{
+                                key: value
+                                for key, value in item.items()
+                                if key not in {"code", "message"}
+                            },
+                        },
                     )
                     for item in rule_blockers
                 )
@@ -1121,14 +2273,10 @@ class RuntimeBundleAssemblyPlanner:
                 selected_rule_bindings[version_id] = observation_types
                 selected_rule_rows.append((version, root))
 
-        current_required = {
-            observation_type
-            for observation_type in expected_types
-            if (
-                (definition := canonical_catalog.get(observation_type)) is not None
-                and "current_state" in definition.assessment_roles
-            )
-        }
+        current_required = set(
+            current_requirement.get("required_observation_types")
+            or []
+        )
         current_covered: set[str] = set()
         for version, _root in selected_rule_rows:
             scope = govern_evaluation_scope(
@@ -1147,6 +2295,76 @@ class RuntimeBundleAssemblyPlanner:
                         "current_state_event_rule_missing",
                         f"{observation_type} 缺少可用于当前状态判断的 Active EventRule。",
                         observation_type=observation_type,
+                    )
+                )
+
+        selected_event_types_by_observation: dict[str, set[str]] = (
+            defaultdict(set)
+        )
+        selected_event_class_by_type: dict[str, set[str]] = (
+            defaultdict(set)
+        )
+        for version, _root in selected_rule_rows:
+            for observation_type in event_rule_observation_types(
+                version
+            ):
+                selected_event_types_by_observation[
+                    observation_type
+                ].add(str(version.event_type))
+            selected_event_class_by_type[str(version.event_type)].add(
+                str(version.event_class or "fault")
+            )
+        for (
+            observation_type,
+            required_event_types,
+        ) in sorted(required_event_types_by_observation.items()):
+            missing_event_types = sorted(
+                required_event_types
+                - selected_event_types_by_observation.get(
+                    observation_type,
+                    set(),
+                )
+            )
+            if missing_event_types:
+                blockers.append(
+                    _issue(
+                        "required_event_rule_missing",
+                        (
+                            f"{observation_type} 缺少检查项目录要求的 "
+                            "Active EventRule。"
+                        ),
+                        observation_type=observation_type,
+                        event_types=missing_event_types,
+                    )
+                )
+        for event_type, required_event_class in (
+            required_event_classes.items()
+        ):
+            if event_type not in {
+                item
+                for event_types in (
+                    required_event_types_by_observation.values()
+                )
+                for item in event_types
+            }:
+                continue
+            actual_classes = selected_event_class_by_type.get(
+                str(event_type),
+                set(),
+            )
+            if actual_classes and str(required_event_class) not in (
+                actual_classes
+            ):
+                blockers.append(
+                    _issue(
+                        "event_rule_class_mismatch",
+                        (
+                            f"{event_type} 的 EventRule class "
+                            "与检查项目录不一致。"
+                        ),
+                        event_type=event_type,
+                        expected_event_class=required_event_class,
+                        actual_event_classes=sorted(actual_classes),
                     )
                 )
 
@@ -1293,22 +2511,13 @@ class RuntimeBundleAssemblyPlanner:
         executable_count = sum(
             item["status"] == "executable" for item in command_routes
         )
-        fallback_resilience = (
+        command_availability = (
             "not_applicable"
-            if result_mode != "structured"
-            else "full"
-            if executable_count == len(command_routes) and executable_count > 0
-            else "reduced"
-            if executable_count > 0
-            else "none"
+            if not command_routes
+            else "available"
+            if executable_count == 1
+            else "unavailable"
         )
-        if fallback_resilience == "reduced":
-            warnings.append(
-                _issue(
-                    "fallback_resilience_reduced",
-                    "运行路径可用，但部分声明命令缺少完整资产，fallback 韧性降低。",
-                )
-            )
 
         selected = {
             "parser_template_ids": sorted(selected_parser_ids),
@@ -1324,10 +2533,29 @@ class RuntimeBundleAssemblyPlanner:
                 str(identity_version.id) if identity_version is not None else None
             ),
         }
+        assessment_policy = normalize_assessment_policy_contract(
+            dict(check_version.canonical_contract_json or {}),
+            dict(check_version.applicability_json or {}),
+        )
         compatibility = {
             "schema_version": 2,
+            "catalog_candidate": (
+                {
+                    "change_id": str(governed_candidate_change.id),
+                    "payload_digest": str(governed_candidate_change.payload_digest),
+                    "impact_digest": str(governed_candidate_change.impact_digest or ""),
+                    "status": str(governed_candidate_change.status),
+                }
+                if governed_candidate_change is not None
+                else None
+            ),
+            "asset_requirement_profile": asset_requirement_profile,
+            "asset_requirement_profile_digest": (
+                asset_requirement_profile_digest
+            ),
             "implementation_selector": dict(implementation_version.match_json or {}),
             "expected_observation_types": sorted(expected_types),
+            "required_observation_types": sorted(required_types),
             "produced_observation_types": sorted(produced_types),
             "observation_projection": selected_projection,
             "current_state_rule_types": sorted(current_covered),
@@ -1338,17 +2566,24 @@ class RuntimeBundleAssemblyPlanner:
                     if str(item.id) in selected_policy_ids
                 }
             ),
+            "effective_event_role_bindings": dict(
+                sorted(effective_event_role_bindings.items())
+            ),
             "executable_commands": [
                 item["canonical_command"]
                 for item in command_routes
                 if item["status"] == "executable"
             ],
-            "unavailable_fallbacks": [
+            # Deprecated compatibility field. Fallback execution is disabled.
+            "unavailable_fallbacks": [],
+            "fallback_resilience": "not_applicable",
+            "unavailable_commands": [
                 item["canonical_command"]
                 for item in command_routes
                 if item["status"] != "executable"
             ],
-            "fallback_resilience": fallback_resilience,
+            "command_availability": command_availability,
+            "assessment_policy": assessment_policy,
             "parser_manifests": {
                 item["parser_template_id"]: item["compatibility"]["parser_manifest"]
                 for item in selected_routes
@@ -1365,6 +2600,16 @@ class RuntimeBundleAssemblyPlanner:
             },
         }
         dependency_snapshot = {
+            "catalog_candidate": (
+                {
+                    "change_id": str(governed_candidate_change.id),
+                    "payload_digest": str(governed_candidate_change.payload_digest),
+                    "impact_digest": str(governed_candidate_change.impact_digest or ""),
+                    "status": str(governed_candidate_change.status),
+                }
+                if governed_candidate_change is not None
+                else None
+            ),
             "check_item": {
                 "id": str(check_version.id),
                 "digest": str(check_version.digest),
@@ -1378,6 +2623,10 @@ class RuntimeBundleAssemblyPlanner:
             "canonical_catalog": {
                 "version": canonical_catalog.version,
                 "digest": canonical_catalog.digest,
+            },
+            "asset_requirement_profile": {
+                "digest": asset_requirement_profile_digest,
+                "profile": asset_requirement_profile,
             },
             "identity_policy": (
                 {
@@ -1399,6 +2648,14 @@ class RuntimeBundleAssemblyPlanner:
                 "output_quality_policy_digest": canonical_digest(
                     output_quality_policy
                 ),
+            },
+            "assessment_policy": {
+                "digest": assessment_policy["digest"],
+                "contract": {
+                    key: value
+                    for key, value in assessment_policy.items()
+                    if key != "digest"
+                },
             },
             "parsers": {
                 str(item.id): {
@@ -1458,6 +2715,22 @@ class RuntimeBundleAssemblyPlanner:
                 else None
             ),
         }
+        blockers = _actionable_issues(
+            blockers,
+            check_item_id=(
+                str(check_item.id) if check_item is not None else None
+            ),
+            check_item_version_id=str(check_version.id),
+            implementation_version_id=str(implementation_version.id),
+        )
+        warnings = _actionable_issues(
+            warnings,
+            check_item_id=(
+                str(check_item.id) if check_item is not None else None
+            ),
+            check_item_version_id=str(check_version.id),
+            implementation_version_id=str(implementation_version.id),
+        )
         preview_payload = {
             "check_item_version_id": str(check_version.id),
             "implementation_version_id": str(implementation_version.id),
@@ -1474,6 +2747,11 @@ class RuntimeBundleAssemblyPlanner:
                 "id": str(check_item.id) if check_item is not None else None,
                 "version_id": str(check_version.id),
                 "name": check_item.name if check_item is not None else None,
+                "display_name": (
+                    check_item_display_name(check_item.id, check_item.name)
+                    if check_item is not None
+                    else None
+                ),
                 "result_mode": result_mode,
                 "assessment_mode": assessment_mode,
             },
@@ -1487,6 +2765,10 @@ class RuntimeBundleAssemblyPlanner:
                 "commands": commands,
             },
             "selected": selected,
+            "asset_requirement_profile": asset_requirement_profile,
+            "asset_requirement_profile_digest": (
+                asset_requirement_profile_digest
+            ),
             "candidates": {
                 "parsers": parser_candidates,
                 "observation_contracts": [
@@ -1539,7 +2821,8 @@ class RuntimeBundleAssemblyPlanner:
                 for item in draft_rows
             ],
             "operationally_ready": not blockers,
-            "fallback_resilience": fallback_resilience,
+            "fallback_resilience": "not_applicable",
+            "command_availability": command_availability,
             "blockers": blockers,
             "warnings": warnings,
             "preview_digest": preview_digest,
@@ -1553,6 +2836,18 @@ class RuntimeBundleAssemblyPlanner:
         blockers: list[dict[str, Any]],
         warnings: list[dict[str, Any]],
     ) -> dict[str, Any]:
+        blockers = _actionable_issues(
+            blockers,
+            check_item_id=None,
+            check_item_version_id=check_item_version_id,
+            implementation_version_id=implementation_version_id,
+        )
+        warnings = _actionable_issues(
+            warnings,
+            check_item_id=None,
+            check_item_version_id=check_item_version_id,
+            implementation_version_id=implementation_version_id,
+        )
         payload = {
             "check_item_version_id": check_item_version_id,
             "implementation_version_id": implementation_version_id,
@@ -1580,6 +2875,8 @@ class RuntimeBundleAssemblyPlanner:
             },
             "command_routes": [],
             "compatibility": {},
+            "asset_requirement_profile": None,
+            "asset_requirement_profile_digest": None,
             "dependency_snapshot": {},
             "active_bundle": None,
             "drafts": [],

@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Alert, Button, DatePicker, Descriptions, Drawer, Dropdown, Input, List, Pagination, Progress,
-  Segmented, Select, Space, Steps, Switch, Table, Tabs, Tag, Typography, message,
+  Alert, Button, Checkbox, DatePicker, Descriptions, Drawer, Dropdown, Input, List, Pagination,
+  Progress, Segmented, Select, Space, Steps, Switch, Table, Tabs, Tag, Typography, message,
 } from 'antd'
 import {
-  CloudUploadOutlined, DeleteOutlined, DownloadOutlined, EyeOutlined, FolderOpenOutlined,
-  MoreOutlined, PlayCircleOutlined, ReloadOutlined, SafetyCertificateOutlined,
+  CheckCircleOutlined, CloudUploadOutlined, DeleteOutlined, DownloadOutlined, EyeOutlined,
+  FolderOpenOutlined, MoreOutlined, PlayCircleOutlined, ReloadOutlined,
+  SafetyCertificateOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from 'react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -13,15 +14,21 @@ import dayjs from 'dayjs'
 import {
   offlinePatrolApi, ruleAssetSourceApi, storageApi,
   type OfflinePatrolDeviceBinding, type OfflinePatrolJob,
-  type OfflinePatrolJobPurpose, type OfflinePatrolJobType, type OfflinePatrolSourceFile,
+  type OfflinePatrolJobPurpose, type OfflinePatrolJobType,
+  type OfflineOutputDisposition, type OfflineOutputReviewItem,
+  type OfflinePatrolReportIntent, type OfflinePatrolSourceFile,
 } from '../../services/api'
 import { useIsMobile } from '../../hooks/useBreakpoint'
 import { downloadBlob } from '../../utils/storageLocalOpen'
 import WorkflowRunMonitor from '../skills/WorkflowRunMonitor'
 import OfflinePatrolResultPanel from './OfflinePatrolResultPanel'
 import OfflineRuleAssetPipeline from './OfflineRuleAssetPipeline'
+import OfflineCurrentAuthorityPanel from './OfflineCurrentAuthorityPanel'
 
 const ACTIVE = new Set(['previewing', 'queued', 'running'])
+const CONFIGURABLE = new Set(['draft', 'uploading', 'blocked', 'failed', 'cancelled'])
+const WIZARD_RESUMABLE = new Set([...CONFIGURABLE, 'ready'])
+const RETRY_BEFORE_RESUME = new Set(['failed', 'cancelled'])
 const PAGE_SIZE_OPTIONS = ['25', '50', '100']
 
 const statusLabel: Record<string, string> = {
@@ -43,6 +50,12 @@ const statusColor = (status: string) => {
   if (status === 'cancelled') return 'orange'
   if (ACTIVE.has(status)) return 'blue'
   return 'default'
+}
+
+const resumeActionLabel = (status: string) => {
+  if (status === 'draft' || status === 'uploading') return '继续上传'
+  if (status === 'failed' || status === 'cancelled') return '修复并继续'
+  return '继续处理'
 }
 
 const jobTypeLabel = (
@@ -107,6 +120,11 @@ const roleLabel: Record<string, string> = {
   sample: '样本周期',
   baseline: '基线周期',
   current: '当前周期',
+}
+
+const reportIntentLabel: Record<OfflinePatrolReportIntent, string> = {
+  historical: '历史分析',
+  current_attestation: '当前现状证明',
 }
 
 export const formatOfflineBlockerMessage = (item: Record<string, unknown>) => {
@@ -211,8 +229,12 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
   const [vendor, setVendor] = useState('')
   const [model, setModel] = useState('')
   const [publishEvents, setPublishEvents] = useState(false)
+  const [reportIntent, setReportIntent] = useState<OfflinePatrolReportIntent>('historical')
   const [uploading, setUploading] = useState(false)
+  const [resumeLoadingId, setResumeLoadingId] = useState<string | null>(null)
   const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0 })
+  const [selectedOutputReviewIds, setSelectedOutputReviewIds] = useState<React.Key[]>([])
+  const [outputDispositionReason, setOutputDispositionReason] = useState('')
   const pendingRole = useRef('sample')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
@@ -225,10 +247,19 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
         && new Date(baselineAt).getTime() < new Date(currentAt).getTime()
 
   useEffect(() => {
-    if (!focusedSourceJobId || focusedSourceJobId === detailJobId) return
-    setDetailJobId(focusedSourceJobId)
-    setDetailTab(focusedSourceJobTab)
-  }, [detailJobId, focusedSourceJobId, focusedSourceJobTab])
+    if (!focusedSourceJobId) return
+    if (focusedSourceJobId !== detailJobId) {
+      setDetailJobId(focusedSourceJobId)
+    }
+    if (focusedSourceJobTab !== detailTab) {
+      setDetailTab(focusedSourceJobTab)
+    }
+  }, [detailJobId, detailTab, focusedSourceJobId, focusedSourceJobTab])
+
+  useEffect(() => {
+    setSelectedOutputReviewIds([])
+    setOutputDispositionReason('')
+  }, [detailJobId])
 
   const listQuery = useQuery(
     ['offline-jobs', purpose, page, pageSize, search, status, jobTypeFilter, archived],
@@ -300,6 +331,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
       vendor: vendor.trim() || undefined,
       model: model.trim() || undefined,
       publish_events: isAssetSource ? false : publishEvents,
+      report_intent: isAssetSource ? 'historical' : reportIntent,
       idempotency_key: crypto.randomUUID(),
     })
   }, {
@@ -333,6 +365,17 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
       isAssetSource ? '启动样本处理失败' : '启动离线巡检失败',
     )),
   })
+  const rerunJob = useMutation(async (id: string) => {
+    await jobApi.retry(id)
+    return jobApi.execute(id, crypto.randomUUID())
+  }, {
+    onSuccess: async (_result, id) => {
+      message.success('已按当前生产规则重新启动巡检')
+      setDetailJobId(id)
+      await refresh(id)
+    },
+    onError: (error: any) => message.error(errorText(error, '重新执行巡检失败')),
+  })
   const jobAction = useMutation(
     ({ id, action }: { id: string; action: 'cancel' | 'retry' | 'archive' | 'restore' }) =>
       jobApi[action](id),
@@ -363,6 +406,26 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
     {
       onSuccess: (_result, variables) => refresh(variables.jobId),
       onError: (error: any) => message.error(errorText(error, '确认设备匹配失败')),
+    },
+  )
+  const confirmOutputDisposition = useMutation(
+    ({
+      jobId,
+      reviewItemIds,
+      reason,
+    }: {
+      jobId: string
+      reviewItemIds: string[]
+      reason: string
+    }) => jobApi.confirmOutputDispositions(jobId, reviewItemIds, reason),
+    {
+      onSuccess: async (_result, variables) => {
+        message.success('空输出已确认；本任务将忽略所选命令，全部阻断解除后可开始处理')
+        setSelectedOutputReviewIds([])
+        setOutputDispositionReason('')
+        await refresh(variables.jobId)
+      },
+      onError: (error: any) => message.error(errorText(error, '确认空输出失败')),
     },
   )
 
@@ -452,6 +515,40 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
     setSearchParams(next, { replace: true })
   }
 
+  const resumeJob = useCallback(async (summary: OfflinePatrolJob) => {
+    setResumeLoadingId(summary.id)
+    try {
+      let latest = await jobApi.get(summary.id)
+      if (RETRY_BEFORE_RESUME.has(latest.status)) {
+        latest = await jobApi.retry(summary.id) as OfflinePatrolJob
+        message.success('任务已恢复，请从上次中断位置继续')
+      }
+      setJobType(latest.job_type)
+      setJobName(latest.name)
+      setVendor(latest.vendor || '')
+      setModel(latest.model || '')
+      setPublishEvents(Boolean(latest.publish_events))
+      setSampleAt(latest.periods?.find((period) => period.role === 'sample')?.observed_at || '')
+      setBaselineAt(latest.periods?.find((period) => period.role === 'baseline')?.observed_at || '')
+      setCurrentAt(latest.periods?.find((period) => period.role === 'current')?.observed_at || '')
+      setDraftJob(latest)
+      setDetailJobId(null)
+      setDetailTab('overview')
+      const next = new URLSearchParams(searchParams)
+      next.delete('source_job_id')
+      next.delete('source_job_tab')
+      next.delete('offline_job_id')
+      next.delete('offline_job_tab')
+      setSearchParams(next, { replace: true })
+      setWizardOpen(true)
+      await queryClient.invalidateQueries(['offline-jobs', purpose])
+    } catch (error: any) {
+      message.error(errorText(error, '恢复任务失败'))
+    } finally {
+      setResumeLoadingId(null)
+    }
+  }, [jobApi, purpose, queryClient, searchParams, setSearchParams])
+
   const changeDetailTab = (value: string) => {
     setDetailTab(value)
     const next = new URLSearchParams(searchParams)
@@ -481,6 +578,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
     setBaselineAt('')
     setCurrentAt('')
     setPublishEvents(false)
+    setReportIntent('historical')
     setWizardOpen(true)
   }
 
@@ -496,8 +594,17 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
       ),
     },
     {
-      title: '用途', dataIndex: 'job_type', width: 150,
-      render: (value: OfflinePatrolJobType) => jobTypeLabel(value, purpose),
+      title: '用途', dataIndex: 'job_type', width: 180,
+      render: (value: OfflinePatrolJobType, row: OfflinePatrolJob) => (
+        <Space direction="vertical" size={0}>
+          <span>{jobTypeLabel(value, purpose)}</span>
+          {!isAssetSource && (
+            <Typography.Text type="secondary">
+              {reportIntentLabel[row.report_intent || 'historical']}
+            </Typography.Text>
+          )}
+        </Space>
+      ),
     },
     {
       title: '数据规模', width: 190,
@@ -512,19 +619,45 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
       title: '状态 / 进度', width: 200,
       render: (_: unknown, row: OfflinePatrolJob) => (
         <Space direction="vertical" size={4} style={{ width: '100%' }}>
-          <Space><Tag color={statusColor(row.status)}>{statusLabel[row.status] || row.status}</Tag>{row.blocker_count > 0 && <Tag color="red">{row.blocker_count} 个阻断项</Tag>}</Space>
+          <Space wrap>
+            <Tag color={statusColor(row.status)}>{statusLabel[row.status] || row.status}</Tag>
+            {row.blocker_count > 0 && <Tag color="red">{row.blocker_count} 个阻断项</Tag>}
+            {!row.blocker_count && Number(row.warning_count || 0) > 0 && <Tag color="orange">{row.warning_count} 个质量提醒</Tag>}
+          </Space>
           {ACTIVE.has(row.status) && <Progress size="small" percent={row.progress?.percent || 0} showInfo={false} />}
         </Space>
       ),
     },
     {
-      title: '操作', width: 154,
+      title: '操作', width: 200,
       render: (_: unknown, row: OfflinePatrolJob) => (
         <Space className="patrol-history-table__actions" size={2}>
+          {!row.archived && WIZARD_RESUMABLE.has(row.status) && (
+            <Button
+              type="text"
+              size="small"
+              icon={<CloudUploadOutlined />}
+              loading={resumeLoadingId === row.id}
+              onClick={() => resumeJob(row)}
+            >
+              {resumeActionLabel(row.status)}
+            </Button>
+          )}
           <Button type="text" size="small" icon={<EyeOutlined />} onClick={() => openDetail(row.id)}>详情</Button>
+          {!isAssetSource && !row.archived && row.status === 'completed' && (
+            <Button
+              type="text"
+              size="small"
+              aria-label="按当前规则重新执行"
+              icon={<ReloadOutlined />}
+              loading={rerunJob.isLoading}
+              onClick={() => rerunJob.mutate(row.id)}
+            >
+              按当前规则重新执行
+            </Button>
+          )}
           <Dropdown trigger={['click']} menu={{ items: [
             ...(ACTIVE.has(row.status) ? [{ key: 'cancel', label: '取消任务' }] : []),
-            ...(['failed', 'cancelled'].includes(row.status) ? [{ key: 'retry', label: '准备重试' }] : []),
             { key: row.archived ? 'restore' : 'archive', label: row.archived ? '恢复记录' : '归档记录' },
           ], onClick: ({ key }) => jobAction.mutate({ id: row.id, action: key as any }) }}>
             <Button type="text" size="small" aria-label="更多操作" icon={<MoreOutlined />} />
@@ -532,7 +665,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
         </Space>
       ),
     },
-  ], [jobAction, openDetail, purpose])
+  ], [isAssetSource, jobAction, openDetail, purpose, rerunJob, resumeJob, resumeLoadingId])
 
   const wizardStep = !draftJob ? 0 : ['previewing', 'ready', 'blocked', 'queued', 'running', 'completed', 'failed'].includes(draftJob.status) ? 2 : 1
   const sourceRoles = jobType === 'parser_validation'
@@ -596,6 +729,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
                     <Space size={4} wrap>
                       <Tag color={statusColor(row.status)}>{statusLabel[row.status] || row.status}</Tag>
                       {row.blocker_count > 0 && <Tag color="red">{row.blocker_count} 个阻断项</Tag>}
+                      {!row.blocker_count && Number(row.warning_count || 0) > 0 && <Tag color="orange">{row.warning_count} 个质量提醒</Tag>}
                     </Space>
                   </div>
                   <Typography.Text copyable code className="offline-patrol-mobile-list__id">
@@ -613,12 +747,34 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
                       {new Date(row.created_at).toLocaleString()}
                     </Typography.Text>
                     <Space className="patrol-history-table__actions" size={2}>
+                      {!row.archived && WIZARD_RESUMABLE.has(row.status) && (
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={<CloudUploadOutlined />}
+                          loading={resumeLoadingId === row.id}
+                          onClick={() => resumeJob(row)}
+                        >
+                          {resumeActionLabel(row.status)}
+                        </Button>
+                      )}
                       <Button type="text" size="small" icon={<EyeOutlined />} onClick={() => openDetail(row.id)}>
                         详情
                       </Button>
+                      {!isAssetSource && !row.archived && row.status === 'completed' && (
+                        <Button
+                          type="text"
+                          size="small"
+                          aria-label="按当前规则重新执行"
+                          icon={<ReloadOutlined />}
+                          loading={rerunJob.isLoading}
+                          onClick={() => rerunJob.mutate(row.id)}
+                        >
+                          按当前规则重新执行
+                        </Button>
+                      )}
                       <Dropdown trigger={['click']} menu={{ items: [
                         ...(ACTIVE.has(row.status) ? [{ key: 'cancel', label: '取消任务' }] : []),
-                        ...(['failed', 'cancelled'].includes(row.status) ? [{ key: 'retry', label: '准备重试' }] : []),
                         { key: row.archived ? 'restore' : 'archive', label: row.archived ? '恢复记录' : '归档记录' },
                       ], onClick: ({ key }) => jobAction.mutate({ id: row.id, action: key as any }) }}>
                         <Button type="text" size="small" aria-label="更多操作" icon={<MoreOutlined />} />
@@ -648,7 +804,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
           loading={listQuery.isLoading}
           dataSource={listQuery.data?.items || []}
           columns={columns}
-          scroll={{ x: 1014 }}
+          scroll={{ x: 1060 }}
           pagination={{
             current: page, pageSize, total: listQuery.data?.total || 0,
             showSizeChanger: true, showQuickJumper: true,
@@ -663,10 +819,14 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
       <input ref={folderInputRef} hidden type="file" multiple accept=".txt,.log" {...({ webkitdirectory: '', directory: '' } as any)} onChange={(event) => uploadFiles(pendingRole.current, Array.from(event.target.files || []))} />
 
       <Drawer
-        title={isAssetSource ? '新建规则资产样本任务' : '新建离线巡检任务'}
+        title={draftJob
+          ? isAssetSource ? '继续规则资产样本任务' : '继续离线巡检任务'
+          : isAssetSource ? '新建规则资产样本任务' : '新建离线巡检任务'}
         open={wizardOpen}
         width={isMobile ? '100vw' : 860}
         destroyOnClose
+        keyboard={false}
+        maskClosable={false}
         onClose={() => setWizardOpen(false)}
         extra={draftJob && <Space>
           <Button icon={<EyeOutlined />} loading={previewJob.isLoading || draftJob.status === 'previewing'} disabled={!draftJob.source_files?.length || ACTIVE.has(draftJob.status)} onClick={() => previewJob.mutate(draftJob.id)}>预览</Button>
@@ -690,6 +850,24 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
                 <Descriptions.Item label="当前时间"><OfflineObservedAtPicker label="当前采集时间" value={currentAt} onChange={setCurrentAt} /></Descriptions.Item>
               </>}
               <Descriptions.Item label="厂商 / 型号"><Space.Compact block><Input value={vendor} onChange={(event) => setVendor(event.target.value)} placeholder="可选厂商" /><Input value={model} onChange={(event) => setModel(event.target.value)} placeholder="可选型号" /></Space.Compact></Descriptions.Item>
+              {!isAssetSource && <Descriptions.Item label="结论用途">
+                <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                  <Segmented
+                    block
+                    value={reportIntent}
+                    onChange={(value) => setReportIntent(value as OfflinePatrolReportIntent)}
+                    options={[
+                      { value: 'historical', label: '历史分析' },
+                      { value: 'current_attestation', label: '当前现状证明' },
+                    ]}
+                  />
+                  <Typography.Text type="secondary">
+                    {reportIntent === 'current_attestation'
+                      ? '完成导入后还需冻结采集证据并由另一位管理员独立复核，平台随后另建生产批次；不会直接把离线任务当成当前网络事实。'
+                      : '用于历史状态、周期变化和风险分析，不声明当前网络整体健康。'}
+                  </Typography.Text>
+                </Space>
+              </Descriptions.Item>}
               <Descriptions.Item label="数据用途"><Typography.Text type="secondary">{isAssetSource ? '仅用于规则资产生产、验证与回放，不写入正式巡检事件流' : '使用当前 active 规则执行离线巡检，不创建或修改规则资产'}</Typography.Text></Descriptions.Item>
               {!isAssetSource && <Descriptions.Item label="事件发布"><Space><Switch checked={publishEvents} onChange={setPublishEvents} /><Typography.Text type="secondary">默认仅保留本任务结果；明确开启后才发布到正式事件流</Typography.Text></Space></Descriptions.Item>}
             </Descriptions>
@@ -728,16 +906,66 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
         </Space>
       </Drawer>
 
-      <Drawer title={isAssetSource ? '规则资产样本任务详情' : '离线巡检任务详情'} open={Boolean(detailJobId)} width={isMobile ? '100vw' : 1040} destroyOnClose onClose={closeDetail} extra={detail && <Space><Button icon={<ReloadOutlined />} onClick={() => refresh(detail.id)}>刷新</Button>{Boolean(detail.source_files?.length) && !ACTIVE.has(detail.status) && detail.status !== 'completed' && <Button icon={<EyeOutlined />} loading={previewJob.isLoading} onClick={() => previewJob.mutate(detail.id)}>{['draft', 'uploading'].includes(detail.status) ? '预览' : '重新预览'}</Button>}{detail.status === 'ready' && <Button type="primary" icon={<PlayCircleOutlined />} loading={executeJob.isLoading} onClick={() => executeJob.mutate(detail.id)}>{isAssetSource ? '开始处理' : '执行巡检'}</Button>}</Space>}>
+      <Drawer
+        title={isAssetSource ? '规则资产样本任务详情' : '离线巡检任务详情'}
+        open={Boolean(detailJobId)}
+        width={isMobile ? '100vw' : 1040}
+        destroyOnClose
+        onClose={closeDetail}
+        extra={detail && (
+          <Space>
+            <Button icon={<ReloadOutlined />} onClick={() => refresh(detail.id)}>刷新</Button>
+            {!detail.archived && CONFIGURABLE.has(detail.status) && (
+              <Button
+                icon={<CloudUploadOutlined />}
+                loading={resumeLoadingId === detail.id}
+                onClick={() => resumeJob(detail)}
+              >
+                {resumeActionLabel(detail.status)}
+              </Button>
+            )}
+            {detail.status === 'ready' && (
+              <Button
+                type="primary"
+                icon={<PlayCircleOutlined />}
+                loading={executeJob.isLoading}
+                onClick={() => executeJob.mutate(detail.id)}
+              >
+                {isAssetSource ? '开始处理' : '执行巡检'}
+              </Button>
+            )}
+            {!isAssetSource && !detail.archived && detail.status === 'completed' && (
+              <Button
+                aria-label="按当前规则重新执行"
+                icon={<ReloadOutlined />}
+                loading={rerunJob.isLoading}
+                onClick={() => rerunJob.mutate(detail.id)}
+              >
+                按当前规则重新执行
+              </Button>
+            )}
+          </Space>
+        )}
+      >
         {detail && <Tabs activeKey={detailTab} onChange={changeDetailTab} items={[
           { key: 'overview', label: '概览', children: <Space direction="vertical" size={12} style={{ width: '100%' }}>
             <Descriptions bordered size="small" column={isMobile ? 1 : 2}>
               <Descriptions.Item label="任务">{offlineJobDisplayName(detail)}</Descriptions.Item><Descriptions.Item label="状态"><Tag color={statusColor(detail.status)}>{statusLabel[detail.status] || detail.status}</Tag></Descriptions.Item>
               <Descriptions.Item label="用途">{jobTypeLabel(detail.job_type, purpose)}</Descriptions.Item><Descriptions.Item label="Workflow Run"><Typography.Text copyable>{detail.workflow_run_id || '-'}</Typography.Text></Descriptions.Item>
+              {!isAssetSource && <Descriptions.Item label="结论权限">{reportIntentLabel[detail.report_intent || 'historical']}</Descriptions.Item>}
               {(detail.periods || []).map((period) => <Descriptions.Item key={period.id} label={roleLabel[period.role]}>{new Date(period.observed_at).toLocaleString()} · Dataset <Typography.Text code>{period.dataset_id}</Typography.Text></Descriptions.Item>)}
             </Descriptions>
             {detail.error_message && <Alert type="error" showIcon message="执行失败" description={detail.error_message} />}
             {(detail.blockers || []).map((item, index) => <Alert key={`${item.period_role || 'job'}-${item.code}-${index}`} type="warning" showIcon message={formatOfflineBlockerMessage(item)} />)}
+            {(detail.output_review_items?.length || 0) > 0 && (
+              <Alert
+                type="warning"
+                showIcon
+                message={`${detail.output_review_items?.length || 0} 条空输出等待人工确认`}
+                description="确认后仅在本任务中跳过对应命令；原始证据、确认人和理由仍会保留。"
+                action={<Button size="small" onClick={() => changeDetailTab('output-review')}>处理空输出</Button>}
+              />
+            )}
             <Space wrap>{isAssetSource && <><Button icon={<SafetyCertificateOutlined />} onClick={() => changeDetailTab('assets')}>资产生产进度</Button><Button icon={<SafetyCertificateOutlined />} onClick={() => navigate(buildOfflineRuleBundleUrl(detail))}>规则资产包</Button></>}<Button icon={<DownloadOutlined />} loading={artifactLoading === 'raw'} onClick={() => downloadArtifact(detail, 'raw')}>{isAssetSource ? '样本原始输出' : '原始输出'}</Button>{(detail.job_type === 'history_compare' || !isAssetSource) && <><Button icon={<DownloadOutlined />} loading={artifactLoading === 'changes'} disabled={detail.status !== 'completed'} onClick={() => downloadArtifact(detail, 'changes')}>{isAssetSource ? '回放变化' : '变化数据'}</Button><Button icon={<DownloadOutlined />} loading={artifactLoading === 'events'} disabled={detail.status !== 'completed'} onClick={() => downloadArtifact(detail, 'events')}>{isAssetSource ? '回放事件' : '事件数据'}</Button></>}<Button icon={<DownloadOutlined />} loading={artifactLoading === 'report'} disabled={detail.status !== 'completed'} onClick={() => downloadArtifact(detail, 'report')}>{isAssetSource ? '规则回放报告' : '巡检报告'}</Button></Space>
           </Space> },
           { key: 'sources', label: `文件与设备 (${detail.source_files?.length || 0})`, children: <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -768,37 +996,73 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
                 {
                   title: '资产匹配',
                   dataIndex: 'match_status',
-                  width: 130,
-                  render: (value) => (
-                    <Tag color={value === 'confirmed' ? 'green' : value === 'ambiguous' ? 'red' : 'default'}>
-                      {value}
-                    </Tag>
+                  width: 170,
+                  render: (value, row) => (
+                    <Space direction="vertical" size={2}>
+                      <Tag color={value === 'confirmed' ? 'green' : value === 'ambiguous' ? 'red' : 'default'}>
+                        {value}
+                      </Tag>
+                      {value === 'ambiguous' && (
+                        <Typography.Text type="secondary">
+                          {row.match_candidates?.length || 0} 个候选，需人工选择
+                        </Typography.Text>
+                      )}
+                    </Space>
                   ),
                 },
                 {
                   title: '操作',
-                  width: 220,
+                  width: 310,
                   render: (_, row) => {
+                    const requiresInventory = detail.report_intent === 'current_attestation'
+                      && row.period_role === 'current'
                     const related = (detail.device_bindings || []).filter(
                       (candidate) => sameObservedDevice(candidate, row)
-                        && !['confirmed', 'external'].includes(candidate.match_status),
+                        && candidate.match_status !== 'confirmed'
+                        && (requiresInventory || candidate.match_status !== 'external'),
                     )
                     const spansPeriods = related.length > 1
+                    const candidates = row.match_candidates || []
                     return (
-                      <Space>
-                        {row.match_status === 'suggested' && (
+                      <Space wrap>
+                        {(row.match_status === 'suggested' || requiresInventory)
+                          && row.match_status !== 'confirmed'
+                          && candidates.length === 1 && (
                           <Button
                             size="small"
                             onClick={() => confirmBinding.mutate({
                               jobId: detail.id,
                               bindings: related,
-                              inventoryId: row.inventory_device_id,
+                              inventoryId: candidates[0].inventory_device_id,
                             })}
                           >
                             {spansPeriods ? '确认全部周期' : '确认匹配'}
                           </Button>
                         )}
-                        {!['confirmed', 'external'].includes(row.match_status) && (
+                        {row.match_status !== 'confirmed'
+                          && (requiresInventory || row.match_status !== 'external')
+                          && candidates.length > 1 && (
+                          <Select
+                            aria-label={`${row.device_name} 选择资产`}
+                            size="small"
+                            style={{ width: 210 }}
+                            placeholder="选择正确资产"
+                            options={candidates.map((candidate) => ({
+                              value: candidate.inventory_device_id,
+                              label: [
+                                candidate.device_name,
+                                candidate.management_ip,
+                                [candidate.vendor, candidate.model].filter(Boolean).join('/'),
+                              ].filter(Boolean).join(' · '),
+                            }))}
+                            onChange={(inventoryId) => confirmBinding.mutate({
+                              jobId: detail.id,
+                              bindings: related,
+                              inventoryId,
+                            })}
+                          />
+                        )}
+                        {!requiresInventory && !['confirmed', 'external'].includes(row.match_status) && (
                           <Button
                             size="small"
                             onClick={() => confirmBinding.mutate({
@@ -810,6 +1074,22 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
                             {spansPeriods ? '全部周期作为外部设备' : '作为外部设备'}
                           </Button>
                         )}
+                        {requiresInventory && row.match_status !== 'confirmed' && candidates.length === 0 && (
+                          <>
+                            <Typography.Text type="danger">
+                              当前现状证明必须绑定 Inventory
+                            </Typography.Text>
+                            <Button
+                              size="small"
+                              onClick={() => {
+                                closeDetail()
+                                navigate('/devices?tab=overview')
+                              }}
+                            >
+                              前往设备资产
+                            </Button>
+                          </>
+                        )}
                       </Space>
                     )
                   },
@@ -817,6 +1097,141 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
               ]}
             />
           </Space> },
+          {
+            key: 'output-review',
+            label: `输出确认 (${detail.output_review_items?.length || 0})`,
+            children: (
+              <Space direction="vertical" size={16} style={{ width: '100%' }}>
+                <Alert
+                  type={(detail.output_review_items?.length || 0) > 0 ? 'warning' : 'success'}
+                  showIcon
+                  message={(detail.output_review_items?.length || 0) > 0 ? '存在无法自动判定的空输出' : '没有待确认的空输出'}
+                  description="人工确认表示该条空输出在当前任务中不适用，不代表设备健康，也不会修改全局命令或 Parser 策略。"
+                />
+                <Space wrap>
+                  <Tag color={(detail.output_review_items?.length || 0) > 0 ? 'orange' : 'default'}>
+                    待确认 {detail.output_review_items?.length || 0}
+                  </Tag>
+                  <Tag color="green">已确认 {detail.output_dispositions?.length || 0}</Tag>
+                </Space>
+                {(detail.output_review_items?.length || 0) > 0 && (
+                  <>
+                    {isMobile ? (
+                      <List<OfflineOutputReviewItem>
+                        dataSource={detail.output_review_items || []}
+                        pagination={{ pageSize: 10, hideOnSinglePage: true }}
+                        renderItem={(item) => (
+                          <List.Item>
+                            <Space align="start">
+                              <Checkbox
+                                aria-label={`选择 ${item.device_name || item.device_id} ${item.canonical_command}`}
+                                checked={selectedOutputReviewIds.includes(item.review_item_id)}
+                                onChange={(event) => setSelectedOutputReviewIds((current) => (
+                                  event.target.checked
+                                    ? Array.from(new Set([...current, item.review_item_id]))
+                                    : current.filter((key) => key !== item.review_item_id)
+                                ))}
+                              />
+                              <Space direction="vertical" size={2}>
+                                <Typography.Text strong>{item.canonical_command}</Typography.Text>
+                                <Typography.Text>{item.device_name || item.device_id || '-'}</Typography.Text>
+                                <Typography.Text type="secondary">
+                                  {roleLabel[item.period_role] || item.period_role} · {item.source_relative_path}
+                                </Typography.Text>
+                              </Space>
+                            </Space>
+                          </List.Item>
+                        )}
+                      />
+                    ) : (
+                      <Table<OfflineOutputReviewItem>
+                        rowKey="review_item_id"
+                        size="small"
+                        dataSource={detail.output_review_items || []}
+                        pagination={{ pageSize: 20, hideOnSinglePage: true }}
+                        scroll={{ x: 920 }}
+                        rowSelection={{
+                          selectedRowKeys: selectedOutputReviewIds,
+                          onChange: setSelectedOutputReviewIds,
+                          getCheckboxProps: (record) => ({
+                            'aria-label': `选择 ${record.device_name || record.device_id} ${record.canonical_command}`,
+                          }),
+                        }}
+                        columns={[
+                          { title: '周期', dataIndex: 'period_role', width: 100, render: (value) => roleLabel[value] || value },
+                          { title: '设备', width: 180, render: (_, row) => <Space direction="vertical" size={0}><Typography.Text>{row.device_name || row.device_id || '-'}</Typography.Text><Typography.Text type="secondary">{row.management_ip || '-'}</Typography.Text></Space> },
+                          { title: '命令', dataIndex: 'canonical_command', width: 220, render: (value) => <Typography.Text code>{value}</Typography.Text> },
+                          { title: '来源文件', dataIndex: 'source_relative_path', ellipsis: true },
+                          { title: '证据位置', width: 130, render: (_, row) => `L${row.start_line || 0}-${row.end_line || 0}` },
+                          { title: '状态', width: 110, render: () => <Tag color="orange">空输出待确认</Tag> },
+                        ]}
+                      />
+                    )}
+                    <Input.TextArea
+                      aria-label="空输出确认理由"
+                      value={outputDispositionReason}
+                      onChange={(event) => setOutputDispositionReason(event.target.value)}
+                      rows={3}
+                      maxLength={1000}
+                      showCount
+                      placeholder="选填备注，例如：设备未配置 vPC，该命令正常无输出"
+                    />
+                    <Space wrap>
+                      <Button
+                        icon={<CheckCircleOutlined />}
+                        loading={confirmOutputDisposition.isLoading}
+                        disabled={selectedOutputReviewIds.length === 0}
+                        onClick={() => confirmOutputDisposition.mutate({
+                          jobId: detail.id,
+                          reviewItemIds: selectedOutputReviewIds.map(String),
+                          reason: outputDispositionReason.trim(),
+                        })}
+                      >
+                        确认为空并忽略所选命令
+                      </Button>
+                      <Typography.Text type="secondary">已选择 {selectedOutputReviewIds.length} 条</Typography.Text>
+                    </Space>
+                  </>
+                )}
+                {(detail.output_dispositions?.length || 0) > 0 && (
+                  <>
+                    <Typography.Title level={5} style={{ margin: 0 }}>已确认记录</Typography.Title>
+                    {isMobile ? (
+                      <List<OfflineOutputDisposition>
+                        dataSource={detail.output_dispositions || []}
+                        pagination={{ pageSize: 10, hideOnSinglePage: true }}
+                        renderItem={(item) => (
+                          <List.Item>
+                            <Space direction="vertical" size={2}>
+                              <Space wrap><Typography.Text strong>{item.canonical_command}</Typography.Text><Tag color={item.applies_to_current_preview === false ? 'default' : 'green'}>{item.applies_to_current_preview === false ? '证据已变化' : '本次生效'}</Tag></Space>
+                              <Typography.Text>{item.device_name || item.device_id || '-'}</Typography.Text>
+                              <Typography.Text type="secondary">{item.reason ? `${item.reason} · ` : ''}{item.decided_by}</Typography.Text>
+                            </Space>
+                          </List.Item>
+                        )}
+                      />
+                    ) : (
+                      <Table<OfflineOutputDisposition>
+                        rowKey="review_item_id"
+                        size="small"
+                        dataSource={detail.output_dispositions || []}
+                        pagination={{ pageSize: 20, hideOnSinglePage: true }}
+                        scroll={{ x: 920 }}
+                        columns={[
+                          { title: '周期', dataIndex: 'period_role', width: 100, render: (value) => roleLabel[value] || value },
+                          { title: '设备', dataIndex: 'device_name', width: 170, render: (value, row) => value || row.device_id || '-' },
+                          { title: '命令', dataIndex: 'canonical_command', width: 220, render: (value) => <Typography.Text code>{value}</Typography.Text> },
+                          { title: '确认理由', dataIndex: 'reason', ellipsis: true },
+                          { title: '确认人', dataIndex: 'decided_by', width: 130 },
+                          { title: '效力', width: 110, render: (_, row) => <Tag color={row.applies_to_current_preview === false ? 'default' : 'green'}>{row.applies_to_current_preview === false ? '证据已变化' : '本次生效'}</Tag> },
+                        ]}
+                      />
+                    )}
+                  </>
+                )}
+              </Space>
+            ),
+          },
           {
             key: 'workflow',
             label: isAssetSource ? '样本处理流程' : '巡检执行流程',
@@ -834,6 +1249,30 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
                 : <Alert type="info" showIcon message="尚未启动 Workflow" description="通过预检并确认设备身份后即可开始处理。" />,
           },
           ...(isAssetSource ? [{ key: 'assets', label: '资产生产', children: <OfflineRuleAssetPipeline jobId={detail.id} /> }] : []),
+          ...(!isAssetSource && detail.report_intent === 'current_attestation'
+            ? [{
+                key: 'current-authority',
+                label: '当前现状证明',
+                children: (
+                  <OfflineCurrentAuthorityPanel
+                    job={detail}
+                    onOpenSources={() => changeDetailTab('sources')}
+                    onOpenInventory={() => {
+                      closeDetail()
+                      navigate('/devices?tab=overview')
+                    }}
+                    onOpenRuntimeAssets={() => navigate(
+                      buildOfflineRuleBundleUrl(detail),
+                    )}
+                    onStartReplacement={() => {
+                      closeDetail()
+                      resetWizard('single_patrol')
+                      setReportIntent('current_attestation')
+                    }}
+                  />
+                ),
+              }]
+            : []),
           { key: 'result', label: isAssetSource ? '验证与回放' : '巡检结果', children: detail.job_type === 'parser_validation'
             ? <Descriptions bordered size="small" column={isMobile ? 1 : 3}><Descriptions.Item label="Snapshot">{String(detail.result?.snapshot_count ?? '-')}</Descriptions.Item><Descriptions.Item label="新增">{String(detail.result?.new_snapshot_count ?? '-')}</Descriptions.Item><Descriptions.Item label="重复">{String(detail.result?.duplicate_snapshot_count ?? '-')}</Descriptions.Item></Descriptions>
             : <OfflinePatrolResultPanel

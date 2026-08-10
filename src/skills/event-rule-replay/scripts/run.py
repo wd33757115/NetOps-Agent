@@ -67,6 +67,11 @@ def run_replay(params: dict[str, Any]) -> dict[str, Any]:
         limit=int(params.get("limit") or 1000),
         include_active_collisions=params.get("include_active_collisions") is not False,
         run_ids=run_ids,
+        candidate_contract=(
+            dict(params["candidate_contract"])
+            if isinstance(params.get("candidate_contract"), dict)
+            else None
+        ),
     )
 
 

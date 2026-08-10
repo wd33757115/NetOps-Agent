@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from billiard.exceptions import SoftTimeLimitExceeded
 from celery import chord
@@ -22,6 +23,83 @@ from src.core.workflows.repository import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+_PARSER_FAILURE_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
+
+
+def _parser_skill_failure_code(exc: Exception) -> str:
+    """Preserve a stable generator reason instead of flattening every failure."""
+
+    payload = getattr(exc, "payload", None)
+    if not isinstance(payload, dict):
+        return "skill_execution_failed"
+
+    reasons: list[str] = []
+
+    def add_reason(value) -> None:
+        reason = str(value or "").strip()
+        if reason:
+            reasons.append(reason)
+
+    add_reason(payload.get("failure_code"))
+    add_reason(payload.get("error_code"))
+    add_reason(payload.get("skipped_reason"))
+    if isinstance(payload.get("agent_loop"), dict):
+        add_reason(payload["agent_loop"].get("stop_reason"))
+    for report in payload.get("reports") or []:
+        if not isinstance(report, dict):
+            continue
+        add_reason(report.get("skipped_reason"))
+        if isinstance(report.get("agent_loop"), dict):
+            add_reason(report["agent_loop"].get("stop_reason"))
+
+    error_text = str(payload.get("error") or "")
+    terminal_match = re.search(
+        r"terminal status:\s*([a-z][a-z0-9_]{2,63})",
+        error_text,
+        flags=re.IGNORECASE,
+    )
+    if terminal_match:
+        reasons.append(terminal_match.group(1))
+
+    for reason in reasons:
+        segments = [segment.strip().lower() for segment in reason.split(":")]
+        candidate = segments[0]
+        if candidate == "model_requested_review" and len(segments) > 1:
+            candidate = segments[1]
+        if _PARSER_FAILURE_CODE_RE.fullmatch(candidate):
+            return candidate
+    return "skill_execution_failed"
+
+
+def _workflow_exception_failure_code(exc: Exception) -> str:
+    """Extract a stable code through Celery Retry and Skill wrappers."""
+
+    pending: list[BaseException] = [exc]
+    seen: set[int] = set()
+    while pending and len(seen) < 8:
+        current = pending.pop(0)
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        direct = str(getattr(current, "failure_code", "") or "").strip()
+        if _PARSER_FAILURE_CODE_RE.fullmatch(direct):
+            return direct
+        payload = getattr(current, "payload", None)
+        if isinstance(payload, dict):
+            for key in ("failure_code", "error_code"):
+                candidate = str(payload.get(key) or "").strip()
+                if _PARSER_FAILURE_CODE_RE.fullmatch(candidate):
+                    return candidate
+        for nested in (
+            getattr(current, "exc", None),
+            getattr(current, "__cause__", None),
+            getattr(current, "__context__", None),
+        ):
+            if isinstance(nested, BaseException):
+                pending.append(nested)
+    return "workflow_step_exception"
 
 
 def _refresh_rule_asset_projection(parser_job_id: str) -> None:
@@ -105,7 +183,12 @@ def execute_skill_task(self, skill_name: str, **params):
 
     if repository:
         try:
-            repository.transition_job_status(job_id, "running")
+            repository.transition_job_status(
+                job_id,
+                "running",
+                expected_status="pending",
+                expected_celery_task_id=str(self.request.id or ""),
+            )
             _refresh_rule_asset_projection(job_id)
         except ParserJobStateError as exc:
             return {"success": False, "message": str(exc), "error": str(exc)}
@@ -113,8 +196,14 @@ def execute_skill_task(self, skill_name: str, **params):
     try:
         result = execute_skill(skill_name, params)
     except SkillExecutionError as exc:
-        fail_active_parser_job(str(exc), "skill_execution_failed")
-        return {"success": False, "message": str(exc), "error": str(exc)}
+        failure_code = _parser_skill_failure_code(exc)
+        fail_active_parser_job(str(exc), failure_code)
+        return {
+            "success": False,
+            "message": str(exc),
+            "error": str(exc),
+            "failure_code": failure_code,
+        }
     except SoftTimeLimitExceeded:
         fail_active_parser_job(
             "textfsm-generator exceeded the Celery soft time limit",
@@ -157,6 +246,13 @@ def _run_subworkflow_step(run_id: str, step_index: int, step_tpl) -> dict:
     run = get_workflow_run(run_id)
     if not run:
         return {"success": False, "error": "workflow run not found", "step_index": step_index}
+    if run.status in TERMINAL_WORKFLOW_STATUSES:
+        return {
+            "success": False,
+            "ignored": True,
+            "error": f"workflow already {run.status}",
+            "step_index": step_index,
+        }
 
     child_template = step_tpl.subworkflow
     if not child_template:
@@ -176,11 +272,20 @@ def _run_subworkflow_step(run_id: str, step_index: int, step_tpl) -> dict:
             parent_run_id=run_id,
         )
     except ValueError as exc:
-        return {"success": False, "error": str(exc), "step_index": step_index}
+        return {
+            "success": False,
+            "error": str(exc),
+            "failure_code": _workflow_exception_failure_code(exc),
+            "step_index": step_index,
+        }
 
     deadline = time.time() + 180
     child = get_workflow_run(child_run_id)
-    while child and child.status not in ("completed", "failed") and time.time() < deadline:
+    while (
+        child
+        and child.status not in TERMINAL_WORKFLOW_STATUSES
+        and time.time() < deadline
+    ):
         time.sleep(0.5)
         child = get_workflow_run(child_run_id)
 
@@ -195,6 +300,14 @@ def _run_subworkflow_step(run_id: str, step_index: int, step_tpl) -> dict:
         return {
             "success": False,
             "error": child.error_message or "子 Workflow 失败",
+            "step_index": step_index,
+            "child_run_id": child_run_id,
+        }
+    if child.status == "cancelled":
+        return {
+            "success": False,
+            "ignored": True,
+            "error": child.error_message or "子 Workflow 已取消",
             "step_index": step_index,
             "child_run_id": child_run_id,
         }
@@ -229,6 +342,13 @@ def _run_workflow_step(run_id: str, step_index: int) -> dict:
     run = get_workflow_run(run_id)
     if not run:
         return {"success": False, "error": "workflow run not found", "step_index": step_index}
+    if run.status in TERMINAL_WORKFLOW_STATUSES:
+        return {
+            "success": False,
+            "ignored": True,
+            "error": f"workflow already {run.status}",
+            "step_index": step_index,
+        }
 
     template = get_template(run.template_name)
     steps = list_workflow_steps(run_id)
@@ -282,13 +402,25 @@ def execute_workflow_step_only(self, run_id: str, step_index: int):
         return {"success": False, "error": "invalid step", "step_index": step_index}
 
     step_rec = steps[step_index]
-    mark_step_running(step_rec.id, self.request.id)
+    if not mark_step_running(step_rec.id, self.request.id):
+        return {
+            "success": False,
+            "ignored": True,
+            "error": "workflow reached a terminal state before task execution",
+            "step_index": step_index,
+        }
 
     result = _run_workflow_step(run_id, step_index)
     from src.core.workflows.artifacts import normalize_step_result
 
     normalized = normalize_step_result(result)
-    mark_step_completed(step_rec.id, normalized)
+    if not mark_step_completed(step_rec.id, normalized):
+        return {
+            "success": False,
+            "ignored": True,
+            "error": "workflow reached a terminal state before result commit",
+            "step_index": step_index,
+        }
 
     if normalized.get("success"):
         publish = WorkflowEngine._notify_step_progress  # noqa: SLF001 — 复用通知
@@ -316,6 +448,13 @@ def dispatch_parallel_batch_task(self, run_id: str, indices: list[int]):
     """并行调度同组步骤。"""
     if not indices:
         return {"success": False, "error": "empty batch"}
+    run = get_workflow_run(run_id)
+    if not run or run.status in TERMINAL_WORKFLOW_STATUSES:
+        return {
+            "success": False,
+            "ignored": True,
+            "error": f"workflow already {run.status if run else 'missing'}",
+        }
     queues = [_workflow_step_queue(run_id, idx) for idx in indices]
     header = [
         execute_workflow_step_only.s(run_id, idx).set(queue=queue)

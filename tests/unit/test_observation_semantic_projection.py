@@ -4,6 +4,7 @@ import pytest
 
 from src.core.observation.semantic_projection import (
     SemanticProjectionError,
+    dimension_context_references,
     dimension_field_references,
     dimension_schema_signature,
     dimension_value_signature,
@@ -12,6 +13,7 @@ from src.core.observation.semantic_projection import (
     transform_field_references,
     validate_transform,
     validate_unit_conversion,
+    validate_value_mapping,
 )
 
 
@@ -153,3 +155,70 @@ def test_dimension_expression_builds_stable_canonical_identity():
         "scope_id": "slot:01/cpu:2",
     }
     assert dimension_field_references(dimensions) == ("cpu", "slot")
+
+
+def test_device_identity_dimension_uses_governed_collection_context():
+    dimensions = {
+        "device_id": {"context": "device_id"},
+    }
+
+    assert resolve_dimensions(
+        dimensions,
+        {},
+        context={"device_id": "inventory-device-1"},
+    ) == {"device_id": "inventory-device-1"}
+    assert dimension_context_references(dimensions) == ("device_id",)
+    assert dimension_field_references(dimensions) == ()
+    with pytest.raises(
+        SemanticProjectionError,
+        match="transform context is unavailable",
+    ):
+        resolve_dimensions(dimensions, {})
+    with pytest.raises(
+        SemanticProjectionError,
+        match="context is unsupported",
+    ):
+        resolve_dimensions(
+            {"tenant": {"context": "tenant_id"}},
+            {},
+            context={"tenant_id": "forbidden"},
+        )
+
+
+def test_governed_value_mapping_normalizes_vendor_state_values():
+    semantics = {
+        "value_mapping": {
+            "connected": "up",
+            "notconnec": "down",
+            "xcvrAbsen": "absent",
+        },
+        "on_unmapped": "reject",
+    }
+
+    assert project_value(
+        field_name="status",
+        source_value=" CONNECTED ",
+        normalized_record={"status": " CONNECTED "},
+        field_semantics=semantics,
+    ) == "up"
+    assert project_value(
+        field_name="status",
+        source_value="xcvrabsen",
+        normalized_record={"status": "xcvrabsen"},
+        field_semantics=semantics,
+    ) == "absent"
+    with pytest.raises(SemanticProjectionError, match="not covered"):
+        project_value(
+            field_name="status",
+            source_value="new-vendor-state",
+            normalized_record={"status": "new-vendor-state"},
+            field_semantics=semantics,
+        )
+
+
+def test_value_mapping_rejects_casefold_collisions():
+    assert validate_value_mapping(
+        {"UP": "up", "up": "down"},
+    ) == (
+        "value_mapping contains duplicate normalized source values: 'UP', 'up'",
+    )

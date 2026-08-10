@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 
 from src.common.config import get_settings
 from src.core.parser.identity import DeviceIdentity
@@ -21,6 +21,7 @@ from src.core.state.normalizer import observations_from_snapshot
 from src.core.state.repository import StateRepository
 from src.infrastructure.db.models import (
     CommandSnapshot,
+    OfflinePatrolPeriodRecord,
     ParserBackfillJobRecord,
     ParserBackfillResultRecord,
     ParserTemplate,
@@ -406,11 +407,24 @@ class ParserBackfillService:
             "results": rows,
         }
 
-    def commit(self, job_id: str, *, actor: str, reason: str) -> dict[str, Any]:
+    def commit(
+        self,
+        job_id: str,
+        *,
+        actor: str,
+        reason: str | None = None,
+        analyze_changes: bool = False,
+    ) -> dict[str, Any]:
+        """Commit Parser evidence without implicitly running rule semantics.
+
+        Change/Event analysis belongs to the separately approved historical
+        replay flow. ``analyze_changes`` is retained for explicit legacy/admin
+        callers and is intentionally disabled by default.
+        """
         if not get_settings().PARSER_BACKFILL_ENABLED:
             raise ValueError("Parser backfill commit is disabled")
-        if not str(actor).strip() or not str(reason).strip():
-            raise ValueError("backfill commit requires actor and reason")
+        if not str(actor).strip():
+            raise ValueError("backfill commit requires actor")
         owner_token = uuid.uuid4().hex
         with get_db_session() as db:
             job = (
@@ -443,7 +457,7 @@ class ParserBackfillService:
             job.owner_token = owner_token
             job.lease_until = _now() + timedelta(minutes=30)
             job.approved_by = str(actor).strip()
-            job.approval_reason = str(reason).strip()
+            job.approval_reason = str(reason or "").strip()
             job.updated_at = _now()
             result_payloads = [result.to_dict() for result in results]
 
@@ -496,26 +510,27 @@ class ParserBackfillService:
         projection_refresh_count = _refresh_rule_asset_command_units(template_id)
         change_count = 0
         event_count = 0
-        analysis_pairs = _historical_analysis_pairs(run_ids)
-        for run_id, previous_run_id in analysis_pairs:
-            change_result = detect_historical_backfill_changes(
-                run_id=run_id,
-                backfill_job_id=job_id,
-                previous_run_id=previous_run_id,
-            )
-            changes = list(change_result.get("changes") or [])
-            change_count += len(changes)
-            event_result = BuildEventsHandler().handle(
-                {
-                    "run_id": run_id,
-                    "changes": changes,
-                    "persist": True,
-                    "publish": False,
-                    "analysis_revision": f"historical_backfill:{job_id}",
-                    "_analysis_updates_run_status": False,
-                }
-            )
-            event_count += int(event_result.get("event_count") or 0)
+        analysis_pairs = _historical_analysis_pairs(run_ids) if analyze_changes else []
+        if analyze_changes:
+            for run_id, previous_run_id in analysis_pairs:
+                change_result = detect_historical_backfill_changes(
+                    run_id=run_id,
+                    backfill_job_id=job_id,
+                    previous_run_id=previous_run_id,
+                )
+                changes = list(change_result.get("changes") or [])
+                change_count += len(changes)
+                event_result = BuildEventsHandler().handle(
+                    {
+                        "run_id": run_id,
+                        "changes": changes,
+                        "persist": True,
+                        "publish": False,
+                        "analysis_revision": f"historical_backfill:{job_id}",
+                        "_analysis_updates_run_status": False,
+                    }
+                )
+                event_count += int(event_result.get("event_count") or 0)
         with get_db_session() as db:
             job = (
                 db.query(ParserBackfillJobRecord)
@@ -535,6 +550,9 @@ class ParserBackfillService:
                 "notifications": 0,
                 "change_count": change_count,
                 "event_count": event_count,
+                "analysis_status": (
+                    "completed" if analyze_changes else "not_requested"
+                ),
                 "production_run_count": len(production_run_ids),
                 "offline_compare_run_count": sum(
                     previous_run_id is not None
@@ -564,10 +582,40 @@ class ParserBackfillService:
             query = (
                 db.query(CommandSnapshot, PatrolRun.mode)
                 .join(PatrolRun, PatrolRun.id == CommandSnapshot.run_id)
+                .outerjoin(
+                    OfflinePatrolPeriodRecord,
+                    OfflinePatrolPeriodRecord.dataset_id == CommandSnapshot.dataset_id,
+                )
                 .filter(
                     PatrolRun.mode.in_(filters.get("run_modes") or ["production"]),
+                    or_(
+                        OfflinePatrolPeriodRecord.id.is_(None),
+                        and_(
+                            OfflinePatrolPeriodRecord.status == "completed",
+                            OfflinePatrolPeriodRecord.patrol_run_id.is_not(None),
+                            CommandSnapshot.run_id
+                            == OfflinePatrolPeriodRecord.patrol_run_id,
+                        ),
+                    ),
                     CommandSnapshot.canonical_command == template.canonical_command,
-                    CommandSnapshot.parse_status.in_(["template_missing", "parse_failed"]),
+                    or_(
+                        CommandSnapshot.parse_status.in_(
+                            [
+                                "template_missing",
+                                "parse_failed",
+                                "ignored",
+                                "empty_unverified",
+                                "identity_unknown",
+                            ]
+                        ),
+                        and_(
+                            CommandSnapshot.parse_status.in_(["parsed", "parse_empty"]),
+                            or_(
+                                CommandSnapshot.parser_template_id.is_(None),
+                                CommandSnapshot.parser_template_id != template.id,
+                            ),
+                        ),
+                    ),
                     CommandSnapshot.vendor == template.vendor,
                 )
             )

@@ -524,7 +524,7 @@ class RuleAssetProductionPipelineService:
                 "workspace": "production",
                 "subtab": "source-jobs",
                 "source_job_id": offline_job_id,
-                "source_job_tab": "overview",
+                "source_job_tab": "sources",
             }
         )
         runtime_target = next(

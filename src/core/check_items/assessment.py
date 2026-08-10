@@ -5,11 +5,16 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any
 
+from src.core.check_items.assessment_policy import (
+    build_assessment_basis,
+    validate_assessment_basis,
+)
 from src.infrastructure.db.models import CheckAssessmentRecord, CheckExecutionRecord
 from src.infrastructure.db.postgres import get_db_session
 
@@ -63,6 +68,9 @@ class CheckAssessmentInput:
     blocking_reason_codes: tuple[str, ...] = ()
     evidence_refs: tuple[str, ...] = ()
     assessment_rule_bundle_digest: str | None = None
+    runtime_bundle_version_id: str | None = None
+    assessment_policy_snapshot_digest: str | None = None
+    assessment_basis: dict[str, Any] = field(default_factory=dict)
     comparison_context_digest: str | None = None
     assessed_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -94,6 +102,67 @@ class CheckAssessmentService:
             if code not in blockers:
                 blockers.append(code)
 
+        supplied_basis = dict(data.assessment_basis or {})
+        basis_valid = bool(supplied_basis) and validate_assessment_basis(
+            supplied_basis
+        )
+        if supplied_basis and not basis_valid:
+            block("assessment_basis_invalid")
+        assessment_basis = (
+            supplied_basis
+            if basis_valid
+            else build_assessment_basis(
+                entries=(),
+                policy_snapshot_digest=(
+                    data.assessment_policy_snapshot_digest
+                ),
+                runtime_bundle_version_id=data.runtime_bundle_version_id,
+                runtime_bundle_digest=data.assessment_rule_bundle_digest,
+            )
+        )
+        basis_summary = dict(assessment_basis.get("summary") or {})
+        strict_basis = bool(data.assessment_policy_snapshot_digest)
+        if (
+            strict_basis
+            and str(assessment_basis.get("policy_snapshot_digest") or "")
+            != str(data.assessment_policy_snapshot_digest or "")
+        ):
+            block("assessment_basis_policy_snapshot_mismatch")
+        if strict_basis:
+            for entry in assessment_basis.get("entries") or []:
+                if not isinstance(entry, dict):
+                    block("assessment_basis_invalid")
+                    continue
+                reason_code = str(
+                    dict(entry.get("policy_resolution") or {}).get(
+                        "reason_code"
+                    )
+                    or ""
+                )
+                if reason_code:
+                    block(reason_code)
+
+        approved_empty = (
+            data.output_quality_status == "empty"
+            and data.empty_result_classification == "expected_empty"
+        )
+        approved_not_applicable = (
+            data.empty_result_classification == "not_applicable"
+            and data.output_quality_status == "empty"
+        )
+        if (
+            strict_basis
+            and data.execution_status == "completed"
+            and data.assessment_mode == "health"
+            and not approved_empty
+            and not approved_not_applicable
+            and (
+                not basis_valid
+                or int(basis_summary.get("entry_count") or 0) <= 0
+            )
+        ):
+            block("assessment_basis_missing")
+
         if data.execution_status == "not_applicable":
             status = "not_applicable"
             completeness = "complete"
@@ -115,14 +184,6 @@ class CheckAssessmentService:
                 completeness = "partial"
             risk_verification_status = "not_applicable"
         else:
-            approved_empty = (
-                data.output_quality_status == "empty"
-                and data.empty_result_classification == "expected_empty"
-            )
-            approved_not_applicable = (
-                data.empty_result_classification == "not_applicable"
-                and data.output_quality_status in {"empty", "unsupported"}
-            )
             if not data.evidence_qualification_id:
                 block("evidence_qualification_missing")
             if data.source_identity_status != "confirmed":
@@ -229,6 +290,11 @@ class CheckAssessmentService:
             "blocking_reason_codes": blockers,
             "evidence_refs": sorted(set(data.evidence_refs)),
             "assessment_rule_bundle_digest": data.assessment_rule_bundle_digest,
+            "runtime_bundle_version_id": data.runtime_bundle_version_id,
+            "assessment_policy_snapshot_digest": (
+                data.assessment_policy_snapshot_digest
+            ),
+            "assessment_basis_digest": assessment_basis["digest"],
             "comparison_context_digest": data.comparison_context_digest,
         }
         evidence_digest = _digest(evidence_payload)
@@ -266,6 +332,11 @@ class CheckAssessmentService:
             "risk_verification_status": risk_verification_status,
             "blocking_reason_codes_json": blockers,
             "assessment_rule_bundle_digest": data.assessment_rule_bundle_digest,
+            "assessment_policy_snapshot_digest": (
+                data.assessment_policy_snapshot_digest
+            ),
+            "assessment_basis_json": assessment_basis,
+            "assessment_basis_digest": assessment_basis["digest"],
             "comparison_context_digest": data.comparison_context_digest,
             "evidence_digest": evidence_digest,
             "assessed_at": data.assessed_at,

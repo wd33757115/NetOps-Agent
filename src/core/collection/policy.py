@@ -201,10 +201,14 @@ def _stable_plan_sha256(plan_metadata: dict[str, Any]) -> str:
 class ExecutionPlanRepository:
     """Persist immutable execution-plan snapshots for launch audit and replay."""
 
+    def __init__(self, session_scope: Any = get_db_session) -> None:
+        self._session_scope = session_scope
+
     def create_plan(
         self,
         plan: ExecutionPlan | dict[str, Any],
         *,
+        plan_id: str | None = None,
         status: str = "planned",
         launch_source: str | None = None,
         patrol_batch_id: str | None = None,
@@ -213,8 +217,10 @@ class ExecutionPlanRepository:
         validated = execution_plan_from_metadata(metadata)
         normalized = validated.to_metadata()
         now = datetime.now(timezone.utc)
+        stable_plan_id = str(plan_id or uuid.uuid4())
+        plan_sha256 = _stable_plan_sha256(normalized)
         row = CollectionExecutionPlanRecord(
-            id=str(uuid.uuid4()),
+            id=stable_plan_id,
             device_id=validated.device_id,
             action=validated.action,
             mode=validated.mode,
@@ -227,14 +233,26 @@ class ExecutionPlanRepository:
             selector_json=dict(validated.selector or {}),
             plan_json=normalized,
             command_count=len(validated.commands),
-            plan_sha256=_stable_plan_sha256(normalized),
+            plan_sha256=plan_sha256,
             status=status,
             launch_source=launch_source,
             patrol_batch_id=patrol_batch_id,
             created_at=now,
             updated_at=now,
         )
-        with get_db_session() as db:
+        with self._session_scope() as db:
+            existing = db.get(CollectionExecutionPlanRecord, stable_plan_id)
+            if existing is not None:
+                if (
+                    str(existing.plan_sha256) != plan_sha256
+                    or str(existing.patrol_batch_id or "")
+                    != str(patrol_batch_id or "")
+                    or str(existing.device_id) != validated.device_id
+                ):
+                    raise ValueError(
+                        "execution plan id already belongs to different content"
+                    )
+                return self._row_to_dict(existing)
             db.add(row)
             db.flush()
             return self._row_to_dict(row)
@@ -248,7 +266,7 @@ class ExecutionPlanRepository:
         workflow_run_id: str | None = None,
         celery_task_id: str | None = None,
     ) -> dict[str, Any]:
-        with get_db_session() as db:
+        with self._session_scope() as db:
             row = db.get(CollectionExecutionPlanRecord, plan_id)
             if row is None:
                 raise ValueError(f"execution plan not found: {plan_id}")
@@ -272,7 +290,7 @@ class ExecutionPlanRepository:
         failure_code: str,
         error: str,
     ) -> dict[str, Any]:
-        with get_db_session() as db:
+        with self._session_scope() as db:
             row = db.get(CollectionExecutionPlanRecord, plan_id)
             if row is None:
                 raise ValueError(f"execution plan not found: {plan_id}")
@@ -284,7 +302,7 @@ class ExecutionPlanRepository:
             return self._row_to_dict(row)
 
     def get_plan(self, plan_id: str) -> dict[str, Any] | None:
-        with get_db_session() as db:
+        with self._session_scope() as db:
             row = db.get(CollectionExecutionPlanRecord, plan_id)
             return self._row_to_dict(row) if row is not None else None
 
@@ -818,14 +836,21 @@ class CommandProfileRepository:
             version = db.get(CommandProfileVersionRecord, profile_version_id)
             if version is None:
                 raise ValueError(f"command profile version not found: {profile_version_id}")
-            existing = (
+            candidates = (
                 db.query(CollectionProfileBindingRecord)
                 .filter(
                     CollectionProfileBindingRecord.profile_version_id
-                    == profile_version_id,
-                    CollectionProfileBindingRecord.selector_json == selector,
+                    == profile_version_id
                 )
-                .first()
+                .all()
+            )
+            existing = next(
+                (
+                    item
+                    for item in candidates
+                    if dict(item.selector_json or {}) == selector
+                ),
+                None,
             )
             if existing is None:
                 existing = CollectionProfileBindingRecord(

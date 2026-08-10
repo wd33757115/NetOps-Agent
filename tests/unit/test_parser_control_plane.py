@@ -216,6 +216,57 @@ Start
     ]
 
 
+def test_active_template_promotes_catalog_command_missing_from_legacy_policy(tmp_path):
+    content = r"""Value switch_id (\d+)
+Value role (\S+)
+
+Start
+  ^\*?${switch_id}\s+${role}\s+ -> Record
+"""
+    store = TemplateAssetStore(tmp_path)
+    path, digest = store.write_immutable(
+        vendor="H3C",
+        profile="S5130S-54S-HI-G",
+        command="show switch detail",
+        version="1",
+        content=content,
+    )
+    template = SimpleNamespace(
+        id="catalog-parser-1",
+        version="1",
+        profile="S5130S-54S-HI-G",
+        asset_path=str(path),
+        sha256=digest,
+        category="switch_stack",
+        validation_json={
+            "entity_type": "switch_member",
+            "primary_keys": ["switch_id"],
+            "required_fields": ["switch_id", "role"],
+        },
+    )
+    runtime = ParserRuntime(
+        registry=FakeRegistry(template),
+        asset_store=store,
+    )
+
+    result = runtime.parse(
+        identity=known_h3c_identity(),
+        command="show switch detail",
+        raw_text="*1 Master 0011.2233.4455 10 4 Ready\n",
+    )
+    bundle = ParserRuntimeBundle.build(
+        identity=known_h3c_identity(),
+        commands=["show switch detail"],
+        runtime=runtime,
+    )
+
+    assert result.policy_status == "eligible"
+    assert result.handling == "structured"
+    assert result.parser_status == "success"
+    assert result.structured_data == [{"switch_id": "1", "role": "Master"}]
+    assert bundle.templates["show switch detail"].template_id == template.id
+
+
 def test_embedded_active_template_parses_without_a_local_worker_file(tmp_path):
     content = r"""Value model (\S+)
 Value os_version (\S+)
@@ -400,6 +451,51 @@ Start
 
     assert result.parser_status == "failed"
     assert result.failure_code == "field_validation_failed"
+
+
+def test_parser_runtime_accepts_present_empty_fields_and_unassigned_ip(tmp_path):
+    content = r"""Value interface (\S+)
+Value ip_address (\S+)
+Value description (.*)
+
+Start
+  ^${interface}\s+${ip_address}\s*${description} -> Record
+"""
+    store = TemplateAssetStore(tmp_path)
+    path, digest = store.write_immutable(
+        vendor="H3C",
+        profile="S5130S-54S-HI-G",
+        command="display interface brief",
+        version="ip-unassigned-1",
+        content=content,
+    )
+    template = SimpleNamespace(
+        id="ip-unassigned-template",
+        version="ip-unassigned-1",
+        asset_path=str(path),
+        sha256=digest,
+        category="interface_l3",
+        validation_json={
+            "entity_type": "interface_l3",
+            "primary_keys": ["interface"],
+            "required_fields": ["interface", "ip_address", "description"],
+            "validators": {
+                "interface": {"type": "interface_name"},
+                "ip_address": {"type": "ip_or_unassigned"},
+            },
+        },
+    )
+
+    result = ParserRuntime(registry=FakeRegistry(template)).parse(
+        identity=known_h3c_identity(),
+        command="display interface brief",
+        raw_text="GE1/0/1 --\n",
+    )
+
+    assert result.parser_status == "success"
+    assert result.structured_data == [
+        {"interface": "GE1/0/1", "ip_address": "--", "description": ""}
+    ]
 
 
 def test_patrol_modes_are_normalized_without_storage_paths():

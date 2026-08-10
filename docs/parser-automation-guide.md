@@ -1,5 +1,9 @@
 # Parser 自动发现与契约审批
 
+<!-- document-status: superseded -->
+> **历史文档，已被取代。** 本文中的 `parser-validation.db` 等内容不再是运行合同。
+> 当前 Parser 生成架构见 [Simple Parser Pipeline v2](simple-parser-pipeline-v2-2026-07-22.md)。
+
 ## 配置边界
 
 Parser 只保留一份人工策略文件：

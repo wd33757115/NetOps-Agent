@@ -8,16 +8,482 @@ import pytest
 from fastapi import HTTPException
 
 from src.auth.models import CurrentUser
+from src.core.check_items import (
+    AssessmentPolicyConflictError,
+    CatalogGovernanceConflictError,
+)
 from src.core.parser.assets import TemplateAssetStore
 from src.gateway import parser_api
 
 
-def _admin_request(username: str = "operator"):
+def test_assessment_policy_api_forwards_actor_idempotency_and_scope(monkeypatch):
+    calls: list[tuple[str, dict]] = []
+
+    class FakeService:
+        def create_version(self, **payload):
+            calls.append(("create", payload))
+            return {"id": "policy-version-1", "status": "draft"}
+
+        def bind(self, version_id, **payload):
+            calls.append(("bind", {"version_id": version_id, **payload}))
+            return {"id": "binding-1", "status": "active"}
+
+    monkeypatch.setattr(parser_api, "AssessmentPolicyAssetService", FakeService)
+    created = parser_api.create_assessment_policy_version(
+        parser_api.AssessmentPolicyVersionCreateRequest(
+            check_item_id="system.cpu_usage",
+            check_item_version_id="check-version-1",
+            observation_type="system.cpu.usage",
+            policy_role="high",
+            name="核心设备 CPU 阈值",
+            policy={"value": 80, "unit": "percent"},
+            evidence_refs=["customer-policy:cpu"],
+        ),
+        _admin_request("rule-engineer"),
+        "assessment-policy-create-1",
+    )
+    bound = parser_api.bind_assessment_policy_version(
+        "policy-version-1",
+        parser_api.AssessmentPolicyBindingRequest(
+            binding_type="inventory_profile",
+            scope={"device_ids": ["device-1"]},
+            reason="绑定目标设备",
+        ),
+        _admin_request("asset-publisher"),
+        "assessment-policy-bind-1",
+    )
+
+    assert created["status"] == "draft"
+    assert bound["status"] == "active"
+    assert calls[0][1]["created_by"] == "rule-engineer"
+    assert calls[0][1]["idempotency_key"] == "assessment-policy-create-1"
+    assert calls[1][1]["actor"] == "asset-publisher"
+    assert calls[1][1]["scope"] == {"device_ids": ["device-1"]}
+
+
+def test_assessment_policy_api_maps_governance_conflict_to_409(monkeypatch):
+    class FakeService:
+        def publication_review(self, *_args, **_kwargs):
+            raise AssessmentPolicyConflictError("publication approver is not independent")
+
+    monkeypatch.setattr(parser_api, "AssessmentPolicyAssetService", FakeService)
+
+    with pytest.raises(HTTPException) as exc_info:
+        parser_api.review_assessment_policy_publication(
+            "policy-version-1",
+            parser_api.AssessmentPolicyReviewRequest(
+                decision="approved",
+                reason="批准发布",
+            ),
+            _admin_request("network-sme"),
+            "assessment-policy-publish-1",
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "not independent" in str(exc_info.value.detail)
+
+
+def test_assessment_policy_impact_preview_forwards_candidate_and_target_scope(
+    monkeypatch,
+):
+    calls: list[dict] = []
+
+    class FakeService:
+        def preview_target_impact(self, version_id, **payload):
+            calls.append({"version_id": version_id, **payload})
+            return {"summary": {"target_count": 1}, "items": []}
+
+    monkeypatch.setattr(parser_api, "AssessmentPolicyAssetService", FakeService)
+
+    result = parser_api.preview_assessment_policy_target_impact(
+        "policy-version-1",
+        parser_api.AssessmentPolicyImpactPreviewRequest(
+            binding_type="scope_override",
+            proposed_scope={"sites": ["xian"]},
+            target_selector={"device_ids": ["device-1"]},
+            page=2,
+            page_size=25,
+        ),
+        CurrentUser(user_id="user:operator", username="operator", role="admin"),
+    )
+
+    assert result["summary"]["target_count"] == 1
+    assert calls == [
+        {
+            "version_id": "policy-version-1",
+            "binding_type": "scope_override",
+            "proposed_scope": {"sites": ["xian"]},
+            "target_selector": {"device_ids": ["device-1"]},
+            "policy_effective_at": None,
+            "page": 2,
+            "page_size": 25,
+        }
+    ]
+
+
+def test_assessment_policy_migration_api_forwards_inventory_draft_and_shadow(
+    monkeypatch,
+):
+    calls: list[tuple[str, dict]] = []
+
+    class FakeService:
+        def inventory_legacy_sources(self, **payload):
+            calls.append(("inventory", payload))
+            return {"counts": {"inventoried": 1}}
+
+        def list_sources(self, **payload):
+            calls.append(("sources", payload))
+            return {"items": [], "total": 0}
+
+        def create_draft_from_source(self, source_id, **payload):
+            calls.append(("draft", {"source_id": source_id, **payload}))
+            return {"source": {"id": source_id}, "draft": {"status": "draft"}}
+
+        def compare_shadow(self, **payload):
+            calls.append(("shadow", payload))
+            return {"comparison_status": "different"}
+
+        def list_shadow_results(self, **payload):
+            calls.append(("shadow-results", payload))
+            return {"items": [], "total": 0}
+
+        def activate_cutover(self, **payload):
+            calls.append(("cutover", payload))
+            return {"resolver_mode": "governed_only"}
+
+        def rollback_cutover(self, cutover_id, **payload):
+            calls.append(("rollback", {"cutover_id": cutover_id, **payload}))
+            return {"resolver_mode": "legacy_compat"}
+
+        def list_cutovers(self, **payload):
+            calls.append(("cutovers", payload))
+            return {"items": [], "total": 0}
+
+    monkeypatch.setattr(parser_api, "AssessmentPolicyMigrationService", FakeService)
+    request = _admin_request("migration-admin")
+    user = CurrentUser(
+        user_id="user:migration-admin",
+        username="migration-admin",
+        role="admin",
+    )
+
+    inventory = parser_api.inventory_legacy_assessment_policies(
+        parser_api.AssessmentPolicyMigrationInventoryRequest(
+            check_item_ids=["system.cpu_usage"],
+            include_execution_snapshots=True,
+            after_execution_id="execution-100",
+            execution_page_size=500,
+        ),
+        request,
+        "migration-inventory-1",
+    )
+    parser_api.list_legacy_assessment_policy_sources(
+        page=2,
+        page_size=20,
+        search="cpu",
+        conversion_status="inventoried",
+        source_type="catalog_default",
+        check_item_id="system.cpu_usage",
+        _user=user,
+    )
+    draft = parser_api.draft_legacy_assessment_policy_source(
+        "migration-source-1",
+        request,
+        "migration-draft-1",
+    )
+    shadow = parser_api.compare_assessment_policy_shadow(
+        parser_api.AssessmentPolicyShadowCompareRequest(
+            check_item_version_id="check-version-cpu-v1",
+            device={"device_id": "device-1"},
+            observation={"observation_type": "system.cpu.usage", "value": 82},
+            rule={"condition": {"kind": "threshold", "gte": 80}},
+            policy_effective_at="2026-07-30T08:00:00Z",
+        ),
+        request,
+        "migration-shadow-1",
+    )
+    parser_api.list_assessment_policy_shadow_results(
+        page=1,
+        page_size=25,
+        comparison_status="different",
+        check_item_id="system.cpu_usage",
+        device_id="device-1",
+        _user=user,
+    )
+    cutover = parser_api.activate_assessment_policy_cutover(
+        parser_api.AssessmentPolicyCutoverRequest(
+            check_item_version_id="check-version-cpu-v1",
+            device_id="device-1",
+            shadow_result_ids=["shadow-1"],
+            reason="影子结果一致，允许受控切换",
+        ),
+        request,
+        "migration-cutover-1",
+    )
+    rollback = parser_api.rollback_assessment_policy_cutover(
+        "cutover-1",
+        parser_api.AssessmentPolicyCutoverRollbackRequest(
+            reason="完成回滚演练，恢复兼容读取",
+        ),
+        request,
+        "migration-rollback-1",
+    )
+    parser_api.list_assessment_policy_cutovers(
+        page=1,
+        page_size=25,
+        status="active",
+        resolver_mode="governed_only",
+        check_item_id="system.cpu_usage",
+        device_id="device-1",
+        _user=user,
+    )
+
+    assert inventory["counts"]["inventoried"] == 1
+    assert draft["draft"]["status"] == "draft"
+    assert shadow["comparison_status"] == "different"
+    assert cutover["resolver_mode"] == "governed_only"
+    assert rollback["resolver_mode"] == "legacy_compat"
+    assert calls[0] == (
+        "inventory",
+        {
+            "actor": "migration-admin",
+            "check_item_ids": ["system.cpu_usage"],
+            "include_execution_snapshots": True,
+            "after_execution_id": "execution-100",
+            "execution_page_size": 500,
+        },
+    )
+    assert calls[2][1]["actor"] == "migration-admin"
+    assert calls[3][1]["runtime_bundle_version_id"] == "assessment-policy-shadow"
+    assert calls[4][1]["comparison_status"] == "different"
+    assert calls[5][1]["idempotency_key"] == "migration-cutover-1"
+    assert calls[6][1]["cutover_id"] == "cutover-1"
+    assert calls[7][1]["resolver_mode"] == "governed_only"
+
+
+def _request(username: str, role: str):
     return SimpleNamespace(
         state=SimpleNamespace(
-            current_user=CurrentUser(user_id=f"user:{username}", username=username, role="admin")
+            current_user=CurrentUser(
+                user_id=f"user:{username}",
+                username=username,
+                role=role,
+            )
         )
     )
+
+
+def _admin_request(username: str = "operator"):
+    return _request(username, "admin")
+
+
+def test_check_item_catalog_api_forwards_governed_lifecycle(monkeypatch):
+    calls: list[tuple[str, dict]] = []
+
+    class FakeService:
+        def create_implementation_draft(self, payload, **context):
+            calls.append(("create", {"payload": payload, **context}))
+            return {"id": "catalog-change-1", "status": "draft"}
+
+        def preview_impact(self, change_id):
+            calls.append(("preview", {"change_id": change_id}))
+            return {"change_id": change_id, "impact_digest": "a" * 64}
+
+        def publication_options(self, change_id):
+            calls.append(("options", {"change_id": change_id}))
+            return {"change_id": change_id, "eligible_campaigns": []}
+
+        def submit(self, change_id, **context):
+            calls.append(("submit", {"change_id": change_id, **context}))
+            return {"id": change_id, "status": "pending_approval"}
+
+        def decide(self, change_id, **context):
+            calls.append(("decide", {"change_id": change_id, **context}))
+            return {"id": change_id, "status": context["decision"]}
+
+        def delete_implementation(self, implementation_id, **context):
+            calls.append(("delete", {"implementation_id": implementation_id, **context}))
+            return {
+                "success": True,
+                "implementation_id": implementation_id,
+                "status": "deprecated",
+            }
+
+    monkeypatch.setattr(parser_api, "CheckItemCatalogGovernanceService", FakeService)
+    request = _admin_request("catalog-engineer")
+    payload = parser_api.CollectionImplementationDraftRequest(
+        id="huawei-vrp-cpu-usage",
+        name="Huawei VRP CPU utilization",
+        description="Collect CPU utilization through the canonical check item.",
+        check_item_ids=["system.cpu_usage"],
+        match={"vendors": ["Huawei"], "families": ["VRP"]},
+        commands=[{"command": "display cpu-usage", "priority": 100}],
+        parser_requirement="structured",
+        template_scope="family",
+        selection_priority=100,
+    )
+
+    created = parser_api.create_collection_implementation_draft(
+        request,
+        payload,
+        "catalog-create-1",
+    )
+    impact = parser_api.preview_check_item_catalog_change("catalog-change-1")
+    options = parser_api.check_item_catalog_publication_options(
+        "catalog-change-1"
+    )
+    submitted = parser_api.submit_check_item_catalog_change(
+        request,
+        "catalog-change-1",
+        parser_api.CatalogChangeLifecycleRequest(
+            expected_impact_digest="a" * 64,
+        ),
+        "catalog-submit-1",
+    )
+    approved = parser_api.approve_check_item_catalog_change(
+        _admin_request("catalog-approver"),
+        "catalog-change-1",
+        parser_api.CatalogChangeLifecycleRequest(
+            expected_impact_digest="a" * 64,
+            rollout_campaign_id="rollout-completed-1",
+        ),
+        "catalog-approve-1",
+    )
+    deleted = parser_api.delete_collection_implementation(
+        _admin_request("catalog-admin"),
+        "huawei-vrp-cpu-usage",
+        parser_api.CollectionImplementationDeleteRequest(),
+        "catalog-delete-1",
+    )
+
+    assert created["status"] == "draft"
+    assert impact["impact_digest"] == "a" * 64
+    assert options["eligible_campaigns"] == []
+    assert submitted["status"] == "pending_approval"
+    assert approved["status"] == "approved"
+    assert deleted["status"] == "deprecated"
+    assert calls[0][1]["actor"] == "catalog-engineer"
+    assert calls[0][1]["idempotency_key"] == "catalog-create-1"
+    assert calls[0][1]["payload"]["check_item_ids"] == ["system.cpu_usage"]
+    assert calls[0][1]["reason"] == ""
+    assert calls[3][1]["reason"] == ""
+    assert calls[3][1]["expected_impact_digest"] == "a" * 64
+    assert calls[4][1]["actor"] == "catalog-approver"
+    assert calls[4][1]["decision"] == "approved"
+    assert calls[4][1]["reason"] == ""
+    assert calls[4][1]["rollout_campaign_id"] == "rollout-completed-1"
+    assert calls[4][1]["allow_same_actor"] is True
+    assert calls[5][1] == {
+        "implementation_id": "huawei-vrp-cpu-usage",
+        "actor": "catalog-admin",
+        "reason": "",
+        "idempotency_key": "catalog-delete-1",
+    }
+
+
+def test_check_item_catalog_api_creates_and_deletes_check_items(monkeypatch):
+    calls: list[tuple[str, dict]] = []
+
+    class FakeService:
+        def create_check_item_draft(self, payload, **context):
+            calls.append(("create_check_item", {"payload": payload, **context}))
+            return {"id": "catalog-change-check-item-1", "status": "draft"}
+
+        def delete_check_item(self, check_item_id, **context):
+            calls.append(
+                ("delete_check_item", {"check_item_id": check_item_id, **context})
+            )
+            return {
+                "success": True,
+                "check_item_id": check_item_id,
+                "status": "deprecated",
+            }
+
+    monkeypatch.setattr(parser_api, "CheckItemCatalogGovernanceService", FakeService)
+    request = _admin_request("catalog-admin")
+    payload = parser_api.CheckItemDraftRequest(
+        id="device.software_audit",
+        name="Device software audit",
+        category="device",
+        description="Preserve software identity for audit.",
+        result_mode="structured",
+        assessment_mode="evidence",
+        canonical_contract={
+            "entity_type": "device",
+            "identity_dimensions": ["device_id"],
+            "observations": [
+                {
+                    "observation_type": "device.software.version",
+                    "semantic_type": "state",
+                }
+            ],
+        },
+        report_projection="device_inventory",
+        coverage_policy={"model": "fixed", "expected_count": 1},
+    )
+
+    created = parser_api.create_check_item_draft(
+        request,
+        payload,
+        "catalog-create-check-item-1",
+    )
+    deleted = parser_api.delete_check_item(
+        request,
+        "device.software_audit",
+        parser_api.CheckItemDeleteRequest(),
+        "catalog-delete-check-item-1",
+    )
+
+    assert created["status"] == "draft"
+    assert deleted["status"] == "deprecated"
+    assert calls[0][1]["payload"]["id"] == "device.software_audit"
+    assert calls[0][1]["reason"] == ""
+    assert calls[1][1] == {
+        "check_item_id": "device.software_audit",
+        "actor": "catalog-admin",
+        "reason": "",
+        "idempotency_key": "catalog-delete-check-item-1",
+    }
+
+
+def test_canonical_observation_catalog_is_available_to_the_editor():
+    result = parser_api.list_canonical_observations()
+
+    assert result["status"] == "active"
+    assert result["items"]
+    assert {
+        "id",
+        "description",
+        "semantic_type",
+        "value_types",
+        "canonical_unit",
+        "dimensions",
+        "assessment_roles",
+    }.issubset(result["items"][0])
+
+
+def test_check_item_catalog_api_maps_unsafe_publication_to_409(monkeypatch):
+    class FakeService:
+        def decide(self, *_args, **_kwargs):
+            raise CatalogGovernanceConflictError(
+                "catalog change has unresolved blockers"
+            )
+
+    monkeypatch.setattr(parser_api, "CheckItemCatalogGovernanceService", FakeService)
+
+    with pytest.raises(HTTPException) as exc_info:
+        parser_api.approve_check_item_catalog_change(
+            _admin_request("catalog-approver"),
+            "catalog-change-1",
+            parser_api.CatalogChangeLifecycleRequest(
+                reason="Attempt publication with blockers",
+                expected_impact_digest="a" * 64,
+            ),
+            "catalog-approve-blocked-1",
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "unresolved blockers" in str(exc_info.value.detail)
 
 
 def test_parser_spec_and_sample_roles_are_engineer_confirmed_and_audited(monkeypatch):
@@ -91,6 +557,65 @@ def test_simple_parser_dispatch_reports_readiness_blockers(monkeypatch):
 
     assert exc_info.value.status_code == 409
     assert "parser_spec_not_confirmed" in str(exc_info.value.detail)
+
+
+def test_retry_and_dispatch_is_one_server_side_operator_command(monkeypatch):
+    calls: list[tuple[str, dict]] = []
+
+    class FakeJobRepository:
+        def get_job(self, job_id):
+            return {
+                "id": job_id,
+                "status": "failed",
+                "pipeline_version": "simple_v2",
+                "generation_readiness": {"ready": True, "blockers": []},
+            }
+
+        def retry_job(self, job_id, **payload):
+            calls.append(("retry", {"job_id": job_id, **payload}))
+            return {"id": job_id, "status": "pending"}
+
+    repository = FakeJobRepository()
+    monkeypatch.setattr(parser_api, "ParserJobRepository", lambda: repository)
+
+    def fake_dispatch(**payload):
+        calls.append(("dispatch", payload))
+        return {"dispatched": ["job-1"], "failed": []}
+
+    monkeypatch.setattr(parser_api, "dispatch_ready_parser_jobs", fake_dispatch)
+
+    result = parser_api.retry_and_dispatch_job("job-1", _admin_request("engineer"))
+
+    assert result["success"] is True
+    assert calls[0][0] == "retry"
+    assert calls[0][1]["actor"] == "engineer"
+    assert calls[1][0] == "dispatch"
+    assert calls[1][1]["repository"] is repository
+
+
+def test_retry_and_dispatch_keeps_failed_job_when_readiness_is_blocked(monkeypatch):
+    class FakeJobRepository:
+        def get_job(self, job_id):
+            return {
+                "id": job_id,
+                "status": "failed",
+                "pipeline_version": "simple_v2",
+                "generation_readiness": {
+                    "ready": False,
+                    "blockers": ["generation_samples_without_data"],
+                },
+            }
+
+        def retry_job(self, *_args, **_kwargs):
+            raise AssertionError("blocked jobs must not transition to pending")
+
+    monkeypatch.setattr(parser_api, "ParserJobRepository", FakeJobRepository)
+
+    with pytest.raises(HTTPException) as exc_info:
+        parser_api.retry_and_dispatch_job("job-1", _admin_request("engineer"))
+
+    assert exc_info.value.status_code == 409
+    assert "generation_samples_without_data" in str(exc_info.value.detail)
 
 
 def test_recover_endpoint_fails_stale_job_and_revokes_task(monkeypatch):
@@ -203,6 +728,67 @@ def test_asset_production_list_uses_current_user_scope(monkeypatch):
     assert captured["bucket"] == "action_required"
 
 
+def test_asset_gap_list_is_read_only_and_returns_exact_source_import_link(
+    monkeypatch,
+):
+    calls: list[dict] = []
+
+    class FakeAssetGapRepository:
+        def list_page(self, **kwargs):
+            calls.append(kwargs)
+            return {
+                "items": [
+                    {
+                        "id": "gap-1",
+                        "check_item_id": "system.cpu_usage",
+                        "implementation_version_id": "impl-h3c-cpu-v1",
+                        "canonical_command": "display cpu-usage",
+                        "gap_type": "runtime_bundle_missing",
+                        "reason_code": "active_runtime_bundle_missing",
+                        "status": "open",
+                    }
+                ],
+                "total": 1,
+                "limit": 25,
+                "offset": 0,
+            }
+
+    monkeypatch.setattr(
+        parser_api,
+        "AssetGapRepository",
+        FakeAssetGapRepository,
+    )
+
+    result = parser_api.list_asset_gaps(
+        status="open",
+        check_item_id=None,
+        search="cpu",
+        limit=25,
+        offset=0,
+    )
+
+    assert calls == [
+        {
+            "status": "open",
+            "check_item_id": None,
+            "search": "cpu",
+            "limit": 25,
+            "offset": 0,
+        }
+    ]
+    assert result["total"] == 1
+    action = result["items"][0]["recommended_action"]
+    assert action["code"] == "import_rule_samples"
+    assert action["target_url"] == (
+        "/skills/parser?workspace=production&subtab=source-jobs"
+        "&action=asset-gap-source&asset_gap_id=gap-1"
+        "&check_item_id=system.cpu_usage"
+        "&implementation_version_id=impl-h3c-cpu-v1"
+        "&command=display+cpu-usage"
+    )
+    assert "不会直接创建 Parser 或规则生成任务" in action["description"]
+
+
 def test_parser_template_comparison_returns_complete_human_approval_evidence(
     monkeypatch,
     tmp_path,
@@ -222,7 +808,13 @@ def test_parser_template_comparison_returns_complete_human_approval_evidence(
         status="pending_approval",
         sha256="candidate-sha",
         asset_path=str(template_path),
-        validation_json={},
+        validation_json={
+            "parser_spec": {
+                "entity": "interface",
+                "primary_keys": ["interface"],
+                "fields": {"interface": {"required": True, "type": "text"}},
+            }
+        },
         contract_sha256="contract-new",
         source_job_id=None,
     )
@@ -290,11 +882,12 @@ def test_parser_template_comparison_returns_complete_human_approval_evidence(
         },
     )
 
-    result = parser_api.compare_template(candidate.id)
+    result = parser_api.compare_template(candidate.id, _admin_request("release-admin"))
 
     assert result["approval_readiness"] == {"can_approve": True, "blockers": []}
     assert result["candidate_template"]["content"] == template_text
     assert result["candidate_template"]["hash_valid"] is True
+    assert result["parser_field_contract"]["status"] == "aligned"
     assert result["rows"][0]["raw_text"] == snapshot.raw_text
     assert result["rows"][0]["raw_text_sha256"]
     assert result["rows"][0]["proposed"]["records"][0]["status"] == "UP"
@@ -308,9 +901,148 @@ def test_parser_template_comparison_returns_complete_human_approval_evidence(
             "raw_text_sha256": result["rows"][0]["raw_text_sha256"],
             "status": "success",
             "records": [{"interface": "GE1/0/1", "status": "UP"}],
+            "record_sets": [{
+                "name": "interface",
+                "entity_type": "interface",
+                "primary_keys": [],
+                "required_fields": [],
+                "records": [{"interface": "GE1/0/1", "status": "UP"}],
+            }],
             "primary_keys": [[]],
+            "record_set_primary_keys": {"interface": [[]]},
         }],
     }]
+
+    candidate.validation_json = {
+        **candidate.validation_json,
+        "human_semantic_review": {
+            "status": "accepted",
+            "reviewed_by": "review-engineer",
+        },
+    }
+    same_operator = parser_api.compare_template(
+        candidate.id,
+        _request("review-engineer", "operator"),
+    )
+    assert same_operator["release_actor"] == {
+        "username": "review-engineer",
+        "role": "operator",
+        "same_as_semantic_reviewer": True,
+        "admin_override_applies": False,
+        "can_activate": False,
+        "blockers": ["当前账号已完成语义复核，发布必须由其他审批人执行"],
+    }
+    assert "当前账号已完成语义复核，发布必须由其他审批人执行" in (
+        same_operator["activation_readiness"]["blockers"]
+    )
+
+    same_admin = parser_api.compare_template(
+        candidate.id,
+        _admin_request("review-engineer"),
+    )
+    assert same_admin["release_actor"]["admin_override_applies"] is True
+    assert same_admin["release_actor"]["can_activate"] is True
+    assert "当前账号已完成语义复核，发布必须由其他审批人执行" not in (
+        same_admin["activation_readiness"]["blockers"]
+    )
+
+    candidate.validation_json = {
+        "parser_spec": {
+            "entity": "interface",
+            "primary_keys": ["interface"],
+            "fields": {
+                "interface": {"required": True, "type": "text"},
+                "phantom_field": {"required": False, "type": "text"},
+            },
+        }
+    }
+    blocked = parser_api.compare_template(candidate.id, _admin_request("release-admin"))
+    assert blocked["review_readiness"]["can_review"] is False
+    assert blocked["parser_field_contract"]["status"] == "schema_drift"
+    assert (
+        "ParserSpec field inventory does not match the executable TextFSM schema"
+        in blocked["review_readiness"]["blockers"]
+    )
+
+
+def test_comparison_projects_parser_bundle_into_independent_record_sets():
+    result = parser_api._comparison_record_sets(
+        {
+            "status": "success",
+            "records": {
+                "format": "netops.structured_record_sets/v1",
+                "record_sets": {
+                    "module": [{"interface": "XGE1/0/1", "temperature": "41.2"}],
+                    "channel": [
+                        {"interface": "XGE1/0/1", "channel": "1", "rx": "-3.2"},
+                        {"interface": "XGE1/0/1", "channel": "2", "rx": "-3.5"},
+                    ],
+                },
+            },
+        },
+        {
+            "record_sets": [
+                {
+                    "name": "module",
+                    "entity_type": "interface_optical_module",
+                    "primary_keys": ["interface"],
+                    "required_fields": ["interface", "temperature"],
+                },
+                {
+                    "name": "channel",
+                    "entity_type": "interface_optical_channel",
+                    "primary_keys": ["interface", "channel"],
+                    "required_fields": ["interface", "channel", "rx"],
+                },
+            ],
+        },
+        fallback_name="multi_record",
+    )
+
+    assert [item["name"] for item in result] == ["module", "channel"]
+    assert result[0]["primary_keys"] == ["interface"]
+    assert len(result[1]["records"]) == 2
+
+
+def test_candidate_comparison_parses_template_without_production_policy_entry():
+    template_text = (
+        "Value switch_id (\\d+)\n"
+        "Value role (\\S+)\n\n"
+        "Start\n"
+        "  ^\\*?${switch_id}\\s+${role}\\s+ -> Record\n"
+    )
+    template = SimpleNamespace(
+        id="candidate-switch-detail",
+        vendor="Cisco",
+        model="WS-C2960XR-24TS-I",
+        family="IOS",
+        profile="WS-C2960XR-24TS-I",
+        canonical_command="show switch detail",
+        category="switch_stack",
+        version="candidate-v1",
+        asset_path="embedded://candidate-switch-detail",
+        template_text=template_text,
+        sha256=hashlib.sha256(template_text.encode("utf-8")).hexdigest(),
+        validation_json={
+            "category": "switch_stack",
+            "entity_type": "switch_member",
+            "primary_keys": ["switch_id"],
+            "required_fields": ["switch_id", "role"],
+            "optional_fields": [],
+            "validators": {},
+        },
+    )
+
+    result = parser_api._parse_snapshot_with_template(
+        template,
+        SimpleNamespace(raw_text="*1 Master 0011.2233.4455 10 4 Ready\n"),
+    )
+
+    assert result == {
+        "status": "success",
+        "failure_code": None,
+        "records": [{"switch_id": "1", "role": "Master"}],
+    }
 
 
 def test_parser_template_comparison_scopes_evidence_to_source_job(
@@ -368,6 +1100,33 @@ def test_parser_template_comparison_scopes_evidence_to_source_job(
         def record_regression_validation(self, *_args, **_kwargs):
             return None
 
+        def get_candidate_sample_evidence(
+            self,
+            template_id,
+            *,
+            include_sanitized_payload,
+        ):
+            assert template_id == candidate.id
+            assert include_sanitized_payload is True
+            return {
+                "errors": [],
+                "items": [
+                    {
+                        "sample_id": "sample-scoped",
+                        "snapshot_id": "snapshot-scoped",
+                        "dataset_id": "offline-job-current",
+                        "device_id": "switch-1",
+                        "sample_role": "generation",
+                        "expectation": {},
+                        "sanitized_hash": "sanitized-sha",
+                        "sanitized_text": scoped_snapshot.raw_text,
+                        "source_context": {
+                            "canonical_command": candidate.canonical_command,
+                        },
+                    }
+                ],
+            }
+
     class FakeAssetStore:
         root = tmp_path
 
@@ -383,19 +1142,13 @@ def test_parser_template_comparison_scopes_evidence_to_source_job(
     class FakePatrolRepository:
         @staticmethod
         def list_dataset_snapshots(*, mode):
-            assert mode == "parser_validation"
-            return [historical_snapshot, scoped_snapshot]
-
-    class FakeParserJobRepository:
-        @staticmethod
-        def get_job(job_id):
-            assert job_id == "parser-job-1"
-            return {"samples": [{"snapshot_id": "snapshot-scoped"}]}
+            raise AssertionError(
+                f"immutable candidate evidence must replace dataset lookup: {mode}"
+            )
 
     monkeypatch.setattr(parser_api, "ParserTemplateRepository", FakeTemplateRepository)
     monkeypatch.setattr(parser_api, "TemplateAssetStore", FakeAssetStore)
     monkeypatch.setattr(parser_api, "PatrolRepository", FakePatrolRepository)
-    monkeypatch.setattr(parser_api, "ParserJobRepository", FakeParserJobRepository)
     monkeypatch.setattr(
         parser_api,
         "_parse_snapshot_with_template",
@@ -406,10 +1159,235 @@ def test_parser_template_comparison_scopes_evidence_to_source_job(
         },
     )
 
-    result = parser_api.compare_template(candidate.id)
+    result = parser_api.compare_template(candidate.id, _admin_request("release-admin"))
 
     assert result["sample_count"] == 1
     assert [row["snapshot_id"] for row in result["rows"]] == ["snapshot-scoped"]
+    assert result["rows"][0]["raw_text_redacted"] is True
+    assert result["rows"][0]["evidence_kind"] == "sanitized_candidate_sample"
+
+
+def test_parser_template_semantic_review_uses_authenticated_actor(monkeypatch):
+    calls = []
+
+    class FakeTemplateRepository:
+        def record_semantic_review(self, template_id, **payload):
+            calls.append({"template_id": template_id, **payload})
+            return {
+                "status": "accepted",
+                "reviewed_by": payload["actor"],
+                "reason": payload["reason"],
+            }
+
+    monkeypatch.setattr(parser_api, "ParserTemplateRepository", FakeTemplateRepository)
+
+    result = parser_api.review_template_semantics(
+        "template-1",
+        _admin_request("semantic-reviewer"),
+        parser_api.ParserTemplateSemanticReviewRequest(
+            reason="records and primary keys were checked",
+            result_confirmed=True,
+            primary_key_confirmed=True,
+        ),
+    )
+
+    assert result["template_status"] == "pending_approval"
+    assert result["semantic_review"]["reviewed_by"] == "semantic-reviewer"
+    assert calls == [
+        {
+            "template_id": "template-1",
+            "actor": "semantic-reviewer",
+            "reason": "records and primary keys were checked",
+            "result_confirmed": True,
+            "primary_key_confirmed": True,
+        }
+    ]
+
+
+def test_manual_parser_candidate_submission_uses_authenticated_engineer(monkeypatch):
+    calls = []
+
+    class FakeResult:
+        template_id = "template-engineer-1"
+
+        @staticmethod
+        def to_dict():
+            return {
+                "success": True,
+                "template_id": "template-engineer-1",
+                "status": "pending_approval",
+            }
+
+    class FakeService:
+        def submit(self, **payload):
+            calls.append(payload)
+            return FakeResult()
+
+    refreshed = []
+    monkeypatch.setattr(
+        parser_api,
+        "ManualParserCandidateSubmissionService",
+        FakeService,
+    )
+    monkeypatch.setattr(
+        parser_api,
+        "_refresh_rule_asset_projection_for_template",
+        refreshed.append,
+    )
+
+    result = parser_api.submit_manual_parser_candidate(
+        "parser-job-1",
+        _admin_request("network-engineer"),
+        parser_api.ParserManualCandidateRequest(
+            template_text="Value interface (\\S+)\n\nStart\n  ^${interface}$$ -> Record\n",
+            based_on_template_id="template-model-1",
+        ),
+    )
+
+    assert result["status"] == "pending_approval"
+    assert calls == [
+        {
+            "job_id": "parser-job-1",
+            "template_text": "Value interface (\\S+)\n\nStart\n  ^${interface}$$ -> Record\n",
+            "actor": "network-engineer",
+            "reason": None,
+            "based_on_template_id": "template-model-1",
+        }
+    ]
+    assert refreshed == ["template-engineer-1"]
+
+
+def test_manual_parser_candidate_validation_failure_returns_evidence(monkeypatch):
+    from src.core.parser_generation import ValidationReport
+
+    report = ValidationReport(
+        passed=False,
+        hard_gates={"compiled": False},
+        samples=(),
+        diagnostics=("template_syntax_error: invalid state",),
+    )
+
+    class FakeService:
+        def submit(self, **_payload):
+            raise parser_api.ManualParserCandidateValidationError(
+                "engineer candidate could not execute on every frozen sample",
+                execution=report,
+            )
+
+    monkeypatch.setattr(
+        parser_api,
+        "ManualParserCandidateSubmissionService",
+        FakeService,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        parser_api.submit_manual_parser_candidate(
+            "parser-job-1",
+            _admin_request("network-engineer"),
+            parser_api.ParserManualCandidateRequest(template_text="invalid"),
+        )
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["execution"]["hard_gates"]["compiled"] is False
+    assert "template_syntax_error" in exc_info.value.detail["execution"]["diagnostics"][0]
+
+
+def test_parser_template_review_and_activation_allow_optional_notes(monkeypatch):
+    calls = []
+
+    class FakeTemplateRepository:
+        def record_semantic_review(self, template_id, **payload):
+            calls.append(("review", template_id, payload))
+            return {"status": "accepted", "reason": payload["reason"]}
+
+        def activate_template(self, template_id, **payload):
+            calls.append(("activate", template_id, payload))
+            return SimpleNamespace(to_dict=lambda: {"id": template_id, "status": "active"})
+
+    monkeypatch.setattr(parser_api, "ParserTemplateRepository", FakeTemplateRepository)
+    monkeypatch.setattr(
+        parser_api,
+        "_refresh_rule_asset_projection_for_template",
+        lambda _template_id: None,
+    )
+
+    review = parser_api.review_template_semantics(
+        "template-optional-note",
+        _admin_request("semantic-reviewer"),
+        parser_api.ParserTemplateSemanticReviewRequest(
+            result_confirmed=True,
+            primary_key_confirmed=True,
+        ),
+    )
+    activated = parser_api.activate_template(
+        "template-optional-note",
+        _admin_request("release-approver"),
+        parser_api.ParserTemplateApprovalRequest(),
+    )
+
+    assert review["semantic_review"]["reason"] == ""
+    assert activated["status"] == "active"
+    assert calls[0][2]["reason"] == ""
+    assert calls[1][2]["reason"] == ""
+
+
+def test_parser_template_activation_is_a_separate_authenticated_action(monkeypatch):
+    calls = []
+
+    class FakeTemplateRepository:
+        def activate_template(self, template_id, **payload):
+            calls.append({"template_id": template_id, **payload})
+            return SimpleNamespace(
+                to_dict=lambda: {
+                    "id": template_id,
+                    "status": "active",
+                }
+            )
+
+    monkeypatch.setattr(parser_api, "ParserTemplateRepository", FakeTemplateRepository)
+    monkeypatch.setattr(
+        parser_api,
+        "_refresh_rule_asset_projection_for_template",
+        lambda _template_id: None,
+    )
+
+    result = parser_api.activate_template(
+        "template-1",
+        _admin_request("release-approver"),
+        parser_api.ParserTemplateApprovalRequest(
+            reason="independent release approval",
+        ),
+    )
+
+    assert result["status"] == "active"
+    assert calls == [
+        {
+            "template_id": "template-1",
+            "approved_by": "release-approver",
+            "reason": "independent release approval",
+            "allow_same_reviewer": True,
+        }
+    ]
+
+
+def test_parser_template_activation_maps_lifecycle_conflict_to_409(monkeypatch):
+    class FakeTemplateRepository:
+        def activate_template(self, _template_id, **_payload):
+            raise parser_api.ParserTemplateStateError(
+                "template cannot be activated from status rejected"
+            )
+
+    monkeypatch.setattr(parser_api, "ParserTemplateRepository", FakeTemplateRepository)
+
+    with pytest.raises(HTTPException) as exc_info:
+        parser_api.activate_template(
+            "template-stale",
+            _admin_request("release-approver"),
+            parser_api.ParserTemplateApprovalRequest(reason="release approval"),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "status rejected" in str(exc_info.value.detail)
 
 
 def test_template_preview_reads_embedded_candidate_without_a_local_file(
@@ -1068,10 +2046,11 @@ def test_rule_generation_job_preview_endpoint_reports_404(monkeypatch):
 
 def test_rule_generation_job_approve_activates_event_rule_asset(monkeypatch):
     class FakeApprovalService:
-        def approve(self, job_id, *, actor, reason):
+        def approve(self, job_id, *, actor, reason, allow_same_actor=False):
             assert job_id == "job-1"
             assert actor == "operator"
             assert reason == "validated for production"
+            assert allow_same_actor is True
             return {
                 "success": True,
                 "job": {"id": job_id, "status": "active"},
@@ -1099,7 +2078,8 @@ def test_rule_generation_job_approve_activates_event_rule_asset(monkeypatch):
 
 def test_rule_generation_job_approve_rejects_non_pending(monkeypatch):
     class FakeApprovalService:
-        def approve(self, job_id, *, actor, reason):
+        def approve(self, job_id, *, actor, reason, allow_same_actor=False):
+            assert allow_same_actor is True
             raise parser_api.RuleGenerationJobStateError("must be pending_approval")
 
     monkeypatch.setattr(parser_api, "RuleAssetApprovalService", FakeApprovalService)
@@ -2009,7 +2989,7 @@ def test_runtime_bundle_assembly_endpoints_preserve_preview_and_actor(monkeypatc
     )
     active = parser_api.activate_check_item_runtime_bundle(
         "bundle-v1",
-        parser_api.RuntimeBundleLifecycleRequest(reason="verified runtime scope"),
+        parser_api.RuntimeBundleLifecycleRequest(),
         _admin_request("approver"),
         "request-key-activate",
     )
@@ -2020,7 +3000,8 @@ def test_runtime_bundle_assembly_endpoints_preserve_preview_and_actor(monkeypatc
     assert calls[1][1]["actor"] == "engineer"
     assert calls[1][1]["preview_digest"] == "preview-1"
     assert calls[2][1]["actor"] == "approver"
-    assert calls[2][1]["reason"] == "verified runtime scope"
+    assert calls[2][1]["reason"] == ""
+    assert calls[2][1]["allow_same_actor"] is True
 
 
 def test_runtime_bundle_assemble_endpoint_returns_structured_conflict(monkeypatch):
@@ -2050,3 +3031,218 @@ def test_runtime_bundle_assemble_endpoint_returns_structured_conflict(monkeypatc
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail["message"] == "运行包装配被阻断"
     assert "broader" in exc_info.value.detail["blockers"][0]
+
+
+def test_rollout_stage_start_is_async_and_public_result_ingress_is_removed():
+    start_route = next(
+        route
+        for route in parser_api.router.routes
+        if route.path
+        == "/api/v1/parser/check-item-rollout-campaigns/{campaign_id}/start"
+        and "POST" in (route.methods or set())
+    )
+
+    assert start_route.status_code == 202
+    assert not any(
+        route.path
+        == "/api/v1/parser/check-item-rollout-campaigns/{campaign_id}/result"
+        and "POST" in (route.methods or set())
+        for route in parser_api.router.routes
+    )
+
+
+def test_rollout_stage_start_forwards_live_capture_mode(monkeypatch):
+    calls: list[dict] = []
+
+    class FakeCampaignService:
+        def start_stage(self, campaign_id, **payload):
+            calls.append({"campaign_id": campaign_id, **payload})
+            return {
+                "id": campaign_id,
+                "status": "shadow",
+                "execution_mode": payload["execution_mode"],
+            }
+
+    monkeypatch.setattr(
+        parser_api,
+        "RolloutCampaignService",
+        FakeCampaignService,
+    )
+
+    result = parser_api.start_check_item_rollout_stage(
+        "campaign-1",
+        parser_api.RolloutCampaignLifecycleRequest(
+            reason="capture frozen targets",
+            execution_mode="live_capture",
+        ),
+        _admin_request("engineer"),
+        "rollout-live-key",
+    )
+
+    assert result["execution_mode"] == "live_capture"
+    assert calls == [
+        {
+            "campaign_id": "campaign-1",
+            "actor": "engineer",
+            "reason": "capture frozen targets",
+            "idempotency_key": "rollout-live-key",
+            "execution_mode": "live_capture",
+        }
+    ]
+
+
+def test_rollout_legacy_route_admin_endpoints_preserve_governance(
+    monkeypatch,
+):
+    calls: list[tuple[str, dict]] = []
+
+    class FakeLegacyRouteService:
+        def list(self, **payload):
+            calls.append(("list", payload))
+            return {"items": [{"id": "route-1", "status": "active"}]}
+
+        def create_runtime_bundle_route(self, **payload):
+            calls.append(("create", payload))
+            return {"id": "route-1", "status": "active"}
+
+        def deprecate(self, route_id, **payload):
+            calls.append(("deprecate", {"route_id": route_id, **payload}))
+            return {"id": route_id, "status": "deprecated"}
+
+    monkeypatch.setattr(
+        parser_api,
+        "RolloutLegacyRouteService",
+        FakeLegacyRouteService,
+    )
+    current_user = _admin_request("engineer").state.current_user
+
+    page = parser_api.list_check_item_rollout_legacy_routes(
+        page=2,
+        page_size=10,
+        status="active",
+        _user=current_user,
+    )
+    created = parser_api.create_check_item_rollout_legacy_route(
+        parser_api.RolloutLegacyRouteCreateRequest(
+            route_name="current CPU baseline",
+            runtime_bundle_version_id="bundle-active-1",
+        ),
+        _admin_request("engineer"),
+        "legacy-route-create",
+    )
+    deprecated = parser_api.deprecate_check_item_rollout_legacy_route(
+        "route-1",
+        parser_api.RolloutLegacyRouteLifecycleRequest(
+            reason="baseline replaced",
+        ),
+        _admin_request("approver"),
+    )
+
+    assert page["items"][0]["id"] == "route-1"
+    assert created["status"] == "active"
+    assert deprecated["status"] == "deprecated"
+    assert calls == [
+        (
+            "list",
+            {"page": 2, "page_size": 10, "status": "active"},
+        ),
+        (
+            "create",
+            {
+                "route_name": "current CPU baseline",
+                "runtime_bundle_version_id": "bundle-active-1",
+                "actor": "engineer",
+                "idempotency_key": "legacy-route-create",
+            },
+        ),
+        (
+            "deprecate",
+            {
+                "route_id": "route-1",
+                "actor": "approver",
+                "reason": "baseline replaced",
+            },
+        ),
+    ]
+
+
+def test_rollout_legacy_route_conflict_is_structured(monkeypatch):
+    class FakeLegacyRouteService:
+        def create_runtime_bundle_route(self, **_payload):
+            raise parser_api.LegacyRouteError(
+                "legacy_route_dependency_drift",
+                "runtime bundle dependency digest changed",
+            )
+
+    monkeypatch.setattr(
+        parser_api,
+        "RolloutLegacyRouteService",
+        FakeLegacyRouteService,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        parser_api.create_check_item_rollout_legacy_route(
+            parser_api.RolloutLegacyRouteCreateRequest(
+                route_name="stale baseline",
+                runtime_bundle_version_id="bundle-stale",
+            ),
+            _admin_request("engineer"),
+            "legacy-route-conflict",
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "legacy_route_dependency_drift"
+    assert "dependency digest changed" in exc_info.value.detail["blockers"][0]
+
+
+def test_rollout_stage_execution_read_endpoints_enforce_campaign_scope(
+    monkeypatch,
+):
+    class FakeCampaignService:
+        def get(self, campaign_id):
+            return {"id": campaign_id} if campaign_id == "campaign-1" else None
+
+    class FakeExecutionService:
+        def list_for_campaign(self, campaign_id):
+            return [{"id": "execution-1", "campaign_id": campaign_id}]
+
+        def get(self, execution_id):
+            if execution_id == "execution-1":
+                return {"id": execution_id, "campaign_id": "campaign-1"}
+            return None
+
+    monkeypatch.setattr(
+        parser_api,
+        "RolloutCampaignService",
+        FakeCampaignService,
+    )
+    monkeypatch.setattr(
+        parser_api,
+        "RolloutStageExecutionService",
+        FakeExecutionService,
+    )
+    current_user = _admin_request().state.current_user
+
+    page = parser_api.list_check_item_rollout_stage_executions(
+        "campaign-1",
+        current_user,
+    )
+    detail = parser_api.get_check_item_rollout_stage_execution(
+        "campaign-1",
+        "execution-1",
+        current_user,
+    )
+
+    assert page["items"] == [
+        {"id": "execution-1", "campaign_id": "campaign-1"}
+    ]
+    assert detail["id"] == "execution-1"
+
+    with pytest.raises(HTTPException) as exc_info:
+        parser_api.get_check_item_rollout_stage_execution(
+            "campaign-2",
+            "execution-1",
+            current_user,
+        )
+
+    assert exc_info.value.status_code == 404

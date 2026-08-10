@@ -1,4 +1,4 @@
-"""Analyze no_event changes and seed rule-generation jobs for gaps."""
+"""Analyze production no-event evidence without triggering rule generation."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ from typing import Any
 
 from src.core.patrol.event_builder import no_event_reason
 from src.core.patrol.event_rules import EventRuleRepository
-from src.core.rule_control.repository import RuleGenerationJobRepository
 from src.infrastructure.db.models import NetworkChangeRecord
 from src.infrastructure.db.postgres import get_db_session
 
@@ -141,6 +140,19 @@ class ChangeGapAnalysisService:
                         if gap_kind in {"missing_event_rules", "unmatched_event_rules"}
                         else "CHANGE_POLICY"
                     ),
+                    "source_prefill": {
+                        "action": "rule-gap-source",
+                        "job_type": "parser_validation",
+                        "command": sample.get("command"),
+                        "vendor": sample.get("vendor"),
+                        "observation_type": observation_type,
+                        "suggested_job_type": (
+                            "EVENT_RULE"
+                            if gap_kind
+                            in {"missing_event_rules", "unmatched_event_rules"}
+                            else "CHANGE_POLICY"
+                        ),
+                    },
                 }
             )
         return {
@@ -162,64 +174,8 @@ class ChangeGapAnalysisService:
         limit: int = 20,
         created_by: str | None = None,
     ) -> dict[str, Any]:
-        analysis = self.analyze(days=days, limit=max(limit * 10, 200))
-        repository = RuleGenerationJobRepository()
-        created: list[dict[str, Any]] = []
-        skipped: list[dict[str, Any]] = []
-        for gap in analysis["gaps"][: max(1, min(int(limit), 50))]:
-            observation_type = str(gap["observation_type"])
-            job_type = str(gap["suggested_job_type"])
-            source_ref = f"change_gap:{job_type}:{observation_type}"
-            existing = repository.find_job(
-                job_type=job_type,
-                source_ref=source_ref,
-                status_not_in={"deprecated", "rejected"},
-            )
-            if existing is not None:
-                skipped.append({"source_ref": source_ref, "job_id": existing.get("id")})
-                continue
-            job = repository.create_job(
-                job_type=job_type,
-                source_ref=source_ref,
-                asset_type=job_type,
-                payload={
-                    "gap": gap,
-                    "workflow": "rule-asset-generation",
-                    "historical_change_stats": {
-                        "observation_type": observation_type,
-                        "change_count": gap["change_count"],
-                        "top_reason": gap["top_reason"],
-                        "days": days,
-                    },
-                    # Dataset candidates recovered from the runs behind the
-                    # no_event changes; UI/auto-context can preselect them so
-                    # "seed → context → generate" becomes one confirmation.
-                    "candidate_dataset_ids": list(gap.get("dataset_ids") or []),
-                    "missing_context": ["records", "historical_values"],
-                },
-                validation_report={
-                    "success": False,
-                    "generator": "change-gap-analysis",
-                    "ready_for_generation": False,
-                    "candidate_dataset_ids": list(gap.get("dataset_ids") or []),
-                    "note": (
-                        "Seeded from historical no_event changes; "
-                        "dataset candidates prefilled from change runs — "
-                        "confirm them to build the generation context."
-                    ),
-                },
-                created_by=created_by or "change-gap-analysis",
-            )
-            created.append(job)
-        return {
-            "success": True,
-            "created_count": len(created),
-            "skipped_count": len(skipped),
-            "created": created,
-            "skipped": skipped,
-            "analysis_summary": {
-                "change_count": analysis["change_count"],
-                "gap_count": len(analysis["gaps"]),
-                "by_reason": analysis["by_reason"],
-            },
-        }
+        del days, limit, created_by
+        raise ValueError(
+            "production Change gaps cannot create rule-generation jobs; "
+            "import explicit offline evidence in Parser control first"
+        )

@@ -10,6 +10,8 @@ export type ParserWorkspaceKey =
 export type ParserSubWorkspaceKey =
   | 'asset-production-units'
   | 'source-jobs'
+  | 'catalog-management'
+  | 'assessment-policies'
   | 'published-assets'
   | 'coverage-backfill'
   | 'audit-log'
@@ -88,12 +90,17 @@ const focusMap: Record<ParserFocusKind, { workspace: ParserWorkspaceKey; subWork
 }
 
 export const parserWorkspaceTabs: Record<ParserWorkspaceKey, ParserSubWorkspaceKey[]> = {
-  production: ['asset-production-units', 'source-jobs'],
+  production: [
+    'asset-production-units',
+    'source-jobs',
+    'catalog-management',
+    'assessment-policies',
+  ],
   inbox: ['work-items', 'jobs', 'backfills'],
   inventory: ['published-assets'],
   generation: ['rule-gaps', 'rule-generation', 'agent-loop-attempts', 'datasets'],
   release: ['asset-bundles', 'replay-reports'],
-  runtime: ['coverage-backfill'],
+  runtime: ['coverage-backfill', 'rule-gaps'],
   audit: ['audit-log'],
 }
 
@@ -169,7 +176,7 @@ const legacyProductDestination = (
     if (subWorkspace === 'rule-gaps') {
       return {
         workspace: 'runtime',
-        subWorkspace: 'coverage-backfill',
+        subWorkspace: 'rule-gaps',
         action: null,
       }
     }

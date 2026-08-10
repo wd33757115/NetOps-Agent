@@ -249,6 +249,7 @@ def is_down(value: Any) -> bool:
         "inactive",
         "failed",
         "fault",
+        "absent",
     }
 
 
@@ -278,6 +279,7 @@ def is_up(value: Any) -> bool:
         "established",
         "normal",
         "ok",
+        "present",
     }
 
 
@@ -323,6 +325,7 @@ class EventRule:
     event_type: str
     severity: str
     predicate: Callable[[dict[str, Any]], bool]
+    condition: dict[str, Any] | None = None
     priority: int = 100
     exclusive: bool = False
     event_class: str = "fault"
@@ -334,6 +337,7 @@ class EventRule:
         "entity_key",
         "field",
     )
+    version_id: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -399,6 +403,7 @@ class EventRuleDefinition:
                 condition,
                 change,
             ),
+            condition=dict(self.condition),
             priority=self.priority,
             exclusive=self.exclusive,
             event_class=self.event_class,
@@ -858,6 +863,10 @@ class EventRuleRepository:
                             dict(version.condition_json or {}),
                         ),
                     ),
+                    condition=_effective_condition(
+                        str(rule.name),
+                        dict(version.condition_json or {}),
+                    ),
                     priority=int(version.priority or 100),
                     exclusive=bool(version.exclusive),
                     event_class=str(version.event_class or "fault"),
@@ -870,6 +879,7 @@ class EventRuleRepository:
                         version.correlation_key_json
                         or ("device_id", "entity_type", "entity_key", "field")
                     ),
+                    version_id=str(version.id),
                 )
                 for rule, version in rows
             ]
@@ -1389,8 +1399,10 @@ def match_event_rule(change: dict[str, Any]) -> EventRule | None:
     return matched[0] if matched else None
 
 
-def event_rules_from_snapshot(rows: list[dict[str, Any]]) -> list[EventRule]:
-    rules = [
+def event_rule_definitions_from_snapshot(
+    rows: list[dict[str, Any]],
+) -> list[EventRuleDefinition]:
+    return [
         EventRuleDefinition(
             rule_id=str(row.get("rule_name") or row.get("rule_id") or ""),
             version=int(row.get("version") or 1),
@@ -1408,8 +1420,15 @@ def event_rules_from_snapshot(rows: list[dict[str, Any]]) -> list[EventRule]:
             correlation_keys=tuple(
                 row.get("correlation_keys") or ("device_id", "entity_type", "entity_key", "field")
             ),
-        ).to_rule()
+        )
         for row in rows
+    ]
+
+
+def event_rules_from_snapshot(rows: list[dict[str, Any]]) -> list[EventRule]:
+    rules = [
+        definition.to_rule()
+        for definition in event_rule_definitions_from_snapshot(rows)
     ]
     return sorted(rules, key=lambda rule: (-rule.priority, rule.rule_id))
 

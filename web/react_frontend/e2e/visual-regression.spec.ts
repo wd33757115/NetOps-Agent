@@ -306,6 +306,78 @@ async function installAuthenticatedApi(page: Page) {
         },
       })
     }
+    if (path.endsWith('/parser/asset-production/check-items/')) {
+      return route.fulfill({
+        json: {
+          items: [],
+          page: 1,
+          page_size: 25,
+          total: 0,
+          page_count: 0,
+          summary: {
+            total: 0,
+            action_required: 0,
+            in_progress: 0,
+            awaiting_approval: 0,
+            published: 0,
+            not_applicable: 0,
+            exception: 0,
+            by_bucket: {},
+            by_status: {},
+          },
+        },
+      })
+    }
+    if (path.endsWith('/parser/asset-production/automation-control/')) {
+      return route.fulfill({
+        json: {
+          settings: {
+            mode: 'disabled',
+            max_concurrency: 1,
+            max_generation_attempts: 3,
+            stale_run_seconds: 3600,
+            retry_delay_seconds: 300,
+            min_period_count: 2,
+            min_device_count: 2,
+            min_record_count: 10,
+            max_estimated_daily_events: 500,
+            allow_critical: false,
+            last_run: {},
+          },
+          scheduler: {
+            status: 'ok',
+            recorded_at: '2026-07-29T10:00:00Z',
+            age_seconds: 5,
+            worker_id: 'celery@visual',
+          },
+          active_generation_runs: 0,
+          command_units: {},
+        },
+      })
+    }
+    if (path.endsWith('/parser/check-item-runtime-bundles/health/')) {
+      return route.fulfill({
+        json: {
+          items: [],
+          page: 1,
+          page_size: 25,
+          total: 0,
+          page_count: 0,
+          summary: {
+            scope: 'active_catalog',
+            catalog_version: 1,
+            check_item_count: 0,
+            implementation_pair_count: 0,
+            ready_count: 0,
+            missing_count: 0,
+            invalid_count: 0,
+            ready_rate: 0,
+            ready: true,
+            status_counts: {},
+          },
+        },
+      })
+    }
     if (path.endsWith('/parser/dispatch-control/')) {
       return route.fulfill({ json: { auto_dispatch_enabled: false } })
     }
@@ -352,7 +424,9 @@ test('devices visual baseline', async ({ page }) => {
 test('parser control plane visual baseline', async ({ page }) => {
   await installAuthenticatedApi(page)
   await page.goto('/skills/parser')
-  await expect(page.getByRole('tab', { name: /今日待办/ })).toBeVisible()
+  await expect(page.getByText('巡检规则资产', { exact: true }).first()).toBeVisible()
+  await expect(page.getByRole('button', { name: '生产工作台', exact: true }))
+    .toHaveAttribute('aria-current', 'page')
   await settle(page)
   await expect(page).toHaveScreenshot('parser-control-plane.png')
 })

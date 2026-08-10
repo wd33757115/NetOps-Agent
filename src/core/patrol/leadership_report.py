@@ -22,7 +22,6 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
 
-from src.core.patrol.event_rules import is_down
 from src.core.patrol.unstructured_diff import summarize_unstructured_changes
 from src.skills.official_document.docx_format import (
     add_styled_paragraph,
@@ -204,67 +203,75 @@ def _canonical_interface(value: Any) -> str:
     return re.sub(r"[^a-z0-9/.-]+", "", text)
 
 
-def _interface_status_index(summary: dict[str, Any]) -> dict[tuple[str, str], Any]:
-    candidates: dict[tuple[str, str], tuple[str, int, Any]] = {}
-    for run in summary.get("runs") or []:
-        for observation in run.get("observations") or []:
-            field = str(observation.get("field") or "").casefold()
-            observation_type = str(observation.get("observation_type") or "").casefold()
-            entity_type = str(observation.get("entity_type") or "").casefold()
-            if field not in {
-                "link",
-                "status",
-                "oper_status",
-                "protocol",
-                "line_protocol",
-            }:
-                continue
-            if "interface" not in entity_type:
-                continue
-            device_id = str(observation.get("device_id") or run.get("device_id") or "")
-            key = (device_id, _canonical_interface(observation.get("entity_key")))
-            if key[0] and key[1]:
-                priority = (
-                    3
-                    if observation_type == "interface.oper_status"
-                    else 2
-                    if field in {"link", "status", "oper_status"}
-                    else 1
-                )
-                candidate = (
-                    str(observation.get("observed_at") or ""),
-                    priority,
-                    observation.get("value"),
-                )
-                current = candidates.get(key)
-                if current is None or candidate[:2] >= current[:2]:
-                    candidates[key] = candidate
-    return {key: candidate[2] for key, candidate in candidates.items()}
-
-
 def _partition_correlated_risks(
     summary: dict[str, Any], risks: list[dict[str, Any]]
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    statuses = _interface_status_index(summary)
+    by_episode = {
+        str(risk.get("risk_episode_id") or ""): risk
+        for risk in risks
+        if risk.get("risk_episode_id")
+    }
+    candidates: dict[str, list[dict[str, Any]]] = {}
+    for association in summary.get("risk_episode_associations") or []:
+        if str(association.get("status") or "") != "approved":
+            continue
+        if association.get("stale") is True or not association.get("reviewed_by"):
+            continue
+        if str(association.get("source_type") or "manual") == "approved_policy":
+            policy = dict(association.get("policy_ref_json") or {})
+            if not {
+                "policy_id",
+                "policy_version",
+                "policy_digest",
+                "approval_digest",
+            }.issubset({key for key, value in policy.items() if value}):
+                continue
+        primary_episode = str(association.get("primary_risk_episode_id") or "")
+        related_episode = str(association.get("related_risk_episode_id") or "")
+        if (
+            not primary_episode
+            or not related_episode
+            or primary_episode == related_episode
+            or primary_episode not in by_episode
+            or related_episode not in by_episode
+        ):
+            continue
+        candidates.setdefault(related_episode, []).append(association)
+
+    primary_episodes = {
+        str(items[0].get("primary_risk_episode_id") or "")
+        for items in candidates.values()
+        if len(items) == 1
+    }
+    governed = {
+        related_episode: items[0]
+        for related_episode, items in candidates.items()
+        if (
+            len(items) == 1
+            and related_episode not in primary_episodes
+            and str(items[0].get("primary_risk_episode_id") or "")
+            not in candidates
+        )
+    }
     primary: list[dict[str, Any]] = []
     correlated: list[dict[str, Any]] = []
     for risk in risks:
-        is_optical = str(risk.get("domain") or "") == "optical" or str(
-            risk.get("event_type") or ""
-        ).startswith("Optical")
-        status = statuses.get(
-            (
-                str(risk.get("device_id") or ""),
-                _canonical_interface(risk.get("entity_key")),
-            )
-        )
-        if is_optical and status is not None and is_down(status):
+        association = governed.get(str(risk.get("risk_episode_id") or ""))
+        if association is not None:
             correlated.append(
                 {
                     **risk,
                     "correlation": {
-                        "status": "related_interface_down",
-                        "interface_status": status,
+                        "status": "approved_risk_episode_association",
+                        "association_id": association.get("id"),
+                        "primary_risk_episode_id": association.get(
+                            "primary_risk_episode_id"
+                        ),
+                        "relation_type": association.get("relation_type"),
+                        "reviewed_by": association.get("reviewed_by"),
+                        "evidence_refs": list(
+                            association.get("evidence_refs_json") or []
+                        ),
                         "counted_as_independent_risk": False,
                     },
                 }
@@ -448,6 +455,9 @@ def _build_risks(summary: dict[str, Any]) -> list[dict[str, Any]]:
             "dimensions": dict(finding.get("dimensions") or {}),
             "reference_field": finding.get("reference_field"),
             "reference_value": finding.get("reference_value"),
+            "risk_case_id": finding.get("risk_case_id"),
+            "risk_episode_id": finding.get("risk_episode_id")
+            or finding.get("episode_id"),
             "evidence_chain": {
                 "analysis_attempt_id": (summary.get("analysis") or {}).get("attempt_id"),
                 "analysis_revision": (summary.get("analysis") or {}).get("revision"),
@@ -496,6 +506,9 @@ def _build_risks(summary: dict[str, Any]) -> list[dict[str, Any]]:
             "dimensions": dict(event.get("dimensions") or {}),
             "reference_field": event.get("reference_field"),
             "reference_value": event.get("reference_value"),
+            "risk_case_id": event.get("risk_case_id"),
+            "risk_episode_id": event.get("risk_episode_id")
+            or event.get("episode_id"),
             "evidence_chain": dict(event.get("evidence_chain") or {}),
         }
         key = _risk_key(row)
@@ -775,7 +788,7 @@ def _assessment(
                 "周期变化事件形成）；"
                 f"最高等级为{SEVERITY_LABEL[top]}"
                 + (
-                    f"；另有 {len(correlated_evidence)} 项信号作为主故障关联证据，不重复计数"
+                    f"；另有 {len(correlated_evidence)} 项症状已通过独立复核归入主问题，不重复计数"
                     if correlated_evidence
                     else ""
                 )
@@ -789,8 +802,8 @@ def _assessment(
             "status": "发现需复核的关联异常证据",
             "trust": "中",
             "basis": (
-                f"发现 {len(correlated_evidence)} 项异常信号与接口非运行状态重合，"
-                "尚不能作为独立故障重复定级，需结合端口用途和业务状态核验"
+                f"发现 {len(correlated_evidence)} 项症状已通过独立复核归入主问题，"
+                "技术事实仍完整保留；当前缺少可独立展示的主问题，请复核冻结关联证据"
             ),
             "conclusion_allowed": False,
         }
@@ -927,8 +940,8 @@ def _recommendations(
             {
                 "priority": "P2",
                 "action": (
-                    f"核验 {len(correlated_evidence)} 项与 DOWN 接口重合的测量信号，"
-                    "结合端口用途确认属于预期停用、链路中断或模块异常"
+                    f"持续核验 {len(correlated_evidence)} 项已关联症状与主问题的一致性，"
+                    "若根因、实体或时间关系变化，应撤销关联并生成新报告版本"
                 ),
                 "owner": "网络运维组",
                 "deadline": "3 个工作日",
@@ -978,7 +991,7 @@ def build_leadership_report(
             and domain.get("status") == "异常"
         ):
             domain["status"] = "需复核"
-            domain["reason"] = "异常信号与接口非运行状态重合，未重复计为独立风险"
+            domain["reason"] = "异常症状已通过独立复核归入主问题，技术证据仍完整保留"
     assessment = _assessment(summary, risks, domains, correlated_evidence)
     trend = _build_longitudinal_trend(summary, risks, correlated_evidence)
     scope = dict(summary.get("scope") or {})
@@ -1048,7 +1061,7 @@ def build_leadership_report(
         limitations.append("当前状态未被活动故障规则有效覆盖，未产生事件不等同于设备健康。")
     if correlated_evidence:
         limitations.append(
-            "与接口非运行状态重合的光功率信号仅作为关联证据，不重复定级；其业务影响仍需结合端口用途复核。"
+            "已批准的风险关联只调整领导问题计数，不删除技术风险、事件或证据；关联失效后必须在新报告版本中恢复独立计数。"
         )
     incomplete_domain_labels = [
         str(item.get("label") or item.get("domain") or "")
@@ -1256,8 +1269,8 @@ def render_leadership_markdown(report: dict[str, Any]) -> str:
         (
             f"- 风险归并：当前状态规则命中 {metrics['current_state_finding_count']} 条，"
             f"尚未恢复故障事件 {metrics['unresolved_fault_event_count']} 条；按对象去重并"
-            f"归并关联信号后，形成独立当前风险 {metrics['current_risk_count']} 条、"
-            f"关联证据 {report['risk_summary']['correlated_evidence_count']} 条"
+            f"按已批准的 RiskEpisode 关联投影后，形成领导问题 {metrics['current_risk_count']} 项、"
+            f"关联症状 {report['risk_summary']['correlated_evidence_count']} 项"
         ),
         "",
         "## 三、主要风险",
@@ -1274,12 +1287,12 @@ def render_leadership_markdown(report: dict[str, Any]) -> str:
         lines.append("本次未形成已确认风险项。")
     if report.get("correlated_evidence"):
         lines.append(
-            f"另有 {len(report['correlated_evidence'])} 项异常信号与接口非运行状态重合，"
-            "作为关联证据保留，不重复计为独立风险。"
+            f"另有 {len(report['correlated_evidence'])} 项症状已通过独立复核归入主问题，"
+            "技术风险与事件证据完整保留，不重复计入领导问题数。"
         )
         for item in report.get("correlated_evidence_groups") or []:
             lines.append(
-                f"- 关联证据：{item['device_name']} / {item['objects']}，"
+                f"- 关联症状：{item['device_name']} / {item['objects']}，"
                 f"当前值 {item['current_values']}，判据 {item['criterion']}。"
             )
     if metrics.get("recovery_event_count"):
@@ -1329,7 +1342,7 @@ def render_leadership_markdown(report: dict[str, Any]) -> str:
     for row in report["domains"]:
         lines.append(
             f"- {row['label']}：{row['status']}，Observation {row['observation_count']}，"
-            f"独立风险 {row['independent_risk_count']}，关联证据 "
+            f"领导问题 {row['independent_risk_count']}，关联症状 "
             f"{row['correlated_evidence_count']}，Change {row['change_count']}，"
             f"Event {row['event_count']}。"
         )
@@ -1558,7 +1571,7 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
     )
     add_styled_paragraph(
         doc,
-        "说明：巡检流程执行完成、未产生状态变化或事件，均不能单独证明设备健康；"
+        "说明：即使巡检流程执行完成，或未产生状态变化与事件，也不能单独证明设备健康；"
         "本报告结论同时受执行覆盖、结构化质量和当前状态规则覆盖约束。",
         first_line_indent=0.74,
     )
@@ -1590,8 +1603,8 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
             f"{metrics['parse_failed_count']} 条。事件事实 {metrics['event_count']} 条，"
             f"其中恢复类 {metrics['recovery_event_count']} 条。当前状态规则命中 "
             f"{metrics['current_state_finding_count']} 条，尚未恢复故障事件 "
-            f"{metrics['unresolved_fault_event_count']} 条；按对象去重并归并关联信号后，"
-            f"形成独立当前风险 {metrics['current_risk_count']} 条、关联证据 "
+            f"{metrics['unresolved_fault_event_count']} 条；按已批准的 RiskEpisode 关联投影后，"
+            f"形成领导问题 {metrics['current_risk_count']} 项、关联症状 "
             f"{report['risk_summary']['correlated_evidence_count']} 条。"
         ),
         first_line_indent=0.74,
@@ -1630,9 +1643,9 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
         )
         add_styled_paragraph(
             doc,
-            f"另有 {len(report['correlated_evidence'])} 项异常信号与接口非运行状态重合，"
-            f"涉及设备 {'、'.join(devices)}。相关信号作为主故障关联证据保留，"
-            "不重复计为独立风险，具体对象和值如下。",
+            f"另有 {len(report['correlated_evidence'])} 项症状已通过独立复核归入主问题，"
+            f"涉及设备 {'、'.join(devices)}。技术风险与事件证据完整保留，"
+            "不重复计入领导问题数，具体对象和值如下。",
             first_line_indent=0.74,
         )
         correlated_rows = [
@@ -1649,7 +1662,7 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
         if correlated_rows:
             _add_table(
                 doc,
-                ["关联信号", "设备", "对象", "当前值", "设备判据", "数量"],
+                ["关联症状", "设备", "对象", "当前值", "判定依据", "数量"],
                 correlated_rows,
                 [2.4, 1.3, 4.8, 2.0, 3.5, 0.8],
             )
@@ -1898,7 +1911,7 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
 
         for index, item in enumerate(ordered_chains, start=1):
             chain = dict(item.get("chain") or {})
-            kind = "独立风险" if item.get("kind") == "independent_risk" else "关联证据"
+            kind = "领导问题" if item.get("kind") == "independent_risk" else "关联症状"
             item_heading = _add_compact_paragraph(
                 doc,
                 (

@@ -1,5 +1,9 @@
 # 巡检事实链完整性与失败恢复修复计划
 
+<!-- document-status: superseded -->
+> **历史文档，已被取代。** 本文仅保留审计背景，不再作为当前实现、操作或完成状态依据。
+> 当前权威方案见[检查项中心的巡检与规则资产平台总体改造方案](check-item-centered-patrol-platform-remediation-2026-07-27.md)。
+
 更新日期：2026-07-11  
 审计基线：`769ac0bacd5c46b69bb3ce7e5dd827195f85c506`
 

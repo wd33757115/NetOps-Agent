@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import io
-import ipaddress
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from .assets import TemplateAssetStore
@@ -16,6 +15,7 @@ from .output_classifier import OutputClassifier
 from .parser_bundle import parse_parser_bundle
 from .policy import CategorySpec, ParserPolicy
 from .textfsm_input import prepare_textfsm_input
+from .value_types import is_unavailable_value, is_valid_ip_value
 
 try:
     import textfsm
@@ -80,6 +80,53 @@ class ParserRuntime:
             command=canonical_command,
         )
 
+    def _effective_decision(
+        self,
+        *,
+        identity: DeviceIdentity,
+        command: str,
+    ):
+        """Promote catalog-managed commands when an approved Parser exists.
+
+        Explicit raw-hash policies remain authoritative. The promotion only applies
+        to the legacy catch-all ``raw_only`` result, which otherwise prevents a
+        newly governed check-item implementation from ever reaching its Parser.
+        """
+
+        decision = self.policy.decide(
+            vendor=identity.vendor,
+            model=identity.model,
+            family=identity.family,
+            command=command,
+        )
+        template = None
+        if (
+            not decision.enabled
+            and decision.handling == "raw_only"
+            and identity.status == "known"
+        ):
+            template = self._resolve_template(
+                identity=identity,
+                canonical_command=decision.canonical_command,
+            )
+            if template is not None:
+                category = str(getattr(template, "category", None) or "parser_asset")
+                decision = replace(
+                    decision,
+                    enabled=True,
+                    handling="structured",
+                    asset_mode="full_chain",
+                    category=decision.category or category,
+                    capability=decision.capability or category,
+                    capability_status="supported",
+                    template_profile=(
+                        decision.template_profile
+                        or str(getattr(template, "profile", None) or "")
+                        or None
+                    ),
+                )
+        return decision, template
+
     def check_coverage(
         self,
         *,
@@ -87,10 +134,8 @@ class ParserRuntime:
         command: str,
     ) -> dict[str, Any]:
         """Check production readiness without parsing device output."""
-        decision = self.policy.decide(
-            vendor=identity.vendor,
-            model=identity.model,
-            family=identity.family,
+        decision, resolved_template = self._effective_decision(
+            identity=identity,
             command=command,
         )
         result = {
@@ -122,7 +167,7 @@ class ParserRuntime:
                 "coverage_status": "identity_unknown",
                 "failure_code": "identity_unknown",
             }
-        template = self._resolve_template(
+        template = resolved_template or self._resolve_template(
             identity=identity,
             canonical_command=decision.canonical_command,
         )
@@ -151,6 +196,55 @@ class ParserRuntime:
             "template_version": template.version,
         }
 
+    def classify_output(
+        self,
+        *,
+        identity: DeviceIdentity,
+        command: str,
+        raw_text: str,
+    ) -> dict[str, Any]:
+        """Classify raw command evidence without resolving or running a Parser."""
+        decision, _resolved_template = self._effective_decision(
+            identity=identity,
+            command=command,
+        )
+        output_quality_profile = (
+            self.runtime_bundle.output_quality_profile(
+                decision.canonical_command
+            )
+            if self.runtime_bundle is not None
+            and hasattr(self.runtime_bundle, "output_quality_profile")
+            else None
+        )
+        classification = self.output_classifier.classify(
+            raw_text,
+            decision=decision,
+            profile=output_quality_profile,
+        )
+        return {
+            "canonical_command": decision.canonical_command,
+            "policy_status": (
+                "eligible"
+                if decision.enabled
+                else (
+                    "raw"
+                    if decision.handling == "raw_hash_diff"
+                    else "ignored"
+                )
+            ),
+            "identity_status": identity.status,
+            "handling": decision.handling,
+            "output_status": classification.status,
+            "output_reason": classification.reason,
+            "capability": decision.capability,
+            "capability_status": decision.capability_status,
+            "template_profile": decision.template_profile,
+            "comparison_profile": decision.comparison_profile,
+            "comparison_profile_version": (
+                decision.comparison_profile_version
+            ),
+        }
+
     def parse(
         self,
         *,
@@ -158,10 +252,8 @@ class ParserRuntime:
         command: str,
         raw_text: str,
     ) -> ParserRuntimeResult:
-        decision = self.policy.decide(
-            vendor=identity.vendor,
-            model=identity.model,
-            family=identity.family,
+        decision, resolved_template = self._effective_decision(
+            identity=identity,
             command=command,
         )
         evidence = {
@@ -263,7 +355,7 @@ class ParserRuntime:
                 category=decision.category,
                 **common,
             )
-        template = self._resolve_template(
+        template = resolved_template or self._resolve_template(
             identity=identity,
             canonical_command=decision.canonical_command,
         )
@@ -342,7 +434,6 @@ class ParserRuntime:
         required = set(spec.required_fields if spec else ())
         if required and any(
             not required.issubset(record)
-            or any(record.get(field) in (None, "") for field in required)
             for record in records
         ):
             return self._failed(decision, identity, template, "required_fields_missing", evidence)
@@ -357,46 +448,10 @@ class ParserRuntime:
             for record in records:
                 for field, validator in spec.validators.items():
                     value = record.get(field)
-                    if value in (None, ""):
-                        continue
-                    if validator.get("type") == "percent":
-                        try:
-                            numeric = float(str(value).rstrip("%"))
-                        except ValueError:
-                            return self._failed(
-                                decision, identity, template, "field_validation_failed", evidence
-                            )
-                        if numeric < 0 or numeric > 100:
-                            return self._failed(
-                                decision, identity, template, "field_validation_failed", evidence
-                            )
-                    if validator.get("type") in {"ip", "ip_or_unassigned"}:
-                        text = str(value).strip()
-                        if validator.get("type") == "ip_or_unassigned" and text.lower() in {
-                            "unassigned",
-                            "--",
-                            "none",
-                        }:
-                            continue
-                        try:
-                            ipaddress.ip_interface(text)
-                        except ValueError:
-                            return self._failed(
-                                decision,
-                                identity,
-                                template,
-                                "field_validation_failed",
-                                evidence,
-                            )
-                    if validator.get("type") == "interface_name":
-                        if _looks_like_interface_header(value):
-                            return self._failed(
-                                decision,
-                                identity,
-                                template,
-                                "field_validation_failed",
-                                evidence,
-                            )
+                    if _field_validation_failed(value, validator):
+                        return self._failed(
+                            decision, identity, template, "field_validation_failed", evidence
+                        )
         return ParserRuntimeResult(
             policy_status="eligible",
             identity_status="known",
@@ -458,7 +513,7 @@ class ParserRuntime:
                 for row in rows
             ]
             spec = specs.get(record_set.name)
-            failure = self._validate_records(records, spec)
+            failure = self._validate_records(records, spec, raw_text=raw_text)
             if failure:
                 return self._failed(
                     decision,
@@ -469,6 +524,35 @@ class ParserRuntime:
                 )
             output[record_set.name] = records
         if not any(output.values()):
+            legal_empty = any(
+                spec
+                and spec.allow_empty
+                and any(
+                    re.search(pattern, raw_text or "", re.IGNORECASE | re.DOTALL)
+                    for pattern in spec.empty_patterns
+                )
+                for spec in specs.values()
+            )
+            if legal_empty:
+                return ParserRuntimeResult(
+                    policy_status="eligible",
+                    identity_status="known",
+                    parser_status="empty",
+                    canonical_command=decision.canonical_command,
+                    handling=decision.handling,
+                    template_id=template.id,
+                    template_version=template.version,
+                    structured_data={
+                        "format": "netops.structured_record_sets/v1",
+                        "record_sets": output,
+                    },
+                    identity_evidence=evidence,
+                    category="multi_record",
+                    output_status="valid_empty",
+                    capability=decision.capability,
+                    capability_status=decision.capability_status,
+                    template_profile=decision.template_profile,
+                )
             return self._failed(
                 decision,
                 identity,
@@ -520,15 +604,26 @@ class ParserRuntime:
             allow_empty=bool(validation.get("allow_empty", False)),
             empty_patterns=tuple(validation.get("empty_patterns") or ()),
             ignore_fields=tuple(validation.get("ignore_fields") or ()),
+            presence=str(validation.get("presence") or "required").strip().casefold(),
         )
 
     @staticmethod
     def _validate_records(
         records: list[dict[str, Any]],
         spec: CategorySpec | None,
+        *,
+        raw_text: str,
     ) -> str | None:
         if spec is None:
             return None
+        if not records:
+            if spec.presence == "optional":
+                return None
+            legal_empty = spec.allow_empty and any(
+                re.search(pattern, raw_text or "", re.IGNORECASE | re.DOTALL)
+                for pattern in spec.empty_patterns
+            )
+            return None if legal_empty else "unexpected_empty"
         required = set(spec.required_fields)
         if required and any(
             not required.issubset(record)
@@ -544,6 +639,12 @@ class ParserRuntime:
                     if key_result.duplicate_keys
                     else "primary_key_invalid"
                 )
+        if any(
+            _field_validation_failed(record.get(field), validator)
+            for record in records
+            for field, validator in spec.validators.items()
+        ):
+            return "field_validation_failed"
         return None
 
     @staticmethod
@@ -585,3 +686,39 @@ def _looks_like_interface_header(value: Any) -> bool:
         "interface name",
         "port name",
     }
+
+
+def _field_validation_failed(value: Any, validator: dict[str, Any]) -> bool:
+    if value in (None, ""):
+        return False
+    if is_unavailable_value(value, validator.get("unavailable_tokens")):
+        return False
+    rule_type = str(validator.get("type") or "").strip().casefold()
+    text = str(value).strip()
+    if rule_type in {"number", "percent"}:
+        try:
+            numeric = float(text.rstrip("%") if rule_type == "percent" else text)
+        except ValueError:
+            return True
+        if rule_type == "percent" and not 0 <= numeric <= 100:
+            return True
+        minimum = validator.get("minimum")
+        maximum = validator.get("maximum")
+        return bool(
+            (minimum is not None and numeric < float(minimum))
+            or (maximum is not None and numeric > float(maximum))
+        )
+    if rule_type == "enum":
+        allowed = {str(item).strip().casefold() for item in validator.get("values") or ()}
+        return bool(allowed and text.casefold() not in allowed)
+    if rule_type in {"ip", "ip_or_unassigned"}:
+        return not is_valid_ip_value(
+            value,
+            allow_unassigned=rule_type == "ip_or_unassigned",
+        )
+    if rule_type == "interface_name":
+        return _looks_like_interface_header(value)
+    if rule_type == "regex":
+        pattern = str(validator.get("pattern") or "")
+        return bool(pattern and re.fullmatch(pattern, text) is None)
+    return False

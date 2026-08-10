@@ -90,6 +90,29 @@ def _sample(raw_text: str, keys: tuple[tuple[str, ...], ...]) -> ParserSample:
             ),
             (("GE1/0/1",), ("GE1/0/2",)),
         ),
+        (
+            TableCompiler(),
+            ParserSpec(
+                entity="interface_l3",
+                primary_keys=("interface",),
+                fields=(
+                    FieldSpec(
+                        "interface",
+                        True,
+                        "interface_name",
+                        source_labels=("Interface",),
+                    ),
+                    FieldSpec(
+                        "ip_address",
+                        True,
+                        "ip_or_unassigned",
+                        source_labels=("IP Address",),
+                    ),
+                ),
+            ),
+            "Interface  IP Address\nGE1/0/1   192.0.2.1\nGE1/0/2   --\n",
+            (("GE1/0/1",), ("GE1/0/2",)),
+        ),
     ],
 )
 def test_deterministic_compilers_emit_templates_that_pass_hard_gates(

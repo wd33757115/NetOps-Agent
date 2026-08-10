@@ -209,6 +209,60 @@ def test_change_policy_generator_fans_out_all_contract_targets(tmp_path: Path):
     assert result["agent_loop"]["ready_for_approval"] is True
 
 
+def test_change_policy_generator_combines_canonical_multi_source_values(
+    tmp_path: Path,
+):
+    canonical_ref = "canonical:interface.optical.rx_power:{}"
+    result = _run_skill(
+        tmp_path,
+        {
+            "mode": "infer_and_validate",
+            "records": [
+                {
+                    "__record_set__": "single_lane",
+                    "interface": "Eth1/1",
+                    "rx_power": -4.0,
+                },
+                {
+                    "__record_set__": "multi_lane",
+                    "interface": "Eth1/2",
+                    "lane_rx": -5.0,
+                },
+            ],
+            "historical_values_by_field": {
+                canonical_ref: [-4.0, -5.0],
+            },
+            "policy_targets": [
+                {
+                    "field_name": "rx_power",
+                    "field_ref": canonical_ref,
+                    "observation_type": "interface.optical.rx_power",
+                    "field_semantics": {
+                        "semantic_type": "gauge",
+                        "unit": "dbm",
+                    },
+                    "source_targets": [
+                        {
+                            "record_set_name": "single_lane",
+                            "field_name": "rx_power",
+                            "field_ref": "single_lane.rx_power",
+                        },
+                        {
+                            "record_set_name": "multi_lane",
+                            "field_name": "lane_rx",
+                            "field_ref": "multi_lane.lane_rx",
+                        },
+                    ],
+                }
+            ],
+        },
+    )
+
+    assert result["success"] is True
+    assert result["policy_count"] == 1
+    assert result["results"][0]["historical_stats"]["numeric_count"] == 2
+
+
 def test_change_policy_compiles_dimension_targets_into_one_runtime_asset(tmp_path: Path):
     result = _run_skill(
         tmp_path,
@@ -416,3 +470,84 @@ def test_change_policy_constraints_bound_recovery_threshold(tmp_path: Path):
         error.startswith("reason contains unsupported causal speculation")
         for error in result["validation"]["errors"]
     )
+
+
+def test_change_policy_constraints_enforce_approved_static_policy(tmp_path: Path):
+    constraints = {
+        "allowed_compare_modes": ["threshold_and_deadband"],
+        "required_thresholds": {"high": 80},
+        "required_recovery_threshold": 75,
+        "required_deadband": 5,
+    }
+    rejected = _run_skill(
+        tmp_path,
+        {
+            "mode": "validate",
+            "proposal": {
+                "observation_type": "device.cpu.utilization",
+                "semantic_type": "gauge",
+                "compare_mode": "threshold_and_deadband",
+                "thresholds": {"high": 90, "critical_high": 95},
+                "recovery_threshold": 85,
+                "deadband": 2,
+                "reason": "sample-derived values",
+            },
+            "policy_constraints": constraints,
+        },
+        expect_success=False,
+    )
+
+    assert rejected["validation"]["errors"] == [
+        "threshold high must equal the approved value 80",
+        "unapproved threshold keys are present: critical_high",
+        "recovery_threshold must equal the approved value 75",
+        "deadband must equal the approved value 5",
+    ]
+
+    accepted = _run_skill(
+        tmp_path,
+        {
+            "mode": "validate",
+            "proposal": {
+                "observation_type": "device.cpu.utilization",
+                "semantic_type": "gauge",
+                "compare_mode": "threshold_and_deadband",
+                "thresholds": {"high": 80},
+                "recovery_threshold": 75,
+                "deadband": 5,
+                "reason": "approved check-item policy",
+            },
+            "policy_constraints": constraints,
+        },
+    )
+    assert accepted["success"] is True
+
+
+def test_generated_policy_compiles_approved_static_constraints(tmp_path: Path):
+    result = _run_skill(
+        tmp_path,
+        {
+            "mode": "infer_and_validate",
+            "observation_type": "device.cpu.utilization",
+            "field_name": "cpu_5m",
+            "field_semantics": {
+                "semantic_type": "gauge",
+                "unit": "percent",
+            },
+            "historical_values": [42, 91],
+            "policy_constraints": {
+                "allowed_compare_modes": ["threshold_and_deadband"],
+                "required_thresholds": {"high": 80},
+                "required_recovery_threshold": 75,
+                "required_deadband": 5,
+                "allowed_minimum_durations": [None, "0s"],
+            },
+        },
+    )
+
+    assert result["success"] is True
+    assert result["policy"]["compare_mode"] == "threshold_and_deadband"
+    assert result["policy"]["thresholds"] == {"high": 80.0}
+    assert result["policy"]["recovery_threshold"] == 75.0
+    assert result["policy"]["deadband"] == 5.0
+    assert result["policy"]["source"] == "approved_check_item_policy"

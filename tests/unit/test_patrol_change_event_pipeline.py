@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -12,9 +13,14 @@ import pytest
 
 from src.common.config import get_settings
 from src.core.celery_tasks.tasks import _persist_patrol_snapshots
+from src.core.parser.runtime import ParserRuntimeResult
 from src.core.patrol.change_detector import (
+    NetworkChange,
     _aggregate_collection_results,
     _deduplicate_current_observations,
+    _detect_observation_changes_against_history_impl,
+    _detect_scoped_observation_changes_impl,
+    _observation_dimensions,
     detect_changes_between_values,
     detect_changes_from_params,
 )
@@ -30,14 +36,19 @@ from src.core.patrol.event_rules import EventRule, default_event_rule_definition
 from src.core.patrol.raw_importer import (
     _import_fingerprint,
     _resolve_capture_device,
+    build_output_review_item_id,
     import_raw_capture,
     import_raw_path,
 )
-from src.core.patrol.repository import PatrolRepository
+from src.core.patrol.repository import (
+    PatrolRepository,
+    PatrolSnapshotRepository,
+)
 from src.core.state.normalizer import normalize_run
 from src.infrastructure.db.models import (
     CommandSnapshot,
     NetworkChangeRecord,
+    NetworkDevice,
     NetworkEventOccurrenceRecord,
     NetworkEventOutboxRecord,
     NetworkEventRecord,
@@ -52,6 +63,16 @@ from src.infrastructure.db.models import (
 from src.infrastructure.db.postgres import get_db_session
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_observation_change_preserves_runtime_dimensions():
+    assert _observation_dimensions(
+        {
+            "entity_key": '["slot","0/0"]',
+            "dimensions_json": {"window": "5m"},
+            "metadata_json": {"primary_keys": ["scope", "scope_id"]},
+        }
+    ) == {"window": "5m"}
 
 
 @pytest.fixture(autouse=True)
@@ -213,6 +234,38 @@ def test_split_command_report_preserves_executed_empty_output():
     assert len(blocks) == 1
     assert blocks[0].command_canonical == "display vrf"
     assert blocks[0].raw_output == ""
+
+
+def test_split_command_report_uses_embedded_prompt_boundaries():
+    blocks = split_cli_capture(
+        "Command: show switch-profile\n"
+        "Output:\n\n"
+        "----------------------------------------\n"
+        "Command: show vpc\n"
+        "Output:\n\n"
+        "----------------------------------------\n"
+        "Command: show running-config\n"
+        "Output:\n\n"
+        "N9K-1# show switch-profile\n"
+        "N9K-1# show vpc\n"
+        "vPC domain id : 300\n"
+        "Peer status : peer adjacency formed ok\n"
+        "N9K-1# show running-config\n"
+        "version 9.3(8)\n"
+        "hostname N9K-1\n",
+        device_name="N9K-1",
+    )
+
+    assert [block.command_canonical for block in blocks] == [
+        "show switch-profile",
+        "show vpc",
+        "show running-config",
+    ]
+    assert blocks[0].raw_output == ""
+    assert "vPC domain id : 300" in blocks[1].raw_output
+    assert "Peer status" in blocks[1].raw_output
+    assert blocks[2].raw_output == "version 9.3(8)\nhostname N9K-1"
+    assert "vPC domain" not in blocks[2].raw_output
 
 
 def test_change_detector_field_changes():
@@ -404,6 +457,206 @@ def test_observation_change_detector_emits_initial_changes(monkeypatch):
     assert result["changes"][0]["new"] == 98
 
 
+def test_observation_change_detector_suppresses_first_observation_for_frozen_action():
+    current = [
+        {
+            "id": "observation-1",
+            "run_id": "run-current",
+            "snapshot_id": "snapshot-current",
+            "device_id": "device-1",
+            "canonical_command": "display cpu",
+            "entity_type": "cpu_scope",
+            "entity_key": "0",
+            "field_name": "cpu_5m",
+            "observation_type": "device.cpu.utilization",
+            "value_json": 91,
+            "observed_at": "2026-08-01T00:00:00+00:00",
+            "metadata_json": {"collection_item_id": "action-1"},
+        }
+    ]
+
+    result = _detect_observation_changes_against_history_impl(
+        current_run_id="run-current",
+        persist=False,
+        current_observations=current,
+        prior_observations=[],
+        suppress_initial_collection_item_ids=["action-1"],
+    )
+
+    assert result["change_count"] == 0
+    assert result["initial_observations"] == 0
+    assert result["suppressed_initial_observations"] == 1
+
+
+def test_check_item_change_uses_only_frozen_baseline_and_scope(monkeypatch):
+    monkeypatch.setattr(
+        PatrolRepository,
+        "get_run",
+        lambda _self, _run_id: {"run_purpose": "production_current"},
+    )
+    monkeypatch.setattr(
+        PatrolRepository,
+        "list_collection_results",
+        lambda _self, _run_id: [],
+    )
+    current = [
+        {
+            "id": "current-observation",
+            "run_id": "current-run",
+            "snapshot_id": "current-snapshot",
+            "device_id": "device-1",
+            "canonical_command": "display cpu-usage",
+            "entity_type": "cpu_scope",
+            "entity_key": "0",
+            "field_name": "cpu_5m",
+            "observation_type": "system.cpu.utilization",
+            "value_json": 95,
+            "value_number": 95,
+            "observed_at": "2026-08-06T02:00:00+00:00",
+            "metadata_json": {"collection_item_id": "action-1"},
+        }
+    ]
+    prior = [
+        {
+            **current[0],
+            "id": "frozen-observation",
+            "run_id": "frozen-run",
+            "snapshot_id": "frozen-snapshot",
+            "value_json": 20,
+            "value_number": 20,
+            "observed_at": "2026-08-05T02:00:00+00:00",
+        },
+        {
+            **current[0],
+            "id": "unselected-observation",
+            "run_id": "newer-run",
+            "snapshot_id": "unselected-snapshot",
+            "value_json": 94,
+            "value_number": 94,
+            "observed_at": "2026-08-06T01:00:00+00:00",
+        },
+    ]
+    scopes = [
+        {
+            "check_item_id": "system.cpu_usage",
+            "check_item_version_id": "cpu-version",
+            "check_execution_id": "cpu-execution",
+            "comparison_context_id": "cpu-context",
+            "comparison_context_digest": "c" * 64,
+            "comparison_status": "comparable",
+            "selection_reason": "latest_compatible_success",
+            "baseline_run_id": "frozen-run",
+            "baseline_snapshot_ids": ["frozen-snapshot"],
+            "collection_action_ids": ["action-1"],
+        },
+        {
+            "check_item_id": "system.cpu_evidence",
+            "check_item_version_id": "evidence-version",
+            "check_execution_id": "evidence-execution",
+            "comparison_context_id": "evidence-context",
+            "comparison_context_digest": "d" * 64,
+            "comparison_status": "baseline_missing",
+            "selection_reason": "prior_facts_failed_qualification",
+            "baseline_run_id": None,
+            "baseline_snapshot_ids": [],
+            "collection_action_ids": ["action-1"],
+        },
+    ]
+
+    result = _detect_scoped_observation_changes_impl(
+        current_run_id="current-run",
+        device_ids=["device-1"],
+        persist=False,
+        missing_confirmations=2,
+        current_observations=current,
+        prior_observations=prior,
+        comparison_scopes=scopes,
+        policy_bundles_by_check_item_version_id={
+            "cpu-version": [
+                {
+                    "policy_id": "cpu-policy",
+                    "version_id": "cpu-policy-version",
+                    "policy": {
+                        "observation_type": "system.cpu.utilization",
+                        "semantic_type": "gauge",
+                        "compare_mode": "exact",
+                    },
+                }
+            ]
+        },
+    )
+
+    assert result["change_count"] == 1
+    assert result["suppressed_comparison_observations"] == 1
+    assert result["comparison_scope_status_counts"] == {
+        "baseline_missing": 1,
+        "comparable": 1,
+    }
+    assert result["changes"][0]["old"] == 20
+    assert result["changes"][0]["new"] == 95
+    assert result["changes"][0]["check_item_version_id"] == "cpu-version"
+    assert result["changes"][0]["check_execution_id"] == "cpu-execution"
+
+
+def test_check_item_change_does_not_bypass_empty_runtime_policy_bundle(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        PatrolRepository,
+        "list_collection_results",
+        lambda _self, _run_id: [],
+    )
+    current = {
+        "id": "current-observation-no-policy",
+        "run_id": "current-run-no-policy",
+        "snapshot_id": "current-snapshot-no-policy",
+        "device_id": "device-no-policy",
+        "canonical_command": "display version",
+        "entity_type": "device",
+        "entity_key": "device-no-policy",
+        "field_name": "software_version",
+        "observation_type": "device.software.version",
+        "value_json": "v2",
+        "observed_at": "2026-08-06T02:00:00+00:00",
+        "metadata_json": {"collection_item_id": "action-no-policy"},
+    }
+    prior = {
+        **current,
+        "id": "prior-observation-no-policy",
+        "run_id": "prior-run-no-policy",
+        "snapshot_id": "prior-snapshot-no-policy",
+        "value_json": "v1",
+        "observed_at": "2026-08-05T02:00:00+00:00",
+    }
+
+    result = _detect_scoped_observation_changes_impl(
+        current_run_id="current-run-no-policy",
+        device_ids=["device-no-policy"],
+        persist=False,
+        missing_confirmations=2,
+        current_observations=[current],
+        prior_observations=[prior],
+        comparison_scopes=[
+            {
+                "check_item_id": "device.version",
+                "check_item_version_id": "device-version",
+                "check_execution_id": "device-version-execution",
+                "comparison_context_id": "device-version-context",
+                "comparison_context_digest": "e" * 64,
+                "comparison_status": "comparable",
+                "selection_reason": "latest_compatible_success",
+                "baseline_run_id": "prior-run-no-policy",
+                "baseline_snapshot_ids": ["prior-snapshot-no-policy"],
+                "collection_action_ids": ["action-no-policy"],
+            }
+        ],
+        policy_bundles_by_check_item_version_id={"device-version": []},
+    )
+
+    assert result["change_count"] == 0
+    assert result["suppressed_comparison_observations"] == 1
+
+
 def test_event_builder_distinguishes_change_from_event():
     small_cpu_change = [
         {
@@ -439,8 +692,224 @@ def test_event_builder_distinguishes_change_from_event():
     assert high_cpu_event.payload["rule"]["rule_id"] == "cpu-high"
     assert high_cpu_event.payload["rule"]["version"] == 1
     assert high_cpu_event.payload["rule"]["event_class"] == "fault"
+    assert high_cpu_event.payload["rule"]["condition"]["kind"] == "threshold"
+    assert high_cpu_event.payload["evaluation"] == {
+        "condition_kind": "threshold",
+        "field": "cpu_5s",
+        "previous_value": 15,
+        "current_value": 95,
+        "unit": None,
+        "reference_field": "gte",
+        "reference_value": 90.0,
+        "reference_source": "event_rule_static",
+        "hysteresis": None,
+        "recovery_boundary": None,
+    }
     assert interface_event.event_type == "InterfaceDown"
     assert interface_event.payload["rule"]["rule_id"] == "interface-down"
+
+
+def test_event_builder_uses_only_rules_from_change_check_item():
+    always_match = EventRule(
+        rule_id="always-match",
+        version=1,
+        event_type="ScopedRisk",
+        severity="warning",
+        predicate=lambda _change: True,
+        condition={"kind": "changed"},
+    )
+    changes = [
+        {
+            "change_id": "cpu-change",
+            "check_item_id": "system.cpu_usage",
+            "check_item_version_id": "cpu-version",
+            "check_execution_id": "cpu-execution",
+            "device_id": "device-1",
+            "entity_type": "cpu_scope",
+            "entity_key": "0",
+            "field": "cpu_5m",
+            "old": 20,
+            "new": 95,
+            "change_type": "modified",
+        },
+        {
+            "change_id": "evidence-change",
+            "check_item_id": "system.cpu_evidence",
+            "check_item_version_id": "evidence-version",
+            "check_execution_id": "evidence-execution",
+            "device_id": "device-1",
+            "entity_type": "cpu_scope",
+            "entity_key": "0",
+            "field": "cpu_5m",
+            "old": 20,
+            "new": 95,
+            "change_type": "modified",
+        },
+        {
+            "change_id": "other-device-change",
+            "check_item_id": "system.cpu_usage",
+            "check_item_version_id": "cpu-version",
+            "check_execution_id": "other-device-execution",
+            "device_id": "device-2",
+            "entity_type": "cpu_scope",
+            "entity_key": "0",
+            "field": "cpu_5m",
+            "old": 20,
+            "new": 95,
+            "change_type": "modified",
+        },
+    ]
+
+    events = build_events_from_changes(
+        changes,
+        rules=[always_match],
+        rules_by_device_and_check_item_version_id={
+            "device-1": {
+                "cpu-version": [always_match],
+                "evidence-version": [],
+            },
+            "device-2": {"cpu-version": []},
+        },
+    )
+
+    assert len(events) == 1
+    assert events[0].source_change_id == "cpu-change"
+    assert events[0].check_item_version_id == "cpu-version"
+    assert events[0].check_execution_id == "cpu-execution"
+    assert events[0].payload["correlation_dimensions"][
+        "check_item_version_id"
+    ] == "cpu-version"
+    assert events[0].payload["legacy_correlation_key"] == ""
+
+
+def test_check_item_change_and_event_lineage_round_trip_postgresql():
+    run_id = f"lineage-roundtrip-{uuid.uuid4()}"
+    device_id = "device-lineage-roundtrip"
+    check_item_version_id = "cpu-version-lineage-roundtrip"
+    check_execution_id = "cpu-execution-lineage-roundtrip"
+    observed_at = datetime.now(ZoneInfo("UTC")).isoformat()
+    repository = ChangeEventRepository()
+    rule = EventRule(
+        rule_id="lineage-roundtrip-rule",
+        version=1,
+        event_type="ScopedCpuRisk",
+        severity="warning",
+        predicate=lambda _change: True,
+        condition={"kind": "changed"},
+    )
+    change = NetworkChange(
+        change_id="",
+        run_id=run_id,
+        device_id=device_id,
+        command="display cpu-usage",
+        entity_type="cpu_scope",
+        entity_key="0",
+        field="cpu_5m",
+        old_value=20,
+        new_value=95,
+        change_type="modified",
+        source="state_observation",
+        observed_at=observed_at,
+        detected_at=observed_at,
+        processed_at=observed_at,
+        check_item_id="system.cpu_usage",
+        check_item_version_id=check_item_version_id,
+        check_execution_id=check_execution_id,
+    )
+
+    try:
+        assert repository.save_changes([change]) == 1
+        persisted_changes = repository.list_changes(run_id=run_id)
+        assert len(persisted_changes) == 1
+        assert persisted_changes[0]["check_item_id"] == "system.cpu_usage"
+        assert (
+            persisted_changes[0]["check_item_version_id"]
+            == check_item_version_id
+        )
+        assert (
+            persisted_changes[0]["check_execution_id"]
+            == check_execution_id
+        )
+
+        events = build_events_from_changes(
+            persisted_changes,
+            rules=[],
+            rules_by_device_and_check_item_version_id={
+                device_id: {check_item_version_id: [rule]}
+            },
+        )
+        assert len(events) == 1
+        assert repository.save_events(events) == 1
+
+        facts = repository.list_run_event_facts(run_id=run_id)
+        assert len(facts) == 1
+        assert facts[0]["check_item_id"] == "system.cpu_usage"
+        assert facts[0]["check_item_version_id"] == check_item_version_id
+        assert facts[0]["check_execution_id"] == check_execution_id
+    finally:
+        _cleanup_runs(run_id)
+
+
+def test_operator_confirmed_empty_output_is_skipped_without_hiding_raw_evidence(
+    tmp_path: Path,
+):
+    report = tmp_path / "N9K-1.txt"
+    report.write_text("命令: show vpc\n输出:\n\n", encoding="utf-8")
+    block = split_cli_capture(
+        report.read_text(encoding="utf-8"), device_name="N9K-1"
+    )[0]
+    review_item_id = build_output_review_item_id(
+        period_role="sample",
+        source_relative_path=report.name,
+        device_id="N9K-1",
+        canonical_command=block.command_canonical,
+        start_line=block.start_line,
+        end_line=block.end_line,
+        raw_text_hash=hashlib.sha256(block.raw_output.encode("utf-8")).hexdigest(),
+    )
+    run_id = f"confirmed-empty-{uuid.uuid4()}"
+    try:
+        result = import_raw_capture(
+            file_path=report,
+            mode="production",
+            device_name="N9K-1",
+            vendor="Cisco",
+            model="NEXUS9000",
+            run_id=run_id,
+            collector_complete=True,
+            metadata={
+                "period_role": "sample",
+                "source_relative_path": report.name,
+                "output_dispositions": [
+                    {
+                        "review_item_id": review_item_id,
+                        "decision": "ignore_valid_empty",
+                        "reason": "设备未配置 vPC",
+                        "decided_by": "engineer-1",
+                        "decided_at": "2026-08-08T10:00:00+00:00",
+                    }
+                ],
+            },
+        )
+
+        assert result["production_parser_ready"] is True
+        assert result["parse_violations"] == []
+        with get_db_session() as db:
+            snapshot = db.query(CommandSnapshot).filter_by(run_id=run_id).one()
+            collection = db.query(PatrolCollectionResult).filter_by(run_id=run_id).one()
+            assert snapshot.output_status == "empty_unverified"
+            assert snapshot.parse_status == "not_applicable"
+            assert collection.output_status == "empty_unverified"
+            assert collection.parse_status == "not_applicable"
+            assert collection.fact_status == "not_applicable"
+            assert collection.failure_code is None
+            assert collection.baseline_eligible is False
+            assert (
+                collection.metadata_json["operator_output_disposition"]["review_item_id"]
+                == review_item_id
+            )
+    finally:
+        _cleanup_runs(run_id)
 
 
 def test_event_builder_handles_initial_abnormal_state():
@@ -881,9 +1350,7 @@ def test_import_and_raw_hash_change_roundtrip(tmp_path: Path):
 
         assert result["change_count"] == 1
         assert result["changes"][0]["field"] == "raw_text_hash"
-        assert result["changes"][0]["dimensions"]["unstructured_diff"][
-            "changed"
-        ] is True
+        assert result["changes"][0]["dimensions"]["unstructured_diff"]["changed"] is True
     finally:
         _cleanup_runs(run1, run2)
 
@@ -934,6 +1401,186 @@ def test_duplicate_import_reconciles_provisional_collection_statuses(tmp_path: P
             assert all((row.metadata_json or {}).get("collector_complete") for row in reconciled)
     finally:
         _cleanup_runs(run_id)
+
+
+def test_incomplete_stream_persists_raw_without_running_parser(
+    tmp_path: Path,
+    monkeypatch,
+):
+    source = tmp_path / "SW2-10.0.0.2.log"
+    source.write_text(CISCO_SAMPLE, encoding="utf-8")
+    run_id = f"test-{uuid.uuid4()}"
+
+    def parser_must_not_run(*args, **kwargs):
+        raise AssertionError("Parser must wait until the device capture is complete")
+
+    monkeypatch.setattr(
+        "src.core.patrol.raw_importer.ParserRuntime.parse",
+        parser_must_not_run,
+    )
+    try:
+        result = import_raw_capture(
+            file_path=source,
+            mode="production",
+            run_id=run_id,
+            vendor="Cisco",
+            model="WS-C2960XR-24TS-I",
+            collector_complete=False,
+            metadata={"dataset_id": f"test-{uuid.uuid4()}"},
+        )
+
+        assert result["parser_readiness_status"] == "pending"
+        assert result["parser_results"]
+        assert all(item["parser_deferred"] for item in result["parser_results"])
+        with get_db_session() as db:
+            snapshots = db.query(CommandSnapshot).filter(CommandSnapshot.run_id == run_id).all()
+            assert snapshots
+            assert {snapshot.parse_status for snapshot in snapshots} == {"not_attempted"}
+            assert all(snapshot.raw_text for snapshot in snapshots)
+    finally:
+        _cleanup_runs(run_id)
+
+
+def test_production_qualification_groups_all_raw_snapshots_before_parser(
+    tmp_path: Path,
+    monkeypatch,
+):
+    source = tmp_path / "SW2-10.0.0.2.log"
+    source.write_text(
+        "Command: show version\n"
+        "Output:\n"
+        "Cisco IOS Software\n"
+        "--------------------------------------------------\n"
+        "Command: show interface status\n"
+        "Output:\n"
+        "Gi1/0/1 connected\n"
+        "--------------------------------------------------\n",
+        encoding="utf-8",
+    )
+    run_id = f"test-{uuid.uuid4()}"
+    inventory_device_id = f"device-{uuid.uuid4()}"
+    check_item_version_id = "check-item-version-test"
+    qualified: list[dict[str, object]] = []
+    with get_db_session() as db:
+        db.add(
+            NetworkDevice(
+                id=inventory_device_id,
+                device_name=f"qualification-{uuid.uuid4()}",
+                management_ip=f"192.0.2.{uuid.uuid4().int % 200 + 1}",
+                vendor="Cisco",
+                model="C2960",
+                status="active",
+            )
+        )
+
+    class FakeExecutionService:
+        def qualify_evidence(
+            self,
+            execution_id,
+            *,
+            snapshot_facts,
+            evidence_refs,
+            **kwargs,
+        ):
+            facts = tuple(snapshot_facts)
+            with get_db_session() as db:
+                snapshots = db.query(CommandSnapshot).filter(CommandSnapshot.run_id == run_id).all()
+                assert len(snapshots) == 2
+                assert {snapshot.parse_status for snapshot in snapshots} == {"not_attempted"}
+            qualified.append(
+                {
+                    "execution_id": execution_id,
+                    "snapshot_facts": facts,
+                    "evidence_refs": tuple(evidence_refs),
+                }
+            )
+            return {"id": "qualification-test"}
+
+    def fake_check_coverage(self, *, identity, command):
+        return {
+            "canonical_command": command,
+            "policy_status": "eligible",
+            "identity_status": "known",
+            "coverage_status": "ready",
+            "template_id": None,
+            "template_version": None,
+            "failure_code": None,
+        }
+
+    def fake_parse(self, *, identity, command, raw_text):
+        assert len(qualified) == 1
+        assert len(qualified[0]["snapshot_facts"]) == 2
+        return ParserRuntimeResult(
+            policy_status="eligible",
+            identity_status="known",
+            parser_status="success",
+            canonical_command=command,
+            handling="structured",
+            structured_data=[{"value": command}],
+            output_status="data",
+        )
+
+    monkeypatch.setattr(
+        "src.core.check_items.execution.CheckItemExecutionService",
+        FakeExecutionService,
+    )
+    monkeypatch.setattr(
+        "src.core.patrol.raw_importer.ParserRuntime.check_coverage",
+        fake_check_coverage,
+    )
+    monkeypatch.setattr(
+        "src.core.patrol.raw_importer.ParserRuntime.parse",
+        fake_parse,
+    )
+    binding = {
+        "check_item_id": "system.test",
+        "check_item_version_id": check_item_version_id,
+        "implementation_version_id": "implementation-test",
+        "runtime_bundle_version_id": "bundle-test",
+    }
+    command_statuses = [
+        {
+            "command": command,
+            "status": "complete",
+            "execution_item_id": f"execution-{index}",
+            "collection_item_id": f"action-{index}",
+            "check_item_bindings": [binding],
+            "selected_for_bindings": [binding],
+        }
+        for index, command in enumerate(
+            ("show version", "show interface status"),
+            start=1,
+        )
+    ]
+
+    try:
+        result = import_raw_capture(
+            file_path=source,
+            mode="production",
+            run_id=run_id,
+            vendor="Cisco",
+            model="C2960",
+            inventory_device_id=inventory_device_id,
+            collector_complete=True,
+            command_collection_statuses=command_statuses,
+            metadata={
+                "dataset_id": f"test-{uuid.uuid4()}",
+                "patrol_batch_id": "batch-qualification-test",
+            },
+        )
+
+        assert result["command_count"] == 2
+        assert len(qualified) == 1
+        assert {item["id"] for item in qualified[0]["snapshot_facts"]} == set(
+            result["snapshot_ids"]
+        )
+        assert set(qualified[0]["evidence_refs"]) == set(result["snapshot_ids"])
+    finally:
+        _cleanup_runs(run_id)
+        with get_db_session() as db:
+            db.query(NetworkDevice).filter(NetworkDevice.id == inventory_device_id).delete(
+                synchronize_session=False
+            )
 
 
 def test_command_observed_at_propagates_to_snapshot_and_evidence(tmp_path: Path):
@@ -1181,6 +1828,98 @@ def test_production_import_preserves_evidence_without_creating_asset_jobs(
             assert {row.execution_status for row in collection_results} == {"complete"}
             assert {row.fact_status for row in collection_results} == {"blocked_by_parser"}
             assert all(row.parser_candidate_id is None for row in collection_results)
+    finally:
+        _cleanup_runs(run_id)
+
+
+def test_import_persists_raw_snapshot_before_parser_and_attaches_once(
+    tmp_path: Path,
+    monkeypatch,
+):
+    source = tmp_path / "SW1-10.0.0.1.log"
+    source.write_text(
+        "Command: show version\n"
+        "Output:\n"
+        "Cisco IOS Software\n"
+        "--------------------------------------------------\n",
+        encoding="utf-8",
+    )
+    run_id = f"test-{uuid.uuid4()}"
+    observed_raw: dict[str, str] = {}
+
+    def fake_parse(self, *, identity, command, raw_text):
+        with get_db_session() as db:
+            snapshot = (
+                db.query(CommandSnapshot)
+                .filter(
+                    CommandSnapshot.run_id == run_id,
+                    CommandSnapshot.canonical_command == command,
+                )
+                .one()
+            )
+            assert snapshot.parse_status == "not_attempted"
+            assert snapshot.structured_json is None
+            assert snapshot.parser_template_id is None
+            assert snapshot.raw_text == raw_text
+            assert snapshot.raw_text_hash == hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
+            observed_raw["snapshot_id"] = str(snapshot.id)
+            observed_raw["raw_text"] = str(snapshot.raw_text)
+            observed_raw["raw_text_hash"] = str(snapshot.raw_text_hash)
+        return ParserRuntimeResult(
+            policy_status="eligible",
+            identity_status="known",
+            parser_status="success",
+            canonical_command=command,
+            handling="structured",
+            structured_data=[{"software_version": "test"}],
+            output_status="data",
+        )
+
+    monkeypatch.setattr(
+        "src.core.patrol.raw_importer.ParserRuntime.parse",
+        fake_parse,
+    )
+
+    try:
+        result = import_raw_capture(
+            file_path=source,
+            mode="parser_validation",
+            run_id=run_id,
+            vendor="Cisco",
+            model="C2960",
+            metadata={"dataset_id": f"test-{uuid.uuid4()}"},
+        )
+
+        snapshot_id = result["snapshot_ids"][0]
+        assert snapshot_id == observed_raw["snapshot_id"]
+        stored = PatrolSnapshotRepository().get_snapshot(snapshot_id)
+        assert stored is not None
+        assert stored.parse_status == "parsed"
+        assert stored.structured_json == [{"software_version": "test"}]
+        assert stored.raw_text == observed_raw["raw_text"]
+        assert stored.raw_text_hash == observed_raw["raw_text_hash"]
+
+        _same_id, attached = PatrolSnapshotRepository().attach_parser_result(
+            snapshot_id=snapshot_id,
+            expected_raw_text_hash=stored.raw_text_hash,
+            parse_status="parsed",
+            structured_json=[{"software_version": "test"}],
+            parser_name=None,
+            parser_version=None,
+        )
+        assert attached is False
+        with pytest.raises(
+            ValueError,
+            match="already has a different Parser result",
+        ):
+            PatrolSnapshotRepository().attach_parser_result(
+                snapshot_id=snapshot_id,
+                expected_raw_text_hash=stored.raw_text_hash,
+                parse_status="parsed",
+                structured_json=[{"software_version": "different"}],
+                parser_name=None,
+                parser_version=None,
+            )
     finally:
         _cleanup_runs(run_id)
 

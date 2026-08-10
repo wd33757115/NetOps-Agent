@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -22,6 +23,7 @@ from src.infrastructure.db.postgres import get_db_session
 TERMINAL_WORKFLOW_STATUSES = {"completed", "failed", "cancelled"}
 QUEUED_WORKFLOW_STATUSES = {"pending", "queued", "dispatching"}
 RUNNING_WORKFLOW_STATUSES = {"running", "in_progress", "collecting"}
+_FAILURE_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
 
 
 def _now():
@@ -128,28 +130,74 @@ def list_child_runs(parent_run_id: str) -> list[WorkflowRun]:
         return runs
 
 
-def update_run_status(run_id: str, status: str, *, error: str | None = None) -> None:
+def update_run_status(
+    run_id: str,
+    status: str,
+    *,
+    error: str | None = None,
+    failure_code: str | None = None,
+) -> bool:
     with get_db_session() as db:
-        run = db.query(WorkflowRun).filter(WorkflowRun.id == run_id).first()
+        run = (
+            db.query(WorkflowRun)
+            .filter(WorkflowRun.id == run_id)
+            .with_for_update()
+            .first()
+        )
         if not run:
-            return
+            return False
+        if str(run.status or "") in TERMINAL_WORKFLOW_STATUSES:
+            return False
         run.status = status
         run.updated_at = _now()
         if error:
             run.error_message = error
         elif status == "completed":
             run.error_message = None
-        if status in ("completed", "failed"):
+        if status == "failed":
+            raw_failure_code = str(failure_code or "").strip()
+            stable_failure_code = (
+                raw_failure_code
+                if _FAILURE_CODE_RE.fullmatch(raw_failure_code)
+                else "workflow_failed"
+            )
+            run.context = {
+                **dict(run.context or {}),
+                "failure_code": stable_failure_code,
+            }
+            targets = (
+                db.query(PatrolBatchDeviceRecord)
+                .filter(PatrolBatchDeviceRecord.workflow_run_id == run_id)
+                .all()
+            )
+            for target in targets:
+                target.failure_code = stable_failure_code
+                target.error_message = error
+                target.updated_at = run.updated_at
+        if status in TERMINAL_WORKFLOW_STATUSES:
             run.completed_at = _now()
+        return True
 
 
-def update_run_step_index(run_id: str, step_index: int, *, status: str = "running") -> None:
+def update_run_step_index(
+    run_id: str,
+    step_index: int,
+    *,
+    status: str = "running",
+) -> bool:
     with get_db_session() as db:
-        run = db.query(WorkflowRun).filter(WorkflowRun.id == run_id).first()
-        if run:
-            run.current_step_index = step_index
-            run.status = status
-            run.updated_at = _now()
+        run = (
+            db.query(WorkflowRun)
+            .filter(WorkflowRun.id == run_id)
+            .with_for_update()
+            .first()
+        )
+        if not run or str(run.status or "") in TERMINAL_WORKFLOW_STATUSES:
+            return False
+        run.current_step_index = step_index
+        run.status = status
+        run.updated_at = _now()
+        return True
 
 
 def reconcile_stale_patrol_workflow_runs(
@@ -261,11 +309,28 @@ def reconcile_stale_patrol_workflow_runs(
 
 def mark_step_queued(step_id: str, celery_task_id: str) -> bool:
     with get_db_session() as db:
-        step = db.query(WorkflowStepRecord).filter(WorkflowStepRecord.id == step_id).first()
-        if not step:
+        run_id = (
+            db.query(WorkflowStepRecord.run_id)
+            .filter(WorkflowStepRecord.id == step_id)
+            .scalar()
+        )
+        if not run_id:
             return False
-        run = db.query(WorkflowRun).filter(WorkflowRun.id == step.run_id).first()
+        run = (
+            db.query(WorkflowRun)
+            .filter(WorkflowRun.id == run_id)
+            .with_for_update()
+            .first()
+        )
         if not run or run.status in TERMINAL_WORKFLOW_STATUSES:
+            return False
+        step = (
+            db.query(WorkflowStepRecord)
+            .filter(WorkflowStepRecord.id == step_id)
+            .with_for_update()
+            .first()
+        )
+        if not step or str(step.status or "pending") not in {"pending", "queued"}:
             return False
         step.status = "queued"
         step.celery_task_id = celery_task_id
@@ -274,6 +339,21 @@ def mark_step_queued(step_id: str, celery_task_id: str) -> bool:
 
 def mark_step_running(step_id: str, celery_task_id: str) -> bool:
     with get_db_session() as db:
+        run_id = (
+            db.query(WorkflowStepRecord.run_id)
+            .filter(WorkflowStepRecord.id == step_id)
+            .scalar()
+        )
+        if not run_id:
+            return False
+        run = (
+            db.query(WorkflowRun)
+            .filter(WorkflowRun.id == run_id)
+            .with_for_update()
+            .first()
+        )
+        if not run or run.status in TERMINAL_WORKFLOW_STATUSES:
+            return False
         step = (
             db.query(WorkflowStepRecord)
             .filter(WorkflowStepRecord.id == step_id)
@@ -284,9 +364,6 @@ def mark_step_running(step_id: str, celery_task_id: str) -> bool:
             return False
         if str(step.status or "pending") not in {"pending", "queued"}:
             return False
-        run = db.query(WorkflowRun).filter(WorkflowRun.id == step.run_id).first()
-        if not run or run.status in TERMINAL_WORKFLOW_STATUSES:
-            return False
         step.status = "running"
         step.celery_task_id = celery_task_id
         step.started_at = _now()
@@ -295,24 +372,195 @@ def mark_step_running(step_id: str, celery_task_id: str) -> bool:
         return True
 
 
-def mark_step_completed(step_id: str, result: dict[str, Any]) -> None:
+def mark_step_completed(step_id: str, result: dict[str, Any]) -> bool:
     with get_db_session() as db:
-        step = db.query(WorkflowStepRecord).filter(WorkflowStepRecord.id == step_id).first()
-        if step:
-            step.status = "completed" if result.get("success") else "failed"
-            step.result = result
-            step.output_artifacts = result.get("artifacts")
-            step.error_message = result.get("error")
-            step.completed_at = _now()
+        run_id = (
+            db.query(WorkflowStepRecord.run_id)
+            .filter(WorkflowStepRecord.id == step_id)
+            .scalar()
+        )
+        if not run_id:
+            return False
+        run = (
+            db.query(WorkflowRun)
+            .filter(WorkflowRun.id == run_id)
+            .with_for_update()
+            .first()
+        )
+        if not run or run.status in TERMINAL_WORKFLOW_STATUSES:
+            return False
+        step = (
+            db.query(WorkflowStepRecord)
+            .filter(WorkflowStepRecord.id == step_id)
+            .with_for_update()
+            .first()
+        )
+        if not step or str(step.status or "pending") not in {
+            "pending",
+            "queued",
+            "running",
+        }:
+            return False
+        step.status = "completed" if result.get("success") else "failed"
+        step.result = result
+        step.output_artifacts = result.get("artifacts")
+        step.error_message = result.get("error")
+        step.completed_at = _now()
+        return True
 
 
-def mark_step_failed(step_id: str, error: str) -> None:
+def mark_step_failed(step_id: str, error: str) -> bool:
     with get_db_session() as db:
-        step = db.query(WorkflowStepRecord).filter(WorkflowStepRecord.id == step_id).first()
-        if step:
-            step.status = "failed"
-            step.error_message = error
-            step.completed_at = _now()
+        run_id = (
+            db.query(WorkflowStepRecord.run_id)
+            .filter(WorkflowStepRecord.id == step_id)
+            .scalar()
+        )
+        if not run_id:
+            return False
+        run = (
+            db.query(WorkflowRun)
+            .filter(WorkflowRun.id == run_id)
+            .with_for_update()
+            .first()
+        )
+        if not run or run.status in TERMINAL_WORKFLOW_STATUSES:
+            return False
+        step = (
+            db.query(WorkflowStepRecord)
+            .filter(WorkflowStepRecord.id == step_id)
+            .with_for_update()
+            .first()
+        )
+        if not step or str(step.status or "pending") in TERMINAL_WORKFLOW_STATUSES:
+            return False
+        step.status = "failed"
+        step.error_message = error
+        step.completed_at = _now()
+        return True
+
+
+def cancel_workflow_run(
+    run_id: str,
+    *,
+    actor: str,
+    reason: str,
+) -> dict[str, Any]:
+    """Atomically cancel a run and fence every unfinished step."""
+
+    now = _now()
+    with get_db_session() as db:
+        run = (
+            db.query(WorkflowRun)
+            .filter(WorkflowRun.id == run_id)
+            .with_for_update()
+            .first()
+        )
+        if run is None:
+            return {
+                "found": False,
+                "changed": False,
+                "run_id": run_id,
+                "status": "missing",
+                "task_ids": [],
+                "patrol_batch_ids": [],
+                "device_ids": [],
+            }
+
+        previous_status = str(run.status or "pending")
+        if previous_status in {"completed", "failed"}:
+            return {
+                "found": True,
+                "changed": False,
+                "cancellable": False,
+                "run_id": run_id,
+                "previous_status": previous_status,
+                "status": previous_status,
+                "task_ids": [],
+                "patrol_batch_ids": [],
+                "device_ids": [],
+            }
+
+        steps = (
+            db.query(WorkflowStepRecord)
+            .filter(WorkflowStepRecord.run_id == run_id)
+            .order_by(WorkflowStepRecord.step_index)
+            .with_for_update()
+            .all()
+        )
+        task_ids = sorted(
+            {
+                str(step.celery_task_id)
+                for step in steps
+                if step.celery_task_id
+                and str(step.status or "pending") not in TERMINAL_WORKFLOW_STATUSES
+            }
+        )
+        targets = (
+            db.query(PatrolBatchDeviceRecord)
+            .filter(PatrolBatchDeviceRecord.workflow_run_id == run_id)
+            .with_for_update()
+            .all()
+        )
+        patrol_batch_ids = sorted({str(row.patrol_batch_id) for row in targets})
+        device_ids = sorted({str(row.device_id) for row in targets})
+
+        if previous_status == "cancelled":
+            return {
+                "found": True,
+                "changed": False,
+                "cancellable": True,
+                "idempotent": True,
+                "run_id": run_id,
+                "previous_status": previous_status,
+                "status": "cancelled",
+                "task_ids": task_ids,
+                "patrol_batch_ids": patrol_batch_ids,
+                "device_ids": device_ids,
+            }
+
+        message = f"Cancelled by {actor}: {reason}"
+        run.status = "cancelled"
+        run.error_message = message
+        run.completed_at = now
+        run.updated_at = now
+        run.context = {
+            **dict(run.context or {}),
+            "failure_code": "workflow_cancelled",
+            "retryable": True,
+            "cancelled_at": now.isoformat(),
+            "cancelled_by": actor,
+            "cancellation_reason": reason,
+        }
+        for step in steps:
+            if str(step.status or "pending") in TERMINAL_WORKFLOW_STATUSES:
+                continue
+            step.status = "cancelled"
+            step.error_message = message
+            step.completed_at = now
+        for target in targets:
+            target.dispatch_status = "cancelled"
+            target.failure_code = "workflow_cancelled"
+            target.error_message = message
+            target.dispatch_claim_token = None
+            target.dispatch_lease_until = None
+            target.updated_at = now
+
+        return {
+            "found": True,
+            "changed": True,
+            "cancellable": True,
+            "idempotent": False,
+            "run_id": run_id,
+            "previous_status": previous_status,
+            "status": "cancelled",
+            "cancelled_at": now.isoformat(),
+            "cancelled_by": actor,
+            "reason": reason,
+            "task_ids": task_ids,
+            "patrol_batch_ids": patrol_batch_ids,
+            "device_ids": device_ids,
+        }
 
 
 def create_notification(

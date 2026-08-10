@@ -46,6 +46,11 @@ def test_event_rules_can_be_rebuilt_from_immutable_snapshot():
 
     assert rules[0].rule_id == "optical-rx-low-v7"
     assert rules[0].version == 7
+    assert rules[0].condition == {
+        "kind": "threshold_lte",
+        "fields": ["rx_power_dbm"],
+        "lte": -17,
+    }
     assert rules[0].match({"field": "rx_power_dbm", "new": -18.5}) is True
 
 

@@ -21,10 +21,12 @@ from src.core.workflows.registry import (
 )
 from src.core.workflows.repository import (
     TERMINAL_WORKFLOW_STATUSES,
+    cancel_workflow_run,
     create_notification,
     create_workflow_run,
     create_workflow_steps,
     get_workflow_run,
+    list_child_runs,
     list_workflow_steps,
     mark_step_completed,
     mark_step_queued,
@@ -246,7 +248,7 @@ class WorkflowEngine:
     @classmethod
     def _dispatch_from_index(cls, run_id: str, step_index: int) -> None:
         run = get_workflow_run(run_id)
-        if not run:
+        if not run or run.status in TERMINAL_WORKFLOW_STATUSES:
             return
         steps = list_workflow_steps(run_id)
         if step_index >= len(steps):
@@ -267,10 +269,11 @@ class WorkflowEngine:
         from src.core.workflows.tasks import dispatch_parallel_batch_task
 
         run = get_workflow_run(run_id)
-        if not run:
+        if not run or run.status in TERMINAL_WORKFLOW_STATUSES:
             return
         steps = list_workflow_steps(run_id)
-        update_run_step_index(run_id, indices[0], status="queued")
+        if not update_run_step_index(run_id, indices[0], status="queued"):
+            return
         for idx in indices:
             step = steps[idx]
             publish_workflow_event(
@@ -311,7 +314,8 @@ class WorkflowEngine:
         if step_index >= len(steps):
             cls._complete_workflow(run_id)
             return
-        update_run_step_index(run_id, step_index, status="queued")
+        if not update_run_step_index(run_id, step_index, status="queued"):
+            return
         step = steps[step_index]
         publish_workflow_event(
             run_id,
@@ -331,7 +335,18 @@ class WorkflowEngine:
                 )
             ),
         )
-        mark_step_queued(step.id, async_result.id)
+        if not mark_step_queued(step.id, async_result.id):
+            try:
+                async_result.revoke(terminate=False)
+            except Exception:
+                pass
+            log.warning(
+                "workflow_step_dispatch_cancelled_before_commit",
+                run_id=run_id,
+                step_index=step_index,
+                celery_task_id=async_result.id,
+            )
+            return
         log.info(
             "workflow_step_dispatched",
             run_id=run_id,
@@ -360,7 +375,15 @@ class WorkflowEngine:
             return
         step = steps[step_index]
         result = normalize_step_result(raw_result or {})
-        mark_step_completed(step.id, result)
+        if not mark_step_completed(step.id, result):
+            current = get_workflow_run(run_id)
+            log.warning(
+                "workflow_late_step_result_fenced",
+                run_id=run_id,
+                step_index=step_index,
+                workflow_status=current.status if current else "missing",
+            )
+            return
 
         if not result.get("success"):
             err = result.get("error") or result.get("message") or "步骤执行失败"
@@ -372,7 +395,15 @@ class WorkflowEngine:
                 skill_name=step.skill_name,
                 error=str(err),
             )
-            update_run_status(run_id, "failed", error=str(err))
+            if not update_run_status(
+                run_id,
+                "failed",
+                error=str(err),
+                failure_code=str(
+                    result.get("failure_code") or "workflow_step_failed"
+                ),
+            ):
+                return
             cls._project_source_terminal_state(run_id, run)
             record_workflow_step(
                 _ensure_wf_trace(run_id),
@@ -423,6 +454,8 @@ class WorkflowEngine:
             skill_name=step.skill_name,
         )
         run = get_workflow_run(run_id)
+        if not run or run.status in TERMINAL_WORKFLOW_STATUSES:
+            return
         template = get_template(run.template_name) if run else None
         if template and template.on_complete.notify_each_step:
             cls._notify_step_progress(run_id, step, result)
@@ -431,6 +464,9 @@ class WorkflowEngine:
 
     @classmethod
     def _advance_after_step(cls, run_id: str, step_index: int, steps, template) -> None:
+        run = get_workflow_run(run_id)
+        if not run or run.status in TERMINAL_WORKFLOW_STATUSES:
+            return
         next_index = step_index + 1
         if next_index >= len(steps):
             cls._complete_workflow(run_id)
@@ -448,6 +484,14 @@ class WorkflowEngine:
         cls, run_id: str, results: list[dict[str, Any]], next_index: int
     ) -> None:
         """并行批完成后继续调度或标记失败。"""
+        run = get_workflow_run(run_id)
+        if not run or run.status in TERMINAL_WORKFLOW_STATUSES:
+            log.warning(
+                "workflow_late_parallel_completion_ignored",
+                run_id=run_id,
+                workflow_status=run.status if run else "missing",
+            )
+            return
         for item in results or []:
             if not item.get("success", True):
                 err = item.get("error") or item.get("message") or "并行步骤失败"
@@ -457,7 +501,16 @@ class WorkflowEngine:
                     error=str(err),
                     step_index=item.get("step_index"),
                 )
-                update_run_status(run_id, "failed", error=str(err))
+                if not update_run_status(
+                    run_id,
+                    "failed",
+                    error=str(err),
+                    failure_code=str(
+                        item.get("failure_code")
+                        or "workflow_parallel_step_failed"
+                    ),
+                ):
+                    return
                 cls._project_source_terminal_state(run_id)
                 cls._finish_trace(run_id, "failed", str(err))
                 cls._notify_failure(run_id, str(err))
@@ -479,9 +532,10 @@ class WorkflowEngine:
     @classmethod
     def _complete_workflow(cls, run_id: str) -> None:
         run = get_workflow_run(run_id)
-        if not run:
+        if not run or run.status in TERMINAL_WORKFLOW_STATUSES:
             return
-        update_run_status(run_id, "completed")
+        if not update_run_status(run_id, "completed"):
+            return
         cls._project_source_terminal_state(run_id, run)
         template = get_template(run.template_name)
         steps = list_workflow_steps(run_id)
@@ -527,19 +581,36 @@ class WorkflowEngine:
 
     @classmethod
     def _request_patrol_batch_report_if_terminal(cls, run: Any | None) -> None:
-        if run is None or run.template_name != "patrol-change-event":
+        if run is None or run.template_name not in {
+            "patrol-change-event",
+            "patrol-attested-offline-current",
+        }:
             return
         context = dict(run.context or {})
         patrol_batch_id = str(context.get("patrol_batch_id") or "").strip()
         if not patrol_batch_id:
             return
+        cls.request_patrol_batch_report_if_terminal(
+            patrol_batch_id,
+            run_id=str(getattr(run, "id", "") or "") or None,
+        )
+
+    @classmethod
+    def request_patrol_batch_report_if_terminal(
+        cls,
+        patrol_batch_id: str,
+        *,
+        run_id: str | None = None,
+    ) -> bool:
+        """Queue one report only after all batch targets are terminal."""
+
         try:
             from src.core.celery_tasks.tasks import materialize_patrol_batch_report_task
             from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
 
             repository = PatrolBatchManifestRepository()
             if not repository.request_terminal_report(patrol_batch_id):
-                return
+                return False
             materialize_patrol_batch_report_task.apply_async(
                 args=[patrol_batch_id],
                 queue="netops.patrol",
@@ -550,6 +621,7 @@ class WorkflowEngine:
                     )
                 ),
             )
+            return True
         except Exception as exc:
             try:
                 from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
@@ -563,15 +635,107 @@ class WorkflowEngine:
                 pass
             log.warning(
                 "patrol_batch_report_materialization_dispatch_failed",
-                run_id=getattr(run, "id", None),
+                run_id=run_id,
                 patrol_batch_id=patrol_batch_id,
                 error=str(exc),
             )
+            return False
+
+    @classmethod
+    def cancel_run(
+        cls,
+        run_id: str,
+        *,
+        actor: str,
+        reason: str,
+        revoke: bool = True,
+        _visited: set[str] | None = None,
+    ) -> dict[str, Any]:
+        """Cancel one workflow tree and fence late Celery callbacks."""
+
+        visited = _visited if _visited is not None else set()
+        if run_id in visited:
+            return {
+                "found": True,
+                "changed": False,
+                "idempotent": True,
+                "run_id": run_id,
+                "status": "cancelled",
+                "child_results": [],
+            }
+        visited.add(run_id)
+
+        result = cancel_workflow_run(run_id, actor=actor, reason=reason)
+        child_results: list[dict[str, Any]] = []
+        if result.get("found") and result.get("status") == "cancelled":
+            for child in list_child_runs(run_id):
+                if str(child.status or "") in TERMINAL_WORKFLOW_STATUSES:
+                    continue
+                child_results.append(
+                    cls.cancel_run(
+                        str(child.id),
+                        actor=actor,
+                        reason=f"parent {run_id} cancelled: {reason}",
+                        revoke=revoke,
+                        _visited=visited,
+                    )
+                )
+
+        if revoke:
+            try:
+                from src.core.celery_tasks.celery_app import celery
+
+                for task_id in result.get("task_ids") or []:
+                    celery.control.revoke(str(task_id), terminate=False)
+            except Exception as exc:
+                log.warning(
+                    "workflow_cancel_revoke_failed",
+                    run_id=run_id,
+                    error=str(exc),
+                )
+
+        if result.get("changed"):
+            message = f"Workflow cancelled: {reason}"
+            publish_workflow_event(
+                run_id,
+                status="cancelled",
+                message=message,
+                extra={"cancelled_by": actor, "reason": reason},
+            )
+            cls._finish_trace(run_id, "cancelled", message)
+            cls._project_source_terminal_state(run_id)
+            cls._notify_cancelled(run_id, actor=actor, reason=reason)
+
+        for patrol_batch_id in result.get("patrol_batch_ids") or []:
+            cls.request_patrol_batch_report_if_terminal(
+                str(patrol_batch_id),
+                run_id=run_id,
+            )
+        return {**result, "child_results": child_results}
 
     @classmethod
     def _project_source_terminal_state(cls, run_id: str, run=None) -> None:
         run = run or get_workflow_run(run_id)
         context = run.context if run and isinstance(run.context, dict) else {}
+        if (
+            run is not None
+            and run.template_name == "patrol-attested-offline-current"
+        ):
+            try:
+                from src.core.check_items.current_authority import (
+                    PatrolCurrentAuthorityService,
+                )
+
+                PatrolCurrentAuthorityService().sync_workflow_terminal_state(
+                    run_id
+                )
+            except Exception as exc:
+                log.warning(
+                    "current_authority_terminal_projection_failed",
+                    run_id=run_id,
+                    error=str(exc),
+                )
+            return
         if not run or (
             getattr(run, "source", None) != "offline-patrol"
             and not context.get("offline_job_id")
@@ -718,6 +882,35 @@ class WorkflowEngine:
             workflow_run_id=run_id,
             thread_id=run.thread_id,
             level="error",
+        )
+
+    @classmethod
+    def _notify_cancelled(cls, run_id: str, *, actor: str, reason: str) -> None:
+        run = get_workflow_run(run_id)
+        if not run or not run.user_id:
+            return
+        title = f"Workflow cancelled ({run.ticket_id or run_id[:8]})"
+        body = f"Cancelled by {actor}: {reason}"
+        if cls._publish_workflow_notify(
+            "workflow.cancelled",
+            run_id,
+            {
+                "title": title,
+                "body": body,
+                "level": "warning",
+                "cancelled_by": actor,
+                "reason": reason,
+            },
+        ):
+            return
+        create_notification(
+            user_id=run.user_id,
+            title=title,
+            body=body,
+            workflow_run_id=run_id,
+            thread_id=run.thread_id,
+            level="warning",
+            idempotency_key=f"workflow-cancelled|{run_id}",
         )
 
     @classmethod

@@ -7,10 +7,11 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from src.core.check_items import (
+    AssessmentPolicyAssetService,
     AssetGapRepository,
     BaselineCandidate,
     CheckAssessmentInput,
@@ -33,6 +34,7 @@ from src.core.check_items import (
     EvidenceQualificationInput,
     EvidenceQualificationService,
     PatrolProfileCheckItemRepository,
+    ProductionBaselineCandidateRepository,
     ReportManifestService,
     ReportReleaseService,
     RiskCaseService,
@@ -40,15 +42,36 @@ from src.core.check_items import (
     StructuredExecutionResultInput,
     TextComparisonProfileRepository,
     TextExecutionResultInput,
+    build_comparison_fact_contract,
     build_inventory_snapshot,
     build_target_manifest,
     compare_text,
     load_catalog,
     load_text_comparison_profiles,
 )
+from src.core.check_items.assessment_policy import (
+    build_assessment_basis,
+    build_target_assessment_policy_snapshot,
+)
+from src.core.check_items.assessment_policy_migration import (
+    AssessmentPolicyMigrationService,
+)
+from src.core.check_items.report_content_review import (
+    REQUIRED_CONTENT_CONFIRMATIONS,
+    ReportContentReviewService,
+)
+from src.core.check_items.report_contract import (
+    build_report_authority_context,
+)
+from src.core.check_items.reporting import build_check_item_report_view
 from src.infrastructure.db.models import (
-    AuditLogRecord,
+    AssessmentPolicyBindingRecord,
+    AssessmentPolicyCutoverRecord,
+    AssessmentPolicyDecisionRecord,
+    AssessmentPolicyProfileRecord,
+    AssessmentPolicyVersionRecord,
     AssetGapRecord,
+    AuditLogRecord,
     Base,
     ChangePolicyRecord,
     ChangePolicyVersionRecord,
@@ -72,20 +95,30 @@ from src.infrastructure.db.models import (
     CurrentStateFindingRecord,
     EntityIdentityPolicyRecord,
     EntityIdentityPolicyVersionRecord,
-    EvidenceQualificationRecord,
     EventRuleRecord,
     EventRuleVersionRecord,
+    EvidenceQualificationRecord,
     NetworkChangeRecord,
     NetworkDevice,
+    NetworkEventOccurrenceRecord,
     NetworkEventRecord,
     ObservationContractRecord,
     ParserTemplate,
     PatrolBatchDeviceRecord,
     PatrolBatchRecord,
+    PatrolCollectionResult,
+    PatrolIntendedTargetMatrixRecord,
     PatrolProfileCheckItemRecord,
+    PatrolScopeContractRecord,
+    PatrolScopeContractVersionRecord,
+    PatrolScopeDecisionRecord,
+    ReportClaimRecord,
+    ReportContentReviewItemRecord,
+    ReportContentReviewRecord,
     ReportManifestRecord,
     ReportReleaseRecord,
     RiskCaseRecord,
+    RiskEpisodeAssociationRecord,
     RiskOccurrenceRecord,
     RiskRemediationRecord,
     RuntimeBundleAssetRecord,
@@ -94,7 +127,35 @@ from src.infrastructure.db.models import (
     TextComparisonProfileVersionRecord,
     WorkflowRun,
 )
-from src.core.check_items.reporting import build_check_item_report_view
+
+
+def _stable_digest(value):
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+class _MemoryObjectStorage:
+    def __init__(self, objects: dict[str, bytes]) -> None:
+        self.objects = dict(objects)
+
+    def download_file(self, object_name: str) -> bytes | None:
+        return self.objects.get(object_name)
+
+    def sha256_object(self, object_name: str) -> dict[str, int | str] | None:
+        content = self.objects.get(object_name)
+        if content is None:
+            return None
+        return {
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "size": len(content),
+        }
 
 
 @contextmanager
@@ -118,6 +179,11 @@ def _runtime(tmp_path):
             CheckItemRecord.__table__,
             NetworkDevice.__table__,
             CheckItemVersionRecord.__table__,
+            AssessmentPolicyProfileRecord.__table__,
+            AssessmentPolicyVersionRecord.__table__,
+            AssessmentPolicyDecisionRecord.__table__,
+            AssessmentPolicyBindingRecord.__table__,
+            AssessmentPolicyCutoverRecord.__table__,
             CollectionImplementationRecord.__table__,
             CollectionImplementationVersionRecord.__table__,
             CheckItemImplementationLinkRecord.__table__,
@@ -140,10 +206,16 @@ def _runtime(tmp_path):
             EvidenceQualificationRecord.__table__,
             CoverageDecisionRecord.__table__,
             CommandSnapshot.__table__,
+            PatrolCollectionResult.__table__,
             StateObservationRecord.__table__,
             NetworkChangeRecord.__table__,
             NetworkEventRecord.__table__,
+            NetworkEventOccurrenceRecord.__table__,
             PatrolBatchRecord.__table__,
+            PatrolScopeContractRecord.__table__,
+            PatrolScopeContractVersionRecord.__table__,
+            PatrolIntendedTargetMatrixRecord.__table__,
+            PatrolScopeDecisionRecord.__table__,
             PatrolBatchDeviceRecord.__table__,
             CommandProfileRecord.__table__,
             CommandProfileVersionRecord.__table__,
@@ -155,9 +227,13 @@ def _runtime(tmp_path):
             TextComparisonProfileVersionRecord.__table__,
             CurrentStateFindingRecord.__table__,
             RiskCaseRecord.__table__,
+            RiskEpisodeAssociationRecord.__table__,
             RiskOccurrenceRecord.__table__,
             RiskRemediationRecord.__table__,
             ReportManifestRecord.__table__,
+            ReportClaimRecord.__table__,
+            ReportContentReviewRecord.__table__,
+            ReportContentReviewItemRecord.__table__,
             ReportReleaseRecord.__table__,
             WorkflowRun.__table__,
         ],
@@ -284,8 +360,12 @@ def _seed_cpu_assets(session_factory, catalog_repository):
                     version="1",
                     asset_path="database://parser-cpu-v1",
                     template_text=(
-                        "Value cpu_usage (\\d+)\\n\\n"
-                        "Start\\n ^CPU usage: ${cpu_usage}% -> Record\\n"
+                        "Value scope (\\S+)\n"
+                        "Value scope_id (\\S+)\n"
+                        "Value cpu_usage (\\d+)\n\n"
+                        "Start\n"
+                        " ^CPU usage ${scope} ${scope_id}: "
+                        "${cpu_usage}% -> Record\n"
                     ),
                     sha256="a" * 64,
                     status="active",
@@ -293,6 +373,20 @@ def _seed_cpu_assets(session_factory, catalog_repository):
                         "passed": True,
                         "unique_sample_count": 3,
                         "sample_manifest_sha256": "f" * 64,
+                        "parser_spec": {
+                            "entity": "cpu_scope",
+                            "primary_keys": ["scope", "scope_id"],
+                            "fields": {
+                                "scope": {"required": True, "type": "text"},
+                                "scope_id": {"required": True, "type": "text"},
+                                "cpu_usage": {
+                                    "required": True,
+                                    "type": "number",
+                                },
+                            },
+                            "allow_empty": False,
+                            "empty_patterns": [],
+                        },
                         "compatibility": {
                             "manifest_version": 2,
                             "scope": "vendor",
@@ -380,7 +474,7 @@ def _seed_cpu_assets(session_factory, catalog_repository):
                     rule_id="rule-cpu-high",
                     version=1,
                     event_type="CpuUtilizationHigh",
-                    severity="major",
+                    severity="warning",
                     condition_json={
                         "kind": "threshold",
                         "observation_types": ["device.cpu.utilization"],
@@ -405,6 +499,48 @@ def _seed_cpu_assets(session_factory, catalog_repository):
                     created_at=now,
                     activated_at=now,
                 ),
+                EventRuleRecord(
+                    id="rule-cpu-recovered",
+                    name="system.cpu_usage.recovered",
+                    status="active",
+                    current_version=1,
+                    created_at=now,
+                    updated_at=now,
+                ),
+                EventRuleVersionRecord(
+                    id="rule-cpu-recovered-v1",
+                    rule_id="rule-cpu-recovered",
+                    version=1,
+                    event_type="CpuUtilizationRecovered",
+                    severity="info",
+                    condition_json={
+                        "kind": "threshold",
+                        "observation_types": [
+                            "device.cpu.utilization"
+                        ],
+                        "entity_types": ["cpu_scope"],
+                        "fields": ["cpu_usage"],
+                        "lte": 75,
+                    },
+                    priority=90,
+                    exclusive=True,
+                    event_class="recovery",
+                    evaluation_scope="change",
+                    recovery_json={
+                        "resolves": ["CpuUtilizationHigh"]
+                    },
+                    correlation_key_json=[
+                        "device_id",
+                        "entity_type",
+                        "entity_key",
+                    ],
+                    status="active",
+                    validation_report_json={"passed": True},
+                    digest="e" * 64,
+                    created_by="test",
+                    created_at=now,
+                    activated_at=now,
+                ),
             ]
         )
     return check_item, implementation
@@ -425,12 +561,13 @@ def _create_cpu_bundle(tmp_path):
         change_policy_version_ids=["policy-cpu-v1"],
         event_rule_bindings={
             "rule-cpu-high-v1": "device.cpu.utilization",
+            "rule-cpu-recovered-v1": "device.cpu.utilization",
         },
         actor="test",
     )
     bundle = service.activate(
         bundle["version_id"],
-        actor="test",
+        actor="bundle-approver",
         reason="unit test activation",
     )
     return (
@@ -441,6 +578,65 @@ def _create_cpu_bundle(tmp_path):
         implementation,
         service,
         bundle,
+    )
+
+
+def _target_policy_snapshot(check_item, device_id: str) -> dict:
+    return build_target_assessment_policy_snapshot(
+        check_item_id=check_item.id,
+        check_item_version_id=check_item.version_id,
+        canonical_contract=check_item.canonical_contract,
+        device={"id": device_id},
+    )
+
+
+def _execution_policy_fields(check_item, device_id: str) -> dict:
+    snapshot = _target_policy_snapshot(check_item, device_id)
+    return {
+        "assessment_policy_snapshot_json": snapshot,
+        "assessment_policy_snapshot_digest": snapshot["digest"],
+    }
+
+
+def _resolved_assessment_basis(
+    *,
+    check_item,
+    device_id: str,
+    runtime_bundle_version_id: str,
+    runtime_bundle_digest: str,
+    observation_id: str,
+) -> dict:
+    snapshot = _target_policy_snapshot(check_item, device_id)
+    entry = {
+        "schema_version": "check-assessment-basis/v1",
+        "observation_id": observation_id,
+        "observation_type": "device.cpu.utilization",
+        "entity_identity": {
+            "device_id": device_id,
+            "entity_type": "cpu_scope",
+            "entity_key": '["device","0"]',
+            "dimensions": {},
+        },
+        "rule_binding": {"rule_version_id": "rule-cpu-high-v1"},
+        "runtime_bundle_version_id": runtime_bundle_version_id,
+        "runtime_bundle_digest": runtime_bundle_digest,
+        "policy_snapshot_digest": snapshot["digest"],
+        "threshold_binding": {
+            "status": "resolved",
+            "source_kind": "catalog_default",
+            "value": 80.0,
+            "unit": "percent",
+        },
+        "expected_state_binding": {"status": "not_required"},
+        "policy_resolution": {"status": "resolved"},
+        "evidence_refs": [observation_id, runtime_bundle_version_id],
+    }
+    entry["digest"] = _stable_digest(entry)
+    return build_assessment_basis(
+        entries=(entry,),
+        policy_snapshot_digest=snapshot["digest"],
+        runtime_bundle_version_id=runtime_bundle_version_id,
+        runtime_bundle_digest=runtime_bundle_digest,
     )
 
 
@@ -474,7 +670,7 @@ def _create_configuration_bundle(tmp_path):
     )
     bundle = service.activate(
         bundle["version_id"],
-        actor="test",
+        actor="bundle-approver",
         reason="unit test activation",
     )
     return (
@@ -569,6 +765,539 @@ def test_comparison_context_never_invents_a_first_change(tmp_path):
         assert db.query(ComparisonContextRecord).count() == 1
 
 
+def _complete_cpu_production_fact(
+    *,
+    session_factory,
+    scope,
+    catalog_repository,
+    check_item,
+    implementation,
+    bundle,
+    patrol_batch_id: str,
+    device_id: str,
+    observed_at: datetime,
+    snapshot_id: str,
+    run_id: str,
+):
+    devices = (
+        {
+            "device_id": device_id,
+            "device_name": "H3C baseline device",
+            "management_ip": "192.0.2.40",
+            "vendor": "H3C",
+            "family": "Comware7",
+            "model": "S5130",
+        },
+    )
+    target = build_target_manifest(
+        devices=devices,
+        selector={"device_ids": [device_id]},
+    )
+    inventory = build_inventory_snapshot(devices)
+    with _session_scope(session_factory) as db:
+        db.add(
+            PatrolBatchRecord(
+                patrol_batch_id=patrol_batch_id,
+                workflow_name="patrol-change-event",
+                launch_mode="direct",
+                patrol_mode="production",
+                report_purpose="production_current",
+                target_type="devices",
+                target_label="baseline selection test",
+                selector_json={"device_ids": [device_id]},
+                target_count=1,
+                launched_count=1,
+                skipped_count=0,
+                target_manifest_digest=target["digest"],
+                inventory_snapshot_digest=inventory["digest"],
+                dispatch_status="completed",
+                report_status="not_requested",
+                archived=False,
+                created_at=observed_at,
+                updated_at=observed_at,
+            )
+        )
+    plan = CheckItemEffectivePlanService(
+        scope,
+        catalog=catalog_repository.load_active(),
+    ).freeze(
+        EffectivePlanRequest(
+            patrol_batch_id=patrol_batch_id,
+            devices=devices,
+            check_item_ids=("system.cpu_usage",),
+            target_manifest_digest=target["digest"],
+            inventory_snapshot_digest=inventory["digest"],
+            current_observed_at=observed_at,
+            actor="baseline-test",
+            report_purpose="production_current",
+        )
+    )
+    action = plan.collection_actions[0]
+    execution = plan.executions[0]
+    with _session_scope(session_factory) as db:
+        db.add(
+            CommandSnapshot(
+                id=snapshot_id,
+                run_id=run_id,
+                device_id=device_id,
+                execution_item_id=str(action["id"]),
+                collection_action_id=str(action["id"]),
+                implementation_version_id=implementation.version_id,
+                check_item_ids_json=["system.cpu_usage"],
+                device_name="H3C baseline device",
+                management_ip="192.0.2.40",
+                vendor="H3C",
+                model="S5130",
+                command=str(action["command"]),
+                canonical_command=str(action["canonical_command"]),
+                parser_template_id="parser-cpu-v1",
+                parser_version="1",
+                contract_version=1,
+                observed_at=observed_at,
+                structured_json=[{"cpu_usage": 35}],
+                raw_text="CPU usage: 35%",
+                raw_text_hash=hashlib.sha256(
+                    b"CPU usage: 35%"
+                ).hexdigest(),
+                parse_status="parsed",
+                output_status="success",
+            )
+        )
+        db.add(
+            StateObservationRecord(
+                id=f"observation-{patrol_batch_id}",
+                idempotency_key=hashlib.sha256(
+                    f"observation-{patrol_batch_id}".encode()
+                ).hexdigest(),
+                run_id=run_id,
+                snapshot_id=snapshot_id,
+                mode="production",
+                source="cli",
+                source_type="cli",
+                device_id=device_id,
+                vendor="H3C",
+                model="S5130",
+                canonical_command=str(action["canonical_command"]),
+                execution_item_id=str(action["id"]),
+                entity_type="cpu_scope",
+                entity_key='["device","0"]',
+                field_name="cpu_usage",
+                observation_type="device.cpu.utilization",
+                semantic_type="gauge",
+                unit="percent",
+                dimensions_json={"window": "instant"},
+                value_json=35,
+                value_number=35,
+                value_type="number",
+                observation_kind="state",
+                observed_at=observed_at,
+                fact_order_key="",
+                parser_template_id="parser-cpu-v1",
+                parser_version="1",
+                contract_version=1,
+                confidence=1.0,
+            )
+        )
+    finalized = CheckItemExecutionService(scope).finalize_structured(
+        StructuredExecutionResultInput(
+            execution_id=str(execution["id"]),
+            observations=(
+                {
+                    "id": f"observation-{patrol_batch_id}",
+                    "device_id": device_id,
+                    "run_id": run_id,
+                    "entity_type": "cpu_scope",
+                    "entity_key": '["device","0"]',
+                    "field": "cpu_usage",
+                    "observation_type": "device.cpu.utilization",
+                    "value": 35,
+                    "unit": "percent",
+                    "dimensions": {"window": "instant"},
+                    "command": str(action["canonical_command"]),
+                    "snapshot_id": snapshot_id,
+                    "observed_at": observed_at,
+                    "parser_template_id": "parser-cpu-v1",
+                    "observation_contract_id": "contract-cpu-v1",
+                },
+            ),
+            snapshot_facts=(
+                {
+                    "id": snapshot_id,
+                    "device_id": device_id,
+                    "inventory_device_id": device_id,
+                    "output_status": "data",
+                    "observed_at": observed_at,
+                },
+            ),
+            evidence_refs=(snapshot_id,),
+            assessed_at=observed_at,
+        )
+    )
+    assert finalized["assessment"]["assessment_status"] == "healthy"
+    assert finalized["assessment"]["completeness_status"] == "complete"
+    return devices, target, inventory, plan, finalized
+
+
+def test_production_plan_automatically_selects_last_qualified_fact(tmp_path):
+    (
+        session_factory,
+        scope,
+        catalog_repository,
+        check_item,
+        implementation,
+        _bundle_service,
+        bundle,
+    ) = _create_cpu_bundle(tmp_path)
+    previous_at = datetime(2026, 7, 27, 10, tzinfo=timezone.utc)
+    devices, target, inventory, _prior_plan, _finalized = (
+        _complete_cpu_production_fact(
+            session_factory=session_factory,
+            scope=scope,
+            catalog_repository=catalog_repository,
+            check_item=check_item,
+            implementation=implementation,
+            bundle=bundle,
+            patrol_batch_id="batch-baseline-prior",
+            device_id="device-baseline-1",
+            observed_at=previous_at,
+            snapshot_id="snapshot-baseline-prior",
+            run_id="run-baseline-prior",
+        )
+    )
+    service = CheckItemEffectivePlanService(
+        scope,
+        catalog=catalog_repository.load_active(),
+    )
+    current = service.preview(
+        EffectivePlanRequest(
+            patrol_batch_id="batch-baseline-current",
+            devices=devices,
+            check_item_ids=("system.cpu_usage",),
+            target_manifest_digest=target["digest"],
+            inventory_snapshot_digest=inventory["digest"],
+            current_observed_at=previous_at + timedelta(days=1),
+            actor="baseline-test",
+            report_purpose="production_current",
+        )
+    )
+    context = current.comparison_contexts[0]
+    assert context.comparison_status == "comparable", context.metadata
+    assert context.baseline_run_id == "run-baseline-prior"
+    assert context.baseline_snapshot_ids == ("snapshot-baseline-prior",)
+    assert context.selection_reason == "latest_compatible_success"
+    selected = context.metadata["selected_baseline"]
+    assert selected["patrol_batch_id"] == "batch-baseline-prior"
+    assert selected["runtime_bundle_digest"] == bundle["digest"]
+    assert selected["rejection_codes"] == []
+    assert context.metadata["current_fact_contract"]["digest"] == (
+        selected["fact_contract"]["digest"]
+    )
+
+    with _session_scope(session_factory) as db:
+        batch = db.get(PatrolBatchRecord, "batch-baseline-prior")
+        batch.report_purpose = "shadow_validation"
+    wrong_purpose = service.preview(
+        EffectivePlanRequest(
+            patrol_batch_id="batch-baseline-after-shadow",
+            devices=devices,
+            check_item_ids=("system.cpu_usage",),
+            target_manifest_digest=target["digest"],
+            inventory_snapshot_digest=inventory["digest"],
+            current_observed_at=previous_at + timedelta(days=2),
+            actor="baseline-test",
+            report_purpose="production_current",
+        )
+    ).comparison_contexts[0]
+    assert wrong_purpose.comparison_status == "baseline_missing"
+    assert wrong_purpose.metadata["candidate_rejection_counts"][
+        "acquisition_purpose_ineligible"
+    ] == 1
+
+    with _session_scope(session_factory) as db:
+        batch = db.get(PatrolBatchRecord, "batch-baseline-prior")
+        batch.report_purpose = "production_current"
+        observation = db.query(StateObservationRecord).one()
+        observation.observation_type = "unexpected.observation"
+    wrong_observation = service.preview(
+        EffectivePlanRequest(
+            patrol_batch_id="batch-baseline-after-observation-drift",
+            devices=devices,
+            check_item_ids=("system.cpu_usage",),
+            target_manifest_digest=target["digest"],
+            inventory_snapshot_digest=inventory["digest"],
+            current_observed_at=previous_at + timedelta(days=2),
+            actor="baseline-test",
+            report_purpose="production_current",
+        )
+    ).comparison_contexts[0]
+    assert wrong_observation.comparison_status == "baseline_missing"
+    assert wrong_observation.metadata["candidate_rejection_counts"][
+        "state_observation_contract_mismatch"
+    ] == 1
+
+    with _session_scope(session_factory) as db:
+        observation = db.query(StateObservationRecord).one()
+        observation.observation_type = "device.cpu.utilization"
+        manifest = db.query(CheckItemRuntimeManifestRecord).one()
+        original_manifest = dict(manifest.manifest_json)
+        manifest.manifest_json = {
+            **original_manifest,
+            "patrol_batch_id": "tampered-batch",
+        }
+    wrong_manifest = service.preview(
+        EffectivePlanRequest(
+            patrol_batch_id="batch-baseline-after-manifest-drift",
+            devices=devices,
+            check_item_ids=("system.cpu_usage",),
+            target_manifest_digest=target["digest"],
+            inventory_snapshot_digest=inventory["digest"],
+            current_observed_at=previous_at + timedelta(days=2),
+            actor="baseline-test",
+            report_purpose="production_current",
+        )
+    ).comparison_contexts[0]
+    assert wrong_manifest.comparison_status == "baseline_missing"
+    assert wrong_manifest.metadata["candidate_rejection_counts"][
+        "runtime_manifest_integrity_failed"
+    ] == 1
+
+    with _session_scope(session_factory) as db:
+        manifest = db.query(CheckItemRuntimeManifestRecord).one()
+        manifest.manifest_json = original_manifest
+        qualification = db.query(EvidenceQualificationRecord).one()
+        qualification.digest = "0" * 64
+    rejected = service.preview(
+        EffectivePlanRequest(
+            patrol_batch_id="batch-baseline-after-tamper",
+            devices=devices,
+            check_item_ids=("system.cpu_usage",),
+            target_manifest_digest=target["digest"],
+            inventory_snapshot_digest=inventory["digest"],
+            current_observed_at=previous_at + timedelta(days=2),
+            actor="baseline-test",
+            report_purpose="production_current",
+        )
+    ).comparison_contexts[0]
+    assert rejected.comparison_status == "baseline_missing"
+    assert rejected.selection_reason == "prior_facts_failed_qualification"
+    assert rejected.metadata["candidate_rejection_counts"][
+        "evidence_qualification_integrity_failed"
+    ] == 1
+
+
+def test_comparison_rejects_equally_recent_compatible_baselines():
+    current = datetime(2026, 7, 28, 10, tzinfo=timezone.utc)
+    candidates = [
+        BaselineCandidate(
+            run_id=run_id,
+            observed_at=current - timedelta(hours=1),
+            snapshot_ids=(f"snapshot-{run_id}",),
+            canonical_schema_version="canonical-v1",
+            entity_identity_policy_version="identity-v1",
+            metadata={"execution_id": f"execution-{run_id}"},
+        )
+        for run_id in ("run-a", "run-b")
+    ]
+    decision = ComparisonContextService().select_online(
+        device_id="device-ambiguous",
+        check_item_version_id="check-v1",
+        current_observed_at=current,
+        candidates=candidates,
+        max_baseline_age_seconds=86400,
+        canonical_schema_version="canonical-v1",
+        entity_identity_policy_version="identity-v1",
+    )
+    assert decision.comparison_status == "baseline_missing"
+    assert decision.selection_reason == (
+        "multiple_equally_recent_compatible_baselines"
+    )
+    assert len(decision.metadata["ambiguous_candidates"]) == 2
+
+
+def test_comparison_requires_the_same_canonical_fact_contract():
+    current = datetime(2026, 7, 28, 10, tzinfo=timezone.utc)
+    common = {
+        "check_item_version_id": "check-v1",
+        "result_mode": "structured",
+        "assessment_mode": "health",
+        "implementation_version_id": "implementation-v1",
+        "canonical_catalog_version": 3,
+        "canonical_catalog_digest": "c" * 64,
+        "entity_identity_policy_version_id": "identity-v1",
+        "dependency_digests": {
+            "identity_policy": "i" * 64,
+            "observation_contracts": {"contract-v1": "o" * 64},
+        },
+        "comparison_profile_version_id": None,
+    }
+    baseline_contract = build_comparison_fact_contract(
+        check_item_digest="a" * 64,
+        **common,
+    )
+    current_contract = build_comparison_fact_contract(
+        check_item_digest="b" * 64,
+        **common,
+    )
+    decision = ComparisonContextService().select_online(
+        device_id="device-contract",
+        check_item_version_id="check-v1",
+        current_observed_at=current,
+        candidates=(
+            BaselineCandidate(
+                run_id="run-contract-old",
+                observed_at=current - timedelta(hours=1),
+                canonical_schema_version="canonical-v1",
+                entity_identity_policy_version="identity-v1",
+                metadata={"fact_contract": baseline_contract},
+            ),
+        ),
+        max_baseline_age_seconds=86400,
+        canonical_schema_version="canonical-v1",
+        entity_identity_policy_version="identity-v1",
+        current_fact_contract=current_contract,
+    )
+    assert decision.comparison_status == "schema_incompatible"
+    assert decision.selection_reason == "no_compatible_fact_contract"
+
+
+def test_baseline_candidate_lookup_is_bulk_for_large_target_sets(tmp_path):
+    session_factory, scope, catalog_repository = _runtime(tmp_path)
+    check_item = catalog_repository.load_active().check_item("system.cpu_usage")
+    assert check_item is not None
+    engine = session_factory.kw["bind"]
+    statements: list[str] = []
+
+    def record_statement(_conn, _cursor, statement, _parameters, _context, _many):
+        statements.append(str(statement))
+
+    event.listen(engine, "before_cursor_execute", record_statement)
+    try:
+        result = ProductionBaselineCandidateRepository(scope).load_many(
+            targets=(
+                (f"device-{index}", check_item.version_id)
+                for index in range(200)
+            ),
+            current_observed_at=datetime(
+                2026, 7, 28, 10, tzinfo=timezone.utc
+            ),
+            current_patrol_batch_id="batch-current",
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", record_statement)
+    assert result == {}
+    selects = [
+        statement
+        for statement in statements
+        if statement.lstrip().upper().startswith("SELECT")
+    ]
+    assert len(selects) == 1
+
+
+def test_terminal_device_failures_settle_two_thousand_executions_with_fixed_selects(
+    tmp_path,
+):
+    session_factory, scope, _catalog_repository = _runtime(tmp_path)
+    with _session_scope(session_factory) as db:
+        check_item_version_ids = [
+            str(row[0])
+            for row in db.query(CheckItemVersionRecord.id)
+            .filter(CheckItemVersionRecord.status == "active")
+            .order_by(CheckItemVersionRecord.id)
+            .limit(2)
+            .all()
+        ]
+    assert len(check_item_version_ids) == 2
+
+    patrol_batch_id = "batch-terminal-failure-scale"
+    now = datetime.now(timezone.utc)
+    devices = [f"device-{index:04d}" for index in range(1000)]
+    with _session_scope(session_factory) as db:
+        db.bulk_save_objects(
+            [
+                CheckExecutionRecord(
+                    id=f"execution-{device_id}-{check_index}",
+                    idempotency_key=f"execution-{device_id}-{check_index}",
+                    patrol_batch_id=patrol_batch_id,
+                    device_id=device_id,
+                    check_item_version_id=check_item_version_id,
+                    collection_action_ids_json=[],
+                    execution_status="planned",
+                    reason_codes_json=[],
+                    target_manifest_digest="a" * 64,
+                    evidence_refs_json=[],
+                    created_at=now,
+                    updated_at=now,
+                )
+                for device_id in devices
+                for check_index, check_item_version_id in enumerate(
+                    check_item_version_ids
+                )
+            ]
+        )
+
+    engine = session_factory.kw["bind"]
+    statements: list[str] = []
+
+    def record_statement(_conn, _cursor, statement, _parameters, _context, _many):
+        statements.append(str(statement))
+
+    failures = [
+        {
+            "device_id": device_id,
+            "status": "cancelled",
+            "reason_code": "patrol_batch_cancelled",
+            "evidence_refs": (),
+        }
+        for device_id in devices
+    ]
+    event.listen(engine, "before_cursor_execute", record_statement)
+    try:
+        result = CheckItemRunFinalizer(session_scope=scope).fail_devices(
+            patrol_batch_id=patrol_batch_id,
+            failures=failures,
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", record_statement)
+
+    selects = [
+        statement
+        for statement in statements
+        if statement.lstrip().upper().startswith("SELECT")
+    ]
+    assert len(selects) <= 3
+    assert result["failed_execution_count"] == 2000
+    with _session_scope(session_factory) as db:
+        assert (
+            db.query(CheckAssessmentRecord)
+            .filter(CheckAssessmentRecord.patrol_batch_id == patrol_batch_id)
+            .count()
+            == 2000
+        )
+        assert (
+            db.query(CheckAssessmentRecord)
+            .filter(
+                CheckAssessmentRecord.patrol_batch_id == patrol_batch_id,
+                CheckAssessmentRecord.assessment_status
+                == "unable_to_determine",
+            )
+            .count()
+            == 2000
+        )
+
+    repeated = CheckItemRunFinalizer(session_scope=scope).fail_devices(
+        patrol_batch_id=patrol_batch_id,
+        failures=failures,
+    )
+    assert repeated["failed_execution_count"] == 0
+    with _session_scope(session_factory) as db:
+        assert (
+            db.query(CheckAssessmentRecord)
+            .filter(CheckAssessmentRecord.patrol_batch_id == patrol_batch_id)
+            .count()
+            == 2000
+        )
+
+
 def test_completed_execution_is_not_automatically_healthy():
     common = {
         "execution_id": "execution-1",
@@ -648,6 +1377,63 @@ def test_evidence_qualification_fails_closed_for_conflict_truncation_and_stale()
         "output_quality_truncated",
         "observation_stale",
     } <= set(decision.reason_codes)
+
+
+def test_comparison_and_evidence_digests_use_timezone_invariant_utc_values():
+    utc_at = datetime(2026, 7, 28, 4, tzinfo=timezone.utc)
+    china_at = utc_at.astimezone(timezone(timedelta(hours=8)))
+
+    utc_context = ComparisonContextService().select_online(
+        device_id="timezone-device",
+        check_item_version_id="timezone-check-v1",
+        current_observed_at=utc_at,
+        candidates=(),
+        max_baseline_age_seconds=3600,
+        canonical_schema_version="canonical-v1",
+        entity_identity_policy_version="identity-v1",
+    )
+    china_context = ComparisonContextService().select_online(
+        device_id="timezone-device",
+        check_item_version_id="timezone-check-v1",
+        current_observed_at=china_at,
+        candidates=(),
+        max_baseline_age_seconds=3600,
+        canonical_schema_version="canonical-v1",
+        entity_identity_policy_version="identity-v1",
+    )
+    assert china_context.digest == utc_context.digest
+    assert china_context.current_observed_at == utc_at
+
+    common = {
+        "execution_id": "timezone-execution",
+        "patrol_batch_id": "timezone-batch",
+        "device_id": "timezone-device",
+        "check_item_version_id": "timezone-check-v1",
+        "implementation_version_id": "timezone-implementation-v1",
+        "runtime_bundle_version_id": "timezone-bundle-v1",
+        "runtime_bundle_digest": "a" * 64,
+        "snapshot_ids": ("timezone-snapshot",),
+        "source_device_ids": ("timezone-device",),
+        "inventory_device_ids": ("timezone-device",),
+        "output_statuses": ("complete",),
+        "policy_snapshot": {},
+    }
+    utc_evidence = EvidenceQualificationService.qualify(
+        EvidenceQualificationInput(
+            **common,
+            observed_ats=(utc_at,),
+            qualified_at=utc_at,
+        )
+    )
+    china_evidence = EvidenceQualificationService.qualify(
+        EvidenceQualificationInput(
+            **common,
+            observed_ats=(china_at,),
+            qualified_at=china_at,
+        )
+    )
+    assert china_evidence.digest == utc_evidence.digest
+    assert china_evidence.values["qualified_at"] == utc_at
 
 
 def test_coverage_decision_uses_auditable_entity_denominator():
@@ -750,7 +1536,40 @@ def test_evidence_coverage_does_not_require_health_rule_evaluation():
     assert "entity_evaluation_incomplete" not in decision.reason_codes
 
 
-def test_health_assessment_supports_policy_approved_not_applicable():
+def test_coverage_decision_records_parser_failure_as_not_evaluable():
+    decision = CoverageDecisionService.decide(
+        CoverageDecisionInput(
+            execution_id="execution-parser-failed",
+            patrol_batch_id="batch-parser-failed",
+            device_id="device-parser-failed",
+            check_item_version_id="check-interface-v1",
+            observed_entity_keys=(),
+            evaluated_entity_count=0,
+            policy_snapshot={
+                "model": "inventory_entity_set",
+            },
+            denominator_ref={
+                "basis": "inventory_entity_set",
+                "inventory_snapshot_digest": "e" * 64,
+            },
+            evaluable=False,
+            evaluation_failure_reason_codes=(
+                "parse_failed",
+                "template_missing",
+            ),
+        )
+    )
+
+    assert decision.coverage_status == "not_evaluable"
+    assert decision.coverage_basis == "inventory_entity_set"
+    assert {
+        "coverage_not_evaluable",
+        "parse_failed",
+        "template_missing",
+    } <= set(decision.reason_codes)
+
+
+def test_health_assessment_does_not_hide_unsupported_command_as_not_applicable():
     decision = CheckAssessmentService.assess(
         CheckAssessmentInput(
             patrol_batch_id="batch-not-applicable",
@@ -775,9 +1594,108 @@ def test_health_assessment_supports_policy_approved_not_applicable():
         )
     )
 
-    assert decision.assessment_status == "not_applicable"
-    assert decision.completeness_status == "complete"
-    assert decision.values["risk_verification_status"] == "not_applicable"
+    assert decision.assessment_status == "unable_to_determine"
+    assert decision.completeness_status == "insufficient"
+    assert "output_quality_unsupported" in decision.blocking_reason_codes
+
+
+def test_evidence_qualification_requires_frozen_applicability_empty_evidence():
+    assessed_at = datetime(2026, 7, 28, 12, tzinfo=timezone.utc)
+    pattern = r"(?im)^\s*no\s+vpc\s+configured\s*$"
+    common = {
+        "execution_id": "execution-empty-policy",
+        "patrol_batch_id": "batch-empty-policy",
+        "device_id": "device-empty-policy",
+        "check_item_version_id": "check-v1",
+        "implementation_version_id": "implementation-v1",
+        "runtime_bundle_version_id": "bundle-v1",
+        "runtime_bundle_digest": "a" * 64,
+        "snapshot_ids": ("snapshot-empty-policy",),
+        "source_device_ids": ("device-empty-policy",),
+        "inventory_device_ids": ("device-empty-policy",),
+        "output_statuses": ("valid_empty",),
+        "observed_ats": (assessed_at,),
+        "qualified_at": assessed_at,
+    }
+    policy = {
+        "freshness_policy": {
+            "max_observation_age_seconds": 3600,
+            "max_collection_span_seconds": 300,
+        },
+        "empty_result_policy": {"classification": "not_applicable"},
+        "applicability_decision": {
+            "status": "applicable",
+            "selected_policy": {
+                "policy_version_id": "applicability-v1",
+                "empty_result_classification": "expected_empty",
+                "legal_empty_patterns": [pattern],
+            },
+        },
+    }
+
+    accepted = EvidenceQualificationService.qualify(
+        EvidenceQualificationInput(
+            **common,
+            output_reasons=(pattern,),
+            policy_snapshot=policy,
+        )
+    )
+    assert accepted.empty_result_classification == "expected_empty"
+    assert "governed_legal_empty_evidence_matched" in accepted.reason_codes
+
+    rejected = EvidenceQualificationService.qualify(
+        EvidenceQualificationInput(
+            **{**common, "execution_id": "execution-empty-policy-rejected"},
+            output_reasons=(r"(?im)^\s*no\s+entries\s*$",),
+            policy_snapshot=policy,
+        )
+    )
+    assert rejected.empty_result_classification == "invalid"
+    assert (
+        "empty_output_not_authorized_by_frozen_applicability"
+        in rejected.reason_codes
+    )
+
+
+def test_evidence_qualification_never_turns_unsupported_command_into_not_applicable():
+    assessed_at = datetime(2026, 7, 28, 12, tzinfo=timezone.utc)
+    decision = EvidenceQualificationService.qualify(
+        EvidenceQualificationInput(
+            execution_id="execution-unsupported-policy",
+            patrol_batch_id="batch-unsupported-policy",
+            device_id="device-unsupported-policy",
+            check_item_version_id="check-v1",
+            implementation_version_id="implementation-v1",
+            runtime_bundle_version_id="bundle-v1",
+            runtime_bundle_digest="a" * 64,
+            snapshot_ids=("snapshot-unsupported-policy",),
+            source_device_ids=("device-unsupported-policy",),
+            inventory_device_ids=("device-unsupported-policy",),
+            output_statuses=("unsupported_command",),
+            observed_ats=(assessed_at,),
+            output_reasons=(r"%\s*invalid input",),
+            policy_snapshot={
+                "freshness_policy": {
+                    "max_observation_age_seconds": 3600,
+                    "max_collection_span_seconds": 300,
+                },
+                "empty_result_policy": {"classification": "not_applicable"},
+                "applicability_decision": {
+                    "status": "not_applicable",
+                    "selected_policy": {
+                        "policy_version_id": "applicability-v1",
+                        "empty_result_classification": "not_applicable",
+                        "legal_empty_patterns": [r"%\s*invalid input"],
+                    },
+                },
+            },
+            qualified_at=assessed_at,
+        )
+    )
+    assert decision.empty_result_classification == "unsupported_unapproved"
+    assert (
+        "unsupported_command_cannot_be_not_applicable" in decision.reason_codes
+    )
 
 
 def test_runtime_bundle_activation_is_atomic_and_detects_drift(tmp_path):
@@ -877,10 +1795,45 @@ def test_runtime_bundle_preview_is_read_only_and_assembly_is_idempotent(tmp_path
 
     assert preview["operationally_ready"] is True
     assert preview["blockers"] == []
-    assert preview["fallback_resilience"] == "reduced"
+    assert preview["fallback_resilience"] == "not_applicable"
     assert preview["selected"]["parser_template_ids"] == ["parser-cpu-v1"]
     assert preview["selected"]["event_rule_bindings"] == {
-        "rule-cpu-high-v1": ["device.cpu.utilization"]
+        "rule-cpu-high-v1": ["device.cpu.utilization"],
+        "rule-cpu-recovered-v1": ["device.cpu.utilization"],
+    }
+    assert preview["asset_requirement_profile"][
+        "required_asset_types"
+    ] == [
+        "parser_template",
+        "observation_contract",
+        "current_state_rule",
+        "change_policy",
+        "event_rule",
+        "identity_policy",
+    ]
+    assert preview["asset_requirement_profile"]["requirements"][
+        "event_rule"
+    ]["required_event_types_by_observation"] == {
+        "device.cpu.utilization": [
+            "CpuUtilizationHigh",
+            "CpuUtilizationRecovered",
+        ]
+    }
+    assert preview["asset_requirement_profile"]["requirements"][
+        "event_rule"
+    ]["required_event_severities"] == {
+        "CpuUtilizationHigh": "warning",
+        "CpuUtilizationRecovered": "info",
+    }
+    assert preview["asset_requirement_profile"]["requirements"][
+        "event_rule"
+    ]["required_recovery_pairs_by_observation"] == {
+        "device.cpu.utilization": [
+            {
+                "fault": "CpuUtilizationHigh",
+                "recovery": "CpuUtilizationRecovered",
+            }
+        ]
     }
     with _session_scope(session_factory) as db:
         assert db.query(CheckItemRuntimeBundleVersionRecord).count() == 0
@@ -900,28 +1853,235 @@ def test_runtime_bundle_preview_is_read_only_and_assembly_is_idempotent(tmp_path
     )
     assert draft["version_id"] == repeated["version_id"]
     assert draft["version_status"] == "draft"
-    assert draft["compatibility"]["fallback_resilience"] == "reduced"
+    assert draft["compatibility"]["fallback_resilience"] == "not_applicable"
 
+    with pytest.raises(
+        RuntimeBundleValidationError,
+        match="approver different from the version creator",
+    ):
+        service.activate(
+            draft["version_id"],
+            actor="api:engineer",
+            reason="creator cannot self-approve",
+        )
     active = service.activate(
         draft["version_id"],
-        actor="approver",
-        reason="validated canonical CPU runtime path",
+        actor="api:engineer",
+        reason="",
+        allow_same_actor=True,
     )
     assert active["version_status"] == "active"
     with _session_scope(session_factory) as db:
-        actions = {
-            row.action
-            for row in db.query(AuditLogRecord)
+        audit_rows = (
+            db.query(AuditLogRecord)
             .filter(
                 AuditLogRecord.resource_type
                 == "check_item_runtime_bundle_version"
             )
             .all()
-        }
+        )
+        actions = {row.action for row in audit_rows}
+        activation_audit = next(
+            row for row in audit_rows if row.action == "runtime_bundle_activated"
+        )
+        assert activation_audit.detail["separation_of_duties_override"] is True
+        assert activation_audit.detail["reason"] == ""
     assert actions == {
         "runtime_bundle_draft_created",
         "runtime_bundle_activated",
     }
+
+
+@pytest.mark.parametrize(
+    ("rule_version_id", "attribute", "value", "expected_code"),
+    [
+        (
+            "rule-cpu-high-v1",
+            "event_type",
+            "CpuUtilizationUnexpected",
+            "event_rule_type_outside_asset_profile",
+        ),
+        (
+            "rule-cpu-high-v1",
+            "severity",
+            "major",
+            "event_rule_severity_mismatch",
+        ),
+        (
+            "rule-cpu-recovered-v1",
+            "event_class",
+            "fault",
+            "event_rule_class_mismatch",
+        ),
+        (
+            "rule-cpu-recovered-v1",
+            "recovery_json",
+            {"resolves": ["UnrelatedFault"]},
+            "event_rule_recovery_pair_mismatch",
+        ),
+    ],
+)
+def test_runtime_bundle_rejects_event_rules_outside_catalog_contract(
+    tmp_path,
+    rule_version_id,
+    attribute,
+    value,
+    expected_code,
+):
+    session_factory, scope, catalog_repository = _runtime(tmp_path)
+    check_item, implementation = _seed_cpu_assets(
+        session_factory,
+        catalog_repository,
+    )
+    EntityIdentityPolicyRepository(scope).bootstrap(actor="test")
+    with _session_scope(session_factory) as db:
+        db.query(CollectionImplementationParserBindingRecord).delete()
+        version = db.get(EventRuleVersionRecord, rule_version_id)
+        setattr(version, attribute, value)
+
+    preview = CheckItemRuntimeBundleService(scope).preview_assembly(
+        check_item_version_id=check_item.version_id,
+        implementation_version_id=implementation.version_id,
+    )
+
+    assert preview["operationally_ready"] is False
+    candidate = next(
+        item
+        for item in preview["candidates"]["event_rules"]
+        if item["event_rule_version_id"] == rule_version_id
+    )
+    assert expected_code in {
+        item["code"] for item in candidate["blockers"]
+    }
+
+
+def test_runtime_bundle_does_not_block_on_missing_optional_observation(tmp_path):
+    session_factory, scope, catalog_repository = _runtime(tmp_path)
+    check_item, implementation = _seed_cpu_assets(
+        session_factory,
+        catalog_repository,
+    )
+    EntityIdentityPolicyRepository(scope).bootstrap(actor="test")
+    with _session_scope(session_factory) as db:
+        version = db.get(CheckItemVersionRecord, check_item.version_id)
+        canonical = dict(version.canonical_contract_json or {})
+        canonical["observations"] = [
+            *list(canonical.get("observations") or []),
+            {
+                "observation_type": "interface.admin_status",
+                "semantic_type": "state",
+                "required": False,
+            },
+        ]
+        version.canonical_contract_json = canonical
+
+    preview = CheckItemRuntimeBundleService(scope).preview_assembly(
+        check_item_version_id=check_item.version_id,
+        implementation_version_id=implementation.version_id,
+    )
+
+    assert preview["operationally_ready"] is True
+    assert "interface.admin_status" in preview["compatibility"][
+        "expected_observation_types"
+    ]
+    assert "interface.admin_status" not in preview["compatibility"][
+        "required_observation_types"
+    ]
+    assert "interface.admin_status" not in preview["compatibility"][
+        "produced_observation_types"
+    ]
+    created = CheckItemRuntimeBundleService(scope).create_version(
+        check_item_version_id=check_item.version_id,
+        implementation_version_id=implementation.version_id,
+        parser_template_ids=["parser-cpu-v1"],
+        observation_contract_ids=["contract-cpu-v1"],
+        change_policy_version_ids=["policy-cpu-v1"],
+        event_rule_bindings={
+            "rule-cpu-high-v1": "device.cpu.utilization",
+            "rule-cpu-recovered-v1": "device.cpu.utilization",
+        },
+        actor="test",
+    )
+    assert created["version_status"] == "draft"
+
+
+def test_runtime_bundle_rejects_parser_spec_and_textfsm_field_drift(tmp_path):
+    session_factory, scope, catalog_repository = _runtime(tmp_path)
+    check_item, implementation = _seed_cpu_assets(
+        session_factory,
+        catalog_repository,
+    )
+    EntityIdentityPolicyRepository(scope).bootstrap(actor="test")
+    with _session_scope(session_factory) as db:
+        parser = db.get(ParserTemplate, "parser-cpu-v1")
+        validation = dict(parser.validation_json or {})
+        parser_spec = dict(validation.get("parser_spec") or {})
+        parser_spec["fields"] = {
+            **dict(parser_spec.get("fields") or {}),
+            "phantom_metric": {"required": False, "type": "number"},
+        }
+        validation["parser_spec"] = parser_spec
+        parser.validation_json = validation
+
+    preview = CheckItemRuntimeBundleService(scope).preview_assembly(
+        check_item_version_id=check_item.version_id,
+        implementation_version_id=implementation.version_id,
+    )
+
+    assert preview["operationally_ready"] is False
+    assert "parser_field_contract_drift" in {
+        item["code"] for item in preview["blockers"]
+    }
+    candidate = next(
+        item
+        for item in preview["candidates"]["parsers"]
+        if item["parser_template_id"] == "parser-cpu-v1"
+    )
+    assert candidate["field_contract"]["status"] == "schema_drift"
+    assert candidate["field_contract"]["differences"][0][
+        "missing_in_template"
+    ] == ["phantom_metric"]
+    blocker = next(
+        item
+        for item in preview["blockers"]
+        if item["code"] == "parser_field_contract_drift"
+    )
+    assert blocker["remediation_action"]["code"] == "repair_parser_asset"
+    assert blocker["remediation_action"]["asset_type"] == "parser_template"
+
+
+def test_runtime_bundle_rejects_contract_fields_absent_from_parser(tmp_path):
+    session_factory, scope, catalog_repository = _runtime(tmp_path)
+    check_item, implementation = _seed_cpu_assets(
+        session_factory,
+        catalog_repository,
+    )
+    EntityIdentityPolicyRepository(scope).bootstrap(actor="test")
+    with _session_scope(session_factory) as db:
+        contract = db.get(ObservationContractRecord, "contract-cpu-v1")
+        contract.required_fields_json = [
+            *list(contract.required_fields_json or []),
+            "phantom_metric",
+        ]
+
+    preview = CheckItemRuntimeBundleService(scope).preview_assembly(
+        check_item_version_id=check_item.version_id,
+        implementation_version_id=implementation.version_id,
+    )
+
+    assert preview["operationally_ready"] is False
+    assert "observation_contract_source_field_missing" in {
+        item["code"] for item in preview["blockers"]
+    }
+    blocker = next(
+        item
+        for item in preview["blockers"]
+        if item["code"] == "observation_contract_source_field_missing"
+    )
+    assert blocker["context"]["fields"] == ["phantom_metric"]
+    assert blocker["remediation_action"]["code"] == (
+        "repair_observation_contract"
+    )
 
 
 def test_runtime_bundle_assembly_rejects_stale_preview(tmp_path):
@@ -981,6 +2141,61 @@ def test_runtime_bundle_rejects_wide_implementation_with_model_parser(tmp_path):
     blocker_codes = {item["code"] for item in preview["blockers"]}
     assert preview["operationally_ready"] is False
     assert "implementation_scope_broader_than_parser" in blocker_codes
+    assert all(item.get("remediation") for item in preview["blockers"])
+    parser_blocker = next(
+        item
+        for item in preview["blockers"]
+        if item["code"] == "implementation_scope_broader_than_parser"
+    )
+    assert parser_blocker["remediation_action"]["code"] == "repair_parser_asset"
+    assert parser_blocker["remediation_action"]["asset_type"] == "parser_template"
+    assert "workspace=production" in parser_blocker["remediation_action"]["target_url"]
+    assert "command=system.cpu_usage" in parser_blocker["remediation_action"]["target_url"]
+
+
+def test_runtime_bundle_accepts_exact_model_pattern_and_plural_vendor_selector(tmp_path):
+    session_factory, scope, catalog_repository = _runtime(tmp_path)
+    check_item, implementation = _seed_cpu_assets(
+        session_factory,
+        catalog_repository,
+    )
+    EntityIdentityPolicyRepository(scope).bootstrap(actor="test")
+    with _session_scope(session_factory) as db:
+        implementation_row = db.get(
+            CollectionImplementationVersionRecord,
+            implementation.version_id,
+        )
+        implementation_row.match_json = {
+            "vendors": ["H3C"],
+            "families": ["Comware7"],
+            # Catalog-managed exact model selectors are emitted with escaped
+            # punctuation. They still describe one model, not a broad regex.
+            "model_patterns": [r"^S5130S\-54S\-HI\-G$"],
+        }
+        implementation_row.template_scope = "model"
+        parser = db.get(ParserTemplate, "parser-cpu-v1")
+        parser.model = "S5130S-54S-HI-G"
+        validation = dict(parser.validation_json or {})
+        compatibility = dict(validation["compatibility"])
+        compatibility.update(
+            {
+                "scope": "model",
+                "model": "S5130S-54S-HI-G",
+                "family": "Comware7",
+            }
+        )
+        validation["compatibility"] = compatibility
+        parser.validation_json = validation
+
+    preview = CheckItemRuntimeBundleService(scope).preview_assembly(
+        check_item_version_id=check_item.version_id,
+        implementation_version_id=implementation.version_id,
+    )
+
+    blocker_codes = {item["code"] for item in preview["blockers"]}
+    assert "implementation_vendor_missing" not in blocker_codes
+    assert "parser_vendor_mismatch" not in blocker_codes
+    assert "implementation_scope_broader_than_parser" not in blocker_codes
 
 
 def test_runtime_bundle_requires_source_to_canonical_entity_mapping(tmp_path):
@@ -991,6 +2206,27 @@ def test_runtime_bundle_requires_source_to_canonical_entity_mapping(tmp_path):
     )
     EntityIdentityPolicyRepository(scope).bootstrap(actor="test")
     with _session_scope(session_factory) as db:
+        parser = db.get(ParserTemplate, "parser-cpu-v1")
+        parser.template_text = (
+            "Value slot (\\S+)\n"
+            "Value cpu (\\S+)\n"
+            "Value cpu_usage (\\d+)\n\n"
+            "Start\n"
+            " ^CPU usage slot ${slot} cpu ${cpu}: ${cpu_usage}% -> Record\n"
+        )
+        validation = dict(parser.validation_json or {})
+        validation["parser_spec"] = {
+            "entity": "cpu_record",
+            "primary_keys": ["slot", "cpu"],
+            "fields": {
+                "slot": {"required": True, "type": "text"},
+                "cpu": {"required": True, "type": "text"},
+                "cpu_usage": {"required": True, "type": "number"},
+            },
+            "allow_empty": False,
+            "empty_patterns": [],
+        }
+        parser.validation_json = validation
         contract = db.get(ObservationContractRecord, "contract-cpu-v1")
         contract.entity_type = "cpu_record"
         contract.primary_keys_json = ["slot", "cpu"]
@@ -1026,7 +2262,7 @@ def test_runtime_bundle_requires_source_to_canonical_entity_mapping(tmp_path):
         check_item_version_id=check_item.version_id,
         implementation_version_id=implementation.version_id,
     )
-    assert ready["operationally_ready"] is True
+    assert ready["operationally_ready"] is True, ready["blockers"]
 
 
 def test_runtime_bundle_rejects_rule_without_explicit_observation_type(tmp_path):
@@ -1089,7 +2325,6 @@ def test_nonstructured_runtime_bundle_freezes_comparison_profile(tmp_path):
     )
     assert check_item is not None
     profiles = load_text_comparison_profiles()
-    TextComparisonProfileRepository(scope).bootstrap(profiles)
     comparison_profile = next(
         item
         for item in profiles
@@ -1098,6 +2333,26 @@ def test_nonstructured_runtime_bundle_freezes_comparison_profile(tmp_path):
     service = CheckItemRuntimeBundleService(scope)
     EntityIdentityPolicyRepository(scope).bootstrap(actor="test")
 
+    missing_preview = service.preview_assembly(
+        check_item_version_id=check_item.version_id,
+        implementation_version_id=implementation.version_id,
+    )
+    missing_profile = next(
+        item
+        for item in missing_preview["blockers"]
+        if item["code"] == "comparison_profile_missing"
+    )
+    assert missing_profile["remediation_action"]["code"] == "import_rule_samples"
+    assert (
+        "subtab=source-jobs"
+        in missing_profile["remediation_action"]["target_url"]
+    )
+    assert (
+        "check_item_id=configuration.running"
+        in missing_profile["remediation_action"]["target_url"]
+    )
+
+    TextComparisonProfileRepository(scope).bootstrap(profiles)
     preview = service.preview_assembly(
         check_item_version_id=check_item.version_id,
         implementation_version_id=implementation.version_id,
@@ -1107,6 +2362,16 @@ def test_nonstructured_runtime_bundle_freezes_comparison_profile(tmp_path):
         preview["selected"]["comparison_profile_version_id"]
         == comparison_profile.version_id
     )
+    assert preview["command_routes"][0]["status"] == "executable"
+    assert preview["command_routes"][0]["execution_mode"] == (
+        "normalized_diff"
+    )
+    assert preview["asset_requirement_profile"][
+        "required_asset_types"
+    ] == ["comparison_profile", "identity_policy"]
+    assert preview["asset_requirement_profile"]["not_required"][
+        "change_policy"
+    ] == "text_comparison_profile_owns_change_policy"
 
     bundle = service.create_version(
         check_item_version_id=check_item.version_id,
@@ -1119,7 +2384,7 @@ def test_nonstructured_runtime_bundle_freezes_comparison_profile(tmp_path):
     )
     bundle = service.activate(
         bundle["version_id"],
-        actor="test",
+        actor="bundle-approver",
         reason="unit test activation",
     )
     assert bundle["comparison_profile_version_id"] == comparison_profile.version_id
@@ -1128,6 +2393,9 @@ def test_nonstructured_runtime_bundle_freezes_comparison_profile(tmp_path):
         "identity_policy",
     ]
     assert bundle["parser_bundle"] == {}
+    assert bundle["asset_requirement_profile_digest"] == (
+        preview["asset_requirement_profile_digest"]
+    )
 
     with _session_scope(session_factory) as db:
         db.get(
@@ -1323,6 +2591,328 @@ def test_first_patrol_can_open_risk_without_a_change(tmp_path):
         ]
 
 
+def test_recovery_confirmation_revalidates_frozen_runtime_evidence(tmp_path):
+    (
+        session_factory,
+        scope,
+        _catalog_repository,
+        check_item,
+        implementation,
+        _service,
+        bundle,
+    ) = _create_cpu_bundle(tmp_path)
+    assessed_at = datetime(2026, 7, 30, 10, tzinfo=timezone.utc)
+    risk_id = "risk-cpu-recovery-confirmation"
+    execution_id = "execution-cpu-recovery"
+    assessment_id = "assessment-cpu-recovery"
+    qualification_id = "qualification-cpu-recovery"
+    coverage_id = "coverage-cpu-recovery"
+    change_id = "change-cpu-recovery"
+    event_id = "event-cpu-high"
+    occurrence_id = "event-occurrence-cpu-recovery"
+    with _session_scope(session_factory) as db:
+        db.add(
+            NetworkDevice(
+                id="device-recovery-1",
+                device_name="XA-Core-Recovery-1",
+                management_ip="192.0.2.90",
+                vendor="H3C",
+                model="S5130S",
+                status="active",
+            )
+        )
+        db.add(
+            CheckExecutionRecord(
+                id=execution_id,
+                idempotency_key="batch-recovery|device-recovery-1|cpu",
+                patrol_batch_id="batch-recovery",
+                device_id="device-recovery-1",
+                check_item_version_id=check_item.version_id,
+                implementation_version_id=implementation.version_id,
+                collection_action_ids_json=["action-recovery"],
+                runtime_bundle_id=bundle["bundle_id"],
+                runtime_bundle_version_id=bundle["version_id"],
+                runtime_bundle_digest=bundle["digest"],
+                execution_status="completed",
+                reason_codes_json=[],
+                observation_count=1,
+                observed_entity_count=1,
+                change_count=1,
+                event_count=1,
+                current_finding_count=0,
+                assessment_id=assessment_id,
+                evidence_qualification_id=qualification_id,
+                coverage_decision_id=coverage_id,
+                source_identity_status="confirmed",
+                output_quality_status="complete",
+                freshness_status="fresh",
+                empty_result_classification="non_empty",
+                coverage_status="complete",
+                coverage_basis="fixed",
+                risk_verification_status="recovery_pending",
+                expected_entity_count=1,
+                target_manifest_digest="1" * 64,
+                asset_manifest_digest=bundle["digest"],
+                evidence_refs_json=["snapshot:cpu-recovery"],
+                completed_at=assessed_at,
+                created_at=assessed_at,
+                updated_at=assessed_at,
+            )
+        )
+        db.add(
+            EvidenceQualificationRecord(
+                id=qualification_id,
+                digest="2" * 64,
+                check_execution_id=execution_id,
+                patrol_batch_id="batch-recovery",
+                device_id="device-recovery-1",
+                check_item_version_id=check_item.version_id,
+                implementation_version_id=implementation.version_id,
+                runtime_bundle_version_id=bundle["version_id"],
+                runtime_bundle_digest=bundle["digest"],
+                source_identity_status="confirmed",
+                output_quality_status="complete",
+                freshness_status="fresh",
+                empty_result_classification="non_empty",
+                snapshot_ids_json=["snapshot:cpu-recovery"],
+                qualification_reason_codes_json=[],
+                policy_snapshot_json={"schema_version": 1},
+                policy_digest="3" * 64,
+                evidence_refs_json=["snapshot:cpu-recovery"],
+                qualified_at=assessed_at,
+                created_at=assessed_at,
+            )
+        )
+        db.add(
+            CoverageDecisionRecord(
+                id=coverage_id,
+                digest="4" * 64,
+                check_execution_id=execution_id,
+                patrol_batch_id="batch-recovery",
+                device_id="device-recovery-1",
+                check_item_version_id=check_item.version_id,
+                coverage_status="partial",
+                coverage_basis="fixed",
+                expected_entity_count=1,
+                observed_entity_count=1,
+                evaluated_entity_count=1,
+                expected_entity_set_digest="5" * 64,
+                observed_entity_set_digest="5" * 64,
+                denominator_ref_json={"basis": "fixed"},
+                missing_entity_sample_json=[],
+                unexpected_entity_sample_json=[],
+                reason_codes_json=[],
+                policy_snapshot_json={"model": "fixed"},
+                policy_digest="6" * 64,
+                evidence_refs_json=["snapshot:cpu-recovery"],
+                decided_at=assessed_at,
+                created_at=assessed_at,
+            )
+        )
+        db.add(
+            CheckAssessmentRecord(
+                id=assessment_id,
+                idempotency_key="assessment-cpu-recovery-key",
+                patrol_batch_id="batch-recovery",
+                device_id="device-recovery-1",
+                check_item_version_id=check_item.version_id,
+                execution_id=execution_id,
+                assessment_status="healthy",
+                completeness_status="complete",
+                comparison_status="comparable",
+                expected_entity_count=1,
+                observed_entity_count=1,
+                evaluated_entity_count=1,
+                threshold_unknown_count=0,
+                current_finding_ids_json=[],
+                risk_case_ids_json=[risk_id],
+                evidence_qualification_id=qualification_id,
+                coverage_decision_id=coverage_id,
+                source_identity_status="confirmed",
+                output_quality_status="complete",
+                freshness_status="fresh",
+                empty_result_classification="non_empty",
+                coverage_status="complete",
+                coverage_basis="fixed",
+                risk_verification_status="recovery_pending",
+                blocking_reason_codes_json=[],
+                assessment_rule_bundle_digest=bundle["digest"],
+                evidence_digest="7" * 64,
+                assessed_at=assessed_at,
+                created_at=assessed_at,
+            )
+        )
+        db.add(
+            NetworkChangeRecord(
+                id=change_id,
+                idempotency_key="change-cpu-recovery-key",
+                run_id="run-recovery",
+                check_item_id="system.cpu_usage",
+                check_item_version_id=check_item.version_id,
+                check_execution_id=execution_id,
+                device_id="device-recovery-1",
+                canonical_command="display cpu-usage",
+                entity_type="cpu_scope",
+                entity_key='["device","0"]',
+                dimensions_json={"window": "instant"},
+                field="cpu_usage",
+                observation_type="device.cpu.utilization",
+                old_value_json=92,
+                new_value_json=60,
+                change_type="modified",
+                source="patrol",
+                event_status="event_created",
+                observed_at=assessed_at,
+                detected_at=assessed_at,
+                processed_at=assessed_at,
+            )
+        )
+        db.add(
+            NetworkEventRecord(
+                id=event_id,
+                idempotency_key="event-cpu-high-key",
+                check_item_id="system.cpu_usage",
+                check_item_version_id=check_item.version_id,
+                check_execution_id="execution-cpu-fault",
+                event_type="CpuUtilizationHigh",
+                severity="warning",
+                device_id="device-recovery-1",
+                entity_type="cpu_scope",
+                entity_key='["device","0"]',
+                correlation_key="cpu|device-recovery-1|0",
+                correlation_dimensions_json={"window": "instant"},
+                source_change_id="change-cpu-fault",
+                run_id="run-fault",
+                latest_change_id=change_id,
+                last_seen_run_id="run-recovery",
+                occurred_at=assessed_at - timedelta(days=1),
+                first_seen_at=assessed_at - timedelta(days=1),
+                last_seen_at=assessed_at,
+                last_seen_order_key="recovery",
+                occurrence_count=2,
+                status="resolved",
+                payload_json={"resolved_at": assessed_at.isoformat()},
+                created_at=assessed_at - timedelta(days=1),
+            )
+        )
+        db.add(
+            NetworkEventOccurrenceRecord(
+                id=occurrence_id,
+                idempotency_key="event-occurrence-cpu-recovery-key",
+                event_id=event_id,
+                run_id="run-recovery",
+                source_change_id=change_id,
+                observed_at=assessed_at,
+                severity="info",
+                occurrence_kind="recovery",
+                payload_json={
+                    "event_type": "CpuUtilizationRecovered",
+                    "event_class": "recovery",
+                    "device_id": "device-recovery-1",
+                    "entity_type": "cpu_scope",
+                    "entity_key": '["device","0"]',
+                    "projection_applied": True,
+                    "rule": {
+                        "rule_id": "system.cpu_usage.recovered",
+                        "version_id": "rule-cpu-recovered-v1",
+                        "version": 1,
+                        "event_class": "recovery",
+                        "recovery": {
+                            "resolves": ["CpuUtilizationHigh"]
+                        },
+                    },
+                },
+                created_at=assessed_at,
+            )
+        )
+        db.add(
+            RiskCaseRecord(
+                id=risk_id,
+                correlation_key="risk-cpu-recovery-confirmation-key",
+                check_item_id="system.cpu_usage",
+                device_id="device-recovery-1",
+                entity_type="cpu_scope",
+                entity_key='["device","0"]',
+                correlation_dimensions_json={"window": "instant"},
+                risk_type="CpuUtilizationHigh",
+                severity="warning",
+                status="recovering",
+                first_seen_at=assessed_at - timedelta(days=1),
+                last_seen_at=assessed_at - timedelta(days=1),
+                last_successful_evaluation_at=assessed_at,
+                verification_status="recovery_pending",
+                last_verified_at=assessed_at,
+                last_verification_execution_id=execution_id,
+                source_finding_ids_json=["finding-cpu-fault"],
+                source_event_ids_json=[event_id],
+                remediation_status="completed",
+                created_at=assessed_at - timedelta(days=1),
+                updated_at=assessed_at,
+            )
+        )
+
+    service = RiskCaseService(scope)
+    blocked_detail = service.get_case(risk_id)
+    assert blocked_detail["recovery_confirmation"]["state"] == "blocked"
+    assert "coverage_not_complete" in blocked_detail[
+        "recovery_confirmation"
+    ]["blocker_codes"]
+    blocked_candidate = blocked_detail["recovery_candidates"][0]
+    with pytest.raises(ValueError, match="coverage_not_complete"):
+        service.confirm_recovery(
+            risk_id,
+            recovery_candidate_id=blocked_candidate["id"],
+            actor="engineer",
+            reason="确认恢复",
+            idempotency_key="confirm-recovery-0001",
+        )
+
+    with _session_scope(session_factory) as db:
+        db.get(CoverageDecisionRecord, coverage_id).coverage_status = "complete"
+
+    detail = service.get_case(risk_id)
+    assert detail["recovery_confirmation"]["state"] == "ready"
+    candidate = next(
+        item
+        for item in detail["recovery_candidates"]
+        if item["kind"] == "recovery_event" and item["eligible"]
+    )
+    result = service.confirm_recovery(
+        risk_id,
+        recovery_candidate_id=candidate["id"],
+        actor="engineer",
+        reason="已复核当前值、覆盖范围与恢复规则，确认技术恢复",
+        idempotency_key="confirm-recovery-0002",
+    )
+    assert result["risk_case"]["status"] == "resolved"
+    assert result["risk_case"]["verification_status"] == "resolved"
+    assert result["confirmation"]["event_occurrence_id"] == occurrence_id
+    assert "event_rule:rule-cpu-recovered-v1" in result[
+        "risk_case"
+    ]["resolution_evidence_refs_json"]
+
+    replay = service.confirm_recovery(
+        risk_id,
+        recovery_candidate_id=candidate["id"],
+        actor="engineer",
+        reason="幂等重试",
+        idempotency_key="confirm-recovery-0002",
+    )
+    assert replay["risk_case"]["status"] == "resolved"
+    assert replay["confirmation"]["idempotent_replay"] is True
+    with _session_scope(session_factory) as db:
+        resolved_occurrences = (
+            db.query(RiskOccurrenceRecord)
+            .filter(
+                RiskOccurrenceRecord.risk_case_id == risk_id,
+                RiskOccurrenceRecord.occurrence_kind == "resolved",
+            )
+            .all()
+        )
+        assert len(resolved_occurrences) == 1
+        assert resolved_occurrences[0].actor == "engineer"
+
+
 def test_risk_workbench_query_and_remediation_lifecycle(tmp_path):
     session_factory, scope, _catalog_repository = _runtime(tmp_path)
     now = datetime(2026, 7, 28, 10, tzinfo=timezone.utc)
@@ -1449,6 +3039,163 @@ def test_risk_workbench_query_and_remediation_lifecycle(tmp_path):
         "acknowledged",
     ]
 
+    service.resolve_with_evidence(
+        risk_id,
+        successful_current_evaluation=True,
+        observed_at=now + timedelta(hours=3),
+        patrol_batch_id="batch-risk-recovery",
+        evidence_refs=["assessment:healthy", "coverage:complete"],
+        recovery_rule_version_id="rule-cpu-recovery-v1",
+        actor="recovery-reviewer",
+        reason="技术复检已通过",
+    )
+    with pytest.raises(ValueError, match="cannot accept their own"):
+        service.accept_remediation(
+            risk_id,
+            remediation["id"],
+            actor="network-team",
+            reason="自验收不得通过",
+            evidence_refs=["acceptance:self-review"],
+            idempotency_key="accept-remediation-self-review",
+        )
+    accepted = service.accept_remediation(
+        risk_id,
+        remediation["id"],
+        actor="independent-reviewer",
+        reason="已核对变更单和复测结果",
+        evidence_refs=["acceptance:review-1"],
+        idempotency_key="accept-remediation-review-1",
+    )
+    assert accepted["status"] == "accepted"
+    assert accepted["completed_by"] == "network-team"
+    assert accepted["accepted_by"] == "independent-reviewer"
+
+    ready = service.get_case(risk_id)
+    assert ready["status"] == "resolved"
+    assert ready["remediation_status"] == "accepted"
+    assert ready["closure"]["state"] == "ready_to_close"
+    assert ready["closure"]["allowed_dispositions"] == [
+        "remediation_accepted"
+    ]
+    with pytest.raises(ValueError, match="no-remediation closure is invalid"):
+        service.close_case(
+            risk_id,
+            actor="risk-manager",
+            reason="错误地尝试绕过整改验收",
+            disposition="no_remediation_required",
+            evidence_refs=["closure:invalid"],
+            idempotency_key="close-risk-invalid-1",
+        )
+    closed = service.close_case(
+        risk_id,
+        actor="risk-manager",
+        reason="技术恢复和整改验收均已完成",
+        disposition="remediation_accepted",
+        evidence_refs=["acceptance:review-1", "closure:approval-1"],
+        idempotency_key="close-risk-approved-1",
+    )
+    assert closed["closed_by"] == "risk-manager"
+    assert closed["closure_disposition"] == "remediation_accepted"
+    replay = service.close_case(
+        risk_id,
+        actor="risk-manager",
+        reason="幂等重放",
+        disposition="remediation_accepted",
+        evidence_refs=["closure:approval-1"],
+        idempotency_key="close-risk-approved-1",
+    )
+    assert replay["closed_at"] == closed["closed_at"]
+    final_detail = service.get_case(risk_id)
+    assert final_detail["closure"]["state"] == "closed"
+    assert final_detail["closure"]["closed_by"] == "risk-manager"
+    assert final_detail["remediations"][0]["status"] == "accepted"
+    assert final_detail["occurrences"][0]["occurrence_kind"] == "closed"
+    first_episode_id = final_detail["episode_id"]
+    assert final_detail["occurrences"][0]["risk_episode_id"] == first_episode_id
+
+    with _session_scope(session_factory) as db:
+        reopened = db.get(RiskCaseRecord, risk_id)
+        reopened.episode_id = "risk-workbench-episode-2"
+        reopened.status = "open"
+        reopened.verification_status = "confirmed_current"
+        reopened.resolved_at = None
+        reopened.closed_at = None
+        reopened.closed_by = None
+        reopened.closure_reason = None
+        reopened.closure_disposition = None
+        reopened.closure_evidence_refs_json = None
+        reopened.remediation_status = "not_started"
+        reopened.owner = None
+        reopened.due_at = None
+
+    second_remediation = service.create_remediation(
+        risk_id,
+        action_text="复发后再次执行整改。",
+        owner="network-team",
+        created_by="engineer",
+        idempotency_key="remediation-risk-workbench-1",
+    )
+    assert second_remediation["id"] != remediation["id"]
+    assert second_remediation["risk_episode_id"] == "risk-workbench-episode-2"
+    service.update_remediation(
+        risk_id,
+        second_remediation["id"],
+        status="in_progress",
+        actor="network-team",
+        reason="第二轮整改开始",
+        idempotency_key="start-remediation-risk-workbench-1",
+    )
+    service.update_remediation(
+        risk_id,
+        second_remediation["id"],
+        status="completed",
+        actor="network-team",
+        reason="第二轮整改完成",
+        evidence_refs=["snapshot:episode-2-after-change"],
+        idempotency_key="complete-remediation-risk-workbench-1",
+    )
+    service.resolve_with_evidence(
+        risk_id,
+        successful_current_evaluation=True,
+        observed_at=now + timedelta(hours=4),
+        patrol_batch_id="batch-risk-recovery-episode-2",
+        evidence_refs=["assessment:episode-2-healthy"],
+        recovery_rule_version_id="rule-cpu-recovery-v1",
+        actor="recovery-reviewer",
+        reason="第二轮技术复检通过",
+    )
+    service.accept_remediation(
+        risk_id,
+        second_remediation["id"],
+        actor="independent-reviewer",
+        reason="第二轮整改验收通过",
+        evidence_refs=["acceptance:episode-2"],
+        idempotency_key="accept-remediation-review-1",
+    )
+    second_closed = service.close_case(
+        risk_id,
+        actor="risk-manager",
+        reason="第二轮技术恢复和整改验收均已完成",
+        disposition="remediation_accepted",
+        evidence_refs=["closure:episode-2"],
+        idempotency_key="close-risk-approved-1",
+    )
+    assert second_closed["closed_at"] != closed["closed_at"]
+    with _session_scope(session_factory) as db:
+        closed_occurrences = (
+            db.query(RiskOccurrenceRecord)
+            .filter(
+                RiskOccurrenceRecord.risk_case_id == risk_id,
+                RiskOccurrenceRecord.occurrence_kind == "closed",
+            )
+            .order_by(RiskOccurrenceRecord.observed_at)
+            .all()
+        )
+        assert [item.risk_episode_id for item in closed_occurrences] == [
+            first_episode_id,
+            "risk-workbench-episode-2",
+        ]
+
 
 def test_execution_service_finalizes_current_state_without_fake_change(tmp_path):
     (
@@ -1476,6 +3223,10 @@ def test_execution_service_finalizes_current_state_without_fake_change(tmp_path)
         ),
     )
     ComparisonContextRepository(scope).save(context)
+    assessment_policy_snapshot = _target_policy_snapshot(
+        check_item,
+        "device-exec-1",
+    )
     with _session_scope(session_factory) as db:
         db.add(
             CheckExecutionRecord(
@@ -1489,6 +3240,12 @@ def test_execution_service_finalizes_current_state_without_fake_change(tmp_path)
                 runtime_bundle_id=bundle["bundle_id"],
                 runtime_bundle_version_id=bundle["version_id"],
                 runtime_bundle_digest=bundle["digest"],
+                assessment_policy_snapshot_json=(
+                    assessment_policy_snapshot
+                ),
+                assessment_policy_snapshot_digest=(
+                    assessment_policy_snapshot["digest"]
+                ),
                 comparison_context_id=context.id,
                 execution_status="processing",
                 reason_codes_json=[],
@@ -1602,6 +3359,7 @@ def test_structured_zero_records_forms_terminal_unknown_assessment(tmp_path):
                 runtime_bundle_id=bundle["bundle_id"],
                 runtime_bundle_version_id=bundle["version_id"],
                 runtime_bundle_digest=bundle["digest"],
+                **_execution_policy_fields(check_item, "device-empty-1"),
                 comparison_context_id=context.id,
                 execution_status="processing",
                 reason_codes_json=[],
@@ -1654,7 +3412,8 @@ def test_run_finalizer_uses_only_snapshot_selected_for_check_item(tmp_path):
         _bundle_service,
         bundle,
     ) = _create_cpu_bundle(tmp_path)
-    observed_at = datetime(2026, 7, 28, 10, 30, tzinfo=timezone.utc)
+    # This case verifies snapshot binding, not stale-evidence handling.
+    observed_at = datetime.now(timezone.utc)
     context = ComparisonContextService().select_online(
         device_id="device-finalizer-1",
         check_item_version_id=check_item.version_id,
@@ -1744,6 +3503,39 @@ def test_run_finalizer_uses_only_snapshot_selected_for_check_item(tmp_path):
                     contract_version=1,
                     confidence=1.0,
                 ),
+                NetworkChangeRecord(
+                    id="change-finalizer-cpu-deleted",
+                    idempotency_key="change-finalizer-cpu-deleted",
+                    run_id="run-finalizer-cpu",
+                    check_item_id="system.cpu_usage",
+                    check_item_version_id=check_item.version_id,
+                    check_execution_id="execution-finalizer-cpu",
+                    device_id="device-finalizer-1",
+                    canonical_command="display cpu-usage",
+                    entity_type="cpu_scope",
+                    entity_key='["device","slot-removed"]',
+                    dimensions_json={"window": "instant"},
+                    field="cpu_usage",
+                    observation_type="device.cpu.utilization",
+                    old_value_json=40,
+                    new_value_json=None,
+                    change_type="deleted",
+                    previous_snapshot_id="snapshot-finalizer-cpu-baseline",
+                    current_snapshot_id=None,
+                    previous_observation_id=(
+                        "observation-finalizer-cpu-baseline"
+                    ),
+                    current_observation_id=None,
+                    source="state_observation",
+                    analysis_revision="original",
+                    rule_bundle_digest=bundle["digest"],
+                    event_status="no_event",
+                    observed_at=observed_at,
+                    detected_at=observed_at,
+                    processed_at=observed_at,
+                    confidence=1.0,
+                    created_at=observed_at,
+                ),
                 CheckExecutionRecord(
                     id="execution-finalizer-cpu",
                     idempotency_key="execution-finalizer-cpu",
@@ -1755,6 +3547,10 @@ def test_run_finalizer_uses_only_snapshot_selected_for_check_item(tmp_path):
                     runtime_bundle_id=bundle["bundle_id"],
                     runtime_bundle_version_id=bundle["version_id"],
                     runtime_bundle_digest=bundle["digest"],
+                    **_execution_policy_fields(
+                        check_item,
+                        "device-finalizer-1",
+                    ),
                     comparison_context_id=context.id,
                     execution_status="processing",
                     reason_codes_json=[],
@@ -1786,6 +3582,7 @@ def test_run_finalizer_uses_only_snapshot_selected_for_check_item(tmp_path):
         )
         assert execution.execution_status == "completed"
         assert execution.observation_count == 1
+        assert execution.change_count == 1
         assert assessment.assessment_status == "healthy"
         assert "snapshot-finalizer-cpu" in execution.evidence_refs_json
 
@@ -1853,6 +3650,10 @@ def test_run_finalizer_does_not_claim_snapshot_selected_for_another_check(
                     runtime_bundle_id=bundle["bundle_id"],
                     runtime_bundle_version_id=bundle["version_id"],
                     runtime_bundle_digest=bundle["digest"],
+                    **_execution_policy_fields(
+                        check_item,
+                        "device-wrong-binding",
+                    ),
                     execution_status="processing",
                     reason_codes_json=[],
                     target_manifest_digest="b" * 64,
@@ -1888,6 +3689,333 @@ def test_run_finalizer_does_not_claim_snapshot_selected_for_another_check(
         )
 
 
+def test_run_finalizer_classifies_command_timeout_before_parser_failure(
+    tmp_path,
+):
+    (
+        session_factory,
+        scope,
+        _catalog_repository,
+        check_item,
+        implementation,
+        _bundle_service,
+        bundle,
+    ) = _create_cpu_bundle(tmp_path)
+    observed_at = datetime.now(timezone.utc)
+    with _session_scope(session_factory) as db:
+        db.add_all(
+            [
+                PatrolCollectionResult(
+                    id="collection-timeout",
+                    run_id="run-command-timeout",
+                    inventory_device_id="device-command-timeout",
+                    device_id="device-command-timeout",
+                    execution_item_id="cpu-timeout",
+                    collection_action_id="action-command-timeout",
+                    canonical_command="display cpu-usage",
+                    status="timeout",
+                    execution_status="timeout",
+                    parse_status="not_attempted",
+                    output_status="not_classified",
+                    fact_status="blocked_by_collection",
+                    normalization_status="blocked",
+                    failure_code="timeout",
+                    observed_at=observed_at,
+                    created_at=observed_at,
+                    updated_at=observed_at,
+                ),
+                CheckExecutionRecord(
+                    id="execution-command-timeout",
+                    idempotency_key="execution-command-timeout",
+                    patrol_batch_id="batch-command-timeout",
+                    device_id="device-command-timeout",
+                    check_item_version_id=check_item.version_id,
+                    implementation_version_id=implementation.version_id,
+                    collection_action_ids_json=["action-command-timeout"],
+                    runtime_bundle_id=bundle["bundle_id"],
+                    runtime_bundle_version_id=bundle["version_id"],
+                    runtime_bundle_digest=bundle["digest"],
+                    **_execution_policy_fields(
+                        check_item,
+                        "device-command-timeout",
+                    ),
+                    execution_status="processing",
+                    reason_codes_json=[],
+                    target_manifest_digest="1" * 64,
+                    asset_manifest_digest=bundle["digest"],
+                    evidence_refs_json=[],
+                    created_at=observed_at,
+                    updated_at=observed_at,
+                ),
+            ]
+        )
+
+    result = CheckItemRunFinalizer(scope).finalize(
+        patrol_batch_id="batch-command-timeout",
+        run_id="run-command-timeout",
+        device_id="device-command-timeout",
+    )
+
+    assert result["success"] is False
+    assert result["failures"][0]["reason_code"] == "command_timeout"
+    with _session_scope(session_factory) as db:
+        execution = db.get(
+            CheckExecutionRecord,
+            "execution-command-timeout",
+        )
+        assessment = db.get(
+            CheckAssessmentRecord,
+            execution.assessment_id,
+        )
+        assert execution.execution_status == "collection_failed"
+        assert assessment.assessment_status == "unable_to_determine"
+        assert "command_timeout" in assessment.blocking_reason_codes_json
+        assert "parse_or_observation_missing" not in (
+            assessment.blocking_reason_codes_json
+        )
+        assert "collection-timeout" in execution.evidence_refs_json
+
+
+def test_run_finalizer_detects_snapshot_persistence_failure(tmp_path):
+    (
+        session_factory,
+        scope,
+        _catalog_repository,
+        check_item,
+        implementation,
+        _bundle_service,
+        bundle,
+    ) = _create_cpu_bundle(tmp_path)
+    observed_at = datetime.now(timezone.utc)
+    with _session_scope(session_factory) as db:
+        db.add_all(
+            [
+                PatrolCollectionResult(
+                    id="collection-without-snapshot",
+                    run_id="run-without-snapshot",
+                    inventory_device_id="device-without-snapshot",
+                    device_id="device-without-snapshot",
+                    execution_item_id="cpu-without-snapshot",
+                    collection_action_id="action-without-snapshot",
+                    canonical_command="display cpu-usage",
+                    status="complete",
+                    execution_status="complete",
+                    parse_status="not_attempted",
+                    output_status="success",
+                    fact_status="blocked_by_parser",
+                    normalization_status="blocked",
+                    observed_at=observed_at,
+                    created_at=observed_at,
+                    updated_at=observed_at,
+                ),
+                CheckExecutionRecord(
+                    id="execution-without-snapshot",
+                    idempotency_key="execution-without-snapshot",
+                    patrol_batch_id="batch-without-snapshot",
+                    device_id="device-without-snapshot",
+                    check_item_version_id=check_item.version_id,
+                    implementation_version_id=implementation.version_id,
+                    collection_action_ids_json=["action-without-snapshot"],
+                    runtime_bundle_id=bundle["bundle_id"],
+                    runtime_bundle_version_id=bundle["version_id"],
+                    runtime_bundle_digest=bundle["digest"],
+                    **_execution_policy_fields(
+                        check_item,
+                        "device-without-snapshot",
+                    ),
+                    execution_status="processing",
+                    reason_codes_json=[],
+                    target_manifest_digest="2" * 64,
+                    asset_manifest_digest=bundle["digest"],
+                    evidence_refs_json=[],
+                    created_at=observed_at,
+                    updated_at=observed_at,
+                ),
+            ]
+        )
+
+    result = CheckItemRunFinalizer(scope).finalize(
+        patrol_batch_id="batch-without-snapshot",
+        run_id="run-without-snapshot",
+        device_id="device-without-snapshot",
+    )
+
+    assert result["success"] is False
+    assert result["failures"][0]["reason_code"] == (
+        "snapshot_persistence_failed"
+    )
+    with _session_scope(session_factory) as db:
+        execution = db.get(
+            CheckExecutionRecord,
+            "execution-without-snapshot",
+        )
+        assessment = db.get(
+            CheckAssessmentRecord,
+            execution.assessment_id,
+        )
+        assert execution.execution_status == "collection_failed"
+        assert "snapshot_persistence_failed" in (
+            assessment.blocking_reason_codes_json
+        )
+        assert "collection-without-snapshot" in (
+            execution.evidence_refs_json
+        )
+
+
+def test_run_finalizer_preserves_qualification_when_all_fallback_parsers_fail(
+    tmp_path,
+):
+    (
+        session_factory,
+        scope,
+        _catalog_repository,
+        check_item,
+        implementation,
+        _bundle_service,
+        bundle,
+    ) = _create_cpu_bundle(tmp_path)
+    observed_at = datetime.now(timezone.utc)
+    with _session_scope(session_factory) as db:
+        db.add_all(
+            [
+                CommandSnapshot(
+                    id="snapshot-parser-failed",
+                    run_id="run-parser-failed",
+                    device_id="device-parser-failed",
+                    inventory_device_id="device-parser-failed",
+                    execution_item_id="cpu",
+                    collection_action_id="action-parser-failed",
+                    implementation_version_id=implementation.version_id,
+                    check_item_ids_json=["system.cpu_usage"],
+                    device_name="H3C-Parser-Failed",
+                    vendor="H3C",
+                    model="S5130",
+                    command="display cpu-usage",
+                    canonical_command="display cpu-usage",
+                    observed_at=observed_at,
+                    structured_json=[],
+                    raw_text="CPU usage: invalid",
+                    raw_text_hash="f" * 64,
+                    parse_status="parse_failed",
+                    output_status="success",
+                    metadata_json={
+                        "check_item_bindings": [
+                            {
+                                "check_item_version_id": (
+                                    check_item.version_id
+                                ),
+                                "fallback_rank": 1,
+                            }
+                        ],
+                        "selected_check_item_bindings": [],
+                    },
+                ),
+                PatrolCollectionResult(
+                    id="collection-parser-failed",
+                    run_id="run-parser-failed",
+                    inventory_device_id="device-parser-failed",
+                    device_id="device-parser-failed",
+                    execution_item_id="cpu",
+                    collection_action_id="action-parser-failed",
+                    canonical_command="display cpu-usage",
+                    status="complete",
+                    execution_status="complete",
+                    parse_status="parse_failed",
+                    output_status="success",
+                    fact_status="blocked_by_parser",
+                    normalization_status="blocked",
+                    observed_at=observed_at,
+                    created_at=observed_at,
+                    updated_at=observed_at,
+                ),
+                PatrolCollectionResult(
+                    id="collection-parser-primary-timeout",
+                    run_id="run-parser-failed",
+                    inventory_device_id="device-parser-failed",
+                    device_id="device-parser-failed",
+                    execution_item_id="cpu-primary",
+                    collection_action_id="action-parser-primary-timeout",
+                    canonical_command="display cpu-usage summary",
+                    status="timeout",
+                    execution_status="timeout",
+                    parse_status="not_attempted",
+                    output_status="not_classified",
+                    fact_status="blocked_by_collection",
+                    normalization_status="blocked",
+                    failure_code="timeout",
+                    observed_at=observed_at,
+                    created_at=observed_at,
+                    updated_at=observed_at,
+                ),
+                CheckExecutionRecord(
+                    id="execution-parser-failed",
+                    idempotency_key="execution-parser-failed",
+                    patrol_batch_id="batch-parser-failed",
+                    device_id="device-parser-failed",
+                    check_item_version_id=check_item.version_id,
+                    implementation_version_id=implementation.version_id,
+                    collection_action_ids_json=[
+                        "action-parser-primary-timeout",
+                        "action-parser-failed",
+                    ],
+                    runtime_bundle_id=bundle["bundle_id"],
+                    runtime_bundle_version_id=bundle["version_id"],
+                    runtime_bundle_digest=bundle["digest"],
+                    **_execution_policy_fields(
+                        check_item,
+                        "device-parser-failed",
+                    ),
+                    execution_status="processing",
+                    reason_codes_json=[],
+                    target_manifest_digest="d" * 64,
+                    asset_manifest_digest=bundle["digest"],
+                    evidence_refs_json=[],
+                    created_at=observed_at,
+                    updated_at=observed_at,
+                ),
+            ]
+        )
+
+    result = CheckItemRunFinalizer(scope).finalize(
+        patrol_batch_id="batch-parser-failed",
+        run_id="run-parser-failed",
+        device_id="device-parser-failed",
+    )
+
+    assert result["success"] is False
+    assert result["failure_count"] == 1
+    with _session_scope(session_factory) as db:
+        execution = db.get(
+            CheckExecutionRecord,
+            "execution-parser-failed",
+        )
+        qualification = db.get(
+            EvidenceQualificationRecord,
+            execution.evidence_qualification_id,
+        )
+        coverage = db.get(
+            CoverageDecisionRecord,
+            execution.coverage_decision_id,
+        )
+        assessment = db.get(
+            CheckAssessmentRecord,
+            execution.assessment_id,
+        )
+        assert qualification is not None
+        assert qualification.source_identity_status == "confirmed"
+        assert qualification.output_quality_status == "complete"
+        assert coverage is not None
+        assert coverage.coverage_status == "not_evaluable"
+        assert "parse_failed" in coverage.reason_codes_json
+        assert assessment.evidence_qualification_id == qualification.id
+        assert assessment.coverage_decision_id == coverage.id
+        assert assessment.coverage_status == "not_evaluable"
+        assert assessment.assessment_status == "unable_to_determine"
+        assert "command_timeout" not in (
+            assessment.blocking_reason_codes_json
+        )
+
+
 def test_run_finalizer_fail_device_preserves_actual_failure_stage(tmp_path):
     (
         session_factory,
@@ -1912,6 +4040,10 @@ def test_run_finalizer_fail_device_preserves_actual_failure_stage(tmp_path):
                 runtime_bundle_id=bundle["bundle_id"],
                 runtime_bundle_version_id=bundle["version_id"],
                 runtime_bundle_digest=bundle["digest"],
+                **_execution_policy_fields(
+                    check_item,
+                    "device-assessment-failed",
+                ),
                 execution_status="processing",
                 reason_codes_json=[],
                 target_manifest_digest="c" * 64,
@@ -1945,6 +4077,150 @@ def test_run_finalizer_fail_device_preserves_actual_failure_stage(tmp_path):
         assert "execution_assessment_failed" in (
             assessment.blocking_reason_codes_json
         )
+
+
+def test_run_finalizer_bulk_device_failures_keep_coverage_stage(tmp_path):
+    (
+        session_factory,
+        scope,
+        _catalog_repository,
+        check_item,
+        implementation,
+        _bundle_service,
+        bundle,
+    ) = _create_cpu_bundle(tmp_path)
+    observed_at = datetime.now(timezone.utc)
+    with _session_scope(session_factory) as db:
+        db.add_all(
+            [
+                CommandSnapshot(
+                    id="snapshot-normalizer-stage",
+                    run_id="run-normalizer-stage",
+                    inventory_device_id="device-normalizer-stage",
+                    device_id="device-normalizer-stage",
+                    execution_item_id="normalizer-stage",
+                    collection_action_id="action-normalizer-stage",
+                    implementation_version_id=implementation.version_id,
+                    check_item_ids_json=["system.cpu_usage"],
+                    device_name="H3C-Normalizer-Stage",
+                    vendor="H3C",
+                    model="S5130",
+                    command="display cpu-usage",
+                    canonical_command="display cpu-usage",
+                    observed_at=observed_at,
+                    structured_json=[{"cpu_usage": "35"}],
+                    raw_text="CPU usage: 35%",
+                    raw_text_hash="4" * 64,
+                    parse_status="parsed",
+                    output_status="success",
+                    metadata_json={
+                        "check_item_bindings": [
+                            {
+                                "check_item_version_id": (
+                                    check_item.version_id
+                                )
+                            }
+                        ],
+                        "selected_check_item_bindings": [
+                            {
+                                "check_item_version_id": (
+                                    check_item.version_id
+                                )
+                            }
+                        ],
+                    },
+                ),
+                CheckExecutionRecord(
+                    id="execution-normalizer-stage",
+                    idempotency_key="execution-normalizer-stage",
+                    patrol_batch_id="batch-mixed-failure-stage",
+                    device_id="device-normalizer-stage",
+                    check_item_version_id=check_item.version_id,
+                    implementation_version_id=implementation.version_id,
+                    collection_action_ids_json=["action-normalizer-stage"],
+                    runtime_bundle_id=bundle["bundle_id"],
+                    runtime_bundle_version_id=bundle["version_id"],
+                    runtime_bundle_digest=bundle["digest"],
+                    **_execution_policy_fields(
+                        check_item,
+                        "device-normalizer-stage",
+                    ),
+                    execution_status="processing",
+                    reason_codes_json=[],
+                    target_manifest_digest="3" * 64,
+                    asset_manifest_digest=bundle["digest"],
+                    evidence_refs_json=[],
+                    created_at=observed_at,
+                    updated_at=observed_at,
+                ),
+                CheckExecutionRecord(
+                    id="execution-collection-stage",
+                    idempotency_key="execution-collection-stage",
+                    patrol_batch_id="batch-mixed-failure-stage",
+                    device_id="device-collection-stage",
+                    check_item_version_id=check_item.version_id,
+                    implementation_version_id=implementation.version_id,
+                    collection_action_ids_json=["action-collection-stage"],
+                    runtime_bundle_id=bundle["bundle_id"],
+                    runtime_bundle_version_id=bundle["version_id"],
+                    runtime_bundle_digest=bundle["digest"],
+                    **_execution_policy_fields(
+                        check_item,
+                        "device-collection-stage",
+                    ),
+                    execution_status="processing",
+                    reason_codes_json=[],
+                    target_manifest_digest="3" * 64,
+                    asset_manifest_digest=bundle["digest"],
+                    evidence_refs_json=[],
+                    created_at=observed_at,
+                    updated_at=observed_at,
+                ),
+            ]
+        )
+
+    result = CheckItemRunFinalizer(scope).fail_devices(
+        patrol_batch_id="batch-mixed-failure-stage",
+        failures=[
+            {
+                "device_id": "device-normalizer-stage",
+                "status": "normalization_failed",
+                "reason_code": "worker_timeout",
+                "evidence_refs": ("workflow-normalizer-stage",),
+                "run_id": "run-normalizer-stage",
+            },
+            {
+                "device_id": "device-collection-stage",
+                "status": "collection_failed",
+                "reason_code": "command_timeout",
+                "evidence_refs": ("workflow-collection-stage",),
+            },
+        ],
+    )
+
+    assert result["failed_execution_count"] == 2
+    with _session_scope(session_factory) as db:
+        normalization_execution = db.get(
+            CheckExecutionRecord,
+            "execution-normalizer-stage",
+        )
+        normalization_coverage = db.get(
+            CoverageDecisionRecord,
+            normalization_execution.coverage_decision_id,
+        )
+        collection_execution = db.get(
+            CheckExecutionRecord,
+            "execution-collection-stage",
+        )
+        assert normalization_execution.execution_status == (
+            "normalization_failed"
+        )
+        assert normalization_coverage.coverage_status == "not_evaluable"
+        assert "normalization_failed" in (
+            normalization_coverage.reason_codes_json
+        )
+        assert collection_execution.execution_status == "collection_failed"
+        assert collection_execution.coverage_decision_id is None
 
 
 def test_execution_service_text_diff_uses_frozen_redacted_profile(tmp_path):
@@ -2014,7 +4290,8 @@ def test_execution_service_text_diff_uses_frozen_redacted_profile(tmp_path):
                 CommandSnapshot(
                     id="snapshot-config-current",
                     run_id="run-config-current",
-                    device_id="device-config-1",
+                    inventory_device_id="device-config-1",
+                    device_id="H3C-1",
                     execution_item_id="show-running",
                     collection_action_id="action-config-current",
                     implementation_version_id=implementation.version_id,
@@ -2046,6 +4323,7 @@ def test_execution_service_text_diff_uses_frozen_redacted_profile(tmp_path):
                     runtime_bundle_id=bundle["bundle_id"],
                     runtime_bundle_version_id=bundle["version_id"],
                     runtime_bundle_digest=bundle["digest"],
+                    **_execution_policy_fields(check_item, "device-config-1"),
                     comparison_context_id=context.id,
                     execution_status="processing",
                     reason_codes_json=[],
@@ -2071,6 +4349,7 @@ def test_execution_service_text_diff_uses_frozen_redacted_profile(tmp_path):
     assert result["comparison"]["changed"] is True
     assert result["comparison"]["profile_version_id"] == profile.version_id
     assert len(result["changes"]) == 1
+    assert result["changes"][0]["device_id"] == "device-config-1"
     preview = json.dumps(
         result["changes"][0]["dimensions_json"],
         ensure_ascii=False,
@@ -2168,6 +4447,9 @@ def test_effective_plan_freezes_every_device_check_and_asset_gap(tmp_path):
             "reason_code": "asset_unavailable_at_plan_time",
         }
     ]
+    assert cpu["fallback_resilience"] == "reduced"
+    assert cpu["declared_command_count"] == 2
+    assert cpu["executable_command_count"] == 1
     assert len(plan.executions) == 2
     assert len(plan.terminal_assessments) == 1
     assert plan.terminal_assessments[0]["assessment_status"] == (
@@ -2193,6 +4475,12 @@ def test_effective_plan_freezes_every_device_check_and_asset_gap(tmp_path):
     assert plan.manifest["entity_identity_policy_versions"] == (
         expected_identity_versions
     )
+    assert plan.manifest["report_cutoff_policy"] == {
+        "business_time_source": "batch_terminal_server_time",
+        "ingestion_boundary_source": "report_requested_at",
+        "clock": "server_utc",
+        "late_fact_strategy": "new_report_manifest_revision",
+    }
 
     same = service.freeze(request)
     assert same.manifest_digest == plan.manifest_digest
@@ -2201,6 +4489,10 @@ def test_effective_plan_freezes_every_device_check_and_asset_gap(tmp_path):
             CheckExecutionRecord.patrol_batch_id == "batch-plan-1"
         ).count() == 2
         assert db.query(CheckItemRuntimeManifestRecord).count() == 1
+        assert db.query(PatrolScopeContractRecord).count() == 1
+        assert db.query(PatrolScopeContractVersionRecord).count() == 1
+        assert db.query(PatrolIntendedTargetMatrixRecord).count() == 1
+        assert db.query(PatrolScopeDecisionRecord).count() == 2
         assert db.query(AssetGapRecord).count() == 1
         runtime_manifest = db.query(
             CheckItemRuntimeManifestRecord
@@ -2214,6 +4506,18 @@ def test_effective_plan_freezes_every_device_check_and_asset_gap(tmp_path):
         batch = db.get(PatrolBatchRecord, "batch-plan-1")
         assert batch.runtime_manifest_digest == plan.manifest_digest
         assert batch.target_manifest_digest == target["digest"]
+        assert batch.scope_contract_version_id == plan.manifest[
+            "scope_contract_version_id"
+        ]
+        assert batch.scope_contract_digest == plan.manifest[
+            "scope_contract_digest"
+        ]
+        assert batch.intended_target_matrix_digest == plan.manifest[
+            "intended_target_matrix_digest"
+        ]
+        assert batch.scope_decision_digest == plan.manifest[
+            "scope_decision_digest"
+        ]
 
     changed = replace(request, target_manifest_digest="0" * 64)
     with pytest.raises(ValueError, match="target or inventory differs"):
@@ -2263,6 +4567,308 @@ def test_effective_plan_freezes_every_device_check_and_asset_gap(tmp_path):
         gap = db.get(AssetGapRecord, repeated.asset_gaps[0]["id"])
         assert gap.occurrence_count == 2
         assert gap.metadata_json["latest_patrol_batch_id"] == "batch-plan-2"
+
+
+def test_effective_plan_freezes_governed_assessment_policy_binding(tmp_path):
+    (
+        session_factory,
+        scope,
+        catalog_repository,
+        check_item,
+        _implementation,
+        _bundle_service,
+        _bundle,
+    ) = _create_cpu_bundle(tmp_path)
+    policy_service = AssessmentPolicyAssetService(scope)
+    observed_at = datetime.now(timezone.utc) + timedelta(seconds=1)
+    with _session_scope(session_factory) as db:
+        db.add_all(
+            [
+                NetworkDevice(
+                    id="device-policy-plan",
+                    device_name="H3C-Policy",
+                    management_ip="192.0.2.80",
+                    vendor="H3C",
+                    model="S5130",
+                    site="xian",
+                    role="core",
+                    status="active",
+                    created_at=observed_at,
+                    updated_at=observed_at,
+                ),
+                PatrolBatchRecord(
+                    patrol_batch_id="batch-policy-plan",
+                    workflow_name="patrol-change-event",
+                    launch_mode="workflow",
+                    patrol_mode="production",
+                    target_type="devices",
+                    target_label="governed policy target",
+                    selector_json={"device_ids": ["device-policy-plan"]},
+                    target_count=1,
+                    launched_count=0,
+                    skipped_count=0,
+                    save_baseline=False,
+                    dispatch_status="pending",
+                    report_status="not_requested",
+                    archived=False,
+                    created_at=observed_at,
+                    updated_at=observed_at,
+                ),
+            ]
+        )
+
+    draft = policy_service.create_version(
+        check_item_id=check_item.id,
+        check_item_version_id=check_item.version_id,
+        observation_type="device.cpu.utilization",
+        policy_role="high",
+        name="核心设备 CPU 高水位",
+        policy={
+            "value": 72,
+            "unit": "percent",
+            "operator": "gte",
+            "hysteresis": 5,
+        },
+        evidence_refs=["customer-policy:cpu-core-v1"],
+        provenance={"source": "customer_policy"},
+        created_by="policy-author",
+        idempotency_key="plan-policy-create-001",
+    )
+    policy_service.submit(
+        draft["id"],
+        actor="policy-author",
+        reason="提交网络专家复核",
+        idempotency_key="plan-policy-submit-001",
+    )
+    policy_service.semantic_review(
+        draft["id"],
+        decision="approved",
+        actor="network-sme",
+        reason="阈值符合客户核心设备运维标准",
+        idempotency_key="plan-policy-semantic-001",
+    )
+    approved = policy_service.publication_review(
+        draft["id"],
+        decision="approved",
+        actor="policy-publisher",
+        reason="证据与职责分离完整，批准发布",
+        idempotency_key="plan-policy-publish-001",
+    )
+    binding = policy_service.bind(
+        approved["id"],
+        binding_type="inventory_profile",
+        scope={"device_ids": ["device-policy-plan"]},
+        actor="policy-publisher",
+        reason="绑定指定核心交换机",
+        idempotency_key="plan-policy-binding-001",
+    )
+
+    devices = (
+        {
+            "device_id": "device-policy-plan",
+            "device_name": "H3C-Policy",
+            "management_ip": "192.0.2.80",
+            "vendor": "H3C",
+            "family": "Comware7",
+            "model": "S5130",
+            "site": "xian",
+            "role": "core",
+        },
+    )
+    target = build_target_manifest(
+        devices=devices,
+        selector={"device_ids": ["device-policy-plan"]},
+    )
+    inventory = build_inventory_snapshot(devices)
+    plan = CheckItemEffectivePlanService(
+        scope,
+        catalog=catalog_repository.load_active(),
+    ).freeze(
+        EffectivePlanRequest(
+            patrol_batch_id="batch-policy-plan",
+            devices=devices,
+            check_item_ids=(check_item.id,),
+            target_manifest_digest=target["digest"],
+            inventory_snapshot_digest=inventory["digest"],
+            current_observed_at=observed_at,
+            actor="test",
+        )
+    )
+
+    decision = plan.decisions[0]
+    snapshot = decision["assessment_policy_snapshot"]
+    source = snapshot["sources"][0]
+    assert source["source_kind"] == "inventory_profile"
+    assert source["policy_version_id"] == approved["id"]
+    assert source["policy_version_digest"] == approved["digest"]
+    assert source["binding_id"] == binding["id"]
+    assert source["binding_digest"] == binding["binding_digest"]
+    assert source["approval_digest"]
+    assert source["thresholds"]["high"]["value"] == 72.0
+    assert decision["assessment_policy_snapshot_digest"] == snapshot["digest"]
+
+    with _session_scope(session_factory) as db:
+        execution = db.query(CheckExecutionRecord).filter(
+            CheckExecutionRecord.patrol_batch_id == "batch-policy-plan"
+        ).one()
+        assert execution.assessment_policy_snapshot_digest == snapshot["digest"]
+        assert execution.assessment_policy_snapshot_json == snapshot
+
+
+def test_effective_plan_stops_collection_when_applicability_is_unknown(tmp_path):
+    (
+        _session_factory,
+        scope,
+        catalog_repository,
+        check_item,
+        _implementation,
+        _bundle_service,
+        _bundle,
+    ) = _create_cpu_bundle(tmp_path)
+    catalog = catalog_repository.load_active()
+    governed_check_item = replace(
+        check_item,
+        applicability={"capability": "cpu.telemetry"},
+    )
+    governed_catalog = replace(
+        catalog,
+        check_items=tuple(
+            governed_check_item if item.id == check_item.id else item
+            for item in catalog.check_items
+        ),
+    )
+    devices = (
+        {
+            "device_id": "device-without-capability-inventory",
+            "device_name": "Unknown-Capability",
+            "management_ip": "192.0.2.81",
+            "vendor": "H3C",
+            "family": "Comware7",
+            "model": "S5130",
+        },
+    )
+    target = build_target_manifest(
+        devices=devices,
+        selector={"device_ids": ["device-without-capability-inventory"]},
+    )
+    inventory = build_inventory_snapshot(devices)
+
+    plan = CheckItemEffectivePlanService(
+        scope,
+        catalog=governed_catalog,
+    ).preview(
+        EffectivePlanRequest(
+            patrol_batch_id="batch-applicability-unknown",
+            devices=devices,
+            check_item_ids=(check_item.id,),
+            target_manifest_digest=target["digest"],
+            inventory_snapshot_digest=inventory["digest"],
+            current_observed_at=datetime.now(timezone.utc),
+            actor="test",
+        )
+    )
+
+    decision = plan.decisions[0]
+    assert decision["status"] == "unsupported"
+    assert decision["applicability"] == "unknown"
+    assert decision["reason_codes"] == ["applicability_capability_unknown"]
+    assert decision["applicability_decision"]["status"] == "unknown"
+    assert plan.collection_actions == ()
+    assert plan.executions[0]["execution_status"] == "unsupported"
+    assert plan.terminal_assessments[0]["assessment_status"] == (
+        "unable_to_determine"
+    )
+    assert plan.terminal_assessments[0]["assessment_basis_json"][
+        "applicability_decision"
+    ]["status"] == "unknown"
+
+
+def test_effective_plan_cutover_disables_legacy_policy_sources_and_fails_closed(
+    tmp_path,
+    monkeypatch,
+):
+    (
+        _session_factory,
+        scope,
+        catalog_repository,
+        check_item,
+        _implementation,
+        _bundle_service,
+        _bundle,
+    ) = _create_cpu_bundle(tmp_path)
+    device_id = "device-governed-cutover"
+    monkeypatch.setattr(
+        AssessmentPolicyMigrationService,
+        "effective_cutover_modes",
+        lambda self, targets, session=None: {
+            (check_item.version_id, device_id): {
+                "id": "cutover-1",
+                "resolver_mode": "governed_only",
+                "evidence_digest": "e" * 64,
+                "binding_ids_json": ["binding-applicability"],
+                "shadow_result_ids_json": ["shadow-1"],
+                "created_by": "asset-publisher",
+                "reason": "matched shadow evidence",
+                "created_at": "2026-08-02T10:00:00+00:00",
+            }
+        },
+    )
+    devices = (
+        {
+            "device_id": device_id,
+            "device_name": "Governed-Cutover",
+            "management_ip": "192.0.2.82",
+            "vendor": "H3C",
+            "family": "Comware7",
+            "model": "S5130",
+            "attributes": {
+                "assessment_policy_bindings": [
+                    {
+                        "policy_id": "legacy-cpu",
+                        "version": "1",
+                        "check_item_id": check_item.id,
+                        "observation_type": "device.cpu.utilization",
+                        "policy_role": "high",
+                        "status": "approved",
+                    }
+                ]
+            },
+        },
+    )
+    target = build_target_manifest(
+        devices=devices,
+        selector={"device_ids": [device_id]},
+    )
+    inventory = build_inventory_snapshot(devices)
+
+    plan = CheckItemEffectivePlanService(
+        scope,
+        catalog=catalog_repository.load_active(),
+    ).preview(
+        EffectivePlanRequest(
+            patrol_batch_id="batch-governed-cutover",
+            devices=devices,
+            check_item_ids=(check_item.id,),
+            target_manifest_digest=target["digest"],
+            inventory_snapshot_digest=inventory["digest"],
+            current_observed_at=datetime.now(timezone.utc),
+            actor="test",
+        )
+    )
+
+    decision = plan.decisions[0]
+    snapshot = decision["assessment_policy_snapshot"]
+    assert snapshot["resolver_mode"] == "governed_only"
+    assert snapshot["legacy_sources_allowed"] is False
+    assert snapshot["sources"] == []
+    assert snapshot["resolver_transition"]["id"] == "cutover-1"
+    assert decision["status"] == "unsupported"
+    assert decision["applicability"] == "unknown"
+    assert decision["reason_codes"] == ["assessment_applicability_policy_missing"]
+    assert plan.collection_actions == ()
+    assert plan.terminal_assessments[0]["assessment_status"] == (
+        "unable_to_determine"
+    )
 
 
 def test_profile_selection_is_version_safe(tmp_path):
@@ -2316,8 +4922,8 @@ def test_text_comparison_is_versioned_and_redacts_secrets(tmp_path):
     profiles = load_text_comparison_profiles()
     repository = TextComparisonProfileRepository(scope)
     assert repository.bootstrap(profiles) == {
-        "created_roots": 3,
-        "created_versions": 3,
+        "created_roots": 4,
+        "created_versions": 4,
     }
     assert repository.bootstrap(profiles) == {
         "created_roots": 0,
@@ -2344,7 +4950,7 @@ def test_text_comparison_is_versioned_and_redacts_secrets(tmp_path):
     assert result.removed_lines == ("interface GigabitEthernet1/0/1",)
     assert "new-secret" not in "\n".join(result.redacted_preview)
     with _session_scope(session_factory) as db:
-        assert db.query(TextComparisonProfileVersionRecord).count() == 3
+        assert db.query(TextComparisonProfileVersionRecord).count() == 4
 
 
 def test_asset_gap_is_idempotent_work_queue_not_generation(tmp_path):
@@ -2392,6 +4998,17 @@ def test_report_manifest_is_final_only_after_execution_assessment_reconciliation
         bundle,
     ) = _create_cpu_bundle(tmp_path)
     now = datetime(2026, 7, 28, 12, tzinfo=timezone.utc)
+    assessment_policy_snapshot = _target_policy_snapshot(
+        check_item,
+        "device-report-1",
+    )
+    assessment_basis = _resolved_assessment_basis(
+        check_item=check_item,
+        device_id="device-report-1",
+        runtime_bundle_version_id=bundle["version_id"],
+        runtime_bundle_digest=bundle["digest"],
+        observation_id="observation-report-1",
+    )
     context = ComparisonContextService().select_online(
         device_id="device-report-1",
         check_item_version_id=check_item.version_id,
@@ -2422,6 +5039,39 @@ def test_report_manifest_is_final_only_after_execution_assessment_reconciliation
             bundle["entity_identity_policy_version_id"]
         ],
     )
+    scope_contract = {
+        "scope_contract_id": "scope-contract-report-1",
+        "claim_boundary": "selected_devices",
+    }
+    intended_target_pairs = [
+        {
+            "device_id": "device-report-1",
+            "check_item_version_id": check_item.version_id,
+        }
+    ]
+    scope_decisions = [
+        {
+            **intended_target_pairs[0],
+            "decision": "included",
+            "reason_codes": ["selected_target"],
+        }
+    ]
+    runtime_document.update(
+        {
+            "scope_contract": scope_contract,
+            "scope_contract_digest": _stable_digest(scope_contract),
+            "intended_target_pairs": intended_target_pairs,
+            "intended_target_matrix_digest": _stable_digest(
+                intended_target_pairs
+            ),
+            "scope_decisions": scope_decisions,
+            "scope_decision_digest": _stable_digest(scope_decisions),
+            "unmatched_device_ids": [],
+        }
+    )
+    runtime_document.pop("digest", None)
+    runtime_digest = _stable_digest(runtime_document)
+    runtime_document["digest"] = runtime_digest
     qualification = EvidenceQualificationService.qualify(
         EvidenceQualificationInput(
             execution_id="execution-report-1",
@@ -2491,6 +5141,11 @@ def test_report_manifest_is_final_only_after_execution_assessment_reconciliation
             coverage_basis=coverage_decision.coverage_basis,
             evidence_refs=("snapshot-report-1",),
             assessment_rule_bundle_digest=bundle["digest"],
+            runtime_bundle_version_id=bundle["version_id"],
+            assessment_policy_snapshot_digest=(
+                assessment_policy_snapshot["digest"]
+            ),
+            assessment_basis=assessment_basis,
             comparison_context_digest=context.digest,
             assessed_at=now,
         )
@@ -2640,6 +5295,12 @@ def test_report_manifest_is_final_only_after_execution_assessment_reconciliation
                     runtime_bundle_id=bundle["bundle_id"],
                     runtime_bundle_version_id=bundle["version_id"],
                     runtime_bundle_digest=bundle["digest"],
+                    assessment_policy_snapshot_json=(
+                        assessment_policy_snapshot
+                    ),
+                    assessment_policy_snapshot_digest=(
+                        assessment_policy_snapshot["digest"]
+                    ),
                     comparison_context_id=context.id,
                     execution_status="completed",
                     reason_codes_json=[],
@@ -2680,10 +5341,46 @@ def test_report_manifest_is_final_only_after_execution_assessment_reconciliation
         generated_by="test",
     )
     assert manifest["status"] == "final"
+    assert manifest["schema_version"] == (
+        "patrol-report-manifest/v5"
+    )
+    assert manifest["report_purpose"] == "production_current"
+    assert len(manifest["raw_evidence_set_digest"]) == 64
     assert manifest["source_facts_json"]["readiness"][
         "ready_for_final"
     ] is True
     facts = manifest["source_facts_json"]
+    assert facts["schema_version"] == "patrol-report-source/v5"
+    assert facts["report_purpose"] == "production_current"
+    assert facts["raw_evidence_set_digest"] == (
+        manifest["raw_evidence_set_digest"]
+    )
+    assert facts["fact_ingestion_high_watermark"]
+    assert facts["late_fact_count"] == 0
+    assert len(facts["claim_ledger"]["claims"]) == manifest[
+        "claim_count"
+    ]
+    assert facts["claim_ledger_digest"] == manifest[
+        "claim_ledger_digest"
+    ]
+    projection_snapshot = facts["report_projection_snapshot"]
+    assert facts["report_projection_digest"] == (
+        projection_snapshot["digest"]
+    )
+    assert projection_snapshot["bindings"][
+        check_item.version_id
+    ]["profile_ref"] == "cpu@1"
+    with _session_scope(session_factory) as db:
+        assert (
+            db.query(ReportClaimRecord)
+            .filter(
+                ReportClaimRecord.report_manifest_id
+                == manifest["id"]
+            )
+            .count()
+            == manifest["claim_count"]
+        )
+    assert manifest["fact_ingestion_high_watermark"]
     assert facts["check_items"][check_item.version_id][
         "check_item_id"
     ] == "system.cpu_usage"
@@ -2691,18 +5388,64 @@ def test_report_manifest_is_final_only_after_execution_assessment_reconciliation
         "execution-report-1"
     ]
     assert facts["observations"][0]["value_number"] == 35
+    assert facts["executions"][0][
+        "assessment_policy_snapshot_digest"
+    ] == assessment_policy_snapshot["digest"]
+    assert facts["assessments"][0][
+        "assessment_basis_digest"
+    ] == assessment_basis["digest"]
+    assert facts["assessments"][0]["assessment_basis_json"][
+        "summary"
+    ]["source_counts"] == {"catalog_default": 1}
+    assessment_claim = next(
+        item
+        for item in facts["claim_ledger"]["claims"]
+        if item["claim_code"] == f"assessment.{assessment.id}"
+    )
+    assert f"AssessmentBasis:{assessment_basis['digest']}" in (
+        assessment_claim["fact_refs"]
+    )
     assert facts["evidence_index"][0]["snapshot_id"] == (
         "snapshot-report-1"
     )
     assert "raw_text" not in facts["evidence_index"][0]
-    assert facts["risks"] == []
+    assert [item["id"] for item in facts["risks"]] == [
+        "risk-from-other-batch"
+    ]
+    permission = facts["conclusion_permission"]
+    assert permission["terminal_truth_reconciled"] is True
+    assert permission["current_conclusion_ready"] is True
+    assert (
+        permission["evaluated_scope_no_abnormality_allowed"]
+        is False
+    )
+    assert permission["overall_healthy_allowed"] is False
+    assert (
+        "unresolved_in_scope_risk_case"
+        in permission["blocker_reason_codes"]
+    )
+    report_view = build_check_item_report_view(manifest)
+    assert report_view["matrix"][0]["assessment_basis_digest"] == (
+        assessment_basis["digest"]
+    )
+    assert report_view["matrix"][0][
+        "assessment_basis_source_counts"
+    ] == {"catalog_default": 1}
+    assert report_view["report_projection_digest"] == (
+        facts["report_projection_digest"]
+    )
+    assert report_view["conclusion"]["code"] == "unresolved_risk"
+    assert "未关闭风险" in report_view["conclusion"]["text"]
+    assert "未发现异常" not in report_view["conclusion"]["text"]
     assert service.build(
         "batch-report-1",
         generated_by="test",
     )["id"] == manifest["id"]
     batch_results = CheckItemBatchResultService(scope)
     live_summary = batch_results.summary("batch-report-1")
-    assert live_summary["conclusion"]["code"] == "healthy"
+    assert live_summary["conclusion"]["code"] == (
+        "unresolved_risk"
+    )
     assert live_summary["conclusion"]["formal"] is True
     result_page = batch_results.list_results(
         "batch-report-1",
@@ -2724,6 +5467,32 @@ def test_report_manifest_is_final_only_after_execution_assessment_reconciliation
     assert result_page["items"][0]["coverage_status"] == "complete"
     assert result_page["items"][0]["coverage_basis"] == "fixed"
     assert result_page["items"][0]["expected_entity_count"] == 1
+    result_detail = batch_results.get_result_detail(
+        "batch-report-1",
+        "execution-report-1",
+    )
+    assert result_detail["schema_version"] == "patrol-check-result-detail/v1"
+    assert result_detail["assessment_policy_snapshot"]["digest"] == (
+        assessment_policy_snapshot["digest"]
+    )
+    assert result_detail["assessment_basis"]["digest"] == (
+        assessment_basis["digest"]
+    )
+    assert result_detail["integrity"] == {
+        "policy_snapshot_present": True,
+        "policy_snapshot_valid": True,
+        "assessment_basis_present": True,
+        "assessment_basis_valid": True,
+        "policy_snapshot_digest_matches": True,
+        "assessment_basis_digest_matches": True,
+    }
+    assert result_detail["assessment_basis_entries"] == {
+        "total": 1,
+        "limit": 50,
+        "offset": 0,
+        "has_more": False,
+    }
+    assert "observation-report-1" in result_detail["evidence_refs"]
     assert batch_results.list_results(
         "batch-report-1",
         output_quality_status="truncated",
@@ -2734,19 +5503,149 @@ def test_report_manifest_is_final_only_after_execution_assessment_reconciliation
         freshness_status="fresh",
         coverage_status="complete",
     )["total"] == 1
+    artifact_object_keys = {
+        "markdown": "reports/batch-report-1/report.md",
+        "docx": "reports/batch-report-1/report.docx",
+        "excel": "reports/batch-report-1/appendix.xlsx",
+        "json": "reports/batch-report-1/report.json",
+        "evidence": "reports/batch-report-1/evidence.zip",
+    }
+    artifact_objects = {
+        object_key: f"assessment-runtime-{name}".encode()
+        for name, object_key in artifact_object_keys.items()
+    }
+    artifact_digests = {
+        name: hashlib.sha256(artifact_objects[object_key]).hexdigest()
+        for name, object_key in artifact_object_keys.items()
+    }
+    object_storage = _MemoryObjectStorage(artifact_objects)
     attached = service.attach_artifacts(
         manifest["id"],
-        object_keys={
-            "markdown": "reports/batch-report-1/report.md",
-            "excel": "reports/batch-report-1/appendix.xlsx",
-        },
-        sha256_by_artifact={
-            "markdown": "8" * 64,
-            "excel": "9" * 64,
-        },
+        object_keys=artifact_object_keys,
+        sha256_by_artifact=artifact_digests,
     )
-    assert attached["artifact_sha256_json"]["excel"] == "9" * 64
-    release_service = ReportReleaseService(scope)
+    assert attached["artifact_sha256_json"]["excel"] == artifact_digests[
+        "excel"
+    ]
+    release_service = ReportReleaseService(
+        scope,
+        object_storage=object_storage,
+    )
+    with _session_scope(session_factory) as db:
+        row = db.get(ReportManifestRecord, manifest["id"])
+        original_facts = json.loads(
+            json.dumps(row.source_facts_json)
+        )
+        original_source_digest = str(row.source_digest)
+        tampered_facts = json.loads(json.dumps(original_facts))
+        original_context = dict(
+            original_facts["report_authority_context"]
+        )
+        tampered_facts["report_authority_context"] = (
+            build_report_authority_context(
+                report_purpose="production_current",
+                patrol_mode=original_context.get("patrol_mode"),
+                launch_mode=original_context.get("launch_mode"),
+                workflow_name=original_context.get("workflow_name"),
+                target_type="offline_import",
+                readiness_ready=bool(
+                    original_context.get("facts_ready")
+                ),
+                target_manifest_digest=original_context.get(
+                    "target_manifest_digest"
+                ),
+                inventory_snapshot_digest=original_context.get(
+                    "inventory_snapshot_digest"
+                ),
+                runtime_manifest_digest=original_context.get(
+                    "runtime_manifest_digest"
+                ),
+                observation_min_at=original_context.get(
+                    "observation_min_at"
+                ),
+                observation_max_at=original_context.get(
+                    "observation_max_at"
+                ),
+            )
+        )
+        row.source_facts_json = tampered_facts
+        row.source_digest = _stable_digest(tampered_facts)
+    with pytest.raises(
+        ValueError,
+        match="report purpose is inconsistent with source evidence",
+    ):
+        release_service.release(
+            manifest["id"],
+            signed_by="reviewer",
+            signoff_comment="tampered authority must be rejected",
+            disclosure_confirmations=[
+                "facts_reviewed",
+                "unknown_scope_disclosed",
+                "artifact_digests_verified",
+            ],
+            verified_artifact_sha256=attached[
+                "artifact_sha256_json"
+            ],
+        )
+    with _session_scope(session_factory) as db:
+        row = db.get(ReportManifestRecord, manifest["id"])
+        row.source_facts_json = original_facts
+        row.source_digest = original_source_digest
+    with _session_scope(session_factory) as db:
+        row = db.get(ReportManifestRecord, manifest["id"])
+        stale_permission_facts = json.loads(
+            json.dumps(original_facts)
+        )
+        stale_permission_facts["assessments"][0][
+            "assessment_status"
+        ] = "unable_to_determine"
+        stale_permission_facts["assessments"][0][
+            "blocking_reason_codes_json"
+        ] = ["parser_missing"]
+        row.source_facts_json = stale_permission_facts
+        row.source_digest = _stable_digest(
+            stale_permission_facts
+        )
+    with pytest.raises(
+        ValueError,
+        match="conclusion permission does not match",
+    ):
+        release_service.release(
+            manifest["id"],
+            signed_by="reviewer",
+            signoff_comment=(
+                "stale conclusion permission must be rejected"
+            ),
+            disclosure_confirmations=[
+                "facts_reviewed",
+                "unknown_scope_disclosed",
+                "artifact_digests_verified",
+            ],
+            verified_artifact_sha256=attached[
+                "artifact_sha256_json"
+            ],
+        )
+    with _session_scope(session_factory) as db:
+        row = db.get(ReportManifestRecord, manifest["id"])
+        row.source_facts_json = original_facts
+        row.source_digest = original_source_digest
+    with pytest.raises(
+        ValueError,
+        match="signer different from the manifest generator",
+    ):
+        release_service.release(
+            manifest["id"],
+            signed_by="api:test",
+            signoff_comment="self sign-off must be rejected",
+            disclosure_confirmations=[
+                "facts_reviewed",
+                "unknown_scope_disclosed",
+                "artifact_digests_verified",
+            ],
+            verified_artifact_sha256=attached[
+                "artifact_sha256_json"
+            ],
+        )
     with pytest.raises(ValueError, match="disclosure confirmations"):
         release_service.release(
             manifest["id"],
@@ -2768,10 +5667,45 @@ def test_report_manifest_is_final_only_after_execution_assessment_reconciliation
                 "artifact_digests_verified",
             ],
             verified_artifact_sha256={
+                **attached["artifact_sha256_json"],
                 "markdown": "7" * 64,
-                "excel": "9" * 64,
             },
         )
+    content_review = ReportContentReviewService(
+        scope,
+        object_storage=object_storage,
+    )
+    review = content_review.start(
+        manifest["id"],
+        created_by="content-reviewer",
+    )
+    pending_items = content_review.list_items(
+        manifest["id"],
+        page=1,
+        page_size=200,
+        review_status="pending",
+    )
+    assert pending_items["total"] == review["required_item_count"]
+    decided = content_review.decide_items(
+        manifest["id"],
+        review_item_ids=[
+            item["review_item_id"] for item in pending_items["items"]
+        ],
+        decision="accepted",
+        reviewed_by="content-reviewer",
+        review_comment="reviewed all required and sampled report facts",
+    )
+    assert decided["can_accept"] is True
+    accepted_content = content_review.accept(
+        manifest["id"],
+        accepted_by="content-reviewer",
+        acceptance_comment=(
+            "accepted report content, evidence traces and action wording"
+        ),
+        confirmations=REQUIRED_CONTENT_CONFIRMATIONS,
+        verified_artifact_sha256=attached["artifact_sha256_json"],
+        accepted_at=now + timedelta(minutes=4),
+    )
     release = release_service.release(
         manifest["id"],
         signed_by="reviewer",
@@ -2786,6 +5720,13 @@ def test_report_manifest_is_final_only_after_execution_assessment_reconciliation
     )
     assert release["status"] == "released"
     assert release["source_facts_digest"] == manifest["source_digest"]
+    assert release["claim_ledger_digest"] == manifest[
+        "claim_ledger_digest"
+    ]
+    assert release["content_review_id"] == accepted_content["id"]
+    assert release["content_acceptance_digest"] == accepted_content[
+        "acceptance_digest"
+    ]
     assert release_service.release(
         manifest["id"],
         signed_by="reviewer",
@@ -2797,6 +5738,34 @@ def test_report_manifest_is_final_only_after_execution_assessment_reconciliation
         ],
         verified_artifact_sha256=attached["artifact_sha256_json"],
     )["id"] == release["id"]
+    with _session_scope(session_factory) as db:
+        row = db.get(ReportManifestRecord, manifest["id"])
+        original_facts = json.loads(
+            json.dumps(row.source_facts_json)
+        )
+        tampered_facts = json.loads(json.dumps(original_facts))
+        tampered_facts["late_fact_count"] = 999
+        row.source_facts_json = tampered_facts
+    with pytest.raises(
+        ValueError,
+        match="source facts do not match the immutable digest",
+    ):
+        release_service.release(
+            manifest["id"],
+            signed_by="reviewer",
+            signoff_comment="idempotent retry must still verify facts",
+            disclosure_confirmations=[
+                "facts_reviewed",
+                "unknown_scope_disclosed",
+                "artifact_digests_verified",
+            ],
+            verified_artifact_sha256=attached[
+                "artifact_sha256_json"
+            ],
+        )
+    with _session_scope(session_factory) as db:
+        row = db.get(ReportManifestRecord, manifest["id"])
+        row.source_facts_json = original_facts
     with pytest.raises(ValueError, match="immutable"):
         service.attach_artifacts(
             manifest["id"],
@@ -2829,6 +5798,22 @@ def test_report_manifest_is_final_only_after_execution_assessment_reconciliation
     if revised_cutoff.tzinfo is None:
         revised_cutoff = revised_cutoff.replace(tzinfo=timezone.utc)
     assert revised_cutoff > previous_cutoff
+    previous_high_watermark = manifest[
+        "fact_ingestion_high_watermark"
+    ]
+    revised_high_watermark = revised[
+        "fact_ingestion_high_watermark"
+    ]
+    if previous_high_watermark.tzinfo is None:
+        previous_high_watermark = previous_high_watermark.replace(
+            tzinfo=timezone.utc
+        )
+    if revised_high_watermark.tzinfo is None:
+        revised_high_watermark = revised_high_watermark.replace(
+            tzinfo=timezone.utc
+        )
+    assert revised_high_watermark > previous_high_watermark
+    assert revised["source_facts_json"]["late_fact_count"] >= 1
     assert revised["source_facts_json"]["executions"][0][
         "reason_codes_json"
     ] == ["late_fact_revision"]
@@ -2851,7 +5836,7 @@ def test_report_manifest_is_final_only_after_execution_assessment_reconciliation
     )["id"] == revised["id"]
 
 
-def test_mixed_device_outcomes_and_direct_workflow_terminal_semantics(
+def test_mixed_device_outcomes_and_report_terminal_semantics(
     tmp_path,
 ):
     (

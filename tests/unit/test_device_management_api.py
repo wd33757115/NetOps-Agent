@@ -87,6 +87,34 @@ def test_list_devices_redacts_password(monkeypatch):
     assert result["items"][0]["credential_ref"] == "env:NETOPS_PASSWORD"
 
 
+def test_list_devices_passes_inventory_selector_search(monkeypatch):
+    class FakeRepository:
+        def get_devices_by_filter(self, **kwargs):
+            assert kwargs["search"] == "192.0.2.10"
+            return [
+                {
+                    "device_id": "device-1",
+                    "device_name": "SW1",
+                    "management_ip": "192.0.2.10",
+                    "vendor": "H3C",
+                    "model": "S5130",
+                    "status": "active",
+                }
+            ]
+
+    monkeypatch.setattr(devices_api, "DeviceRepository", FakeRepository)
+
+    result = devices_api.list_devices(
+        search="192.0.2.10",
+        status="active",
+        limit=100,
+        offset=0,
+    )
+
+    assert result["total"] == 1
+    assert result["items"][0]["device_id"] == "device-1"
+
+
 def test_device_import_template_exposes_columns_and_csv():
     result = devices_api.get_device_import_template()
 
@@ -564,6 +592,104 @@ def test_preview_device_plan_returns_execution_plan(monkeypatch):
     assert (
         result["coverage_summary"]["connection_issues"][0]["failure_code"] == "missing_credential"
     )
+
+
+def test_preview_device_plan_uses_authoritative_check_item_manifest(monkeypatch):
+    class FakeRepository:
+        def get_devices_by_filter(self, **kwargs):
+            assert kwargs["device_id"] == "device-1"
+            return [
+                {
+                    "device_id": "device-1",
+                    "device_name": "SW1",
+                    "ip": "10.0.0.1",
+                    "vendor": "H3C",
+                    "credential_ref": "env:NETOPS_PASSWORD",
+                }
+            ]
+
+    class FakePlan:
+        check_item_ids = ("configuration.running",)
+        profile_version_id = "profile-v1"
+        policy_source = "profile_binding"
+        commands = ()
+
+        def to_metadata(self):
+            return {
+                "device_id": "device-1",
+                "action": "patrol",
+                "mode": "production",
+                "profile_name": "check-items",
+                "profile_version_id": "profile-v1",
+                "check_item_ids": ["configuration.running"],
+                "collection_items": [],
+            }
+
+    class FakeResolver:
+        def build_plan(self, *, device, action, mode):
+            assert device["device_id"] == "device-1"
+            assert action == "patrol"
+            assert mode == "production"
+            return FakePlan()
+
+    monkeypatch.setattr(devices_api, "DeviceRepository", FakeRepository)
+    monkeypatch.setattr(devices_api, "CollectionPolicyResolver", FakeResolver)
+    monkeypatch.setattr(
+        devices_api,
+        "_connection_preflight",
+        lambda _device: [],
+    )
+    monkeypatch.setattr(
+        devices_api,
+        "_preview_check_item_effective_plan",
+        lambda **_kwargs: {
+            "manifest_id": "manifest-1",
+            "manifest_digest": "a" * 64,
+            "manifest": {"schema_version": 2, "digest": "a" * 64},
+            "decisions": [
+                {
+                    "check_item_id": "configuration.running",
+                    "status": "resolved",
+                }
+            ],
+            "collection_actions": [
+                {
+                    "id": "action-1",
+                    "command": "display current-configuration",
+                    "fallback_rank": 0,
+                    "bindings": [
+                        {
+                            "check_item_id": "configuration.running",
+                            "runtime_bundle_version_id": "bundle-v1",
+                        }
+                    ],
+                }
+            ],
+            "executions": [{"id": "execution-1"}],
+            "terminal_assessments": [],
+            "asset_gaps": [],
+        },
+    )
+
+    result = devices_api.preview_device_plan(
+        "device-1",
+        devices_api.DevicePlanPreviewRequest(
+            action="patrol",
+            mode="production",
+        ),
+    )
+
+    assert result["commands"] == ["display current-configuration"]
+    assert result["plan"]["runtime_manifest_id"] == "manifest-1"
+    assert result["plan"]["runtime_manifest_digest"] == "a" * 64
+    assert result["plan"]["collection_items"][0]["collection_item_id"] == "action-1"
+    assert result["check_item_effective_plan"]["executions"] == [
+        {"id": "execution-1"}
+    ]
+    assert result["runtime_asset_health"]["status"] == "ready"
+    assert result["coverage_summary"]["status"] == "ready"
+    assert result["coverage_summary"]["ready_count"] == 1
+    assert result["parser_coverage"] == []
 
 
 def test_device_connectivity_test_blocks_preflight_issue(monkeypatch):
@@ -2086,7 +2212,9 @@ def test_device_timeline_includes_direct_patrol_and_legacy_opening_event():
             db.query(PatrolRun).filter(PatrolRun.id == run_id).delete(synchronize_session=False)
 
 
-def test_launch_device_patrol_submits_one_task_per_plan(monkeypatch):
+def test_launch_device_patrol_allows_direct_only_for_nonproduction_diagnostics(
+    monkeypatch,
+):
     submitted = []
 
     class FakeTaskResult:
@@ -2166,6 +2294,7 @@ def test_launch_device_patrol_submits_one_task_per_plan(monkeypatch):
             ticket_id="PATROL-1",
             save_baseline=True,
             launch_mode="direct",
+            mode="parser_validation",
         ),
         None,
     )
@@ -2177,6 +2306,41 @@ def test_launch_device_patrol_submits_one_task_per_plan(monkeypatch):
     assert result["patrol_batch_id"].startswith("patrol-batch-")
     assert result["tasks"] == []
     assert submitted == []
+
+
+def test_launch_device_patrol_rejects_direct_check_item_batch(
+    monkeypatch,
+):
+    preview_called = False
+
+    def forbidden_preview(payload, repository):
+        nonlocal preview_called
+        preview_called = True
+        raise AssertionError("production direct launch must fail before preview")
+
+    monkeypatch.setattr(
+        devices_api,
+        "_patrol_launch_preview",
+        forbidden_preview,
+    )
+
+    with pytest.raises(devices_api.HTTPException) as exc_info:
+        devices_api.launch_device_patrol(
+            devices_api.DevicePatrolLaunchRequest(
+                device_ids=["device-1"],
+                launch_mode="direct",
+            ),
+            None,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["failure_code"] == (
+        "direct_check_item_patrol_disabled"
+    )
+    assert exc_info.value.detail["next_action"] == (
+        "set launch_mode=workflow"
+    )
+    assert preview_called is False
 
 
 def test_launch_device_patrol_starts_workflow_by_default(monkeypatch):

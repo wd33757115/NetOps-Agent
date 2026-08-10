@@ -44,7 +44,8 @@ def test_parser_sample_sanitization_is_idempotent_for_redacted_serial_labels():
     first = sanitize_parser_sample(raw)
     second = sanitize_parser_sample(first.text)
 
-    assert first.text == "MANU SERIAL NUMBER   : <SERIAL>\n"
+    assert first.text.startswith("MANU SERIAL NUMBER   : <SERIAL:")
+    assert first.text.endswith(">\n")
     assert second.text == first.text
     assert second.sha256 == first.sha256
 
@@ -60,7 +61,26 @@ MAC_ADDRESS          : 90F7-B2B1-0510
     assert "ABC123" not in sanitized.text
     assert "PSU456" not in sanitized.text
     assert "90F7-B2B1-0510" not in sanitized.text
-    assert "DEVICE_SERIAL_NUMBER : <SERIAL>" in sanitized.text
-    assert "MANU SERIAL NUMBER   : <SERIAL>" in sanitized.text
-    assert "MAC_ADDRESS          : 0200-0000-0001" in sanitized.text
+    assert "DEVICE_SERIAL_NUMBER : <SERIAL:" in sanitized.text
+    assert "MANU SERIAL NUMBER   : <SERIAL:" in sanitized.text
+    assert "MAC_ADDRESS          : 0200-5E" in sanitized.text
     assert runtime_pattern_for_redacted_value("<SERIAL>") == r"[A-Za-z0-9._/-]+"
+
+
+def test_parser_sample_sanitization_preserves_identity_cardinality():
+    raw = """Internet 10.0.0.1 aa:bb:cc:dd:ee:01 Gi1/0/1
+Internet 10.0.0.2 aa:bb:cc:dd:ee:02 Gi1/0/2
+Serial Number: SERIAL-ONE
+Serial Number: SERIAL-TWO
+"""
+
+    first = sanitize_parser_sample(raw)
+    second = sanitize_parser_sample(raw)
+    lines = first.text.splitlines()
+
+    assert first == second
+    assert "10.0.0.1" not in first.text and "10.0.0.2" not in first.text
+    assert "aa:bb:cc:dd:ee:01" not in first.text
+    assert lines[0].split()[1] != lines[1].split()[1]
+    assert lines[0].split()[2] != lines[1].split()[2]
+    assert lines[2].split()[-1] != lines[3].split()[-1]

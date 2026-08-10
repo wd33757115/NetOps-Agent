@@ -258,9 +258,7 @@ foreach ($k in @("LANGFUSE_HOST", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"))
 if ($dotEnv.ContainsKey("JWT_ALGORITHM")) { $fastapiEnv["JWT_ALGORITHM"] = $dotEnv["JWT_ALGORITHM"] }
 if ($dotEnv.ContainsKey("BFF_REQUIRE_AUTH")) { $fastapiEnv["BFF_REQUIRE_AUTH"] = $dotEnv["BFF_REQUIRE_AUTH"] }
 
-Write-ColorOutput '[Step 4/7] Start Celery Worker + Beat (Windows) ...' "Yellow"
-$celeryLog = Join-Path $logDir "celery.log"
-$celeryLauncher = Join-Path $logDir "celery-launcher.ps1"
+Write-ColorOutput '[Step 4/7] Start Celery Core/AI Workers + Beat (Windows) ...' "Yellow"
 $celeryEnv = @{
     POSTGRES_HOST = "localhost"
     REDIS_HOST = "localhost"
@@ -280,13 +278,30 @@ if ($jwtSecret) { $celeryEnv["JWT_SECRET_KEY"] = $jwtSecret }
 foreach ($k in @("LANGFUSE_HOST", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY")) {
     if ($dotEnv.ContainsKey($k)) { $celeryEnv[$k] = $dotEnv[$k] }
 }
-$celeryCmd = "& '$py' -m celery -A src.core.celery_tasks.celery_app worker --loglevel=info -P solo -Q netops.default,netops.firewall,netops.device,netops.health,netops.patrol,netops.ai"
-New-LauncherScript -Path $celeryLauncher -WorkingDirectory $ProjectRoot -EnvVars $celeryEnv -CommandLine $celeryCmd -LogFile $celeryLog -PreCommands @(
+$coreCeleryEnv = $celeryEnv.Clone()
+$coreCeleryEnv["CELERY_WORKER_ROLE"] = "core"
+$coreCeleryEnv["CELERY_WORKER_QUEUES"] = "netops.default,netops.firewall,netops.device,netops.health,netops.patrol"
+$coreCeleryLog = Join-Path $logDir "celery-core.log"
+$coreCeleryLauncher = Join-Path $logDir "celery-core-launcher.ps1"
+$coreCeleryCmd = "& '$py' -m celery -A src.core.celery_tasks.celery_app worker --loglevel=info -P solo --hostname=netops-core@%h -Q netops.default,netops.firewall,netops.device,netops.health,netops.patrol"
+New-LauncherScript -Path $coreCeleryLauncher -WorkingDirectory $ProjectRoot -EnvVars $coreCeleryEnv -CommandLine $coreCeleryCmd -LogFile $coreCeleryLog -PreCommands @(
     'Remove-Item Env:DJANGO_SETTINGS_MODULE -ErrorAction SilentlyContinue'
 )
-$pids.celery = (Start-LauncherProcess -LauncherPath $celeryLauncher).Id
-Write-ColorOutput ("  [OK] Celery PID={0} (log: celery.log)" -f $pids.celery) "Green"
-Write-ColorOutput "  [TIP] Celery worker running; do not start a second worker (pidbox conflict)" "Gray"
+$pids.celeryCore = (Start-LauncherProcess -LauncherPath $coreCeleryLauncher).Id
+Write-ColorOutput ("  [OK] Core Worker PID={0} (log: celery-core.log)" -f $pids.celeryCore) "Green"
+
+$aiCeleryEnv = $celeryEnv.Clone()
+$aiCeleryEnv["CELERY_WORKER_ROLE"] = "ai"
+$aiCeleryEnv["CELERY_WORKER_QUEUES"] = "netops.ai"
+$aiCeleryLog = Join-Path $logDir "celery-ai.log"
+$aiCeleryLauncher = Join-Path $logDir "celery-ai-launcher.ps1"
+$aiCeleryCmd = "& '$py' -m celery -A src.core.celery_tasks.celery_app worker --loglevel=info -P solo --hostname=netops-ai@%h -Q netops.ai"
+New-LauncherScript -Path $aiCeleryLauncher -WorkingDirectory $ProjectRoot -EnvVars $aiCeleryEnv -CommandLine $aiCeleryCmd -LogFile $aiCeleryLog -PreCommands @(
+    'Remove-Item Env:DJANGO_SETTINGS_MODULE -ErrorAction SilentlyContinue'
+)
+$pids.celeryAi = (Start-LauncherProcess -LauncherPath $aiCeleryLauncher).Id
+Write-ColorOutput ("  [OK] AI Worker PID={0} (log: celery-ai.log)" -f $pids.celeryAi) "Green"
+Write-ColorOutput "  [TIP] Long LLM calls are isolated from patrol, health and report queues" "Gray"
 Write-ColorOutput "        Debug: scripts\test\celery_worker.ps1" "Gray"
 $celeryBeatLog = Join-Path $logDir "celery-beat.log"
 $celeryBeatLauncher = Join-Path $logDir "celery-beat-launcher.ps1"

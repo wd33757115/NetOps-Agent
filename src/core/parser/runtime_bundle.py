@@ -48,17 +48,15 @@ class ParserRuntimeBundle:
         runtime = runtime or ParserRuntime()
         templates: dict[str, ParserTemplateRef | None] = {}
         for command in commands:
-            decision = runtime.policy.decide(
-                vendor=identity.vendor,
-                model=identity.model,
-                family=identity.family,
+            decision, resolved_template = runtime._effective_decision(
+                identity=identity,
                 command=command,
             )
             canonical = decision.canonical_command
             if not decision.enabled or identity.status != "known":
                 templates.setdefault(canonical, None)
                 continue
-            template = runtime.registry.resolve_active(
+            template = resolved_template or runtime.registry.resolve_active(
                 vendor=identity.vendor or "",
                 model=identity.model or "",
                 family=identity.family,

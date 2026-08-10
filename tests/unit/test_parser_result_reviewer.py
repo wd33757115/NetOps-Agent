@@ -8,7 +8,11 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "src" / "skills" / "textfsm-generator" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-from result_reviewer import IndependentParserResultReviewer  # noqa: E402
+from result_reviewer import (  # noqa: E402
+    IndependentParserResultReviewer,
+    _is_non_blocking_sample_scope_diagnostic,
+)
+
 from src.core.parser_generation import (  # noqa: E402
     FieldSpec,
     ParserSample,
@@ -18,7 +22,6 @@ from src.core.parser_generation import (  # noqa: E402
     ValidationReport,
 )
 from src.core.parser_generation.validation import SampleValidation  # noqa: E402
-
 
 SPEC = ParserSpec(
     entity="interface",
@@ -82,7 +85,10 @@ def test_reviewer_uses_fresh_thinking_call_without_forced_tools():
                                 '"diagnostics":[],"primary_key_assessment":'
                                 '{"passed":true,"reason":"stable"},'
                                 '"completeness_assessment":'
-                                '{"passed":true,"reason":"all rows represented"}}'
+                                '{"passed":true,"reason":"all rows represented"},'
+                                '"record_set_assessments":['
+                                '{"name":"interface","passed":true,'
+                                '"reason":"current values match"}]}'
                             )
                         )
                     )
@@ -122,12 +128,22 @@ def test_reviewer_uses_fresh_thinking_call_without_forced_tools():
     assert "tools" not in captured
     assert captured["messages"][0]["role"] == "system"
     assert "Eth1/1 up" in captured["messages"][0]["content"]
+    assert '"sample_role": "generation"' in captured["messages"][0]["content"]
     assert "RAW MUST NOT BE SENT" not in captured["messages"][0]["content"]
     assert captured["messages"][1]["role"] == "user"
     assert '"record_count": 1' in captured["messages"][1]["content"]
+    assert "`ip` field cannot contain `--`" in captured["messages"][0]["content"]
+    assert "regenerating only the TextFSM template cannot repair it" in captured[
+        "messages"
+    ][0]["content"]
+    assert "fields that are operationally valuable" in captured["messages"][0]["content"]
+    assert "generation guidance, not ground truth" in captured["messages"][0]["content"]
+    assert "Local execution evidence (not a semantic verdict)" in captured["messages"][1][
+        "content"
+    ]
 
 
-def test_reviewer_reuses_stable_evidence_prefix_across_candidate_revisions():
+def test_reviewer_reuses_only_stable_evidence_prefix_across_candidate_revisions():
     requests = []
 
     class Completions:
@@ -146,7 +162,10 @@ def test_reviewer_reuses_stable_evidence_prefix_across_candidate_revisions():
                                 '"diagnostics":[],"primary_key_assessment":'
                                 '{"passed":true,"reason":"stable"},'
                                 '"completeness_assessment":'
-                                '{"passed":true,"reason":"all rows represented"}}'
+                                '{"passed":true,"reason":"all rows represented"},'
+                                '"record_set_assessments":['
+                                '{"name":"interface","passed":true,'
+                                '"reason":"current values match"}]}'
                             ),
                         )
                     )
@@ -179,25 +198,14 @@ def test_reviewer_reuses_stable_evidence_prefix_across_candidate_revisions():
         validation=_validation(),
     )
 
-    assert requests[1][:3] == [
-        requests[0][0],
-        requests[0][1],
-        {
-            "role": "assistant",
-            "content": requests[0][1]["content"].replace(
-                requests[0][1]["content"],
-                (
-                    '{"passed":true,"summary":"complete",'
-                    '"diagnostics":[],"primary_key_assessment":'
-                    '{"passed":true,"reason":"stable"},'
-                    '"completeness_assessment":'
-                    '{"passed":true,"reason":"all rows represented"}}'
-                ),
-            ),
-            "reasoning_content": "checked",
-        },
-    ]
-    assert "candidate-2" in requests[1][-1]["content"]
+    assert len(requests[0]) == 2
+    assert len(requests[1]) == 2
+    assert requests[1][0] == requests[0][0]
+    assert "candidate-1" in requests[0][1]["content"]
+    assert "candidate-1" not in requests[1][1]["content"]
+    assert "candidate-2" in requests[1][1]["content"]
+    assert "Parsed record-set coverage summary" in requests[1][1]["content"]
+    assert '"default": 1' in requests[1][1]["content"]
 
 
 def test_reviewer_protocol_failure_becomes_a_blocking_report():
@@ -231,6 +239,128 @@ def test_reviewer_protocol_failure_becomes_a_blocking_report():
     assert report.diagnostics[0]["code"] == "review_provider_or_protocol_error"
 
 
+def test_reviewer_does_not_regenerate_a_valid_template_for_omitted_per_set_format():
+    class Completions:
+        @staticmethod
+        def create(**_kwargs):
+            return SimpleNamespace(
+                model="deepseek-v4-pro",
+                usage=None,
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content=(
+                                '{"passed":true,'
+                                '"summary":"All interface records are correctly parsed.",'
+                                '"diagnostics":[],'
+                                '"primary_key_assessment":'
+                                '{"passed":true,"reason":"stable interface key"},'
+                                '"completeness_assessment":'
+                                '{"passed":true,"reason":"all rows represented"}}'
+                            )
+                        )
+                    )
+                ],
+            )
+
+    report = IndependentParserResultReviewer(
+        client=SimpleNamespace(chat=SimpleNamespace(completions=Completions())),
+        model_name="deepseek-v4-pro",
+    ).review(
+        spec=SPEC,
+        samples=(
+            ParserSample(
+                "sample-1",
+                "raw",
+                SampleRole.GENERATION,
+                prompt_text="Eth1/1 up",
+            ),
+        ),
+        candidate=TemplateCandidate("template", "llm"),
+        validation=_validation(),
+    )
+
+    assert report.passed is True
+    assert report.diagnostics == ()
+    assert report.record_set_assessments == (
+        {
+            "name": "interface",
+            "passed": True,
+            "reason": (
+                "Overall independent review passed; the provider omitted the "
+                "per-record-set entry. All interface records are correctly parsed."
+            ),
+            "normalized_from_overall_review": True,
+        },
+    )
+
+
+def test_reviewer_treats_single_sample_risk_as_non_blocking_when_result_is_correct():
+    class Completions:
+        @staticmethod
+        def create(**_kwargs):
+            return SimpleNamespace(
+                model="deepseek-v4-pro",
+                usage=None,
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content=(
+                                '{"passed":false,'
+                                '"summary":"All 59 interface rows are correctly parsed.",'
+                                '"diagnostics":[{'
+                                '"code":"other","sample_id":"sample-1",'
+                                '"target":"template",'
+                                '"message":"Only one frozen sample was provided; '
+                                'cross-sample risk remains."}],'
+                                '"primary_key_assessment":'
+                                '{"passed":true,"reason":"stable interface key"},'
+                                '"completeness_assessment":'
+                                '{"passed":true,"reason":"all rows represented"}}'
+                            )
+                        )
+                    )
+                ],
+            )
+
+    report = IndependentParserResultReviewer(
+        client=SimpleNamespace(chat=SimpleNamespace(completions=Completions())),
+        model_name="deepseek-v4-pro",
+    ).review(
+        spec=SPEC,
+        samples=(
+            ParserSample(
+                "sample-1",
+                "raw",
+                SampleRole.GENERATION,
+                prompt_text="Eth1/1 up",
+            ),
+        ),
+        candidate=TemplateCandidate("template", "ntc_templates"),
+        validation=_validation(),
+    )
+
+    assert report.passed is True
+    assert report.diagnostics == ()
+    assert report.completeness_assessment["non_blocking_warnings"] == [
+        "Only one frozen sample was provided; cross-sample risk remains."
+    ]
+    assert report.record_set_assessments[0]["normalized_from_overall_review"] is True
+
+
+def test_reviewer_recognizes_structural_variant_coverage_wording():
+    assert _is_non_blocking_sample_scope_diagnostic(
+        {
+            "code": "other",
+            "target": "template",
+            "message": (
+                "Only one structural CLI variant is available; the template may "
+                "need additional robustness testing for different column spacing."
+            ),
+        }
+    )
+
+
 def test_reviewer_preserves_textfsm_list_values_as_json_arrays():
     captured = {}
 
@@ -250,7 +380,10 @@ def test_reviewer_preserves_textfsm_list_values_as_json_arrays():
                                 '"diagnostics":[],"primary_key_assessment":'
                                 '{"passed":true,"reason":"stable"},'
                                 '"completeness_assessment":'
-                                '{"passed":true,"reason":"all values represented"}}'
+                                '{"passed":true,"reason":"all values represented"},'
+                                '"record_set_assessments":['
+                                '{"name":"vpc","passed":true,'
+                                '"reason":"current values match"}]}'
                             ),
                         )
                     )
@@ -320,3 +453,98 @@ def test_reviewer_preserves_textfsm_list_values_as_json_arrays():
     assert '"1-3967"' in prompt
     assert "['1-3967', '3969-4093']" not in prompt
     assert "one-based `value_index`" in prompt
+
+
+def test_reviewer_does_not_rewrite_list_field_only_because_element_type_is_text():
+    class Completions:
+        @staticmethod
+        def create(**_kwargs):
+            return SimpleNamespace(
+                model="deepseek-v4-pro",
+                usage=None,
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content=(
+                                '{"passed":false,'
+                                '"summary":"All MAC records are complete.",'
+                                '"diagnostics":[{'
+                                '"code":"field_misaligned","sample_id":"",'
+                                '"target":"template",'
+                                '"message":"The interfaces field is declared as '
+                                'Value List interfaces, but ParserSpec expects a scalar '
+                                'text field."}],'
+                                '"primary_key_assessment":'
+                                '{"passed":true,"reason":"stable MAC key"},'
+                                '"completeness_assessment":'
+                                '{"passed":true,"reason":"all ports preserved"}}'
+                            )
+                        )
+                    )
+                ],
+            )
+
+    spec = ParserSpec(
+        entity="mac_entry",
+        primary_keys=("mac_address",),
+        fields=(
+            FieldSpec("mac_address", True, "text"),
+            FieldSpec("interfaces", False, "text"),
+        ),
+    )
+    validation = ValidationReport(
+        passed=True,
+        hard_gates={"compiled": True},
+        samples=(
+            SampleValidation(
+                sample_id="sample-mac",
+                role=SampleRole.GENERATION,
+                passed=True,
+                record_count=1,
+                records=(
+                    {
+                        "mac_address": "0011.2233.4455",
+                        "interfaces": ["Gi1/0/1", "Gi1/0/2"],
+                    },
+                ),
+                errors=(),
+                actual_primary_keys=(("0011.2233.4455",),),
+            ),
+        ),
+        diagnostics=(),
+    )
+    candidate = TemplateCandidate(
+        (
+            "Value mac_address (\\S+)\n"
+            "Value List interfaces (\\S+)\n\n"
+            "Start\n"
+            "  ^${mac_address}\\s+${interfaces}$$ -> Record\n"
+        ),
+        "ntc_templates",
+    )
+
+    report = IndependentParserResultReviewer(
+        client=SimpleNamespace(chat=SimpleNamespace(completions=Completions())),
+        model_name="deepseek-v4-pro",
+    ).review(
+        spec=spec,
+        samples=(
+            ParserSample(
+                "sample-mac",
+                "raw",
+                SampleRole.GENERATION,
+                prompt_text="0011.2233.4455 Gi1/0/1 Gi1/0/2",
+            ),
+        ),
+        candidate=candidate,
+        validation=validation,
+    )
+
+    assert report.passed is True
+    assert report.diagnostics == ()
+    assert report.completeness_assessment["non_blocking_warnings"] == [
+        (
+            "The interfaces field is declared as Value List interfaces, but "
+            "ParserSpec expects a scalar text field."
+        )
+    ]

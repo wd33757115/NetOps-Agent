@@ -1,15 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Descriptions, Input, Progress, Select, Space, Switch, Table, Tabs, Tag, Typography, type TableProps } from 'antd'
-import { DownloadOutlined, FileExcelOutlined, ReloadOutlined, SafetyCertificateOutlined, SearchOutlined } from '@ant-design/icons'
-import { useQuery } from 'react-query'
-import type { PatrolBatchCheckResult, PatrolBatchDeviceItem, PatrolBatchDevicePage, PatrolBatchResultSummary, PatrolBatchSummary } from '../../services/api'
-import { deviceApi, workflowApi } from '../../services/api'
+import { Alert, Button, Descriptions, Drawer, Form, Input, Modal, Pagination, Progress, Select, Space, Switch, Table, Tabs, Tag, Typography, message, type TableProps } from 'antd'
+import { DownloadOutlined, FileExcelOutlined, LeftOutlined, ReloadOutlined, RightOutlined, SafetyCertificateOutlined, SearchOutlined, StopOutlined } from '@ant-design/icons'
+import { useMutation, useQuery, useQueryClient } from 'react-query'
+import type { PatrolBatchCheckResult, PatrolBatchDeviceItem, PatrolBatchDevicePage, PatrolBatchResultSummary, PatrolBatchSummary, ProductionFeedbackType } from '../../services/api'
+import { deviceApi, patrolApi, workflowApi } from '../../services/api'
 import { openAuthenticatedEventStream } from '../../services/authenticatedSse'
 import { useIsMobile } from '../../hooks/useBreakpoint'
 import PatrolBatchPipeline from './PatrolBatchPipeline'
 import OfflinePatrolPanel from './OfflinePatrolPanel'
 import ReportReleasePanel from './ReportReleasePanel'
 import RiskCaseWorkspace from './RiskCaseWorkspace'
+import ProductionFeedbackWorkspace from './ProductionFeedbackWorkspace'
+import { canCancelPatrolBatch } from './patrolBatchLifecycle'
 
 type TableColumns<T> = TableProps<T>['columns']
 
@@ -39,6 +41,7 @@ interface PatrolOperationsPanelProps {
   patrolBatchColumns: TableColumns<PatrolBatchSummary>
   showArchivedBatches: boolean
   onClearActiveBatch: () => void
+  onCancelBatch: (batchId: string) => void
   onExportBatchReport: (batchId: string) => void
   onExportBatchTechnicalWorkbook: (batchId: string) => void
   onExportBatchEvidencePackage: (batchId: string) => void
@@ -69,12 +72,37 @@ interface PatrolOperationsPanelProps {
   exportBatchRawCliLoading?: boolean
   exportBatchEventsLoading?: boolean
   retryRunLoading?: boolean
+  cancelBatchLoading?: boolean
 }
 
 const ACTIVE_STATUSES = new Set(['pending', 'queued', 'running', 'in_progress', 'collecting', 'dispatching'])
 const ACTIONABLE_STATUSES = new Set(['failed', 'cancelled'])
 const PATROL_BATCH_PAGE_SIZE_OPTIONS = ['25', '50', '100']
 const CHECK_RESULT_PAGE_SIZE = 25
+const ASSESSMENT_SOURCE_LABELS: Record<string, string> = {
+  device_output: '设备输出',
+  inventory_profile: '设备或模块档案',
+  scope_override: '本次范围策略',
+  catalog_default: '目录缺省值',
+  approved_rule_constant: '旧版规则常量',
+}
+const APPLICABILITY_STATUS_LABELS: Record<string, string> = {
+  applicable: '适用',
+  not_applicable: '明确不适用',
+  unknown: '未知',
+  conflict: '冲突',
+}
+
+const assessmentBasisText = (row: PatrolBatchCheckResult) => {
+  if (!row.assessment_basis_digest) return '历史数据未冻结'
+  const summary = row.assessment_basis_summary
+  if (!summary?.entry_count) return '无实体规则判定'
+  const sources = Object.entries(summary.source_counts || {})
+    .filter(([, count]) => count > 0)
+    .map(([source, count]) => `${ASSESSMENT_SOURCE_LABELS[source] || source} ${count}`)
+    .join('；')
+  return sources || '依据来源未记录'
+}
 
 const assessmentStatus = (status: string) => {
   const labels: Record<string, { text: string; color: string }> = {
@@ -215,6 +243,7 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
   patrolBatchColumns,
   showArchivedBatches,
   onClearActiveBatch,
+  onCancelBatch,
   onExportBatchReport,
   onExportBatchTechnicalWorkbook,
   onExportBatchEvidencePackage,
@@ -240,8 +269,10 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
   exportBatchRawCliLoading,
   exportBatchEventsLoading,
   retryRunLoading,
+  cancelBatchLoading,
 }) => {
   const isMobile = useIsMobile()
+  const queryClient = useQueryClient()
   const [liveEvents, setLiveEvents] = useState<Array<Record<string, unknown>>>([])
   const [liveStreamUnavailable, setLiveStreamUnavailable] = useState(false)
   const [checkResultPage, setCheckResultPage] = useState(1)
@@ -249,37 +280,124 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
   const [checkResultSearch, setCheckResultSearch] = useState('')
   const [checkResultStatus, setCheckResultStatus] = useState<string | undefined>()
   const [checkEvidenceFilter, setCheckEvidenceFilter] = useState<string | undefined>()
+  const [selectedCheckExecutionId, setSelectedCheckExecutionId] = useState<string>()
+  const [basisEntryPage, setBasisEntryPage] = useState(1)
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const [feedbackForm] = Form.useForm()
+  const [checkResultCursors, setCheckResultCursors] = useState<Record<number, string | undefined>>({
+    1: undefined,
+  })
 
   const checkItemSummary = activeBatchResultSummary?.check_item_summary
+  const checkResultCursor = checkResultPage > 1
+    ? checkResultCursors[checkResultPage]
+    : undefined
   const checkResultsQuery = useQuery(
     [
       'patrol-batch-check-results',
       activePatrolBatchId,
       checkResultPage,
       checkResultPageSize,
+      checkResultCursor,
       checkResultSearch,
       checkResultStatus,
       checkEvidenceFilter,
     ],
     () => workflowApi.listPatrolBatchCheckResults(activePatrolBatchId!, {
       limit: checkResultPageSize,
-      offset: (checkResultPage - 1) * checkResultPageSize,
+      offset: 0,
+      cursor: checkResultCursor,
       search: checkResultSearch || undefined,
       assessment_status: checkResultStatus,
       ...evidenceFilterParams(checkEvidenceFilter),
     }),
     {
-      enabled: Boolean(activePatrolBatchId && checkItemSummary),
+      enabled: Boolean(
+        activePatrolBatchId
+        && checkItemSummary
+        && (checkResultPage === 1 || checkResultCursor),
+      ),
       keepPreviousData: true,
       refetchInterval: activeBatchSummary.running || activeBatchSummary.pending ? 5000 : false,
+      onSuccess: (page) => {
+        if (!page.next_cursor) return
+        setCheckResultCursors((current) => (
+          current[checkResultPage + 1] === page.next_cursor
+            ? current
+            : {
+                ...current,
+                [checkResultPage + 1]: page.next_cursor || undefined,
+              }
+        ))
+      },
+    },
+  )
+  const checkResultDetailQuery = useQuery(
+    [
+      'patrol-batch-check-result-detail',
+      activePatrolBatchId,
+      selectedCheckExecutionId,
+      basisEntryPage,
+    ],
+    () => workflowApi.getPatrolBatchCheckResultDetail(
+      activePatrolBatchId!,
+      selectedCheckExecutionId!,
+      { entry_limit: 50, entry_offset: (basisEntryPage - 1) * 50 },
+    ),
+    {
+      enabled: Boolean(activePatrolBatchId && selectedCheckExecutionId),
+      keepPreviousData: true,
+    },
+  )
+  const feedbackContextQuery = useQuery(
+    ['production-feedback-context', selectedCheckExecutionId],
+    () => patrolApi.getProductionFeedbackContext(selectedCheckExecutionId!),
+    { enabled: Boolean(selectedCheckExecutionId && feedbackOpen) },
+  )
+  const feedbackMutation = useMutation(
+    async (values: {
+      feedback_type: ProductionFeedbackType
+      statement: string
+      source_ref?: string
+    }) => {
+      const context = feedbackContextQuery.data
+      if (!context?.assessment_id || !selectedCheckExecutionId) {
+        throw new Error('该结果尚未形成可反馈的冻结评估证据')
+      }
+      const [sourceType, sourceId] = String(values.source_ref || '').split(':', 2)
+      return patrolApi.submitProductionFeedback(
+        {
+          execution_id: selectedCheckExecutionId,
+          assessment_id: context.assessment_id,
+          feedback_type: values.feedback_type,
+          statement: values.statement,
+          event_occurrence_id: sourceType === 'event' ? sourceId : undefined,
+          risk_occurrence_id: sourceType === 'risk' ? sourceId : undefined,
+        },
+        `feedback-submit-${crypto.randomUUID()}`,
+      )
+    },
+    {
+      onSuccess: () => {
+        message.success('反馈已提交，等待独立复核')
+        setFeedbackOpen(false)
+        feedbackForm.resetFields()
+        void queryClient.invalidateQueries('production-feedback')
+      },
+      onError: (error: any) => message.error(
+        error?.response?.data?.detail || error?.message || '反馈提交失败',
+      ),
     },
   )
 
   useEffect(() => {
     setCheckResultPage(1)
+    setCheckResultCursors({ 1: undefined })
     setCheckResultSearch('')
     setCheckResultStatus(undefined)
     setCheckEvidenceFilter(undefined)
+    setSelectedCheckExecutionId(undefined)
+    setBasisEntryPage(1)
   }, [activePatrolBatchId])
 
   useEffect(() => {
@@ -396,6 +514,22 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
             {activeBatch?.archived && <Tag color="warning">已归档</Tag>}
           </Space>
           <Space>
+            {canCancelPatrolBatch({
+              archived: activeBatch?.archived,
+              dispatchStatus: activeBatch?.dispatch_status,
+              runningCount: activeBatchSummary.running,
+              pendingCount: activeBatchSummary.pending,
+            }) && (
+              <Button
+                size="small"
+                danger
+                icon={<StopOutlined />}
+                loading={cancelBatchLoading}
+                onClick={() => onCancelBatch(activePatrolBatchId)}
+              >
+                取消运行
+              </Button>
+            )}
             <Button size="small" onClick={onRefreshActiveBatchRuns}>刷新</Button>
             <Button size="small" onClick={onClearActiveBatch}>关闭</Button>
           </Space>
@@ -423,6 +557,11 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
           <Descriptions.Item label="执行结果">
             完成 {activeBatchSummary.completed} · 运行 {activeBatchSummary.running} · 等待 {activeBatchSummary.pending} · 失败 {activeBatchSummary.failed} · 取消 {activeBatchSummary.cancelled}
           </Descriptions.Item>
+          {activeBatch?.dispatch_status === 'cancelled' && activeBatch.dispatch_error && (
+            <Descriptions.Item label="取消记录" span={2}>
+              <Typography.Text type="secondary">{activeBatch.dispatch_error}</Typography.Text>
+            </Descriptions.Item>
+          )}
           {activeBatchResultSummary && (
             <>
               {checkItemSummary && (
@@ -502,6 +641,7 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
                   onSearch={(value) => {
                     setCheckResultSearch(value.trim())
                     setCheckResultPage(1)
+                    setCheckResultCursors({ 1: undefined })
                   }}
                 />
                 <Select
@@ -521,6 +661,7 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
                   onChange={(value) => {
                     setCheckResultStatus(value)
                     setCheckResultPage(1)
+                    setCheckResultCursors({ 1: undefined })
                   }}
                 />
                 <Select
@@ -543,6 +684,7 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
                   onChange={(value) => {
                     setCheckEvidenceFilter(value)
                     setCheckResultPage(1)
+                    setCheckResultCursors({ 1: undefined })
                   }}
                 />
                 <Button size="small" onClick={() => checkResultsQuery.refetch()}>刷新</Button>
@@ -561,19 +703,7 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
               size="small"
               loading={checkResultsQuery.isFetching}
               dataSource={checkResultsQuery.data?.items || []}
-              pagination={{
-                current: checkResultPage,
-                pageSize: checkResultPageSize,
-                total: checkResultsQuery.data?.total || 0,
-                showSizeChanger: !isMobile,
-                showQuickJumper: !isMobile,
-                pageSizeOptions: PATROL_BATCH_PAGE_SIZE_OPTIONS,
-                showTotal: (total, range) => `第 ${range[0]}-${range[1]} 条，共 ${total} 项检查`,
-                onChange: (page, pageSize) => {
-                  setCheckResultPage(pageSize === checkResultPageSize ? page : 1)
-                  setCheckResultPageSize(pageSize)
-                },
-              }}
+              pagination={false}
               columns={[
                 {
                   title: '设备',
@@ -656,6 +786,36 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
                   ),
                 },
                 {
+                  title: '判断依据',
+                  width: 230,
+                  render: (_, row) => {
+                    const conflicts = row.assessment_basis_summary?.status_counts?.conflict || 0
+                    const missing = row.assessment_basis_summary?.status_counts?.missing || 0
+                    return (
+                      <Space direction="vertical" size={0}>
+                        <Typography.Text
+                          type={conflicts || missing || !row.assessment_basis_digest ? 'warning' : undefined}
+                          title={row.assessment_basis_digest || undefined}
+                        >
+                          {assessmentBasisText(row)}
+                        </Typography.Text>
+                        {conflicts > 0 && <Tag color="red">冲突 {conflicts}</Tag>}
+                        {!conflicts && missing > 0 && <Tag color="orange">缺失 {missing}</Tag>}
+                        <Button
+                          type="link"
+                          size="small"
+                          onClick={() => {
+                            setSelectedCheckExecutionId(row.execution_id)
+                            setBasisEntryPage(1)
+                          }}
+                        >
+                          查看依据
+                        </Button>
+                      </Space>
+                    )
+                  },
+                },
+                {
                   title: '阻断原因',
                   width: 280,
                   render: (_, row) => row.blocking_reason_codes.length
@@ -683,8 +843,60 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
                   ),
                 },
               ]}
-              scroll={{ x: 1780 }}
+              scroll={{ x: 2010 }}
             />
+            <Space
+              wrap
+              size={8}
+              style={{ width: '100%', justifyContent: 'flex-end' }}
+            >
+              <Typography.Text type="secondary">
+                共 {checkResultsQuery.data?.total || 0} 项，第 {checkResultPage} 页
+              </Typography.Text>
+              <Select
+                aria-label="检查项结果每页条数"
+                size="small"
+                value={String(checkResultPageSize)}
+                style={{ width: 96 }}
+                options={PATROL_BATCH_PAGE_SIZE_OPTIONS.map((value) => ({
+                  label: `${value} 条/页`,
+                  value,
+                }))}
+                onChange={(value) => {
+                  setCheckResultPageSize(Number(value))
+                  setCheckResultPage(1)
+                  setCheckResultCursors({ 1: undefined })
+                }}
+              />
+              <Button
+                size="small"
+                icon={<LeftOutlined />}
+                disabled={checkResultPage <= 1 || checkResultsQuery.isFetching}
+                onClick={() => setCheckResultPage((page) => Math.max(1, page - 1))}
+              >
+                上一页
+              </Button>
+              <Button
+                size="small"
+                icon={<RightOutlined />}
+                disabled={
+                  checkResultsQuery.isFetching
+                  || !checkResultsQuery.data?.has_more
+                  || !checkResultsQuery.data?.next_cursor
+                }
+                onClick={() => {
+                  const nextCursor = checkResultsQuery.data?.next_cursor
+                  if (!nextCursor) return
+                  setCheckResultCursors((current) => ({
+                    ...current,
+                    [checkResultPage + 1]: nextCursor,
+                  }))
+                  setCheckResultPage((page) => page + 1)
+                }}
+              >
+                下一页
+              </Button>
+            </Space>
           </Space>
         )}
 
@@ -721,8 +933,8 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
                     <Tag color="warning" key={reason}>{noEventReasonLabel(reason)}：{count}</Tag>
                   ))}
                 </Space>
-                <Typography.Link href="/skills/parser?workspace=runtime&subtab=coverage-backfill">
-                  查看变化缺口并 seed Job
+                <Typography.Link href="/skills/parser?workspace=runtime&subtab=rule-gaps">
+                  查看治理缺口并导入证据
                 </Typography.Link>
               </Space>
             )}
@@ -891,34 +1103,311 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
   </Space>
   )
   const patrolView = new URLSearchParams(window.location.search).get('patrol_view')
-  return <Tabs
-    defaultActiveKey={patrolView === 'offline' || patrolView === 'risks' ? patrolView : 'online'}
-    onChange={(value) => {
-      const url = new URL(window.location.href)
-      if (value === 'offline' || value === 'risks') {
-        url.searchParams.set('patrol_view', value)
-      }
-      else url.searchParams.delete('patrol_view')
-      window.history.replaceState({}, '', url)
-    }}
-    items={[
-    { key: 'online', label: '在线巡检', children: onlineContent },
-    { key: 'offline', label: '离线巡检', children: <OfflinePatrolPanel /> },
-    {
-      key: 'risks',
-      label: '风险与整改',
-      children: (
-        <RiskCaseWorkspace
-          onOpenDeviceEvidence={(deviceId, deviceName) => onOpenDeviceEvidence(
-            deviceId,
-            deviceName,
-            undefined,
-            undefined,
-          )}
-        />
-      ),
-    },
-  ]} />
+  const checkResultDetail = checkResultDetailQuery.data
+  const assessmentBasis = checkResultDetail?.assessment_basis || {}
+  const policySnapshot = checkResultDetail?.assessment_policy_snapshot || {}
+  const applicabilityDecision = assessmentBasis.applicability_decision
+    || policySnapshot.applicability_decision
+    || {}
+  const basisEntries = Array.isArray(assessmentBasis.entries)
+    ? assessmentBasis.entries
+    : []
+  const policySources = Array.isArray(policySnapshot.sources)
+    ? policySnapshot.sources
+    : []
+  const integrityPassed = checkResultDetail
+    ? Object.values(checkResultDetail.integrity).every(Boolean)
+    : false
+  return (
+    <>
+      <Tabs
+        defaultActiveKey={['offline', 'risks', 'feedback'].includes(String(patrolView)) ? String(patrolView) : 'online'}
+        onChange={(value) => {
+          const url = new URL(window.location.href)
+          if (value === 'offline' || value === 'risks' || value === 'feedback') {
+            url.searchParams.set('patrol_view', value)
+          }
+          else url.searchParams.delete('patrol_view')
+          window.history.replaceState({}, '', url)
+        }}
+        items={[
+          { key: 'online', label: '在线巡检', children: onlineContent },
+          { key: 'offline', label: '离线巡检', children: <OfflinePatrolPanel /> },
+          {
+            key: 'risks',
+            label: '风险与整改',
+            children: (
+              <RiskCaseWorkspace
+                onOpenDeviceEvidence={(deviceId, deviceName) => onOpenDeviceEvidence(
+                  deviceId,
+                  deviceName,
+                  undefined,
+                  undefined,
+                )}
+              />
+            ),
+          },
+          {
+            key: 'feedback',
+            label: '质量反馈',
+            children: <ProductionFeedbackWorkspace />,
+          },
+        ]}
+      />
+      <Drawer
+        open={Boolean(selectedCheckExecutionId)}
+        width={isMobile ? '100%' : 980}
+        title="巡检判断依据"
+        onClose={() => {
+          setSelectedCheckExecutionId(undefined)
+          setBasisEntryPage(1)
+        }}
+      >
+        {checkResultDetailQuery.isError ? (
+          <Alert
+            type="error"
+            showIcon
+            message="判断依据加载失败"
+            description="本批次结果仍保留，稍后可重新打开依据详情。"
+            action={<Button size="small" onClick={() => void checkResultDetailQuery.refetch()}>重试</Button>}
+          />
+        ) : !checkResultDetail ? (
+          <Typography.Text type="secondary">正在读取本批次冻结的判断依据...</Typography.Text>
+        ) : (
+          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+              <Button
+                disabled={!checkResultDetail.assessment_id || !checkResultDetail.runtime_bundle_version_id}
+                onClick={() => setFeedbackOpen(true)}
+              >
+                提交质量反馈
+              </Button>
+            </Space>
+            <Descriptions bordered size="small" column={isMobile ? 1 : 3}>
+              <Descriptions.Item label="设备">
+                {checkResultDetail.device_name || checkResultDetail.device_id}
+              </Descriptions.Item>
+              <Descriptions.Item label="检查项">
+                {checkResultDetail.check_item_name}
+              </Descriptions.Item>
+              <Descriptions.Item label="评估结论">
+                <Tag color={assessmentStatus(checkResultDetail.assessment_status).color}>
+                  {assessmentStatus(checkResultDetail.assessment_status).text}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="执行状态">
+                {statusText(checkResultDetail.execution_status)}
+              </Descriptions.Item>
+              <Descriptions.Item label="实体评估">
+                {checkResultDetail.evaluated_entity_count} / {checkResultDetail.observed_entity_count}
+              </Descriptions.Item>
+              <Descriptions.Item label="完整性校验">
+                <Tag color={integrityPassed ? 'green' : 'orange'}>
+                  {integrityPassed ? '冻结证据有效' : '历史证据不完整'}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="策略快照" span={isMobile ? 1 : 3}>
+                <Typography.Text copyable code>
+                  {checkResultDetail.assessment_policy_snapshot_digest || '未冻结'}
+                </Typography.Text>
+              </Descriptions.Item>
+              <Descriptions.Item label="AssessmentBasis" span={isMobile ? 1 : 3}>
+                <Typography.Text copyable code>
+                  {checkResultDetail.assessment_basis_digest || '未冻结'}
+                </Typography.Text>
+              </Descriptions.Item>
+            </Descriptions>
+
+            {!integrityPassed && (
+              <Alert
+                type="warning"
+                showIcon
+                message="该结果缺少完整的历史判断证据"
+                description="平台不会依据当前最新策略重算这条历史结论；正式报告应将其披露为历史依据未知或无法判断。"
+              />
+            )}
+
+            <section>
+              <Typography.Title level={5}>适用性决定</Typography.Title>
+              <Descriptions bordered size="small" column={isMobile ? 1 : 3}>
+                <Descriptions.Item label="状态">
+                  {APPLICABILITY_STATUS_LABELS[String(applicabilityDecision.status || '')]
+                    || applicabilityDecision.status
+                    || '未记录'}
+                </Descriptions.Item>
+                <Descriptions.Item label="来源">
+                  {ASSESSMENT_SOURCE_LABELS[String(applicabilityDecision.source_kind || '')]
+                    || applicabilityDecision.source_kind
+                    || '-'}
+                </Descriptions.Item>
+                <Descriptions.Item label="原因">
+                  {(applicabilityDecision.reason_codes || []).join('、') || '-'}
+                </Descriptions.Item>
+              </Descriptions>
+            </section>
+
+            <section>
+              <Typography.Title level={5}>冻结策略来源</Typography.Title>
+              <Table
+                rowKey={(row) => String(row.policy_version_id || row.digest)}
+                size="small"
+                pagination={false}
+                dataSource={policySources}
+                scroll={{ x: 900 }}
+                locale={{ emptyText: '本检查项没有冻结策略来源' }}
+                columns={[
+                  { title: '策略角色', dataIndex: 'policy_role', width: 130 },
+                  { title: '来源', dataIndex: 'source_kind', width: 150, render: (value) => ASSESSMENT_SOURCE_LABELS[value] || value },
+                  { title: '策略版本', dataIndex: 'policy_version_id', width: 220, render: (value) => <Typography.Text code>{value || '-'}</Typography.Text> },
+                  { title: '作用范围', dataIndex: 'scope', render: (value) => JSON.stringify(value || {}) },
+                  { title: '有效期', width: 210, render: (_, row) => `${row.valid_from || '-'} 至 ${row.valid_until || '-'}` },
+                ]}
+              />
+            </section>
+
+            <section>
+              <Typography.Title level={5}>实体判断明细</Typography.Title>
+              <Table
+                rowKey={(row, index) => String(row.digest || `${basisEntryPage}-${index}`)}
+                size="small"
+                loading={checkResultDetailQuery.isFetching}
+                pagination={false}
+                dataSource={basisEntries}
+                scroll={{ x: 1180 }}
+                locale={{ emptyText: '该结论没有实体级规则判断' }}
+                columns={[
+                  {
+                    title: '实体',
+                    width: 230,
+                    render: (_, row) => (
+                      <Space direction="vertical" size={0}>
+                        <Typography.Text>{row.entity_identity?.entity_key || '-'}</Typography.Text>
+                        <Typography.Text type="secondary">{row.entity_identity?.entity_type || '-'}</Typography.Text>
+                      </Space>
+                    ),
+                  },
+                  { title: '实测值', width: 150, render: (_, row) => `${typeof row.observed_value === 'object' ? JSON.stringify(row.observed_value) : row.observed_value ?? '-'}${row.unit ? ` ${row.unit}` : ''}` },
+                  {
+                    title: '阈值依据',
+                    width: 230,
+                    render: (_, row) => {
+                      const binding = row.threshold_binding || {}
+                      return binding.status === 'resolved'
+                        ? `${binding.value} ${binding.unit || ''} · ${ASSESSMENT_SOURCE_LABELS[binding.source_kind] || binding.source_kind}`
+                        : binding.status || '-'
+                    },
+                  },
+                  {
+                    title: '期望状态',
+                    width: 210,
+                    render: (_, row) => {
+                      const binding = row.expected_state_binding || {}
+                      return binding.status === 'resolved'
+                        ? `${(binding.expected_states || []).join(', ')} · ${ASSESSMENT_SOURCE_LABELS[binding.source_kind] || binding.source_kind}`
+                        : binding.status || '-'
+                    },
+                  },
+                  { title: '规则版本', width: 220, render: (_, row) => <Typography.Text code>{row.rule_binding?.rule_version_id || '-'}</Typography.Text> },
+                  { title: '解析状态', width: 130, render: (_, row) => row.policy_resolution?.status || '-' },
+                ]}
+              />
+              <Pagination
+                current={basisEntryPage}
+                pageSize={checkResultDetail.assessment_basis_entries.limit}
+                total={checkResultDetail.assessment_basis_entries.total}
+                showSizeChanger={false}
+                hideOnSinglePage
+                onChange={setBasisEntryPage}
+              />
+            </section>
+
+            <section>
+              <Typography.Title level={5}>证据引用</Typography.Title>
+              <Space wrap>
+                {checkResultDetail.evidence_refs.slice(0, 50).map((item) => (
+                  <Tag key={item}>{item}</Tag>
+                ))}
+                {checkResultDetail.evidence_refs.length > 50 && (
+                  <Tag>另有 {checkResultDetail.evidence_refs.length - 50} 条</Tag>
+                )}
+              </Space>
+            </section>
+          </Space>
+        )}
+      </Drawer>
+      <Modal
+        open={feedbackOpen}
+        title="提交巡检质量反馈"
+        okText="提交反馈"
+        cancelText="取消"
+        confirmLoading={feedbackMutation.isLoading}
+        okButtonProps={{ disabled: feedbackContextQuery.isLoading || feedbackContextQuery.data?.feedback_ready !== true }}
+        onCancel={() => { setFeedbackOpen(false); feedbackForm.resetFields() }}
+        onOk={() => feedbackForm.submit()}
+      >
+        {feedbackContextQuery.isError && (
+          <Alert
+            type="error"
+            showIcon
+            message="反馈上下文读取失败"
+            description="平台无法冻结该结果的证据和规则版本，暂不允许提交无上下文反馈。"
+            style={{ marginBottom: 16 }}
+          />
+        )}
+        <Form
+          form={feedbackForm}
+          layout="vertical"
+          onFinish={(values) => feedbackMutation.mutate(values)}
+        >
+          <Form.Item name="feedback_type" label="问题类型" rules={[{ required: true }]}>
+            <Select options={[
+              { value: 'false_positive', label: '误报' },
+              { value: 'missed_detection', label: '漏报' },
+              { value: 'wrong_severity', label: '严重度不准确' },
+              { value: 'wrong_scope', label: '作用范围不准确' },
+              { value: 'expected_behavior', label: '属于预期行为' },
+              { value: 'evidence_quality_issue', label: '证据质量问题' },
+            ]} />
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate={(before, after) => before.feedback_type !== after.feedback_type}>
+            {({ getFieldValue }) => {
+              const type = getFieldValue('feedback_type') as ProductionFeedbackType | undefined
+              const required = ['false_positive', 'wrong_severity', 'wrong_scope', 'expected_behavior'].includes(String(type))
+              const options = [
+                ...(feedbackContextQuery.data?.events || []).map((item) => ({
+                  value: `event:${item.occurrence_id}`,
+                  label: `事件 ${item.event_type} · ${item.severity} · ${item.observed_at}`,
+                })),
+                ...(feedbackContextQuery.data?.risks || []).map((item) => ({
+                  value: `risk:${item.occurrence_id}`,
+                  label: `风险 ${item.risk_case_id} · ${item.status_after} · ${item.observed_at}`,
+                })),
+              ]
+              return (
+                <Form.Item
+                  name="source_ref"
+                  label="关联事件或风险"
+                  rules={[{ required, message: '该类反馈必须选择具体事件或风险' }]}
+                >
+                  <Select
+                    allowClear={!required}
+                    showSearch
+                    optionFilterProp="label"
+                    placeholder={options.length ? '选择本次执行中的事件或风险' : '本次执行没有可关联事件或风险'}
+                    options={options}
+                    disabled={!options.length}
+                  />
+                </Form.Item>
+              )
+            }}
+          </Form.Item>
+          <Form.Item name="statement" label="问题说明" rules={[{ required: true, min: 3 }]}>
+            <Input.TextArea rows={4} maxLength={4000} showCount />
+          </Form.Item>
+        </Form>
+      </Modal>
+    </>
+  )
 }
 
 export default PatrolOperationsPanel

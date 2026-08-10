@@ -1722,6 +1722,8 @@ const ParserControlTab: React.FC = () => {
   const subWorkspaceLabels: Record<ParserSubWorkspaceKey, React.ReactNode> = {
     'asset-production-units': '检查项资产',
     'source-jobs': '规则资产生成',
+    'catalog-management': '检查项目录',
+    'assessment-policies': '判断策略',
     'published-assets': '生产资产目录',
     'coverage-backfill': '覆盖与历史回填',
     'audit-log': '规则资产审计',
@@ -1736,7 +1738,7 @@ const ParserControlTab: React.FC = () => {
     'observation-contracts': `数据契约 (${observationContractTotal})`,
     'change-policies': `变化策略 (${changePolicyTotal})`,
     'event-rules': `变化转事件规则 (${eventRuleTotal})`,
-    'rule-gaps': '变化缺口',
+    'rule-gaps': '治理缺口',
     'rule-generation': `规则资产任务 (${ruleGenerationJobTotal})`,
     'agent-loop-attempts': `Agent Loop 尝试 (${agentLoopAttemptTotal})`,
     datasets: `数据集解析覆盖率 (${datasets.length})`,
@@ -1757,10 +1759,19 @@ const ParserControlTab: React.FC = () => {
   const changeProductWorkspace = (nextWorkspace: 'production' | 'inventory' | 'runtime' | 'audit') => {
     changeWorkspace(nextWorkspace)
   }
-  const changeProductionView = (view: 'commands' | 'sources') => {
+  const changeProductionView = (view: 'commands' | 'sources' | 'catalog' | 'policies') => {
     const next = new URLSearchParams(searchParams)
     next.set('workspace', 'production')
-    next.set('subtab', view === 'commands' ? 'asset-production-units' : 'source-jobs')
+    next.set(
+      'subtab',
+      view === 'commands'
+        ? 'asset-production-units'
+        : view === 'sources'
+          ? 'source-jobs'
+          : view === 'catalog'
+            ? 'catalog-management'
+            : 'assessment-policies',
+    )
     next.delete('focus')
     next.delete('id')
     setSearchParams(next, { replace: true })
@@ -1947,6 +1958,26 @@ const ParserControlTab: React.FC = () => {
           />
         ),
       },
+      {
+        key: 'assessment-policies',
+        label: '判断策略',
+        children: (
+          <RuleAssetProductionWorkbench
+            view="policies"
+            onViewChange={changeProductionView}
+          />
+        ),
+      },
+      {
+        key: 'catalog-management',
+        label: '检查项目录',
+        children: (
+          <RuleAssetProductionWorkbench
+            view="catalog"
+            onViewChange={changeProductionView}
+          />
+        ),
+      },
       { key: 'work-items', label: `统一待办 (${workItemTotal})`, children:
         <ParserWorkQueueWorkspace
           isMobile={isMobile}
@@ -2112,7 +2143,7 @@ const ParserControlTab: React.FC = () => {
           onInspectAssetChain={openLinkedAssetChain}
           initialSearch={linkedOfflineJobId}
         /> },
-      { key: 'rule-gaps', label: '变化缺口', children: <RuleGapsWorkspace /> },
+      { key: 'rule-gaps', label: '治理缺口', children: <RuleGapsWorkspace /> },
       { key: 'rule-generation', label: `规则资产任务 (${ruleGenerationJobTotal})`, children:
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           <Alert type="info" showIcon

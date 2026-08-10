@@ -196,7 +196,7 @@ class TableCompiler:
         layouts: dict[tuple[str | None, ...], dict[str, object]] = {}
         anchor_rules: list[str] = []
         for sample in generation_samples:
-            lines = sample.raw_text.splitlines()
+            lines = sample.validation_text.splitlines()
             anchors = [
                 (index, anchor)
                 for index, line in enumerate(lines)
@@ -329,7 +329,7 @@ class TableCompiler:
                 pattern = next(
                     (
                         matched
-                        for line in sample.raw_text.splitlines()
+                        for line in sample.validation_text.splitlines()
                         if (
                             matched := self._key_value_label(
                                 line,
@@ -360,7 +360,7 @@ class TableCompiler:
         layouts: dict[tuple[str | None, ...], dict[str, object]] = {}
         for sample in generation_samples:
             sample_layouts = 0
-            lines = sample.raw_text.splitlines()
+            lines = sample.validation_text.splitlines()
             for line_index, header in enumerate(lines):
                 positions = self._field_positions(
                     header,
@@ -486,7 +486,7 @@ class TableCompiler:
         layouts: dict[tuple[str | None, ...], dict[str, object]] = {}
         for sample in generation_samples:
             sample_layouts = 0
-            lines = sample.raw_text.splitlines()
+            lines = sample.validation_text.splitlines()
             for line_index, line in enumerate(lines):
                 positions = self._field_positions(line, spec)
                 if not positions:

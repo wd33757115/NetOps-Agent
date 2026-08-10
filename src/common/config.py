@@ -22,6 +22,17 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "deepseek-v4-pro"
     LLM_TEMPERATURE: float = 0.1
     LLM_REQUEST_TIMEOUT_SECONDS: int = 240
+    # Parser generation has an explicit wall-clock budget in addition to the
+    # provider SDK's connect/read/write timeout.
+    PARSER_MODEL_REQUEST_HARD_TIMEOUT_SECONDS: int = 480
+    PARSER_GENERATION_TOTAL_TIMEOUT_SECONDS: int = 1500
+    PARSER_MODEL_CALL_HEARTBEAT_SECONDS: int = 15
+    PARSER_LLM_MAX_COMPLETION_TOKENS: int = 32768
+    PARSER_LLM_REVIEW_MAX_COMPLETION_TOKENS: int = 8192
+    # Optional HMAC key for stable Parser-sample pseudonyms. Empty reuses JWT.
+    PARSER_SANITIZATION_SECRET: str = ""
+    PARSER_GENERATION_TASK_SOFT_TIME_LIMIT_SECONDS: int = 1740
+    PARSER_GENERATION_TASK_TIME_LIMIT_SECONDS: int = 1800
 
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
@@ -42,7 +53,7 @@ class Settings(BaseSettings):
     # 空字符串表示自动：Windows → solo，Linux/macOS → prefork
     CELERY_WORKER_POOL: str = ""
     CELERY_WORKER_QUEUES: str = (
-        "netops.default,netops.firewall,netops.health,netops.patrol,netops.ai"
+        "netops.default,netops.firewall,netops.device,netops.health,netops.patrol,netops.ai"
     )
     CELERY_WORKER_ROLE: str = "all"
     CELERY_BEAT_HEARTBEAT_INTERVAL_SECONDS: int = 15
@@ -144,6 +155,7 @@ class Settings(BaseSettings):
 
     # 巡检并发与规则运行时治理
     PATROL_MAX_CONCURRENCY: int = 50
+    PATROL_SITE_MAX_CONCURRENCY: int = 10
     PATROL_DISTRIBUTED_CONCURRENCY_ENABLED: bool = True
     PATROL_CONCURRENCY_FAIL_CLOSED: bool = True
     PATROL_CONCURRENCY_LEASE_SECONDS: int = 180
@@ -152,6 +164,12 @@ class Settings(BaseSettings):
     PATROL_WORKFLOW_RUNNING_STALE_SECONDS: int = 900
     PATROL_WORKFLOW_QUEUED_STALE_SECONDS: int = 14_400
     PATROL_LOCAL_OUTPUT_RETENTION_HOURS: int = 72
+    PATROL_OFFLINE_CURRENT_MAX_AGE_HOURS: int = 24
+    PATROL_CURRENT_AUTHORITY_REQUEST_TTL_HOURS: int = 4
+    # 批次结果深分页游标：空密钥时复用 JWT_SECRET_KEY。
+    CHECK_ITEM_RESULT_CURSOR_SECRET: str = ""
+    CHECK_ITEM_RESULT_CURSOR_TTL_SECONDS: int = 3600
+    CHECK_ITEM_RESULT_MAX_OFFSET: int = 1000
     # block=exclude from ready with error; skip=exclude with skip code; warn=allow launch
     PATROL_PARSER_COVERAGE_POLICY: str = "skip"
     REDIS_RECONNECT_BACKOFF_SECONDS: int = 5

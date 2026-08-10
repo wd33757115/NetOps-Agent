@@ -1,5 +1,9 @@
 # 巡检规则资产控制面最终详细设计
 
+<!-- document-status: superseded -->
+> **历史文档，已被取代。** “最终”与“Implemented Baseline”只代表当时设计，不代表当前产品完成状态。
+> 当前权威方案见[检查项中心的巡检与规则资产平台总体改造方案](check-item-centered-patrol-platform-remediation-2026-07-27.md)。
+
 > 文档状态：Implemented Baseline  
 > 版本：1.2  
 > 日期：2026-07-24  

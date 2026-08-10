@@ -42,6 +42,81 @@ PATROL_ARCHIVE_SPEC = ArchiveSpec(
 class PatrolPlatformError(RuntimeError):
     """Retryable platform failure outside an individual device collection."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure_code: str = "device_patrol_failed",
+    ) -> None:
+        super().__init__(message)
+        self.failure_code = failure_code
+
+
+def _terminal_collection_failure_code(details: list[dict[str, Any]]) -> str:
+    """Return one stable reason for an all-device collection failure."""
+
+    reasons: list[str] = []
+    for detail in details:
+        direct = str(detail.get("failure_code") or "").strip()
+        if direct:
+            reasons.append(direct)
+        for item in detail.get("command_collection_results") or []:
+            if not isinstance(item, dict):
+                continue
+            status = str(item.get("status") or "").strip()
+            if status == "timeout":
+                reasons.append("command_timeout")
+            elif status == "failed":
+                reasons.append("command_failed")
+    unique = tuple(dict.fromkeys(reason for reason in reasons if reason))
+    if len(unique) == 1:
+        return unique[0]
+    if len(unique) > 1:
+        return "multiple_collection_failures"
+    return "device_patrol_failed"
+
+
+def _device_result_evidence(
+    details: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Keep operator-facing failure facts without persisting raw CLI or secrets."""
+
+    evidence: list[dict[str, Any]] = []
+    for detail in details:
+        commands = []
+        for item in list(detail.get("command_collection_results") or [])[:50]:
+            if not isinstance(item, dict):
+                continue
+            commands.append(
+                {
+                    "command": str(item.get("command") or ""),
+                    "status": str(item.get("status") or "unknown"),
+                    "failure_code": str(item.get("failure_code") or "") or None,
+                    "error": str(item.get("error") or "")[:1000] or None,
+                }
+            )
+        evidence.append(
+            {
+                "inventory_device_id": str(
+                    detail.get("inventory_device_id") or ""
+                )
+                or None,
+                "device_name": str(detail.get("device_name") or "") or None,
+                "success": bool(detail.get("success")),
+                "collection_status": str(
+                    detail.get("collection_status") or "unknown"
+                ),
+                "failure_code": str(detail.get("failure_code") or "") or None,
+                "error": str(detail.get("error") or "")[:1000] or None,
+                "persistence_error": str(
+                    detail.get("persistence_error") or ""
+                )[:1000]
+                or None,
+                "commands": commands,
+            }
+        )
+    return evidence
+
 
 def persist_patrol_snapshots(
     *,
@@ -51,7 +126,11 @@ def persist_patrol_snapshots(
     ticket_id: str | None = None,
     mode: str = "production",
     execution_plan_id: str | None = None,
+    patrol_batch_id: str | None = None,
     run_purpose: str = "scheduled_patrol",
+    source: str = "device-patrol",
+    dataset_id: str | None = None,
+    source_metadata: dict[str, Any] | None = None,
     started_at: str | datetime | None = None,
     create_run: bool = True,
     finalize_run: bool = True,
@@ -68,15 +147,18 @@ def persist_patrol_snapshots(
     if create_run:
         run_repository.create_run(
             run_id=snapshot_run_id,
-            source="device-patrol",
+            source=source,
             mode=mode,
+            dataset_id=dataset_id,
             metadata={
                 "ticket_id": ticket_id,
                 "execution_plan_id": execution_plan_id,
+                "patrol_batch_id": patrol_batch_id,
                 "requested_device_count": len(details),
                 "parser_runtime_bundle_digest": (
                     parser_runtime_bundle.get("digest") if parser_runtime_bundle else None
                 ),
+                **dict(source_metadata or {}),
             },
             run_purpose=run_purpose,
             started_at=started_at,
@@ -112,7 +194,10 @@ def persist_patrol_snapshots(
                     item_status = (
                         str(item.get("status") or "failed") if isinstance(item, dict) else "failed"
                     )
-                    if item_status == "fallback_not_needed":
+                    if item_status in {
+                        "fallback_not_needed",
+                        "ignored_legacy_fallback",
+                    }:
                         continue
                     collection_repository.save_collection_result(
                         run_id=snapshot_run_id,
@@ -141,6 +226,12 @@ def persist_patrol_snapshots(
                                 if isinstance(item, dict)
                                 else []
                             ),
+                            "concurrency_mode": detail.get(
+                                "concurrency_mode"
+                            ),
+                            "device_fencing_token": detail.get(
+                                "device_fencing_token"
+                            ),
                         },
                         owner_token=run_owner_token,
                     )
@@ -162,12 +253,25 @@ def persist_patrol_snapshots(
                 model=detail.get("model"),
                 metadata={
                     "ticket_id": ticket_id,
-                    "source": "device-patrol",
+                    "source": source,
+                    "dataset_id": dataset_id,
                     "execution_plan_id": execution_plan_id,
+                    "patrol_batch_id": patrol_batch_id,
                     "run_purpose": run_purpose,
+                    "concurrency_mode": detail.get("concurrency_mode"),
+                    "device_fencing_token": detail.get(
+                        "device_fencing_token"
+                    ),
+                    **dict(source_metadata or {}),
                 },
                 inventory_device_id=detail.get("inventory_device_id"),
-                collector_complete=detail.get("collection_status") == "complete",
+                collector_complete=(
+                    bool(detail.get("collector_complete"))
+                    if "collector_complete" in detail
+                    else detail.get("collection_status") == "complete"
+                    if "collection_status" in detail
+                    else True
+                ),
                 command_collection_statuses=command_statuses,
                 parser_runtime_bundle=parser_runtime_bundle,
                 finalize_run=False,
@@ -200,6 +304,7 @@ def persist_patrol_snapshots(
                 if command_result.get("status") in {
                     "complete",
                     "fallback_not_needed",
+                    "ignored_legacy_fallback",
                 }:
                     continue
                 collection_repository.save_collection_result(
@@ -239,10 +344,22 @@ def persist_patrol_snapshots(
             snapshot_health = "failed_data_quality"
 
     failed_devices = sum(not bool(detail.get("success")) for detail in details)
+    failed_commands = sum(
+        1
+        for detail in details
+        for item in detail.get("command_collection_results") or []
+        if isinstance(item, dict)
+        and str(item.get("status") or "")
+        not in {
+            "complete",
+            "fallback_not_needed",
+            "ignored_legacy_fallback",
+        }
+    )
     collection_status = "completed"
     if imported_devices == 0:
         collection_status = "failed"
-    elif failed_devices or import_errors:
+    elif failed_devices or failed_commands or import_errors:
         collection_status = "partial"
     parser_readiness_status = (
         "ready"
@@ -280,6 +397,7 @@ def persist_patrol_snapshots(
         "fact_readiness_status": parser_readiness_status,
         "parsed_commands": parsed_commands,
         "failed_parse_commands": failed_parse_commands,
+        "failed_collection_commands": failed_commands,
         "coverage_violations": coverage_violations,
         "parse_violations": parse_violations,
         "production_parser_ready": production_parser_ready,
@@ -411,6 +529,10 @@ class DevicePatrolRunner:
             )
             else self._runtime_manifest_factory(runtime_bundle)
         )
+        patrol_batch_id = (
+            str(runtime_asset_manifest.get("patrol_batch_id") or "").strip()
+            or None
+        )
         owner_token = request.owner_token or uuid.uuid4().hex
         if streaming_persistence:
             from src.core.patrol.run_repository import PatrolRunRepository
@@ -427,6 +549,7 @@ class DevicePatrolRunner:
                     ),
                     "runtime_asset_manifest_digest": runtime_asset_manifest.get("digest"),
                     "runtime_asset_manifest": runtime_asset_manifest,
+                    "patrol_batch_id": patrol_batch_id,
                 },
                 run_purpose=run_purpose,
                 started_at=collection_started_at,
@@ -445,6 +568,7 @@ class DevicePatrolRunner:
                     ticket_id=request.ticket_id,
                     mode=mode,
                     execution_plan_id=request.execution_plan_id,
+                    patrol_batch_id=patrol_batch_id,
                     run_purpose=run_purpose,
                     create_run=False,
                     finalize_run=False,
@@ -469,6 +593,10 @@ class DevicePatrolRunner:
                             "ip": device.get("ip") or device.get("management_ip"),
                             "vendor": device.get("vendor"),
                             "model": device.get("model"),
+                            "concurrency_mode": device.get("concurrency_mode"),
+                            "device_fencing_token": device.get(
+                                "device_fencing_token"
+                            ),
                             "success": False,
                             "output_file": str(output_file),
                             "collection_status": str(manifest.get("status") or "running"),
@@ -480,6 +608,7 @@ class DevicePatrolRunner:
                     ticket_id=request.ticket_id,
                     mode=mode,
                     execution_plan_id=request.execution_plan_id,
+                    patrol_batch_id=patrol_batch_id,
                     run_purpose=run_purpose,
                     create_run=False,
                     finalize_run=False,
@@ -497,6 +626,32 @@ class DevicePatrolRunner:
                         )
                     },
                 )
+
+            raw_persist_command_progress = persist_command_progress
+
+            def persist_command_progress(
+                *,
+                output_file,
+                manifest,
+                device,
+                execution_plan,
+            ) -> None:
+                from src.core.ingestion.adapters.cli import (
+                    CollectionProgressFencedError,
+                )
+                from src.core.patrol.repository import PatrolRunFencedError
+
+                try:
+                    raw_persist_command_progress(
+                        output_file=output_file,
+                        manifest=manifest,
+                        device=device,
+                        execution_plan=execution_plan,
+                    )
+                except PatrolRunFencedError as exc:
+                    raise CollectionProgressFencedError(
+                        "stale patrol worker was fenced before progress persistence"
+                    ) from exc
 
             context.tool.result_callback = persist_device_result
             collector = getattr(context.tool, "cli_collector", None)
@@ -541,6 +696,7 @@ class DevicePatrolRunner:
                 ticket_id=request.ticket_id,
                 mode=mode,
                 execution_plan_id=request.execution_plan_id,
+                patrol_batch_id=patrol_batch_id,
                 run_purpose=run_purpose,
                 started_at=collection_started_at,
                 parser_runtime_bundle=runtime_bundle_data,
@@ -567,13 +723,24 @@ class DevicePatrolRunner:
                     "archive_status": archive_status,
                     "raw_outputs_archive": raw_outputs_url,
                     "runtime_asset_manifest_digest": runtime_asset_manifest.get("digest"),
+                    "device_results": _device_result_evidence(
+                        list(result.details or [])
+                    ),
                 },
                 owner_token=owner_token,
             )
         if int(result.success_devices or 0) == 0 and not snapshot_result.get("snapshot_devices"):
-            raise PatrolPlatformError(result.message or "device patrol failed")
+            raise PatrolPlatformError(
+                result.message or "device patrol failed",
+                failure_code=_terminal_collection_failure_code(
+                    list(result.details or [])
+                ),
+            )
         if snapshot_result["snapshot_errors"] and not snapshot_result.get("snapshot_devices"):
-            raise PatrolPlatformError("; ".join(snapshot_result["snapshot_errors"]))
+            raise PatrolPlatformError(
+                "; ".join(snapshot_result["snapshot_errors"]),
+                failure_code="snapshot_persistence_failed",
+            )
 
         execution_time_ms = int(
             (datetime.now(timezone.utc) - execution_start).total_seconds() * 1000
@@ -653,7 +820,7 @@ def _build_parser_runtime_bundle(execution_plan: Any):
     )
 
 
-def _load_frozen_check_item_runtime_manifest(
+def load_frozen_check_item_runtime_manifest(
     execution_plan: Any,
 ) -> dict[str, Any]:
     from src.infrastructure.db.models import (
@@ -715,7 +882,11 @@ def _load_frozen_check_item_runtime_manifest(
         }
 
 
-def _build_frozen_check_item_parser_bundle(execution_plan: Any):
+def build_frozen_check_item_parser_bundle(
+    execution_plan: Any,
+    *,
+    frozen_device: dict[str, Any] | None = None,
+):
     from src.core.check_items import CheckItemRuntimeBundleService
     from src.core.device_ops.repository import DeviceRepository
     from src.core.parser.policy import (
@@ -724,10 +895,14 @@ def _build_frozen_check_item_parser_bundle(execution_plan: Any):
     )
     from src.core.parser.runtime_bundle import ParserRuntimeBundle
 
-    _load_frozen_check_item_runtime_manifest(execution_plan)
-    matches = DeviceRepository().get_devices_by_filter(
-        device_id=str(execution_plan.device_id),
-        status=None,
+    load_frozen_check_item_runtime_manifest(execution_plan)
+    matches = (
+        [dict(frozen_device)]
+        if frozen_device is not None
+        else DeviceRepository().get_devices_by_filter(
+            device_id=str(execution_plan.device_id),
+            status=None,
+        )
     )
     if not matches:
         raise RuntimeError(
@@ -811,3 +986,14 @@ def _build_frozen_check_item_parser_bundle(execution_plan: Any):
             "output_quality_profiles": output_quality_profiles,
         }
     )
+
+
+# Compatibility aliases for older internal imports. New governed replay code
+# uses the public names above so both online and attested-offline collection
+# resolve the exact same frozen runtime assets.
+_load_frozen_check_item_runtime_manifest = (
+    load_frozen_check_item_runtime_manifest
+)
+_build_frozen_check_item_parser_bundle = (
+    build_frozen_check_item_parser_bundle
+)

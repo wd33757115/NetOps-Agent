@@ -368,6 +368,59 @@ def test_observations_from_snapshot_skip_blank_textfsm_fields(monkeypatch):
     ]
 
 
+def test_contract_can_map_blank_parser_status_to_present(monkeypatch):
+    monkeypatch.setattr(
+        normalizer,
+        "_template_contract",
+        lambda *_args, **_kwargs: {
+            "entity_type": "interface_optical",
+            "primary_keys": ["interface"],
+            "contract_version": 1,
+            "state_semantics": {
+                "status": {
+                    "semantic_type": "state",
+                    "observation_type": "interface.optical.presence",
+                    "emit_when_empty": True,
+                    "value_mapping": {
+                        "": "present",
+                        "The transceiver is absent.": "absent",
+                    },
+                    "on_unmapped": "reject",
+                },
+            },
+        },
+    )
+
+    observations = observations_from_snapshot(
+        {
+            "id": "snapshot-optical-presence",
+            "run_id": "run-1",
+            "device_id": "SW1",
+            "vendor": "H3C",
+            "model": "S5130S-54S-HI-G",
+            "canonical_command": "display transceiver diagnosis interface",
+            "parser_template_id": "template-optical",
+            "parser_version": "1",
+            "observed_at": "2026-07-18T00:00:00+00:00",
+            "structured_json": [
+                {"interface": "Ten-GigabitEthernet1/0/49", "status": ""},
+                {
+                    "interface": "Ten-GigabitEthernet1/0/51",
+                    "status": "The transceiver is absent.",
+                },
+            ],
+        },
+        mode="parser_validation",
+        source="test",
+        dataset_id="dataset-optical",
+    )
+
+    assert [(item.entity_key, item.value) for item in observations] == [
+        ('["Ten-GigabitEthernet1/0/49"]', "present"),
+        ('["Ten-GigabitEthernet1/0/51"]', "absent"),
+    ]
+
+
 def _state_observation(observed_at: str, value: str = "up") -> StateObservation:
     return StateObservation(
         observation_id=f"obs-{observed_at}",
@@ -657,6 +710,71 @@ def test_observations_from_snapshot_can_pin_semantic_contract_for_replay(monkeyp
     assert observations[0].metadata["parser_contract_version"] == 3
 
 
+def test_observations_from_snapshot_uses_contract_frozen_by_runtime_bundle(
+    monkeypatch,
+):
+    class FrozenContract:
+        def to_validation_dict(self):
+            return {
+                "contract_id": "contract-frozen-v8",
+                "contract_sha256": "b" * 64,
+                "schema_id": "template-1",
+                "entity_type": "interface_l3",
+                "primary_keys": ["interface"],
+                "contract_version": 8,
+            }
+
+    class FakeContractRepository:
+        def get_by_id(self, contract_id):
+            assert contract_id == "contract-frozen-v8"
+            return FrozenContract()
+
+    monkeypatch.setattr(
+        normalizer,
+        "ObservationContractRepository",
+        FakeContractRepository,
+    )
+    monkeypatch.setattr(
+        normalizer,
+        "_template_contract",
+        lambda *_args, **_kwargs: pytest.fail(
+            "active contract lookup must not run for frozen production facts"
+        ),
+    )
+
+    observations = observations_from_snapshot(
+        {
+            "id": "snapshot-frozen-contract",
+            "run_id": "run-frozen-contract",
+            "device_id": "device-1",
+            "canonical_command": "show ip interface brief",
+            "parser_template_id": "template-1",
+            "contract_version": 3,
+            "observed_at": "2026-07-31T10:00:00+00:00",
+            "structured_json": {"interface": "Eth1/1", "status": "up"},
+            "metadata_json": {
+                "observation_contract_refs": [
+                    {
+                        "contract_id": "contract-frozen-v8",
+                        "schema_id": "template-1",
+                        "digest": "b" * 64,
+                    }
+                ]
+            },
+        },
+        mode="production",
+        source="test",
+        dataset_id=None,
+    )
+
+    assert observations[0].contract_version == 8
+    assert observations[0].metadata["parser_contract_version"] == 3
+    assert (
+        observations[0].metadata["observation_contract_id"]
+        == "contract-frozen-v8"
+    )
+
+
 def test_observations_from_snapshot_applies_validator_semantics(monkeypatch):
     monkeypatch.setattr(
         normalizer,
@@ -845,7 +963,14 @@ def test_contract_context_fields_are_copied_for_dynamic_thresholds(monkeypatch):
                     "semantic_type": "gauge",
                     "observation_type": "generic.measurement",
                     "context_fields": ["low_reference"],
-                }
+                    "comparison_role": "observation",
+                    "monitor": True,
+                },
+                "low_reference": {
+                    "semantic_type": "gauge",
+                    "comparison_role": "threshold",
+                    "monitor": False,
+                },
             },
         },
     )
@@ -873,6 +998,7 @@ def test_contract_context_fields_are_copied_for_dynamic_thresholds(monkeypatch):
 
     measurement = next(item for item in observations if item.field_name == "measurement")
     assert measurement.metadata["_observation_context"] == {"low_reference": -10.0}
+    assert [item.field_name for item in observations] == ["measurement"]
 
 
 def test_observations_from_snapshot_prefers_inventory_device_id(monkeypatch):
@@ -1163,6 +1289,53 @@ def test_source_cpu_keys_project_to_governed_canonical_entity(monkeypatch):
     }
 
 
+def test_device_entity_identity_comes_from_inventory_context(monkeypatch):
+    monkeypatch.setattr(
+        normalizer,
+        "_template_contract",
+        lambda *_args, **_kwargs: {
+            "entity_type": "device",
+            "primary_keys": [],
+            "canonical_entity_type": "device",
+            "entity_identity_fields": ["device_id"],
+            "entity_dimensions": {
+                "device_id": {"context": "device_id"},
+            },
+            "state_semantics": {
+                "software_version": {
+                    "semantic_type": "state",
+                    "observation_type": "device.software.version",
+                }
+            },
+        },
+    )
+
+    observation = observations_from_snapshot(
+        {
+            "id": "snapshot-device-context",
+            "run_id": "run-1",
+            "device_id": "external-device-1",
+            "inventory_device_id": "inventory-device-1",
+            "vendor": "H3C",
+            "model": "MSR5620",
+            "canonical_command": "display version",
+            "parser_template_id": "template-version",
+            "observed_at": "2026-07-29T00:00:00+00:00",
+            "structured_json": [{"software_version": "7.1.064"}],
+        },
+        mode="production",
+        source="test",
+        dataset_id=None,
+    )[0]
+
+    assert observation.device_id == "inventory-device-1"
+    assert observation.entity_type == "device"
+    assert observation.entity_key == '["inventory-device-1"]'
+    assert observation.metadata["canonical_identity"]["values"] == {
+        "device_id": "inventory-device-1",
+    }
+
+
 def test_state_normalizer_applies_governed_memory_formula(monkeypatch):
     monkeypatch.setattr(
         normalizer,
@@ -1205,6 +1378,58 @@ def test_state_normalizer_applies_governed_memory_formula(monkeypatch):
     assert observation.observation_type == "device.memory.utilization"
     assert observation.value_number == pytest.approx(47.3)
     assert observation.metadata["source_value"] == pytest.approx(52.7)
+
+
+def test_state_normalizer_preserves_numeric_unavailability_without_converting_to_zero(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        normalizer,
+        "_template_contract",
+        lambda *_args, **_kwargs: {
+            "entity_type": "interface_optical_channel",
+            "primary_keys": ["interface", "channel"],
+            "validators": {
+                "rx_power_dbm": {
+                    "type": "number",
+                    "unavailable_tokens": ["N/A", "--"],
+                }
+            },
+            "state_semantics": {
+                "rx_power_dbm": {
+                    "semantic_type": "measurement",
+                    "unit": "dBm",
+                    "observation_type": "interface.optical.rx_power",
+                }
+            },
+        },
+    )
+
+    observation = observations_from_snapshot(
+        {
+            "id": "snapshot-optical-unavailable",
+            "run_id": "run-1",
+            "device_id": "device-1",
+            "canonical_command": "display transceiver diagnosis interface",
+            "parser_template_id": "template-optical",
+            "observed_at": "2026-08-02T00:00:00+00:00",
+            "structured_json": [
+                {
+                    "interface": "FortyGigE1/0/1",
+                    "channel": "1",
+                    "rx_power_dbm": "N/A",
+                }
+            ],
+        },
+        mode="production",
+        source="test",
+        dataset_id=None,
+    )[0]
+
+    assert observation.value is None
+    assert observation.value_number is None
+    assert observation.metadata["availability"] == "unavailable"
+    assert observation.metadata["unavailable_token"] == "N/A"
 
 
 def test_state_normalizer_handles_multiple_record_sets_from_one_command(monkeypatch):
@@ -1291,6 +1516,122 @@ def test_state_normalizer_handles_multiple_record_sets_from_one_command(monkeypa
     assert len(board_facts) == 2
     assert board_facts[0].state_key != board_facts[1].state_key
     assert board_facts[0].idempotency_key != board_facts[1].idempotency_key
+
+
+def test_state_normalizer_joins_cross_record_device_thresholds(monkeypatch):
+    monkeypatch.setattr(
+        normalizer,
+        "_template_contract",
+        lambda *_args, **_kwargs: {
+            "contract_id": "contract-optical-multi",
+            "contract_version": 1,
+            "record_sets": [
+                {
+                    "name": "measurements",
+                    "entity_type": "interface_optical",
+                    "primary_keys": ["interface", "channel"],
+                    "required_fields": ["interface", "channel", "rx_power"],
+                    "optional_fields": [],
+                    "validators": {"rx_power": {"type": "number"}},
+                    "state_semantics": {
+                        "interface": {"semantic_type": "identity"},
+                        "channel": {"semantic_type": "identity"},
+                        "rx_power": {
+                            "semantic_type": "gauge",
+                            "unit": "dbm",
+                            "observation_type": "interface.optical.rx_power",
+                            "threshold_references": {
+                                "critical_low": {
+                                    "field_name": "rx_power_low",
+                                    "context_key": "threshold.critical_low",
+                                    "source": "cross_record_set_reference",
+                                    "record_set_name": "thresholds",
+                                    "join_keys": {"interface": "interface"},
+                                    "relation_name": "measurement_thresholds",
+                                }
+                            },
+                        },
+                    },
+                },
+                {
+                    "name": "thresholds",
+                    "entity_type": "interface_threshold",
+                    "primary_keys": ["interface"],
+                    "required_fields": ["interface", "rx_power_low"],
+                    "optional_fields": [],
+                    "validators": {"rx_power_low": {"type": "number"}},
+                    "state_semantics": {
+                        "interface": {"semantic_type": "identity"},
+                        "rx_power_low": {
+                            "semantic_type": "gauge",
+                            "comparison_role": "threshold",
+                            "monitor": False,
+                        },
+                    },
+                },
+            ],
+            "record_set_relations": [
+                {
+                    "name": "measurement_thresholds",
+                    "source_record_set": "measurements",
+                    "target_record_set": "thresholds",
+                    "join_keys": {"interface": "interface"},
+                    "threshold_bindings": {
+                        "rx_power": {"critical_low": "rx_power_low"}
+                    },
+                    "match_policy": "partial",
+                }
+            ],
+        },
+    )
+
+    observations = observations_from_snapshot(
+        {
+            "id": "snapshot-optical-multi",
+            "run_id": "run-1",
+            "device_id": "device-1",
+            "canonical_command": "inspect optics",
+            "parser_template_id": "template-optical-multi",
+            "observed_at": "2026-07-27T00:00:00+00:00",
+            "structured_json": {
+                "record_sets": {
+                    "measurements": [
+                        {
+                            "interface": "Eth1/1",
+                            "channel": "1",
+                            "rx_power": "-13.5",
+                        },
+                        {
+                            "interface": "Eth1/2",
+                            "channel": "1",
+                            "rx_power": "-8.0",
+                        },
+                    ],
+                    "thresholds": [
+                        {"interface": "Eth1/1", "rx_power_low": "-12.0"}
+                    ],
+                }
+            },
+        },
+        mode="production",
+        source="test",
+        dataset_id=None,
+    )
+
+    assert len(observations) == 2
+    by_entity = {item.entity_key: item for item in observations}
+    matched = by_entity['["Eth1/1","1"]']
+    matched_context = matched.metadata[APPLICABILITY_CONTEXT_KEY]
+    assert matched_context["threshold.critical_low"] == -12.0
+    assert matched_context["threshold_source"] == "device_output"
+    assert matched_context["threshold_reference_sources"]["critical_low"] == {
+        "source": "cross_record_set_reference",
+        "record_set_name": "thresholds",
+        "relation_name": "measurement_thresholds",
+        "field_name": "rx_power_low",
+    }
+    unmatched = by_entity['["Eth1/2","1"]']
+    assert unmatched.metadata[APPLICABILITY_CONTEXT_KEY] == {}
 
 
 def test_normalize_run_can_limit_to_selected_devices(monkeypatch):
@@ -1574,6 +1915,37 @@ def test_observation_change_detector_rejects_unnormalized_explicit_baseline(monk
             current_run_id="run-current",
             previous_run_id="run-previous",
         )
+
+
+def test_observation_change_detector_allows_explicit_partial_normalization(monkeypatch):
+    class FakeStateRepository:
+        def list_run_observations(self, _run_id):
+            return []
+
+        def list_observations_for_runs(self, _run_ids, **_kwargs):
+            return []
+
+    class FakePatrolRepository(_AnalysisPatrolRepository):
+        def get_run(self, run_id):
+            return {
+                "id": run_id,
+                "mode": "production",
+                "analysis_status": "normalized_partial",
+                "run_purpose": "historical_compare",
+                "metadata_json": {"offline_job_id": "offline-job-1"},
+            }
+
+    monkeypatch.setattr("src.core.patrol.change_detector.StateRepository", FakeStateRepository)
+    monkeypatch.setattr("src.core.patrol.change_detector.PatrolRepository", FakePatrolRepository)
+
+    result = detect_observation_changes_against_history(
+        current_run_id="run-current",
+        previous_run_id="run-previous",
+        allow_partial_normalization=True,
+    )
+
+    assert result["success"] is True
+    assert result["change_count"] == 0
 
 
 def test_observation_change_detector_requires_explicit_longitudinal_offline_mode(

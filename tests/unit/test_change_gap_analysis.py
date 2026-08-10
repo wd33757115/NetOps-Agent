@@ -1,6 +1,6 @@
 """变化缺口分析真实断言单测（SQLite fixture）。
 
-覆盖 no_event 分类逻辑、dataset_ids 自动回填与 seed_jobs 幂等。
+覆盖 no_event 分类逻辑、证据定位，以及生产变化不得直接触发规则生成。
 """
 
 from __future__ import annotations
@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -35,20 +36,6 @@ class _FakeEventRuleRepository:
 
     def snapshot_active_rules(self):
         return list(self.active_rules)
-
-
-class _FakeJobRepository:
-    def __init__(self) -> None:
-        self.created: list[dict[str, Any]] = []
-        self.existing: dict[str, dict[str, Any]] = {}
-
-    def find_job(self, *, job_type, source_ref, status_not_in=None):
-        return self.existing.get(source_ref)
-
-    def create_job(self, **kwargs):
-        job = {"id": f"job-{len(self.created) + 1}", **kwargs}
-        self.created.append(job)
-        return job
 
 
 def _change(index: int, **overrides) -> NetworkChangeRecord:
@@ -89,13 +76,7 @@ def _fixture(monkeypatch, tmp_path, *, active_rules=None):
         "EventRuleRepository",
         _FakeEventRuleRepository,
     )
-    fake_jobs = _FakeJobRepository()
-    monkeypatch.setattr(
-        change_gap_analysis,
-        "RuleGenerationJobRepository",
-        lambda: fake_jobs,
-    )
-    return session_factory, fake_jobs
+    return session_factory
 
 
 def _add_run(db, run_id: str, dataset_id: str | None) -> None:
@@ -113,7 +94,7 @@ def _add_run(db, run_id: str, dataset_id: str | None) -> None:
 def test_analyze_classifies_missing_event_rules_when_no_active_rules(
     monkeypatch, tmp_path
 ) -> None:
-    session_factory, _ = _fixture(monkeypatch, tmp_path, active_rules=[])
+    session_factory = _fixture(monkeypatch, tmp_path, active_rules=[])
     with _session_scope(session_factory) as db:
         db.add_all([_change(1), _change(2)])
     result = ChangeGapAnalysisService().analyze(days=30)
@@ -126,7 +107,7 @@ def test_analyze_classifies_missing_event_rules_when_no_active_rules(
 
 
 def test_analyze_classifies_policy_gap_for_threshold_unknown(monkeypatch, tmp_path) -> None:
-    session_factory, _ = _fixture(
+    session_factory = _fixture(
         monkeypatch, tmp_path, active_rules=[{"rule_id": "r1"}]
     )
     with _session_scope(session_factory) as db:
@@ -143,7 +124,7 @@ def test_analyze_classifies_policy_gap_for_threshold_unknown(monkeypatch, tmp_pa
 
 
 def test_analyze_backfills_dataset_ids_from_change_runs(monkeypatch, tmp_path) -> None:
-    session_factory, _ = _fixture(monkeypatch, tmp_path, active_rules=[])
+    session_factory = _fixture(monkeypatch, tmp_path, active_rules=[])
     with _session_scope(session_factory) as db:
         _add_run(db, "run-1", "dataset-a")
         _add_run(db, "run-2", "dataset-b")
@@ -160,26 +141,28 @@ def test_analyze_backfills_dataset_ids_from_change_runs(monkeypatch, tmp_path) -
     assert sorted(gap["dataset_ids"]) == ["dataset-a", "dataset-b"]
 
 
-def test_seed_jobs_creates_job_with_candidate_datasets_and_skips_existing(
+def test_production_change_gap_cannot_seed_rule_generation_job(
     monkeypatch, tmp_path
 ) -> None:
-    session_factory, fake_jobs = _fixture(monkeypatch, tmp_path, active_rules=[])
+    session_factory = _fixture(monkeypatch, tmp_path, active_rules=[])
     with _session_scope(session_factory) as db:
         _add_run(db, "run-1", "dataset-a")
         db.add_all([_change(1, run_id="run-1"), _change(2, run_id="run-1")])
     service = ChangeGapAnalysisService()
 
-    result = service.seed_jobs(days=30, limit=5)
-    assert result["created_count"] == 1
-    job = fake_jobs.created[0]
-    assert job["job_type"] == "EVENT_RULE"
-    assert job["source_ref"] == "change_gap:EVENT_RULE:interface_error_metric"
-    assert job["payload"]["candidate_dataset_ids"] == ["dataset-a"]
-    assert job["payload"]["missing_context"] == ["records", "historical_values"]
-    assert job["validation_report"]["ready_for_generation"] is False
-
-    # 已存在同 source_ref 的 Job 时应跳过而不是重复创建
-    fake_jobs.existing[job["source_ref"]] = {"id": job["id"]}
-    result = service.seed_jobs(days=30, limit=5)
-    assert result["created_count"] == 0
-    assert result["skipped_count"] == 1
+    analysis = service.analyze(days=30)
+    gap = analysis["gaps"][0]
+    assert gap["dataset_ids"] == ["dataset-a"]
+    assert gap["source_prefill"] == {
+        "action": "rule-gap-source",
+        "job_type": "parser_validation",
+        "command": "display interface",
+        "vendor": "huawei",
+        "observation_type": "interface_error_metric",
+        "suggested_job_type": "EVENT_RULE",
+    }
+    with pytest.raises(
+        ValueError,
+        match="cannot create rule-generation jobs",
+    ):
+        service.seed_jobs(days=30, limit=5)

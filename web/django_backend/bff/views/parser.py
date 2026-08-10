@@ -41,7 +41,11 @@ async def _proxy(request: HttpRequest, path: str) -> JsonResponse:
         method=request.method,
         fastapi_path=f"/api/v1/parser/{path}".rstrip("/"),
         request_id=request.bff_request_id,
-        data=parse_json_body(request) if request.method in {"POST", "PUT", "PATCH"} else None,
+        data=(
+            parse_json_body(request)
+            if request.method in {"POST", "PUT", "PATCH", "DELETE"}
+            else None
+        ),
         extra_headers=forward_client_headers(request),
     )
 

@@ -2,15 +2,29 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import threading
 from typing import Any
 
 from llm_generator import call_llm
 
+from src.core.check_items.catalog import CheckItemCatalogRepository, load_catalog
+from src.core.check_items.parser_capability import (
+    build_parser_field_naming_context,
+)
 from src.core.parser.output_classifier import classify_parser_generation_sample
 from src.core.parser.repository import ParserJobRepository
-from src.core.parser_generation import ParserSpec, ParserSpecDocument
+from src.core.parser.semantic_catalog import field_semantics, resolve_semantic_contract
+from src.core.parser.value_types import IP_UNASSIGNED_TOKENS, is_unassigned_ip
+from src.core.parser_generation import (
+    NtcTemplateResolver,
+    ParserSample,
+    ParserSpec,
+    ParserSpecDocument,
+    SampleRole,
+)
 
 _TYPE_ALIASES = {
     "string": "text",
@@ -19,6 +33,7 @@ _TYPE_ALIASES = {
     "int": "number",
     "float": "number",
     "decimal": "number",
+    "numeric": "number",
     "percentage": "percent",
     "interface": "interface_name",
     "ipv4": "ip",
@@ -27,6 +42,52 @@ _TYPE_ALIASES = {
 _CANONICAL_CANDIDATE_RE = re.compile(
     r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$"
 )
+
+
+class _SuggestionHeartbeat:
+    def __init__(
+        self,
+        *,
+        repository: ParserJobRepository,
+        job_id: str,
+        task_id: str,
+    ) -> None:
+        from src.common.config import get_settings
+
+        self.repository = repository
+        self.job_id = job_id
+        self.task_id = task_id
+        self.interval_seconds = max(
+            1,
+            int(get_settings().PARSER_MODEL_CALL_HEARTBEAT_SECONDS),
+        )
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def __enter__(self) -> _SuggestionHeartbeat:
+        self._thread = threading.Thread(
+            target=self._run,
+            name=f"parser-spec-heartbeat-{self.task_id[:8]}",
+            daemon=True,
+        )
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_args: Any) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=min(2, self.interval_seconds))
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.interval_seconds):
+            try:
+                self.repository.record_parser_spec_suggestion(
+                    self.job_id,
+                    task_id=self.task_id,
+                    status="running",
+                )
+            except Exception:
+                return
 
 
 def _json_object(value: str) -> dict[str, Any]:
@@ -52,10 +113,138 @@ def _field_name(value: Any) -> str:
     return normalized
 
 
+def _sample_content_key(sample: dict[str, Any]) -> str:
+    sanitized_hash = str(sample.get("sanitized_hash") or "").strip()
+    if sanitized_hash:
+        return sanitized_hash
+    text = str(sample.get("sanitized_text") or "")
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _representative_data_samples(
+    samples: list[dict[str, Any]],
+    *,
+    limit: int = 3,
+) -> list[dict[str, Any]]:
+    """Bound semantic prompt input while full samples remain acceptance evidence."""
+
+    representatives: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for sample in samples:
+        content_key = _sample_content_key(sample)
+        if content_key in seen:
+            continue
+        seen.add(content_key)
+        representatives.append(sample)
+        if len(representatives) >= max(1, int(limit)):
+            break
+    return representatives
+
+
+def _preferred_field_name(
+    field_name: str,
+    *,
+    canonical_candidate: str,
+    naming_context: dict[str, Any] | None,
+) -> str:
+    """Prefer catalog-owned names only when the model supplied an exact semantic hint."""
+
+    normalized = _field_name(field_name)
+    candidate = str(canonical_candidate or "").strip().casefold()
+    for check_item in (naming_context or {}).get("check_items") or []:
+        if not isinstance(check_item, dict):
+            continue
+        identity_fields = {
+            _field_name(item)
+            for item in check_item.get("preferred_identity_fields") or []
+            if _field_name(item)
+        }
+        if candidate and candidate.rsplit(".", 1)[-1] in identity_fields:
+            return candidate.rsplit(".", 1)[-1]
+        for observation in check_item.get("preferred_observation_fields") or []:
+            if not isinstance(observation, dict):
+                continue
+            preferred_name = _field_name(observation.get("preferred_name"))
+            observation_type = str(
+                observation.get("observation_type") or ""
+            ).strip().casefold()
+            if preferred_name and candidate and candidate == observation_type:
+                return preferred_name
+        for vocabulary in check_item.get("configured_vocabulary") or []:
+            if not isinstance(vocabulary, dict):
+                continue
+            preferred_name = _field_name(vocabulary.get("preferred_name"))
+            aliases = {
+                _field_name(alias)
+                for alias in vocabulary.get("aliases") or []
+                if _field_name(alias)
+            }
+            vocabulary_observation = str(
+                vocabulary.get("observation_type") or ""
+            ).strip().casefold()
+            vocabulary_candidates = {
+                str(item).strip().casefold()
+                for item in vocabulary.get("canonical_candidates") or []
+                if str(item).strip()
+            }
+            if preferred_name and (
+                normalized == preferred_name
+                or normalized in aliases
+                or (candidate and candidate == vocabulary_observation)
+                or (candidate and candidate in vocabulary_candidates)
+            ):
+                return preferred_name
+    return normalized
+
+
+def _expected_field_values(
+    expected_records: Any,
+    field_name: str,
+) -> list[Any]:
+    values: list[Any] = []
+    for item in expected_records or []:
+        if not isinstance(item, dict):
+            continue
+        records = item.get("records")
+        if not isinstance(records, list):
+            records = [item]
+        for record in records:
+            if isinstance(record, dict) and field_name in record:
+                values.append(record.get(field_name))
+    return values
+
+
+def _evidence_contains_unassigned_ip(config: dict[str, Any]) -> bool:
+    tokens = "|".join(
+        re.escape(token)
+        for token in sorted(IP_UNASSIGNED_TOKENS, key=lambda item: (-len(item), item))
+    )
+    pattern = re.compile(rf"(?<!\S)(?:{tokens})(?!\S)", re.IGNORECASE)
+    return any(
+        pattern.search(str(item or "")) is not None
+        for item in config.get("evidence") or []
+    )
+
+
+def _unavailable_tokens_from_evidence(config: dict[str, Any]) -> tuple[str, ...]:
+    evidence = "\n".join(str(item or "") for item in config.get("evidence") or [])
+    observed: list[str] = []
+    token_pattern = re.compile(
+        r"(?<!\S)(N/A|NA|--|-|NONE|NULL|UNKNOWN|UNAVAILABLE|NOT\s+SUPPORTED)(?!\S)",
+        re.IGNORECASE,
+    )
+    for match in token_pattern.finditer(evidence):
+        token = re.sub(r"\s+", " ", match.group(1).strip())
+        if token.casefold() not in {item.casefold() for item in observed}:
+            observed.append(token)
+    return tuple(observed)
+
+
 def _normalize_spec(
     payload: dict[str, Any],
     *,
     warnings: list[str] | None = None,
+    field_naming_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     raw = dict(payload.get("parser_spec") or payload.get("spec") or payload)
 
@@ -77,18 +266,79 @@ def _normalize_spec(
         if not isinstance(raw_fields, dict):
             raise ValueError("suggested ParserSpec fields must be an object")
         fields: dict[str, dict[str, Any]] = {}
+        field_name_remap: dict[str, str] = {}
+        expected_records = raw_record_set.get("expected_records") or []
         for raw_name, raw_config in raw_fields.items():
-            name = _field_name(raw_name)
-            if not name or not isinstance(raw_config, dict):
+            source_name = _field_name(raw_name)
+            if not source_name or not isinstance(raw_config, dict):
                 continue
             config = dict(raw_config)
+            raw_canonical_candidate = str(
+                config.get("canonical_candidate") or ""
+            ).strip()
+            name = _preferred_field_name(
+                source_name,
+                canonical_candidate=raw_canonical_candidate,
+                naming_context=field_naming_context,
+            )
+            if name in fields:
+                if source_name in fields:
+                    if warnings is not None:
+                        warnings.append(
+                            f"ignored duplicate field {source_name} after canonical naming"
+                        )
+                    continue
+                if warnings is not None:
+                    warnings.append(
+                        f"kept source field name {source_name} because preferred name "
+                        f"{name} would collide"
+                    )
+                name = source_name
+            field_name_remap[source_name] = name
+            if name != source_name and warnings is not None:
+                warnings.append(
+                    f"preferred approved check-item field name {name} over {source_name}"
+                )
             value_type = str(config.get("type") or "text").strip().lower()
             value_type = _TYPE_ALIASES.get(value_type, value_type)
             if value_type == "enum" and not config.get("values"):
                 value_type = "text"
-            canonical_candidate = str(
-                config.get("canonical_candidate") or ""
-            ).strip()
+            if value_type == "ip":
+                expected_values = _expected_field_values(expected_records, name)
+                has_explicit_unassigned_value = any(
+                    value is not None and is_unassigned_ip(value)
+                    for value in expected_values
+                )
+                has_expected_null = any(value is None for value in expected_values)
+                if has_explicit_unassigned_value or (
+                    has_expected_null and _evidence_contains_unassigned_ip(config)
+                ):
+                    value_type = "ip_or_unassigned"
+                    if warnings is not None:
+                        warnings.append(
+                            f"promoted {name} from ip to ip_or_unassigned because "
+                            "the sample evidence contains an unassigned value"
+                        )
+            observed_unavailable_tokens = _unavailable_tokens_from_evidence(config)
+            role = str(config.get("role") or "").strip().casefold()
+            declared_unavailable_tokens = config.get("unavailable_tokens") or ()
+            if isinstance(declared_unavailable_tokens, str):
+                declared_unavailable_tokens = (declared_unavailable_tokens,)
+            elif not isinstance(declared_unavailable_tokens, (list, tuple, set)):
+                declared_unavailable_tokens = ()
+            unavailable_tokens = tuple(
+                dict.fromkeys(
+                    str(item).strip()
+                    for item in (
+                        *declared_unavailable_tokens,
+                        *observed_unavailable_tokens,
+                    )
+                    if str(item).strip()
+                )
+            )
+            if value_type not in {"number", "percent"}:
+                unavailable_tokens = ()
+            canonical_candidate = raw_canonical_candidate
             if canonical_candidate and not _CANONICAL_CANDIDATE_RE.fullmatch(
                 canonical_candidate
             ):
@@ -121,7 +371,7 @@ def _normalize_spec(
                     else {}
                 ),
                 **(
-                    {"role": str(config.get("role") or "").strip().casefold()}
+                    {"role": role}
                     if config.get("role")
                     else {}
                 ),
@@ -162,12 +412,19 @@ def _normalize_spec(
                     if config.get("evidence")
                     else {}
                 ),
+                **(
+                    {"unavailable_tokens": list(unavailable_tokens)}
+                    if unavailable_tokens
+                    else {}
+                ),
             }
         raw_primary_keys = raw_record_set.get("primary_keys") or []
         if isinstance(raw_primary_keys, str):
             raw_primary_keys = [raw_primary_keys]
         primary_keys = [
-            _field_name(item) for item in raw_primary_keys if _field_name(item)
+            field_name_remap.get(_field_name(item), _field_name(item))
+            for item in raw_primary_keys
+            if _field_name(item)
         ]
         for key in primary_keys:
             if key in fields:
@@ -190,27 +447,28 @@ def _normalize_spec(
                 if include_metadata
                 else {}
             ),
+            **(
+                {
+                    "presence": str(
+                        raw_record_set.get("presence") or "required"
+                    ).strip().casefold()
+                }
+                if include_metadata
+                else {}
+            ),
             "primary_keys": primary_keys,
             "fields": fields,
             "allow_empty": bool(raw_record_set.get("allow_empty", False)),
             "empty_patterns": [
                 str(item) for item in raw_record_set.get("empty_patterns") or []
             ],
-            **(
-                {
-                    "expected_records": [
-                        dict(item)
-                        for item in raw_record_set.get("expected_records") or []
-                        if isinstance(item, dict)
-                    ]
-                }
-                if include_metadata
-                else {}
-            ),
         }
-        return ParserSpec.from_dict(spec).to_dict(
+        normalized = ParserSpec.from_dict(spec).to_dict(
             include_record_set_metadata=include_metadata
         )
+        if include_metadata:
+            normalized.pop("expected_records", None)
+        return normalized
 
     raw_record_sets = raw.get("record_sets")
     if raw_record_sets is None:
@@ -238,7 +496,10 @@ def _normalize_spec(
         "business_purpose": str(raw.get("business_purpose") or "").strip(),
         "record_sets": record_sets,
     }
-    return ParserSpecDocument.from_dict(document).to_dict()
+    normalized_document = ParserSpecDocument.from_dict(document).to_dict()
+    for record_set in normalized_document.get("record_sets") or []:
+        record_set.pop("expected_records", None)
+    return normalized_document
 
 
 def _parent_blocks(raw_text: str) -> list[tuple[str, list[str]]]:
@@ -627,10 +888,55 @@ def _normalize_sample_plans(
     return output
 
 
+def _expand_sample_plans(
+    plans: list[dict[str, Any]],
+    *,
+    representative_samples: list[dict[str, Any]],
+    all_samples: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    plans_by_id = {
+        str(item.get("sample_id") or ""): dict(item)
+        for item in plans
+        if item.get("sample_id")
+    }
+    representative_by_key = {
+        _sample_content_key(sample): str(sample.get("id") or "")
+        for sample in representative_samples
+    }
+    expanded: list[dict[str, Any]] = []
+    for sample in all_samples:
+        sample_id = str(sample.get("id") or "")
+        plan = plans_by_id.get(sample_id)
+        if plan is None:
+            representative_id = representative_by_key.get(_sample_content_key(sample))
+            representative_plan = plans_by_id.get(str(representative_id or ""))
+            if representative_plan is not None:
+                plan = {**representative_plan, "sample_id": sample_id}
+        if plan is None:
+            plan = {
+                "sample_id": sample_id,
+                "recommended_role": "generation",
+                "semantic_plan": {
+                    "target_section": "",
+                    "record_unit": "",
+                    "record_start": "",
+                    "record_end": "",
+                    "exclude_sections": [],
+                    "ambiguities": [
+                        "sample retained for full validation but omitted from the bounded semantic prompt"
+                    ],
+                },
+            }
+        expanded.append(plan)
+    return expanded
+
+
 def _build_prompt(
     job: dict[str, Any],
     data_samples: list[dict[str, Any]],
     empty_samples: list[dict[str, Any]],
+    trusted_parser_evidence: list[dict[str, Any]] | None = None,
+    field_naming_context: dict[str, Any] | None = None,
 ) -> str:
     sample_payload = [
         {
@@ -658,6 +964,12 @@ Sanitized samples:
 Known valid-empty sample patterns (if any):
 {json.dumps(empty_patterns, ensure_ascii=True)}
 
+Trusted local parser execution evidence (if any):
+{json.dumps(trusted_parser_evidence or [], ensure_ascii=True, indent=2)}
+
+Approved check-item field naming guidance (advisory, not a parse gate):
+{json.dumps(field_naming_context or {}, ensure_ascii=True, indent=2)}
+
 Required response shape:
 {{
   "parser_spec": {{
@@ -668,11 +980,13 @@ Required response shape:
         "name": "snake_case_record_set",
         "entity": "snake_case_entity",
         "cardinality": "singleton|repeated",
+        "presence": "required|optional",
         "primary_keys": ["field_name"],
         "fields": {{
           "field_name": {{
             "required": true,
             "type": "text",
+            "unavailable_tokens": [],
             "source_labels": ["CLI label"],
             "role": "identity|state|metric|threshold|context",
             "operational_reason": "why this field changes an operational decision",
@@ -683,10 +997,7 @@ Required response shape:
           }}
         }},
         "allow_empty": false,
-        "empty_patterns": [],
-        "expected_records": [
-          {{"sample_id": "...", "records": [{{"field_name": "expected value"}}]}}
-        ]
+        "empty_patterns": []
       }}
     ]
   }},
@@ -706,20 +1017,80 @@ Required response shape:
 }}
 
 Rules:
-- Use only these field types: text, number, percent, enum, interface_name, ip, regex.
+- Use only these field types: text, number, percent, enum, interface_name, ip,
+  ip_or_unassigned, regex.
+- Keep operational measurements and thresholds typed as number or percent even when
+  some source rows show N/A, -- or another visible missing token. Put only the exact
+  source tokens in unavailable_tokens; never downgrade a numeric field to text and
+  never interpret a missing token as zero.
+- Use ip_or_unassigned when an IP column visibly contains placeholders such as
+  unassigned, --, -, none, unset, N/A or null. Such placeholders are valid
+  per-entity absence, not malformed IP addresses.
 - First describe the ideal structured result. Do not design one giant sparse table merely
   because the command contains several entity grains.
 - Split device-level, slot-level, interface-level, sensor-level, and child inventory
   records into separate record_sets whenever their natural cardinality differs.
 - A singleton record set has cardinality=singleton and no primary key. A repeated
   record set must have stable required primary keys that identify one business record.
+- presence=required means every positive sample must contain that record-set grain.
+  Use presence=optional for a source-backed branch that is legitimately absent from
+  some samples, such as mutually exclusive absent, unsupported, single-channel and
+  multi-channel layouts. At least one record set must still cover every positive sample.
 - For nested repeated child sections, use a composite parent/child primary key.
+- Parser fields and primary keys must be directly capturable from visible source text
+  in every record where they are required. Never invent an implicit, default, ordinal,
+  synthetic, or canonical value in ParserSpec, even when that value seems obvious.
+- If one layout exposes a child key but another layout omits it, split them into
+  separate natural-grain record_sets with source-backed keys. Do not reuse a previous
+  child's key through Filldown and do not assign a made-up key such as lane 1.
+- Preserve the physical row/block grain of the source. Do not pivot visible columns
+  into synthetic records, do not turn a header label into a repeated record value,
+  and do not expect TextFSM to emit several keyed records from one source row.
+- Keep column-oriented metrics and thresholds as explicit wide fields on their
+  source-backed parent record. A later ObservationContract may unpivot or union them.
+- Derived dimensions, defaults, coalescing, and cross-record-set unions belong to a
+  later approved ObservationContract, not to TextFSM or ParserSpec.
 - When some parent blocks have child rows and others have a single non-child record,
   add one required record discriminator sourced from visible alternative marker lines.
+- For mutually exclusive status branches, do not create several required boolean fields
+  such as is_absent/is_unsupported. Use one source-backed text field that captures the
+  visible branch token or phrase, or split the branches into optional natural record sets.
 - For measurement tables with grouped Current, Alarm High/Low and Warning High/Low
   columns, include the current value and all four threshold fields separately.
 - Include only fields visibly supported by the samples. Select a small, operationally
   meaningful field set rather than copying every line.
+- Trusted local parser evidence comes from compiling and executing an existing template
+  against these same sanitized samples. Treat its field identifiers, record counts and
+  observed value shapes as strong executable evidence. Preserve semantically correct field
+  identifiers, or map them explicitly through source_labels; do not replace them with an
+  invented near-synonym. Never declare a field as number or percent when its observed
+  non-empty examples include nonnumeric values such as auto, 40G, routed or trunk.
+- Trusted parser evidence is not final business truth. Correct it only when the visible CLI
+  proves that its record grain or field meaning is wrong, and explain that conflict in the
+  rationale. Do not make ParserSpec incompatible with a faithful executable candidate merely
+  to prefer a different naming style.
+- When trusted parser evidence faithfully produces one operational table, default to one
+  record_set aligned with that executable table. Do not split headings, context lines or
+  summary prose into additional record_sets unless they are independently useful business
+  records and the visible source supports a stable parse for each one.
+- ParserSpec is editable generation guidance, not an oracle. The final authority is the full
+  local TextFSM result reviewed against the source evidence by the independent model and the
+  engineer. A speculative ParserSpec detail must never cause a faithful parsed table to be
+  rewritten into a worse result.
+- Prefer the exact check-item identity and observation field names supplied in the approved
+  field naming guidance whenever the visible source value, unit and record grain are
+  semantically equivalent. This keeps TextFSM Value names stable across vendors and models.
+  For a dimension pattern such as cpu_utilization_{{window}}_percent, replace the placeholder
+  with the visible dimension value such as 5s, 1m or 5m.
+- Source headings and vendor-specific labels belong in source_labels, not in the field name.
+  When the same generic heading appears in several record sets, qualify the Value name
+  with the measured quantity and unit. For example, separate optical receive/transmit
+  thresholds as rx_low_warning_dbm and tx_low_warning_dbm instead of repeating a bare
+  low_warning field whose meaning depends on the record-set name.
+  If the source meaning is not equivalent to a preferred field, keep a clear source-faithful
+  snake_case name and declare the closest canonical_candidate. A naming difference by itself
+  is never a parsing or acceptance failure; the approved ObservationContract is the final
+  canonical mapping authority.
 - Every retained field must state its role, operational_reason, change_behavior,
   monitor decision, canonical_candidate, and exact evidence.
 - Keep a field only when it identifies an object, determines health, measures capacity
@@ -727,16 +1098,434 @@ Rules:
   or materially helps troubleshooting. Copyright, headings, duplicate summaries and
   unstable prose are not business records.
 - uptime may be retained as context, but it is normally monitor=false.
-- canonical_candidate is a vendor-neutral semantic suggestion, not a parser field name.
-  Commands and vendors may use different source fields for the same canonical semantic.
+- canonical_candidate is the vendor-neutral observation semantic. Prefer the associated
+  check-item field name when the mapping is one-to-one; commands may still use different
+  source-faithful fields when the source shape or meaning is genuinely different.
 - Describe the intended record scope and boundary for every supplied data sample.
-- expected_records must show the ideal values supported by each sanitized sample. Do
-  not invent records or values. These results guide TextFSM generation and remain
-  engineer-editable during approval.
-- source_labels should preserve visible CLI headings or labels.
+- Do not return expected_records. A model-authored record list is not an acceptance
+  baseline and must not limit a large sample to a few examples. The platform will execute
+  TextFSM against every frozen sample and send the complete parsed results to an independent
+  LLM review and then to the engineer. Only an explicitly engineer-confirmed optional sample
+  expectation may later act as an exact record-count or primary-key gate.
+- source_labels should preserve visible CLI headings or labels. Evidence entries must
+  be exact fragments from the sanitized samples; placeholder prose such as
+  "implicit when absent" is not evidence.
 - When valid-empty patterns are supplied, set allow_empty=true and include them.
 - Do not generate TextFSM. Do not include raw device identity, credentials, or prose outside JSON.
 """
+
+
+def _trusted_ntc_parser_evidence(
+    job: dict[str, Any],
+    data_samples: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    samples = tuple(
+        ParserSample(
+            sample_id=str(sample["id"]),
+            raw_text=str(sample.get("sanitized_text") or ""),
+            prompt_text=str(sample.get("sanitized_text") or ""),
+            validation_text_override=str(sample.get("sanitized_text") or ""),
+            role=SampleRole.GENERATION,
+        )
+        for sample in data_samples
+    )
+    if not samples:
+        return []
+    try:
+        _decision, resolutions = NtcTemplateResolver().resolve(
+            device={
+                "vendor": job.get("vendor"),
+                "model": job.get("model") or job.get("profile"),
+                "family": job.get("family"),
+                "platform": job.get("platform"),
+                "device_type": job.get("device_type"),
+            },
+            command=str(job.get("canonical_command") or ""),
+            samples=samples,
+            spec=None,
+        )
+    except Exception:
+        return []
+    return [
+        {
+            "provider": "ntc_templates",
+            "platform": resolution.platform,
+            "template_name": resolution.template_name,
+            "template_sha256": resolution.candidate.sha256,
+            "sample_record_counts": {
+                str(sample.get("sample_id") or ""): int(sample.get("record_count") or 0)
+                for sample in resolution.execution_evidence.get("samples") or []
+            },
+            "field_profiles": dict(
+                resolution.execution_evidence.get("field_profiles") or {}
+            ),
+            "provenance": dict(resolution.candidate.provenance or {}),
+        }
+        for resolution in resolutions
+        if resolution.status == "resolved" and resolution.candidate is not None
+    ]
+
+
+def _ntc_parser_spec_draft(
+    *,
+    job: dict[str, Any],
+    data_samples: list[dict[str, Any]],
+    evidence: list[dict[str, Any]],
+    field_naming_context: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Build editable guidance from an actually executed trusted template.
+
+    This is deliberately not semantic approval. It only turns the observed NTC
+    row shape into a single record-set draft so the exact same candidate can be
+    locally executed, independently reviewed and finally confirmed by an
+    engineer.
+    """
+
+    viable = [
+        item
+        for item in evidence
+        if sum(int(value or 0) for value in item.get("sample_record_counts", {}).values()) > 0
+        and item.get("field_profiles")
+    ]
+    if not viable:
+        return None
+    selected = max(
+        viable,
+        key=lambda item: (
+            sum(int(value or 0) for value in item.get("sample_record_counts", {}).values()),
+            len(item.get("field_profiles") or {}),
+            str(item.get("template_name") or ""),
+        ),
+    )
+    field_profiles = {
+        str(name): dict(profile or {})
+        for name, profile in dict(selected.get("field_profiles") or {}).items()
+        if str(name).strip()
+    }
+    if not field_profiles:
+        return None
+    preferred_names: dict[str, str] = {}
+    sources_by_preferred_name: dict[str, list[str]] = {}
+    for source_name in field_profiles:
+        semantics = dict(field_semantics(source_name) or {})
+        preferred_name = _preferred_field_name(
+            source_name,
+            canonical_candidate=str(semantics.get("observation_type") or ""),
+            naming_context=field_naming_context,
+        )
+        preferred_names[source_name] = preferred_name
+        sources_by_preferred_name.setdefault(preferred_name, []).append(source_name)
+
+    # A shared business vocabulary is advisory. When two source columns would
+    # collapse onto one preferred name, keep both source names instead of
+    # silently losing a column or inventing a semantic distinction.
+    source_name_by_field_name: dict[str, str] = {}
+    normalized_profiles: dict[str, dict[str, Any]] = {}
+    for source_name, profile in field_profiles.items():
+        preferred_name = preferred_names[source_name]
+        collision_sources = sources_by_preferred_name[preferred_name]
+        field_name = (
+            preferred_name
+            if len(collision_sources) == 1
+            else source_name
+        )
+        source_name_by_field_name[field_name] = source_name
+        normalized_profiles[field_name] = profile
+    field_profiles = normalized_profiles
+    total_records = sum(
+        int(value or 0)
+        for value in dict(selected.get("sample_record_counts") or {}).values()
+    )
+    semantic_match = resolve_semantic_contract(
+        command=str(job.get("canonical_command") or ""),
+        samples_text="\n\n".join(
+            str(sample.get("sanitized_text") or "") for sample in data_samples
+        ),
+    )
+    contract = dict(semantic_match.contract or {}) if semantic_match else {}
+    identity_candidates: list[str] = []
+    for item in field_naming_context.get("check_items") or []:
+        identity_candidates.extend(
+            str(name) for name in item.get("preferred_identity_fields") or []
+        )
+    identity_candidates.extend(
+        str(name) for name in contract.get("primary_keys") or []
+    )
+    identity_candidates.extend(
+        name for name in field_profiles if name == "id" or name.endswith("_id")
+    )
+    primary_keys = list(
+        dict.fromkeys(
+            name
+            for name in identity_candidates
+            if name in field_profiles
+            and int(field_profiles[name].get("observed_non_empty_count") or 0)
+            >= total_records
+        )
+    )
+    per_sample_counts = [
+        int(value or 0)
+        for value in dict(selected.get("sample_record_counts") or {}).values()
+    ]
+    cardinality = (
+        "repeated"
+        if primary_keys
+        else "singleton"
+        if per_sample_counts and max(per_sample_counts) <= 1
+        else "repeated"
+    )
+    if cardinality == "repeated" and not primary_keys:
+        return None
+    if cardinality == "singleton":
+        primary_keys = []
+
+    def field_type(name: str, profile: dict[str, Any]) -> str:
+        for check_item in field_naming_context.get("check_items") or []:
+            for vocabulary in check_item.get("configured_vocabulary") or []:
+                if (
+                    _field_name(vocabulary.get("preferred_name")) == name
+                    and str(vocabulary.get("value_type") or "").strip()
+                ):
+                    return str(vocabulary["value_type"]).strip()
+        shape = str(profile.get("value_shape") or "text")
+        if name == "interface":
+            return "interface_name"
+        if name == "ip_address":
+            return "ip_or_unassigned"
+        if name.endswith(("_version", "_release", "_image")) or name in {
+            "version",
+            "release",
+            "model",
+            "hostname",
+            "serial_number",
+            "mac_address",
+            "config_register",
+            "reload_reason",
+            "restarted",
+        }:
+            # Identifiers may look numeric (for example BIOS 05.31), but numeric
+            # coercion would discard leading zeros and version-segment meaning.
+            return "text"
+        return shape if shape in {"number", "percent"} else "text"
+
+    fields: dict[str, dict[str, Any]] = {}
+    for name, profile in sorted(field_profiles.items()):
+        source_name = source_name_by_field_name.get(name, name)
+        semantics = dict(field_semantics(source_name) or field_semantics(name) or {})
+        semantic_type = str(semantics.get("semantic_type") or "").strip()
+        observation_type = str(semantics.get("observation_type") or "").strip()
+        role = (
+            "identity"
+            if name in primary_keys
+            else "threshold"
+            if semantic_type == "threshold"
+            else "metric"
+            if semantic_type in {"counter", "gauge"}
+            else "state"
+            if semantic_type == "state"
+            else "context"
+        )
+        fields[name] = {
+            "required": name in primary_keys,
+            "type": field_type(name, profile),
+            "role": role,
+            "operational_reason": (
+                "Identify each parsed record."
+                if name in primary_keys
+                else "Preserve an operational value proven by the trusted parser output."
+            ),
+            "change_behavior": (
+                "counter"
+                if semantic_type == "counter"
+                else "gauge"
+                if semantic_type in {"gauge", "threshold"}
+                else "stable"
+            ),
+            "monitor": not bool(semantics.get("ignore", False)),
+            **(
+                {"canonical_candidate": observation_type}
+                if observation_type
+                else {}
+            ),
+            "evidence": [
+                str(value)
+                for value in profile.get("examples") or []
+            ][:3],
+            **(
+                {"source_labels": [source_name]}
+                if source_name != name
+                else {}
+            ),
+        }
+    entity = str(
+        contract.get("entity_type")
+        or contract.get("category")
+        or "record"
+    ).strip()
+    entity = re.sub(r"[^a-z0-9_]+", "_", entity.casefold()).strip("_") or "record"
+    return {
+        "version": 2,
+        "business_purpose": (
+            f"Parse trusted NTC output for {job.get('canonical_command') or 'the command'}; "
+            "the resulting table remains subject to independent and human review."
+        ),
+        "record_sets": [
+            {
+                "name": entity,
+                "entity": entity,
+                "cardinality": cardinality,
+                "presence": "required",
+                "primary_keys": primary_keys,
+                "fields": fields,
+                "allow_empty": False,
+                "empty_patterns": [],
+            }
+        ],
+    }
+
+
+def _field_naming_context(
+    job: dict[str, Any],
+    data_samples: list[dict[str, Any]],
+) -> dict[str, Any]:
+    try:
+        catalog = CheckItemCatalogRepository().load_active()
+        if not catalog.check_items:
+            catalog = load_catalog()
+    except Exception:
+        catalog = load_catalog()
+    return build_parser_field_naming_context(
+        vendor=str(job.get("vendor") or ""),
+        model=str(job.get("model") or "").strip() or None,
+        family=str(job.get("family") or "").strip() or None,
+        profile=str(job.get("profile") or "").strip() or None,
+        command=str(job.get("canonical_command") or ""),
+        sample_text="\n\n".join(
+            str(sample.get("sanitized_text") or "")
+            for sample in data_samples
+        ),
+        catalog=catalog,
+    )
+
+
+def _semantic_valid_empty_spec_draft(
+    *,
+    job: dict[str, Any],
+    samples: list[dict[str, Any]],
+) -> tuple[dict[str, Any], str] | None:
+    """Build a reviewable empty-capable spec from governed command semantics.
+
+    Header-only tables are not positive data, but they can still prove a valid
+    empty result when every sample matches an explicit semantic-catalog empty
+    pattern. This keeps the decision auditable without inventing example rows.
+    """
+
+    sample_texts = [
+        str(sample.get("sanitized_text") or "")
+        for sample in samples
+        if str(sample.get("sanitized_text") or "").strip()
+    ]
+    if not sample_texts:
+        return None
+    match = resolve_semantic_contract(
+        command=str(job.get("canonical_command") or ""),
+        samples_text="\n\n".join(sample_texts),
+    )
+    if match is None:
+        return None
+    contract = dict(match.contract or {})
+    empty_patterns = [
+        str(pattern).strip()
+        for pattern in contract.get("empty_patterns") or []
+        if str(pattern).strip()
+    ]
+    if not contract.get("allow_empty") or not empty_patterns:
+        return None
+    try:
+        all_samples_match = all(
+            any(re.search(pattern, text) is not None for pattern in empty_patterns)
+            for text in sample_texts
+        )
+    except re.error:
+        return None
+    if not all_samples_match:
+        return None
+
+    primary_keys = [str(item) for item in contract.get("primary_keys") or []]
+    required_fields = [str(item) for item in contract.get("required_fields") or []]
+    optional_fields = [str(item) for item in contract.get("optional_fields") or []]
+    field_names = list(dict.fromkeys((*primary_keys, *required_fields, *optional_fields)))
+    validators = {
+        str(name): dict(config)
+        for name, config in (contract.get("validators") or {}).items()
+        if isinstance(config, dict)
+    }
+    fields: dict[str, dict[str, Any]] = {}
+    for name in field_names:
+        semantics = dict(field_semantics(name) or {})
+        semantic_type = str(semantics.get("semantic_type") or "").strip()
+        configured_type = str(validators.get(name, {}).get("type") or "").strip()
+        value_type = _TYPE_ALIASES.get(configured_type, configured_type)
+        if not value_type:
+            value_type = (
+                "percent"
+                if str(semantics.get("unit") or "").casefold() == "percent"
+                else "number"
+                if semantic_type in {"counter", "gauge", "threshold"}
+                else "text"
+            )
+        observation_type = str(semantics.get("observation_type") or "").strip()
+        fields[name] = {
+            "required": name in set(primary_keys) | set(required_fields),
+            "type": value_type,
+            "role": (
+                "identity"
+                if name in primary_keys
+                else "threshold"
+                if semantic_type == "threshold"
+                else "metric"
+                if semantic_type in {"counter", "gauge"}
+                else "state"
+                if semantic_type == "state"
+                else "context"
+            ),
+            "operational_reason": (
+                "Identify a record when the command returns business rows."
+                if name in primary_keys
+                else "Preserve the governed field when the command returns business rows."
+            ),
+            "change_behavior": "stable" if name in primary_keys else "volatile",
+            "monitor": name not in primary_keys,
+            **(
+                {"canonical_candidate": observation_type}
+                if observation_type
+                else {}
+            ),
+        }
+    entity = str(
+        contract.get("entity_type") or contract.get("category") or "record"
+    ).strip()
+    entity = re.sub(r"[^a-z0-9_]+", "_", entity.casefold()).strip("_") or "record"
+    spec = {
+        "version": 2,
+        "business_purpose": (
+            f"Parse {job.get('canonical_command') or 'the command'} records while "
+            "preserving an explicitly governed valid-empty result."
+        ),
+        "record_sets": [
+            {
+                "name": entity,
+                "entity": entity,
+                "cardinality": "repeated" if primary_keys else "singleton",
+                "presence": "optional",
+                "primary_keys": primary_keys,
+                "fields": fields,
+                "allow_empty": True,
+                "empty_patterns": empty_patterns,
+            }
+        ],
+    }
+    return ParserSpecDocument.from_dict(spec).to_dict(), match.profile_id
 
 
 def suggest_parser_spec(params: dict[str, Any]) -> dict[str, Any]:
@@ -779,54 +1568,146 @@ def suggest_parser_spec(params: dict[str, Any]) -> dict[str, Any]:
                 sample["classification"]["status"] == "header_only_unverified"
                 for sample in classified
             )
-            suggestion = {
-                "classification": (
-                    "sample_collection_required"
-                    if header_only_count
-                    else "no_positive_data"
-                ),
-                "parser_spec": None,
-                "sample_suggestions": negative_suggestions,
-                "confidence": 1.0,
-                "rationale": (
-                    (
-                        "The current samples contain table headers but no business data rows. "
-                        "Add at least one output with real records before generating a "
-                        "ParserSpec. Re-running generation with the same samples cannot "
-                        "produce a verifiable Parser."
-                    )
-                    if header_only_count
-                    else (
-                        "The current samples contain no positive structured data. Mark the "
-                        "recognized empty/error outputs as negative samples and add one output "
-                        "that contains real records before generating a ParserSpec."
-                    )
-                ),
-                "model_called": False,
-            }
+            valid_empty_draft = (
+                _semantic_valid_empty_spec_draft(job=job, samples=classified)
+                if header_only_count
+                else None
+            )
+            if valid_empty_draft is not None:
+                spec, semantic_profile_id = valid_empty_draft
+                suggestion = {
+                    "classification": "valid_empty_structured",
+                    "parser_spec": spec,
+                    "sample_suggestions": [
+                        {
+                            "sample_id": str(sample["id"]),
+                            "recommended_role": "generation",
+                            "classification": "governed_valid_empty",
+                        }
+                        for sample in classified
+                    ],
+                    "confidence": 1.0,
+                    "rationale": (
+                        "Every header-only sample matches an explicit valid-empty pattern "
+                        "from the governed semantic catalog. The draft defines the row "
+                        "shape without inventing records; an engineer must still confirm it."
+                    ),
+                    "model_called": False,
+                    "draft_source": "semantic_catalog_valid_empty",
+                    "semantic_profile_id": semantic_profile_id,
+                }
+            else:
+                suggestion = {
+                    "classification": (
+                        "sample_collection_required"
+                        if header_only_count
+                        else "no_positive_data"
+                    ),
+                    "parser_spec": None,
+                    "sample_suggestions": negative_suggestions,
+                    "confidence": 1.0,
+                    "rationale": (
+                        (
+                            "The current samples contain table headers but no business data rows. "
+                            "Add at least one output with real records before generating a "
+                            "ParserSpec, unless an engineer first approves an explicit valid-empty "
+                            "pattern for this command family."
+                        )
+                        if header_only_count
+                        else (
+                            "The current samples contain no positive structured data. Mark the "
+                            "recognized empty/error outputs as negative samples and add one output "
+                            "that contains real records before generating a ParserSpec."
+                        )
+                    ),
+                    "model_called": False,
+                }
         else:
-            response = call_llm(_build_prompt(job, data_samples, empty_samples))
-            payload = _json_object(response)
-            normalization_warnings: list[str] = []
-            spec = _normalize_spec(
-                payload,
-                warnings=normalization_warnings,
+            prompt_data_samples = _representative_data_samples(data_samples)
+            field_naming_context = _field_naming_context(job, prompt_data_samples)
+            ntc_evidence = _trusted_ntc_parser_evidence(job, data_samples)
+            ntc_spec = _ntc_parser_spec_draft(
+                job=job,
+                data_samples=data_samples,
+                evidence=ntc_evidence,
+                field_naming_context=field_naming_context,
             )
-            sample_plans = _normalize_sample_plans(
-                payload,
-                samples=data_samples,
-            )
-            suggestion = {
-                "classification": "structured_data",
-                "parser_spec": spec,
-                "sample_suggestions": sample_plans + negative_suggestions,
-                "confidence": max(0.0, min(float(payload.get("confidence", 0.5)), 1.0)),
-                "rationale": str(payload.get("rationale") or "")[:1000],
-                "model_called": True,
-                "model_name": getattr(response, "model_name", None),
-                "token_usage": getattr(response, "token_usage", {}),
-                "normalization_warnings": normalization_warnings,
-            }
+            if ntc_spec is not None:
+                spec = ParserSpecDocument.from_dict(ntc_spec).to_dict()
+                sample_plans = _normalize_sample_plans({}, samples=data_samples)
+                selected_ntc = max(
+                    ntc_evidence,
+                    key=lambda item: sum(
+                        int(value or 0)
+                        for value in item.get("sample_record_counts", {}).values()
+                    ),
+                )
+                suggestion = {
+                    "classification": "structured_data",
+                    "parser_spec": spec,
+                    "sample_suggestions": sample_plans + negative_suggestions,
+                    "source_sample_count": len(data_samples),
+                    "prompt_sample_count": 0,
+                    "confidence": 0.95,
+                    "rationale": (
+                        "A trusted local ntc_templates asset compiled and produced records "
+                        "for every supplied data sample. The draft mirrors that executable "
+                        "row shape; semantic acceptance still belongs to independent review "
+                        "and final engineer confirmation."
+                    ),
+                    "model_called": False,
+                    "draft_source": "ntc_templates_objective_execution",
+                    "normalization_warnings": [
+                        "ParserSpec was derived from executable NTC evidence, not accepted as business truth."
+                    ],
+                    "field_naming_context": field_naming_context,
+                    "trusted_parser_evidence": selected_ntc,
+                }
+            else:
+                with _SuggestionHeartbeat(
+                    repository=repository,
+                    job_id=job_id,
+                    task_id=task_id,
+                ):
+                    response = call_llm(
+                        _build_prompt(
+                            job,
+                            prompt_data_samples,
+                            empty_samples,
+                            ntc_evidence,
+                            field_naming_context,
+                        )
+                    )
+                payload = _json_object(response)
+                normalization_warnings: list[str] = []
+                spec = _normalize_spec(
+                    payload,
+                    warnings=normalization_warnings,
+                    field_naming_context=field_naming_context,
+                )
+                representative_plans = _normalize_sample_plans(
+                    payload,
+                    samples=prompt_data_samples,
+                )
+                sample_plans = _expand_sample_plans(
+                    representative_plans,
+                    representative_samples=prompt_data_samples,
+                    all_samples=data_samples,
+                )
+                suggestion = {
+                    "classification": "structured_data",
+                    "parser_spec": spec,
+                    "sample_suggestions": sample_plans + negative_suggestions,
+                    "source_sample_count": len(data_samples),
+                    "prompt_sample_count": len(prompt_data_samples),
+                    "confidence": max(0.0, min(float(payload.get("confidence", 0.5)), 1.0)),
+                    "rationale": str(payload.get("rationale") or "")[:1000],
+                    "model_called": True,
+                    "model_name": getattr(response, "model_name", None),
+                    "token_usage": getattr(response, "token_usage", {}),
+                    "normalization_warnings": normalization_warnings,
+                    "field_naming_context": field_naming_context,
+                }
         repository.record_parser_spec_suggestion(
             job_id,
             task_id=task_id,

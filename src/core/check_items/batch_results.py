@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import hashlib
+import hmac
+import json
+import time
 from collections import Counter
 from collections.abc import Callable
 from contextlib import AbstractContextManager
@@ -9,6 +15,12 @@ from typing import Any
 
 from sqlalchemy import and_, func, or_
 
+from src.common.config import settings
+from src.core.check_items.assessment_policy import (
+    validate_assessment_basis,
+    validate_assessment_policy_snapshot,
+)
+from src.core.check_items.presentation import check_item_display_name
 from src.core.check_items.reporting import build_check_item_report_view
 from src.infrastructure.db.models import (
     CheckAssessmentRecord,
@@ -34,6 +46,186 @@ _TERMINAL_EXECUTION_STATUSES = {
     "assessment_failed",
     "cancelled",
 }
+_CURSOR_VERSION = 3
+
+
+def _decode_base64url_segment(segment: str) -> bytes:
+    if not segment or "=" in segment:
+        raise ValueError("invalid base64url segment")
+    try:
+        decoded = base64.urlsafe_b64decode(
+            segment + ("=" * (-len(segment) % 4))
+        )
+    except (ValueError, binascii.Error) as exc:
+        raise ValueError("invalid base64url segment") from exc
+    canonical = base64.urlsafe_b64encode(decoded).decode("ascii").rstrip("=")
+    if not hmac.compare_digest(canonical, segment):
+        raise ValueError("non-canonical base64url segment")
+    return decoded
+
+
+def _cursor_scope(
+    *,
+    search: str | None,
+    assessment_status: str | None,
+    completeness_status: str | None,
+    source_identity_status: str | None,
+    output_quality_status: str | None,
+    freshness_status: str | None,
+    coverage_status: str | None,
+) -> str:
+    payload = {
+        "search": str(search or "").strip(),
+        "assessment_status": assessment_status,
+        "completeness_status": completeness_status,
+        "source_identity_status": source_identity_status,
+        "output_quality_status": output_quality_status,
+        "freshness_status": freshness_status,
+        "coverage_status": coverage_status,
+    }
+    return hashlib.sha256(
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _encode_cursor(
+    *,
+    patrol_batch_id: str,
+    scope_digest: str,
+    values: tuple[str, ...],
+    total: int,
+    secret: str | bytes | None = None,
+    now: int | None = None,
+    ttl_seconds: int | None = None,
+) -> str:
+    issued_at = int(time.time()) if now is None else int(now)
+    ttl = (
+        int(settings.CHECK_ITEM_RESULT_CURSOR_TTL_SECONDS)
+        if ttl_seconds is None
+        else int(ttl_seconds)
+    )
+    if ttl <= 0:
+        raise ValueError("check-result cursor TTL must be positive")
+    payload = {
+        "v": _CURSOR_VERSION,
+        "batch": patrol_batch_id,
+        "scope": scope_digest,
+        "values": list(values),
+        "total": int(total),
+        "iat": issued_at,
+        "exp": issued_at + ttl,
+    }
+    payload_token = base64.urlsafe_b64encode(
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).decode("ascii").rstrip("=")
+    signature = hmac.new(
+        _cursor_secret(secret),
+        payload_token.encode("ascii"),
+        hashlib.sha256,
+    ).digest()
+    signature_token = base64.urlsafe_b64encode(signature).decode("ascii").rstrip("=")
+    return f"{payload_token}.{signature_token}"
+
+
+def _decode_cursor(
+    cursor: str,
+    *,
+    patrol_batch_id: str,
+    scope_digest: str,
+    secret: str | bytes | None = None,
+    now: int | None = None,
+) -> tuple[tuple[str, ...], int]:
+    try:
+        token = str(cursor).strip()
+        payload_token, signature_token = token.split(".", 1)
+        signature = _decode_base64url_segment(signature_token)
+        expected_signature = hmac.new(
+            _cursor_secret(secret),
+            payload_token.encode("ascii"),
+            hashlib.sha256,
+        ).digest()
+        if not hmac.compare_digest(signature, expected_signature):
+            raise ValueError("signature mismatch")
+        payload = json.loads(
+            _decode_base64url_segment(payload_token).decode("utf-8")
+        )
+    except (
+        ValueError,
+        TypeError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+    ) as exc:
+        raise ValueError("invalid check-result cursor") from exc
+    if (
+        not isinstance(payload, dict)
+        or payload.get("v") != _CURSOR_VERSION
+        or payload.get("batch") != patrol_batch_id
+        or payload.get("scope") != scope_digest
+    ):
+        raise ValueError("check-result cursor does not match this query")
+    values = payload.get("values")
+    if (
+        not isinstance(values, list)
+        or len(values) != 3
+        or not all(isinstance(item, str) for item in values)
+    ):
+        raise ValueError("invalid check-result cursor values")
+    total = payload.get("total")
+    if not isinstance(total, int) or total < 0:
+        raise ValueError("invalid check-result cursor total")
+    issued_at = payload.get("iat")
+    expires_at = payload.get("exp")
+    current_time = int(time.time()) if now is None else int(now)
+    if (
+        not isinstance(issued_at, int)
+        or not isinstance(expires_at, int)
+        or expires_at <= issued_at
+        or issued_at > current_time + 60
+    ):
+        raise ValueError("invalid check-result cursor lifetime")
+    if current_time >= expires_at:
+        raise ValueError("check-result cursor has expired")
+    return tuple(values), total
+
+
+def _cursor_secret(secret: str | bytes | None = None) -> bytes:
+    resolved = (
+        secret
+        if secret not in (None, "", b"")
+        else settings.CHECK_ITEM_RESULT_CURSOR_SECRET
+        or settings.JWT_SECRET_KEY
+    )
+    if isinstance(resolved, bytes):
+        return resolved
+    return str(resolved).encode("utf-8")
+
+
+def _keyset_after(
+    expressions: tuple[Any, ...],
+    values: tuple[str, ...],
+) -> Any:
+    return or_(
+        *[
+            and_(
+                *[
+                    expressions[prior] == values[prior]
+                    for prior in range(index)
+                ],
+                expression > values[index],
+            )
+            for index, expression in enumerate(expressions)
+        ]
+    )
 
 
 class CheckItemBatchResultService:
@@ -187,6 +379,9 @@ class CheckItemBatchResultService:
         ):
             report = build_check_item_report_view(report_manifest)
             conclusion = dict(report["conclusion"])
+            conclusion_dimensions = dict(
+                report["conclusion_dimensions"]
+            )
             coverage = dict(report["coverage"])
             source_digest = str(report["source_digest"])
         else:
@@ -224,6 +419,7 @@ class CheckItemBatchResultService:
                     "insufficient"
                 ],
             }
+            conclusion_dimensions = None
             source_digest = ""
         return {
             "schema_version": "check-item-batch-summary/v1",
@@ -236,6 +432,7 @@ class CheckItemBatchResultService:
             "runtime_manifest_digest": runtime_manifest_digest,
             "target_manifest_digest": target_manifest_digest,
             "conclusion": conclusion,
+            "conclusion_dimensions": conclusion_dimensions,
             "coverage": coverage,
             "execution_counts": dict(sorted(execution_counts.items())),
             "assessment_counts": dict(sorted(assessment_counts.items())),
@@ -254,6 +451,7 @@ class CheckItemBatchResultService:
         *,
         limit: int = 50,
         offset: int = 0,
+        cursor: str | None = None,
         search: str | None = None,
         assessment_status: str | None = None,
         completeness_status: str | None = None,
@@ -264,6 +462,39 @@ class CheckItemBatchResultService:
     ) -> dict[str, Any]:
         safe_limit = min(max(int(limit), 1), 200)
         safe_offset = max(int(offset), 0)
+        if cursor and safe_offset:
+            raise ValueError(
+                "check-result cursor cannot be combined with a non-zero offset"
+            )
+        if not cursor and safe_offset > int(settings.CHECK_ITEM_RESULT_MAX_OFFSET):
+            raise ValueError(
+                "check-result offset exceeds the shallow-page limit; "
+                "continue with next_cursor"
+            )
+        scope_digest = _cursor_scope(
+            search=search,
+            assessment_status=assessment_status,
+            completeness_status=completeness_status,
+            source_identity_status=source_identity_status,
+            output_quality_status=output_quality_status,
+            freshness_status=freshness_status,
+            coverage_status=coverage_status,
+        )
+        decoded_cursor = (
+            _decode_cursor(
+                cursor,
+                patrol_batch_id=patrol_batch_id,
+                scope_digest=scope_digest,
+            )
+            if cursor
+            else None
+        )
+        cursor_values = (
+            decoded_cursor[0] if decoded_cursor is not None else None
+        )
+        cursor_total = (
+            decoded_cursor[1] if decoded_cursor is not None else None
+        )
         with self._session_scope() as db:
             batch = db.get(PatrolBatchRecord, patrol_batch_id)
             if batch is None:
@@ -353,18 +584,105 @@ class CheckItemBatchResultService:
                         CheckItemRecord.name.ilike(pattern),
                     )
                 )
-            total = int(query.count())
-            rows = (
-                query.order_by(
-                    PatrolBatchDeviceRecord.device_name,
-                    CheckExecutionRecord.device_id,
-                    CheckItemRecord.category,
-                    CheckItemRecord.id,
+            has_filters = any(
+                (
+                    pattern,
+                    assessment_status,
+                    completeness_status,
+                    source_identity_status,
+                    output_quality_status,
+                    freshness_status,
+                    coverage_status,
                 )
-                .offset(safe_offset)
-                .limit(safe_limit)
-                .all()
             )
+            if cursor_total is not None:
+                total = cursor_total
+            elif not has_filters:
+                total = int(
+                    db.query(func.count(CheckExecutionRecord.id))
+                    .filter(
+                        CheckExecutionRecord.patrol_batch_id
+                        == patrol_batch_id
+                    )
+                    .scalar()
+                    or 0
+                )
+            else:
+                total = int(
+                    query.with_entities(
+                        func.count(CheckExecutionRecord.id)
+                    )
+                    .order_by(None)
+                    .scalar()
+                    or 0
+                )
+            sort_expressions = (
+                CheckExecutionRecord.device_id,
+                CheckExecutionRecord.check_item_version_id,
+                CheckExecutionRecord.id,
+            )
+            if has_filters:
+                page_query = query.with_entities(
+                    CheckExecutionRecord.id.label("execution_id"),
+                    CheckExecutionRecord.device_id.label("device_id"),
+                    CheckExecutionRecord.check_item_version_id.label(
+                        "check_item_version_id"
+                    ),
+                )
+            else:
+                page_query = db.query(
+                    CheckExecutionRecord.id.label("execution_id"),
+                    CheckExecutionRecord.device_id.label("device_id"),
+                    CheckExecutionRecord.check_item_version_id.label(
+                        "check_item_version_id"
+                    ),
+                ).filter(
+                    CheckExecutionRecord.patrol_batch_id
+                    == patrol_batch_id
+                )
+            if cursor_values is not None:
+                page_query = page_query.filter(
+                    _keyset_after(sort_expressions, cursor_values)
+                )
+            page_query = page_query.order_by(*sort_expressions)
+            if cursor_values is None:
+                page_query = page_query.offset(safe_offset)
+            page_rows = (
+                page_query.limit(safe_limit + 1).all()
+            )
+            has_more = len(page_rows) > safe_limit
+            page_rows = page_rows[:safe_limit]
+            execution_ids = [
+                str(item.execution_id) for item in page_rows
+            ]
+            detail_rows = (
+                query.filter(
+                    CheckExecutionRecord.id.in_(execution_ids)
+                ).all()
+                if execution_ids
+                else []
+            )
+            detail_by_id = {
+                str(execution.id): (
+                    execution,
+                    assessment,
+                    check_version,
+                    check_item,
+                    target,
+                )
+                for (
+                    execution,
+                    assessment,
+                    check_version,
+                    check_item,
+                    target,
+                ) in detail_rows
+            }
+            rows = [
+                detail_by_id[execution_id]
+                for execution_id in execution_ids
+                if execution_id in detail_by_id
+            ]
             items = [
                 self._result_item(
                     execution,
@@ -381,12 +699,168 @@ class CheckItemBatchResultService:
                     target,
                 ) in rows
             ]
+            next_cursor = None
+            if has_more and page_rows:
+                last = page_rows[-1]
+                next_cursor = _encode_cursor(
+                    patrol_batch_id=patrol_batch_id,
+                    scope_digest=scope_digest,
+                    values=(
+                        str(last.device_id),
+                        str(last.check_item_version_id),
+                        str(last.execution_id),
+                    ),
+                    total=total,
+                )
             return {
                 "patrol_batch_id": patrol_batch_id,
                 "total": total,
                 "limit": safe_limit,
-                "offset": safe_offset,
+                "offset": 0 if cursor else safe_offset,
+                "pagination_mode": "cursor" if cursor else "offset",
+                "next_cursor": next_cursor,
+                "has_more": has_more,
                 "items": items,
+            }
+
+    def get_result_detail(
+        self,
+        patrol_batch_id: str,
+        execution_id: str,
+        *,
+        entry_limit: int = 50,
+        entry_offset: int = 0,
+    ) -> dict[str, Any]:
+        safe_entry_limit = min(max(int(entry_limit), 1), 200)
+        safe_entry_offset = max(int(entry_offset), 0)
+        with self._session_scope() as db:
+            batch = db.get(PatrolBatchRecord, str(patrol_batch_id))
+            if batch is None:
+                raise ValueError("patrol batch not found")
+            row = (
+                db.query(
+                    CheckExecutionRecord,
+                    CheckAssessmentRecord,
+                    CheckItemVersionRecord,
+                    CheckItemRecord,
+                    PatrolBatchDeviceRecord,
+                )
+                .join(
+                    CheckItemVersionRecord,
+                    CheckItemVersionRecord.id
+                    == CheckExecutionRecord.check_item_version_id,
+                )
+                .join(
+                    CheckItemRecord,
+                    CheckItemRecord.id == CheckItemVersionRecord.check_item_id,
+                )
+                .outerjoin(
+                    CheckAssessmentRecord,
+                    CheckAssessmentRecord.execution_id == CheckExecutionRecord.id,
+                )
+                .outerjoin(
+                    PatrolBatchDeviceRecord,
+                    and_(
+                        PatrolBatchDeviceRecord.patrol_batch_id
+                        == CheckExecutionRecord.patrol_batch_id,
+                        PatrolBatchDeviceRecord.device_id
+                        == CheckExecutionRecord.device_id,
+                    ),
+                )
+                .filter(
+                    CheckExecutionRecord.id == str(execution_id),
+                    CheckExecutionRecord.patrol_batch_id
+                    == str(patrol_batch_id),
+                )
+                .one_or_none()
+            )
+            if row is None:
+                raise ValueError("check result not found")
+            execution, assessment, check_version, check_item, target = row
+            result = self._result_item(
+                execution,
+                assessment,
+                check_version,
+                check_item,
+                target,
+            )
+            policy_snapshot = dict(
+                execution.assessment_policy_snapshot_json or {}
+            )
+            assessment_basis = (
+                dict(assessment.assessment_basis_json or {})
+                if assessment is not None
+                else {}
+            )
+            basis_entries = [
+                dict(entry)
+                for entry in assessment_basis.get("entries") or []
+                if isinstance(entry, dict)
+            ]
+            public_basis = {
+                **assessment_basis,
+                "entries": basis_entries[
+                    safe_entry_offset : safe_entry_offset + safe_entry_limit
+                ],
+            }
+            snapshot_present = bool(policy_snapshot)
+            basis_present = bool(assessment_basis)
+            evidence_refs = sorted(
+                {
+                    str(item)
+                    for item in [
+                        *(execution.evidence_refs_json or []),
+                        *(assessment_basis.get("evidence_refs") or []),
+                        *(
+                            reference
+                            for entry in assessment_basis.get("entries") or []
+                            if isinstance(entry, dict)
+                            for reference in entry.get("evidence_refs") or []
+                        ),
+                    ]
+                    if item is not None and str(item).strip()
+                }
+            )
+            return {
+                **result,
+                "schema_version": "patrol-check-result-detail/v1",
+                "assessment_policy_snapshot": policy_snapshot,
+                "assessment_basis": public_basis,
+                "assessment_basis_entries": {
+                    "total": len(basis_entries),
+                    "limit": safe_entry_limit,
+                    "offset": safe_entry_offset,
+                    "has_more": (
+                        safe_entry_offset + safe_entry_limit
+                        < len(basis_entries)
+                    ),
+                },
+                "evidence_refs": evidence_refs,
+                "integrity": {
+                    "policy_snapshot_present": snapshot_present,
+                    "policy_snapshot_valid": (
+                        validate_assessment_policy_snapshot(policy_snapshot)
+                        if snapshot_present
+                        else False
+                    ),
+                    "assessment_basis_present": basis_present,
+                    "assessment_basis_valid": (
+                        validate_assessment_basis(assessment_basis)
+                        if basis_present
+                        else False
+                    ),
+                    "policy_snapshot_digest_matches": bool(
+                        snapshot_present
+                        and str(policy_snapshot.get("digest") or "")
+                        == str(execution.assessment_policy_snapshot_digest or "")
+                    ),
+                    "assessment_basis_digest_matches": bool(
+                        basis_present
+                        and assessment is not None
+                        and str(assessment_basis.get("digest") or "")
+                        == str(assessment.assessment_basis_digest or "")
+                    ),
+                },
             }
 
     @staticmethod
@@ -397,8 +871,17 @@ class CheckItemBatchResultService:
         check_item: CheckItemRecord,
         target: PatrolBatchDeviceRecord | None,
     ) -> dict[str, Any]:
+        assessment_basis = (
+            dict(assessment.assessment_basis_json or {})
+            if assessment is not None
+            else {}
+        )
+        assessment_basis_summary = dict(
+            assessment_basis.get("summary") or {}
+        )
         return {
             "execution_id": str(execution.id),
+            "assessment_id": str(assessment.id) if assessment is not None else None,
             "device_id": str(execution.device_id),
             "device_name": (
                 target.device_name if target is not None else None
@@ -407,7 +890,10 @@ class CheckItemBatchResultService:
                 target.management_ip if target is not None else None
             ),
             "check_item_id": str(check_item.id),
-            "check_item_name": str(check_item.name),
+            "check_item_name": check_item_display_name(
+                str(check_item.id),
+                str(check_item.name),
+            ),
             "check_item_category": str(check_item.category),
             "check_item_version_id": str(check_version.id),
             "result_mode": str(check_version.result_mode),
@@ -508,6 +994,27 @@ class CheckItemBatchResultService:
                 execution.runtime_bundle_version_id
             ),
             "runtime_bundle_digest": execution.runtime_bundle_digest,
+            "assessment_policy_snapshot_digest": (
+                assessment.assessment_policy_snapshot_digest
+                if assessment is not None
+                else execution.assessment_policy_snapshot_digest
+            ),
+            "assessment_basis_digest": (
+                assessment.assessment_basis_digest
+                if assessment is not None
+                else None
+            ),
+            "assessment_basis_summary": {
+                "entry_count": int(
+                    assessment_basis_summary.get("entry_count") or 0
+                ),
+                "source_counts": dict(
+                    assessment_basis_summary.get("source_counts") or {}
+                ),
+                "status_counts": dict(
+                    assessment_basis_summary.get("status_counts") or {}
+                ),
+            },
             "comparison_context_id": execution.comparison_context_id,
             "observation_min_at": execution.observation_min_at,
             "observation_max_at": execution.observation_max_at,

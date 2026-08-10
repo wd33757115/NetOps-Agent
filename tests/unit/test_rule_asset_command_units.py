@@ -2,21 +2,24 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from src.core.parser.policy import ParserPolicy
 from src.core.check_items.catalog import CheckItemCatalogRepository
+from src.core.parser.policy import ParserPolicy
 from src.core.rule_control.command_asset_units import (
     RuleAssetCommandUnitService,
     _backfill_url,
     _bundle_url,
+    _catalog_projection_version,
     _child_stage_status,
     _generation_url,
     _latest_bundle_by_context,
+    _latest_context_by_seed_for_source,
     _parser_url,
 )
 from src.infrastructure.db.models import (
@@ -28,8 +31,9 @@ from src.infrastructure.db.models import (
     ParserTemplateJob,
     PatrolDataset,
     PatrolRun,
-    RuleAssetCommandUnitRecord,
     RuleAssetCommandUnitCheckItemRecord,
+    RuleAssetCommandUnitRecord,
+    RuleGenerationContextRecord,
     RuleGenerationJobRecord,
     SnapshotParseResult,
 )
@@ -38,6 +42,80 @@ from src.infrastructure.db.postgres import get_db_session
 
 def _query(url: str) -> dict[str, list[str]]:
     return parse_qs(urlparse(url).query)
+
+
+def test_catalog_projection_version_changes_for_any_active_implementation_revision():
+    repository = CheckItemCatalogRepository()
+    repository.bootstrap(actor="pytest-projection-fingerprint")
+    catalog = repository.load_active()
+    implementation = catalog.implementations[0]
+    revised = replace(
+        implementation,
+        version=implementation.version + 1,
+        version_id=f"{implementation.version_id}-revision",
+        digest="f" * 64,
+    )
+    revised_catalog = replace(
+        catalog,
+        implementations=tuple(
+            revised if item.version_id == implementation.version_id else item
+            for item in catalog.implementations
+        ),
+    )
+
+    assert revised_catalog.catalog_version == catalog.catalog_version
+    assert _catalog_projection_version(revised_catalog) != _catalog_projection_version(
+        catalog
+    )
+
+
+def test_command_unit_contexts_never_cross_offline_source_boundaries() -> None:
+    contexts = [
+        RuleGenerationContextRecord(
+            id="context-other-new",
+            job_id="seed-1",
+            offline_job_id="offline-other",
+            dataset_ids_json=["other"],
+            context_json={},
+            context_digest="digest-other-new",
+            privacy_report_json={},
+        ),
+        RuleGenerationContextRecord(
+            id="context-current-new",
+            job_id="seed-1",
+            offline_job_id="offline-current",
+            dataset_ids_json=["current"],
+            context_json={},
+            context_digest="digest-current-new",
+            privacy_report_json={},
+        ),
+        RuleGenerationContextRecord(
+            id="context-current-old",
+            job_id="seed-1",
+            offline_job_id="offline-current",
+            dataset_ids_json=["current"],
+            context_json={},
+            context_digest="digest-current-old",
+            privacy_report_json={},
+        ),
+        RuleGenerationContextRecord(
+            id="context-legacy-unscoped",
+            job_id="seed-2",
+            offline_job_id=None,
+            dataset_ids_json=[],
+            context_json={},
+            context_digest="digest-legacy-unscoped",
+            privacy_report_json={},
+        ),
+    ]
+
+    selected = _latest_context_by_seed_for_source(
+        contexts,
+        "offline-current",
+    )
+
+    assert set(selected) == {"seed-1"}
+    assert selected["seed-1"].id == "context-current-new"
 
 
 def test_command_asset_actions_use_product_workspaces() -> None:
@@ -89,6 +167,328 @@ def test_command_asset_actions_use_product_workspaces() -> None:
     assert bundle_query["subtab"] == ["asset-production-units"]
     assert bundle_query["action"] == ["release"]
     assert bundle_query["bundle_id"] == ["bundle-1"]
+
+
+def test_check_item_projection_ignores_assets_not_required_by_profile() -> None:
+    child = {
+        "governance_status": "failed",
+        "governance_bucket": "exception",
+        "component_statuses": {
+            "parser": "published",
+            "contract": "published",
+            "policy": "failed",
+            "event": "blocked",
+        },
+    }
+    plan = {
+        "check_item": {
+            "id": "device.version",
+            "version_id": "check-version-v2",
+        },
+        "implementation": {
+            "version_id": "h3c-device-version-v1",
+        },
+        "asset_requirement_profile": {
+            "requirements": {
+                "identity_policy": {"required": True},
+                "parser_template": {"required": True},
+                "observation_contract": {"required": True},
+                "current_state_rule": {"required": False},
+                "change_policy": {"required": False},
+                "event_rule": {"required": False},
+                "comparison_profile": {"required": False},
+            },
+        },
+        "selected": {
+            "entity_identity_policy_version_id": "identity-v1",
+            "parser_template_ids": ["parser-v1"],
+            "observation_contract_ids": ["contract-v1"],
+            "change_policy_version_ids": [],
+            "event_rule_version_ids": [],
+        },
+        "compatibility": {},
+        "candidates": {},
+        "operationally_ready": True,
+        "active_bundle": None,
+        "blockers": [],
+        "warnings": [],
+        "preview_digest": "preview-1",
+    }
+
+    projected = RuleAssetCommandUnitService._project_check_item_implementation(
+        child,
+        plan,
+    )
+
+    assert projected["component_statuses"] == {
+        "identity": "published",
+        "parser": "published",
+        "contract": "published",
+        "current_state": "not_applicable",
+        "policy": "not_applicable",
+        "event": "not_applicable",
+        "comparison": "not_applicable",
+        "runtime_bundle": "ready_to_generate",
+    }
+    assert projected["source_governance_status"] == "failed"
+    assert projected["governance_status"] == "ready_to_generate"
+    assert projected["governance_bucket"] == "action_required"
+    assert projected["next_action"]["code"] == "assemble_runtime_bundle"
+    target_query = _query(projected["next_action"]["target_url"])
+    assert target_query["check_item_version_id"] == ["check-version-v2"]
+    assert target_query["implementation_version_id"] == [
+        "h3c-device-version-v1"
+    ]
+
+
+def test_check_item_projection_separates_current_state_and_change_event_rules() -> None:
+    child = {
+        "governance_status": "published",
+        "governance_bucket": "published",
+        "component_statuses": {
+            "parser": "published",
+            "contract": "published",
+            "policy": "published",
+            "event": "published",
+        },
+    }
+    plan = {
+        "check_item": {
+            "id": "system.cpu_usage",
+            "version_id": "check-cpu-v5",
+        },
+        "implementation": {
+            "version_id": "h3c-cpu-v1",
+        },
+        "asset_requirement_profile": {
+            "requirements": {
+                "identity_policy": {"required": True},
+                "parser_template": {"required": True},
+                "observation_contract": {"required": True},
+                "current_state_rule": {
+                    "required": True,
+                    "required_observation_types": [
+                        "device.cpu.utilization"
+                    ],
+                },
+                "change_policy": {
+                    "required": True,
+                    "required_observation_types": [
+                        "device.cpu.utilization"
+                    ],
+                },
+                "event_rule": {"required": True},
+                "comparison_profile": {"required": False},
+            },
+        },
+        "selected": {
+            "entity_identity_policy_version_id": "identity-v1",
+            "parser_template_ids": ["parser-v1"],
+            "observation_contract_ids": ["contract-v1"],
+            "change_policy_version_ids": ["policy-v1"],
+            "event_rule_version_ids": ["event-change-v1"],
+        },
+        "compatibility": {
+            "current_state_rule_types": [],
+            "change_policy_types": ["device.cpu.utilization"],
+        },
+        "candidates": {
+            "event_rules": [{"version_id": "event-change-v1"}],
+        },
+        "operationally_ready": False,
+        "active_bundle": None,
+        "blockers": [
+            {
+                "code": "current_state_event_rule_missing",
+                "message": "缺少当前状态规则。",
+            }
+        ],
+        "warnings": [],
+    }
+
+    projected = RuleAssetCommandUnitService._project_check_item_implementation(
+        child,
+        plan,
+    )
+
+    assert projected["component_statuses"]["current_state"] == "blocked"
+    assert projected["component_statuses"]["policy"] == "published"
+    assert projected["component_statuses"]["event"] == "published"
+    assert projected["component_statuses"]["runtime_bundle"] == "blocked"
+    assert projected["governance_status"] == "blocked"
+    assert projected["governance_bucket"] == "action_required"
+    assert projected["next_action"]["code"] == "inspect_runtime_bundle"
+
+
+def test_check_item_projection_keeps_upstream_parser_action_before_runtime_bundle() -> None:
+    child = {
+        "governance_status": "ready_to_generate",
+        "governance_bucket": "action_required",
+        "current_stage": "parser_generation",
+        "current_stage_label": "Parser 生成",
+        "next_action": {
+            "code": "open_parser_job",
+            "label": "生成 Parser",
+            "target_url": "/skills/parser?action=parser&command=show+interface+status",
+        },
+        "component_statuses": {
+            "parser": "ready_to_generate",
+            "contract": "not_started",
+        },
+    }
+    plan = {
+        "check_item": {
+            "id": "interface.oper_status",
+            "version_id": "check-interface-v1",
+        },
+        "implementation": {
+            "version_id": "cisco-interface-status-v1",
+        },
+        "asset_requirement_profile": {
+            "requirements": {
+                "identity_policy": {"required": True},
+                "parser_template": {"required": True},
+                "observation_contract": {"required": True},
+                "current_state_rule": {"required": False},
+                "change_policy": {"required": False},
+                "event_rule": {"required": False},
+                "comparison_profile": {"required": False},
+            },
+        },
+        "selected": {"entity_identity_policy_version_id": "identity-v1"},
+        "compatibility": {},
+        "candidates": {},
+        "operationally_ready": False,
+        "active_bundle": None,
+        "blockers": [
+            {
+                "code": "parser_template_missing",
+                "message": "missing Parser template",
+            }
+        ],
+        "warnings": [],
+    }
+
+    projected = RuleAssetCommandUnitService._project_check_item_implementation(
+        child,
+        plan,
+    )
+
+    assert projected["next_action"] == child["next_action"]
+    assert projected["current_stage"] == "parser_generation"
+    assert projected["current_stage_label"] == "Parser 生成"
+
+
+def test_catalog_binding_overrides_legacy_ignored_mode_for_non_empty_output() -> None:
+    unit = {
+        "handling": "not_applicable",
+        "asset_mode": "ignored",
+        "has_non_empty_output": True,
+    }
+    catalog = SimpleNamespace(
+        check_items=[
+            SimpleNamespace(id="network.arp_table", result_mode="structured")
+        ]
+    )
+
+    RuleAssetCommandUnitService._apply_catalog_asset_mode(
+        unit,
+        [{"check_item_id": "network.arp_table"}],
+        catalog=catalog,
+    )
+
+    assert unit["handling"] == "structured"
+    assert unit["asset_mode"] == "full_chain"
+
+
+def test_catalog_binding_keeps_confirmed_empty_output_not_applicable() -> None:
+    unit = {
+        "handling": "not_applicable",
+        "asset_mode": "ignored",
+        "has_non_empty_output": False,
+    }
+    catalog = SimpleNamespace(
+        check_items=[
+            SimpleNamespace(id="redundancy.mlag", result_mode="structured")
+        ]
+    )
+
+    RuleAssetCommandUnitService._apply_catalog_asset_mode(
+        unit,
+        [{"check_item_id": "redundancy.mlag"}],
+        catalog=catalog,
+    )
+
+    assert unit["handling"] == "not_applicable"
+    assert unit["asset_mode"] == "ignored"
+
+
+def test_mapped_confirmed_empty_output_does_not_require_runtime_assets() -> None:
+    child = {
+        "handling": "not_applicable",
+        "asset_mode": "ignored",
+        "governance_status": "not_applicable",
+        "governance_bucket": "not_applicable",
+        "component_statuses": {},
+    }
+    plan = {
+        "asset_requirement_profile": {"requirements": {}},
+        "blockers": [{"code": "parser_template_missing"}],
+        "preview_digest": "preview-empty",
+    }
+
+    projected = RuleAssetCommandUnitService._project_check_item_implementation(
+        child,
+        plan,
+    )
+
+    assert projected["governance_status"] == "not_applicable"
+    assert projected["governance_bucket"] == "not_applicable"
+    assert projected["blocker_count"] == 0
+    assert projected["next_action"] is None
+    assert set(projected["component_statuses"].values()) == {"not_applicable"}
+
+
+def test_unclassified_ignored_commands_do_not_create_false_exceptions() -> None:
+    child = {
+        "id": "ignored-command",
+        "governance_status": "not_applicable",
+        "governance_bucket": "not_applicable",
+        "current_stage": "release",
+        "current_stage_label": "not applicable",
+        "progress_percent": 100,
+        "blocker_count": 0,
+        "sample_count": 2,
+        "device_count": 1,
+        "output_signature_count": 1,
+        "canonical_command": "show clock",
+        "vendor": "Cisco",
+        "profile": "N9K-C9364C",
+        "component_statuses": {
+            component: "not_applicable"
+            for component in (
+                "identity",
+                "parser",
+                "contract",
+                "current_state",
+                "policy",
+                "event",
+                "comparison",
+                "runtime_bundle",
+            )
+        },
+        "next_action": None,
+    }
+
+    result = RuleAssetCommandUnitService._rollup_check_item_group(
+        "__unclassified__",
+        {"check_item_id": None, "implementations": [child]},
+    )
+
+    assert result["governance_status"] == "not_applicable"
+    assert result["governance_bucket"] == "not_applicable"
+    assert result["blocker_count"] == 0
+    assert result["next_action"] is None
 
 
 def _snapshot(
@@ -304,15 +704,14 @@ def test_command_units_deduplicate_evidence_and_keep_asset_boundaries():
         assert len(detail["stages"]) == 10
         assert len(detail["evidence"]) == 3
         assert all("raw_text" not in item for item in detail["evidence"])
-        generation_actions = [
+        visible_actions = [
             stage["next_action"]
             for stage in detail["stages"]
-            if (stage.get("next_action") or {}).get("code") == "generate_rule_asset_bundle"
+            if stage.get("next_action")
         ]
-        assert len(generation_actions) == 1
-        generation_url = generation_actions[0]["target_url"]
-        assert f"source_job_id={job_id}" in generation_url
-        assert f"dataset_ids={dataset_id}" in generation_url
+        assert visible_actions == [detail["next_action"]]
+        assert detail["next_action"]["code"] == "open_parser_job"
+        assert f"source_job_id={job_id}" in detail["next_action"]["target_url"]
         paged_detail = service.get_unit(
             job_id,
             h3c_interface["id"],
@@ -576,6 +975,7 @@ def test_command_unit_projection_uses_latest_successful_reparse_as_effective_sta
         service.reconcile(job_id)
         unit = service.list_units(job_id, page=1, page_size=10)["items"][0]
         assert unit["parse_counts"] == {"success": 1}
+        assert unit["output_signature_count"] == 1
         assert unit["stage_statuses"]["structured_quality"] == "passed"
         assert unit["current_stage"] == "observation_contract"
         assert unit["rule_seed_job_id"]
@@ -621,7 +1021,10 @@ def test_command_unit_projection_uses_latest_successful_reparse_as_effective_sta
                 "target_url": "/stale",
             }
         refreshed = service.list_units(job_id, page=1, page_size=10)["items"][0]
-        assert refreshed["projection_version"] == 4
+        expected_projection_version = _catalog_projection_version(
+            CheckItemCatalogRepository().load_active()
+        )
+        assert refreshed["projection_version"] == expected_projection_version
         assert refreshed["next_action"]["code"] == "generate_rule_asset_bundle"
         assert refreshed["next_action"]["label"] == "生成完整规则资产包"
     finally:
@@ -710,42 +1113,16 @@ def test_parser_job_state_changes_refresh_linked_offline_command_units():
     try:
         service.reconcile(offline_job_id)
         initial = service.list_units(offline_job_id, page=1, page_size=10)["items"][0]
-        assert initial["parser_job_id"] is None
+        assert initial["parser_job_id"]
+        parser_job_id = initial["parser_job_id"]
 
         with get_db_session() as db:
-            db.add(
-                ParserTemplateJob(
-                    id=parser_job_id,
-                    job_type="CREATE_TEMPLATE",
-                    source_mode="parser_validation",
-                    vendor="H3C",
-                    model="S6520",
-                    profile="S6520",
-                    canonical_command=command,
-                    output_signature="a" * 64,
-                    idempotency_key=f"parser-refresh-{suffix}",
-                    status="failed",
-                    pipeline_version="simple_v2",
-                    parser_spec_status="confirmed",
-                    sample_count=1,
-                    failure_code="generation_validation_failed",
-                    last_error="candidate did not pass validation",
-                )
-            )
-            db.add(
-                ParserJobSample(
-                    id=f"parser-sample-refresh-{suffix}",
-                    job_id=parser_job_id,
-                    snapshot_id=snapshot_id,
-                    device_id="SW1",
-                    output_signature="a" * 64,
-                    dataset_id=dataset_id,
-                    sample_role="generation",
-                    sanitization_status="sanitized",
-                    sanitized_text="Interface Status\nGE1/0/1 UP",
-                    sanitized_hash="b" * 64,
-                )
-            )
+            parser_job = db.get(ParserTemplateJob, parser_job_id)
+            assert parser_job is not None
+            parser_job.status = "failed"
+            parser_job.parser_spec_status = "confirmed"
+            parser_job.failure_code = "generation_validation_failed"
+            parser_job.last_error = "candidate did not pass validation"
 
         failed_refresh = service.reconcile_for_parser_job(parser_job_id)
         assert failed_refresh["offline_job_ids"] == [offline_job_id]
@@ -790,6 +1167,18 @@ class _PolicyRepository:
     @staticmethod
     def list_command_aliases():
         return []
+
+
+def test_parser_policy_preserves_ios_env_all_and_expands_known_env_aliases():
+    policy = ParserPolicy(repository=_PolicyRepository())
+
+    assert policy.normalize_command("show env all") == "show env all"
+    assert policy.normalize_command("show environment all") == "show env all"
+    assert policy.normalize_command("show env fan") == "show environment fan"
+    assert policy.normalize_command("show env power") == "show environment power"
+    assert policy.normalize_command("show env temperature") == (
+        "show environment temperature"
+    )
 
 
 def test_parser_policy_exposes_all_governed_semantic_asset_modes(tmp_path):
@@ -875,6 +1264,72 @@ def test_command_unit_stages_respect_semantic_asset_mode(
 
     assert by_key["change_policy"] == policy_status
     assert by_key["event_rule"] == event_status
+
+
+def test_command_unit_uses_bundle_requirements_instead_of_legacy_full_chain_mode():
+    requirements = {
+        "schema_version": "rule-asset-requirements/v1",
+        "requires_observation_contract": True,
+        "requires_change_policy": False,
+        "requires_current_state_rule": False,
+        "requires_event_rule": False,
+        "requires_event_rule_assets": False,
+        "requires_historical_replay": False,
+    }
+    unit = {
+        "vendor": "Cisco",
+        "profile": "WS-C2960XR-24TS-I",
+        "models": {"WS-C2960XR-24TS-I"},
+        "command": "show ip interface brief",
+        "asset_mode": "full_chain",
+        "sample_count": 2,
+        "device_count": 1,
+        "structured_count": 118,
+        "parse_counts": {"parsed": 2},
+    }
+    bundle = SimpleNamespace(
+        id="bundle-contract-only",
+        status="active",
+        payload_json={"asset_requirements": requirements},
+        validation_report_json={
+            "success": True,
+            "bundle_gate": {
+                "success": True,
+                "asset_requirements": requirements,
+            },
+            "context_gate": {"success": True},
+            "historical_replay": None,
+        },
+    )
+
+    stages = RuleAssetCommandUnitService()._build_stages(
+        offline_job_id="offline-contract-only",
+        unit=unit,
+        parser_job=None,
+        template=SimpleNamespace(id="template-contract-only", status="active"),
+        active_contract=SimpleNamespace(id="contract-active"),
+        seed=None,
+        context=None,
+        bundle=bundle,
+        children=[
+            SimpleNamespace(
+                id="contract-child",
+                asset_type="OBSERVATION_CONTRACT",
+                status="active",
+                validation_report_json={"success": True},
+            )
+        ],
+        output_signature_count=1,
+    )
+    by_key = {stage["key"]: stage["status"] for stage in stages}
+    current, overall, progress, next_action = RuleAssetCommandUnitService._rollup(stages)
+
+    assert unit["asset_mode"] == "observation_only"
+    assert by_key["change_policy"] == "skipped"
+    assert by_key["event_rule"] == "skipped"
+    assert by_key["validation_review"] == "passed"
+    assert by_key["release"] == "passed"
+    assert (current, overall, progress, next_action) == ("release", "completed", 100, None)
 
 
 def test_product_command_asset_list_deduplicates_latest_units_and_enforces_owner_scope():
@@ -1030,6 +1485,20 @@ def test_product_command_asset_list_deduplicates_latest_units_and_enforces_owner
             page_size=10,
         )
         assert filtered["total"] == 1
+        model_filtered = service.list_production_units(
+            owner_id=owner_id,
+            model="S5130S",
+            page=1,
+            page_size=10,
+        )
+        assert model_filtered["total"] == 1
+        model_miss = service.list_production_units(
+            owner_id=owner_id,
+            model="S5130S-NOT-PRESENT",
+            page=1,
+            page_size=10,
+        )
+        assert model_miss["total"] == 0
 
         admin_page = service.list_production_units(
             owner_id=owner_id,
@@ -1059,10 +1528,12 @@ def test_check_item_workbench_groups_catalog_implementations_and_blocks_unclassi
     job_id = f"offline-check-item-production-{suffix}"
     memory_unit_id = f"command-memory-{suffix}"
     unknown_unit_id = f"command-unclassified-{suffix}"
+    ignored_unit_id = f"command-ignored-{suffix}"
     now = datetime.now(timezone.utc)
     catalog_repository = CheckItemCatalogRepository()
     catalog_repository.bootstrap(actor="pytest-check-item-workbench")
     catalog = catalog_repository.load_active()
+    projection_version = _catalog_projection_version(catalog)
     memory_item = catalog.check_item("system.memory_usage")
     memory_implementation = next(
         item for item in catalog.implementations if item.id == "h3c-memory-usage"
@@ -1074,6 +1545,7 @@ def test_check_item_workbench_groups_catalog_implementations_and_blocks_unclassi
         unit_id: str,
         asset_key: str,
         command: str,
+        asset_mode: str = "full_chain",
     ) -> RuleAssetCommandUnitRecord:
         return RuleAssetCommandUnitRecord(
             id=unit_id,
@@ -1085,7 +1557,7 @@ def test_check_item_workbench_groups_catalog_implementations_and_blocks_unclassi
             profile="S5130S",
             canonical_command=command,
             handling="structured",
-            asset_mode="full_chain",
+            asset_mode=asset_mode,
             status="completed",
             current_stage="release",
             progress_percent=100,
@@ -1102,7 +1574,7 @@ def test_check_item_workbench_groups_catalog_implementations_and_blocks_unclassi
                 {"key": "release", "status": "passed"},
             ],
             next_action_json=None,
-            projection_version=4,
+            projection_version=projection_version,
             created_at=now,
             updated_at=now,
         )
@@ -1135,6 +1607,12 @@ def test_check_item_workbench_groups_catalog_implementations_and_blocks_unclassi
                     asset_key=f"asset-unknown-{suffix}",
                     command="display vendor-special-state",
                 ),
+                unit(
+                    unit_id=ignored_unit_id,
+                    asset_key=f"asset-ignored-{suffix}",
+                    command="screen-length disable",
+                    asset_mode="ignored",
+                ),
             ]
         )
         db.flush()
@@ -1160,13 +1638,18 @@ def test_check_item_workbench_groups_catalog_implementations_and_blocks_unclassi
             page=1,
             page_size=10,
         )
-        assert page["total"] == 2
+        assert page["total"] == 3
         memory_group = next(
             item
             for item in page["items"]
             if item["check_item_id"] == "system.memory_usage"
         )
         assert memory_group["implementation_count"] == 1
+        assert memory_group["name"] == "Memory utilization"
+        assert memory_group["display_name"] == "内存使用率"
+        assert memory_group["display_description"] == (
+            "评估设备或槽位的内存容量与使用率。"
+        )
         assert memory_group["command_count"] == 1
         assert memory_group["implementations"][0]["canonical_command"] == (
             "display memory"
@@ -1187,16 +1670,28 @@ def test_check_item_workbench_groups_catalog_implementations_and_blocks_unclassi
         assert unclassified["current_stage"] == "identity_grouping"
         assert unclassified["next_action"]["code"] == "classify_check_item"
         assert page["summary"]["unclassified"] == 1
+
+        ignored = next(
+            item
+            for item in page["items"]
+            if item["category"] == "not_applicable"
+        )
+        assert ignored["display_name"] == "无需规则命令"
+        assert ignored["governance_status"] == "not_applicable"
+        assert ignored["governance_bucket"] == "not_applicable"
+        assert ignored["classification_required"] is False
+        assert ignored["next_action"] is None
+        assert ignored["implementations"][0]["mapping_status"] == "not_required"
     finally:
         with get_db_session() as db:
             db.query(RuleAssetCommandUnitCheckItemRecord).filter(
                 RuleAssetCommandUnitCheckItemRecord.command_unit_id.in_(
-                    [memory_unit_id, unknown_unit_id]
+                    [memory_unit_id, unknown_unit_id, ignored_unit_id]
                 )
             ).delete(synchronize_session=False)
             db.query(RuleAssetCommandUnitRecord).filter(
                 RuleAssetCommandUnitRecord.id.in_(
-                    [memory_unit_id, unknown_unit_id]
+                    [memory_unit_id, unknown_unit_id, ignored_unit_id]
                 )
             ).delete(synchronize_session=False)
             db.query(OfflinePatrolJobRecord).filter(

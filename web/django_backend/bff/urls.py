@@ -98,6 +98,11 @@ urlpatterns = [
         name="bff_patrol_batch_restore",
     ),
     path(
+        "workflows/runs/patrol-batches/<str:patrol_batch_id>/cancel/",
+        workflows.proxy_patrol_batch_cancel,
+        name="bff_patrol_batch_cancel",
+    ),
+    path(
         "workflows/runs/patrol-batches/<str:patrol_batch_id>/rerun/",
         workflows.proxy_patrol_batch_rerun,
         name="bff_patrol_batch_rerun",
@@ -138,9 +143,19 @@ urlpatterns = [
         name="bff_patrol_batch_leadership_report",
     ),
     path(
+        "workflows/runs/patrol-batches/<str:patrol_batch_id>/report.xlsx",
+        workflows.proxy_patrol_batch_technical_workbook,
+        name="bff_patrol_batch_technical_workbook",
+    ),
+    path(
         "workflows/runs/patrol-batches/<str:patrol_batch_id>/report.json",
         workflows.proxy_patrol_batch_leadership_report_json,
         name="bff_patrol_batch_leadership_report_json",
+    ),
+    path(
+        "workflows/runs/patrol-batches/<str:patrol_batch_id>/evidence.zip",
+        workflows.proxy_patrol_batch_evidence_package,
+        name="bff_patrol_batch_evidence_package",
     ),
     path("workflows/runs/test/", workflows.proxy_workflow_test_run, name="bff_workflow_test_run"),
     path("workflows/<str:run_id>/timeline/", workflows.proxy_workflow_timeline, name="bff_workflow_timeline"),

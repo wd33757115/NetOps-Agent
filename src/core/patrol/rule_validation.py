@@ -795,9 +795,15 @@ def validate_event_rule_condition(condition: dict[str, Any]) -> list[str]:
         if condition_kind != "raw_config_hash":
             keys.add("observation_types")
             keys.add("dimensions")
+        if condition_kind.startswith("threshold"):
+            keys.add("threshold_role")
     unknown_keys = sorted(set(condition) - allowed_keys[kind])
     if unknown_keys:
         errors.append(f"condition contains unsupported keys for {kind}: " + ", ".join(unknown_keys))
+    if "threshold_role" in condition and not str(
+        condition.get("threshold_role") or ""
+    ).strip():
+        errors.append("condition.threshold_role must be a non-empty string")
 
     def require_list(key: str) -> None:
         value = condition.get(key)

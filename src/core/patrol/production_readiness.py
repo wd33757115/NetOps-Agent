@@ -44,6 +44,7 @@ class PatrolProductionReadinessService:
         *,
         workflow_name: str = "patrol-change-event",
         launch_mode: str = "workflow",
+        executing_worker_queues: list[str] | None = None,
     ) -> dict[str, Any]:
         workflow_check = self._check_workflow(workflow_name, launch_mode)
         required_queues = list(
@@ -55,7 +56,10 @@ class PatrolProductionReadinessService:
             self._check_database_schema(),
             self._check_redis(),
             self._check_celery_broker(),
-            self._check_celery_queues(required_queues),
+            self._check_celery_queues(
+                required_queues,
+                executing_worker_queues=executing_worker_queues,
+            ),
             self._check_celery_beat(),
             self._check_minio(),
             workflow_check,
@@ -183,17 +187,46 @@ class PatrolProductionReadinessService:
             probe=probe,
         )
 
-    def _check_celery_queues(self, required_queues: list[str]) -> PatrolReadinessCheck:
+    def _check_celery_queues(
+        self,
+        required_queues: list[str],
+        *,
+        executing_worker_queues: list[str] | None = None,
+    ) -> PatrolReadinessCheck:
         queues = sorted({str(item).strip() for item in required_queues if str(item).strip()})
+        current_task_queues = sorted(
+            {
+                str(item).strip()
+                for item in executing_worker_queues or []
+                if str(item).strip() in queues
+            }
+        )
 
         def probe():
             from src.core.celery_tasks.celery_app import celery
             from src.core.celery_tasks.celery_exec import CELERY_INSPECT_TIMEOUT
 
-            responses = celery.control.inspect(timeout=CELERY_INSPECT_TIMEOUT).active_queues()
-            if not responses:
+            inspect_queues = [
+                queue for queue in queues if queue not in current_task_queues
+            ]
+            responses = {}
+            if inspect_queues:
+                responses = (
+                    celery.control.inspect(
+                        timeout=CELERY_INSPECT_TIMEOUT
+                    ).active_queues()
+                    or {}
+                )
+            if not responses and inspect_queues:
                 raise RuntimeError("没有 Celery Worker 响应队列检查")
-            consumers: dict[str, list[str]] = {queue: [] for queue in queues}
+            consumers: dict[str, list[str]] = {
+                queue: (
+                    ["current-task@trusted-delivery"]
+                    if queue in current_task_queues
+                    else []
+                )
+                for queue in queues
+            }
             observed: dict[str, list[str]] = {}
             for worker_name, worker_queues in responses.items():
                 names = sorted(
@@ -212,6 +245,7 @@ class PatrolProductionReadinessService:
                 "required_queues": queues,
                 "queue_consumers": consumers,
                 "workers": observed,
+                "current_task_queues": current_task_queues,
             }
             if missing:
                 return (

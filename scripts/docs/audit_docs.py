@@ -17,6 +17,13 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_REGISTRY = ROOT / "docs" / "document-governance.yaml"
 ALLOWED_STATUSES = {"proposed", "active", "superseded", "archived"}
 LINK_RE = re.compile(r"!?\[[^\]]*]\((?P<target>[^)]+)\)")
+GOVERNED_INDEX_RE = re.compile(
+    r"<!--\s*governed-index:\s*(?P<status>active|proposed|historical)\s*-->"
+)
+DOCUMENT_STATUS_RE = re.compile(
+    r"<!--\s*document-status:\s*(?P<status>superseded|archived)\s*-->"
+)
+STATUS_BANNER_LINE_LIMIT = 20
 
 
 def _date(value: Any, *, label: str) -> date:
@@ -189,8 +196,16 @@ def audit(
         else sorted(registered)
     )
     broken_links: list[str] = []
+    index_status_violations: list[str] = []
+    status_banner_violations: list[str] = []
+    rows_by_absolute = {
+        row["absolute"].resolve(): row
+        for row in rows.values()
+        if row["absolute"].is_file()
+    }
     for source in link_sources:
         text = source.read_text(encoding="utf-8")
+        index_markers = list(GOVERNED_INDEX_RE.finditer(text))
         for match in LINK_RE.finditer(text):
             raw_target = match.group("target")
             target = _local_link_target(source, raw_target)
@@ -202,7 +217,72 @@ def audit(
                     f"{source.relative_to(docs_root).as_posix()}:{line}: "
                     f"broken link {raw_target}"
                 )
+                continue
+            marker = next(
+                (
+                    item
+                    for item in reversed(index_markers)
+                    if item.start() < match.start()
+                ),
+                None,
+            )
+            if marker is None:
+                continue
+            index_status = marker.group("status")
+            if index_status == "historical":
+                continue
+            target_row = rows_by_absolute.get(target.resolve())
+            if target_row is None:
+                continue
+            expected_status = index_status
+            if target_row["status"] != expected_status:
+                line = text.count("\n", 0, match.start()) + 1
+                index_status_violations.append(
+                    f"{source.relative_to(docs_root).as_posix()}:{line}: "
+                    f"{index_status} index links to "
+                    f"{target_row['status']} document {target_row['path']}"
+                )
+
+    for key, row in rows.items():
+        source = row["absolute"]
+        if not source.is_file():
+            continue
+        text = source.read_text(encoding="utf-8")
+        head = "\n".join(text.splitlines()[:STATUS_BANNER_LINE_LIMIT])
+        marker = DOCUMENT_STATUS_RE.search(head)
+        if row["status"] == "superseded":
+            if marker is None or marker.group("status") != "superseded":
+                status_banner_violations.append(
+                    f"{key}: superseded document requires a "
+                    "document-status marker in the first "
+                    f"{STATUS_BANNER_LINE_LIMIT} lines"
+                )
+                continue
+            replacement = rows.get(
+                str(row.get("superseded_by") or "").replace("\\", "/")
+            )
+            replacement_target = (
+                replacement["absolute"].resolve()
+                if replacement is not None
+                else None
+            )
+            has_replacement_link = any(
+                _local_link_target(source, match.group("target"))
+                == replacement_target
+                for match in LINK_RE.finditer(head)
+            )
+            if not has_replacement_link:
+                status_banner_violations.append(
+                    f"{key}: superseded banner must link to "
+                    f"{row.get('superseded_by')}"
+                )
+        elif marker is not None and marker.group("status") == "superseded":
+            status_banner_violations.append(
+                f"{key}: {row['status']} document contains a superseded marker"
+            )
     errors.extend(broken_links)
+    errors.extend(index_status_violations)
+    errors.extend(status_banner_violations)
 
     return {
         "success": not errors,
@@ -219,6 +299,8 @@ def audit(
         ),
         "unregistered_count": len(unregistered),
         "broken_link_count": len(broken_links),
+        "index_status_violation_count": len(index_status_violations),
+        "status_banner_violation_count": len(status_banner_violations),
         "errors": errors,
         "warnings": warnings,
     }
@@ -269,7 +351,9 @@ def main() -> int:
         f"superseded={result['superseded_count']} "
         f"archived={result['archived_count']} "
         f"unregistered={result['unregistered_count']} "
-        f"broken_links={result['broken_link_count']}"
+        f"broken_links={result['broken_link_count']} "
+        f"index_status_violations={result['index_status_violation_count']} "
+        f"status_banner_violations={result['status_banner_violation_count']}"
     )
     return 0 if result["success"] else 1
 

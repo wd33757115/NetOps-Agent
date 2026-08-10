@@ -17,6 +17,9 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.core.patrol.change_policy import normalize_dimension_selector  # noqa: E402
+from src.core.patrol.event_constraint_governance import (  # noqa: E402
+    scope_event_constraints_to_policy,
+)
 from src.core.patrol.event_rule_compiler import (  # noqa: E402
     compile_event_rule_intents,
     govern_event_rule_severity,
@@ -27,6 +30,10 @@ from src.core.patrol.event_rule_generation import (  # noqa: E402
 )
 from src.core.patrol.event_rules import EventRuleDefinition  # noqa: E402
 from src.core.patrol.rule_validation import validate_event_rule_definition  # noqa: E402
+from src.core.rule_control.asset_requirements import (  # noqa: E402
+    event_rule_role_errors,
+    normalize_rule_asset_requirements,
+)
 from src.core.rule_control.generation_agent import (  # noqa: E402
     DEFAULT_RULE_GENERATION_PROVIDERS,
     RuleGenerationAgent,
@@ -57,7 +64,7 @@ def _agent_loop(result: dict[str, Any], params: dict[str, Any]) -> dict[str, Any
                 "event rule generation or deterministic validation failed",
             ],
             "required_fixes": [
-                "match rules to the contract entity_type",
+                "match rules to the contract canonical runtime entity type",
                 "keep recovery rules from matching initial observations",
                 "include entity_types so status/state fields are not misclassified",
                 "keep dedupe and resolves semantics compatible with event lifecycle",
@@ -79,7 +86,12 @@ def _agent_loop(result: dict[str, Any], params: dict[str, Any]) -> dict[str, Any
                 "mode": "generate_and_validate",
                 "success": success,
                 "input_summary": {
-                    "entity_type": (params.get("contract") or {}).get("entity_type")
+                    "entity_type": (
+                        (params.get("contract") or {}).get(
+                            "canonical_entity_type"
+                        )
+                        or (params.get("contract") or {}).get("entity_type")
+                    )
                     if isinstance(params.get("contract"), dict)
                     else None,
                     "observation_type": (params.get("change_policy") or {}).get("observation_type")
@@ -115,6 +127,7 @@ def _validate_llm_rules(
     change_policy: dict[str, Any],
     event_constraints: dict[str, Any] | None = None,
     reserved_fault_event_types: dict[str, str] | None = None,
+    rule_asset_requirements: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     rules = candidate.get("rules") or []
     if not isinstance(rules, list) or not rules:
@@ -124,6 +137,7 @@ def _validate_llm_rules(
         contract=contract,
         change_policy=change_policy,
         event_constraints=dict(event_constraints or {}),
+        rule_asset_requirements=dict(rule_asset_requirements or {}),
     )
     rules = list(compilation.get("rules") or [])
     declared_fields = {
@@ -133,7 +147,11 @@ def _validate_llm_rules(
             *(contract.get("optional_fields") or []),
         ]
     }
-    entity_type = str(contract.get("entity_type") or "").strip()
+    entity_type = str(
+        contract.get("canonical_entity_type")
+        or contract.get("entity_type")
+        or ""
+    ).strip()
     reports: list[dict[str, Any]] = []
     errors: list[str] = [str(item) for item in compilation.get("errors") or []]
     fault_event_types: set[str] = set()
@@ -188,10 +206,15 @@ def _validate_llm_rules(
         entity_types = {str(value) for value in condition.get("entity_types") or []}
         if condition.get("kind") != "raw_config_hash" and not entity_types:
             errors.append(
-                f"rules[{index}].condition.entity_types must include contract entity_type"
+                "rules["
+                f"{index}].condition.entity_types must include the contract "
+                "canonical runtime entity type"
             )
         if entity_type and entity_types and entity_type not in entity_types:
-            errors.append(f"rules[{index}] does not include contract entity_type")
+            errors.append(
+                f"rules[{index}] does not include the contract canonical "
+                "runtime entity type"
+            )
         proposed_correlation_keys = tuple(
             item.get("correlation_keys")
             or item.get("correlation_key")
@@ -294,6 +317,7 @@ def _validate_llm_rules(
             normalized_rules,
             contract=contract,
             change_policy=change_policy,
+            rule_asset_requirements=rule_asset_requirements,
         )
     )
     errors.extend(
@@ -308,6 +332,13 @@ def _validate_llm_rules(
             dict(event_constraints or {}),
         )
     )
+    if rule_asset_requirements:
+        errors.extend(
+            event_rule_role_errors(
+                requirements=rule_asset_requirements,
+                event_rule_roles=normalized_rules,
+            )
+        )
     current_observation_type = str(change_policy.get("observation_type") or "")
     for rule in normalized_rules:
         if str(rule.get("event_class") or "fault") == "recovery":
@@ -493,6 +524,25 @@ def _normalize_rule_ir(
                     "to": new_name,
                 }
             )
+    required_exclusive_types = {
+        str(event_type)
+        for event_type in constraints.get("required_exclusive_event_types") or []
+        if str(event_type)
+    }
+    for rule in rules:
+        event_type = str(rule.get("event_type") or "")
+        if event_type not in required_exclusive_types or bool(rule.get("exclusive")):
+            continue
+        rule["exclusive"] = True
+        changes.append(
+            {
+                "kind": "exclusive_precedence",
+                "rule": rule.get("name"),
+                "from": False,
+                "to": True,
+                "reason": f"{event_type} supersedes lower-severity matches",
+            }
+        )
     for item in constraints.get("priority_order") or []:
         if not isinstance(item, dict):
             continue
@@ -652,6 +702,7 @@ def _cross_asset_rule_errors(
     *,
     contract: dict[str, Any],
     change_policy: dict[str, Any],
+    rule_asset_requirements: dict[str, Any] | None = None,
 ) -> list[str]:
     errors: list[str] = []
     observation_type = str(change_policy.get("observation_type") or "")
@@ -670,6 +721,13 @@ def _cross_asset_rule_errors(
     recovery_rules = [
         rule for rule in rules if str(rule.get("event_class") or "fault") == "recovery"
     ]
+    normalized_requirements = normalize_rule_asset_requirements(
+        rule_asset_requirements
+    )
+    current_state_only = bool(
+        normalized_requirements.get("requires_current_state_rule")
+        and not normalized_requirements.get("requires_event_rule")
+    )
     for rule in rules:
         condition = dict(rule.get("condition") or {})
         fields = {str(item) for item in condition.get("fields") or []}
@@ -722,7 +780,9 @@ def _cross_asset_rule_errors(
             if primary_value is not None and deadband
             else None
         )
-        if expected_recovery is not None or (primary_reference and deadband):
+        if not current_state_only and (
+            expected_recovery is not None or (primary_reference and deadband)
+        ):
             matching_recovery = [
                 rule
                 for rule in recovery_rules
@@ -794,16 +854,27 @@ def _cross_asset_rule_errors(
             if primary_value is not None and deadband
             else None
         )
-        if (expected_recovery is not None or (primary_reference and deadband)) and not any(
-            (rule.get("condition") or {}).get("kind")
-            == ("threshold_field_high_recovery" if primary_reference else "threshold_recovery")
-            and (
-                str((rule.get("condition") or {}).get("reference_field") or "")
-                == str(primary_reference.get("field_name") or "")
-                if primary_reference
-                else _numbers_equal((rule.get("condition") or {}).get("lt"), expected_recovery)
+        if (
+            not current_state_only
+            and (expected_recovery is not None or (primary_reference and deadband))
+            and not any(
+                (rule.get("condition") or {}).get("kind")
+                == (
+                    "threshold_field_high_recovery"
+                    if primary_reference
+                    else "threshold_recovery"
+                )
+                and (
+                    str((rule.get("condition") or {}).get("reference_field") or "")
+                    == str(primary_reference.get("field_name") or "")
+                    if primary_reference
+                    else _numbers_equal(
+                        (rule.get("condition") or {}).get("lt"),
+                        expected_recovery,
+                    )
+                )
+                for rule in recovery_rules
             )
-            for rule in recovery_rules
         ):
             errors.append("recovery rule threshold must match the ChangePolicy")
     elif compare_mode in {"state_transition", "enum_transition"}:
@@ -896,14 +967,146 @@ def _numbers_equal(left: Any, right: Any) -> bool:
         return False
 
 
+def _policy_target_key(
+    observation_type: Any,
+    dimension_selector: Any,
+) -> str:
+    selector = normalize_dimension_selector(dimension_selector)
+    return (
+        f"{str(observation_type or '').strip()}:"
+        + json.dumps(
+            selector,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
+
+
+def _expand_dimension_dispatch_policies(
+    policies: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Expose dimension branches to generation while runtime keeps one asset."""
+
+    expanded: list[dict[str, Any]] = []
+    for raw_policy in policies:
+        policy = dict(raw_policy)
+        if str(policy.get("compare_mode") or "") != "dimension_dispatch":
+            expanded.append(policy)
+            continue
+        observation_type = str(policy.get("observation_type") or "")
+        semantic_type = str(policy.get("semantic_type") or "")
+        for branch in policy.get("dimension_policies") or []:
+            if not isinstance(branch, dict) or not isinstance(
+                branch.get("policy"), dict
+            ):
+                continue
+            child = dict(branch["policy"])
+            child.setdefault("observation_type", observation_type)
+            child.setdefault("semantic_type", semantic_type)
+            child["dimension_selector"] = normalize_dimension_selector(
+                branch.get("selector")
+            )
+            expanded.append(child)
+    return expanded
+
+
+def _scoped_rule_asset_requirements(
+    raw_requirements: dict[str, Any] | None,
+    *,
+    target: dict[str, Any] | None,
+    observation_type: str,
+) -> dict[str, Any] | None:
+    """Limit logical rule roles to the observation handled by one fanout call."""
+
+    if not raw_requirements:
+        return None
+    requirements = normalize_rule_asset_requirements(raw_requirements)
+    target_roles = {
+        str(item).strip()
+        for item in (target or {}).get("required_rule_roles") or []
+        if str(item).strip()
+    }
+    requires_current = bool(
+        "current_state" in target_roles
+        or observation_type in set(
+            requirements.get("current_state_observation_types") or []
+        )
+    )
+    required_event_types = dict(
+        requirements.get("required_event_types_by_observation") or {}
+    )
+    requires_change_event = bool(
+        "change_event" in target_roles
+        or (
+            not target_roles
+            and (
+                observation_type in required_event_types
+                or requirements.get("requires_event_rule") is True
+            )
+        )
+    )
+    return {
+        **requirements,
+        "requires_current_state_rule": requires_current,
+        "requires_event_rule": requires_change_event,
+        "requires_event_rule_assets": (
+            requires_current or requires_change_event
+        ),
+        "requires_historical_replay": bool(
+            requires_change_event
+            and requirements.get("requires_historical_replay") is True
+        ),
+        "current_state_observation_types": (
+            [observation_type] if requires_current else []
+        ),
+        "change_policy_observation_types": (
+            [observation_type]
+            if observation_type
+            in set(requirements.get("change_policy_observation_types") or [])
+            else []
+        ),
+        "required_event_types_by_observation": (
+            {observation_type: required_event_types[observation_type]}
+            if requires_change_event and observation_type in required_event_types
+            else {}
+        ),
+    }
+
+
 def run_event_rule_generation(params: dict[str, Any]) -> dict[str, Any]:
     contract = params.get("contract")
     if not isinstance(contract, dict):
         raise ValueError("contract must be an object")
     change_policies = params.get("change_policies")
     if isinstance(change_policies, list) and change_policies:
+        change_policies = _expand_dimension_dispatch_policies(
+            [dict(item) for item in change_policies if isinstance(item, dict)]
+        )
+        event_policy_targets = [
+            dict(item)
+            for item in params.get("event_policy_targets") or []
+            if isinstance(item, dict)
+        ]
+        targets_by_key = {
+            _policy_target_key(
+                target.get("observation_type"),
+                target.get("dimension_selector"),
+            ): target
+            for target in event_policy_targets
+        }
+        if event_policy_targets:
+            change_policies = [
+                policy
+                for policy in change_policies
+                if _policy_target_key(
+                    policy.get("observation_type"),
+                    policy.get("dimension_selector"),
+                )
+                in targets_by_key
+            ]
         event_observation_types = params.get("event_observation_types")
-        if isinstance(event_observation_types, list):
+        if not event_policy_targets and isinstance(event_observation_types, list):
             eligible = {
                 str(item).strip()
                 for item in event_observation_types
@@ -917,33 +1120,10 @@ def run_event_rule_generation(params: dict[str, Any]) -> dict[str, Any]:
                     and str(policy.get("observation_type") or "").strip() in eligible
                 )
             ]
-            if not change_policies:
-                return {
-                    "success": True,
-                    "mode": "change_policy_fanout",
-                    "generated_rule_count": 0,
-                    "rules": [],
-                    "results": [],
-                    "validation": {
-                        "success": True,
-                        "errors": [],
-                        "governance_repairs": [],
-                    },
-                    "governance_repairs": [],
-                    "agent_loop": {
-                        "ready_for_approval": True,
-                        "next_action": "submit_for_validation",
-                        "attempt_count": 0,
-                        "attempts": [],
-                        "governance_repairs": [],
-                    },
-                    "generation_provider": str(
-                        params.get("generation_provider") or "builtin"
-                    ).casefold(),
-                }
         results: list[dict[str, Any]] = []
         scoped_results: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
         attempts: list[dict[str, Any]] = []
+        child_governance_repairs: list[dict[str, Any]] = []
         rules_by_name: dict[str, dict[str, Any]] = {}
         conflicts: list[str] = []
         for index, policy in enumerate(change_policies):
@@ -951,26 +1131,50 @@ def run_event_rule_generation(params: dict[str, Any]) -> dict[str, Any]:
                 raise ValueError(f"change_policies[{index}] must be an object")
             constraints_by_type = params.get("event_constraints_by_observation_type")
             observation_type = str(policy.get("observation_type") or "")
+            target = targets_by_key.get(
+                _policy_target_key(
+                    observation_type,
+                    policy.get("dimension_selector"),
+                )
+            )
             scoped_constraints = (
-                constraints_by_type.get(observation_type)
+                (target or {}).get("event_constraints")
+                or constraints_by_type.get(observation_type)
                 if isinstance(constraints_by_type, dict)
-                else None
+                else (target or {}).get("event_constraints")
+            )
+            scoped_contract = (
+                (target or {}).get("event_contract")
+                if isinstance((target or {}).get("event_contract"), dict)
+                else contract
             )
             result = run_event_rule_generation(
                 {
                     **params,
                     "change_policies": None,
+                    "contract": scoped_contract,
                     "change_policy": policy,
+                    "rule_asset_requirements": _scoped_rule_asset_requirements(
+                        dict(params.get("rule_asset_requirements") or {}),
+                        target=target,
+                        observation_type=observation_type,
+                    ),
                     "event_constraints": scoped_constraints or params.get("event_constraints"),
                     "reserved_fault_event_types": {},
                 }
             )
             results.append(result)
+            effective_constraints = dict(
+                result.get("effective_event_constraints")
+                or scoped_constraints
+                or params.get("event_constraints")
+                or {}
+            )
             scoped_results.append(
                 (
                     observation_type,
                     result,
-                    dict(scoped_constraints or params.get("event_constraints") or {}),
+                    effective_constraints,
                 )
             )
             loop = result.get("agent_loop")
@@ -978,9 +1182,40 @@ def run_event_rule_generation(params: dict[str, Any]) -> dict[str, Any]:
                 for attempt in loop.get("attempts") or []:
                     if isinstance(attempt, dict):
                         attempts.append({**attempt, "attempt": len(attempts) + 1})
-        governance_repairs, governance_errors = _govern_fanout_event_types(scoped_results)
+            child_governance_repairs.extend(
+                dict(item)
+                for item in result.get("governance_repairs") or []
+                if isinstance(item, dict)
+            )
+        fanout_repairs, governance_errors = _govern_fanout_event_types(
+            scoped_results
+        )
+        governance_repairs = list(
+            {
+                json.dumps(
+                    item,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    default=str,
+                ): item
+                for item in [
+                    *child_governance_repairs,
+                    *fanout_repairs,
+                ]
+            }.values()
+        )
         conflicts.extend(governance_errors)
         for observation_type, result, scoped_constraints in scoped_results:
+            if result.get("success") is not True:
+                child_errors = list(
+                    (result.get("validation") or {}).get("errors") or []
+                )
+                if not child_errors:
+                    child_errors = ["event rule generation failed"]
+                conflicts.extend(
+                    f"{observation_type}: {message}"
+                    for message in child_errors
+                )
             constraint_errors = _event_constraint_errors(
                 list(result.get("rules") or []), scoped_constraints
             )
@@ -1000,6 +1235,12 @@ def run_event_rule_generation(params: dict[str, Any]) -> dict[str, Any]:
                 else:
                     rules_by_name[name] = rule
         success = all(result.get("success") is True for result in results) and not conflicts
+        role_errors = event_rule_role_errors(
+            requirements=dict(params.get("rule_asset_requirements") or {}),
+            event_rule_roles=list(rules_by_name.values()),
+        ) if params.get("rule_asset_requirements") else []
+        conflicts.extend(role_errors)
+        success = success and not role_errors
         return {
             "success": success,
             "mode": "change_policy_fanout",
@@ -1026,6 +1267,37 @@ def run_event_rule_generation(params: dict[str, Any]) -> dict[str, Any]:
     change_policy = params.get("change_policy")
     if not isinstance(change_policy, dict):
         raise ValueError("change_policy must be an object")
+    constraint_scope = scope_event_constraints_to_policy(
+        dict(params.get("event_constraints") or {}),
+        change_policy,
+    )
+    event_constraints = dict(constraint_scope.get("constraints") or {})
+    if constraint_scope.get("success") is not True:
+        errors = list(constraint_scope.get("errors") or [])
+        return {
+            "success": False,
+            "generated_rule_count": 0,
+            "rules": [],
+            "reports": [],
+            "validation": {
+                "success": False,
+                "errors": errors,
+                "normalizations": list(
+                    constraint_scope.get("normalizations") or []
+                ),
+            },
+            "agent_loop": {
+                "ready_for_approval": False,
+                "next_action": "revise_change_policy",
+                "attempt_count": 0,
+                "attempts": [],
+            },
+            "effective_event_constraints": event_constraints,
+            "event_constraint_scope": constraint_scope,
+            "generation_provider": str(
+                params.get("generation_provider") or "builtin"
+            ).casefold(),
+        }
     generation_provider = str(params.get("generation_provider") or "").strip().casefold()
     if generation_provider == "llm":
         agent = RuleGenerationAgent(
@@ -1038,15 +1310,21 @@ def run_event_rule_generation(params: dict[str, Any]) -> dict[str, Any]:
                 "contract": contract,
                 "change_policy": change_policy,
                 "event_intent": params.get("intent"),
-                "event_constraints": dict(params.get("event_constraints") or {}),
+                "event_constraints": event_constraints,
                 "reserved_fault_event_types": dict(params.get("reserved_fault_event_types") or {}),
+                "rule_asset_requirements": dict(
+                    params.get("rule_asset_requirements") or {}
+                ),
             },
             validator=lambda candidate: _validate_llm_rules(
                 candidate,
                 contract=contract,
                 change_policy=change_policy,
-                event_constraints=dict(params.get("event_constraints") or {}),
+                event_constraints=event_constraints,
                 reserved_fault_event_types=dict(params.get("reserved_fault_event_types") or {}),
+                rule_asset_requirements=dict(
+                    params.get("rule_asset_requirements") or {}
+                ),
             ),
             candidate_governor=_govern_llm_event_rule_candidate,
         )
@@ -1058,6 +1336,8 @@ def run_event_rule_generation(params: dict[str, Any]) -> dict[str, Any]:
             "reports": validation.get("reports") or [],
             "validation": validation,
             "agent_loop": generated.get("agent_loop"),
+            "effective_event_constraints": event_constraints,
+            "event_constraint_scope": constraint_scope,
             "generation_provider": generation_provider,
         }
     result = generate_and_validate_event_rules(
@@ -1065,10 +1345,37 @@ def run_event_rule_generation(params: dict[str, Any]) -> dict[str, Any]:
         change_policy=change_policy,
         intent=params.get("intent"),
     )
+    if event_constraints:
+        governed = _validate_llm_rules(
+            {"rules": list(result.get("rules") or [])},
+            contract=contract,
+            change_policy=change_policy,
+            event_constraints=event_constraints,
+        )
+        result["success"] = (
+            result.get("success") is True
+            and governed.get("success") is True
+        )
+        result["rules"] = list(governed.get("rules") or [])
+        result["generated_rule_count"] = len(result["rules"])
+        result["reports"] = list(governed.get("reports") or [])
+        result["validation"] = governed
+        result["governance_repairs"] = list(
+            governed.get("governance_repairs") or []
+        )
     constraint_errors = _event_constraint_errors(
         list(result.get("rules") or []),
-        dict(params.get("event_constraints") or {}),
+        event_constraints,
     )
+    role_errors = (
+        event_rule_role_errors(
+            requirements=dict(params.get("rule_asset_requirements") or {}),
+            event_rule_roles=list(result.get("rules") or []),
+        )
+        if params.get("rule_asset_requirements")
+        else []
+    )
+    constraint_errors.extend(role_errors)
     if constraint_errors:
         result["success"] = False
         result["validation"] = {
@@ -1077,6 +1384,8 @@ def run_event_rule_generation(params: dict[str, Any]) -> dict[str, Any]:
         }
     if params.get("agent_loop"):
         result["agent_loop"] = _agent_loop(result, params)
+    result["effective_event_constraints"] = event_constraints
+    result["event_constraint_scope"] = constraint_scope
     result["generation_provider"] = "builtin"
     return result
 

@@ -12,8 +12,8 @@ from typing import Any, Protocol
 import textfsm
 
 from src.core.parser.parser_bundle import ParserBundleError, parse_parser_bundle
-from src.core.parser.textfsm_dialect import lint_textfsm_template
 from src.core.parser.textfsm_input import prepare_textfsm_input
+from src.core.parser.value_types import is_unavailable_value, is_valid_ip_value
 
 from .samples import ParserSample, SampleExpectation, SampleRole
 from .spec import FieldSpec, ParserSpec, ParserSpecDocument
@@ -27,19 +27,93 @@ class ValidationBackend(Protocol):
 
 class TextFSMValidationBackend:
     def compile(self, template_text: str) -> tuple[str, ...]:
-        violations = lint_textfsm_template(template_text)
-        return tuple(
-            (
-                f"{item.code}: {item.message}"
-                f"{f' (line {item.line_number})' if item.line_number else ''}"
-            )
-            for item in violations
-        )
+        """Compile with the same TextFSM runtime used in production.
+
+        Platform dialect lint remains available to authors and audits, but it is
+        not execution truth. In particular, trusted ntc_templates legitimately
+        use native constructs such as ``Required``, ``NoRecord`` and implicit
+        EOF recording. The generation loop must execute those templates and
+        give their actual rows (or runtime error) to semantic review instead of
+        rejecting valid TextFSM syntax before it runs.
+        """
+
+        try:
+            textfsm.TextFSM(io.StringIO(template_text))
+        except Exception as exc:
+            return (f"template_syntax_error: compile failed: {exc}",)
+        return ()
 
     def parse(self, template_text: str, raw_text: str) -> list[dict[str, Any]]:
         parser = textfsm.TextFSM(io.StringIO(template_text))
         rows = parser.ParseText(prepare_textfsm_input(template_text, raw_text))
         return [dict(zip(parser.header, row, strict=True)) for row in rows]
+
+    def field_names(self, template_text: str) -> tuple[str, ...]:
+        """Return the executable TextFSM schema used by ParserRuntime."""
+
+        parser = textfsm.TextFSM(io.StringIO(template_text))
+        return tuple(str(name) for name in parser.header)
+
+
+def _field_inventory_error(
+    *,
+    template_text: str,
+    spec: ParserSpec,
+    backend: ValidationBackend,
+) -> str | None:
+    """Compare declared and executable fields when the backend can expose them."""
+
+    read_fields = getattr(backend, "field_names", None)
+    if not callable(read_fields):
+        return None
+    expected = {field.name for field in spec.fields}
+    actual = {str(name) for name in read_fields(template_text)}
+    if expected == actual:
+        return None
+    return (
+        "ParserSpec field inventory does not match the executable TextFSM schema: "
+        f"missing={sorted(expected - actual)}, extra={sorted(actual - expected)}"
+    )
+
+
+def _record_shape(records: list[dict[str, Any]]) -> tuple[tuple[tuple[str, bool], ...], ...]:
+    return tuple(
+        tuple(
+            sorted(
+                (str(key), bool(str(value or "").strip()))
+                for key, value in record.items()
+            )
+        )
+        for record in records
+    )
+
+
+def _source_compatibility(
+    *,
+    template_text: str,
+    sample: ParserSample,
+    validation_records: list[dict[str, Any]],
+    backend: ValidationBackend,
+) -> tuple[bool, bool, tuple[str, ...]]:
+    """Execute raw evidence without comparing sensitive values to redacted values."""
+
+    if sample.raw_text == sample.validation_text:
+        return True, True, ()
+    try:
+        source_records = backend.parse(template_text, sample.raw_text)
+    except Exception as exc:
+        return False, False, (f"source_parse_failed: {exc}",)
+    errors: list[str] = []
+    if len(source_records) != len(validation_records):
+        errors.append(
+            "source record count differs from sanitized evidence: "
+            f"{len(source_records)} != {len(validation_records)}"
+        )
+    elif _record_shape(source_records) != _record_shape(validation_records):
+        errors.append(
+            "source record field/non-empty shape differs from sanitized evidence"
+        )
+    return True, not errors, tuple(errors)
 
 
 @dataclass(frozen=True)
@@ -161,6 +235,7 @@ class ValidationReport:
         failed_gates = [name for name, passed in self.hard_gates.items() if not passed]
         code_by_gate = {
             "compiled": "template_compile_failed",
+            "field_inventory_aligned": "field_inventory_mismatch",
             "positive_samples_parsed": "zero_records",
             "required_fields_complete": "missing_required_fields",
             "primary_keys_valid": "primary_key_invalid",
@@ -168,9 +243,12 @@ class ValidationReport:
             "values_normalized": "non_normalized_field_value",
             "expectations_matched": "entity_expectation_mismatch",
             "negative_samples_rejected": "negative_sample_matched",
+            "source_executed": "source_parse_failed",
+            "source_shape_compatible": "source_structure_mismatch",
         }
         action_by_code = {
             "template_compile_failed": "repair_syntax",
+            "field_inventory_mismatch": "repair_field_inventory",
             "zero_records": "repair_entity_anchor",
             "missing_required_fields": "repair_field_capture",
             "primary_key_invalid": "repair_key_integrity",
@@ -178,6 +256,8 @@ class ValidationReport:
             "non_normalized_field_value": "repair_field_capture",
             "entity_expectation_mismatch": "repair_record_boundary",
             "negative_sample_matched": "tighten_noise_filter",
+            "source_parse_failed": "repair_field_capture",
+            "source_structure_mismatch": "repair_record_boundary",
         }
         primary_gate = failed_gates[0] if failed_gates else "validation"
         code = code_by_gate.get(primary_gate, "hard_validation_failed")
@@ -216,6 +296,8 @@ def execute_template_candidate(
     template_text: str,
     samples: tuple[ParserSample, ...],
     backend: ValidationBackend,
+    *,
+    spec: ParserSpec | None = None,
 ) -> ValidationReport:
     """Return only objective TextFSM compile and execution evidence.
 
@@ -227,6 +309,9 @@ def execute_template_candidate(
     gates = {
         "compiled": not compile_errors,
         "executed": not compile_errors,
+        "field_inventory_aligned": not compile_errors,
+        "source_executed": not compile_errors,
+        "source_shape_compatible": not compile_errors,
     }
     if compile_errors:
         return ValidationReport(
@@ -236,15 +321,35 @@ def execute_template_candidate(
             diagnostics=tuple(compile_errors),
         )
     diagnostics: list[str] = []
+    if spec is not None:
+        inventory_error = _field_inventory_error(
+            template_text=template_text,
+            spec=spec,
+            backend=backend,
+        )
+        if inventory_error:
+            gates["field_inventory_aligned"] = False
+            diagnostics.append(inventory_error)
     sample_results: list[SampleValidation] = []
     for sample in samples:
         errors: list[str] = []
         try:
-            records = backend.parse(template_text, sample.raw_text)
+            records = backend.parse(template_text, sample.validation_text)
         except Exception as exc:
             records = []
             errors.append(f"parse_failed: {exc}")
             gates["executed"] = False
+        source_executed, source_compatible, source_errors = _source_compatibility(
+            template_text=template_text,
+            sample=sample,
+            validation_records=records,
+            backend=backend,
+        )
+        if not source_executed:
+            gates["source_executed"] = False
+        if not source_compatible:
+            gates["source_shape_compatible"] = False
+        errors.extend(source_errors)
         diagnostics.extend(
             f"{sample.sample_id}: {error}" for error in errors
         )
@@ -275,7 +380,12 @@ def validate_template_execution(
     """Objectively execute a template or Parser bundle without semantic gates."""
 
     if isinstance(spec, ParserSpec):
-        return execute_template_candidate(template_text, samples, backend)
+        return execute_template_candidate(
+            template_text,
+            samples,
+            backend,
+            spec=spec,
+        )
     try:
         bundle = parse_parser_bundle(template_text)
     except ParserBundleError as exc:
@@ -288,6 +398,9 @@ def validate_template_execution(
         "bundle_complete": False,
         "compiled": False,
         "executed": False,
+        "field_inventory_aligned": False,
+        "source_executed": False,
+        "source_shape_compatible": False,
     }
     if bundle is None:
         return ValidationReport(
@@ -317,6 +430,7 @@ def validate_template_execution(
                 templates[record_set.record_set_name],
                 samples,
                 backend,
+                spec=record_set,
             ),
         )
         for record_set in spec.record_sets
@@ -329,6 +443,18 @@ def validate_template_execution(
         ),
         "executed": all(
             report.hard_gates.get("executed", False)
+            for _, report in child_reports
+        ),
+        "field_inventory_aligned": all(
+            report.hard_gates.get("field_inventory_aligned", False)
+            for _, report in child_reports
+        ),
+        "source_executed": all(
+            report.hard_gates.get("source_executed", False)
+            for _, report in child_reports
+        ),
+        "source_shape_compatible": all(
+            report.hard_gates.get("source_shape_compatible", False)
             for _, report in child_reports
         ),
     }
@@ -363,10 +489,74 @@ def validate_template_execution(
     )
 
 
+def _without_record_expectations(
+    spec: ParserSpec | ParserSpecDocument,
+) -> ParserSpec | ParserSpecDocument:
+    def strip(record_set: ParserSpec) -> ParserSpec:
+        if not record_set.expected_records:
+            return record_set
+        return ParserSpec(
+            entity=record_set.entity,
+            primary_keys=record_set.primary_keys,
+            fields=record_set.fields,
+            allow_empty=record_set.allow_empty,
+            empty_patterns=record_set.empty_patterns,
+            name=record_set.name,
+            cardinality=record_set.cardinality,
+            expected_records=(),
+            presence=record_set.presence,
+        )
+
+    if isinstance(spec, ParserSpec):
+        return strip(spec)
+    return ParserSpecDocument(
+        business_purpose=spec.business_purpose,
+        record_sets=tuple(strip(item) for item in spec.record_sets),
+        version=spec.version,
+    )
+
+
+def validate_template_runtime_compatibility(
+    template_text: str,
+    spec: ParserSpec | ParserSpecDocument,
+    samples: tuple[ParserSample, ...],
+    backend: ValidationBackend,
+) -> ValidationReport:
+    """Verify the candidate can satisfy the production ParserRuntime contract.
+
+    This deliberately ignores advisory pre-generation record counts and expected
+    entity sets. It checks only executable invariants that production will enforce:
+    compilation, non-empty positive execution unless explicitly allowed, required
+    field presence, primary-key integrity, declared field types, negative samples,
+    and source/sanitized structural compatibility. LLM and engineer review remain
+    authoritative for business usefulness, record scope and semantic completeness.
+    """
+
+    expectation_free_samples = tuple(
+        ParserSample(
+            sample_id=sample.sample_id,
+            raw_text=sample.raw_text,
+            role=sample.role,
+            prompt_text=sample.prompt_text,
+            expectation=None,
+            validation_text_override=sample.validation_text_override,
+        )
+        for sample in samples
+    )
+    return validate_template_candidate(
+        template_text,
+        _without_record_expectations(spec),
+        expectation_free_samples,
+        backend,
+    )
+
+
 def _field_value_valid(value: str, field: FieldSpec) -> bool:
     text = str(value or "").strip()
     if not text:
-        return not field.required
+        return True
+    if is_unavailable_value(text, field.unavailable_tokens):
+        return True
     if field.value_type == "number":
         return re.fullmatch(r"[-+]?\d+(?:\.\d+)?", text) is not None
     if field.value_type == "percent":
@@ -374,8 +564,9 @@ def _field_value_valid(value: str, field: FieldSpec) -> bool:
     if field.value_type == "enum":
         return text.casefold() in {item.casefold() for item in field.values}
     if field.value_type == "ip":
-        parts = text.split(".")
-        return len(parts) == 4 and all(part.isdigit() and 0 <= int(part) <= 255 for part in parts)
+        return is_valid_ip_value(text)
+    if field.value_type == "ip_or_unassigned":
+        return is_valid_ip_value(text, allow_unassigned=True)
     if field.value_type == "regex":
         return re.fullmatch(str(field.pattern), text) is not None
     return True
@@ -390,6 +581,8 @@ def _validate_single_template_candidate(
     compile_errors = backend.compile(template_text)
     gates = {
         "compiled": not compile_errors,
+        "executed": not compile_errors,
+        "field_inventory_aligned": not compile_errors,
         "positive_samples_parsed": True,
         "required_fields_complete": True,
         "primary_keys_valid": True,
@@ -397,10 +590,21 @@ def _validate_single_template_candidate(
         "values_normalized": True,
         "expectations_matched": True,
         "negative_samples_rejected": True,
+        "source_executed": not compile_errors,
+        "source_shape_compatible": not compile_errors,
     }
     diagnostics: list[str] = list(compile_errors)
     if compile_errors:
         return ValidationReport(False, gates, (), tuple(diagnostics))
+
+    inventory_error = _field_inventory_error(
+        template_text=template_text,
+        spec=spec,
+        backend=backend,
+    )
+    if inventory_error:
+        gates["field_inventory_aligned"] = False
+        diagnostics.append(inventory_error)
 
     sample_results: list[SampleValidation] = []
     for sample in samples:
@@ -412,10 +616,23 @@ def _validate_single_template_candidate(
                 errors.append(message)
 
         try:
-            records = backend.parse(template_text, sample.raw_text)
+            records = backend.parse(template_text, sample.validation_text)
         except Exception as exc:
             records = []
+            gates["executed"] = False
             add_error(f"parse_failed: {exc}")
+        source_executed, source_compatible, source_errors = _source_compatibility(
+            template_text=template_text,
+            sample=sample,
+            validation_records=records,
+            backend=backend,
+        )
+        if not source_executed:
+            gates["source_executed"] = False
+        if not source_compatible:
+            gates["source_shape_compatible"] = False
+        for source_error in source_errors:
+            add_error(source_error)
         if sample.role is SampleRole.NEGATIVE:
             if records:
                 gates["negative_samples_rejected"] = False
@@ -427,10 +644,14 @@ def _validate_single_template_candidate(
             ) or (
                 spec.allow_empty
                 and any(
-                    re.search(pattern, sample.raw_text, re.IGNORECASE | re.MULTILINE)
+                    re.search(
+                        pattern,
+                        sample.validation_text,
+                        re.IGNORECASE | re.MULTILINE,
+                    )
                     for pattern in spec.empty_patterns
                 )
-            )
+            ) or spec.presence == "optional"
             if not records and not legal_empty:
                 gates["positive_samples_parsed"] = False
                 add_error("positive sample produced no records")
@@ -439,7 +660,9 @@ def _validate_single_template_candidate(
                 add_error("singleton record set produced more than one record")
             for record in records:
                 missing = [
-                    name for name in spec.required_fields if not str(record.get(name, "")).strip()
+                    name
+                    for name in spec.required_fields
+                    if name not in record or not str(record.get(name) or "").strip()
                 ]
                 if missing:
                     gates["required_fields_complete"] = False
@@ -531,7 +754,7 @@ def _record_set_samples(
     output: list[ParserSample] = []
     for sample in samples:
         expected_records = expected_by_sample.get(sample.sample_id)
-        expectation = sample.expectation
+        expectation = None
         if expected_records is not None:
             expectation = SampleExpectation(
                 record_count=len(expected_records),
@@ -549,6 +772,7 @@ def _record_set_samples(
                 role=sample.role,
                 prompt_text=sample.prompt_text,
                 expectation=expectation,
+                validation_text_override=sample.validation_text_override,
             )
         )
     return tuple(output)
@@ -579,6 +803,8 @@ def validate_template_candidate(
     base_gates = {
         "bundle_complete": False,
         "compiled": False,
+        "executed": False,
+        "field_inventory_aligned": False,
         "positive_samples_parsed": False,
         "required_fields_complete": False,
         "primary_keys_valid": False,
@@ -586,6 +812,8 @@ def validate_template_candidate(
         "values_normalized": False,
         "expectations_matched": False,
         "negative_samples_rejected": False,
+        "source_executed": False,
+        "source_shape_compatible": False,
     }
     if bundle is None:
         return ValidationReport(
@@ -627,6 +855,10 @@ def validate_template_candidate(
                 ),
             )
         )
+    aggregate_gates["executed"] = all(
+        report.hard_gates.get("executed", False)
+        for _, report in child_reports
+    )
     for gate in aggregate_gates:
         if gate == "bundle_complete":
             continue
@@ -635,8 +867,42 @@ def validate_template_candidate(
             for _, report in child_reports
         )
 
+    bundle_coverage_diagnostics: list[str] = []
+    for sample in samples:
+        if sample.role is SampleRole.NEGATIVE:
+            continue
+        total_records = sum(
+            next(
+                (
+                    item.record_count
+                    for item in report.samples
+                    if item.sample_id == sample.sample_id
+                ),
+                0,
+            )
+            for _, report in child_reports
+        )
+        legal_bundle_empty = any(
+            record_set.allow_empty
+            and any(
+                re.search(
+                    pattern,
+                    sample.validation_text,
+                    re.IGNORECASE | re.MULTILINE,
+                )
+                for pattern in record_set.empty_patterns
+            )
+            for record_set in spec.record_sets
+        )
+        if total_records == 0 and not legal_bundle_empty:
+            aggregate_gates["positive_samples_parsed"] = False
+            bundle_coverage_diagnostics.append(
+                f"{sample.sample_id}: positive sample produced no records across the Parser bundle"
+            )
+
     combined_samples: list[SampleValidation] = []
     diagnostics: list[str] = []
+    diagnostics.extend(bundle_coverage_diagnostics)
     for record_set_name, report in child_reports:
         diagnostics.extend(
             f"{record_set_name}: {diagnostic}"

@@ -12,6 +12,7 @@ from parser_model import TextFSMParserModel
 from report_generator import GenerationReport, save_report, save_summary
 from result_reviewer import IndependentParserResultReviewer
 
+from src.common.config import get_settings
 from src.core.parser.repository import ParserJobRepository, ParserTemplateRepository
 from src.core.parser_generation import (
     MAX_PARSER_MODEL_CALLS,
@@ -21,6 +22,7 @@ from src.core.parser_generation import (
     ParserSpec,
     ParserSpecDocument,
     RepeatedBlockCompiler,
+    RepositoryGenerationObserver,
     RepositoryModelCallController,
     SampleExpectation,
     SampleRole,
@@ -34,6 +36,7 @@ from src.core.parser_generation import (
     validate_template_execution,
 )
 from src.core.patrol.repository import PatrolRepository
+from src.observability.deprecations import observe_legacy_path
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REPORTS = SKILL_ROOT / "reports"
@@ -71,10 +74,15 @@ def _load_sample_set(job: dict[str, Any]) -> SampleSet:
                 sample_id=str(item["id"]),
                 raw_text=str(snapshot.raw_text or ""),
                 role=role,
+                # Every role is validated against the same frozen sanitized evidence
+                # used by ParserSpec. SampleRole still controls what the model may see.
                 prompt_text=(
-                    str(item.get("sanitized_text") or "") if role is SampleRole.GENERATION else None
+                    str(item.get("sanitized_text") or "")
+                    if role is SampleRole.GENERATION
+                    else None
                 ),
                 expectation=expectation,
+                validation_text_override=str(item.get("sanitized_text") or ""),
             )
         )
     return SampleSet(tuple(samples))
@@ -111,29 +119,41 @@ def _process_simple_job(
         if job.get("generation_strategy") == "deterministic_fallback"
         else ()
     )
-    seed_candidate = latest_reusable_candidate(
-        job=job,
-        sample_set=sample_set,
-        repository=job_repository,
-    )
-    seed_candidates = [seed_candidate] if seed_candidate is not None else []
+    seed_candidates: list[TemplateCandidate] = []
     if isinstance(spec, ParserSpec):
         _platform_decision, ntc_resolutions = NtcTemplateResolver().resolve(
             device={
                 "vendor": job.get("vendor"),
-                "model": job.get("model"),
+                "model": job.get("model") or job.get("profile"),
                 "family": job.get("family"),
                 "platform": job.get("platform"),
                 "device_type": job.get("device_type"),
             },
             command=str(job["canonical_command"]),
             samples=sample_set.samples,
+            spec=spec,
         )
         seed_candidates.extend(
             resolution.candidate
             for resolution in ntc_resolutions
             if resolution.candidate is not None
         )
+    seed_candidate = latest_reusable_candidate(
+        job=job,
+        sample_set=sample_set,
+        repository=job_repository,
+    )
+    if seed_candidate is not None and all(
+        candidate.sha256 != seed_candidate.sha256 for candidate in seed_candidates
+    ):
+        seed_candidates.append(seed_candidate)
+    settings = get_settings()
+    generation_observer = RepositoryGenerationObserver(
+        job=job,
+        spec=spec,
+        sample_set=sample_set,
+        repository=job_repository,
+    )
     outcome = SimpleParserGenerationService(
         # Production generation is LLM-led. Deterministic compilers remain available
         # as explicit fallback/test providers, but cannot define the acceptance truth.
@@ -149,8 +169,15 @@ def _process_simple_job(
             job_id=str(job["id"]),
             repository=job_repository,
             used=int(job.get("model_calls_used") or 0),
+            heartbeat_seconds=settings.PARSER_MODEL_CALL_HEARTBEAT_SECONDS,
+            request_timeout_seconds=settings.PARSER_MODEL_REQUEST_HARD_TIMEOUT_SECONDS,
         ),
+        observer=generation_observer,
         seed_candidates=tuple(seed_candidates),
+        total_timeout_seconds=settings.PARSER_GENERATION_TOTAL_TIMEOUT_SECONDS,
+        # Local code is an evidence executor, not the semantic acceptance authority.
+        # It compiles and runs the exact candidate against every frozen sample, then
+        # the independent model reviews the resulting records or execution errors.
         validator=validate_template_execution,
     ).generate(job_id=str(job["id"]), spec=spec, sample_set=sample_set)
 
@@ -276,6 +303,11 @@ def _generation_succeeded(reports: list[GenerationReport]) -> bool:
 def generate_templates(params: dict[str, Any]) -> dict[str, Any]:
     job_id = str(params.get("job_id") or "").strip()
     if not job_id:
+        observe_legacy_path(
+            "legacy-parser-job-dispatch",
+            "generation_without_job_id",
+            outcome="rejected",
+        )
         raise ValueError(
             "job_id is required for Parser generation; import evidence or promote a "
             "Parser gap in the control plane before starting generation"
@@ -290,6 +322,11 @@ def generate_templates(params: dict[str, Any]) -> dict[str, Any]:
     if job is None:
         raise ValueError(f"parser template job does not exist: {job_id}")
     if job.get("pipeline_version") != "simple_v2":
+        observe_legacy_path(
+            "legacy-parser-job-dispatch",
+            "legacy_job_dispatch",
+            outcome="rejected",
+        )
         raise ValueError(
             "legacy Parser jobs are read-only; confirm ParserSpec and sample roles to "
             "promote this job to simple_v2"

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from src.core.parser.value_types import IP_UNASSIGNED_TOKENS
+
 from ..spec import FieldSpec, ParserSpec
 
 
@@ -22,13 +24,37 @@ def field_label_map(spec: ParserSpec) -> dict[str, str]:
 
 
 def value_pattern(field: FieldSpec) -> str:
+    unavailable_pattern = "|".join(
+        re.escape(item).replace(r"\ ", r"\s+")
+        for item in sorted(
+            field.unavailable_tokens,
+            key=lambda item: (-len(item), item),
+        )
+    )
+
+    def with_unavailable(pattern: str) -> str:
+        if not unavailable_pattern:
+            return pattern
+        return rf"(?:{pattern}|(?i:{unavailable_pattern}))"
+
     if field.value_type == "enum":
         values = [re.escape(value).replace(r"\ ", r"\s+") for value in field.values]
         return "(?i:" + "|".join(values) + ")"
-    if field.value_type in {"number", "percent"}:
-        return r"[-+]?\d+(?:\.\d+)?%?"
+    if field.value_type == "number":
+        return with_unavailable(r"[-+]?\d+(?:\.\d+)?")
+    if field.value_type == "percent":
+        return with_unavailable(r"[-+]?\d+(?:\.\d+)?%?")
     if field.value_type == "ip":
         return r"(?:\d{1,3}\.){3}\d{1,3}"
+    if field.value_type == "ip_or_unassigned":
+        empty_tokens = "|".join(
+            re.escape(item)
+            for item in sorted(
+                IP_UNASSIGNED_TOKENS,
+                key=lambda item: (-len(item), item),
+            )
+        )
+        return rf"(?:(?:\d{{1,3}}\.){{3}}\d{{1,3}}|(?i:{empty_tokens}))"
     if field.value_type == "regex":
         pattern = str(field.pattern or "").strip()
         pattern = re.sub(r"^\^", "", pattern)

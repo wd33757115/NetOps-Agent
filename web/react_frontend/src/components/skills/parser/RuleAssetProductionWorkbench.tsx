@@ -18,6 +18,7 @@ import type { ColumnsType } from 'antd/es/table'
 import {
   ArrowRightOutlined,
   EyeOutlined,
+  LinkOutlined,
   ReloadOutlined,
   UploadOutlined,
 } from '@ant-design/icons'
@@ -25,6 +26,7 @@ import { useQuery } from 'react-query'
 import { useNavigate } from 'react-router-dom'
 import {
   parserApi,
+  type RuleAssetCheckItemComponentStatuses,
   type RuleAssetCheckItemProductionUnit,
   type RuleAssetComponentStatus,
   type RuleAssetGovernanceBucket,
@@ -35,14 +37,18 @@ import { CommandAssetDetail } from '../../devices/OfflineCommandAssetUnits'
 import RuleAssetSourceJobsWorkspace from './RuleAssetSourceJobsWorkspace'
 import RuleAssetGenerationStep from './RuleAssetGenerationStep'
 import RuleAssetAutomationControl from './RuleAssetAutomationControl'
+import AssessmentPolicyWorkspace from './AssessmentPolicyWorkspace'
+import CheckItemCatalogWorkspace from './CheckItemCatalogWorkspace'
+import CommandCatalogBindingDrawer from './CommandCatalogBindingDrawer'
 
-type WorkbenchView = 'commands' | 'sources'
+type WorkbenchView = 'commands' | 'sources' | 'catalog' | 'policies'
 type BucketFilter = RuleAssetGovernanceBucket | 'all'
 type DetailTab = 'flow' | 'parser' | 'generation' | 'evidence' | 'attempts' | 'assets'
 
 interface RuleAssetProductionWorkbenchProps {
   view: WorkbenchView
   onViewChange: (view: WorkbenchView) => void
+  embedded?: boolean
   initialSearch?: string
   focusAction?: string
   focusOfflineJobId?: string
@@ -93,10 +99,14 @@ const assetModeLabel: Record<string, string> = {
 }
 
 const componentLabels = [
+  ['identity', '身份策略'],
   ['parser', 'Parser'],
   ['contract', 'Contract'],
-  ['policy', 'Policy'],
-  ['event', 'Event'],
+  ['current_state', '当前状态'],
+  ['policy', '变化策略'],
+  ['event', '事件规则'],
+  ['comparison', '文本比较'],
+  ['runtime_bundle', '运行包'],
 ] as const
 
 const detailTabForAction = (
@@ -149,6 +159,8 @@ const nextActionLabel = (unit: RuleAssetProductionUnit) => {
     generate_rule_asset_bundle: '生成规则',
     review_bundle: '工程复核',
     release_bundle: '审批发布',
+    assemble_runtime_bundle: '装配运行包',
+    inspect_runtime_bundle: '处理运行包缺口',
     repair_or_backfill: '修复回填',
     inspect_parser_validation: '查看验证',
     confirm_identity: '修正身份',
@@ -157,10 +169,12 @@ const nextActionLabel = (unit: RuleAssetProductionUnit) => {
 }
 
 const ComponentChain: React.FC<{
-  unit: Pick<RuleAssetProductionUnit, 'component_statuses'>
+  unit: { component_statuses: RuleAssetCheckItemComponentStatuses }
 }> = ({ unit }) => (
   <div className="rule-asset-chain">
-    {componentLabels.map(([key, label]) => {
+    {componentLabels.filter(
+      ([key]) => unit.component_statuses[key] !== 'not_applicable',
+    ).map(([key, label]) => {
       const status = unit.component_statuses[key]
       return (
         <div className="rule-asset-chain__item" key={key}>
@@ -177,6 +191,7 @@ const ComponentChain: React.FC<{
 const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> = ({
   view,
   onViewChange,
+  embedded = false,
   initialSearch = '',
   focusAction,
   focusOfflineJobId,
@@ -199,6 +214,10 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
   const [detailInitialTab, setDetailInitialTab] = useState<DetailTab>('flow')
   const [evidencePage, setEvidencePage] = useState(1)
   const [evidencePageSize, setEvidencePageSize] = useState(25)
+  const [bindingUnit, setBindingUnit] = useState<
+    RuleAssetCheckItemProductionUnit['implementations'][number]
+  >()
+  const [catalogFocusChangeId, setCatalogFocusChangeId] = useState<string>()
   const handledFocusRef = useRef('')
 
   useEffect(() => {
@@ -208,7 +227,7 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
   }, [initialSearch])
 
   useEffect(() => {
-    if (view === 'sources') setSelectedUnitId(undefined)
+    if (view !== 'commands') setSelectedUnitId(undefined)
   }, [view])
 
   const listQuery = useQuery(
@@ -245,6 +264,14 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
     }),
     { enabled: Boolean(selectedUnitId), keepPreviousData: true },
   )
+  const detailDatasetIds = useMemo(() => {
+    if (datasetIds.length) return datasetIds
+    return Array.from(new Set(
+      (detailQuery.data?.evidence || [])
+        .map((item) => item.period?.dataset_id)
+        .filter((item): item is string => Boolean(item)),
+    ))
+  }, [datasetIds, detailQuery.data?.evidence])
 
   const data = listQuery.data
   const summary = data?.summary
@@ -267,19 +294,27 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
   }
   const openNextAction = (unit: RuleAssetProductionUnit) => {
     const tab = detailTabForAction(unit)
+    if (unit.next_action?.target_url) {
+      // The backend deep link carries the authoritative source job, datasets,
+      // command and seed/bundle IDs. Keep that context when opening an inline
+      // production step so the user never has to reselect its evidence.
+      navigate(unit.next_action.target_url)
+    }
     if (tab !== 'flow') {
       openDetail(unit.id, tab)
       return
     }
-    if (unit.next_action?.target_url) navigate(unit.next_action.target_url)
   }
+  const openCatalogBinding = (
+    unit: RuleAssetCheckItemProductionUnit['implementations'][number],
+  ) => setBindingUnit(unit)
   const changeBucket = (nextBucket: BucketFilter) => {
     setPage(1)
     setBucket(nextBucket)
   }
 
   useEffect(() => {
-    if (view !== 'commands' || !data?.items?.length) return
+    if (embedded || view !== 'commands' || !data?.items?.length) return
     const focusKey = [
       focusAction,
       focusOfflineJobId,
@@ -288,14 +323,30 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
       initialSearch,
     ].filter(Boolean).join(':')
     if (!focusKey || handledFocusRef.current === focusKey) return
+    const matchesFocusAction = (unit: RuleAssetProductionUnit) => {
+      const code = unit.next_action?.code || ''
+      if (focusAction === 'parser') {
+        return ['open_parser_job', 'inspect_parser_validation'].includes(code)
+      }
+      if (focusAction === 'rule-generation') {
+        return code === 'generate_rule_asset_bundle'
+      }
+      if (focusAction === 'release' || focusAction === 'bundle-review') {
+        return ['review_bundle', 'release_bundle'].includes(code)
+      }
+      return true
+    }
     const focusedImplementation = (item: RuleAssetCheckItemProductionUnit) => (
       item.implementations.find((unit) => (
         (focusRuleSeedJobId && unit.rule_seed_job_id === focusRuleSeedJobId)
         || (focusBundleId && unit.bundle_id === focusBundleId)
         || (
-          focusOfflineJobId
+          !focusRuleSeedJobId
+          && !focusBundleId
+          && focusOfflineJobId
           && unit.offline_job_id === focusOfflineJobId
           && (!initialSearch || unit.canonical_command === initialSearch)
+          && matchesFocusAction(unit)
         )
       ))
     )
@@ -327,10 +378,20 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
     focusOfflineJobId,
     focusRuleSeedJobId,
     initialSearch,
+    embedded,
     view,
   ])
 
   const openCheckItemNextAction = (item: RuleAssetCheckItemProductionUnit) => {
+    if (
+      item.next_action?.target_url
+      && ['assemble_runtime_bundle', 'inspect_runtime_bundle'].includes(
+        item.next_action.code || '',
+      )
+    ) {
+      navigate(item.next_action.target_url)
+      return
+    }
     const implementation = item.implementations.find(
       (unit) => unit.next_action?.code === item.next_action?.code,
     ) || item.implementations[0]
@@ -392,12 +453,21 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
     {
       title: '操作',
       key: 'actions',
-      width: 180,
+      width: 240,
       render: (_, unit) => (
-        <Space size={2}>
+        <Space size={2} wrap>
           <Button type="text" icon={<EyeOutlined />} onClick={() => openDetail(unit.id)}>
             审查证据
           </Button>
+          {unit.mapping_status === 'unclassified' && (
+            <Button
+              type="text"
+              icon={<LinkOutlined />}
+              onClick={() => openCatalogBinding(unit)}
+            >
+              绑定检查项
+            </Button>
+          )}
           {unit.next_action?.target_url && (
             <Button
               type="text"
@@ -421,9 +491,13 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
       fixed: 'left',
       render: (_, item) => (
         <Space direction="vertical" size={2}>
-          <Typography.Text strong>{item.name}</Typography.Text>
-          <Typography.Text code>{item.check_item_id || 'unclassified'}</Typography.Text>
-          <Typography.Text type="secondary">{item.description}</Typography.Text>
+          <Typography.Text strong>{item.display_name || item.name}</Typography.Text>
+          <Typography.Text code>
+            {item.check_item_id || (item.category === 'not_applicable' ? 'no-rule-required' : 'unclassified')}
+          </Typography.Text>
+          <Typography.Text type="secondary">
+            {item.display_description || item.description}
+          </Typography.Text>
         </Space>
       ),
     },
@@ -474,10 +548,10 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
     {
       title: '操作',
       key: 'actions',
-      width: 200,
+      width: 240,
       fixed: 'right',
       render: (_, item) => (
-        <Space size={2}>
+        <Space size={2} wrap>
           <Tooltip title="展开厂商、型号和命令实现">
             <Button
               type="text"
@@ -491,6 +565,25 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
               查看实现
             </Button>
           </Tooltip>
+          {!item.check_item_id && (
+            <Tooltip title="先展开命令，再逐条选择已审批检查项">
+              <Button
+                type="text"
+                icon={<LinkOutlined />}
+                onClick={() => {
+                  if (item.implementations.length === 1) {
+                    openCatalogBinding(item.implementations[0])
+                    return
+                  }
+                  setExpandedRowKeys((current) => (
+                    current.includes(item.id) ? current : [...current, item.id]
+                  ))
+                }}
+              >
+                {item.implementations.length === 1 ? '绑定检查项' : '逐条绑定'}
+              </Button>
+            </Tooltip>
+          )}
           {item.next_action?.target_url && (
             <Tooltip title={item.next_action.label}>
               <Button
@@ -510,7 +603,7 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
 
   return (
     <div className="rule-asset-workbench">
-      <div className="rule-asset-workbench__toolbar">
+      {!embedded && <div className="rule-asset-workbench__toolbar">
         <div className="rule-asset-view-switch" role="tablist" aria-label="规则资产生产视图">
           <button
             type="button"
@@ -530,21 +623,47 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
           >
             样本批次
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === 'catalog'}
+            className={view === 'catalog' ? 'is-active' : ''}
+            onClick={() => onViewChange('catalog')}
+          >
+            检查项目录
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === 'policies'}
+            className={view === 'policies' ? 'is-active' : ''}
+            onClick={() => onViewChange('policies')}
+          >
+            判断策略
+          </button>
         </div>
-        <Button
-          icon={<UploadOutlined />}
-          className="rule-asset-import-button"
-          onClick={() => onViewChange('sources')}
-        >
-          导入规则样本
-        </Button>
-      </div>
+        {(view === 'commands' || view === 'sources') && (
+          <Button
+            icon={<UploadOutlined />}
+            className="rule-asset-import-button"
+            onClick={() => onViewChange('sources')}
+          >
+            导入规则样本
+          </Button>
+        )}
+      </div>}
 
-      {view === 'sources' ? (
+      {view === 'policies' ? (
+        <AssessmentPolicyWorkspace />
+      ) : view === 'catalog' ? (
+        <CheckItemCatalogWorkspace focusChangeId={catalogFocusChangeId} />
+      ) : view === 'sources' ? (
         <RuleAssetSourceJobsWorkspace />
       ) : (
         <Space direction="vertical" size={14} style={{ width: '100%' }}>
-          <RuleAssetAutomationControl onChanged={() => void listQuery.refetch()} />
+          {!embedded && (
+            <RuleAssetAutomationControl onChanged={() => void listQuery.refetch()} />
+          )}
           <div className="rule-asset-metrics" aria-label="规则资产治理摘要">
             {summaryMetrics.map((metric) => (
               <button
@@ -589,6 +708,7 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
               }}
             />
             <Select
+              aria-label="治理状态"
               allowClear
               value={governanceStatus}
               placeholder="治理状态"
@@ -602,6 +722,7 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
               }}
             />
             <Select
+              aria-label="资产模式"
               allowClear
               value={assetMode}
               placeholder="资产模式"
@@ -643,15 +764,18 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
                     <div className="rule-asset-mobile-item">
                       <div className="rule-asset-mobile-item__header">
                         <Space direction="vertical" size={0}>
-                          <Typography.Text strong>{item.name}</Typography.Text>
+                          <Typography.Text strong>{item.display_name || item.name}</Typography.Text>
                           <Typography.Text code>
-                            {item.check_item_id || 'unclassified'}
+                            {item.check_item_id || (item.category === 'not_applicable' ? 'no-rule-required' : 'unclassified')}
                           </Typography.Text>
                         </Space>
                         <Tag className={`rule-asset-governance-status is-${item.governance_status}`}>
                           {governanceStatusLabel[item.governance_status]}
                         </Tag>
                       </div>
+                      <Typography.Text type="secondary">
+                        {item.display_description || item.description}
+                      </Typography.Text>
                       <Typography.Text type="secondary">
                         {item.implementation_count} 个实现 / {item.command_count} 条命令 / {item.vendors.join(' / ') || '待归类'}
                       </Typography.Text>
@@ -667,6 +791,22 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
                         >
                           查看实现
                         </Button>
+                        {!item.check_item_id && (
+                          <Button
+                            icon={<LinkOutlined />}
+                            onClick={() => {
+                              if (item.implementations.length === 1) {
+                                openCatalogBinding(item.implementations[0])
+                                return
+                              }
+                              setExpandedRowKeys((current) => (
+                                current.includes(item.id) ? current : [...current, item.id]
+                              ))
+                            }}
+                          >
+                            {item.implementations.length === 1 ? '绑定检查项' : '逐条绑定'}
+                          </Button>
+                        )}
                         {item.next_action?.target_url && (
                           <Button
                             className="rule-asset-next-action"
@@ -691,6 +831,17 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
                                 >
                                   审查证据
                                 </Button>,
+                                ...(unit.mapping_status === 'unclassified'
+                                  ? [
+                                    <Button
+                                      key="catalog-binding"
+                                      type="link"
+                                      onClick={() => openCatalogBinding(unit)}
+                                    >
+                                      绑定检查项
+                                    </Button>,
+                                  ]
+                                  : []),
                                 ...(unit.next_action?.target_url
                                   ? [
                                     <Button
@@ -738,6 +889,8 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
                 />
               )}
             </div>
+          ) : !listQuery.isLoading && !listQuery.isFetching && (data?.items.length || 0) === 0 ? (
+            <Empty description="暂无符合条件的检查项资产" />
           ) : (
             <Table<RuleAssetCheckItemProductionUnit>
               rowKey="id"
@@ -746,6 +899,7 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
               dataSource={data?.items || []}
               columns={columns}
               expandable={{
+                columnTitle: '实现',
                 expandedRowKeys,
                 onExpandedRowsChange: (keys) => setExpandedRowKeys([...keys]),
                 expandedRowRender: (item) => (
@@ -788,7 +942,7 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
           <RuleAssetGenerationStep
             seedJobId={detailQuery.data?.rule_seed_job_id || focusRuleSeedJobId}
             bundleId={detailQuery.data?.bundle_id || focusBundleId}
-            datasetIds={datasetIds}
+            datasetIds={detailDatasetIds}
             command={detailQuery.data?.canonical_command || initialSearch}
             offlineJobId={detailQuery.data?.offline_job_id || focusOfflineJobId}
             initialAction={
@@ -810,6 +964,16 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
         onClose={() => {
           setEvidencePage(1)
           setSelectedUnitId(undefined)
+        }}
+      />
+      <CommandCatalogBindingDrawer
+        open={Boolean(bindingUnit)}
+        unit={bindingUnit}
+        onClose={() => setBindingUnit(undefined)}
+        onCreated={(change) => {
+          setBindingUnit(undefined)
+          setCatalogFocusChangeId(change.id)
+          onViewChange('catalog')
         }}
       />
     </div>
