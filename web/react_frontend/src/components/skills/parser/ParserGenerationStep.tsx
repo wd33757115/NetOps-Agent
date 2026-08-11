@@ -105,29 +105,6 @@ const classificationLabel: Record<string, string> = {
   empty_unverified: '空输出待判定',
 }
 
-const blockerLabel: Record<string, string> = {
-  parser_spec_missing: '语义方案尚未形成',
-  parser_spec_not_confirmed: '语义方案尚未就绪',
-  parser_spec_digest_mismatch: '语义方案摘要不一致',
-  samples_missing: '缺少可用样本',
-  samples_not_sanitized: '样本脱敏尚未完成',
-  sample_roles_unassigned: '存在未分类样本',
-  generation_sample_missing: '缺少包含业务数据的样本',
-  generation_samples_without_data: '生成样本中没有可验证的数据记录',
-  header_only_samples_unverified: '样本只有表头，没有实际数据行',
-  rule_asset_source_dataset_missing: '样本未关联离线规则数据集',
-  rule_asset_source_dataset_not_governed: '样本不是由规则资产离线导入任务产生',
-  rule_asset_source_source_job_wrong_purpose: '样本来自巡检执行线，不能用于生成规则资产',
-  rule_asset_source_source_job_not_completed: '离线规则样本任务尚未完成',
-  rule_asset_source_source_job_archived: '离线规则样本任务已归档',
-  rule_asset_source_period_not_completed: '样本周期尚未完成',
-  rule_asset_source_authoritative_run_not_completed: '样本采集 Run 尚未完整结束',
-  rule_asset_source_source_file_missing: '原始离线文件已缺失',
-  rule_asset_source_source_file_unverified: '原始离线文件哈希尚未验证',
-  rule_asset_source_source_file_unavailable: '原始离线文件已不可访问',
-  rule_asset_source_sample_snapshot_outside_scope: '样本不属于当前离线任务的权威 Run',
-}
-
 const jobStatusLabel: Record<string, string> = {
   collecting: '准备中',
   pending: '等待生成',
@@ -273,14 +250,42 @@ const AttemptExecutionEvidence: React.FC<{
 const ParserAttemptHistory: React.FC<{
   attempts: ParserGenerationAttempt[]
   loading: boolean
+  fallbackTemplateText?: string
   onUseTemplate?: (attempt: ParserGenerationAttempt) => void
-}> = ({ attempts, loading, onUseTemplate }) => {
+  mode?: 'all' | 'template' | 'execution'
+}> = ({ attempts, loading, fallbackTemplateText, onUseTemplate, mode = 'all' }) => {
   if (loading) return <div style={{ display: 'grid', minHeight: 180, placeItems: 'center' }}><Spin /></div>
   if (!attempts.length) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未产生生成轮次" />
+  const latestAttemptNumber = Math.max(...attempts.map((attempt) => attempt.attempt_number))
+  const executableTemplateText = (value?: string) => {
+    const text = value?.trim()
+    if (!text) return undefined
+    const hasValueDefinition = /^\s*Value(?:\s+\w+)*\s+\w+\s+\(.+\)\s*$/m.test(text)
+    const hasStartState = /^\s*Start\s*$/m.test(text)
+    return hasValueDefinition && hasStartState ? text : undefined
+  }
+  const templateTextFor = (attempt: ParserGenerationAttempt) => {
+    const attemptText = executableTemplateText(attempt.template_text)
+    if (attemptText) return attemptText
+    if (attempt.attempt_number !== latestAttemptNumber) return undefined
+    return executableTemplateText(fallbackTemplateText)
+  }
+  const visibleAttempts = mode === 'template'
+    ? attempts.filter((attempt) => Boolean(templateTextFor(attempt)))
+    : attempts
+  if (!visibleAttempts.length) {
+    return (
+      <Empty
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+        description="尚未生成可执行的 TextFSM 模板"
+      />
+    )
+  }
   return (
     <Collapse
       accordion
-      items={attempts.map((attempt) => {
+      items={visibleAttempts.map((attempt) => {
+        const effectiveTemplateText = templateTextFor(attempt)
         const validation = asRecord(attempt.validation_report_json)
         const generation = asRecord(validation.generation)
         const acceptance = Object.keys(asRecord(validation.acceptance)).length
@@ -304,71 +309,205 @@ const ParserAttemptHistory: React.FC<{
           ),
           children: (
             <Space direction="vertical" size={14} style={{ width: '100%' }}>
-              <Descriptions bordered size="small" column={2}>
-                <Descriptions.Item label="候选摘要">{attempt.template_sha256 || '-'}</Descriptions.Item>
-                <Descriptions.Item label="耗时">{attempt.latency_ms ? `${attempt.latency_ms} ms` : '-'}</Descriptions.Item>
-                <Descriptions.Item label="生成时间">{attempt.created_at ? new Date(attempt.created_at).toLocaleString() : '-'}</Descriptions.Item>
-                <Descriptions.Item label="失败签名">{attempt.failure_signature || '-'}</Descriptions.Item>
-              </Descriptions>
-              <Collapse
-                ghost
-                defaultActiveKey={['execution', 'review']}
-                items={[
-                  {
+              {mode !== 'template' && (
+                <Descriptions bordered size="small" column={2}>
+                  <Descriptions.Item label="候选摘要">{attempt.template_sha256 || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="耗时">{attempt.latency_ms ? `${attempt.latency_ms} ms` : '-'}</Descriptions.Item>
+                  <Descriptions.Item label="生成时间">{attempt.created_at ? new Date(attempt.created_at).toLocaleString() : '-'}</Descriptions.Item>
+                  <Descriptions.Item label="失败签名">{attempt.failure_signature || '-'}</Descriptions.Item>
+                </Descriptions>
+              )}
+              {mode === 'template' && effectiveTemplateText ? (
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  {onUseTemplate && (
+                    <Button
+                      icon={<CodeOutlined />}
+                      onClick={() => onUseTemplate({
+                        ...attempt,
+                        template_text: effectiveTemplateText,
+                      })}
+                    >
+                      使用本轮模板进行工程师修订
+                    </Button>
+                  )}
+                  <pre style={{ ...codePanelStyle, maxHeight: 420, whiteSpace: 'pre-wrap' }}>
+                    {effectiveTemplateText}
+                  </pre>
+                </Space>
+              ) : (
+                <Collapse
+                  ghost
+                  defaultActiveKey={['execution', 'review']}
+                  items={[
+                    ...(mode === 'all' && effectiveTemplateText ? [{
                     key: 'template',
                     label: <Space><CodeOutlined /><span>本轮 TextFSM 候选</span></Space>,
                     children: (
                       <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                        {onUseTemplate && attempt.template_text && (
+                        {onUseTemplate && (
                           <Button
                             icon={<CodeOutlined />}
-                            onClick={() => onUseTemplate(attempt)}
+                            onClick={() => onUseTemplate({
+                              ...attempt,
+                              template_text: effectiveTemplateText,
+                            })}
                           >
                             使用本轮模板进行工程师修订
                           </Button>
                         )}
                         <pre style={{ ...codePanelStyle, maxHeight: 420, whiteSpace: 'pre-wrap' }}>
-                          {attempt.template_text || '该轮次没有可执行模板正文'}
+                          {effectiveTemplateText}
                         </pre>
                       </Space>
                     ),
-                  },
-                  {
-                    key: 'execution',
-                    label: '本地执行结果',
-                    children: <AttemptExecutionEvidence report={generation} />,
-                  },
-                  ...(acceptance ? [{
-                    key: 'acceptance',
-                    label: '额外复核样本执行结果',
-                    children: <AttemptExecutionEvidence report={acceptance} />,
-                  }] : []),
-                  {
-                    key: 'review',
-                    label: 'LLM 独立复核',
-                    children: Object.keys(review).length ? (
-                      <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                        <Alert
-                          type={review.passed === true ? 'success' : 'warning'}
-                          showIcon
-                          message={review.passed === true ? '本轮复核通过' : '本轮复核要求修复'}
-                          description={String(review.summary || '未提供复核摘要')}
-                        />
-                        {reviewDiagnostics.map((diagnostic, index) => (
-                          <Typography.Text key={`${attempt.id}-diagnostic-${index}`} type="secondary">
-                            {String(diagnostic.code || 'review_finding')}：{String(diagnostic.message || '')}
-                          </Typography.Text>
-                        ))}
-                      </Space>
-                    ) : <Typography.Text type="secondary">本轮未进入独立复核。</Typography.Text>,
-                  },
-                ]}
-              />
+                    }] : []),
+                    {
+                      key: 'execution',
+                      label: '本地执行结果',
+                      children: <AttemptExecutionEvidence report={generation} />,
+                    },
+                    ...(acceptance ? [{
+                      key: 'acceptance',
+                      label: '额外复核样本执行结果',
+                      children: <AttemptExecutionEvidence report={acceptance} />,
+                    }] : []),
+                    {
+                      key: 'review',
+                      label: 'LLM 独立复核',
+                      children: Object.keys(review).length ? (
+                        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                          <Alert
+                            type={review.passed === true ? 'success' : 'warning'}
+                            showIcon
+                            message={review.passed === true ? '本轮复核通过' : '本轮复核要求修复'}
+                            description={String(review.summary || '未提供复核摘要')}
+                          />
+                          {reviewDiagnostics.map((diagnostic, index) => (
+                            <Typography.Text key={`${attempt.id}-diagnostic-${index}`} type="secondary">
+                              {String(diagnostic.code || 'review_finding')}：{String(diagnostic.message || '')}
+                            </Typography.Text>
+                          ))}
+                        </Space>
+                      ) : <Typography.Text type="secondary">本轮未进入独立复核。</Typography.Text>,
+                    },
+                  ]}
+                />
+              )}
             </Space>
           ),
         }
       })}
     />
+  )
+}
+
+interface SemanticPlanRecordSet {
+  name: string
+  recordUnit: string
+  primaryKeys: string[]
+  expectedRecords?: number
+  fields: Array<{
+    name: string
+    type: string
+    required: boolean
+    source: string
+    example: string
+  }>
+}
+
+const semanticPlanRecordSets = (
+  value: unknown,
+  fallbackExpectedRecords?: number,
+): SemanticPlanRecordSet[] => {
+  const spec = asRecord(value)
+  const rawRecordSets = Array.isArray(spec.record_sets)
+    ? spec.record_sets.map(asRecord)
+    : Object.keys(spec).length
+      ? [spec]
+      : []
+  return rawRecordSets.map((recordSet, index) => {
+    const rawFields = asRecord(recordSet.fields)
+    const primaryKeys = Array.isArray(recordSet.primary_keys)
+      ? recordSet.primary_keys.map(String)
+      : []
+    return {
+      name: String(recordSet.name || recordSet.entity || `record_set_${index + 1}`),
+      recordUnit: String(recordSet.record_unit || recordSet.entity || recordSet.name || '一条业务记录'),
+      primaryKeys,
+      expectedRecords: Number(recordSet.expected_record_count || recordSet.record_count || (
+        rawRecordSets.length === 1 ? fallbackExpectedRecords : 0
+      )) || undefined,
+      fields: Object.entries(rawFields).map(([name, definition]) => {
+        const field = asRecord(definition)
+        const examples = Array.isArray(field.examples) ? field.examples : []
+        return {
+          name,
+          type: String(field.type || 'text'),
+          required: field.required === true,
+          source: String(field.source_column || field.source || field.cli_field || '待生成验证'),
+          example: String(field.example ?? examples[0] ?? '待生成验证'),
+        }
+      }),
+    }
+  })
+}
+
+const SemanticPlanOverview: React.FC<{
+  parserSpec?: Record<string, unknown>
+  fallbackExpectedRecords?: number
+}> = ({ parserSpec, fallbackExpectedRecords }) => {
+  const recordSets = semanticPlanRecordSets(parserSpec, fallbackExpectedRecords)
+  if (!recordSets.length) {
+    return (
+      <Empty
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+        description="尚未形成语义方案。请先描述记录粒度、主键和需要保留的字段。"
+      />
+    )
+  }
+  return (
+    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      {recordSets.map((recordSet) => (
+        <section className="parser-generation-step" key={recordSet.name}>
+          <div className="parser-generation-step__heading">
+            <div>
+              <Typography.Text strong>{recordSet.name}</Typography.Text>
+              <br />
+              <Typography.Text type="secondary">每条记录代表：{recordSet.recordUnit}</Typography.Text>
+            </div>
+            <Space size={6} wrap>
+              <Tag>预计 {recordSet.expectedRecords ?? '待验证'} 条</Tag>
+              <Tag>主键 {recordSet.primaryKeys.join(' + ') || '未定义'}</Tag>
+            </Space>
+          </div>
+          <Table
+            rowKey="name"
+            size="small"
+            pagination={false}
+            dataSource={recordSet.fields}
+            locale={{ emptyText: '该记录集尚未定义字段' }}
+            columns={[
+              { title: '字段', dataIndex: 'name', key: 'name' },
+              { title: '类型', dataIndex: 'type', key: 'type', width: 140 },
+              { title: 'CLI 来源', dataIndex: 'source', key: 'source', width: 160 },
+              { title: '样例值', dataIndex: 'example', key: 'example', width: 160 },
+              {
+                title: '约束',
+                key: 'constraint',
+                width: 160,
+                render: (_, field) => (
+                  <Space size={4} wrap>
+                    {recordSet.primaryKeys.includes(field.name) && <Tag>主键</Tag>}
+                    {field.required && <Tag>必填</Tag>}
+                    {!recordSet.primaryKeys.includes(field.name) && !field.required && <Typography.Text type="secondary">可选</Typography.Text>}
+                  </Space>
+                ),
+              },
+            ]}
+          />
+        </section>
+      ))}
+    </Space>
   )
 }
 
@@ -484,8 +623,6 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
   const navigate = useNavigate()
   const isMobile = typeof window !== 'undefined'
     && Boolean(window.matchMedia?.('(max-width: 767px)')?.matches)
-  const autoSuggestionJob = useRef<string>()
-  const autoDispatchJob = useRef<string>()
   const projectionRefreshKey = useRef<string>()
 
   const [specText, setSpecText] = useState('{}')
@@ -496,6 +633,7 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
   const [sampleKeysText, setSampleKeysText] = useState('[]')
   const [sampleReason, setSampleReason] = useState('工程师修订样本角色或验收基准')
   const [approvalOpen, setApprovalOpen] = useState(false)
+  const [revisionMode, setRevisionMode] = useState(false)
   const [selectedPipelineStep, setSelectedPipelineStep] = useState<number | null>(null)
   const [advancedKeys, setAdvancedKeys] = useState<string[]>([])
   const [manualTemplateText, setManualTemplateText] = useState('')
@@ -573,6 +711,7 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
   const activeTemplate = templatesQuery.data?.items.find(
     (template) => template.status === 'active' && matchesJob(template),
   )
+  const evidenceTemplate = candidateTemplate || activeTemplate
   const aiReview = candidateTemplate?.validation_json?.ai_review as {
     passed?: boolean
     summary?: string
@@ -582,24 +721,28 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
   )
 
   const comparisonQuery = useQuery(
-    ['parser-template-comparison-inline', candidateTemplate?.id],
-    () => parserApi.comparison(candidateTemplate?.id || ''),
-    { enabled: Boolean(approvalOpen && candidateTemplate?.id) },
+    ['parser-template-comparison-inline', evidenceTemplate?.id],
+    () => parserApi.comparison(evidenceTemplate?.id || ''),
+    { enabled: Boolean(approvalOpen && evidenceTemplate?.id) },
   )
 
   useEffect(() => {
     setSpecText(JSON.stringify(job?.parser_spec_json || {}, null, 2))
   }, [job?.id, job?.parser_spec_json])
 
+  const [parserRevisionInstruction, setParserRevisionInstruction] = useState('')
+
   useEffect(() => {
     setSelectedPipelineStep(null)
     setAdvancedKeys([])
     setManualTemplateText('')
     setManualTemplateReason('')
+    setParserRevisionInstruction('')
+    setRevisionMode(false)
   }, [jobId])
 
   const suggestSpec = useMutation(
-    () => parserApi.suggestJobSpec(jobId || ''),
+    () => parserApi.suggestJobSpec(jobId || '', parserRevisionInstruction.trim()),
     {
       onSuccess: async () => {
         await refreshParserState(queryClient, jobId || '')
@@ -622,48 +765,6 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
   )
   const dispatchGeneration = dispatch.mutate
   const dispatchLoading = dispatch.isLoading
-
-  useEffect(() => {
-    if (
-      !job
-      || job.status !== 'collecting'
-      || job.parser_spec_status !== 'missing'
-      || suggestion.status
-      || specSuggestionLoading
-      || autoSuggestionJob.current === job.id
-    ) return
-    autoSuggestionJob.current = job.id
-    requestSpecSuggestion()
-  }, [
-    job,
-    job?.id,
-    job?.parser_spec_status,
-    job?.status,
-    requestSpecSuggestion,
-    specSuggestionLoading,
-    suggestion.status,
-  ])
-
-  useEffect(() => {
-    if (
-      !job
-      || job.status !== 'collecting'
-      || suggestion.status !== 'ready'
-      || !job.generation_readiness?.ready
-      || dispatchLoading
-      || autoDispatchJob.current === job.id
-    ) return
-    autoDispatchJob.current = job.id
-    dispatchGeneration()
-  }, [
-    dispatchGeneration,
-    dispatchLoading,
-    job,
-    job?.generation_readiness?.ready,
-    job?.id,
-    job?.status,
-    suggestion.status,
-  ])
 
   useEffect(() => {
     if (
@@ -908,18 +1009,26 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
       'header_only_samples_unverified',
     ].includes(item)),
   )
+  const fallbackExpectedRecords = (job.samples || []).reduce((total, sample) => (
+    total + Number(asRecord(sample).expected_record_count || 0)
+  ), 0) || undefined
+  const publishedReadOnly = Boolean(activeTemplate && !candidateTemplate && !revisionMode)
+  const candidateReadOnly = Boolean(candidateTemplate && !revisionMode)
+  const semanticReadOnly = publishedReadOnly || candidateReadOnly
   const pipelineCurrent = activeTemplate
-    ? 4
+    ? 3
     : candidateTemplate
-      ? 4
+      ? 3
       : job.status === 'succeeded'
-        ? 3
+        ? 2
         : jobActive
           ? 2
+          : job.status === 'failed'
+            ? parserSpecRevised ? 1 : 2
           : semanticReady
-            ? 2
-            : 1
-  const visiblePipelineStep = selectedPipelineStep ?? pipelineCurrent
+            ? 1
+            : semanticAnalysisActive ? 1 : 0
+  const visiblePipelineStep = Math.min(3, Math.max(0, selectedPipelineStep ?? pipelineCurrent))
   const generationAttempts = attemptsQuery.data || job.generation_attempts || []
   const reviewedAttempts = generationAttempts.filter((attempt) => (
     Object.keys(asRecord(asRecord(attempt.validation_report_json).ai_review)).length > 0
@@ -967,7 +1076,14 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
       title: '操作',
       width: 90,
       render: (_, sample) => (
-        <Button size="small" disabled={sampleEditingLocked} onClick={() => editSample(sample)}>
+        <Button
+          size="small"
+          disabled={sampleEditingLocked}
+          onClick={() => {
+            editSample(sample)
+            setAdvancedKeys(['advanced'])
+          }}
+        >
           修订
         </Button>
       ),
@@ -1107,7 +1223,11 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
           </div>
           <Button
             icon={<CheckOutlined />}
-            disabled={jobActive || Boolean(candidateTemplate) || Boolean(activeTemplate)}
+            disabled={
+              jobActive
+              || Boolean(candidateTemplate)
+              || (Boolean(activeTemplate) && !revisionMode)
+            }
             loading={submitManualCandidate.isLoading}
             onClick={() => submitManualCandidate.mutate()}
           >
@@ -1143,7 +1263,16 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
   const pipelineStepContent = [
     (
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
-        <Typography.Text strong>冻结样本与脱敏命令输出</Typography.Text>
+        <div className="parser-generation-step__heading">
+          <div>
+            <Typography.Text strong>先确认 CLI 样本</Typography.Text>
+            <br />
+            <Typography.Text type="secondary">
+              先判断输出是否包含真实业务记录，再进入语义设计。空结果和错误输出不能单独用于生成 Parser。
+            </Typography.Text>
+          </div>
+          <Tag>{job.sample_count} 份样本</Tag>
+        </div>
         <Table
           rowKey="id"
           size="small"
@@ -1154,6 +1283,7 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
         />
         <Collapse
           ghost
+          defaultActiveKey={(job.samples || []).slice(0, 1).map((sample) => sample.id)}
           items={(job.samples || []).map((sample) => ({
             key: sample.id,
             label: (
@@ -1172,41 +1302,230 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
             ),
           }))}
         />
+        {needsPositiveSample ? (
+          <Alert
+            type="warning"
+            showIcon
+            message="当前样本没有可用于设计字段的真实记录"
+            description="请将正常空输出标记为负样本，或补充一份包含真实业务记录的同命令输出。"
+            action={<Button onClick={openSampleImport}>导入补充样本</Button>}
+          />
+        ) : (
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button
+              type="primary"
+              disabled={!job.sample_count}
+              onClick={() => setSelectedPipelineStep(1)}
+            >
+              样本已确认，进入语义设计 <ArrowRightOutlined />
+            </Button>
+          </div>
+        )}
       </Space>
     ),
     (
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         <div className="parser-generation-step__heading">
           <div>
-            <Typography.Text strong>当前 ParserSpec</Typography.Text>
+            <Typography.Text strong>设计并确认语义方案</Typography.Text>
             <br />
             <Typography.Text type="secondary">
-              它用于引导生成，最终是否符合业务要求以实际解析结果和人工确认结论为准。
+              明确每条记录代表什么、主键是什么、需要提取哪些字段，再让 LLM 生成 Parser。
             </Typography.Text>
           </div>
-          <Button
-            icon={<SettingOutlined />}
-            onClick={() => setAdvancedKeys(['advanced'])}
-          >
-            修订 ParserSpec
-          </Button>
+          {semanticReadOnly ? (
+            <Tag>只读历史版本</Tag>
+          ) : (
+            <Button
+              icon={<SettingOutlined />}
+              onClick={() => setAdvancedKeys(['advanced'])}
+            >
+              专家模式
+            </Button>
+          )}
         </div>
-        <pre style={{ ...codePanelStyle, maxHeight: 520, whiteSpace: 'pre-wrap' }}>
-          {JSON.stringify(job.parser_spec_json || {}, null, 2)}
-        </pre>
-        {preferredValueNames.length > 0 && (
-          <div>
-            <Space wrap size={[6, 6]}>
-              <Typography.Text strong>推荐 TextFSM Value</Typography.Text>
-              {preferredValueNames.map((name) => <Tag key={name}>{name}</Tag>)}
-            </Space>
-            <Typography.Paragraph type="secondary" style={{ margin: '6px 0 0' }}>
-              与样本语义、单位和记录粒度一致时优先采用；存在真实差异时保留源字段，发布后由标准字段映射统一。
+        <div className="parser-generation-sequence">
+          <section className="parser-generation-step">
+            <Typography.Text strong>1. CLI 证据</Typography.Text>
+            <Typography.Paragraph type="secondary" style={{ margin: '4px 0 12px' }}>
+              语义方案中的记录和字段必须能在这些脱敏输出中找到依据。
             </Typography.Paragraph>
+            <Collapse
+              ghost
+              defaultActiveKey={(job.samples || []).slice(0, 1).map((sample) => sample.id)}
+              items={(job.samples || []).map((sample) => ({
+                key: sample.id,
+                label: (
+                  <Space wrap>
+                    <Typography.Text strong>{sample.source_context?.device_name || sample.device_id}</Typography.Text>
+                    <Tag>{classificationLabel[sample.content_classification?.status || ''] || '待判定'}</Tag>
+                  </Space>
+                ),
+                children: (
+                  <pre style={{ ...codePanelStyle, maxHeight: 560, whiteSpace: 'pre-wrap' }}>
+                    {sample.sanitized_text || sample.sanitized_preview || '无可展示的脱敏样本内容'}
+                  </pre>
+                ),
+              }))}
+            />
+          </section>
+          <section className="parser-generation-step">
+            <Typography.Text strong>2. 结构化语义方案</Typography.Text>
+            <Typography.Paragraph type="secondary" style={{ margin: '4px 0 12px' }}>
+              LLM 只负责提出方案；最终是否进入生成由你确认。
+            </Typography.Paragraph>
+            <SemanticPlanOverview
+              parserSpec={job.parser_spec_json}
+              fallbackExpectedRecords={fallbackExpectedRecords}
+            />
+            {!semanticReadOnly && <div style={{ marginTop: 16 }}>
+              <Typography.Text strong>告诉 AI 如何设计或调整</Typography.Text>
+              <Input.TextArea
+                aria-label="AI ParserSpec 修订要求"
+                value={parserRevisionInstruction}
+                onChange={(event) => setParserRevisionInstruction(event.target.value)}
+                placeholder="例如：每个物理电源一条记录；主键为 slot + power_supply；必须提取 State、Mode、电流、电压和输出功率。"
+                autoSize={{ minRows: 4, maxRows: 8 }}
+                maxLength={4000}
+                showCount
+                disabled={semanticAnalysisActive}
+                style={{ marginTop: 8 }}
+              />
+              <Button
+                icon={<RobotOutlined />}
+                loading={specSuggestionLoading}
+                disabled={semanticAnalysisActive || (semanticReady && !parserRevisionInstruction.trim())}
+                onClick={() => requestSpecSuggestion()}
+                style={{ marginTop: 10 }}
+              >
+                {semanticReady ? '按要求更新语义方案' : '让 LLM 提出语义方案'}
+              </Button>
+            </div>}
+          </section>
+        </div>
+        {(preferredValueNames.length > 0 || suggestion.result?.rationale) && (
+          <Collapse
+            ghost
+            items={[{
+              key: 'technical-basis',
+              label: '技术依据与字段命名建议',
+              children: (
+                <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                  {preferredValueNames.length > 0 && (
+                    <div>
+                      <Space wrap size={[6, 6]}>
+                        <Typography.Text strong>推荐 TextFSM Value</Typography.Text>
+                        {preferredValueNames.map((name) => <Tag key={name}>{name}</Tag>)}
+                      </Space>
+                      <Typography.Paragraph type="secondary" style={{ margin: '6px 0 0' }}>
+                        与样本语义、单位和记录粒度一致时优先采用；存在真实差异时保留源字段。
+                      </Typography.Paragraph>
+                    </div>
+                  )}
+                  {suggestion.result?.rationale && (
+                    <Alert
+                      type="info"
+                      showIcon
+                      message="AI 方案依据（模型原文）"
+                      description={suggestion.result.rationale}
+                    />
+                  )}
+                </Space>
+              ),
+            }]}
+          />
+        )}
+        {parserSpecRevised && (
+          <Alert
+            type="warning"
+            showIcon
+            message="ParserSpec 已更新，等待重新确认"
+            description="旧候选与当前语义方案不再一致。请核对上方记录集、字段和主键后，再生成新的 Parser。"
+          />
+        )}
+        {suggestion.status === 'failed' && (
+          <Alert
+            type="error"
+            showIcon
+            message="语义方案生成失败"
+            description={suggestion.error}
+            action={<Button loading={specSuggestionLoading} onClick={() => requestSpecSuggestion()}>重新分析</Button>}
+          />
+        )}
+        {semanticAnalysisActive && (
+          <section className="parser-generation-progress" aria-live="polite">
+            <div className="parser-generation-progress__header">
+              <Space wrap size={8}>
+                <Spin size="small" />
+                <Typography.Text strong>正在分析样本并生成语义方案</Typography.Text>
+                <Tag>{suggestion.status === 'queued' ? '等待 AI Worker' : '模型分析中'}</Tag>
+              </Space>
+              <Typography.Text type="secondary">已运行 {formatElapsed(suggestion.elapsed_ms)}</Typography.Text>
+            </div>
+            <div className="parser-generation-progress__facts">
+              <span>任务 {suggestion.task_id ? suggestion.task_id.slice(0, 8) : '待分配'}</span>
+              <span>
+                最近心跳 {suggestion.heartbeat_at
+                  ? new Date(suggestion.heartbeat_at).toLocaleTimeString()
+                  : '等待 Worker 接管'}
+              </span>
+              {suggestion.deadline_at && (
+                <span>分析截止 {new Date(suggestion.deadline_at).toLocaleTimeString()}</span>
+              )}
+            </div>
+          </section>
+        )}
+        {publishedReadOnly && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button
+              type="primary"
+              onClick={() => {
+                setRevisionMode(true)
+                setParserRevisionInstruction('')
+              }}
+            >
+              基于此版本创建修订
+            </Button>
           </div>
         )}
-        {suggestion.result?.rationale && (
-          <Alert type="info" showIcon message="生成依据" description={suggestion.result.rationale} />
+        {candidateReadOnly && (
+          <Alert
+            type="info"
+            showIcon
+            message="候选版本正在等待发布确认"
+            description="当前语义方案只读；如需修改，请先在发布确认阶段驳回候选。"
+            action={<Button onClick={() => setSelectedPipelineStep(3)}>前往发布确认</Button>}
+          />
+        )}
+        {semanticReady && !semanticReadOnly && (
+          <div
+            style={{
+              alignItems: 'center',
+              borderTop: '1px solid var(--border-subtle, #e5e7eb)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              paddingTop: 14,
+            }}
+          >
+            <Typography.Text type="secondary">确认后才会调用 LLM 生成 TextFSM，并自动执行样本校验。</Typography.Text>
+            <Button
+              type="primary"
+              icon={<PlayCircleOutlined />}
+              disabled={
+                !readiness?.ready
+                || semanticAnalysisActive
+                || (Boolean(activeTemplate) && !parserSpecRevised)
+              }
+              loading={dispatchLoading || retryAndDispatch.isLoading}
+              onClick={() => (
+                parserSpecRevised || !['collecting', 'pending'].includes(job.status)
+                  ? retryAndDispatch.mutate()
+                  : dispatchGeneration()
+              )}
+            >
+              {activeTemplate ? '确认修订方案并生成新版本' : '确认语义方案并生成 Parser'}
+            </Button>
+          </div>
         )}
       </Space>
     ),
@@ -1217,7 +1536,7 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
             <Typography.Text strong>TextFSM 生成轮次</Typography.Text>
             <br />
             <Typography.Text type="secondary">
-              每轮均保留候选模板、本地实际执行结果和诊断；LLM 异议会进入下一轮，最多三轮。
+              先核对 CLI 原始输出，再逐轮查看模板、实际解析结果和诊断；LLM 异议会进入下一轮，最多三轮。
             </Typography.Text>
           </div>
           {!jobActive && readiness?.ready && (
@@ -1230,14 +1549,57 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
             </Button>
           )}
         </div>
-        <ParserAttemptHistory
-          attempts={generationAttempts}
-          loading={attemptsQuery.isLoading}
-          onUseTemplate={(attempt) => {
-            setManualTemplateText(attempt.template_text || '')
-            setManualTemplateReason(`基于候选记录 ${attempt.attempt_number} 修订`)
-            setAdvancedKeys(['advanced'])
-          }}
+        <div className="parser-generation-sequence">
+          <section className="parser-generation-step">
+            <Typography.Text strong>1. CLI 验证证据</Typography.Text>
+            <Typography.Paragraph type="secondary" style={{ margin: '4px 0 12px' }}>
+              对照原始输出判断是否漏行、错列或错误合并记录。
+            </Typography.Paragraph>
+            <Collapse
+              ghost
+              defaultActiveKey={(job.samples || []).slice(0, 1).map((sample) => sample.id)}
+              items={(job.samples || []).map((sample) => ({
+                key: sample.id,
+                label: sample.source_context?.device_name || sample.device_id,
+                children: (
+                  <pre style={{ ...codePanelStyle, maxHeight: 560, whiteSpace: 'pre-wrap' }}>
+                    {sample.sanitized_text || sample.sanitized_preview || '无可展示的脱敏样本内容'}
+                  </pre>
+                ),
+              }))}
+            />
+          </section>
+          <section className="parser-generation-step">
+            <Typography.Text strong>2. 模板与实际解析结果</Typography.Text>
+            <Typography.Paragraph type="secondary" style={{ margin: '4px 0 12px' }}>
+              按生成轮次核对 TextFSM 模板、实际记录、字段、样本覆盖和复核诊断；没有模板正文时不显示候选模板区。
+            </Typography.Paragraph>
+            <ParserAttemptHistory
+              attempts={generationAttempts}
+              loading={attemptsQuery.isLoading}
+              fallbackTemplateText={evidenceTemplate?.content}
+              mode="all"
+              onUseTemplate={(attempt) => {
+                setManualTemplateText(attempt.template_text || '')
+                setManualTemplateReason(`基于候选记录 ${attempt.attempt_number} 修订`)
+                setAdvancedKeys(['advanced'])
+              }}
+            />
+          </section>
+        </div>
+        <Collapse
+          ghost
+          items={[{
+            key: 'ai-review-history',
+            label: `AI 复核记录 (${reviewedAttempts.length})`,
+            children: (
+              <ParserAttemptHistory
+                attempts={reviewedAttempts}
+                loading={attemptsQuery.isLoading}
+                mode="execution"
+              />
+            ),
+          }]}
         />
       </Space>
     ),
@@ -1253,14 +1615,7 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
     (
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         <Typography.Text strong>人工最终确认</Typography.Text>
-        {activeTemplate ? (
-          <Alert
-            type="success"
-            showIcon
-            message="Parser 已发布"
-            description={`版本 ${activeTemplate.version} 已生效，审批证据和解析结果已冻结。`}
-          />
-        ) : candidateTemplate ? (
+        {candidateTemplate ? (
           <Alert
             type={humanDirectReviewRequired ? 'warning' : 'success'}
             showIcon
@@ -1268,12 +1623,20 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
             description={aiReview?.summary || '请核对样本、模板、逐样本解析结果和主键。'}
             action={<Button onClick={() => setApprovalOpen(true)}>审查并确认</Button>}
           />
+        ) : activeTemplate ? (
+          <Alert
+            type="success"
+            showIcon
+            message="Parser 已发布"
+            description={`版本 ${activeTemplate.version} 已生效，审批证据和解析结果已冻结。`}
+            action={<Button onClick={() => setApprovalOpen(true)}>查看完整审批证据</Button>}
+          />
         ) : (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未形成可供人工确认的候选" />
         )}
       </Space>
     ),
-  ][visiblePipelineStep]
+  ][[0, 1, 2, 4][visiblePipelineStep]]
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -1285,8 +1648,10 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
           {[job.vendor, job.model || job.profile].filter(Boolean).join(' / ')}
         </Descriptions.Item>
         <Descriptions.Item label="当前状态">
-          <Tag color={activeTemplate ? 'green' : parserSpecRevised ? 'gold' : undefined}>
-            {activeTemplate
+          <Tag color={candidateTemplate ? 'gold' : activeTemplate ? 'green' : parserSpecRevised ? 'gold' : undefined}>
+            {candidateTemplate
+              ? '待人工确认'
+              : activeTemplate
               ? '已发布'
               : parserSpecRevised
                 ? '待重新生成'
@@ -1295,13 +1660,30 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
         </Descriptions.Item>
       </Descriptions>
 
+      {publishedReadOnly && (
+        <Alert
+          type="info"
+          showIcon
+          message="正在查看已发布版本"
+          description="当前内容只读，不会修改生产 Parser。需要调整时，请先创建修订版本。"
+        />
+      )}
+      {revisionMode && activeTemplate && !candidateTemplate && (
+        <Alert
+          type="warning"
+          showIcon
+          message="正在创建修订版本"
+          description={`生产版本 ${activeTemplate.version} 保持生效；只有新候选通过验证并再次审批后才会替换。`}
+        />
+      )}
+
       <section className="parser-generation-step">
         <div className="parser-generation-step__heading">
           <div>
-            <Typography.Text strong>Parser 自动生成流程</Typography.Text>
+            <Typography.Text strong>Parser 生产工作流</Typography.Text>
             <br />
             <Typography.Text type="secondary">
-              平台自动完成语义设计、模板生成、本地校验与独立复核。
+              先核对 CLI 证据和语义方案，确认后再生成、验证并发布。
             </Typography.Text>
           </div>
           {jobActive && (
@@ -1329,16 +1711,18 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
         </div>
         <Steps
           current={visiblePipelineStep}
-          onChange={setSelectedPipelineStep}
+          onChange={(step) => {
+            if (step <= pipelineCurrent) setSelectedPipelineStep(step)
+          }}
           responsive
           items={[
             {
-              title: '样本识别',
+              title: '样本证据',
               status: job.sample_count > 0 ? 'finish' : 'error',
-              description: `${job.sample_count} 份`,
+              description: '查看 CLI 并判断内容',
             },
             {
-              title: '语义方案',
+              title: '语义设计',
               status: suggestion.status === 'failed'
                 ? 'error'
                 : semanticReady
@@ -1346,10 +1730,10 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
                   : ['queued', 'running'].includes(suggestion.status || '')
                     ? 'process'
                     : 'wait',
-              description: semanticReady ? '已自动采纳' : '分析字段与记录范围',
+              description: semanticReady ? '等待人工确认' : '定义记录、字段与主键',
             },
             {
-              title: '生成与校验',
+              title: '生成与验证',
               status: parserSpecRevised
                 ? 'wait'
                 : job.status === 'failed'
@@ -1359,29 +1743,16 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
                   : ['succeeded'].includes(job.status)
                     ? 'finish'
                     : 'wait',
-              description: '本地执行与结果取证',
-            },
-            {
-              title: '独立复核',
-              status: humanDirectReviewRequired
-                ? 'process'
-                : reviewPassed
-                ? 'finish'
-                : job.status === 'failed' && job.last_error?.includes('semantic')
-                  ? 'error'
-                  : job.status === 'validating'
-                    ? 'process'
-                    : 'wait',
               description: humanDirectReviewRequired
-                ? 'AI 有异议，待人工直审'
+                ? '本地通过，AI 有异议'
                 : reviewPassed
-                  ? 'AI 复核通过'
-                  : '检查完整性与主键',
+                  ? '本地执行与 AI 复核通过'
+                  : '本地执行、结果取证与 AI 复核',
             },
             {
-              title: '人工确认',
-              status: activeTemplate ? 'finish' : candidateTemplate ? 'process' : 'wait',
-              description: activeTemplate ? '已发布' : '确认结果与主键',
+              title: '发布确认',
+              status: candidateTemplate ? 'process' : activeTemplate ? 'finish' : 'wait',
+              description: candidateTemplate ? '确认结果与主键' : activeTemplate ? '已发布' : '等待候选',
             },
           ]}
         />
@@ -1400,7 +1771,7 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
           <Space wrap>
             <HistoryOutlined />
             <Typography.Text>
-              正在查看：{['样本识别', '语义方案', '生成与执行', 'LLM 复核', '人工确认'][visiblePipelineStep]}
+              正在查看：{['样本证据', '语义设计', '生成与验证', '发布确认'][visiblePipelineStep]}
             </Typography.Text>
             {visiblePipelineStep !== pipelineCurrent && <Tag>历史查看</Tag>}
           </Space>
@@ -1412,12 +1783,6 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
             >
               返回上一步
             </Button>
-            <Button
-              disabled={visiblePipelineStep === 4}
-              onClick={() => setSelectedPipelineStep(Math.min(4, visiblePipelineStep + 1))}
-            >
-              下一步 <ArrowRightOutlined />
-            </Button>
             {visiblePipelineStep !== pipelineCurrent && (
               <Button onClick={() => setSelectedPipelineStep(null)}>回到当前进度</Button>
             )}
@@ -1428,47 +1793,7 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
         </div>
       </section>
 
-      {suggestion.status === 'failed' && (
-        <Alert
-          type={failurePresentation.severity}
-          showIcon
-          message="语义方案生成失败"
-          description={suggestion.error}
-          action={(
-            <Button loading={specSuggestionLoading} onClick={() => requestSpecSuggestion()}>
-              重新分析
-            </Button>
-          )}
-        />
-      )}
-
-      {semanticAnalysisActive && (
-        <section className="parser-generation-progress" aria-live="polite">
-          <div className="parser-generation-progress__header">
-            <Space wrap size={8}>
-              <Spin size="small" />
-              <Typography.Text strong>正在分析样本并生成语义方案</Typography.Text>
-              <Tag>{suggestion.status === 'queued' ? '等待 AI Worker' : '模型分析中'}</Tag>
-            </Space>
-            <Typography.Text type="secondary">
-              已运行 {formatElapsed(suggestion.elapsed_ms)}
-            </Typography.Text>
-          </div>
-          <div className="parser-generation-progress__facts">
-            <span>任务 {suggestion.task_id ? suggestion.task_id.slice(0, 8) : '待分配'}</span>
-            <span>
-              最近心跳 {suggestion.heartbeat_at
-                ? new Date(suggestion.heartbeat_at).toLocaleTimeString()
-                : '等待 Worker 接管'}
-            </span>
-            {suggestion.deadline_at && (
-              <span>分析截止 {new Date(suggestion.deadline_at).toLocaleTimeString()}</span>
-            )}
-          </div>
-        </section>
-      )}
-
-      {jobActive && (
+      {jobActive && visiblePipelineStep === 2 && (
         <section className="parser-generation-progress" aria-live="polite">
           <div className="parser-generation-progress__header">
             <Space wrap size={8}>
@@ -1500,7 +1825,7 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
         </section>
       )}
 
-      {job.status === 'failed' && (
+      {job.status === 'failed' && visiblePipelineStep === 2 && (
         <Alert
           type="error"
           showIcon
@@ -1544,25 +1869,29 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
         />
       )}
 
-      {!activeTemplate && candidateTemplate && visiblePipelineStep !== 4 && (
+      {!activeTemplate && candidateTemplate && visiblePipelineStep === 2 && (
         <Alert
           type={humanDirectReviewRequired ? 'warning' : 'success'}
           showIcon
           message="候选正在等待人工确认"
           description="当前正在回看生成过程；请返回人工确认步骤核对原始输出、解析结果、主键和模板。"
-          action={<Button onClick={() => setSelectedPipelineStep(4)}>前往人工确认</Button>}
+          action={<Button onClick={() => setSelectedPipelineStep(3)}>前往发布确认</Button>}
         />
       )}
 
-      {activeTemplate && (
+      {activeTemplate && !candidateTemplate && visiblePipelineStep === 2 && (
         <Alert
           type="success"
           showIcon
           message="Parser 已发布"
           description={`版本 ${activeTemplate.version} 已进入运行时；审批时确认的解析结果已冻结为回归基线。`}
           action={(
-            <Button
-              onClick={() => {
+            <Space wrap>
+              <Button onClick={() => setApprovalOpen(true)}>
+                查看审批证据
+              </Button>
+              <Button
+                onClick={() => {
                 const datasets = Array.from(new Set(
                   (job.samples || [])
                     .map((sample) => sample.dataset_id)
@@ -1582,10 +1911,11 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
                 }
                 if (datasets.length) params.set('dataset_ids', datasets.join(','))
                 navigate(`/skills/parser?${params.toString()}`)
-              }}
-            >
-              回填历史样本
-            </Button>
+                }}
+              >
+                回填历史样本
+              </Button>
+            </Space>
           )}
         />
       )}
@@ -1609,60 +1939,26 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
         />
       )}
 
-      {!jobActive
-        && ['collecting', 'pending'].includes(job.status)
-        && !candidateTemplate
-        && !activeTemplate
-        && (
-        <Alert
-          type={readiness?.ready ? 'success' : needsPositiveSample ? 'warning' : 'info'}
-          showIcon
-          message={
-            readiness?.ready
-              ? '自动生成条件已满足'
-              : semanticAnalysisActive
-                ? '正在分析样本并生成语义方案'
-              : needsPositiveSample
-                ? '需要补充包含实际记录的样本'
-                : '平台正在准备生成条件'
-          }
-          description={
-            readiness?.ready
-              ? '语义方案就绪后将自动启动 TextFSM 生成。'
-              : semanticAnalysisActive
-                ? '平台正在识别字段、主键、记录范围和样本角色；分析完成后会自动进入 TextFSM 生成。'
-                : (readiness?.blockers || []).map((item) => blockerLabel[item] || item).join('；')
-          }
-          action={
-            needsPositiveSample ? (
-              <Button onClick={openSampleImport}>导入补充样本</Button>
-            ) : readiness?.ready && job.status === 'collecting' ? (
-              <Button loading={dispatchLoading} onClick={() => dispatchGeneration()}>
-                立即开始
-              </Button>
-            ) : undefined
-          }
+      {!semanticReadOnly && (
+        <Collapse
+          ghost
+          activeKey={advancedKeys}
+          onChange={(keys) => setAdvancedKeys(Array.isArray(keys) ? keys.map(String) : [String(keys)])}
+          items={[{
+            key: 'advanced',
+            label: (
+              <Space>
+                <SettingOutlined />
+                <span>高级修订</span>
+                <Typography.Text type="secondary">
+                  ParserSpec、记录方案、样本角色与可选验收基准
+                </Typography.Text>
+              </Space>
+            ),
+            children: advancedContent,
+          }]}
         />
-        )}
-
-      <Collapse
-        ghost
-        activeKey={advancedKeys}
-        onChange={(keys) => setAdvancedKeys(Array.isArray(keys) ? keys.map(String) : [String(keys)])}
-        items={[{
-          key: 'advanced',
-          label: (
-            <Space>
-              <SettingOutlined />
-              <span>高级修订</span>
-              <Typography.Text type="secondary">
-                ParserSpec、记录方案、样本角色与可选验收基准
-              </Typography.Text>
-            </Space>
-          ),
-          children: advancedContent,
-        }]}
-      />
+      )}
 
       <ParserTemplateApprovalDrawer
         open={approvalOpen}
@@ -1670,6 +1966,7 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
         isMobile={isMobile}
         loading={comparisonQuery.isLoading}
         comparison={comparisonQuery.data}
+        readOnly={!candidateTemplate && Boolean(activeTemplate)}
         reviewing={semanticReview.isLoading}
         approving={approve.isLoading}
         rejecting={reject.isLoading}

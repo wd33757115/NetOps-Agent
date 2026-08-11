@@ -72,7 +72,7 @@ describe('ParserGenerationStep', () => {
     vi.restoreAllMocks()
   })
 
-  it('starts semantic analysis automatically for a new command asset', async () => {
+  it('waits for the operator to inspect samples before semantic analysis', async () => {
     const collectingJob: ParserJobItem = {
       ...failedReadyJob,
       id: 'parser-job-new',
@@ -104,12 +104,16 @@ describe('ParserGenerationStep', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(suggest).toHaveBeenCalledWith(collectingJob.id))
-    expect(await screen.findByText('Parser 自动生成流程')).toBeVisible()
+    expect(await screen.findByText('Parser 生产工作流')).toBeVisible()
+    expect(suggest).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: /样本已确认，进入语义设计/ }))
+    expect(await screen.findByText('设计并确认语义方案')).toBeVisible()
+    await userEvent.click(screen.getByText('让 LLM 提出语义方案'))
+    await waitFor(() => expect(suggest).toHaveBeenCalledWith(collectingJob.id, ''))
     expect(screen.getByText('高级修订')).toBeVisible()
   })
 
-  it('dispatches automatically after the LLM semantic plan is adopted', async () => {
+  it('requires explicit semantic confirmation before generation starts', async () => {
     const readyJob: ParserJobItem = {
       ...failedReadyJob,
       id: 'parser-job-ready',
@@ -139,6 +143,9 @@ describe('ParserGenerationStep', () => {
       </MemoryRouter>,
     )
 
+    expect(await screen.findByText('设计并确认语义方案')).toBeVisible()
+    expect(dispatch).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByText('确认语义方案并生成 Parser'))
     await waitFor(() => expect(dispatch).toHaveBeenCalledWith(readyJob.id))
   })
 
@@ -179,7 +186,8 @@ describe('ParserGenerationStep', () => {
       </MemoryRouter>,
     )
 
-    fireEvent.click(await screen.findByText('语义方案'))
+    fireEvent.click(await screen.findByText('语义设计'))
+    fireEvent.click(await screen.findByText('技术依据与字段命名建议'))
     expect(await screen.findByText('推荐 TextFSM Value')).toBeVisible()
     expect(screen.getByText('interface')).toBeVisible()
     expect(screen.getByText('rx_power_dbm')).toBeVisible()
@@ -227,7 +235,7 @@ describe('ParserGenerationStep', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findAllByText('正在分析样本并生成语义方案')).toHaveLength(2)
+    expect(await screen.findAllByText('正在分析样本并生成语义方案')).toHaveLength(1)
     expect(screen.getByText('模型分析中')).toBeVisible()
     expect(screen.getByText('任务 semantic')).toBeVisible()
     expect(screen.getByText(/分析截止/)).toBeVisible()
@@ -338,7 +346,7 @@ describe('ParserGenerationStep', () => {
     const reanalyze = screen.getByRole('button', { name: /重新分析/ })
     expect(reanalyze).toBeEnabled()
     await userEvent.click(reanalyze)
-    await waitFor(() => expect(suggestSpec).toHaveBeenCalledWith(succeededJob.id))
+    await waitFor(() => expect(suggestSpec).toHaveBeenCalledWith(succeededJob.id, ''))
     const editor = screen.getByLabelText('ParserSpec JSON')
     expect(editor).toBeEnabled()
     fireEvent.change(editor, {
@@ -411,10 +419,97 @@ describe('ParserGenerationStep', () => {
     expect(screen.queryByRole('button', { name: '前往人工确认' })).not.toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: /返回上一步/ }))
-    expect(await screen.findByText('LLM 独立复核历史')).toBeVisible()
+    expect(await screen.findByText(/AI 复核记录/)).toBeVisible()
     expect(screen.getByText('候选正在等待人工确认')).toBeVisible()
     expect(screen.getByRole('button', { name: '前往人工确认' })).toBeEnabled()
     expect(screen.queryByRole('button', { name: '审查并确认' })).not.toBeInTheDocument()
+  })
+
+  it('keeps a new candidate visible when an older active template exists', async () => {
+    const succeededJob: ParserJobItem = {
+      ...failedReadyJob,
+      id: 'parser-job-new-version',
+      status: 'succeeded',
+      last_error: undefined,
+    }
+    const active: ParserTemplateItem = {
+      id: 'template-active-old',
+      vendor: succeededJob.vendor,
+      model: succeededJob.model,
+      profile: succeededJob.profile,
+      canonical_command: succeededJob.canonical_command,
+      category: 'vpc',
+      version: 'v1',
+      status: 'active',
+      created_at: '2026-08-07T10:00:00Z',
+    }
+    const candidate: ParserTemplateItem = {
+      ...active,
+      id: 'template-candidate-new',
+      version: 'v2',
+      status: 'pending_approval',
+      source_job_id: succeededJob.id,
+      created_at: '2026-08-08T10:00:00Z',
+    }
+    vi.spyOn(parserApi, 'job').mockResolvedValue(succeededJob)
+    vi.spyOn(parserApi, 'templates').mockResolvedValue({
+      items: [active, candidate],
+      total: 2,
+      limit: 100,
+      offset: 0,
+    })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          <ParserGenerationStep jobId={succeededJob.id} />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('待人工确认')).toBeVisible()
+    expect(screen.getByRole('button', { name: '审查并确认' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: '查看完整审批证据' })).not.toBeInTheDocument()
+  })
+
+  it('offers one read-only evidence entry for a published Parser', async () => {
+    const succeededJob: ParserJobItem = {
+      ...failedReadyJob,
+      id: 'parser-job-published',
+      status: 'succeeded',
+      last_error: undefined,
+    }
+    const active: ParserTemplateItem = {
+      id: 'template-active',
+      vendor: succeededJob.vendor,
+      model: succeededJob.model,
+      profile: succeededJob.profile,
+      canonical_command: succeededJob.canonical_command,
+      category: 'vpc',
+      version: 'v1',
+      status: 'active',
+      source_job_id: succeededJob.id,
+      created_at: '2026-08-08T10:00:00Z',
+    }
+    vi.spyOn(parserApi, 'job').mockResolvedValue(succeededJob)
+    vi.spyOn(parserApi, 'templates').mockResolvedValue({
+      items: [active],
+      total: 1,
+      limit: 100,
+      offset: 0,
+    })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          <ParserGenerationStep jobId={succeededJob.id} />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('Parser 已发布')).toBeVisible()
+    expect(screen.getByRole('button', { name: '查看完整审批证据' })).toBeEnabled()
+    expect(screen.getAllByText('Parser 已发布')).toHaveLength(1)
   })
 
   it('presents a revised ParserSpec as awaiting regeneration instead of a generation failure', async () => {
@@ -436,7 +531,7 @@ describe('ParserGenerationStep', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('ParserSpec 已更新')).toBeVisible()
+    expect(await screen.findByText('ParserSpec 已更新，等待重新确认')).toBeVisible()
     expect(screen.getByText('待重新生成')).toBeVisible()
     expect(screen.queryByText('本次生成未通过')).not.toBeInTheDocument()
   })
@@ -600,12 +695,9 @@ describe('ParserGenerationStep', () => {
     expect(await screen.findByText('TextFSM 生成轮次')).toBeVisible()
     expect(await screen.findByText('候选记录 1')).toBeVisible()
     await userEvent.click(screen.getByRole('button', { name: /返回上一步/ }))
-    expect(await screen.findByText('当前 ParserSpec')).toBeVisible()
+    expect(await screen.findByText('设计并确认语义方案')).toBeVisible()
     await userEvent.click(screen.getByRole('button', { name: /返回上一步/ }))
-    expect(await screen.findByText('冻结样本与脱敏命令输出')).toBeVisible()
-    expect(screen.getByRole('button', { name: /下一步/ })).toBeEnabled()
-    await userEvent.click(screen.getByRole('button', { name: /人工确认/ }))
-    expect(await screen.findByText('人工最终确认')).toBeVisible()
+    expect(await screen.findByText('先确认 CLI 样本')).toBeVisible()
   })
 
   it('lets an operator cancel an active Parser generation without losing the job', async () => {

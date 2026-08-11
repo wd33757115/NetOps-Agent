@@ -244,6 +244,7 @@ class ParserSpecUpdateRequest(BaseModel):
 
 class ParserSpecSuggestionRequest(BaseModel):
     reason: str | None = None
+    revision_instruction: str | None = Field(default=None, max_length=4000)
 
 
 class ParserManualCandidateRequest(BaseModel):
@@ -429,6 +430,7 @@ class CollectionImplementationDraftRequest(BaseModel):
         "evidence_only",
     ]
     template_scope: str | None = None
+    adapter_spec: dict[str, Any] | None = None
     output_quality_policy: dict[str, Any] | None = None
     selection_priority: int = Field(default=100, ge=0, le=10000)
     reason: str = Field(default="", max_length=2000)
@@ -436,6 +438,13 @@ class CollectionImplementationDraftRequest(BaseModel):
 
 class CollectionImplementationDeleteRequest(BaseModel):
     reason: str = Field(default="", max_length=2000)
+
+
+class CommandAdapterPreviewRequest(BaseModel):
+    adapter_spec: dict[str, Any]
+    record_sets: dict[str, list[dict[str, Any]]]
+    device_id: str = "preview-device"
+    adapter_version_id: str = "preview"
 
 
 class CheckItemDraftRequest(BaseModel):
@@ -1468,12 +1477,14 @@ def suggest_parser_spec(
 ):
     task_id = str(uuid.uuid4())
     repository = ParserJobRepository()
+    revision_instruction = str(payload.revision_instruction or "").strip()
     try:
         repository.queue_parser_spec_suggestion(
             job_id,
             task_id=task_id,
             actor=_authenticated_actor(request),
             reason=str(payload.reason or "Generate an engineer-reviewable ParserSpec draft"),
+            revision_instruction=revision_instruction,
         )
         celery.send_task(
             "execute_skill_task",
@@ -4254,6 +4265,7 @@ def list_check_items(
                 "collector": implementation.collector,
                 "parser_requirement": implementation.parser_requirement,
                 "template_scope": implementation.template_scope,
+                "adapter_spec": implementation.adapter_spec,
                 "output_quality_policy": implementation.output_quality_policy,
                 "selection_priority": implementation.selection_priority,
                 "status": implementation.status,
@@ -4329,8 +4341,53 @@ def list_check_items(
             "offset": page_offset,
             "catalog_version": catalog.catalog_version,
         }
+
+
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.post("/catalog/command-adapters/preview")
+def preview_command_adapter(payload: CommandAdapterPreviewRequest):
+    from src.core.check_items.command_adapter import execute_adapter
+
+    catalog = CheckItemCatalogRepository().load_active()
+    referenced = {
+        str(item.get("check_item_id") or item.get("check_item") or "")
+        for item in payload.adapter_spec.get("outputs") or []
+        if isinstance(item, dict)
+    }
+    check_items = {
+        item.id: {
+            "version_id": item.version_id,
+            "canonical_contract": item.canonical_contract,
+        }
+        for item in catalog.check_items
+        if item.id in referenced
+    }
+    missing = sorted(referenced - set(check_items))
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail="unknown check items: " + ", ".join(missing),
+        )
+    try:
+        batches = execute_adapter(
+            payload.adapter_spec,
+            record_sets=payload.record_sets,
+            check_items=check_items,
+            device_id=payload.device_id,
+            adapter_version_id=payload.adapter_version_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "success": all(
+            item.quality_status in {"complete", "valid_empty", "not_applicable"}
+            for item in batches
+        ),
+        "batches": [item.to_dict() for item in batches],
+    }
 
 
 @router.get("/command-profiles")

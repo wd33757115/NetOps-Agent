@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Button,
@@ -13,6 +13,7 @@ import {
   Pagination,
   Select,
   Space,
+  Switch,
   Table,
   Tag,
   Typography,
@@ -25,6 +26,7 @@ import {
   DeleteOutlined,
   EditOutlined,
   EyeOutlined,
+  MinusCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
 } from '@ant-design/icons'
@@ -47,6 +49,7 @@ type CatalogView = 'catalog' | 'changes'
 
 interface CheckItemCatalogWorkspaceProps {
   focusChangeId?: string
+  mode?: 'check_items' | 'command_adapters'
 }
 
 interface ImplementationDraftForm {
@@ -64,7 +67,51 @@ interface ImplementationDraftForm {
   template_scope?: string
   selection_priority: number
   output_quality_policy_json?: string
+  configure_adapter: boolean
+  parser_template_id?: string
+  adapter_outputs: Array<{
+    check_item_id: string
+    source_record_set: string
+    field_mappings: Array<{
+      target_field: string
+      mode: 'source' | 'expression' | 'literal'
+      value: string
+    }>
+    empty_status: 'valid_empty' | 'unavailable' | 'not_applicable'
+  }>
   reason?: string
+}
+
+const fieldMappingRows = (value: unknown): ImplementationDraftForm['adapter_outputs'][number]['field_mappings'] => {
+  if (!value || Array.isArray(value) || typeof value !== 'object') return []
+  return Object.entries(value as Record<string, unknown>).map(([targetField, binding]) => {
+    if (typeof binding === 'string') {
+      return { target_field: targetField, mode: 'source' as const, value: binding }
+    }
+    const item = binding && !Array.isArray(binding) && typeof binding === 'object'
+      ? binding as Record<string, unknown>
+      : {}
+    if ('expression' in item) {
+      return { target_field: targetField, mode: 'expression' as const, value: String(item.expression || '') }
+    }
+    if ('literal' in item) {
+      return { target_field: targetField, mode: 'literal' as const, value: String(item.literal ?? '') }
+    }
+    return { target_field: targetField, mode: 'source' as const, value: String(item.source || '') }
+  })
+}
+
+const canonicalFields = (checkItem?: ParserCheckItem): string[] => {
+  const contract = checkItem?.canonical_contract || {}
+  const identities = Array.isArray(contract.identity_dimensions)
+    ? contract.identity_dimensions.map(String).filter((item) => item && item !== 'device_id')
+    : []
+  const observations = Array.isArray(contract.observations)
+    ? (contract.observations as Array<Record<string, unknown>>)
+      .map((item) => String(item.canonical_field || '').trim())
+      .filter(Boolean)
+    : []
+  return Array.from(new Set([...identities, ...observations]))
 }
 
 const statusLabels: Record<CheckItemCatalogChange['status'], string> = {
@@ -88,8 +135,8 @@ const nextActionLabels: Record<string, string> = {
   prepare_dual_implementation_rollout: '先补齐旧、新采集实现双路由的渐进发布能力；当前修订可保存和审批，但禁止替换生产版本',
   import_inventory_or_review_manually: '补充设备资产数据，或由工程师逐台复核预期影响',
   confirm_future_compatibility_scope: '确认该兼容范围用于后续新增设备，当前没有可验证的现网设备',
-  prepare_runtime_bundle: '补齐 Parser、Contract、Policy 和 Rule，并组装候选运行包',
-  create_collection_implementation: '为检查项新增厂商、设备族、型号和命令采集实现',
+  prepare_runtime_bundle: '补齐 Parser、字段映射和检查项判断，并生成可发布运行版本',
+  create_collection_implementation: '为检查项新增厂商、设备族、型号和命令适配器',
   add_check_item_to_patrol_profile: '把已发布检查项加入需要执行它的巡检 Profile',
   retire_or_rebuild_runtime_bundles: '先停用旧运行包，或按新检查项版本重新组装并发布运行包',
 }
@@ -127,6 +174,21 @@ const implementationFormValues = (
   const match = implementation.match || {}
   const primaryCommand = [...implementation.commands]
     .sort((left, right) => right.priority - left.priority)[0]
+  const adapterSpec = implementation.adapter_spec || {}
+  const parser = adapterSpec.parser && typeof adapterSpec.parser === 'object'
+    ? adapterSpec.parser as Record<string, unknown>
+    : {}
+  const legacyTemplates = Array.isArray(parser.templates)
+    ? parser.templates as Array<Record<string, unknown>>
+    : []
+  const parserTemplateId = String(
+    parser.template_id
+    || legacyTemplates.find((item) => item.template_id)?.template_id
+    || '',
+  )
+  const outputs = Array.isArray(adapterSpec.outputs)
+    ? adapterSpec.outputs as Array<Record<string, unknown>>
+    : []
   return {
     id: implementation.implementation_id,
     name: implementation.name,
@@ -144,6 +206,14 @@ const implementationFormValues = (
     output_quality_policy_json: Object.keys(implementation.output_quality_policy || {}).length
       ? JSON.stringify(implementation.output_quality_policy, null, 2)
       : '',
+    configure_adapter: outputs.length > 0,
+    parser_template_id: parserTemplateId,
+    adapter_outputs: outputs.map((item) => ({
+      check_item_id: String(item.check_item_id || item.check_item || ''),
+      source_record_set: String(item.source_record_set || ''),
+      field_mappings: fieldMappingRows(item.fields),
+      empty_status: String(item.empty_status || 'unavailable') as ImplementationDraftForm['adapter_outputs'][number]['empty_status'],
+    })),
     reason: '',
   }
 }
@@ -159,6 +229,7 @@ const decisionLabel = (value: unknown) => {
 
 const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
   focusChangeId,
+  mode = 'check_items',
 }) => {
   const screens = Grid.useBreakpoint()
   const isMobile = !screens.md
@@ -191,6 +262,8 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
   const [deletingCheckItem, setDeletingCheckItem] = useState<ParserCheckItem>()
   const [checkItemDeleteReason, setCheckItemDeleteReason] = useState('')
   const [form] = Form.useForm<ImplementationDraftForm>()
+  const configureAdapter = Form.useWatch('configure_adapter', form)
+  const parserRequirement = Form.useWatch('parser_requirement', form)
   const handledFocusChangeId = useRef('')
 
   useEffect(() => {
@@ -231,6 +304,11 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
     () => parserApi.canonicalObservations(),
     { staleTime: 5 * 60_000 },
   )
+  const activeTemplatesQuery = useQuery(
+    ['active-parser-template-options'],
+    () => parserApi.templates({ status: 'active', limit: 200, offset: 0 }),
+    { staleTime: 60_000 },
+  )
   const changeDetailQuery = useQuery(
     ['check-item-catalog-change', selectedChangeId],
     () => parserApi.getCatalogChange(selectedChangeId || ''),
@@ -265,7 +343,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
       parserApi.createCollectionImplementationDraft(data, draftIdempotencyKey),
     {
       onSuccess: async (change) => {
-        message.success('采集实现草稿已创建')
+        message.success('命令适配器草稿已创建')
         setDraftOpen(false)
         setSelectedChangeId(change.id)
         setDetailOpen(true)
@@ -348,7 +426,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
       ),
     {
       onSuccess: async () => {
-        message.success('采集实现已删除，历史版本与审计记录已保留')
+        message.success('命令适配器已删除，历史版本与审计记录已保留')
         setDeletingImplementation(undefined)
         setDeleteReason('')
         await refreshAll()
@@ -392,6 +470,9 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
       template_scope: 'family',
       selection_priority: 100,
       output_quality_policy_json: '',
+      configure_adapter: false,
+      parser_template_id: '',
+      adapter_outputs: [],
       reason: '',
     })
     setDraftOpen(true)
@@ -401,6 +482,36 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
     setEditingCheckItem(undefined)
     setCheckItemIdempotencyKey(makeIdempotencyKey('catalog-check-item-create'))
     setCheckItemEditorOpen(true)
+  }
+
+  const canonicalFieldOptions = useMemo(() => Array.from(new Set(
+    (allCheckItemsQuery.data?.items || []).flatMap(canonicalFields),
+  )).sort().map((value) => ({ value, label: value })), [allCheckItemsQuery.data?.items])
+
+  const prefillOutputMappings = (outputIndex: number, checkItemId?: string) => {
+    const outputs = form.getFieldValue('adapter_outputs') || []
+    const selectedId = checkItemId || outputs[outputIndex]?.check_item_id
+    const checkItem = (allCheckItemsQuery.data?.items || []).find(
+      (item) => item.check_item_id === selectedId,
+    )
+    const fields = canonicalFields(checkItem)
+    if (!fields.length) {
+      message.warning('该检查项尚未定义标准字段')
+      return
+    }
+    const existing = new Map(
+      (outputs[outputIndex]?.field_mappings || []).map((item) => [item.target_field, item]),
+    )
+    outputs[outputIndex] = {
+      ...outputs[outputIndex],
+      ...(checkItemId ? { check_item_id: checkItemId } : {}),
+      field_mappings: fields.map((field) => existing.get(field) || {
+        target_field: field,
+        mode: 'source',
+        value: field,
+      }),
+    }
+    form.setFieldValue('adapter_outputs', outputs)
   }
 
   const openCheckItemRevision = (checkItem: ParserCheckItem) => {
@@ -452,6 +563,43 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
           return
         }
       }
+      let adapterSpec: Record<string, unknown> | undefined
+      if (values.configure_adapter && values.parser_requirement === 'structured') {
+        const outputs: Array<Record<string, unknown>> = []
+        for (const output of values.adapter_outputs || []) {
+          const fields: Record<string, unknown> = {}
+          for (const mapping of output.field_mappings || []) {
+            const target = mapping.target_field?.trim()
+            const value = mapping.value?.trim()
+            if (!target || !value) {
+              message.error(`检查项 ${output.check_item_id || '-'} 存在未完成的字段映射`)
+              return
+            }
+            if (target in fields) {
+              message.error(`检查项 ${output.check_item_id || '-'} 的标准字段 ${target} 被重复映射`)
+              return
+            }
+            fields[target] = mapping.mode === 'source'
+              ? value
+              : { [mapping.mode]: value }
+          }
+          if (!Object.keys(fields).length) {
+            message.error(`检查项 ${output.check_item_id || '-'} 至少需要一个字段映射`)
+            return
+          }
+          outputs.push({
+            check_item_id: output.check_item_id,
+            source_record_set: output.source_record_set.trim(),
+            fields,
+            empty_status: output.empty_status,
+          })
+        }
+        adapterSpec = {
+          schema_version: 'command-adapter/v1',
+          parser: { template_id: values.parser_template_id?.trim() },
+          outputs,
+        }
+      }
       createMutation.mutate({
         id: values.id.trim(),
         name: values.name.trim(),
@@ -462,6 +610,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
         collector: 'cli',
         parser_requirement: values.parser_requirement,
         template_scope: values.template_scope || null,
+        adapter_spec: adapterSpec,
         output_quality_policy: outputQualityPolicy,
         selection_priority: Number(values.selection_priority),
         reason: values.reason?.trim() || '',
@@ -523,7 +672,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
       render: (value: string) => parserRequirementLabels[value] || value,
     },
     {
-      title: '采集实现',
+      title: '命令适配器',
       dataIndex: 'implementation_count',
       width: 110,
       render: (value: number) => `${value} 个`,
@@ -543,8 +692,8 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
           <Button
             type="text"
             icon={<PlusOutlined />}
-            title="新增采集实现"
-            aria-label={`为 ${row.check_item_id} 新增采集实现`}
+            title="新增命令适配器"
+            aria-label={`为 ${row.check_item_id} 新增命令适配器`}
             onClick={() => openNewDraft(row.check_item_id)}
           />
           <Button
@@ -611,16 +760,16 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
           <Button
             type="text"
             icon={<EditOutlined />}
-            title="编辑采集实现"
-            aria-label="编辑采集实现"
+            title="编辑命令适配器"
+            aria-label="编辑命令适配器"
             onClick={() => openRevision(row, checkItemId)}
           />
           <Button
             type="text"
             danger
             icon={<DeleteOutlined />}
-            title="删除采集实现"
-            aria-label="删除采集实现"
+            title="删除命令适配器"
+            aria-label="删除命令适配器"
             disabled={user?.role !== 'admin'}
             onClick={() => {
               setDeletingImplementation(row)
@@ -639,7 +788,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
         <Space direction="vertical" size={0}>
           <Typography.Text strong>{row.candidate.name}</Typography.Text>
           <Typography.Text type="secondary">
-            {row.asset_kind === 'check_item' ? '检查项' : '采集实现'} · {row.asset_id} · v{row.version}
+            {row.asset_kind === 'check_item' ? '检查项' : '命令适配器'} · {row.asset_id} · v{row.version}
           </Typography.Text>
         </Space>
       ),
@@ -690,31 +839,45 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
     <div className="check-item-catalog-workspace">
       <div className="check-item-catalog-toolbar">
         <div>
-          <Typography.Title level={4}>检查项目录</Typography.Title>
+          <Typography.Title level={2}>
+            {mode === 'command_adapters' ? '命令适配器' : '检查项目录'}
+          </Typography.Title>
           <Typography.Text type="secondary">
-            维护检查项到厂商、设备族、型号和命令的版本化采集实现。
+            {mode === 'command_adapters'
+              ? '按检查项分组维护设备范围、单条命令、Parser 记录集与标准字段映射。'
+              : '定义跨厂商一致的标准字段、主键、变化与风险判断。'}
           </Typography.Text>
         </div>
         <Space>
           <Button icon={<ReloadOutlined />} title="刷新" onClick={() => void refreshAll()} />
-          <Button
-            icon={<PlusOutlined />}
-            onClick={() => openNewDraft()}
-          >
-            新增采集实现
-          </Button>
-          <Button
-            type="primary"
-            className="rule-asset-import-button"
-            icon={<PlusOutlined />}
-            onClick={openNewCheckItem}
-          >
-            新增检查项
-          </Button>
+          {mode === 'command_adapters' && (
+            <Button
+              type="primary"
+              className="rule-asset-import-button"
+              icon={<PlusOutlined />}
+              onClick={() => openNewDraft()}
+            >
+              新增命令适配器
+            </Button>
+          )}
+          {mode === 'check_items' && (
+            <Button
+              type="primary"
+              className="rule-asset-import-button"
+              icon={<PlusOutlined />}
+              onClick={openNewCheckItem}
+            >
+              新增检查项
+            </Button>
+          )}
         </Space>
       </div>
 
-      <div className="rule-asset-view-switch" role="tablist" aria-label="检查项目录视图">
+      <div
+        className="rule-asset-view-switch"
+        role="tablist"
+        aria-label={mode === 'command_adapters' ? '命令适配器视图' : '检查项目录视图'}
+      >
         <button
           type="button"
           role="tab"
@@ -722,7 +885,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
           aria-selected={view === 'catalog'}
           onClick={() => setView('catalog')}
         >
-          目录与采集实现
+          {mode === 'command_adapters' ? '已发布适配器' : '已发布检查项'}
         </button>
         <button
           type="button"
@@ -756,6 +919,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
             dataSource={catalogQuery.data?.items || []}
             columns={catalogColumns}
             expandable={{
+              columnTitle: <span className="visually-hidden">展开命令适配器</span>,
               expandedRowRender: (row) => row.implementations.length ? (
                 <Table
                   rowKey="implementation_version_id"
@@ -765,7 +929,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
                   pagination={false}
                   scroll={{ x: 760 }}
                 />
-              ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未配置采集实现" />,
+              ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未配置命令适配器" />,
             }}
             scroll={{ x: 760 }}
             pagination={{
@@ -888,7 +1052,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
       <Drawer
         open={draftOpen}
         width={isMobile ? '100%' : 760}
-        title={editingImplementationId ? '编辑采集实现' : '新增采集实现'}
+        title={editingImplementationId ? '编辑命令适配器' : '新增命令适配器'}
         onClose={() => setDraftOpen(false)}
         extra={(
           <Button
@@ -969,7 +1133,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
           <Alert
             type="info"
             showIcon
-            message="每个采集实现只执行一条明确命令"
+            message="每个命令适配器只执行一条明确命令"
             description="平台不再尝试备用命令；设备不支持该命令时会记录原因并提示治理。"
             style={{ marginBottom: 16 }}
           />
@@ -990,6 +1154,164 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
             <Form.Item label="实现选择优先级" name="selection_priority" rules={[{ required: true }]}>
               <InputNumber min={0} max={10000} style={{ width: '100%' }} />
             </Form.Item>
+            <Form.Item
+              className="check-item-catalog-form-wide"
+              label="配置结构化结果映射"
+              name="configure_adapter"
+              valuePropName="checked"
+              extra="样本生成流程会自动填写；工程师可在发布前随时修正。文本比较模式无需配置。"
+            >
+              <Switch disabled={parserRequirement !== 'structured'} />
+            </Form.Item>
+            {configureAdapter && (
+              <div className="check-item-catalog-form-wide">
+                <Typography.Title level={5}>Parser 资产</Typography.Title>
+                <Form.Item
+                  name="parser_template_id"
+                  label="Parser 版本 ID"
+                  rules={[{ required: true, message: '请选择已审批的 Parser 资产版本' }]}
+                  extra="一个命令适配器只引用一个 Parser；ParserBundle 可以包含多个命名记录集。"
+                >
+                  <Select
+                    showSearch
+                    optionFilterProp="label"
+                    loading={activeTemplatesQuery.isLoading}
+                    placeholder="选择已发布 Parser"
+                    options={(activeTemplatesQuery.data?.items || []).map((item) => ({
+                      value: item.id,
+                      label: `${item.vendor} / ${item.profile} / ${item.canonical_command} · ${item.version}`,
+                    }))}
+                  />
+                </Form.Item>
+
+                <Typography.Title level={5} style={{ marginTop: 20 }}>标准结果映射</Typography.Title>
+                <Form.List name="adapter_outputs">
+                  {(fields, { add, remove }) => (
+                    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                      {fields.map(({ key, name, ...restField }) => (
+                        <div key={key} className="check-item-adapter-output">
+                          <div className="check-item-catalog-form-grid">
+                            <Form.Item
+                              {...restField}
+                              label="检查项"
+                              name={[name, 'check_item_id']}
+                              rules={[{ required: true }]}
+                            >
+                              <Select
+                                options={(allCheckItemsQuery.data?.items || [])
+                                  .filter((item) => form.getFieldValue('check_item_ids')?.includes(item.check_item_id))
+                                  .map((item) => ({
+                                    value: item.check_item_id,
+                                    label: `${item.display_name || item.name} · ${item.check_item_id}`,
+                                  }))}
+                                onChange={(value) => prefillOutputMappings(name, value)}
+                              />
+                            </Form.Item>
+                            <Form.Item
+                              {...restField}
+                              label="来源记录集"
+                              name={[name, 'source_record_set']}
+                              rules={[{ required: true }]}
+                            >
+                              <Input placeholder="例如 cpu_cores" />
+                            </Form.Item>
+                            <Form.Item
+                              {...restField}
+                              label="空输出含义"
+                              name={[name, 'empty_status']}
+                              initialValue="unavailable"
+                            >
+                              <Select options={[
+                                { value: 'unavailable', label: '无法判断' },
+                                { value: 'valid_empty', label: '确认无记录' },
+                                { value: 'not_applicable', label: '设备不适用' },
+                              ]} />
+                            </Form.Item>
+                          </div>
+                          <div className="check-item-catalog-form-wide">
+                            <Space align="center" style={{ marginBottom: 8 }}>
+                              <Typography.Text strong>标准字段映射</Typography.Text>
+                              <Button size="small" onClick={() => prefillOutputMappings(name)}>
+                                按检查项字段预填
+                              </Button>
+                            </Space>
+                            <Form.List name={[name, 'field_mappings']}>
+                              {(mappingFields, mappingActions) => (
+                                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                                  {mappingFields.map(({ key: mappingKey, name: mappingName, ...mappingRest }) => (
+                                    <div key={mappingKey} className="check-item-field-mapping-row">
+                                      <Form.Item
+                                        {...mappingRest}
+                                        name={[mappingName, 'target_field']}
+                                        rules={[{ required: true, message: '请选择标准字段' }]}
+                                      >
+                                        <Select
+                                          showSearch
+                                          optionFilterProp="label"
+                                          placeholder="标准字段"
+                                          options={canonicalFieldOptions}
+                                        />
+                                      </Form.Item>
+                                      <Form.Item
+                                        {...mappingRest}
+                                        name={[mappingName, 'mode']}
+                                        rules={[{ required: true }]}
+                                      >
+                                        <Select options={[
+                                          { value: 'source', label: '直接取源字段' },
+                                          { value: 'expression', label: '简单换算' },
+                                          { value: 'literal', label: '固定值' },
+                                        ]} />
+                                      </Form.Item>
+                                      <Form.Item
+                                        {...mappingRest}
+                                        name={[mappingName, 'value']}
+                                        rules={[{ required: true, message: '请输入来源字段、表达式或固定值' }]}
+                                      >
+                                        <Input placeholder="例如 cpu_usage_percent 或 100 - cpu_idle_percent" />
+                                      </Form.Item>
+                                      <Button
+                                        type="text"
+                                        danger
+                                        icon={<MinusCircleOutlined />}
+                                        title="删除字段映射"
+                                        onClick={() => mappingActions.remove(mappingName)}
+                                      />
+                                    </div>
+                                  ))}
+                                  <Button
+                                    type="dashed"
+                                    icon={<PlusOutlined />}
+                                    onClick={() => mappingActions.add({ mode: 'source' })}
+                                  >
+                                    添加字段映射
+                                  </Button>
+                                </Space>
+                              )}
+                            </Form.List>
+                          </div>
+                          <Button
+                            type="text"
+                            danger
+                            icon={<MinusCircleOutlined />}
+                            onClick={() => remove(name)}
+                          >
+                            删除此输出
+                          </Button>
+                        </div>
+                      ))}
+                      <Button
+                        type="dashed"
+                        icon={<PlusOutlined />}
+                        onClick={() => add({ empty_status: 'unavailable', field_mappings: [] })}
+                      >
+                        添加检查项输出
+                      </Button>
+                    </Space>
+                  )}
+                </Form.List>
+              </div>
+            )}
             <Form.Item className="check-item-catalog-form-wide" label="输出质量策略（高级 JSON）" name="output_quality_policy_json">
               <Input.TextArea rows={5} placeholder="留空继承平台默认策略" />
             </Form.Item>
@@ -1002,7 +1324,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
 
       <Modal
         open={Boolean(deletingImplementation)}
-        title="删除采集实现"
+        title="删除命令适配器"
         okText="确认删除"
         cancelText="取消"
         okButtonProps={{

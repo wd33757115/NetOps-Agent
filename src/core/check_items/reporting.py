@@ -1493,6 +1493,7 @@ def build_check_item_report_view(
                 ),
                 "evidence_digest": assessment.get("evidence_digest"),
                 "runtime_bundle_digest": execution.get("runtime_bundle_digest"),
+                "evidence_refs": list(execution.get("evidence_refs_json") or []),
                 "assessment_policy_snapshot_digest": assessment.get(
                     "assessment_policy_snapshot_digest",
                     execution.get("assessment_policy_snapshot_digest"),
@@ -3529,7 +3530,7 @@ def _append_sheet(
         )
 
 
-def render_check_item_xlsx(report: Mapping[str, Any]) -> bytes:
+def _render_audit_check_item_xlsx(report: Mapping[str, Any]) -> bytes:
     """Render a scalable technical annex from the immutable report view."""
 
     from openpyxl import Workbook
@@ -4372,6 +4373,16 @@ def render_check_item_xlsx(report: Mapping[str, Any]) -> bytes:
     stream = io.BytesIO()
     workbook.save(stream)
     return _normalize_zip_archive(stream.getvalue())
+
+
+def render_check_item_xlsx(report: Mapping[str, Any]) -> bytes:
+    """Render the operator workbook grouped by check item and unmatched command."""
+
+    from src.core.check_items.inspection_workbook import (
+        render_inspection_workbook,
+    )
+
+    return _normalize_zip_archive(render_inspection_workbook(report))
 
 
 def _csv_bytes(

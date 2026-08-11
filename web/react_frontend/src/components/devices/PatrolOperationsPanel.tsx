@@ -1007,7 +1007,7 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
             <Button icon={<FileExcelOutlined />}
               loading={exportBatchTechnicalWorkbookLoading}
               onClick={() => onExportBatchTechnicalWorkbook(activePatrolBatchId)}>
-              技术附表
+              巡检明细 Excel
             </Button>
             <Button icon={<SafetyCertificateOutlined />}
               loading={exportBatchEvidencePackageLoading}
@@ -1017,8 +1017,8 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
           </Space>
           <Typography.Text type="secondary">
             原始输出按设备保留采集器生成的 .txt，并附完整设备清单和登录失败清单；
-            事件数据为 CSV；巡检报告为适合汇报与归档的 Word；技术附表按标准语义汇总
-            版本、CPU、内存、接口和光衰；证据包保存冻结事实、检查项结论、风险生命周期
+            事件数据为 CSV；巡检报告为适合汇报与归档的 Word；巡检明细 Excel 按检查项分 Sheet，
+            未关联检查项的命令单独成 Sheet；证据包保存冻结事实、检查项结论、风险生命周期
             与命令快照索引，不重复包含原始 CLI 正文。
           </Typography.Text>
         </Space>

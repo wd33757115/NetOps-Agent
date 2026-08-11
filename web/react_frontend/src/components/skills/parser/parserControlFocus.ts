@@ -94,7 +94,6 @@ export const parserWorkspaceTabs: Record<ParserWorkspaceKey, ParserSubWorkspaceK
     'asset-production-units',
     'source-jobs',
     'catalog-management',
-    'assessment-policies',
   ],
   inbox: ['work-items', 'jobs', 'backfills'],
   inventory: ['published-assets'],
@@ -138,6 +137,9 @@ export const isSubWorkspace = (workspace: ParserWorkspaceKey, value: string | nu
   value !== null && parserWorkspaceTabs[workspace].includes(value as ParserSubWorkspaceKey)
 
 const legacySubWorkspaceAliases: Partial<Record<ParserWorkspaceKey, Record<string, ParserSubWorkspaceKey>>> = {
+  production: {
+    'assessment-policies': 'catalog-management',
+  },
   inventory: {
     templates: 'published-assets',
     aliases: 'published-assets',

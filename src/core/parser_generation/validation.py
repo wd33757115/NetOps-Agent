@@ -321,15 +321,6 @@ def execute_template_candidate(
             diagnostics=tuple(compile_errors),
         )
     diagnostics: list[str] = []
-    if spec is not None:
-        inventory_error = _field_inventory_error(
-            template_text=template_text,
-            spec=spec,
-            backend=backend,
-        )
-        if inventory_error:
-            gates["field_inventory_aligned"] = False
-            diagnostics.append(inventory_error)
     sample_results: list[SampleValidation] = []
     for sample in samples:
         errors: list[str] = []

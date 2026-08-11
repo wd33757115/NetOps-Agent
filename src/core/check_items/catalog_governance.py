@@ -111,6 +111,7 @@ def _implementation_from_row(
         template_scope=(
             str(version.template_scope) if version.template_scope is not None else None
         ),
+        adapter_spec=dict(version.adapter_spec_json or {}),
         output_quality_policy=dict(version.output_quality_policy_json or {}),
         selection_priority=int(version.selection_priority),
         status=str(version.status),
@@ -433,6 +434,10 @@ class CheckItemCatalogGovernanceService:
                     "status": "draft",
                 }
             )
+            if len(raw.get("commands") or []) != 1:
+                raise ValueError(
+                    "a command adapter must declare exactly one command; fallback commands are not supported"
+                )
             candidate = build_collection_implementation(
                 raw,
                 known_check_item_ids=known_check_item_ids,
@@ -490,6 +495,7 @@ class CheckItemCatalogGovernanceService:
                 ],
                 parser_requirement=candidate.parser_requirement,
                 template_scope=candidate.template_scope,
+                adapter_spec_json=candidate.adapter_spec or None,
                 output_quality_policy_json=candidate.output_quality_policy or None,
                 selection_priority=candidate.selection_priority,
                 status="draft",
@@ -541,6 +547,7 @@ class CheckItemCatalogGovernanceService:
                     "collector": candidate.collector,
                     "parser_requirement": candidate.parser_requirement,
                     "template_scope": candidate.template_scope,
+                    "adapter_spec": candidate.adapter_spec,
                     "selection_priority": candidate.selection_priority,
                     "output_quality_policy": candidate.output_quality_policy,
                 },
@@ -1789,6 +1796,7 @@ class CheckItemCatalogGovernanceService:
             "collector": candidate.collector,
             "parser_requirement": candidate.parser_requirement,
             "template_scope": candidate.template_scope,
+            "adapter_spec": candidate.adapter_spec,
             "selection_priority": candidate.selection_priority,
             "output_quality_policy": candidate.output_quality_policy,
             "status": candidate.status,

@@ -1,5 +1,5 @@
-import React from 'react'
-import { fireEvent, render, screen } from '@testing-library/react'
+﻿import React from 'react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -123,6 +123,32 @@ const comparison: ParserTemplateComparison = {
 }
 
 describe('ParserTemplateApprovalDrawer', () => {
+  it('shows frozen evidence without lifecycle actions in read-only mode', async () => {
+    render(
+      <ParserTemplateApprovalDrawer
+        open
+        readOnly
+        onClose={vi.fn()}
+        isMobile={false}
+        loading={false}
+        comparison={comparison}
+        onReview={vi.fn()}
+        onApprove={vi.fn()}
+      />,
+    )
+
+    expect(await screen.findByText('查看 Parser 审批证据')).toBeVisible()
+    expect(screen.getByText('已发布 Parser')).toBeVisible()
+    expect(screen.getByText('CLI 输出样本')).toBeVisible()
+    expect(screen.getByText('原始快照')).toBeVisible()
+    expect(screen.getAllByText('TextFSM 模板')[0]).toBeVisible()
+    expect(screen.getAllByText('解析结果')[0]).toBeVisible()
+    expect(screen.getByText(/GE1\/0\/1 UP/)).toBeVisible()
+    expect(screen.getByText(/Value interface/)).toBeVisible()
+    expect(screen.queryByRole('button', { name: /保存人工复核/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /批准发布/ })).not.toBeInTheDocument()
+  })
+
   it('shows raw CLI, parsed records and the exact TextFSM candidate before approval', async () => {
     const user = userEvent.setup()
     const onReview = vi.fn()
@@ -138,16 +164,17 @@ describe('ParserTemplateApprovalDrawer', () => {
       />,
     )
 
-    expect(await screen.findByText('命令样本原始数据')).toBeVisible()
+    expect(await screen.findByText('CLI 输出样本')).toBeVisible()
     expect(screen.getByText('候选已通过自动校验，等待工程师复核最终结果')).toBeVisible()
     expect(screen.getByText(/GE1\/0\/1 UP/)).toBeVisible()
-    expect(screen.getByText('候选模板解析结果')).toBeVisible()
-    expect(screen.getByRole('cell', { name: 'UP' })).toBeVisible()
+    expect(screen.getAllByText('TextFSM 模板')[0]).toBeVisible()
+    expect(screen.getAllByText('解析结果')[0]).toBeVisible()
+    expect(screen.getByText(/Value interface/)).toBeVisible()
+    expect(screen.queryByRole('tab', { name: 'TextFSM 模板' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('单条解析记录')).toHaveTextContent('statusUP')
 
     await user.click(screen.getByRole('checkbox', { name: /记录完整且字段对应正确/ }))
     await user.click(screen.getByRole('checkbox', { name: /能稳定、唯一地标识记录/ }))
-    await user.click(screen.getByRole('tab', { name: 'TextFSM 模板' }))
-    expect(screen.getByText(/Value interface/)).toBeVisible()
 
     await user.click(screen.getByRole('button', { name: /保存人工复核/ }))
     expect(onReview).toHaveBeenCalledWith('')
@@ -167,10 +194,9 @@ describe('ParserTemplateApprovalDrawer', () => {
       />,
     )
 
+    await user.click(screen.getByRole('tab', { name: '能力边界 (1)' }))
     expect(await screen.findByText('Parser 可审批不等于检查项已具备生产能力')).toBeVisible()
     expect(screen.getByText(/字段形态可承载目标语义/)).toBeVisible()
-
-    await user.click(screen.getByRole('tab', { name: '能力边界 (1)' }))
     expect(screen.getAllByText('interface.oper_status')).not.toHaveLength(0)
     expect(screen.getByText('ParserSpec 与 TextFSM 输出字段一致')).toBeVisible()
     expect(screen.getByText('检查项未就绪')).toBeVisible()
@@ -346,14 +372,15 @@ describe('ParserTemplateApprovalDrawer', () => {
     )
 
     expect(await screen.findByText('NTC 公共模板')).toBeVisible()
-    await user.click(screen.getByRole('tab', { name: 'TextFSM 模板' }))
+    expect(screen.getAllByText('TextFSM 模板')[0]).toBeVisible()
+    expect(screen.getByText(/Value interface/)).toBeVisible()
+    await user.click(screen.getByRole('tab', { name: '过程资产' }))
 
-    expect(screen.getByText('该候选来自公共 NTC 模板')).toBeVisible()
-    expect(screen.getAllByText('cisco_nxos_show_interface_status.textfsm')).not.toHaveLength(0)
+    expect(screen.getByText('NTC 模板来源')).toBeVisible()
+    expect(screen.getAllByText(/cisco_nxos_show_interface_status\.textfsm/)).not.toHaveLength(0)
     expect(screen.getByText('Apache-2.0')).toBeVisible()
     expect(screen.getByText('ntc-platform-compat/v1')).toBeVisible()
     expect(screen.getByText('NTC 原始模板')).toBeVisible()
-    expect(screen.getByText('平台最终候选模板')).toBeVisible()
     expect(screen.getAllByText(/\^\. -> Error/)).not.toHaveLength(0)
   })
 
@@ -437,16 +464,14 @@ describe('ParserTemplateApprovalDrawer', () => {
     )
 
     expect((await screen.findAllByText('interface_transceiver_status'))[0]).toBeVisible()
-    expect(screen.getByRole('cell', { name: 'available' })).toBeVisible()
+    expect(screen.getByRole('definition', { name: 'available' })).toBeVisible()
 
-    await user.click(screen.getByRole('combobox', { name: '解析记录集' }))
-    await user.click(await screen.findByText(/interface_diagnostic_channel · 2 条/))
-
-    expect(screen.getByText('interface_name + channel_number')).toBeVisible()
+    expect(screen.queryByRole('combobox', { name: '解析记录集' })).not.toBeInTheDocument()
+    expect((await screen.findAllByText('interface_diagnostic_channel'))[0]).toBeVisible()
+    expect(screen.getByText(/主键 interface_name \+ channel_number/)).toBeVisible()
     expect(screen.getByRole('cell', { name: '-3.21' })).toBeVisible()
     expect(screen.getByRole('cell', { name: '-3.45' })).toBeVisible()
-
-    await user.click(screen.getByRole('tab', { name: 'TextFSM 模板' }))
     expect(screen.getByText(/Value channel_number/)).toBeVisible()
   })
 })
+

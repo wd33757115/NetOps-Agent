@@ -3,7 +3,7 @@
 > - 文档状态：Active
 > - 最后校验：2026-07-30
 > - 说明：文件名为历史兼容，不再表示平台支持无人值守发布
-> - 权威上位方案：`check-item-centered-patrol-platform-remediation-2026-07-27.md`
+> - 权威上位方案：`check-item-command-adapter-simplification-remediation-2026-08-10.md`
 
 ## 1. 建设目标
 

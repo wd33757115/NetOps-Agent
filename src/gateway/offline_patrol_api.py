@@ -85,6 +85,10 @@ class OfflineOutputDispositionConfirmRequest(BaseModel):
     reason: str = Field(default="", max_length=1000)
 
 
+class CommandAssetNotApplicableConfirmRequest(BaseModel):
+    reason: str = Field(min_length=5, max_length=1000)
+
+
 class OfflinePatrolExecuteRequest(BaseModel):
     idempotency_key: str = Field(
         default_factory=lambda: uuid.uuid4().hex, min_length=8, max_length=128
@@ -504,6 +508,41 @@ def get_rule_asset_source_command_unit(
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@asset_source_routes.post(
+    "/{job_id}/command-asset-units/{unit_id}/confirm-not-applicable"
+)
+def confirm_rule_asset_source_command_unit_not_applicable(
+    job_id: str,
+    unit_id: str,
+    payload: CommandAssetNotApplicableConfirmRequest,
+    request: Request,
+    user: CurrentUser = Depends(require_role(["admin", "operator"])),
+):
+    _detail_or_http(job_id, user)
+    try:
+        result = RuleAssetCommandUnitService().confirm_not_applicable(
+            job_id,
+            unit_id,
+            actor=user.username,
+            reason=payload.reason,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _audit(
+        request,
+        user,
+        "rule_asset_command_not_applicable_confirmed",
+        job_id,
+        {
+            "unit_id": unit_id,
+            "decision": result.get("decision"),
+        },
+    )
+    return result
 
 
 @routes.get("/{job_id}/replay-summary")

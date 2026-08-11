@@ -953,6 +953,8 @@ class PatrolCollectionResultRepository(_PatrolRepositoryBase):
         normalization_status: str,
         fact_status: str | None = None,
         failure_code: str | None = None,
+        authoritative_for_deletion: bool | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         if normalization_status not in {"normalized", "empty", "skipped", "blocked", "failed"}:
             raise ValueError(f"unsupported normalization_status: {normalization_status}")
@@ -977,6 +979,15 @@ class PatrolCollectionResultRepository(_PatrolRepositoryBase):
                 row.fact_status = fact_status
             if failure_code is not None:
                 row.failure_code = failure_code
+            if authoritative_for_deletion is not None:
+                row.authoritative_for_deletion = bool(authoritative_for_deletion)
+                if not authoritative_for_deletion:
+                    row.baseline_eligible = False
+            if metadata:
+                row.metadata_json = {
+                    **dict(row.metadata_json or {}),
+                    **dict(metadata),
+                }
             row.updated_at = _utcnow()
 
     def list_collection_results(self, run_id: str) -> list[dict[str, Any]]:

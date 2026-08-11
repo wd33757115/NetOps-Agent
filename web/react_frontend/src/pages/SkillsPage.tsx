@@ -101,7 +101,7 @@ const SkillsPage: React.FC = () => {
     <GrokShellLayout
       title={activeTab === 'parser' ? '巡检规则资产' : 'Skills 和连接器'}
       subtitle={activeTab === 'parser'
-        ? '从离线命令样本生成、验证、审批并发布巡检解析与事件规则'
+        ? '用离线样本维护检查项、命令适配器与确定性判断规则'
         : '管理 Skill、编排 Workflow 插件、模板市场与聊天触发'}
     >
       {activeTab === 'parser' ? (

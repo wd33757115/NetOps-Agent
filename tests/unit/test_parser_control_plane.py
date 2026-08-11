@@ -453,6 +453,49 @@ Start
     assert result.failure_code == "field_validation_failed"
 
 
+def test_parser_runtime_validates_textfsm_list_items_individually(tmp_path):
+    content = r"""Value Required interface (\S+)
+Value List ip_address (\S+)
+
+Start
+  ^Interface ${interface}
+  ^Address ${ip_address}
+  ^End -> Record
+"""
+    store = TemplateAssetStore(tmp_path)
+    path, digest = store.write_immutable(
+        vendor="H3C",
+        profile="S5130S-54S-HI-G",
+        command="display interface",
+        version="list-validator-1",
+        content=content,
+    )
+    template = SimpleNamespace(
+        id="list-validator-template",
+        version="list-validator-1",
+        asset_path=str(path),
+        sha256=digest,
+        category="interface_l3",
+        validation_json={
+            "entity_type": "interface_l3",
+            "primary_keys": ["interface"],
+            "required_fields": ["interface"],
+            "validators": {"ip_address": {"type": "ip_or_unassigned"}},
+        },
+    )
+
+    result = ParserRuntime(registry=FakeRegistry(template)).parse(
+        identity=known_h3c_identity(),
+        command="display interface",
+        raw_text="Interface Vlan-interface1\nAddress 10.0.0.1/24\nAddress --\nEnd\n",
+    )
+
+    assert result.parser_status == "success"
+    assert result.structured_data == [
+        {"interface": "Vlan-interface1", "ip_address": ["10.0.0.1/24", "--"]}
+    ]
+
+
 def test_parser_runtime_accepts_present_empty_fields_and_unassigned_ip(tmp_path):
     content = r"""Value interface (\S+)
 Value ip_address (\S+)

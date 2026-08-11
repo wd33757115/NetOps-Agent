@@ -153,6 +153,6 @@ venv\Scripts\python.exe scripts\test\check_item_golden_runtime_replay.py
 ```
 
 总体产品合同、资产治理和报告权限以
-[检查项中心巡检平台改造方案](./check-item-centered-patrol-platform-remediation-2026-07-27.md) 为准；
+[检查项中心巡检平台改造方案](./check-item-command-adapter-simplification-remediation-2026-08-10.md) 为准；
 实际完成状态以
 [实施与验收矩阵](./implementation/check-item-platform-completion-matrix-2026-07-28.md) 为准。

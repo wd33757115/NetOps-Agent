@@ -128,11 +128,17 @@ documents:
     owner: NetOps Architecture
     last_verified: 2026-05-24
 
-  - path: check-item-centered-patrol-platform-remediation-2026-07-27.md
+  - path: check-item-command-adapter-simplification-remediation-2026-08-10.md
     topic: patrol-platform-architecture
     status: active
     owner: NetOps Platform
-    last_verified: 2026-07-30
+    last_verified: 2026-08-10
+
+  - path: check-item-centered-patrol-platform-remediation-2026-07-27.md
+    topic: legacy-patrol-platform-architecture
+    status: superseded
+    owner: NetOps Platform
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
 
   - path: implementation/check-item-platform-completion-matrix-2026-07-28.md
     topic: patrol-platform-implementation-status
@@ -253,13 +259,13 @@ documents:
     topic: legacy-architecture-simplification
     status: superseded
     owner: NetOps Architecture
-    superseded_by: check-item-centered-patrol-platform-remediation-2026-07-27.md
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
 
   - path: llm-rule-control-plane-implementation-plan.md
     topic: legacy-llm-rule-control-plane
     status: superseded
     owner: Rule Asset Platform
-    superseded_by: check-item-centered-patrol-platform-remediation-2026-07-27.md
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
 
   - path: parser-automation-guide.md
     topic: legacy-parser-automation
@@ -271,7 +277,7 @@ documents:
     topic: legacy-parser-optical-remediation
     status: superseded
     owner: Parser Platform
-    superseded_by: check-item-centered-patrol-platform-remediation-2026-07-27.md
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
 
   - path: parser-control-plane-productization-remediation-2026-07-19.md
     topic: legacy-parser-control-plane
@@ -283,85 +289,85 @@ documents:
     topic: legacy-patrol-capacity-baseline
     status: superseded
     owner: NetOps Platform
-    superseded_by: check-item-centered-patrol-platform-remediation-2026-07-27.md
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
 
   - path: patrol-chain-audit-and-remediation-plan-2026-07.md
     topic: legacy-patrol-chain-audit
     status: superseded
     owner: NetOps Platform
-    superseded_by: check-item-centered-patrol-platform-remediation-2026-07-27.md
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
 
   - path: patrol-chain-best-practice-remediation-2026-07-19.md
     topic: legacy-patrol-best-practice
     status: superseded
     owner: NetOps Platform
-    superseded_by: check-item-centered-patrol-platform-remediation-2026-07-27.md
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
 
   - path: patrol-chain-failure-semantics-remediation-2026-07.md
     topic: legacy-patrol-failure-semantics
     status: superseded
     owner: NetOps Platform
-    superseded_by: check-item-centered-patrol-platform-remediation-2026-07-27.md
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
 
   - path: patrol-chain-integrity-recovery-remediation-2026-07-11.md
     topic: legacy-patrol-integrity-recovery
     status: superseded
     owner: NetOps Platform
-    superseded_by: check-item-centered-patrol-platform-remediation-2026-07-27.md
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
 
   - path: patrol-chain-replay-integrity-remediation-2026-07-11.md
     topic: legacy-patrol-replay-integrity
     status: superseded
     owner: NetOps Platform
-    superseded_by: check-item-centered-patrol-platform-remediation-2026-07-27.md
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
 
   - path: patrol-degradation-parser-asset-closure-2026-07-12.md
     topic: legacy-patrol-parser-closure
     status: superseded
     owner: NetOps Platform
-    superseded_by: check-item-centered-patrol-platform-remediation-2026-07-27.md
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
 
   - path: patrol-output-capability-and-raw-handling-2026-07-12.md
     topic: legacy-patrol-output-capability
     status: superseded
     owner: NetOps Platform
-    superseded_by: check-item-centered-patrol-platform-remediation-2026-07-27.md
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
 
   - path: patrol-productionization-roadmap-2026-07-20.md
     topic: legacy-patrol-productionization
     status: superseded
     owner: NetOps Platform
-    superseded_by: check-item-centered-patrol-platform-remediation-2026-07-27.md
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
 
   - path: patrol-production-readiness-remediation-2026-07-11.md
     topic: legacy-patrol-production-readiness
     status: superseded
     owner: NetOps Platform
-    superseded_by: check-item-centered-patrol-platform-remediation-2026-07-27.md
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
 
   - path: patrol-rule-pipeline-implementation-2026-07-21.md
     topic: legacy-patrol-rule-pipeline
     status: superseded
     owner: Rule Asset Platform
-    superseded_by: check-item-centered-patrol-platform-remediation-2026-07-27.md
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
 
   - path: patrol-runtime-concurrency-remediation-2026-07-11.md
     topic: legacy-patrol-runtime-concurrency
     status: superseded
     owner: NetOps Platform
-    superseded_by: check-item-centered-patrol-platform-remediation-2026-07-27.md
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
 
   - path: rule-asset-control-plane-and-leadership-report-2026-07-14.md
     topic: legacy-rule-asset-and-report
     status: superseded
     owner: Rule Asset Platform
-    superseded_by: check-item-centered-patrol-platform-remediation-2026-07-27.md
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
 
   - path: rule-asset-control-plane-final-detailed-design-2026-07-23.md
     topic: legacy-rule-asset-control-plane-ui
     status: superseded
     owner: Rule Asset Platform
-    superseded_by: check-item-centered-patrol-platform-remediation-2026-07-27.md
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
 
   - path: textfsm-parser-agent-loop-design-2026-07-13.md
     topic: legacy-parser-generation-architecture

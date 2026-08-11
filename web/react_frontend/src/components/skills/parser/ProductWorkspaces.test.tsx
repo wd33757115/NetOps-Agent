@@ -36,6 +36,7 @@ describe('rule asset product workspaces', () => {
         category: 'interface',
         version: '3',
         status: 'active',
+        source_job_id: 'offline-job-1',
         created_at: '2026-07-23T12:00:00Z',
       }],
       total: 1,
@@ -51,6 +52,42 @@ describe('rule asset product workspaces', () => {
     vi.spyOn(parserApi, 'eventRules').mockResolvedValue({
       items: [], total: 4, limit: 1, offset: 0,
     })
+    const comparison = vi.spyOn(parserApi, 'comparison').mockResolvedValue({
+      template_id: 'tpl-1',
+      sample_count: 1,
+      passed_samples: 1,
+      contract_changed: false,
+      candidate_template: {
+        id: 'tpl-1',
+        vendor: 'H3C',
+        profile: 'S5130S',
+        canonical_command: 'display interface brief',
+        category: 'interface',
+        version: '3',
+        status: 'active',
+        sha256: 'a'.repeat(64),
+        hash_valid: true,
+        content: 'Value interface (\\S+)\nValue status (\\S+)\n\nStart\n  ^${interface} ${status} -> Record\n',
+        validation: {},
+      },
+      candidate_contract: { primary_keys: ['interface'] },
+      active_contract: {},
+      approval_readiness: { can_approve: true, blockers: [] },
+      rows: [{
+        snapshot_id: 'snapshot-1',
+        dataset_id: 'dataset-q3',
+        device_id: 'SW1',
+        command: 'display interface brief',
+        raw_text: 'Interface Link\nGE1/0/1 UP',
+        raw_text_sha256: 'b'.repeat(64),
+        raw_text_redacted: true,
+        changed: false,
+        proposed: {
+          status: 'success',
+          records: [{ interface: 'GE1/0/1', status: 'UP' }],
+        },
+      }],
+    })
 
     renderWorkspace(<PublishedAssetsWorkspace />)
 
@@ -58,6 +95,15 @@ describe('rule asset product workspaces', () => {
     expect(screen.getByText('生产资产目录')).toBeInTheDocument()
     expect(screen.getAllByText('生产生效').length).toBeGreaterThan(0)
     expect(parserApi.templates).toHaveBeenCalledWith(expect.objectContaining({ status: 'active' }))
+
+    fireEvent.click(screen.getByRole('button', { name: /查看详情/ }))
+    expect(await screen.findByText('Parser 模板详情')).toBeVisible()
+    expect(screen.getByText('CLI 输出样本')).toBeVisible()
+    expect(screen.getByText('已脱敏')).toBeVisible()
+    expect(screen.getByText(/GE1\/0\/1 UP/)).toBeVisible()
+    expect(screen.getByText(/Value interface/)).toBeVisible()
+    expect(screen.getByLabelText('单条解析记录')).toHaveTextContent('statusUP')
+    expect(comparison).toHaveBeenCalledWith('tpl-1')
   })
 
   it('turns runtime gaps into an actionable coverage view', async () => {

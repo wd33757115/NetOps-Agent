@@ -6,8 +6,18 @@ import hashlib
 import ipaddress
 import json
 import uuid
+from dataclasses import replace
 from typing import Any
 
+from src.core.check_items.catalog import (
+    CheckItemCatalogRepository,
+    CheckItemDefinition,
+)
+from src.core.check_items.command_adapter import (
+    CommandAdapterError,
+    ObservationBatch,
+    execute_adapter,
+)
 from src.core.observation import ObservationContractRepository
 from src.core.observation.record_set_relations import (
     materialize_record_set_references,
@@ -35,6 +45,169 @@ PLACEHOLDER_NORMALIZED_FIELDS = {"description"}
 
 class ObservationContractVersionError(ValueError):
     """Raised when replay cannot resolve the immutable contract version."""
+
+
+def _adapter_record_sets(structured: Any) -> dict[str, list[dict[str, Any]]]:
+    if isinstance(structured, dict) and isinstance(
+        structured.get("record_sets"), dict
+    ):
+        return {
+            str(name): _records(rows)
+            for name, rows in structured["record_sets"].items()
+        }
+    if isinstance(structured, dict):
+        candidate_sets = {
+            str(name): _records(rows)
+            for name, rows in structured.items()
+            if isinstance(rows, list)
+        }
+        if candidate_sets:
+            return candidate_sets
+    return {"default": _records(structured)}
+
+
+def _adapter_contract(check_item: CheckItemDefinition) -> dict[str, Any]:
+    """Compile one check-item definition into the legacy normalizer shape."""
+
+    canonical = dict(check_item.canonical_contract or {})
+    observations = [
+        dict(item)
+        for item in canonical.get("observations") or []
+        if isinstance(item, dict)
+    ]
+    state_semantics: dict[str, dict[str, Any]] = {}
+    validators: dict[str, dict[str, Any]] = {}
+    for observation in observations:
+        field = str(observation.get("canonical_field") or "").strip()
+        if not field:
+            continue
+        semantics = {
+            key: value
+            for key, value in observation.items()
+            if key not in {"canonical_field", "required", "mapping_guidance"}
+        }
+        explicit_thresholds = observation.get("threshold_references")
+        if isinstance(explicit_thresholds, dict):
+            semantics["threshold_references"] = dict(explicit_thresholds)
+        state_semantics[field] = semantics
+        semantic_type = str(observation.get("semantic_type") or "").strip()
+        value_type = str(observation.get("value_type") or "").strip()
+        if value_type:
+            validators[field] = {"type": value_type}
+        elif semantic_type in {"gauge", "counter", "number", "percentage"}:
+            validators[field] = {"type": "number"}
+
+    primary_keys = [
+        str(item)
+        for item in (
+            canonical.get("primary_keys")
+            or canonical.get("identity_dimensions")
+            or []
+        )
+        if str(item) and str(item) != "device_id"
+    ]
+    observable_fields = set(state_semantics)
+    known_fields = set(dict(canonical.get("parser_field_vocabulary") or {}))
+    ignored_fields = sorted(known_fields - observable_fields - set(primary_keys))
+    return {
+        "contract_id": check_item.version_id,
+        "contract_version": check_item.version,
+        "contract_sha256": check_item.digest,
+        "schema_id": check_item.version_id,
+        "source_type": "cli",
+        "entity_type": str(canonical.get("entity_type") or check_item.id),
+        "canonical_entity_type": str(
+            canonical.get("canonical_entity_type")
+            or canonical.get("entity_type")
+            or check_item.id
+        ),
+        "primary_keys": primary_keys,
+        "entity_identity_fields": primary_keys,
+        "state_semantics": state_semantics,
+        "validators": validators,
+        "ignore_fields": ignored_fields,
+        "record_sets": [],
+    }
+
+
+def _adapter_projection(
+    snapshot: dict[str, Any],
+    *,
+    mode: str,
+    source: str,
+    dataset_id: str | None,
+) -> tuple[list[StateObservation], tuple[ObservationBatch, ...]] | None:
+    version_id = str(snapshot.get("implementation_version_id") or "").strip()
+    if not version_id:
+        return None
+    context = CheckItemCatalogRepository().get_implementation_version_context(
+        version_id
+    )
+    if context is None:
+        return None
+    implementation, check_items = context
+    if not implementation.adapter_spec:
+        return None
+    parser_id = str(
+        dict(implementation.adapter_spec.get("parser") or {}).get("template_id")
+        or ""
+    ).strip()
+    snapshot_parser_id = str(snapshot.get("parser_template_id") or "").strip()
+    if parser_id != snapshot_parser_id:
+        raise SemanticProjectionError(
+            "command adapter Parser binding does not match the snapshot Parser version"
+        )
+
+    items_by_id = {item.id: item for item in check_items}
+    batches = execute_adapter(
+        implementation.adapter_spec,
+        record_sets=_adapter_record_sets(snapshot.get("structured_json")),
+        check_items={
+            item.id: {
+                "version_id": item.version_id,
+                "canonical_contract": item.canonical_contract,
+            }
+            for item in check_items
+        },
+        device_id=str(snapshot.get("inventory_device_id") or snapshot["device_id"]),
+        adapter_version_id=implementation.version_id,
+        evidence={
+            "snapshot_id": snapshot.get("id"),
+            "parser_template_id": snapshot.get("parser_template_id"),
+            "raw_text_hash": snapshot.get("raw_text_hash"),
+            "canonical_command": snapshot.get("canonical_command"),
+        },
+        observed_at=snapshot.get("observed_at"),
+    )
+    observations: list[StateObservation] = []
+    for batch in batches:
+        if not batch.records:
+            continue
+        check_item = items_by_id[batch.check_item_id]
+        child_snapshot = dict(snapshot)
+        child_snapshot["structured_json"] = list(batch.records)
+        projected = observations_from_snapshot(
+            child_snapshot,
+            mode=mode,
+            source=source,
+            dataset_id=dataset_id,
+            _contract_override=_adapter_contract(check_item),
+        )
+        for observation in projected:
+            observations.append(
+                replace(
+                    observation,
+                    metadata={
+                        **dict(observation.metadata or {}),
+                        "check_item_id": check_item.id,
+                        "check_item_version_id": check_item.version_id,
+                        "command_adapter_id": implementation.id,
+                        "command_adapter_version_id": implementation.version_id,
+                        "observation_batch_quality": batch.quality_status,
+                    },
+                )
+            )
+    return _reconcile_snapshot_observations(observations), batches
 
 
 def _records(value: Any) -> list[dict[str, Any]]:
@@ -269,6 +442,15 @@ def observations_from_snapshot(
     structured = snapshot.get("structured_json")
     if structured is None:
         return []
+    if _contract_override is None:
+        adapter_projection = _adapter_projection(
+            snapshot,
+            mode=mode,
+            source=source,
+            dataset_id=dataset_id,
+        )
+        if adapter_projection is not None:
+            return adapter_projection[0]
     frozen_contract_version = (
         int(observation_contract_version)
         if observation_contract_version is not None
@@ -865,7 +1047,9 @@ def _build_snapshot_normalization(
             [],
             False,
         )
-    if parse_status == "parse_empty":
+    if parse_status == "parse_empty" and not snapshot.get(
+        "implementation_version_id"
+    ):
         return (
             {
                 "success": True,
@@ -904,13 +1088,24 @@ def _build_snapshot_normalization(
             should_update_current,
         )
     try:
-        observations = observations_from_snapshot(
+        adapter_projection = _adapter_projection(
             context["snapshot"],
             mode=mode,
             source=str(context["source"]),
             dataset_id=context["dataset_id"],
         )
+        if adapter_projection is None:
+            observations = observations_from_snapshot(
+                context["snapshot"],
+                mode=mode,
+                source=str(context["source"]),
+                dataset_id=context["dataset_id"],
+            )
+            batches: tuple[ObservationBatch, ...] = ()
+        else:
+            observations, batches = adapter_projection
     except (
+        CommandAdapterError,
         EntityKeyError,
         ObservationContractVersionError,
         SemanticProjectionError,
@@ -918,6 +1113,8 @@ def _build_snapshot_normalization(
         failure_code = (
             "contract_version_unavailable"
             if isinstance(exc, ObservationContractVersionError)
+            else "adapter_mapping_invalid"
+            if isinstance(exc, CommandAdapterError)
             else "semantic_projection_invalid"
             if isinstance(exc, SemanticProjectionError)
             else "entity_key_invalid"
@@ -938,6 +1135,49 @@ def _build_snapshot_normalization(
             [],
             should_update_current,
         )
+    batch_rows = [batch.to_dict() for batch in batches]
+    quality_statuses = {batch.quality_status for batch in batches}
+    if batches and not observations:
+        if quality_statuses == {"not_applicable"}:
+            normalization_status = "skipped"
+            fact_status = "not_applicable"
+            no_observation_reason = "not_applicable"
+            success = True
+        elif quality_statuses <= {"valid_empty"}:
+            normalization_status = "empty"
+            fact_status = "empty"
+            no_observation_reason = "legitimate_empty"
+            success = True
+        else:
+            normalization_status = "failed"
+            fact_status = "blocked_by_contract"
+            no_observation_reason = "adapter_output_unavailable"
+            success = False
+        return (
+            {
+                "success": success,
+                "snapshot_id": snapshot_id,
+                "mode": mode,
+                "parse_status": parse_status,
+                "normalization_status": normalization_status,
+                "fact_status": fact_status,
+                "failure_code": (
+                    None if success else "adapter_output_unavailable"
+                ),
+                "no_observation_reason": no_observation_reason,
+                "observation_count": 0,
+                "created_count": 0,
+                "current_state_updates": 0,
+                "updated_current_state": should_update_current and success,
+                "observations": [],
+                "observation_batches": batch_rows,
+                "authoritative_for_deletion": bool(
+                    batches and quality_statuses <= {"complete", "valid_empty"}
+                ),
+            },
+            [],
+            should_update_current and success,
+        )
     normalization_status = "normalized" if observations else "empty"
     return (
         {
@@ -953,6 +1193,17 @@ def _build_snapshot_normalization(
             "current_state_updates": 0,
             "updated_current_state": should_update_current,
             "observations": [item.to_dict() for item in observations],
+            "observation_batches": batch_rows,
+            "partial": bool(
+                batches
+                and any(
+                    batch.quality_status != "complete" for batch in batches
+                )
+            ),
+            "authoritative_for_deletion": bool(
+                not batches
+                or quality_statuses <= {"complete", "valid_empty"}
+            ),
         },
         observations,
         should_update_current,
@@ -980,6 +1231,16 @@ def normalize_snapshot(
             normalization_status=str(result["normalization_status"]),
             fact_status=str(result["fact_status"]),
             failure_code=result.get("failure_code"),
+            authoritative_for_deletion=(
+                False
+                if result.get("authoritative_for_deletion") is False
+                else None
+            ),
+            metadata={
+                "observation_batches": result.get("observation_batches") or [],
+            }
+            if "observation_batches" in result
+            else None,
         )
     if not result["success"]:
         return result
@@ -1126,6 +1387,19 @@ def _normalize_run_impl(
                 normalization_status=str(snapshot_result["normalization_status"]),
                 fact_status=str(snapshot_result["fact_status"]),
                 failure_code=snapshot_result.get("failure_code"),
+                authoritative_for_deletion=(
+                    False
+                    if snapshot_result.get("authoritative_for_deletion") is False
+                    else None
+                ),
+                metadata={
+                    "observation_batches": snapshot_result.get(
+                        "observation_batches"
+                    )
+                    or [],
+                }
+                if "observation_batches" in snapshot_result
+                else None,
             )
         if snapshot_result["success"]:
             valid_observations.extend(observations)

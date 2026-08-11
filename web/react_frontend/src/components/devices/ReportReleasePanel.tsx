@@ -99,7 +99,7 @@ const contentMachineCheckLabels: Record<string, string> = {
 const artifactLabels: Record<string, string> = {
   markdown: 'Markdown 报告',
   docx: '领导版报告',
-  excel: '技术附表',
+  excel: '巡检明细 Excel',
   json: '机器可读报告',
   evidence: '证据包',
 }
@@ -574,11 +574,11 @@ const ReportReleasePanel: React.FC<ReportReleasePanelProps> = ({
             ? '报告后台生成失败'
             : (missingManifest ? '尚未生成报告事实清单' : '报告交付状态读取失败'))}
         description={reportWorkerActive
-          ? '系统正在冻结事实并生成领导版报告、技术附表和证据包，完成后本区域会自动更新。'
+          ? '系统正在冻结事实并生成领导版报告、巡检明细 Excel 和证据包，完成后本区域会自动更新。'
           : (workerFailed
             ? (materializationStatus?.error || '请检查 Worker 与对象存储状态后重试。')
             : (missingManifest
-              ? '批次结束后可生成冻结事实、领导版报告、技术附表和证据包。'
+              ? '批次结束后可生成冻结事实、领导版报告、巡检明细 Excel 和证据包。'
               : errorMessage(reportQuery.error, '无法读取报告交付状态')))}
         action={(
           <Button
@@ -975,7 +975,7 @@ const ReportReleasePanel: React.FC<ReportReleasePanelProps> = ({
                         },
                         {
                           key: 'excel',
-                          label: '技术附表',
+                          label: '巡检明细 Excel',
                           disabled: !item.artifact_sha256.excel,
                         },
                         {
@@ -1543,7 +1543,7 @@ const ReportReleasePanel: React.FC<ReportReleasePanelProps> = ({
             type="info"
             showIcon
             message="报告中的事实结论只能来自本账本"
-            description="声明编号贯穿领导报告、技术附表、机器事实和证据包；限制条件不能在公文润色时删除。"
+            description="声明编号贯穿领导报告、巡检明细 Excel、机器事实和证据包；限制条件不能在公文润色时删除。"
           />
           <Space wrap>
             <Input.Search

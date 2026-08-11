@@ -43,6 +43,7 @@ from src.infrastructure.db.models import (
     NetworkEventRecord,
     PatrolBatchDeviceRecord,
     PatrolBatchRecord,
+    PatrolRun,
     PatrolSourceQualificationRecord,
     ReportManifestRecord,
     RiskCaseRecord,
@@ -962,20 +963,59 @@ class ReportManifestService:
                     *(str(item.id) for item in event_occurrences),
                 }
             )
-            snapshots = (
-                db.query(CommandSnapshot)
-                .filter(
-                    CommandSnapshot.id.in_(evidence_refs),
-                    CommandSnapshot.created_at <= fact_ingestion_high_watermark,
+            baseline_snapshot_ids = sorted(
+                {
+                    str(snapshot_id)
+                    for item in comparisons
+                    for snapshot_id in item.baseline_snapshot_ids_json or []
+                    if str(snapshot_id)
+                }
+            )
+            batch_run_ids = [
+                str(row[0])
+                for row in (
+                    db.query(PatrolRun.id)
+                    .filter(
+                        PatrolRun.metadata_json["patrol_batch_id"].as_string()
+                        == patrol_batch_id,
+                        PatrolRun.created_at <= fact_ingestion_high_watermark,
+                    )
+                    .order_by(PatrolRun.id)
+                    .all()
                 )
-                .order_by(
-                    CommandSnapshot.device_id,
-                    CommandSnapshot.observed_at,
-                    CommandSnapshot.id,
-                )
-                .all()
-                if evidence_refs
-                else []
+            ]
+            snapshots_by_id: dict[str, CommandSnapshot] = {}
+            referenced_snapshot_ids = sorted(
+                set(evidence_refs).union(baseline_snapshot_ids)
+            )
+            if referenced_snapshot_ids:
+                for item in (
+                    db.query(CommandSnapshot)
+                    .filter(
+                        CommandSnapshot.id.in_(referenced_snapshot_ids),
+                        CommandSnapshot.created_at <= fact_ingestion_high_watermark,
+                    )
+                    .all()
+                ):
+                    snapshots_by_id[str(item.id)] = item
+            if batch_run_ids:
+                for item in (
+                    db.query(CommandSnapshot)
+                    .filter(
+                        CommandSnapshot.run_id.in_(batch_run_ids),
+                        CommandSnapshot.created_at <= fact_ingestion_high_watermark,
+                    )
+                    .all()
+                ):
+                    snapshots_by_id[str(item.id)] = item
+            current_run_id_set = set(batch_run_ids)
+            snapshots = sorted(
+                snapshots_by_id.values(),
+                key=lambda item: (
+                    str(item.device_id),
+                    item.observed_at,
+                    str(item.id),
+                ),
             )
             snapshot_ids = [str(item.id) for item in snapshots]
             snapshot_id_set = set(snapshot_ids)
@@ -1075,6 +1115,11 @@ class ReportManifestService:
                     "implementation_version_id": (item.implementation_version_id),
                     "check_item_ids": list(item.check_item_ids_json or []),
                     "observed_at": item.observed_at,
+                    "evidence_role": (
+                        "current" if str(item.run_id) in current_run_id_set else "baseline"
+                    ),
+                    "structured_json": item.structured_json,
+                    "raw_text": str(item.raw_text or ""),
                     "raw_text_hash": str(item.raw_text_hash),
                     "parse_status": str(item.parse_status),
                     "output_status": str(item.output_status),

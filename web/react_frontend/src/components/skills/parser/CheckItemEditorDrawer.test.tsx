@@ -76,9 +76,16 @@ describe('CheckItemEditorDrawer', () => {
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
     const payload = onSubmit.mock.calls[0][0]
-    expect(payload.canonical_contract.parser_field_vocabulary).toEqual(
-      checkItem.canonical_contract.parser_field_vocabulary,
-    )
+    expect(payload.canonical_contract.parser_field_vocabulary).toMatchObject({
+      fan: { aliases: ['fan_id', 'fan_name'], role: 'identity' },
+      slot: { role: 'identity' },
+      fan_status: {
+        aliases: ['status', 'state'],
+        observation_type: 'environment.fan.state',
+        role: 'state',
+        value_type: 'state',
+      },
+    })
     expect(payload.applicability).toEqual(checkItem.applicability)
   })
 })

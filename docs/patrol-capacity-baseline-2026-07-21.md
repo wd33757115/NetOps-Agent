@@ -2,7 +2,7 @@
 
 <!-- document-status: superseded -->
 > **历史文档，已被取代。** 本文中的估算仅作历史参考，不代表当前容量或生产承诺。
-> 当前权威方案见[检查项中心的巡检与规则资产平台总体改造方案](check-item-centered-patrol-platform-remediation-2026-07-27.md)。
+> 当前权威方案见[检查项中心的巡检与规则资产平台总体改造方案](check-item-command-adapter-simplification-remediation-2026-08-10.md)。
 
 基于 `scripts/test/patrol_capacity_benchmark.py` 的串行 SSH 估算模型：
 

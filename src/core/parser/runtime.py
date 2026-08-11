@@ -689,6 +689,12 @@ def _looks_like_interface_header(value: Any) -> bool:
 
 
 def _field_validation_failed(value: Any, validator: dict[str, Any]) -> bool:
+    # TextFSM ``Value List`` fields preserve repeated captures as a list while
+    # ParserSpec validators describe the scalar item type. Validate every
+    # captured item instead of stringifying the whole list (which turns valid
+    # IP/MAC/number lists into false ``field_validation_failed`` results).
+    if isinstance(value, (list, tuple, set)):
+        return any(_field_validation_failed(item, validator) for item in value)
     if value in (None, ""):
         return False
     if is_unavailable_value(value, validator.get("unavailable_tokens")):

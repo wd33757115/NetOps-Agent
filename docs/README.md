@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com> -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-Latest platform remediation plan: [check-item-centered-patrol-platform-remediation-2026-07-27.md](./check-item-centered-patrol-platform-remediation-2026-07-27.md)
+Latest architecture: [check-item-command-adapter-simplification-remediation-2026-08-10.md](./check-item-command-adapter-simplification-remediation-2026-08-10.md)
 
 # NetOps Agent 文档中心
 
@@ -41,7 +41,7 @@ Latest platform remediation plan: [check-item-centered-patrol-platform-remediati
 
 | 文档 | 说明 |
 |------|------|
-| [check-item-centered-patrol-platform-remediation-2026-07-27.md](./check-item-centered-patrol-platform-remediation-2026-07-27.md) | 检查项中心的巡检、Parser、规则资产、报告及文档/废弃代码治理总体改造方案 |
+| [check-item-command-adapter-simplification-remediation-2026-08-10.md](./check-item-command-adapter-simplification-remediation-2026-08-10.md) | 当前架构：检查项、命令适配器、样本任务以及可信巡检报告 |
 | [implementation/check-item-platform-completion-matrix-2026-07-28.md](./implementation/check-item-platform-completion-matrix-2026-07-28.md) | 当前实现、验证证据、生产阻断项和下一步 |
 | [implementation/check-item-platform-e2e-evidence-matrix-2026-07-30.md](./implementation/check-item-platform-e2e-evidence-matrix-2026-07-30.md) | 35 条浏览器验收场景的证据层级、现有证据和剩余门禁 |
 | [simple-parser-pipeline-v2-2026-07-22.md](./simple-parser-pipeline-v2-2026-07-22.md) | Parser Job、样本、生成、验证、人工审批与激活的当前架构 |

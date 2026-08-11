@@ -431,6 +431,26 @@ def test_change_policy_compiler_supports_alarm_only_dynamic_reference():
     ) == []
 
 
+def test_change_policy_compiler_normalizes_single_directional_threshold_key():
+    module = _load_skill_module()
+
+    low = module._compile_directional_threshold_keys(
+        {
+            "compare_mode": "threshold_low_and_deadband",
+            "thresholds": {"free_ratio": 20.0},
+        }
+    )
+    high = module._compile_directional_threshold_keys(
+        {
+            "compare_mode": "threshold_and_deadband",
+            "thresholds": {"utilization": 80.0},
+        }
+    )
+
+    assert low["thresholds"] == {"low": 20.0}
+    assert high["thresholds"] == {"high": 80.0}
+
+
 def test_change_policy_constraints_bound_recovery_threshold(tmp_path: Path):
     result = _run_skill(
         tmp_path,

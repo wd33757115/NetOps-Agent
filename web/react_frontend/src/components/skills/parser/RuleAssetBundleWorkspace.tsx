@@ -32,6 +32,7 @@ interface RuleAssetBundleWorkspaceProps {
   onAssetsChanged?: () => void
   onInspectAssetChain?: () => void
   initialSearch?: string
+  initialBundleId?: string
 }
 
 const statusColor = (status: string) => {
@@ -132,6 +133,7 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
   onAssetsChanged,
   onInspectAssetChain,
   initialSearch = '',
+  initialBundleId,
 }) => {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState(initialSearch)
@@ -141,6 +143,7 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
     row: ParserRuleAssetBundle
   } | null>(null)
   const [engineeringBundle, setEngineeringBundle] = useState<ParserRuleAssetBundle | null>(null)
+  const [autoOpenedBundleId, setAutoOpenedBundleId] = useState<string | undefined>()
   const pageSize = 20
   const query = useQuery(
     ['parser-rule-asset-bundles', page, search, status],
@@ -156,6 +159,13 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
     setSearch(initialSearch)
     setPage(1)
   }, [initialSearch])
+  useEffect(() => {
+    if (!initialBundleId || autoOpenedBundleId === initialBundleId) return
+    const bundle = (query.data?.items || []).find((item) => item.id === initialBundleId)
+    if (!bundle) return
+    setEngineeringBundle(bundle)
+    setAutoOpenedBundleId(initialBundleId)
+  }, [autoOpenedBundleId, initialBundleId, query.data?.items])
   const lifecycle = useMutation(
     ({ action, id, reason }: { action: 'approve' | 'reject' | 'deprecate'; id: string; reason: string }) => {
       if (action === 'approve') return parserApi.approveRuleGenerationJob(id, { reason })

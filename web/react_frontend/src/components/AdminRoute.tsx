@@ -12,7 +12,7 @@ const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   if (loading) {
     return (
       <div style={{ minHeight: '40vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Spin size="large" tip="加载中..." />
+        <Spin size="large" />
       </div>
     )
   }

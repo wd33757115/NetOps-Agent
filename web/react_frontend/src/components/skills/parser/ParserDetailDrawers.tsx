@@ -241,7 +241,7 @@ export const ParserJobDetailDrawer: React.FC<
       expectation: { record_count: number; primary_keys: string[][] } | undefined,
       reason: string,
     ) => Promise<unknown>
-    onSuggestSpec?: (jobId: string) => Promise<unknown>
+    onSuggestSpec?: (jobId: string, revisionInstruction: string) => Promise<unknown>
     onDispatch?: (jobId: string) => Promise<unknown>
   }
 > = ({
@@ -258,6 +258,7 @@ export const ParserJobDetailDrawer: React.FC<
 }) => {
   const [specText, setSpecText] = useState('{}')
   const [specReason, setSpecReason] = useState('')
+  const [revisionInstruction, setRevisionInstruction] = useState('')
   const [formError, setFormError] = useState('')
   const [editingSampleId, setEditingSampleId] = useState<string | null>(null)
   const [sampleRole, setSampleRole] = useState<'unassigned' | 'generation' | 'acceptance' | 'negative'>('unassigned')
@@ -269,12 +270,14 @@ export const ParserJobDetailDrawer: React.FC<
   useEffect(() => {
     setSpecText(JSON.stringify(job?.parser_spec_json || {}, null, 2))
     setSpecReason('')
+    setRevisionInstruction('')
     setFormError('')
     setEditingSampleId(null)
     setPreviewSampleId(null)
   }, [job?.id, job?.parser_spec_json])
 
   const locked = Boolean(job && ['pending', 'running', 'validating', 'succeeded', 'superseded'].includes(job.status))
+  const suggestionLocked = Boolean(job && ['pending', 'running', 'validating', 'superseded'].includes(job.status))
   const readiness = job?.generation_readiness
   const suggestionState = (job?.agent_state_json?.parser_spec_suggestion || {}) as {
     status?: 'queued' | 'running' | 'ready' | 'failed'
@@ -482,14 +485,26 @@ export const ParserJobDetailDrawer: React.FC<
         {onSuggestSpec ? (
           <Button
             icon={<RobotOutlined />}
-            disabled={locked || suggestingSpec}
+            disabled={suggestionLocked || suggestingSpec}
             loading={suggestingSpec}
-            onClick={() => onSuggestSpec(job.id)}
+            onClick={() => onSuggestSpec(job.id, revisionInstruction.trim())}
           >
             {job.parser_spec_status === 'missing' ? '生成 ParserSpec 草稿' : '重新生成草稿'}
           </Button>
         ) : null}
       </Space>
+      {onSuggestSpec ? (
+        <Input.TextArea
+          aria-label="AI ParserSpec 修订要求"
+          value={revisionInstruction}
+          onChange={(event) => setRevisionInstruction(event.target.value)}
+          placeholder="描述记录粒度、主键、保留/忽略字段、字段类型和验收要求"
+          autoSize={{ minRows: 4, maxRows: 8 }}
+          maxLength={4000}
+          showCount
+          disabled={suggestionLocked || suggestingSpec}
+        />
+      ) : null}
       {suggestionState.status === 'failed' ? (
         <Alert
           type="error"

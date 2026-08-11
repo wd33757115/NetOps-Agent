@@ -1,10 +1,11 @@
 import React from 'react'
-import { Alert, Button, Divider, Progress, Space, Steps, Tag, Typography } from 'antd'
-import { ArrowRightOutlined, DatabaseOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Alert, Button, Divider, Progress, Space, Tooltip, Typography } from 'antd'
+import { ArrowRightOutlined, CheckOutlined, CloseOutlined, DatabaseOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useQuery } from 'react-query'
 import { useNavigate } from 'react-router-dom'
-import { ruleAssetSourceApi, type OfflineRuleAssetPipelineStep } from '../../services/api'
-import RuleAssetProductionWorkbench from '../skills/parser/RuleAssetProductionWorkbench'
+import { ruleAssetSourceApi } from '../../services/api'
+import { useIsMobile } from '../../hooks/useBreakpoint'
+import OfflineCommandAssetUnits from './OfflineCommandAssetUnits'
 
 const statusLabel: Record<string, string> = {
   not_started: '未开始',
@@ -16,23 +17,9 @@ const statusLabel: Record<string, string> = {
   completed: '已完成',
 }
 
-const statusColor: Record<string, string> = {
-  in_progress: 'processing',
-  ready: 'blue',
-  available: 'cyan',
-  blocked: 'red',
-  completed: 'green',
-}
-
-const antStepStatus = (item: OfflineRuleAssetPipelineStep) => {
-  if (item.status === 'completed') return 'finish' as const
-  if (item.status === 'blocked') return 'error' as const
-  if (['in_progress', 'ready'].includes(item.status)) return 'process' as const
-  return 'wait' as const
-}
-
 const OfflineRuleAssetPipeline: React.FC<{ jobId: string }> = ({ jobId }) => {
   const navigate = useNavigate()
+  const isMobile = useIsMobile()
   const query = useQuery(
     ['offline-rule-asset-pipeline', jobId],
     () => ruleAssetSourceApi.assetPipeline(jobId),
@@ -47,7 +34,7 @@ const OfflineRuleAssetPipeline: React.FC<{ jobId: string }> = ({ jobId }) => {
       <Alert
         type="error"
         showIcon
-        message="资产生产进度加载失败"
+        message="适配器生产进度加载失败"
         action={<Button icon={<ReloadOutlined />} onClick={() => query.refetch()}>重试</Button>}
       />
     )
@@ -55,70 +42,102 @@ const OfflineRuleAssetPipeline: React.FC<{ jobId: string }> = ({ jobId }) => {
   if (!pipeline) return <Progress percent={0} status="active" />
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <Alert
-        type="info"
-        showIcon
-        message="规则资产只使用本次样本任务形成的结构化数据"
-        description="历史未结构化数据可以另行选择回填；回填必须先 dry-run、人工审批，再写入 Observation，不会直接进入 LLM 上下文。"
-      />
-      <div className="patrol-history__header">
-        <Space direction="vertical" size={2}>
-          <Typography.Text strong>任务级资产生产总览</Typography.Text>
-          <Typography.Text type="secondary">
-            当前：{pipeline.next_action.label} · {pipeline.next_action.description}
-          </Typography.Text>
-        </Space>
-        <Progress type="circle" size={64} percent={pipeline.progress_percent} />
-      </div>
-      <Steps
-        direction="vertical"
-        size="small"
-        items={pipeline.steps.map((item) => ({
-          title: (
-            <Space size={6} wrap>
-              <span>{item.label}</span>
-              {item.optional && <Tag>可选</Tag>}
-              <Tag color={statusColor[item.status]}>{statusLabel[item.status] || item.status}</Tag>
-            </Space>
-          ),
-          description: item.detail,
-          status: antStepStatus(item),
-        }))}
-      />
-      <Space wrap>
-        {pipeline.next_action.code !== 'completed' && (
-          <Button
-            type="primary"
-            icon={<ArrowRightOutlined />}
-            onClick={() => navigate(pipeline.next_action.target_url)}
-          >
-            {pipeline.next_action.label}
-          </Button>
-        )}
-        {pipeline.secondary_actions.map((action) => (
-          <Button
-            key={action.code}
-            icon={<DatabaseOutlined />}
-            onClick={() => navigate(action.target_url)}
-          >
-            {action.label}
-          </Button>
-        ))}
-        <Button icon={<ReloadOutlined />} onClick={() => query.refetch()}>刷新进度</Button>
-      </Space>
-      <Divider style={{ marginBlock: 4 }} />
-      <Space direction="vertical" size={2}>
-        <Typography.Text strong>按巡检检查项生产规则资产</Typography.Text>
-        <Typography.Text type="secondary">
-          规则需求由检查项的 AssetRequirementProfile 决定；命令、厂家和适配 Profile 作为兼容实现展开查看。
-        </Typography.Text>
-      </Space>
-      <RuleAssetProductionWorkbench
-        embedded
-        view="commands"
-        onViewChange={() => undefined}
-        focusOfflineJobId={jobId}
-      />
+      {isMobile && (
+        <Alert
+          className="offline-asset-pipeline__notice-bar"
+          type="info"
+          showIcon
+          message={(
+            <div className="offline-asset-pipeline__notice">
+              <Typography.Text strong>只使用已确认的离线样本</Typography.Text>
+              <Typography.Text type="secondary">
+                历史未结构化数据可另行回填；回填必须先预演和审批，不会直接影响生产巡检。
+              </Typography.Text>
+            </div>
+          )}
+        />
+      )}
+      <section className="offline-asset-pipeline" aria-label="样本任务生产进度">
+        <header className={`offline-asset-pipeline__header${isMobile ? '' : ' is-compact'}`}>
+          {isMobile && (
+            <div className="offline-asset-pipeline__current">
+              <Typography.Text strong>样本任务生产进度</Typography.Text>
+              <Typography.Text type="secondary">
+                当前：{pipeline.next_action.label} · {pipeline.next_action.description}
+              </Typography.Text>
+            </div>
+          )}
+          <div className="offline-asset-pipeline__progress">
+            <div>
+              <Typography.Text type="secondary">{isMobile ? '总体进度' : '生产进度'}</Typography.Text>
+              <Typography.Text strong>{pipeline.progress_percent}%</Typography.Text>
+            </div>
+            <Progress percent={pipeline.progress_percent} showInfo={false} size="small" />
+          </div>
+        </header>
+        <ol className="offline-asset-pipeline__stages">
+          {pipeline.steps.map((item, index) => (
+            <li
+              key={`${item.key}-${index}`}
+              className={`offline-asset-pipeline__stage is-${item.status}`}
+              aria-current={['in_progress', 'ready'].includes(item.status) ? 'step' : undefined}
+            >
+              <span className="offline-asset-pipeline__stage-marker" aria-hidden="true">
+                {item.status === 'completed'
+                  ? <CheckOutlined />
+                  : item.status === 'blocked'
+                    ? <CloseOutlined />
+                    : index + 1}
+              </span>
+              <div className="offline-asset-pipeline__stage-copy">
+                <Tooltip title={item.detail} placement="top">
+                  <span className="offline-asset-pipeline__stage-label">
+                    {item.label}{item.optional ? '（可选）' : ''}
+                  </span>
+                </Tooltip>
+                <span className={`offline-asset-pipeline__step-status is-${item.status}`}>
+                  {statusLabel[item.status] || item.status}
+                  {isMobile ? ` · ${item.detail}` : ''}
+                </span>
+              </div>
+            </li>
+          ))}
+        </ol>
+        <div className="offline-asset-pipeline__actions">
+          {pipeline.next_action.code !== 'completed' && (
+            <Button
+              type="primary"
+              className="offline-asset-pipeline__primary-action"
+              icon={<ArrowRightOutlined />}
+              onClick={() => navigate(pipeline.next_action.target_url)}
+            >
+              {pipeline.next_action.label}
+            </Button>
+          )}
+          {pipeline.secondary_actions.map((action) => (
+            <Button
+              key={action.code}
+              icon={<DatabaseOutlined />}
+              onClick={() => navigate(action.target_url)}
+            >
+              {action.label}
+            </Button>
+          ))}
+          <Button icon={<ReloadOutlined />} onClick={() => query.refetch()}>刷新进度</Button>
+        </div>
+      </section>
+      {isMobile && (
+        <>
+          <Divider style={{ marginBlock: 4 }} />
+          <Space direction="vertical" size={2}>
+            <Typography.Text strong>按命令处理样本资产</Typography.Text>
+            <Typography.Text type="secondary">
+              每条命令使用本任务的样本完成 Parser 生成与验证，再绑定检查项和命令适配器。
+            </Typography.Text>
+          </Space>
+        </>
+      )}
+      <OfflineCommandAssetUnits jobId={jobId} />
     </Space>
   )
 }

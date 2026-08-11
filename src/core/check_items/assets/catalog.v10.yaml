@@ -1229,13 +1229,12 @@ implementations:
     status: active
 
   - id: h3c-cpu-usage
-    version: 2
+    version: 3
     name: H3C CPU utilization
     check_item_ids: [system.cpu_usage]
     match: {vendor: H3C}
     commands:
       - {command: display cpu-usage, priority: 100}
-      - {command: display cpu, priority: 50}
     collector: cli
     parser_requirement: structured
     template_scope: family
@@ -1327,13 +1326,12 @@ implementations:
     status: active
 
   - id: h3c-interface-status
-    version: 2
+    version: 3
     name: H3C interface status
     check_item_ids: [interface.oper_status]
     match: {vendor: H3C}
     commands:
       - {command: display interface brief, priority: 100}
-      - {command: display ip interface brief, priority: 50}
     collector: cli
     parser_requirement: structured
     template_scope: family
@@ -1341,13 +1339,12 @@ implementations:
     status: active
 
   - id: huawei-interface-status
-    version: 2
+    version: 3
     name: Huawei interface status
     check_item_ids: [interface.oper_status]
     match: {vendor: Huawei}
     commands:
       - {command: display interface brief, priority: 100}
-      - {command: display ip interface brief, priority: 50}
     collector: cli
     parser_requirement: structured
     template_scope: family
@@ -1450,13 +1447,12 @@ implementations:
     status: active
 
   - id: cisco-fan-health
-    version: 2
+    version: 3
     name: Cisco fan health
     check_item_ids: [environment.fan]
     match: {vendor: Cisco}
     commands:
       - {command: show environment fan, priority: 100}
-      - {command: show env all, priority: 50}
     collector: cli
     parser_requirement: structured
     template_scope: family
@@ -1490,13 +1486,12 @@ implementations:
     status: active
 
   - id: cisco-power-health
-    version: 2
+    version: 3
     name: Cisco power supply health
     check_item_ids: [environment.power]
     match: {vendor: Cisco}
     commands:
       - {command: show environment power, priority: 100}
-      - {command: show env all, priority: 50}
     collector: cli
     parser_requirement: structured
     template_scope: family

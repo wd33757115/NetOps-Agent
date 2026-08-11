@@ -147,7 +147,17 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
   onDownloadReport,
   onOpenRuleAssets,
 }) => {
-  if (loading) return <Typography.Text type="secondary">正在汇总巡检事实...</Typography.Text>
+  if (loading) {
+    return (
+      <Alert
+        type="info"
+        showIcon
+        message="正在生成验证与回放结果"
+        description="系统正在汇总两个周期的巡检事实、变化和事件。首次生成可能需要数秒，完成后会自动展示结果。"
+        action={<Button size="small" onClick={onRetry}>重新请求</Button>}
+      />
+    )
+  }
   if (error || !report) {
     return (
       <Alert

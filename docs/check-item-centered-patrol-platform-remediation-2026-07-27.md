@@ -1,3 +1,7 @@
+<!-- document-status: superseded -->
+
+> **历史方案，已被取代。** 当前权威方案见[巡检检查项与命令适配器简化改造方案](check-item-command-adapter-simplification-remediation-2026-08-10.md)。
+
 # 检查项中心的巡检与规则资产平台总体改造方案
 
 > - 文档状态：Active / Implementation In Progress / Production Rollout Gated

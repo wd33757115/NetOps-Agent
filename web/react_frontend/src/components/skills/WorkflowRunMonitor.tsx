@@ -30,6 +30,12 @@ function hasArtifacts(value?: Record<string, unknown> | null) {
   return !!value && Object.keys(value).length > 0
 }
 
+function formatTimestamp(value?: string | null) {
+  if (!value) return '-'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
 type ArtifactMeta = {
   download_url?: string
   filename?: string
@@ -225,13 +231,15 @@ const WorkflowRunMonitor: React.FC<WorkflowRunMonitorProps> = ({
         <Spin />
       ) : run ? (
         <>
-          <Alert
-            type={run.status === 'failed' ? 'error' : run.status === 'completed' ? 'success' : 'info'}
-            showIcon
-            message={`${subjectLabel}${displayStatus(run.status)}`}
-            description="步骤轨道展示完整处理流程；事件日志按实际时间记录每一步的开始、完成和错误。"
-            style={{ marginBottom: 12 }}
-          />
+          {(!plain || run.status === 'failed') && (
+            <Alert
+              type={run.status === 'failed' ? 'error' : run.status === 'completed' ? 'success' : 'info'}
+              showIcon
+              message={`${subjectLabel}${displayStatus(run.status)}`}
+              description="步骤轨道展示完整处理流程；事件日志按实际时间记录每一步的开始、完成和错误。"
+              style={{ marginBottom: 12 }}
+            />
+          )}
           {liveStreamUnavailable && (
             <Alert
               type="warning"
@@ -254,8 +262,8 @@ const WorkflowRunMonitor: React.FC<WorkflowRunMonitorProps> = ({
             )}
           </div>
           <Descriptions size="small" bordered column={2} style={{ marginTop: 10 }}>
-            <Descriptions.Item label="开始时间">{run.created_at || '-'}</Descriptions.Item>
-            <Descriptions.Item label="完成时间">{run.completed_at || '-'}</Descriptions.Item>
+            <Descriptions.Item label="开始时间">{formatTimestamp(run.created_at)}</Descriptions.Item>
+            <Descriptions.Item label="完成时间">{formatTimestamp(run.completed_at)}</Descriptions.Item>
             <Descriptions.Item label="总耗时">{durationText(run.created_at, run.completed_at)}</Descriptions.Item>
             <Descriptions.Item label="执行编号">
               <Text copyable={{ text: run.run_id }} code>{run.run_id}</Text>

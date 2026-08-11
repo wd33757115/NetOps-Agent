@@ -895,6 +895,8 @@ def compile_rule_targets(
 ) -> dict[str, Any]:
     """Compile a validated Contract into deterministic ChangePolicy targets."""
 
+    from src.core.observation.semantic_projection import project_value
+
     if not isinstance(contract, dict):
         raise ValueError("contract must be an object")
     if not isinstance(records, list) or not all(isinstance(item, dict) for item in records):
@@ -1112,7 +1114,35 @@ def compile_rule_targets(
                 )
             continue
 
-        values = [item for record in records for item in _scalar_values(record.get(field))]
+        values: list[Any] = []
+        for record_index, record in enumerate(records):
+            normalized_record = {
+                **record,
+                **{
+                    str(name).strip().lower(): value
+                    for name, value in record.items()
+                },
+            }
+            for raw_value in _scalar_values(record.get(field)):
+                try:
+                    projected_value = project_value(
+                        field_name=field,
+                        source_value=raw_value,
+                        normalized_record=normalized_record,
+                        field_semantics=field_semantics,
+                    )
+                except SemanticProjectionError as exc:
+                    blockers.append(
+                        {
+                            "code": "historical_value_projection_failed",
+                            "field_name": field,
+                            "observation_type": observation_type,
+                            "record_index": record_index,
+                            "message": str(exc),
+                        }
+                    )
+                    continue
+                values.extend(_scalar_values(projected_value))
         if not values:
             blockers.append(
                 {

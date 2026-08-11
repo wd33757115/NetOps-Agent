@@ -2,7 +2,7 @@
 
 <!-- document-status: superseded -->
 > **Historical document, superseded.** Retained for audit context only; it is not the current implementation or completion authority.
-> See the [check-item-centered patrol platform remediation](check-item-centered-patrol-platform-remediation-2026-07-27.md).
+> See the [check-item-centered patrol platform remediation](check-item-command-adapter-simplification-remediation-2026-08-10.md).
 
 ## Goal
 

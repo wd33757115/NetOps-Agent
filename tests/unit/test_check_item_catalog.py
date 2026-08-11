@@ -15,6 +15,7 @@ from src.core.check_items import (
     CheckItemCatalog,
     CheckItemCatalogRepository,
     CheckItemImplementationResolver,
+    build_collection_implementation,
     load_canonical_catalog,
     load_catalog,
     load_entity_identity_policy,
@@ -481,6 +482,32 @@ def test_catalog_bootstrap_is_idempotent_and_versions_are_immutable(tmp_path):
         repository.bootstrap(changed_catalog)
 
 
+def test_empty_command_adapter_keeps_legacy_implementation_digest_stable():
+    raw = {
+        "id": "test-device-version",
+        "version": 1,
+        "name": "Test device version",
+        "check_item_ids": ["device.version"],
+        "match": {"vendor": "Test"},
+        "commands": [{"command": "show version", "priority": 100}],
+        "collector": "cli",
+        "parser_requirement": "structured",
+        "template_scope": "family",
+        "selection_priority": 100,
+        "status": "active",
+    }
+    without_adapter = build_collection_implementation(
+        raw,
+        known_check_item_ids={"device.version"},
+    )
+    with_empty_adapter = build_collection_implementation(
+        {**raw, "adapter_spec": {}},
+        known_check_item_ids={"device.version"},
+    )
+
+    assert with_empty_adapter.digest == without_adapter.digest
+
+
 def test_latest_catalog_transactionally_replaces_v1_without_mutating_history(
     tmp_path,
 ):
@@ -505,7 +532,11 @@ def test_latest_catalog_transactionally_replaces_v1_without_mutating_history(
     assert {
         implementation.version
         for implementation in active.implementations
-    } == {1, 2}
+    } == {1, 2, 3}
+    assert all(
+        len(implementation.commands) == 1
+        for implementation in active.implementations
+    )
     assert all(
         item.freshness_policy and item.coverage_policy
         for item in active.check_items

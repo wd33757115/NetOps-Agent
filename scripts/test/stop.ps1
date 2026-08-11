@@ -19,7 +19,15 @@ $pidFile = Join-Path $ProjectRoot ".runtime\test\pids.json"
 
 Write-ColorOutput "[Step 1/3] Stop processes from PID file..." "Yellow"
 Stop-ProjectAppProcesses -ProjectRoot $ProjectRoot
-Stop-DockerAppContainers
+$dockerOk = Test-DockerAvailable -TimeoutSec 5 -Quiet
+if ($dockerOk) {
+    $dockerOk = [bool](Stop-DockerAppContainers -SkipAvailabilityCheck)
+    if (-not $dockerOk) {
+        Write-ColorOutput "  [WARN] Docker stopped responding during app-container cleanup" "Yellow"
+    }
+} else {
+    Write-ColorOutput "  [WARN] Docker is not responding; Docker cleanup will be skipped" "Yellow"
+}
 if (Test-Path $pidFile) {
     $pids = Get-Content $pidFile -Raw | ConvertFrom-Json
     foreach ($name in $pids.PSObject.Properties.Name) {
@@ -40,13 +48,17 @@ if (-not $KeepMiddleware -or -not $KeepLangfuse) {
     $middlewareCompose = Join-Path $ProjectRoot "deployment\docker-compose.middleware.yml"
     $langfuseCompose = Join-Path $ProjectRoot "docker\langfuse\docker-compose.yml"
 
-    if ($KeepMiddleware) {
+    if (-not $dockerOk) {
+        Write-ColorOutput "  [WARN] Docker dependencies were not stopped because Docker is unavailable" "Yellow"
+    } elseif ($KeepMiddleware) {
         Write-ColorOutput "  [SKIP] Middleware (KeepMiddleware)" "Gray"
     } else {
         Invoke-DockerComposeDown -ComposeFile $middlewareCompose -Label "Middleware" | Out-Null
     }
 
-    if ($KeepLangfuse) {
+    if (-not $dockerOk) {
+        # The warning above covers both dependency stacks.
+    } elseif ($KeepLangfuse) {
         Write-ColorOutput "  [SKIP] Langfuse (KeepLangfuse)" "Gray"
     } else {
         Invoke-DockerComposeDown -ComposeFile $langfuseCompose -Label "Langfuse" | Out-Null

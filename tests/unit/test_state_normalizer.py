@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from src.core.observation.semantic_projection import SemanticProjectionError
@@ -144,6 +146,91 @@ def test_raw_hash_diff_normalizes_only_the_digest():
         "profile": "configuration",
         "profile_version": 1,
     }
+
+
+def test_command_adapter_projects_named_record_set_to_canonical_observation(
+    monkeypatch,
+):
+    implementation = SimpleNamespace(
+        id="cisco.nxos.show_system_resources",
+        version_id="adapter-v1",
+        adapter_spec={
+            "schema_version": "command-adapter/v1",
+            "parser": {"template_id": "parser-system-resources-v1"},
+            "outputs": [
+                {
+                    "check_item_id": "system.cpu_usage",
+                    "source_record_set": "cpu_cores",
+                    "fields": {
+                        "scope": {"literal": "processor"},
+                        "scope_id": "cpu_id",
+                        "cpu_usage_percent": {
+                            "expression": "100 - cpu_idle_percent"
+                        },
+                    },
+                }
+            ],
+        },
+    )
+    check_item = SimpleNamespace(
+        id="system.cpu_usage",
+        version=8,
+        version_id="cpu-v8",
+        digest="a" * 64,
+        canonical_contract={
+            "entity_type": "cpu_scope",
+            "identity_dimensions": ["scope", "scope_id"],
+            "observations": [
+                {
+                    "canonical_field": "cpu_usage_percent",
+                    "observation_type": "device.cpu.utilization",
+                    "semantic_type": "gauge",
+                    "unit": "percent",
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        normalizer.CheckItemCatalogRepository,
+        "get_implementation_version_context",
+        lambda _self, _version_id: (implementation, (check_item,)),
+    )
+
+    observations = observations_from_snapshot(
+        {
+            "id": "snapshot-adapter",
+            "run_id": "run-1",
+            "device_id": "switch-1",
+            "inventory_device_id": "inventory-1",
+            "vendor": "Cisco",
+            "model": "N9K",
+            "canonical_command": "show system resources",
+            "observed_at": "2026-08-10T00:00:00+00:00",
+            "structured_json": {
+                "format": "netops.structured_record_sets/v1",
+                "record_sets": {
+                    "cpu_cores": [
+                        {"cpu_id": "0", "cpu_idle_percent": "92.5"}
+                    ]
+                },
+            },
+            "implementation_version_id": "adapter-v1",
+            "parser_template_id": "parser-system-resources-v1",
+            "parser_version": "1",
+            "raw_text_hash": "b" * 64,
+            "metadata_json": {},
+        },
+        mode="production",
+        source="test",
+        dataset_id="dataset-1",
+    )
+
+    assert len(observations) == 1
+    assert observations[0].field_name == "cpu_usage_percent"
+    assert observations[0].value == 7.5
+    assert observations[0].entity_key == '["processor","0"]'
+    assert observations[0].metadata["check_item_id"] == "system.cpu_usage"
+    assert observations[0].metadata["command_adapter_version_id"] == "adapter-v1"
 
 
 def test_device_level_projection_deduplicates_repeated_parser_records():

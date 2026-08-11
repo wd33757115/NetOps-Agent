@@ -7,7 +7,7 @@ import json
 import logging
 import uuid
 from collections import Counter, defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
 
@@ -24,6 +24,7 @@ from src.core.check_items.runtime_bundle_assembly import (
     RuntimeBundleAssemblyPlanner,
 )
 from src.core.parser.policy import DEFAULT_COMMAND_ALIASES, ParserPolicy
+from src.core.parser.output_classifier import classify_parser_generation_sample
 from src.core.parser.repository import (
     ParserJobRepository,
     ParserMetadataRepository,
@@ -54,8 +55,11 @@ from src.infrastructure.db.models import (
 )
 from src.infrastructure.db.postgres import get_db_session
 
-PROJECTION_VERSION = 9
+PROJECTION_VERSION = 11
 logger = logging.getLogger(__name__)
+
+COMMAND_ASSET_DISPOSITION_KEY = "command_asset_dispositions"
+NOT_APPLICABLE_VALID_EMPTY = "not_applicable_valid_empty"
 
 CHECK_ITEM_COMPONENT_ORDER = (
     "identity",
@@ -117,6 +121,30 @@ def _models_contain(model: str):
     """Use PostgreSQL JSONB containment instead of invalid JSON string matching."""
 
     return cast(RuleAssetCommandUnitRecord.models_json, JSONB).contains([str(model)])
+
+
+def _command_disposition_applies(
+    disposition: dict[str, Any],
+    group: dict[str, Any],
+) -> bool:
+    if disposition.get("decision") != NOT_APPLICABLE_VALID_EMPTY:
+        return False
+    if _norm(disposition.get("vendor")) != _norm(group.get("vendor")):
+        return False
+    if _norm(disposition.get("canonical_command")) != _norm(group.get("command")):
+        return False
+    disposition_models = {
+        _norm(item) for item in disposition.get("models") or [] if _norm(item)
+    }
+    if disposition_models and _norm(group.get("model")) not in disposition_models:
+        return False
+    expected_signatures = {
+        str(item) for item in disposition.get("output_signatures") or [] if item
+    }
+    actual_signatures = {
+        str(item) for item in group.get("output_signatures") or [] if item
+    }
+    return bool(expected_signatures) and expected_signatures == actual_signatures
 
 
 STAGE_ORDER = (
@@ -511,6 +539,8 @@ class RuleAssetCommandUnitService:
     ) -> None:
         """Let approved check-item contracts override legacy command policy."""
 
+        if unit.get("handling") == "not_applicable" or unit.get("asset_mode") == "ignored":
+            return
         if not mappings or not unit.get("has_non_empty_output"):
             return
         check_items = {item.id: item for item in catalog.check_items}
@@ -846,7 +876,19 @@ class RuleAssetCommandUnitService:
             # Parser completions for one source job can arrive concurrently. Lock
             # the source row for the whole delete-and-rebuild transaction so two
             # projections cannot insert the same deterministic mapping IDs.
-            require_rule_asset_source_job(db, offline_job_id, for_update=True)
+            source_job = require_rule_asset_source_job(
+                db, offline_job_id, for_update=True
+            )
+            command_dispositions = [
+                dict(item)
+                for item in (
+                    (source_job.preview_json or {}).get(
+                        COMMAND_ASSET_DISPOSITION_KEY
+                    )
+                    or []
+                )
+                if isinstance(item, dict)
+            ]
             periods = (
                 db.query(OfflinePatrolPeriodRecord)
                 .filter(OfflinePatrolPeriodRecord.job_id == offline_job_id)
@@ -1075,10 +1117,14 @@ class RuleAssetCommandUnitService:
                     command=group["command"],
                 )
                 parse_total = sum(group["parse_counts"].values())
-                is_not_applicable = bool(parse_total) and set(group["parse_counts"]).issubset(
-                    {"not_applicable", "ignored"}
+                parse_not_applicable = bool(parse_total) and set(
+                    group["parse_counts"]
+                ).issubset({"not_applicable", "ignored"})
+                governed_not_applicable = any(
+                    _command_disposition_applies(item, group)
+                    for item in command_dispositions
                 )
-                handling = "not_applicable" if is_not_applicable else decision.handling
+                is_not_applicable = parse_not_applicable or governed_not_applicable
                 profile = str(
                     (template.profile if template else None)
                     or (parser_job.profile if parser_job else None)
@@ -1100,8 +1146,11 @@ class RuleAssetCommandUnitService:
                         "family": family,
                         "profile": profile,
                         "command": decision.canonical_command,
-                        "handling": handling,
-                        "asset_mode": ("ignored" if is_not_applicable else decision.asset_mode),
+                        "handling": decision.handling,
+                        "asset_mode": decision.asset_mode,
+                        "default_handling": decision.handling,
+                        "default_asset_mode": decision.asset_mode,
+                        "all_not_applicable": is_not_applicable,
                         "parse_counts": Counter(),
                         "structured_count": 0,
                         "sample_count": 0,
@@ -1113,6 +1162,9 @@ class RuleAssetCommandUnitService:
                     },
                 )
                 unit["models"].add(group["model"])
+                unit["all_not_applicable"] = bool(
+                    unit["all_not_applicable"] and is_not_applicable
+                )
                 unit["parse_counts"].update(group["parse_counts"])
                 unit["structured_count"] += int(group["structured_count"])
                 unit["sample_count"] += sum(group["parse_counts"].values())
@@ -1126,6 +1178,19 @@ class RuleAssetCommandUnitService:
                     unit["template"] = template
                 if parser_job and unit["parser_job"] is None:
                     unit["parser_job"] = parser_job
+
+            for unit in resolved_groups.values():
+                if unit.pop("all_not_applicable"):
+                    unit["handling"] = "not_applicable"
+                    unit["asset_mode"] = "ignored"
+                    unit["parse_counts"] = Counter(
+                        {"not_applicable": int(unit["sample_count"])}
+                    )
+                else:
+                    unit["handling"] = unit["default_handling"]
+                    unit["asset_mode"] = unit["default_asset_mode"]
+                unit.pop("default_handling", None)
+                unit.pop("default_asset_mode", None)
 
             active_template_ids = {
                 str(item["template"].id)
@@ -1249,6 +1314,7 @@ class RuleAssetCommandUnitService:
                 else []
             )
             child_by_id = {str(item.id): item for item in children}
+            runtime_planner = RuntimeBundleAssemblyPlanner(db)
 
             keep_ids: set[str] = set()
             mapped_link_count = 0
@@ -1263,6 +1329,23 @@ class RuleAssetCommandUnitService:
                     mappings,
                     catalog=catalog,
                 )
+                runtime_states: list[bool] = []
+                for mapping in mappings:
+                    try:
+                        runtime_plan = runtime_planner.build(
+                            check_item_version_id=mapping["check_item_version_id"],
+                            implementation_version_id=mapping[
+                                "implementation_version_id"
+                            ],
+                        )
+                    except Exception:
+                        runtime_states.append(False)
+                    else:
+                        runtime_states.append(
+                            bool(runtime_plan.get("active_bundle"))
+                            and runtime_plan.get("operationally_ready") is True
+                        )
+                runtime_ready = bool(runtime_states) and all(runtime_states)
                 template = unit["template"]
                 parser_job = unit["parser_job"]
                 template_id = str(template.id) if template is not None else None
@@ -1291,6 +1374,7 @@ class RuleAssetCommandUnitService:
                     bundle=bundle,
                     children=bundle_children,
                     output_signature_count=len(unit["output_signatures"]),
+                    runtime_ready=runtime_ready,
                 )
                 current_stage, overall_status, progress, next_action = self._rollup(stages)
                 # Expose one authoritative next action. Future-stage actions stay
@@ -2612,6 +2696,9 @@ class RuleAssetCommandUnitService:
                 else []
             )
             result = self._serialize_row(row, include_stages=True)
+            result["not_applicable_confirmation"] = (
+                self._not_applicable_confirmation_state(db, row)
+            )
             evidence: list[dict[str, Any]] = []
             for item in evidence_rows:
                 parse_result = effective_results.get(str(item.id))
@@ -2698,6 +2785,130 @@ class RuleAssetCommandUnitService:
                 result["bundle"] = None
             return result
 
+    @staticmethod
+    def _not_applicable_confirmation_state(
+        db: Any,
+        row: RuleAssetCommandUnitRecord,
+    ) -> dict[str, Any]:
+        if row.handling == "not_applicable" and row.asset_mode == "ignored":
+            return {
+                "eligible": False,
+                "confirmed": True,
+                "evidence_count": int(row.sample_count or 0),
+                "blockers": [],
+            }
+        if not row.parser_job_id:
+            return {
+                "eligible": False,
+                "confirmed": False,
+                "evidence_count": 0,
+                "blockers": ["parser_job_missing"],
+            }
+        samples = (
+            db.query(ParserJobSample)
+            .filter(
+                ParserJobSample.job_id == row.parser_job_id,
+                ParserJobSample.lifecycle_status == "current",
+            )
+            .order_by(ParserJobSample.id)
+            .all()
+        )
+        blockers: list[str] = []
+        if not samples:
+            blockers.append("sample_evidence_missing")
+        if len(samples) != int(row.sample_count or 0):
+            blockers.append("sample_evidence_incomplete")
+        if any(item.sanitization_status != "sanitized" for item in samples):
+            blockers.append("sample_not_sanitized")
+        if any(item.sample_role != "negative" for item in samples):
+            blockers.append("negative_sample_confirmation_required")
+        classifications = [
+            classify_parser_generation_sample(str(item.sanitized_text or ""))
+            for item in samples
+        ]
+        if any(item.get("status") != "valid_empty" for item in classifications):
+            blockers.append("non_empty_or_unverified_sample_present")
+        return {
+            "eligible": bool(samples) and not blockers,
+            "confirmed": False,
+            "evidence_count": len(samples),
+            "classification": "valid_empty" if samples and not blockers else None,
+            "blockers": blockers,
+        }
+
+    def confirm_not_applicable(
+        self,
+        offline_job_id: str,
+        unit_id: str,
+        *,
+        actor: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        normalized_reason = str(reason or "").strip()
+        if len(normalized_reason) < 5:
+            raise ValueError("confirmation reason must contain at least 5 characters")
+        with get_db_session() as db:
+            source_job = require_rule_asset_source_job(
+                db, offline_job_id, for_update=True
+            )
+            row = (
+                db.query(RuleAssetCommandUnitRecord)
+                .filter(
+                    RuleAssetCommandUnitRecord.id == unit_id,
+                    RuleAssetCommandUnitRecord.offline_job_id == offline_job_id,
+                )
+                .first()
+            )
+            if row is None:
+                raise KeyError("command asset unit not found")
+            confirmation = self._not_applicable_confirmation_state(db, row)
+            if not confirmation.get("eligible"):
+                blockers = ", ".join(confirmation.get("blockers") or [])
+                raise ValueError(
+                    "command asset cannot be confirmed not applicable"
+                    + (f": {blockers}" if blockers else "")
+                )
+            samples = (
+                db.query(ParserJobSample)
+                .filter(
+                    ParserJobSample.job_id == row.parser_job_id,
+                    ParserJobSample.lifecycle_status == "current",
+                )
+                .order_by(ParserJobSample.id)
+                .all()
+            )
+            disposition = {
+                "asset_key": row.asset_key,
+                "decision": NOT_APPLICABLE_VALID_EMPTY,
+                "vendor": row.vendor,
+                "models": list(row.models_json or []),
+                "canonical_command": row.canonical_command,
+                "output_signatures": sorted(
+                    {str(item.output_signature) for item in samples}
+                ),
+                "sample_ids": [str(item.id) for item in samples],
+                "reason": normalized_reason,
+                "decided_by": str(actor or "unknown"),
+                "decided_at": datetime.now(timezone.utc).isoformat(),
+            }
+            preview = dict(source_job.preview_json or {})
+            existing = [
+                dict(item)
+                for item in preview.get(COMMAND_ASSET_DISPOSITION_KEY) or []
+                if isinstance(item, dict)
+                and str(item.get("asset_key") or "") != str(row.asset_key)
+            ]
+            preview[COMMAND_ASSET_DISPOSITION_KEY] = [*existing, disposition]
+            source_job.preview_json = preview
+            db.flush()
+
+        projection = self.reconcile(offline_job_id)
+        return {
+            "success": True,
+            "decision": disposition,
+            "projection": projection,
+        }
+
     def summary(self, offline_job_id: str) -> dict[str, Any]:
         self._ensure_projection_current(offline_job_id)
         with get_db_session() as db:
@@ -2754,6 +2965,7 @@ class RuleAssetCommandUnitService:
         bundle: RuleGenerationJobRecord | None,
         children: list[RuleGenerationJobRecord],
         output_signature_count: int,
+        runtime_ready: bool = False,
     ) -> list[dict[str, Any]]:
         command = unit["command"]
         source_job_url = "/skills/parser?" + urlencode(
@@ -3116,7 +3328,7 @@ class RuleAssetCommandUnitService:
         validation_success = report.get("success") is True
         replay_success = replay_gate.get("success") is True
         review_accepted = review.get("decision") == "accepted"
-        if bundle_status == "active":
+        if runtime_ready or bundle_status == "active":
             review_status = "passed"
         elif bundle is None:
             review_status = "not_started"
@@ -3153,7 +3365,7 @@ class RuleAssetCommandUnitService:
                 ),
             )
         )
-        if bundle_status == "active":
+        if runtime_ready or bundle_status == "active":
             release_status = "passed"
         elif (
             bundle_status == "pending_approval"

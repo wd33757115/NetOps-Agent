@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Checkbox, Descriptions, Drawer, Input, Select, Space, Spin, Table, Tabs, Tag, Typography } from 'antd'
+import { Alert, Button, Checkbox, Descriptions, Drawer, Empty, Input, Select, Space, Spin, Table, Tabs, Tag, Typography } from 'antd'
 import { CheckOutlined, CloseCircleOutlined } from '@ant-design/icons'
 
 import type {
@@ -7,7 +7,7 @@ import type {
   ParserComparisonRecordSet,
   ParserTemplateComparison,
 } from '../../../services/api'
-import { codePanelStyle, statusColor } from './parserUi'
+import { statusColor } from './parserUi'
 
 interface ParserTemplateApprovalDrawerProps {
   open: boolean
@@ -15,6 +15,11 @@ interface ParserTemplateApprovalDrawerProps {
   isMobile: boolean
   loading: boolean
   comparison?: ParserTemplateComparison | null
+  title?: React.ReactNode
+  drawerWidth?: number | string
+  expandedEvidence?: boolean
+  evidenceOnly?: boolean
+  readOnly?: boolean
   reviewing?: boolean
   approving?: boolean
   rejecting?: boolean
@@ -65,6 +70,12 @@ interface CandidateProvenance {
 
 const recordCount = (value: unknown) => (Array.isArray(value) ? value.length : 0)
 
+const displayRecordValue = (value: unknown) => (
+  typeof value === 'object' && value !== null
+    ? JSON.stringify(value)
+    : String(value ?? '')
+)
+
 const resultRecordSets = (
   result: ParserComparisonParseResult | undefined,
   fallbackName: string,
@@ -103,12 +114,127 @@ const JsonEvidence: React.FC<{ value: unknown; emptyText?: string }> = ({ value,
   <pre className="parser-approval-evidence__code">{value == null ? emptyText : JSON.stringify(value, null, 2)}</pre>
 )
 
+const ParserRecordSetEvidence: React.FC<{
+  recordSet: ParserComparisonRecordSet
+  templateText: string
+  templateName?: string
+  isNtcCandidate: boolean
+  currentRecords?: Array<Record<string, unknown>>
+  showCurrentComparison: boolean
+}> = ({
+  recordSet,
+  templateText,
+  templateName,
+  isNtcCandidate,
+  currentRecords,
+  showCurrentComparison,
+}) => {
+  const fields = Array.from(new Set(
+    recordSet.records.flatMap((record) => Object.keys(record)),
+  ))
+  const primaryKeySet = new Set(recordSet.primary_keys || [])
+  const columns = fields.map((key) => ({
+    title: key,
+    dataIndex: key,
+    key,
+    width: Math.max(140, Math.min(240, key.length * 9 + 48)),
+    fixed: primaryKeySet.has(key) ? ('left' as const) : undefined,
+    render: (value: unknown) => {
+      const text = displayRecordValue(value)
+      return <span className="parser-approval-result-table__value" title={text}>{text || '-'}</span>
+    },
+  }))
+  const data = recordSet.records.map((record, index) => ({
+    ...record,
+    __approval_row_key: `${recordSet.name}-${index}`,
+  }))
+
+  return (
+    <section style={{ marginTop: 16 }} aria-label={`${recordSet.name} 解析结果`}>
+      <Space size={8} wrap style={{ marginBottom: 10 }}>
+        <Typography.Text strong>{recordSet.name}</Typography.Text>
+        <Typography.Text type="secondary">
+          {recordSet.records.length} 条记录 · {fields.length} 个字段
+        </Typography.Text>
+        <Typography.Text type="secondary">
+          主键 {(recordSet.primary_keys || []).join(' + ') || '无（单例）'}
+        </Typography.Text>
+      </Space>
+      <div
+        className="parser-approval-workbench__grid"
+        style={{ gridTemplateColumns: 'minmax(0, 0.82fr) minmax(0, 1.18fr)' }}
+      >
+        <section className="parser-approval-workbench__panel parser-approval-workbench__template">
+          <header className="parser-approval-workbench__panel-header">
+            <Space size={6} wrap>
+              <Typography.Text strong>TextFSM 模板</Typography.Text>
+              {isNtcCandidate && <Tag color="green">NTC</Tag>}
+              {templateName && <Tag>{templateName}</Tag>}
+            </Space>
+            <Typography.Text type="secondary" copyable={{ text: templateText }}>
+              复制模板
+            </Typography.Text>
+          </header>
+          <pre className="parser-approval-workbench__code">{templateText}</pre>
+        </section>
+        <section className="parser-approval-workbench__panel parser-approval-workbench__result">
+          <header className="parser-approval-workbench__panel-header">
+            <Typography.Text strong>解析结果</Typography.Text>
+            <Typography.Text type="secondary">
+              {recordSet.name} · {data.length} 条 · {fields.length} 个字段
+            </Typography.Text>
+          </header>
+          {data.length === 1 ? (
+            <dl className="parser-approval-record-detail" aria-label="单条解析记录">
+              {fields.map((field) => {
+                const value = displayRecordValue(recordSet.records[0]?.[field])
+                return (
+                  <div className="parser-approval-record-detail__field" key={field}>
+                    <dt>
+                      <span>{field}</span>
+                      {primaryKeySet.has(field) && <Tag>主键</Tag>}
+                    </dt>
+                    <dd title={value}>{value || '-'}</dd>
+                  </div>
+                )
+              })}
+            </dl>
+          ) : (
+            <Table
+              className="parser-approval-result-table"
+              rowKey="__approval_row_key"
+              size="small"
+              pagination={false}
+              sticky
+              scroll={{ x: 'max-content', y: 420 }}
+              columns={columns}
+              dataSource={data}
+              locale={{ emptyText: '该记录集没有解析记录' }}
+            />
+          )}
+        </section>
+      </div>
+      {showCurrentComparison && currentRecords ? (
+        <details className="parser-approval-workbench__current">
+          <summary>与当前生产模板的解析结果对比</summary>
+          <JsonEvidence value={currentRecords} />
+        </details>
+      ) : null}
+    </section>
+  )
+}
+
 const ParserTemplateApprovalDrawer: React.FC<ParserTemplateApprovalDrawerProps> = ({
   open,
   onClose,
   isMobile,
   loading,
   comparison,
+  title,
+  drawerWidth,
+  expandedEvidence = false,
+  evidenceOnly = false,
+  readOnly = false,
   reviewing = false,
   approving = false,
   rejecting = false,
@@ -167,7 +293,10 @@ const ParserTemplateApprovalDrawer: React.FC<ParserTemplateApprovalDrawerProps> 
     | undefined
   const hardGates = simpleParser?.hard_gates || parserAgent?.hard_gates || {}
   const generationOnly = simpleParser?.validation_mode === 'generation_sample_only'
-  const primaryKeys = (candidateContract.primary_keys || []) as string[]
+  const primaryKeys = useMemo(
+    () => (comparison?.candidate_contract.primary_keys || []) as string[],
+    [comparison?.candidate_contract],
+  )
   const recordSetContracts = (
     Array.isArray(candidateContract.record_sets)
       ? candidateContract.record_sets
@@ -199,27 +328,31 @@ const ParserTemplateApprovalDrawer: React.FC<ParserTemplateApprovalDrawerProps> 
       ),
       (comparison?.active_contract?.primary_keys || []) as string[],
     ),
-    [comparison?.active_contract, comparison?.candidate_template.category, selectedSample?.current],
+    [comparison?.active_contract, comparison?.candidate_template.category, selectedSample],
   )
   const currentRecordSet = currentRecordSets.find(
     (item) => item.name === selectedRecordSet?.name,
   )
-  const recordTableColumns = useMemo(() => {
-    const keys = Array.from(new Set(
+  const recordFields = useMemo(
+    () => Array.from(new Set(
       (selectedRecordSet?.records || []).flatMap((record) => Object.keys(record)),
-    ))
-    return keys.map((key) => ({
+    )),
+    [selectedRecordSet],
+  )
+  const recordTableColumns = useMemo(() => {
+    const primaryKeySet = new Set(selectedRecordSet?.primary_keys || [])
+    return recordFields.map((key) => ({
       title: key,
       dataIndex: key,
       key,
-      ellipsis: true,
-      render: (value: unknown) => (
-        typeof value === 'object' && value !== null
-          ? JSON.stringify(value)
-          : String(value ?? '')
-      ),
+      width: Math.max(140, Math.min(240, key.length * 9 + 48)),
+      fixed: primaryKeySet.has(key) ? ('left' as const) : undefined,
+      render: (value: unknown) => {
+        const text = displayRecordValue(value)
+        return <span className="parser-approval-result-table__value" title={text}>{text || '-'}</span>
+      },
     }))
-  }, [selectedRecordSet])
+  }, [recordFields, selectedRecordSet?.primary_keys])
   const recordTableData = useMemo(
     () => (selectedRecordSet?.records || []).map((record, index) => ({
       ...record,
@@ -256,6 +389,24 @@ const ParserTemplateApprovalDrawer: React.FC<ParserTemplateApprovalDrawerProps> 
     reviewAccepted &&
     activationReadiness.can_activate,
   )
+  const reviewStatusMessage = readOnly
+    ? '已发布 Parser'
+    : reviewAccepted
+      ? '人工语义复核已保存，等待独立发布审批'
+      : reviewReadiness.can_review
+        ? humanDirectReviewRequired
+          ? '候选已通过客观执行校验，需要工程师直接复核'
+          : '候选已通过自动校验，等待工程师复核最终结果'
+        : '候选模板暂不可复核'
+  const reviewStatusDetail = reviewReadiness.blockers.length
+    ? reviewReadiness.blockers.join('；')
+    : reviewAccepted
+      ? releaseActor?.admin_override_applies
+        ? '当前管理员可以代行发布审批；本次职责分离豁免将写入审计记录。'
+        : '复核结论不会激活 Parser；发布仍须由另一名审批人单独执行。'
+      : generationOnly
+        ? `当前使用 ${comparison?.sample_count || 0} 份生成样本完成校验；请逐项确认解析结果和主键。`
+        : `全部 ${comparison?.sample_count || 0} 份样本均已通过独立验收。`
 
   useEffect(() => {
     if (!proposedRecordSets.length) return
@@ -266,13 +417,14 @@ const ParserTemplateApprovalDrawer: React.FC<ParserTemplateApprovalDrawerProps> 
 
   return (
     <Drawer
-      title="确认 Parser 最终结果"
+      rootClassName={expandedEvidence ? 'parser-approval-drawer parser-approval-drawer--expanded' : 'parser-approval-drawer'}
+      title={title || (readOnly ? '查看 Parser 审批证据' : '确认 Parser 最终结果')}
       open={open}
       onClose={onClose}
-      width={isMobile ? '100vw' : 1180}
+      width={isMobile ? '100vw' : drawerWidth || 1180}
       destroyOnClose
       extra={
-        comparison ? (
+        comparison && !readOnly ? (
           <Space>
             {onReject && (
               <Button danger icon={<CloseCircleOutlined />} loading={rejecting} onClick={onReject}>
@@ -308,184 +460,199 @@ const ParserTemplateApprovalDrawer: React.FC<ParserTemplateApprovalDrawerProps> 
         </div>
       ) : comparison ? (
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
-          <Alert
-            showIcon
-            type={reviewAccepted ? 'success' : reviewReadiness.can_review ? 'warning' : 'error'}
-            message={
-              reviewAccepted
-                ? '人工语义复核已保存，等待独立发布审批'
-                : reviewReadiness.can_review
-                  ? humanDirectReviewRequired
-                    ? '候选已通过客观执行校验，需要工程师直接复核'
-                    : '候选已通过自动校验，等待工程师复核最终结果'
-                  : '候选模板暂不可复核'
-            }
-            description={
-              reviewReadiness.blockers.length
-                ? reviewReadiness.blockers.join('；')
-                : reviewAccepted
-                  ? releaseActor?.admin_override_applies
-                    ? '当前管理员可以代行发布审批；本次职责分离豁免将写入审计记录。'
-                    : '复核结论不会激活 Parser；发布仍须由另一名审批人单独执行。'
-                : generationOnly
-                  ? `当前使用 ${comparison.sample_count} 份生成样本完成校验；请逐项确认解析结果和主键。`
-                  : `全部 ${comparison.sample_count} 份样本均已通过独立验收。`
-            }
-          />
-
-          <Alert
-            showIcon
-            type="warning"
-            message="Parser 可审批不等于检查项已具备生产能力"
-            description={
-              checkItemCapabilities.length
-                ? checkItemCapabilities.map((item) => {
-                    const missingRoles = item.shape_assessment?.missing_required_roles || []
-                    const suffix = missingRoles.length
-                      ? `；当前输出缺少 ${missingRoles.join('、')} 类型字段`
-                      : '；字段形态可承载目标语义，但仍需 Observation Contract 完成标准映射'
-                    return `${item.check_item_id}：${item.status}${suffix}`
-                  }).join('。')
-                : '当前 Parser 尚未通过检查项目录归类；可复核结构化结果，但不能据此声明检查项或 RuntimeBundle 就绪。'
-            }
-          />
-
-          <Descriptions bordered size="small" column={isMobile ? 1 : 4}>
-            <Descriptions.Item label="厂商">{comparison.candidate_template.vendor}</Descriptions.Item>
-            <Descriptions.Item label="兼容范围">{comparison.candidate_template.profile}</Descriptions.Item>
-            <Descriptions.Item label="命令" span={isMobile ? 1 : 2}>
-              {comparison.candidate_template.canonical_command}
-            </Descriptions.Item>
-            <Descriptions.Item label="解析记录集">
-              {recordSetContracts.length ? (
-                <Space wrap>
-                  {recordSetContracts.map((item) => (
-                    <Tag key={item.name}>{item.name}</Tag>
-                  ))}
-                </Space>
-              ) : comparison.candidate_template.category}
-            </Descriptions.Item>
-            <Descriptions.Item label="主键">
-              <Typography.Text>{primaryKeySummary}</Typography.Text>
-            </Descriptions.Item>
-            <Descriptions.Item label="样本通过">
-              {comparison.passed_samples}/{comparison.sample_count}
-            </Descriptions.Item>
-            <Descriptions.Item label="模板摘要">
-              <Tag color={comparison.candidate_template.hash_valid ? 'green' : 'red'}>
-                {comparison.candidate_template.hash_valid ? '一致' : '不一致'}
-              </Tag>
-            </Descriptions.Item>
-            <Descriptions.Item label="模板来源" span={isMobile ? 1 : 4}>
-              {isNtcCandidate ? (
-                <Space wrap>
-                  <Tag color="green">NTC 公共模板</Tag>
-                  <Typography.Text>{candidateProvenance.source_template || '来源文件未记录'}</Typography.Text>
-                  {candidateProvenance.package_version ? (
-                    <Typography.Text type="secondary">
-                      ntc_templates {candidateProvenance.package_version}
-                    </Typography.Text>
-                  ) : null}
-                </Space>
-              ) : (
-                <Space wrap>
-                  <Tag>平台生成</Tag>
-                  <Typography.Text type="secondary">
-                    {candidateProvenance.provider || '生成器来源未记录'}
-                  </Typography.Text>
-                </Space>
-              )}
-            </Descriptions.Item>
-          </Descriptions>
+          <section className="parser-approval-brief">
+            <div className="parser-approval-brief__status">
+              <Space size={8} wrap>
+                <Tag color={readOnly || reviewAccepted ? 'green' : reviewReadiness.can_review ? 'orange' : 'red'}>
+                  {readOnly ? '已发布' : reviewAccepted ? '待发布' : reviewReadiness.can_review ? '待复核' : '已阻断'}
+                </Tag>
+                <Typography.Text strong>{reviewStatusMessage}</Typography.Text>
+              </Space>
+              {!readOnly && <Typography.Text type="secondary">{reviewStatusDetail}</Typography.Text>}
+            </div>
+            <Space className="parser-approval-brief__facts" size={12} wrap>
+              <Typography.Text code>{comparison.candidate_template.canonical_command}</Typography.Text>
+              <Typography.Text type="secondary">
+                {comparison.candidate_template.vendor} / {comparison.candidate_template.profile}
+              </Typography.Text>
+              <Typography.Text type="secondary">
+                样本 {comparison.passed_samples}/{comparison.sample_count}
+              </Typography.Text>
+              <Typography.Text type="secondary">
+                {recordSetContracts.length || 1} 个记录集
+              </Typography.Text>
+              {isNtcCandidate ? <Tag color="green">NTC 公共模板</Tag> : <Tag>平台生成</Tag>}
+            </Space>
+          </section>
 
           <Tabs
             defaultActiveKey="result"
+            tabBarStyle={evidenceOnly ? { display: 'none' } : undefined}
             items={[
               {
                 key: 'result',
-                label: `最终结果 (${comparison.sample_count})`,
+                label: `证据对照 (${comparison.sample_count})`,
                 children: (
-                  <Space direction="vertical" size={14} style={{ width: '100%' }}>
-                    <Select
-                      value={selectedSample?.snapshot_id}
-                      style={{ width: isMobile ? '100%' : 560 }}
-                      placeholder="选择命令样本"
-                      onChange={setSelectedSnapshotId}
-                      options={comparison.rows.map((row) => ({
-                        value: row.snapshot_id,
-                        label: `${row.device_id} · ${row.dataset_id} · ${row.proposed.record_count ?? recordCount(row.proposed.records)} 条记录`,
-                      }))}
-                    />
-                    {selectedSample ? (
-                      <>
-                        {proposedRecordSets.length > 1 && (
+                  <div className="parser-approval-workbench">
+                    <div className="parser-approval-workbench__toolbar">
+                      <label className="parser-approval-workbench__control">
+                        <span className="parser-approval-workbench__control-label">样本</span>
+                        <Select
+                          aria-label="命令样本"
+                          value={selectedSample?.snapshot_id}
+                          placeholder="选择命令样本"
+                          onChange={setSelectedSnapshotId}
+                          options={comparison.rows.map((row) => ({
+                            value: row.snapshot_id,
+                            label: `${row.device_id} · ${row.dataset_id} · ${row.proposed.record_count ?? recordCount(row.proposed.records)} 条记录`,
+                          }))}
+                        />
+                      </label>
+                      {isMobile && proposedRecordSets.length > 1 && (
+                        <label className="parser-approval-workbench__control is-record-set">
+                          <span className="parser-approval-workbench__control-label">记录集</span>
                           <Select
                             aria-label="解析记录集"
                             value={selectedRecordSet?.name}
-                            style={{ width: isMobile ? '100%' : 420 }}
                             onChange={setSelectedRecordSetName}
                             options={proposedRecordSets.map((item) => ({
                               value: item.name,
                               label: `${item.name} · ${item.records.length} 条`,
                             }))}
                           />
-                        )}
-                        <Descriptions bordered size="small" column={isMobile ? 1 : 4}>
-                          <Descriptions.Item label="设备">{selectedSample.device_id}</Descriptions.Item>
-                          <Descriptions.Item label="数据集">{selectedSample.dataset_id}</Descriptions.Item>
-                          <Descriptions.Item label="解析状态">
+                        </label>
+                      )}
+                    </div>
+                    {selectedSample ? (
+                      <>
+                        <div className="parser-approval-workbench__meta">
+                          <span><Typography.Text type="secondary">设备</Typography.Text> {selectedSample.device_id}</span>
+                          <span><Typography.Text type="secondary">数据集</Typography.Text> {selectedSample.dataset_id}</span>
+                          <span>
+                            <Typography.Text type="secondary">状态</Typography.Text>{' '}
                             <Tag color={statusColor(selectedSample.proposed.status)}>
                               {selectedSample.proposed.status}
                             </Tag>
-                          </Descriptions.Item>
-                          <Descriptions.Item label="记录数">
-                            {selectedRecordSet?.records.length || 0}
-                          </Descriptions.Item>
-                          <Descriptions.Item label="当前记录集">
-                            {selectedRecordSet?.name || '-'}
-                          </Descriptions.Item>
-                          <Descriptions.Item label="记录集主键" span={isMobile ? 1 : 3}>
-                            {(selectedRecordSet?.primary_keys || []).join(' + ') || '无主键（单例）'}
-                          </Descriptions.Item>
-                          <Descriptions.Item label="原始数据摘要" span={isMobile ? 1 : 4}>
-                            <Typography.Text copyable>{selectedSample.raw_text_sha256}</Typography.Text>
-                          </Descriptions.Item>
-                        </Descriptions>
-                        <div className="parser-approval-evidence">
-                          <section>
-                            <Typography.Title level={5}>命令样本原始数据</Typography.Title>
-                            <pre className="parser-approval-evidence__code parser-approval-evidence__raw">
+                          </span>
+                          {isMobile && (
+                            <>
+                              <span><Typography.Text type="secondary">记录</Typography.Text> {selectedRecordSet?.records.length || 0}</span>
+                              <span>
+                                <Typography.Text type="secondary">主键</Typography.Text>{' '}
+                                {(selectedRecordSet?.primary_keys || []).join(' + ') || '无主键（单例）'}
+                              </span>
+                            </>
+                          )}
+                        </div>
+                        <div className="parser-approval-workbench__grid">
+                          <section
+                            className="parser-approval-workbench__panel parser-approval-workbench__source"
+                            style={!isMobile ? { gridColumn: '1 / -1' } : undefined}
+                          >
+                            <header className="parser-approval-workbench__panel-header">
+                              <Space size={6} wrap>
+                                <Typography.Text strong>CLI 输出样本</Typography.Text>
+                                <Tag>{selectedSample.raw_text_redacted ? '已脱敏' : '原始快照'}</Tag>
+                              </Space>
+                              <Typography.Text type="secondary" copyable={{ text: selectedSample.raw_text_sha256 }}>
+                                证据摘要
+                              </Typography.Text>
+                            </header>
+                            <pre className="parser-approval-workbench__code">
                               {selectedSample.raw_text || '原始输出为空'}
                             </pre>
                           </section>
-                          <section>
-                            <Typography.Title level={5}>候选模板解析结果</Typography.Title>
-                            <Table
-                              rowKey="__approval_row_key"
-                              size="small"
-                              pagination={false}
-                              scroll={{ x: 'max-content', y: 460 }}
-                              columns={recordTableColumns}
-                              dataSource={recordTableData}
-                              locale={{
-                                emptyText: selectedSample.proposed.failure_code || '该记录集没有解析记录',
-                              }}
-                            />
+                          {isMobile && (<>
+                          <section className="parser-approval-workbench__panel parser-approval-workbench__template">
+                            <header className="parser-approval-workbench__panel-header">
+                              <Space size={6} wrap>
+                                <Typography.Text strong>TextFSM 模板</Typography.Text>
+                                {isNtcCandidate && <Tag color="green">NTC</Tag>}
+                                {selectedBundleTemplate?.name && <Tag>{selectedBundleTemplate.name}</Tag>}
+                              </Space>
+                              <Typography.Text
+                                type="secondary"
+                                copyable={{
+                                  text: selectedBundleTemplate?.template_text
+                                    || comparison.candidate_template.content,
+                                }}
+                              >
+                                复制模板
+                              </Typography.Text>
+                            </header>
+                            <pre className="parser-approval-workbench__code">
+                              {selectedBundleTemplate?.template_text || comparison.candidate_template.content}
+                            </pre>
                           </section>
+                          <section className="parser-approval-workbench__panel parser-approval-workbench__result">
+                            <header className="parser-approval-workbench__panel-header">
+                              <Typography.Text strong>解析结果</Typography.Text>
+                              <Typography.Text type="secondary">
+                                {selectedRecordSet?.name || 'records'} · {recordTableData.length} 条 · {recordFields.length} 个字段
+                              </Typography.Text>
+                            </header>
+                            {recordTableData.length === 1 ? (
+                              <dl className="parser-approval-record-detail" aria-label="单条解析记录">
+                                {recordFields.map((field) => {
+                                  const value = displayRecordValue(selectedRecordSet?.records[0]?.[field])
+                                  const isPrimaryKey = selectedRecordSet?.primary_keys.includes(field)
+                                  return (
+                                    <div className="parser-approval-record-detail__field" key={field}>
+                                      <dt>
+                                        <span>{field}</span>
+                                        {isPrimaryKey && <Tag>主键</Tag>}
+                                      </dt>
+                                      <dd title={value}>{value || '-'}</dd>
+                                    </div>
+                                  )
+                                })}
+                              </dl>
+                            ) : (
+                              <Table
+                                className="parser-approval-result-table"
+                                rowKey="__approval_row_key"
+                                size="small"
+                                pagination={false}
+                                sticky
+                                scroll={{ x: 'max-content', y: 420 }}
+                                columns={recordTableColumns}
+                                dataSource={recordTableData}
+                                locale={{
+                                  emptyText: selectedSample.proposed.failure_code || '该记录集没有解析记录',
+                                }}
+                              />
+                            )}
+                          </section>
+                          </>)}
                         </div>
-                        {selectedSample.current ? (
-                          <section className="parser-approval-evidence__current">
-                            <Typography.Title level={5}>当前生产模板解析结果</Typography.Title>
+                        {isMobile && selectedSample.current && selectedSample.changed ? (
+                          <details className="parser-approval-workbench__current">
+                            <summary>与当前生产模板的解析结果对比</summary>
                             <JsonEvidence
                               value={currentRecordSet?.records || selectedSample.current.failure_code}
                             />
-                          </section>
+                          </details>
                         ) : null}
+                        {!isMobile && proposedRecordSets.map((recordSet) => {
+                          const bundleTemplate = bundleTemplates.find((item) => item.name === recordSet.name)
+                          const currentSet = currentRecordSets.find((item) => item.name === recordSet.name)
+                          return (
+                            <ParserRecordSetEvidence
+                              key={recordSet.name}
+                              recordSet={recordSet}
+                              templateText={bundleTemplate?.template_text || comparison.candidate_template.content}
+                              templateName={bundleTemplate?.name}
+                              isNtcCandidate={isNtcCandidate}
+                              currentRecords={currentSet?.records}
+                              showCurrentComparison={Boolean(selectedSample.current && selectedSample.changed)}
+                            />
+                          )
+                        })}
                       </>
                     ) : (
                       <Alert type="warning" showIcon message="没有可核对的命令样本" />
                     )}
-                  </Space>
+                  </div>
                 ),
               },
               {
@@ -547,6 +714,22 @@ const ParserTemplateApprovalDrawer: React.FC<ParserTemplateApprovalDrawerProps> 
                 label: `能力边界 (${checkItemCapabilities.length})`,
                 children: (
                   <Space direction="vertical" size={16} style={{ width: '100%' }}>
+                    <Alert
+                      showIcon
+                      type="warning"
+                      message="Parser 可审批不等于检查项已具备生产能力"
+                      description={
+                        checkItemCapabilities.length
+                          ? checkItemCapabilities.map((item) => {
+                              const missingRoles = item.shape_assessment?.missing_required_roles || []
+                              const suffix = missingRoles.length
+                                ? `；当前输出缺少 ${missingRoles.join('、')} 类型字段`
+                                : '；字段形态可承载目标语义，但仍需 Observation Contract 完成标准映射'
+                              return `${item.check_item_id}：${item.status}${suffix}`
+                            }).join('。')
+                          : '当前 Parser 尚未通过检查项目录归类；可复核结构化结果，但不能据此声明检查项或 RuntimeBundle 就绪。'
+                      }
+                    />
                     <Alert
                       showIcon
                       type={parserFieldContract?.aligned ? 'success' : 'error'}
@@ -620,26 +803,20 @@ const ParserTemplateApprovalDrawer: React.FC<ParserTemplateApprovalDrawerProps> 
                 ),
               },
               {
-                key: 'template',
-                label: 'TextFSM 模板',
+                key: 'process',
+                label: '过程资产',
                 children: (
                   <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                    <Typography.Text copyable>{comparison.candidate_template.sha256}</Typography.Text>
-                    {isNtcCandidate ? (
+                    <Typography.Text type="secondary">ParserSpec、记录集合同、样本清单和审计元数据。</Typography.Text>
+                    {isNtcCandidate && (
                       <>
                         <Alert
                           showIcon
                           type="info"
-                          message="该候选来自公共 NTC 模板"
-                          description="平台已冻结 NTC 版本、原始模板和兼容转换记录；生产运行读取审批后的候选资产，不依赖本机 site-packages 的当前内容。"
+                          message="NTC 模板来源"
+                          description={`${candidateProvenance.source_template || '来源文件未记录'} · ntc_templates ${candidateProvenance.package_version || '-'}`}
                         />
                         <Descriptions bordered size="small" column={isMobile ? 1 : 2}>
-                          <Descriptions.Item label="来源文件">
-                            {candidateProvenance.source_template || '-'}
-                          </Descriptions.Item>
-                          <Descriptions.Item label="NTC 版本">
-                            {candidateProvenance.package_version || '-'}
-                          </Descriptions.Item>
                           <Descriptions.Item label="开源许可">{candidateProvenance.license || '-'}</Descriptions.Item>
                           <Descriptions.Item label="平台映射">
                             {candidateProvenance.platform || '-'}
@@ -647,72 +824,16 @@ const ParserTemplateApprovalDrawer: React.FC<ParserTemplateApprovalDrawerProps> 
                               ? ` · v${candidateProvenance.platform_mapping_version}`
                               : ''}
                           </Descriptions.Item>
-                          <Descriptions.Item label="原始模板摘要" span={isMobile ? 1 : 2}>
-                            <Typography.Text copyable>
-                              {candidateProvenance.source_content_sha256 || '-'}
-                            </Typography.Text>
-                          </Descriptions.Item>
                           <Descriptions.Item label="兼容转换" span={isMobile ? 1 : 2}>
-                            {candidateProvenance.transformation_version ? (
-                              <Space direction="vertical" size={4}>
-                                <Tag>{candidateProvenance.transformation_version}</Tag>
-                                {(candidateProvenance.transformations || []).map((item, index) => (
-                                  <Typography.Text key={`${item.line_number ?? 'line'}-${index}`} type="secondary">
-                                    第 {item.line_number ?? '-'} 行：
-                                    <Typography.Text code>{item.source || '-'}</Typography.Text>
-                                    {' → '}
-                                    <Typography.Text code>{item.derived || '-'}</Typography.Text>
-                                  </Typography.Text>
-                                ))}
-                              </Space>
-                            ) : (
-                              <Typography.Text type="secondary">未执行兼容转换</Typography.Text>
-                            )}
+                            {candidateProvenance.transformation_version || '未执行兼容转换'}
                           </Descriptions.Item>
                         </Descriptions>
-                        <div className="parser-approval-evidence">
-                          <section>
-                            <Typography.Title level={5}>NTC 原始模板</Typography.Title>
-                            <pre className="parser-approval-evidence__code">
-                              {candidateProvenance.source_template_text || '原始模板内容未记录'}
-                            </pre>
-                          </section>
-                          <section>
-                            <Typography.Title level={5}>平台最终候选模板</Typography.Title>
-                            <pre className="parser-approval-evidence__code">
-                              {comparison.candidate_template.content}
-                            </pre>
-                          </section>
-                        </div>
+                        <Typography.Text strong>NTC 原始模板</Typography.Text>
+                        <pre className="parser-approval-evidence__code">
+                          {candidateProvenance.source_template_text || '原始模板内容未记录'}
+                        </pre>
                       </>
-                    ) : (
-                      <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                        {bundleTemplates.length > 1 && (
-                          <Select
-                            aria-label="TextFSM 记录集"
-                            value={selectedBundleTemplate?.name}
-                            style={{ width: isMobile ? '100%' : 420 }}
-                            onChange={setSelectedRecordSetName}
-                            options={bundleTemplates.map((item) => ({
-                              value: item.name,
-                              label: item.name,
-                            }))}
-                          />
-                        )}
-                        <Typography.Paragraph copyable style={{ ...codePanelStyle, maxHeight: 620 }}>
-                          {selectedBundleTemplate?.template_text || comparison.candidate_template.content}
-                        </Typography.Paragraph>
-                      </Space>
                     )}
-                  </Space>
-                ),
-              },
-              {
-                key: 'process',
-                label: '过程资产',
-                children: (
-                  <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                    <Typography.Text type="secondary">ParserSpec、记录集合同、样本清单和审计元数据。</Typography.Text>
                     <JsonEvidence value={comparison.candidate_contract} />
                   </Space>
                 ),
@@ -720,7 +841,7 @@ const ParserTemplateApprovalDrawer: React.FC<ParserTemplateApprovalDrawerProps> 
             ]}
           />
 
-          <section className="parser-generation-step">
+          {!readOnly && <section className="parser-generation-step">
             <Typography.Text strong>{reviewAccepted ? '独立发布审批' : '人工语义复核'}</Typography.Text>
             {!reviewAccepted ? (
               <Space direction="vertical" size={10} style={{ width: '100%', marginTop: 10 }}>
@@ -801,9 +922,11 @@ const ParserTemplateApprovalDrawer: React.FC<ParserTemplateApprovalDrawerProps> 
                 />
               </Space>
             )}
-          </section>
+          </section>}
         </Space>
-      ) : null}
+      ) : (
+        <Empty description="暂无可核对的 Parser 证据" />
+      )}
     </Drawer>
   )
 }

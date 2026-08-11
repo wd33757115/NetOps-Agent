@@ -2932,13 +2932,13 @@ class ParserRepository:
                     .all()
                 )
                 retryable_status = bool(generated_templates) and all(
-                    template.status in {"deprecated", "rejected"}
+                    template.status in {"active", "deprecated", "rejected"}
                     for template in generated_templates
                 )
                 if not retryable_status:
                     raise ParserJobStateError(
-                        "a succeeded parser job can be retried only after every "
-                        "generated candidate is deprecated or rejected"
+                        "a succeeded parser job can be retried only when every "
+                        "generated candidate is active, deprecated or rejected"
                     )
             if not retryable_status:
                 raise ParserJobStateError(
@@ -3430,9 +3430,11 @@ class ParserRepository:
         task_id: str,
         actor: str,
         reason: str,
+        revision_instruction: str = "",
     ) -> dict[str, Any]:
         normalized_actor = str(actor or "").strip()
         normalized_reason = str(reason or "").strip()
+        normalized_instruction = str(revision_instruction or "").strip()[:4000]
         if not normalized_actor or not normalized_reason:
             raise ParserJobStateError("ParserSpec suggestion requires actor and reason")
         with get_db_session() as db:
@@ -3475,6 +3477,7 @@ class ParserRepository:
                 "stage": "semantic_queued",
                 "task_id": task_id,
                 "requested_by": normalized_actor,
+                "revision_instruction": normalized_instruction,
                 "requested_at": now.isoformat(),
                 "heartbeat_at": now.isoformat(),
                 "deadline_at": (
@@ -3493,7 +3496,11 @@ class ParserRepository:
                     action="parser_spec_suggestion_queued",
                     resource_type="parser_template_job",
                     resource_id=job_id,
-                    detail={"reason": normalized_reason, "task_id": task_id},
+                    detail={
+                        "reason": normalized_reason,
+                        "revision_instruction": normalized_instruction,
+                        "task_id": task_id,
+                    },
                     status="success",
                     created_at=now,
                 )

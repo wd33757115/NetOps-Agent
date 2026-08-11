@@ -24,6 +24,7 @@ from src.infrastructure.db.models import (
     CollectionImplementationVersionRecord,
 )
 from src.infrastructure.db.postgres import get_db_session
+from src.core.check_items.command_adapter import validate_adapter_spec
 
 DEFAULT_CATALOG_PATH = Path(__file__).parent / "assets" / "catalog.v10.yaml"
 _ASSET_ID_RE = re.compile(r"^[a-z][a-z0-9_.-]+$")
@@ -128,6 +129,7 @@ class CollectionImplementation:
     collector: str
     parser_requirement: str
     template_scope: str | None
+    adapter_spec: dict[str, Any]
     output_quality_policy: dict[str, Any]
     selection_priority: int
     status: str
@@ -293,6 +295,14 @@ def _load_implementation(
             raise ValueError(f"{implementation_id} contains duplicate command: {command}")
         seen_commands.add(normalized)
         commands.append(CollectionCommand(command=command, priority=priority))
+    adapter_spec = validate_adapter_spec(
+        raw.get("adapter_spec"),
+        check_item_ids=check_item_ids,
+    )
+    if adapter_spec and len(commands) != 1:
+        raise ValueError(
+            f"{implementation_id} command adapters require exactly one command"
+        )
     parser_requirement = str(raw.get("parser_requirement") or "").strip()
     if parser_requirement not in _RESULT_MODES:
         raise ValueError(
@@ -316,6 +326,10 @@ def _load_implementation(
         "selection_priority": int(raw.get("selection_priority") or 100),
         "status": status,
     }
+    # Preserve immutable digests created before CommandAdapter existed. An
+    # empty adapter carries no new semantics and must not rewrite old history.
+    if adapter_spec:
+        version_payload["adapter_spec"] = adapter_spec
     output_quality_policy = {
         **dict(defaults.get("output_quality_policy") or {}),
         **dict(raw.get("output_quality_policy") or {}),
@@ -335,6 +349,7 @@ def _load_implementation(
         template_scope=(
             str(raw.get("template_scope")).strip() if raw.get("template_scope") else None
         ),
+        adapter_spec=adapter_spec,
         output_quality_policy=output_quality_policy,
         selection_priority=version_payload["selection_priority"],
         status=status,
@@ -719,6 +734,7 @@ class CheckItemCatalogRepository:
                             ],
                             parser_requirement=implementation.parser_requirement,
                             template_scope=implementation.template_scope,
+                            adapter_spec_json=(implementation.adapter_spec or None),
                             output_quality_policy_json=(
                                 implementation.output_quality_policy or None
                             ),
@@ -985,6 +1001,7 @@ class CheckItemCatalogRepository:
                         if version.template_scope is not None
                         else None
                     ),
+                    adapter_spec=dict(version.adapter_spec_json or {}),
                     output_quality_policy=dict(
                         version.output_quality_policy_json or {}
                     ),
@@ -1009,3 +1026,100 @@ class CheckItemCatalogRepository:
                 check_items=check_items,
                 implementations=implementations,
             )
+
+    def get_implementation_version_context(
+        self,
+        version_id: str,
+    ) -> tuple[CollectionImplementation, tuple[CheckItemDefinition, ...]] | None:
+        """Load the immutable adapter and exactly linked check-item versions."""
+
+        with self._session_scope() as db:
+            version = db.get(CollectionImplementationVersionRecord, str(version_id))
+            if version is None:
+                return None
+            root = db.get(CollectionImplementationRecord, version.implementation_id)
+            if root is None:
+                return None
+            links = (
+                db.query(CheckItemImplementationLinkRecord)
+                .filter(
+                    CheckItemImplementationLinkRecord.implementation_version_id
+                    == str(version.id)
+                )
+                .order_by(CheckItemImplementationLinkRecord.priority.desc())
+                .all()
+            )
+            item_versions = [
+                db.get(CheckItemVersionRecord, str(link.check_item_version_id))
+                for link in links
+            ]
+            check_items: list[CheckItemDefinition] = []
+            for item_version in item_versions:
+                if item_version is None:
+                    continue
+                item_root = db.get(CheckItemRecord, item_version.check_item_id)
+                if item_root is None:
+                    continue
+                check_items.append(
+                    CheckItemDefinition(
+                        id=str(item_root.id),
+                        version=int(item_version.version),
+                        name=str(item_root.name),
+                        category=str(item_root.category),
+                        description=str(item_root.description or ""),
+                        result_mode=str(item_version.result_mode),
+                        assessment_mode=str(item_version.assessment_mode),
+                        canonical_contract=dict(
+                            item_version.canonical_contract_json or {}
+                        ),
+                        report_projection=str(item_version.report_projection),
+                        applicability=dict(item_version.applicability_json or {}),
+                        freshness_policy=dict(
+                            item_version.freshness_policy_json or {}
+                        ),
+                        empty_result_policy=dict(
+                            item_version.empty_result_policy_json or {}
+                        ),
+                        coverage_policy=dict(
+                            item_version.coverage_policy_json or {}
+                        ),
+                        status=str(item_version.status),
+                        digest=str(item_version.digest),
+                        version_id=str(item_version.id),
+                    )
+                )
+            implementation = CollectionImplementation(
+                id=str(root.id),
+                version=int(version.version),
+                name=str(root.name),
+                description=str(root.description or ""),
+                check_item_ids=tuple(item.id for item in check_items),
+                match=dict(version.match_json or {}),
+                commands=primary_collection_commands(
+                    (
+                        CollectionCommand(
+                            command=str(row.get("command") or ""),
+                            priority=int(row.get("priority") or 0),
+                        )
+                        for row in (version.commands_json or [])
+                    ),
+                    implementation_id=str(root.id),
+                    version_id=str(version.id),
+                ),
+                collector=str(version.collector),
+                parser_requirement=str(version.parser_requirement),
+                template_scope=(
+                    str(version.template_scope)
+                    if version.template_scope is not None
+                    else None
+                ),
+                adapter_spec=dict(version.adapter_spec_json or {}),
+                output_quality_policy=dict(
+                    version.output_quality_policy_json or {}
+                ),
+                selection_priority=int(version.selection_priority),
+                status=str(version.status),
+                digest=str(version.digest),
+                version_id=str(version.id),
+            )
+            return implementation, tuple(check_items)

@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from 'react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -159,6 +159,12 @@ describe('CheckItemCatalogWorkspace', () => {
         assessment_roles: ['high'],
       }],
     })
+    vi.spyOn(parserApi, 'templates').mockResolvedValue({
+      items: [],
+      total: 0,
+      limit: 200,
+      offset: 0,
+    })
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
       writable: true,
@@ -177,16 +183,16 @@ describe('CheckItemCatalogWorkspace', () => {
 
   afterEach(() => vi.restoreAllMocks())
 
-  it('maintains check-item compatibility and command implementations in one flow', async () => {
-    renderWorkspace()
+  it('maintains device compatibility and command adapters in one flow', async () => {
+    renderWorkspace({ mode: 'command_adapters' })
 
     expect(await screen.findByText('CPU 使用率')).toBeInTheDocument()
     expect(screen.getByText('system.cpu_usage')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('搜索检查项、厂商、型号或命令')).toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('button', { name: /^plus 新增采集实现$/ }))
+    await userEvent.click(screen.getByRole('button', { name: /^plus 新增命令适配器$/ }))
 
-    expect(await screen.findByRole('dialog', { name: '新增采集实现' })).toBeVisible()
+    expect(await screen.findByRole('dialog', { name: '新增命令适配器' })).toBeVisible()
     expect(screen.getByLabelText('关联检查项')).toBeInTheDocument()
     expect(screen.getAllByLabelText('厂商').length).toBeGreaterThan(0)
     expect(screen.getAllByLabelText('设备族').length).toBeGreaterThan(0)
@@ -194,7 +200,7 @@ describe('CheckItemCatalogWorkspace', () => {
     expect(screen.getAllByLabelText('型号正则').length).toBeGreaterThan(0)
     expect(screen.getAllByLabelText('系统版本正则').length).toBeGreaterThan(0)
     expect(screen.getAllByLabelText('结果处理方式').length).toBeGreaterThan(0)
-    expect(screen.getByText('每个采集实现只执行一条明确命令')).toBeInTheDocument()
+    expect(screen.getByText('每个命令适配器只执行一条明确命令')).toBeInTheDocument()
     expect(screen.queryByText('添加 fallback 命令')).not.toBeInTheDocument()
     expect(screen.getByText(/Active 版本不会被覆盖/)).toBeInTheDocument()
   })
@@ -208,13 +214,17 @@ describe('CheckItemCatalogWorkspace', () => {
     expect(await screen.findByRole('dialog', { name: '新增巡检检查项' })).toBeVisible()
     expect(screen.getByLabelText('稳定检查项 ID')).toBeEnabled()
     expect(screen.getByText('按标准字段自动生成')).toBeInTheDocument()
-    expect(screen.getByText('标准观测字段')).toBeInTheDocument()
-    expect(screen.getByText('证据与完整性')).toBeInTheDocument()
+    expect(screen.getByText('标准输出')).toBeInTheDocument()
+    expect(screen.getByText('变化、当前值与事件')).toBeInTheDocument()
 
-    await userEvent.type(screen.getByLabelText('稳定检查项 ID'), 'routing.test_neighbor')
-    await userEvent.type(screen.getByLabelText('检查项名称'), '测试邻居状态')
+    fireEvent.change(screen.getByLabelText('稳定检查项 ID'), {
+      target: { value: 'routing.test_neighbor' },
+    })
+    fireEvent.change(screen.getByLabelText('检查项名称'), {
+      target: { value: '测试邻居状态' },
+    })
     await userEvent.click(screen.getByRole('button', { name: '保存草稿并预览影响' }))
-    expect(await screen.findByText('结构化检查项至少需要一个标准观测字段')).toBeVisible()
+    expect(await screen.findByText('结构化检查项至少需要一个标准字段')).toBeVisible()
 
     await userEvent.click(screen.getByLabelText('Close'))
     await userEvent.click(screen.getByRole('button', { name: '编辑检查项 system.cpu_usage' }))
@@ -226,13 +236,13 @@ describe('CheckItemCatalogWorkspace', () => {
   })
 
   it('edits an implementation as a new immutable version', async () => {
-    const { container } = renderWorkspace()
+    renderWorkspace({ mode: 'command_adapters' })
 
     await screen.findByText('CPU 使用率')
-    await userEvent.click(container.querySelector('.ant-table-row-expand-icon') as HTMLElement)
-    await userEvent.click(screen.getByRole('button', { name: '编辑采集实现' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Expand row' }))
+    await userEvent.click(screen.getByRole('button', { name: '编辑命令适配器' }))
 
-    expect(await screen.findByRole('dialog', { name: '编辑采集实现' })).toBeVisible()
+    expect(await screen.findByRole('dialog', { name: '编辑命令适配器' })).toBeVisible()
     expect(screen.getByDisplayValue('h3c-cpu-usage')).toBeDisabled()
     expect(screen.getByDisplayValue('display cpu-usage')).toBeInTheDocument()
     expect(screen.getByText('保存会创建不可变新版本')).toBeInTheDocument()
@@ -253,15 +263,15 @@ describe('CheckItemCatalogWorkspace', () => {
       cancelled_change_count: 0,
       idempotent_replay: false,
     })
-    const { container } = renderWorkspace()
+    renderWorkspace({ mode: 'command_adapters' })
 
     await screen.findByText('CPU 使用率')
-    await userEvent.click(container.querySelector('.ant-table-row-expand-icon') as HTMLElement)
-    const deleteButton = screen.getByRole('button', { name: '删除采集实现' })
+    await userEvent.click(screen.getByRole('button', { name: 'Expand row' }))
+    const deleteButton = screen.getByRole('button', { name: '删除命令适配器' })
     expect(deleteButton).toBeEnabled()
     await userEvent.click(deleteButton)
 
-    expect(await screen.findByRole('dialog', { name: '删除采集实现' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '删除命令适配器' })).toBeInTheDocument()
     const confirm = screen.getByRole('button', { name: '确认删除' })
     expect(confirm).toBeEnabled()
     expect(screen.getByPlaceholderText('删除备注（可选）')).toHaveValue('')

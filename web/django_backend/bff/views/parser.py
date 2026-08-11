@@ -22,6 +22,12 @@ _ADMIN_ONLY_PATH_MARKERS = (
     "/force_activate",
 )
 
+_REPORT_TIMEOUT = 120
+_LONG_RUNNING_REPORT_SUFFIXES = (
+    "/replay-summary",
+    "/analysis-summary",
+)
+
 
 def _require_admin_for_sensitive(request: HttpRequest, *, action: str | None = None, path: str = "") -> JsonResponse | None:
     role = str(getattr(request, "bff_user_role", "") or "").lower()
@@ -37,6 +43,12 @@ def _require_admin_for_sensitive(request: HttpRequest, *, action: str | None = N
 
 
 async def _proxy(request: HttpRequest, path: str) -> JsonResponse:
+    normalized_path = path.split("?", 1)[0].rstrip("/")
+    timeout = (
+        _REPORT_TIMEOUT
+        if normalized_path.endswith(_LONG_RUNNING_REPORT_SUFFIXES)
+        else None
+    )
     return await proxy_to_fastapi(
         method=request.method,
         fastapi_path=f"/api/v1/parser/{path}".rstrip("/"),
@@ -47,6 +59,7 @@ async def _proxy(request: HttpRequest, path: str) -> JsonResponse:
             else None
         ),
         extra_headers=forward_client_headers(request),
+        timeout=timeout,
     )
 
 

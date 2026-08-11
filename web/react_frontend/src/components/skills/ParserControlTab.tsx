@@ -616,6 +616,7 @@ const ParserControlTab: React.FC = () => {
       role?: 'unassigned' | 'generation' | 'acceptance' | 'negative'
       expectation?: { record_count: number; primary_keys: string[][] }
       reason?: string
+      revisionInstruction?: string
     }) => {
       if (request.type === 'spec') {
         return parserApi.updateJobSpec(request.jobId, {
@@ -632,7 +633,7 @@ const ParserControlTab: React.FC = () => {
         })
       }
       if (request.type === 'suggest-spec') {
-        return parserApi.suggestJobSpec(request.jobId)
+        return parserApi.suggestJobSpec(request.jobId, request.revisionInstruction || '')
       }
       return parserApi.dispatchJob(request.jobId)
     },
@@ -1720,8 +1721,8 @@ const ParserControlTab: React.FC = () => {
     : Object.keys(buildDeviceSelector(bindingSelectorDraft)).length > 0
   const activationSelectorReady = !activationSelectorExpertMode || Boolean(activationSelector.trim())
   const subWorkspaceLabels: Record<ParserSubWorkspaceKey, React.ReactNode> = {
-    'asset-production-units': '检查项资产',
-    'source-jobs': '规则资产生成',
+    'asset-production-units': '命令适配器',
+    'source-jobs': '样本任务',
     'catalog-management': '检查项目录',
     'assessment-policies': '判断策略',
     'published-assets': '生产资产目录',
@@ -1954,16 +1955,6 @@ const ParserControlTab: React.FC = () => {
         children: (
           <RuleAssetProductionWorkbench
             view="sources"
-            onViewChange={changeProductionView}
-          />
-        ),
-      },
-      {
-        key: 'assessment-policies',
-        label: '判断策略',
-        children: (
-          <RuleAssetProductionWorkbench
-            view="policies"
             onViewChange={changeProductionView}
           />
         ),
@@ -2859,8 +2850,8 @@ const ParserControlTab: React.FC = () => {
       onSaveSampleRole={(targetJobId, sampleId, role, expectation, reason) => configureParserJob.mutateAsync({
         type: 'sample', jobId: targetJobId, sampleId, role, expectation, reason,
       })}
-      onSuggestSpec={(targetJobId) => configureParserJob.mutateAsync({
-        type: 'suggest-spec', jobId: targetJobId,
+      onSuggestSpec={(targetJobId, revisionInstruction) => configureParserJob.mutateAsync({
+        type: 'suggest-spec', jobId: targetJobId, revisionInstruction,
       })}
       onDispatch={(targetJobId) => configureParserJob.mutateAsync({
         type: 'dispatch', jobId: targetJobId,

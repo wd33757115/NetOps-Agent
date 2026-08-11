@@ -9,6 +9,7 @@ import {
   Input,
   List,
   Pagination,
+  Popconfirm,
   Progress,
   Select,
   Space,
@@ -36,6 +37,7 @@ import {
   type OfflineCommandAssetUnitStage,
 } from '../../services/api'
 import ParserGenerationStep from '../skills/parser/ParserGenerationStep'
+import RuleAssetProductionStep from '../skills/parser/RuleAssetProductionStep'
 
 const stageOptions = [
   ['output_slicing', '命令输出切片'],
@@ -144,6 +146,8 @@ export const CommandAssetDetail: React.FC<{
   generationContent?: React.ReactNode
   initialTab?: 'flow' | 'parser' | 'generation' | 'evidence' | 'attempts' | 'assets'
   onEvidencePageChange: (page: number, pageSize: number) => void
+  onConfirmNotApplicable?: () => void
+  notApplicableLoading?: boolean
   onClose: () => void
 }> = ({
   detail,
@@ -154,6 +158,8 @@ export const CommandAssetDetail: React.FC<{
   generationContent,
   initialTab = 'flow',
   onEvidencePageChange,
+  onConfirmNotApplicable,
+  notApplicableLoading = false,
   onClose,
 }) => {
   const screens = Grid.useBreakpoint()
@@ -200,6 +206,30 @@ export const CommandAssetDetail: React.FC<{
       return
     }
     if (action === 'parser' || subtab === 'jobs') {
+      // Parser production is rendered inside this drawer. Keep its deep-link
+      // inputs in sync when operators move directly from one command to the
+      // next; changing only the local tab leaves the previous command mounted.
+      const next = new URLSearchParams(window.location.search)
+      let changed = false
+      for (const key of [
+        'workspace',
+        'subtab',
+        'action',
+        'source_job_id',
+        'offline_job_id',
+        'command',
+        'dataset_ids',
+        'dataset_id',
+      ]) {
+        const value = params.get(key)
+        if (value != null && value !== '' && next.get(key) !== value) {
+          next.set(key, value)
+          changed = true
+        }
+      }
+      if (changed) {
+        navigate(`${window.location.pathname}?${next.toString()}`, { replace: true })
+      }
       setActiveTab('parser')
       return
     }
@@ -218,13 +248,28 @@ export const CommandAssetDetail: React.FC<{
       destroyOnClose
       loading={loading}
       onClose={onClose}
-      extra={detail?.next_action?.target_url ? (
-        <Button
-          icon={<ArrowRightOutlined />}
-          onClick={() => handleStageAction(detail.next_action?.target_url || '')}
-        >
-          {detail.next_action.label}
-        </Button>
+      extra={detail ? (
+        <Space>
+          {detail.not_applicable_confirmation?.eligible && onConfirmNotApplicable && (
+            <Popconfirm
+              title="确认当前设备不适用此命令？"
+              description="仅当全部 CLI 证据均为已确认的合法空输出时使用；证据变化后本确认自动失效。"
+              okText="确认无需规则"
+              cancelText="取消"
+              onConfirm={onConfirmNotApplicable}
+            >
+              <Button loading={notApplicableLoading}>确认无需规则</Button>
+            </Popconfirm>
+          )}
+          {detail.next_action?.target_url && !detail.rule_seed_job_id && (
+            <Button
+              icon={<ArrowRightOutlined />}
+              onClick={() => handleStageAction(detail.next_action?.target_url || '')}
+            >
+              {detail.next_action.label}
+            </Button>
+          )}
+        </Space>
       ) : null}
     >
       {detail && (
@@ -316,11 +361,17 @@ export const CommandAssetDetail: React.FC<{
                 label: 'Parser 生成',
                 children: <ParserGenerationStep jobId={detail.parser_job_id} />,
               }] : []),
-              ...(generationContent ? [{
+              ...([{
                 key: 'generation',
-                label: '规则生成',
-                children: generationContent,
-              }] : []),
+                label: '规则资产生产',
+                children: (
+                  <RuleAssetProductionStep
+                    unit={detail}
+                    onChanged={() => detailQuery.refetch()}
+                    onOpenEvidence={() => setActiveTab('evidence')}
+                  />
+                ),
+              }]),
               {
                 key: 'evidence',
                 label: `证据样本 (${detail.evidence_pagination.total})`,
@@ -415,7 +466,19 @@ export const CommandAssetDetail: React.FC<{
   )
 }
 
-const OfflineCommandAssetUnits: React.FC<{ jobId: string }> = ({ jobId }) => {
+interface OfflineCommandAssetUnitsProps {
+  jobId: string
+  initialSearch?: string
+  focusAction?: string
+  generationContent?: React.ReactNode
+}
+
+const OfflineCommandAssetUnits: React.FC<OfflineCommandAssetUnitsProps> = ({
+  jobId,
+  initialSearch = '',
+  focusAction,
+  generationContent,
+}) => {
   const screens = Grid.useBreakpoint()
   const isMobile = !screens.md
   const navigate = useNavigate()
@@ -423,14 +486,23 @@ const OfflineCommandAssetUnits: React.FC<{ jobId: string }> = ({ jobId }) => {
   const autoRefreshAttempted = useRef(false)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
-  const [searchDraft, setSearchDraft] = useState('')
-  const [search, setSearch] = useState('')
+  const [searchDraft, setSearchDraft] = useState(initialSearch)
+  const [search, setSearch] = useState(initialSearch)
   const [status, setStatus] = useState<string>()
   const [stage, setStage] = useState<string>()
   const [assetMode, setAssetMode] = useState<string>()
   const [selectedUnitId, setSelectedUnitId] = useState<string>()
+  const initialFocusOpened = useRef(false)
   const [evidencePage, setEvidencePage] = useState(1)
   const [evidencePageSize, setEvidencePageSize] = useState(25)
+
+  useEffect(() => {
+    initialFocusOpened.current = false
+    setSelectedUnitId(undefined)
+    setSearchDraft(initialSearch)
+    setSearch(initialSearch)
+    setPage(1)
+  }, [initialSearch])
 
   const listQuery = useQuery(
     ['offline-command-asset-units', jobId, page, pageSize, search, status, stage, assetMode],
@@ -456,11 +528,18 @@ const OfflineCommandAssetUnits: React.FC<{ jobId: string }> = ({ jobId }) => {
       evidence_page: evidencePage,
       evidence_page_size: evidencePageSize,
     }),
-    { enabled: Boolean(selectedUnitId), keepPreviousData: true },
+    { enabled: Boolean(selectedUnitId), keepPreviousData: false },
   )
-  const openUnitDetail = (unitId: string) => {
+  const openUnitDetail = (unitId: string, canonicalCommand?: string) => {
     setEvidencePage(1)
     setSelectedUnitId(unitId)
+    if (canonicalCommand) {
+      const next = new URLSearchParams(window.location.search)
+      if (next.get('command') !== canonicalCommand) {
+        next.set('command', canonicalCommand)
+        navigate(`${window.location.pathname}?${next.toString()}`, { replace: true })
+      }
+    }
   }
   const refreshMutation = useMutation(
     () => ruleAssetSourceApi.refreshCommandAssetUnits(jobId),
@@ -472,6 +551,24 @@ const OfflineCommandAssetUnits: React.FC<{ jobId: string }> = ({ jobId }) => {
         ])
       },
       onError: (error: Error) => message.error(error.message || '命令资产状态刷新失败'),
+    },
+  )
+  const notApplicableMutation = useMutation(
+    () => ruleAssetSourceApi.confirmCommandAssetNotApplicable(
+      jobId,
+      selectedUnitId || '',
+      { reason: '已核对全部 CLI 证据，确认当前设备未配置该命令对应能力。' },
+    ),
+    {
+      onSuccess: async () => {
+        message.success('已确认为设备不适用，命令资产无需生成规则')
+        await Promise.all([
+          queryClient.invalidateQueries(['offline-command-asset-units', jobId]),
+          queryClient.invalidateQueries(['offline-command-asset-unit', jobId, selectedUnitId]),
+          queryClient.invalidateQueries(['offline-rule-asset-pipeline', jobId]),
+        ])
+      },
+      onError: (error: Error) => message.error(error.message || '确认命令不适用失败'),
     },
   )
 
@@ -487,8 +584,30 @@ const OfflineCommandAssetUnits: React.FC<{ jobId: string }> = ({ jobId }) => {
     }
   }, [listQuery.data, listQuery.isFetching, refreshMutation])
 
+  useEffect(() => {
+    if (
+      initialFocusOpened.current
+      || !initialSearch
+      || !listQuery.data
+      || listQuery.isFetching
+    ) return
+    const exactMatch = listQuery.data.items.find(
+      (item) => item.canonical_command === initialSearch,
+    )
+    initialFocusOpened.current = true
+    if (exactMatch) openUnitDetail(exactMatch.id, exactMatch.canonical_command)
+  }, [initialSearch, listQuery.data, listQuery.isFetching])
+
   const data = listQuery.data
   const summary = data?.summary
+  const notStartedCount = Math.max(
+    0,
+    (summary?.total || 0)
+      - (summary?.completed || 0)
+      - (summary?.running || 0)
+      - (summary?.needs_review || 0)
+      - (summary?.blocked || 0),
+  )
   const columns: ColumnsType<OfflineCommandAssetUnit> = [
     {
       title: '命令资产',
@@ -553,7 +672,7 @@ const OfflineCommandAssetUnits: React.FC<{ jobId: string }> = ({ jobId }) => {
             type="text"
             icon={<EyeOutlined />}
             aria-label={`查看 ${unit.canonical_command} 资产详情`}
-            onClick={() => openUnitDetail(unit.id)}
+            onClick={() => openUnitDetail(unit.id, unit.canonical_command)}
           >
             详情
           </Button>
@@ -583,11 +702,12 @@ const OfflineCommandAssetUnits: React.FC<{ jobId: string }> = ({ jobId }) => {
 
   return (
     <Space direction="vertical" size={14} style={{ width: '100%' }}>
-      <div className="command-asset-unit__summary">
+      <div className={`command-asset-unit__summary${isMobile ? '' : ' is-desktop'}`}>
         {[
           ['命令资产', summary?.total || 0],
           ['已完成', summary?.completed || 0],
           ['进行中', summary?.running || 0],
+          ['未开始', notStartedCount],
           ['待复核', summary?.needs_review || 0],
           ['阻断', summary?.blocked || 0],
         ].map(([label, value]) => (
@@ -726,9 +846,17 @@ const OfflineCommandAssetUnits: React.FC<{ jobId: string }> = ({ jobId }) => {
       <CommandAssetDetail
         open={Boolean(selectedUnitId)}
         detail={detailQuery.data}
+        generationContent={generationContent}
+        initialTab={focusAction === 'parser'
+          ? 'parser'
+          : focusAction === 'rule-generation' || focusAction === 'bundle-review'
+            ? 'generation'
+            : 'flow'}
         evidencePage={evidencePage}
         evidencePageSize={evidencePageSize}
         loading={detailQuery.isLoading}
+        notApplicableLoading={notApplicableMutation.isLoading}
+        onConfirmNotApplicable={() => notApplicableMutation.mutate()}
         onEvidencePageChange={(nextPage, nextSize) => {
           setEvidencePage(nextSize === evidencePageSize ? nextPage : 1)
           setEvidencePageSize(nextSize)

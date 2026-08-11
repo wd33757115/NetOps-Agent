@@ -296,7 +296,7 @@ def test_validation_rejects_present_but_empty_required_fields():
     assert report.samples[0].errors == ("missing required fields: status",)
 
 
-def test_execution_rejects_parser_spec_and_textfsm_field_inventory_drift():
+def test_execution_does_not_turn_parser_spec_field_drift_into_a_local_gate():
     spec = ParserSpec(
         entity="interface_l3",
         primary_keys=("interface",),
@@ -325,11 +325,13 @@ Start
         TextFSMValidationBackend(),
     )
 
-    assert report.passed is False
+    assert report.passed is True
     assert report.hard_gates["compiled"] is True
     assert report.hard_gates["executed"] is True
-    assert report.hard_gates["field_inventory_aligned"] is False
-    assert "missing=['description']" in report.primary_diagnostic
+    assert report.hard_gates["field_inventory_aligned"] is True
+    assert report.samples[0].records == (
+        {"interface": "Ethernet1/1", "status": "up"},
+    )
 
 
 def test_multi_record_parser_bundle_validates_each_record_set():

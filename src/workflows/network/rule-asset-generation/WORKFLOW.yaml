@@ -79,7 +79,7 @@ steps:
   - name: change_policy
     label: 生成变化策略
     skill: change-policy-generator
-    when: ${steps.rule_target_planning.result.rule_asset_requirements.requires_change_policy}
+    when: ${context.rule_asset_requirements.requires_change_policy}
     inputs:
       mode: infer_and_validate
       observation_type: ${steps.rule_target_planning.result.observation_type}
@@ -97,7 +97,7 @@ steps:
   - name: event_rule
     label: 生成事件规则候选
     skill: event-rule-generator
-    when: ${steps.rule_target_planning.result.rule_asset_requirements.requires_event_rule_assets}
+    when: ${context.rule_asset_requirements.requires_event_rule_assets}
     inputs:
       contract: ${steps.observation_contract.result.proposal}
       change_policy: ${steps.change_policy.result.policy}
@@ -107,7 +107,7 @@ steps:
       intent: ${context.event_intent}
       event_constraints: ${context.event_constraints}
       event_constraints_by_observation_type: ${context.event_constraints_by_observation_type}
-      rule_asset_requirements: ${steps.rule_target_planning.result.rule_asset_requirements}
+      rule_asset_requirements: ${context.rule_asset_requirements}
       generation_provider: ${context.generation_provider}
       max_agent_attempts: ${context.max_agent_attempts}
       agent_loop: true
@@ -115,7 +115,7 @@ steps:
   - name: event_rule_validation
     label: 验证全部事件规则候选
     skill: event-rule-validator
-    when: ${steps.rule_target_planning.result.rule_asset_requirements.requires_event_rule_assets}
+    when: ${context.rule_asset_requirements.requires_event_rule_assets}
     inputs:
       mode: candidates
       candidate_rules: ${steps.event_rule.result.rules}
@@ -124,7 +124,7 @@ steps:
   - name: event_rule_replay
     label: 历史回放事件规则候选
     skill: event-rule-replay
-    when: ${steps.rule_target_planning.result.rule_asset_requirements.requires_historical_replay}
+    when: ${context.rule_asset_requirements.requires_historical_replay}
     inputs:
       candidate_rules: ${steps.event_rule.result.rules}
       candidate_contract: ${steps.observation_contract.result.proposal}

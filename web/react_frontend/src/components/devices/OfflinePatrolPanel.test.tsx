@@ -2,7 +2,7 @@ import React from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from 'react-query'
-import { MemoryRouter, useNavigate } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useNavigate, useParams } from 'react-router-dom'
 import { afterEach, vi } from 'vitest'
 import OfflinePatrolPanel, {
   OfflineFileJobWorkbench,
@@ -158,12 +158,22 @@ const renderPanel = (
     <MemoryRouter initialEntries={options.initialEntries || ['/']}>
       <QueryClientProvider client={queryClient}>
         {options.accessory}
-        {purpose === 'rule_asset_source'
-          ? <OfflineFileJobWorkbench purpose="rule_asset_source" />
-          : <OfflinePatrolPanel />}
+        <Routes>
+          {purpose === 'rule_asset_source' ? <>
+            <Route path="/skills/parser/source-jobs/:jobId" element={<SourceJobDetailHarness />} />
+            <Route path="*" element={<OfflineFileJobWorkbench purpose="rule_asset_source" />} />
+          </> : (
+            <Route path="*" element={<OfflinePatrolPanel />} />
+          )}
+        </Routes>
       </QueryClientProvider>
     </MemoryRouter>,
   )
+}
+
+const SourceJobDetailHarness: React.FC = () => {
+  const { jobId } = useParams<{ jobId: string }>()
+  return <OfflineFileJobWorkbench purpose="rule_asset_source" detailPageJobId={jobId} />
 }
 
 const SameJobTabSwitch: React.FC<{ jobId: string }> = ({ jobId }) => {
@@ -173,7 +183,7 @@ const SameJobTabSwitch: React.FC<{ jobId: string }> = ({ jobId }) => {
       type="button"
       aria-label="switch-same-job-source-tab"
       onClick={() => navigate(
-        `/skills/parser?workspace=production&subtab=source-jobs&source_job_id=${jobId}&source_job_tab=sources`,
+        `/skills/parser/source-jobs/${jobId}?tab=sources`,
       )}
     >
       switch
@@ -189,6 +199,15 @@ describe('OfflinePatrolPanel', () => {
       .toBe('基线周期：缺少活动模板')
     expect(formatOfflineBlockerMessage({ ...blocker, period_role: 'current' }))
       .toBe('当前周期：缺少活动模板')
+  })
+
+  it('uses product language for internal runtime asset blockers', () => {
+    expect(formatOfflineBlockerMessage({
+      message: 'device.hardware.model 缺少 active ChangePolicy',
+    })).toBe('device.hardware.model 缺少已发布的变化判断策略')
+    expect(formatOfflineBlockerMessage({
+      message: 'device.hardware.model 缺少匹配的 active EventRule',
+    })).toBe('device.hardware.model 缺少匹配的已发布的事件判定规则')
   })
 
   it('carries offline job and period datasets into the asset control deep link', () => {
@@ -234,7 +253,6 @@ describe('OfflinePatrolPanel', () => {
   })
 
   it('uses server pagination and exposes both rule asset sample modes', async () => {
-    const user = userEvent.setup()
     renderPanel()
 
     expect(await screen.findByText('Q1 Parser 验证')).toBeInTheDocument()
@@ -242,9 +260,9 @@ describe('OfflinePatrolPanel', () => {
     expect(screen.getByText(/共 10001 个任务/)).toBeInTheDocument()
     expect(list).toHaveBeenCalledWith(expect.objectContaining({ page: 1, page_size: 25 }))
 
-    await user.click(screen.getByRole('button', { name: /导入单周期样本/ }))
+    fireEvent.click(screen.getByRole('button', { name: /导入单周期样本/ }))
     expect(await screen.findByText('新建规则资产样本任务')).toBeInTheDocument()
-    expect(screen.getAllByText('单周期资产样本').length).toBeGreaterThan(1)
+    expect(screen.getByText('单周期采集样本')).toBeInTheDocument()
     const createButton = screen.getByRole('button', { name: '创建并继续' })
     expect(createButton).toBeDisabled()
     const observedAt = screen.getByLabelText('样本采集时间')
@@ -254,13 +272,13 @@ describe('OfflinePatrolPanel', () => {
     fireEvent.keyDown(observedAt, { key: 'Enter', code: 'Enter' })
     expect(createButton).toBeEnabled()
 
-    await user.click(observedAt)
+    fireEvent.click(observedAt)
     fireEvent.keyDown(observedAt, { key: 'Escape', code: 'Escape' })
     expect(screen.getByText('新建规则资产样本任务')).toBeInTheDocument()
 
-    await user.click(screen.getByLabelText('Close'))
-    await user.click(screen.getByRole('button', { name: /导入双周期样本/ }))
-    expect(await screen.findByText('双周期规则回放样本')).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText('Close'))
+    fireEvent.click(screen.getByRole('button', { name: /导入双周期样本/ }))
+    expect(await screen.findByText('双周期判断回放样本')).toBeInTheDocument()
     expect(screen.getByText('数据用途')).toBeInTheDocument()
     expect(screen.queryByText('事件发布')).not.toBeInTheDocument()
   })
@@ -518,6 +536,8 @@ describe('OfflinePatrolPanel', () => {
       accessory: <SameJobTabSwitch jobId="offline-test-1" />,
     })
 
+    expect(await screen.findByRole('region', { name: '规则资产样本任务详情' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     let tabs = await screen.findAllByRole('tab')
     expect(tabs[0]).toHaveAttribute('aria-selected', 'true')
 
@@ -530,7 +550,7 @@ describe('OfflinePatrolPanel', () => {
     expect(sourceGet).toHaveBeenCalledWith('offline-test-1')
   })
 
-  it('lets an engineer choose the correct inventory asset for an ambiguous identity', async () => {
+  it('uses an ambiguous detected identity as read-only sample context for rule generation', async () => {
     sourceGet.mockResolvedValue({
       id: 'offline-test-1',
       purpose: 'rule_asset_source',
@@ -585,15 +605,11 @@ describe('OfflinePatrolPanel', () => {
 
     await user.click(await screen.findByRole('button', { name: /详情/ }))
     await user.click(await screen.findByRole('tab', { name: /文件与设备/ }))
-    expect(await screen.findByText('2 个候选，需人工选择')).toBeVisible()
-
-    await user.click(screen.getByRole('combobox', { name: 'SW-CONFLICT 选择资产' }))
-    await user.click(await screen.findByText('SW-BY-IP · 192.0.2.10 · Cisco/N9K'))
-
-    expect(sourceConfirmBindings).toHaveBeenCalledWith('offline-test-1', [{
-      binding_id: 'binding-1',
-      inventory_device_id: 'inventory-by-ip',
-    }])
+    expect(await screen.findByText('样本设备识别')).toBeVisible()
+    expect(screen.getByText('已识别为样本设备')).toBeVisible()
+    expect(screen.queryByText('2 个候选，需人工选择')).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'SW-CONFLICT 选择资产' })).not.toBeInTheDocument()
+    expect(sourceConfirmBindings).not.toHaveBeenCalled()
   })
 
   it('lets an engineer confirm an empty command and continue the same job', async () => {

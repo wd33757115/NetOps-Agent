@@ -23,9 +23,9 @@ from src.core.check_items.runtime_bundle_assembly import (
     contract_observation_types,
     derive_asset_requirement_profile,
     event_rule_observation_types,
+    govern_evaluation_scope,
     normalize_rule_bindings,
 )
-from src.core.patrol.event_rules import govern_evaluation_scope
 from src.infrastructure.db.models import (
     AuditLogRecord,
     ChangePolicyRecord,
@@ -399,6 +399,14 @@ class CheckItemRuntimeBundleService:
                 for item in canonical_rows
                 if isinstance(item, dict) and item.get("observation_type")
             }
+            produced_types.update(
+                str(item)
+                for item in dict(assembly_plan.get("compatibility") or {}).get(
+                    "observation_projection"
+                )
+                or []
+                if str(item).strip()
+            )
             required_types = {
                 str(item.get("observation_type") or "")
                 for item in canonical_rows
@@ -575,6 +583,13 @@ class CheckItemRuntimeBundleService:
                 }
                 for item in sorted(parser_rows, key=lambda row: (row.canonical_command, row.id))
             }
+            compatibility = {
+                **dict(assembly_plan["compatibility"]),
+                "expected_observation_types": sorted(expected_types),
+                "produced_observation_types": sorted(produced_types),
+                "current_state_rule_types": sorted(current_rule_types),
+                "change_policy_types": sorted(policy_by_type),
+            }
             payload = {
                 "bundle_id": bundle_id,
                 "check_item_version_id": str(check_version.id),
@@ -589,7 +604,7 @@ class CheckItemRuntimeBundleService:
                     key: list(value)
                     for key, value in sorted(rule_bindings.items())
                 },
-                "compatibility": dict(assembly_plan["compatibility"]),
+                "compatibility": compatibility,
             }
             bundle_digest = _digest(payload)
             existing = (
@@ -598,6 +613,16 @@ class CheckItemRuntimeBundleService:
                 .first()
             )
             if existing is not None:
+                if dict(existing.compatibility_json or {}) != compatibility:
+                    if str(existing.status) != "draft":
+                        raise RuntimeBundleValidationError(
+                            [
+                                "runtime bundle digest conflicts with an immutable "
+                                "published payload"
+                            ]
+                        )
+                    existing.compatibility_json = compatibility
+                    db.flush()
                 return self._serialize(db, root, existing)
             latest = (
                 db.query(CheckItemRuntimeBundleVersionRecord.version)
@@ -612,13 +637,6 @@ class CheckItemRuntimeBundleService:
                     f"netops/runtime-bundle/{bundle_id}/v{version_number}/{bundle_digest}",
                 )
             )
-            compatibility = {
-                **dict(assembly_plan["compatibility"]),
-                "expected_observation_types": sorted(expected_types),
-                "produced_observation_types": sorted(produced_types),
-                "current_state_rule_types": sorted(current_rule_types),
-                "change_policy_types": sorted(policy_by_type),
-            }
             version = CheckItemRuntimeBundleVersionRecord(
                 id=version_id,
                 bundle_id=bundle_id,

@@ -3133,6 +3133,7 @@ class CollectionImplementationVersionRecord(Base):
     commands_json = Column(JSON, nullable=False)
     parser_requirement = Column(String(32), nullable=False, index=True)
     template_scope = Column(String(32), nullable=True)
+    adapter_spec_json = Column(JSON, nullable=True)
     output_quality_policy_json = Column(JSON, nullable=True)
     selection_priority = Column(Integer, nullable=False, default=100, server_default="100")
     status = Column(

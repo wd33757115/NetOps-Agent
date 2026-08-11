@@ -188,7 +188,11 @@ class Settings(BaseSettings):
     PARSER_CANDIDATE_STALE_MINUTES: int = 60
     # Stale parser-job reclamation: dispatched-but-unclaimed jobs and jobs whose
     # worker died after marking them running are treated as failed past these ages.
-    PARSER_JOB_PENDING_STALE_MINUTES: int = 10
+    # A queued generation may legitimately wait behind several 30-minute
+    # Parser jobs when the AI worker uses the Windows solo pool.  Keep the
+    # dispatch watchdog above that normal queueing window; running jobs still
+    # use the separate execution timeout below.
+    PARSER_JOB_PENDING_STALE_MINUTES: int = 60
     PARSER_JOB_RUNNING_STALE_MINUTES: int = 30
     PARSER_BLOCKED_RATIO_ALERT_THRESHOLD: float = 0.2
     # Production template_missing / parse_failed → gap ledger only (no auto LLM).

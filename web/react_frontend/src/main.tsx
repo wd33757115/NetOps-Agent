@@ -4,9 +4,10 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from 'react-query'
-import { ConfigProvider } from 'antd'
+import { App as AntdApp, ConfigProvider } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import App from './App'
+import { AppMessageBridge } from './utils/appMessage'
 import '@harmony-font-regular.css'
 import '@harmony-font-medium.css'
 import '@harmony-font-semibold.css'
@@ -42,7 +43,10 @@ createRoot(document.getElementById('root')!).render(
           },
         }}
       >
-        <App />
+        <AntdApp>
+          <AppMessageBridge />
+          <App />
+        </AntdApp>
       </ConfigProvider>
     </QueryClientProvider>
   </React.StrictMode>,

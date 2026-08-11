@@ -937,6 +937,7 @@ def _build_prompt(
     empty_samples: list[dict[str, Any]],
     trusted_parser_evidence: list[dict[str, Any]] | None = None,
     field_naming_context: dict[str, Any] | None = None,
+    revision_instruction: str = "",
 ) -> str:
     sample_payload = [
         {
@@ -969,6 +970,14 @@ Trusted local parser execution evidence (if any):
 
 Approved check-item field naming guidance (advisory, not a parse gate):
 {json.dumps(field_naming_context or {}, ensure_ascii=True, indent=2)}
+
+Engineer revision instruction (advisory and evidence-bound):
+{json.dumps(str(revision_instruction or "")[:4000], ensure_ascii=True)}
+
+The engineer instruction describes the desired business result. Follow it when the
+sanitized samples visibly support it. It must never override frozen sample evidence,
+invent fields or keys, weaken type validation, suppress contradictory records, or bypass
+full-sample execution and independent review. Explain unsupported requests in rationale.
 
 Required response shape:
 {{
@@ -1539,6 +1548,13 @@ def suggest_parser_spec(params: dict[str, Any]) -> dict[str, Any]:
         job = repository.get_job(job_id, include_sanitized_payload=True)
         if not job:
             raise ValueError(f"parser template job does not exist: {job_id}")
+        revision_instruction = str(
+            (
+                (job.get("agent_state_json") or {}).get("parser_spec_suggestion")
+                or {}
+            ).get("revision_instruction")
+            or ""
+        ).strip()[:4000]
         classified = [
             {
                 **sample,
@@ -1632,7 +1648,7 @@ def suggest_parser_spec(params: dict[str, Any]) -> dict[str, Any]:
                 evidence=ntc_evidence,
                 field_naming_context=field_naming_context,
             )
-            if ntc_spec is not None:
+            if ntc_spec is not None and not revision_instruction:
                 spec = ParserSpecDocument.from_dict(ntc_spec).to_dict()
                 sample_plans = _normalize_sample_plans({}, samples=data_samples)
                 selected_ntc = max(
@@ -1676,6 +1692,7 @@ def suggest_parser_spec(params: dict[str, Any]) -> dict[str, Any]:
                             empty_samples,
                             ntc_evidence,
                             field_naming_context,
+                            revision_instruction,
                         )
                     )
                 payload = _json_object(response)

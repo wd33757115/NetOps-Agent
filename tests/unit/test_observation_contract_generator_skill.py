@@ -2563,7 +2563,7 @@ def test_llm_loop_projects_source_cpu_keys_to_check_item_identity(monkeypatch):
     } == {"device.cpu.utilization"}
 
 
-def test_llm_loop_repairs_collapsed_canonical_identity_from_validator_feedback(
+def test_llm_loop_deterministically_preserves_collapsed_source_identity(
     monkeypatch,
 ):
     module = _load_skill_module()
@@ -2664,13 +2664,51 @@ def test_llm_loop_repairs_collapsed_canonical_identity_from_validator_feedback(
     )
 
     assert result["success"] is True
-    assert result["agent_loop"]["attempt_count"] == 2
-    assert feedback_history[0] is None
-    assert any(
-        "missing: cpu" in error
-        for error in feedback_history[1]["errors"]
+    assert result["agent_loop"]["attempt_count"] == 1
+    assert feedback_history == [None]
+    assert result["proposal"]["entity_dimensions"]["cpu"] == {"field": "cpu"}
+    assert list(result["proposal"]["entity_identity_fields"]) == [
+        "scope",
+        "scope_id",
+        "cpu",
+    ]
+
+
+def test_canonical_identity_defaults_preserve_all_approved_source_primary_keys():
+    module = _load_skill_module()
+    candidate = {
+        "primary_keys": ["ip_address", "interface", "vlan_id"],
+        "required_fields": ["ip_address", "interface", "vlan_id"],
+        "entity_dimensions": {
+            "vrf": {"context": "device_id"},
+            "ip_address": {"field": "ip_address"},
+        },
+    }
+
+    result = module._apply_canonical_identity_defaults(
+        candidate,
+        {
+            "canonical_entity_type": "arp_binding",
+            "identity_dimensions": ["vrf", "ip_address"],
+        },
     )
-    assert result["proposal"]["entity_dimensions"]["scope_id"]["op"] == "concat"
+
+    assert result["entity_identity_fields"] == [
+        "vrf",
+        "ip_address",
+        "interface",
+        "vlan_id",
+    ]
+    assert result["entity_dimensions"] == {
+        "vrf": {"context": "device_id"},
+        "ip_address": {"field": "ip_address"},
+        "interface": {"field": "interface"},
+        "vlan_id": {"field": "vlan_id"},
+    }
+    assert result["evidence"]["source_primary_keys_preserved"] == [
+        "interface",
+        "vlan_id",
+    ]
 
 
 def test_contract_governance_rejects_dynamic_value_in_scope_dimension():
@@ -3491,3 +3529,60 @@ def test_multi_record_llm_can_propose_locally_proved_threshold_join(monkeypatch)
             "reason": "field_is_not_an_approved_observation_target",
         }
     ]
+
+
+def test_reference_threshold_targets_are_not_compiled_as_observations():
+    module = _load_skill_module()
+    candidate = {
+        "state_semantics": {
+            "temperature_celsius": {
+                "semantic_type": "gauge",
+                "comparison_role": "observation",
+                "monitor": True,
+            },
+            "warning_celsius": {
+                "semantic_type": "threshold",
+                "comparison_role": "threshold",
+                "monitor": False,
+                "observation_type": "environment.temperature.warning",
+            },
+        }
+    }
+
+    governed = module._apply_observation_target_constraints(
+        candidate,
+        field_inventory=["temperature_celsius", "warning_celsius"],
+        observation_targets=[
+            {
+                "canonical_field": "temperature_celsius",
+                "observation_type": "environment.temperature.current",
+                "semantic_type": "gauge",
+            },
+            {
+                "canonical_field": "warning_celsius",
+                "observation_type": "environment.temperature.warning",
+                "semantic_type": "threshold",
+                "required": False,
+            },
+        ],
+        strict=True,
+    )
+
+    current = governed["state_semantics"]["temperature_celsius"]
+    warning = governed["state_semantics"]["warning_celsius"]
+    assert current["observation_type"] == "environment.temperature.current"
+    assert current["monitor"] is True
+    assert "observation_type" not in warning
+    assert warning["comparison_role"] == "threshold"
+    assert warning["monitor"] is False
+
+
+def test_projection_recipe_binding_prefers_direct_field_over_qualified_variants():
+    module = _load_skill_module()
+
+    resolved = module._resolve_recipe_binding(
+        field_inventory=["free", "buffers_cache_free", "swap_free"],
+        binding={"canonical_fields": ["memory_free_bytes"]},
+    )
+
+    assert resolved == "free"

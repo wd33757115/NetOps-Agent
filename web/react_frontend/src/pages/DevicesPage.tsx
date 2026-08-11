@@ -1377,7 +1377,7 @@ const DevicesPage: React.FC = () => {
         link.remove()
         window.URL.revokeObjectURL(url)
       },
-      onError: (error: any) => message.error(extractErrorMessage(error, '技术附表导出失败')),
+      onError: (error: any) => message.error(extractErrorMessage(error, '巡检明细 Excel 导出失败')),
     },
   )
 

@@ -472,6 +472,26 @@ def test_dataset_rule_context_is_immutable_balanced_and_sanitized():
             )
             if index == 0:
                 db.add(
+                    CommandSnapshot(
+                        id=f"snapshot-duplicate-{index}-{suffix}",
+                        run_id=run_ids[index],
+                        dataset_id=dataset_id,
+                        device_id=f"device-{index}",
+                        execution_item_id=f"item-duplicate-{index}",
+                        device_name=f"SW{index + 1}",
+                        management_ip=f"10.0.0.{index + 1}",
+                        command="display transceiver diagnosis interface",
+                        canonical_command="display transceiver diagnosis interface",
+                        parser_template_id=template_id,
+                        observed_at=observed_at + timedelta(days=index),
+                        structured_json=records[index],
+                        raw_text=f"raw CLI with password secret-{index}",
+                        raw_text_hash=f"hash-{index}-{suffix}",
+                        parse_status="parsed",
+                    )
+                )
+            if index == 0:
+                db.add(
                     SnapshotParseResult(
                         id=f"reparse-{index}-{suffix}",
                         snapshot_id=f"snapshot-{index}-{suffix}",
@@ -633,3 +653,22 @@ def test_dataset_rule_context_is_immutable_balanced_and_sanitized():
             db.query(OfflinePatrolJobRecord).filter(
                 OfflinePatrolJobRecord.id == offline_job_id
             ).delete(synchronize_session=False)
+
+
+def test_sanitize_preserves_list_valued_ip_fields():
+    from src.core.rule_control.dataset_context import _sanitize
+
+    removed = {}
+    pseudonymized = {}
+    result = _sanitize(
+        {"ip_address": ["10.34.2.13/27", "unassigned"]},
+        removed=removed,
+        pseudonymized=pseudonymized,
+    )
+
+    assert isinstance(result["ip_address"], list)
+    assert len(result["ip_address"]) == 2
+    assert result["ip_address"][0] != "10.34.2.13/27"
+    assert "/27" in result["ip_address"][0]
+    assert result["ip_address"][1] == "unassigned"
+    assert pseudonymized == {"ip_address": 1}

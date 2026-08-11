@@ -199,21 +199,23 @@ def _sanitize(value: Any, *, removed: dict[str, int], pseudonymized: dict[str, i
                 removed[lowered] = removed.get(lowered, 0) + 1
                 continue
             if lowered in IP_IDENTITY_KEYS and nested not in (None, ""):
-                text = str(nested).strip()
-                if text.casefold() in {"--", "none", "unassigned", "unknown"}:
-                    output[key] = text
-                    continue
-                try:
-                    parsed_ip = ipaddress.ip_interface(text)
-                except ValueError:
+                is_collection = isinstance(nested, (list, tuple))
+                sanitized_values: list[Any] = []
+                for item in list(nested) if is_collection else [nested]:
+                    text = str(item).strip()
+                    if text.casefold() in {"--", "none", "unassigned", "unknown"}:
+                        sanitized_values.append(text)
+                        continue
+                    try:
+                        parsed_ip = ipaddress.ip_interface(text)
+                    except ValueError:
+                        sanitized_values.append(_stable_alias("identity", item))
+                    else:
+                        sanitized_values.append(
+                            _pseudonymize_ip(parsed_ip, had_prefix="/" in text)
+                        )
                     pseudonymized[lowered] = pseudonymized.get(lowered, 0) + 1
-                    output[key] = _stable_alias("identity", nested)
-                else:
-                    pseudonymized[lowered] = pseudonymized.get(lowered, 0) + 1
-                    output[key] = _pseudonymize_ip(
-                        parsed_ip,
-                        had_prefix="/" in text,
-                    )
+                output[key] = sanitized_values if is_collection else sanitized_values[0]
                 continue
             if lowered in IDENTITY_KEYS and nested not in (None, ""):
                 pseudonymized[lowered] = pseudonymized.get(lowered, 0) + 1
@@ -737,14 +739,14 @@ class DatasetRuleGenerationContextService:
         job_id: str,
         dataset_ids: list[str],
         created_by: str | None,
-        max_records: int = 120,
+        max_records: int | None = 120,
         field_name: str | None = None,
         observation_type: str | None = None,
     ) -> dict[str, Any]:
         dataset_ids = sorted({str(item).strip() for item in dataset_ids if str(item).strip()})
         if not dataset_ids:
             raise ValueError("select at least one offline patrol dataset")
-        max_records = max(1, min(int(max_records), 500))
+        max_records = max(1, min(int(max_records or 120), 500))
         with get_db_session() as db:
             job = db.get(RuleGenerationJobRecord, job_id)
             if not job:
@@ -752,6 +754,13 @@ class DatasetRuleGenerationContextService:
             payload = dict(job.payload_json or {})
             defaults = dict(payload.get("workflow_context_defaults") or {})
             template_id = str(payload.get("template_id") or "").strip()
+            if not template_id:
+                source_ref = str(
+                    payload.get("source_ref") or job.source_ref or ""
+                ).strip()
+                prefix = "parser_template:"
+                if source_ref.startswith(prefix):
+                    template_id = source_ref[len(prefix) :].strip()
             if not template_id:
                 raise ValueError("rule generation job is not linked to a parser template")
             template = db.get(ParserTemplate, template_id)
@@ -824,6 +833,7 @@ class DatasetRuleGenerationContextService:
                 effective_reparse.setdefault(str(reparse.snapshot_id), reparse)
             rows: list[tuple[str, str, str, datetime, Any]] = []
             source_counts = {"capture": 0, "reparse": 0}
+            seen_source_snapshots: set[tuple[str, str, str, str, str]] = set()
             for snapshot in snapshots:
                 reparse = effective_reparse.get(str(snapshot.id))
                 if reparse is not None:
@@ -843,6 +853,22 @@ class DatasetRuleGenerationContextService:
                     and any(isinstance(item, dict) for item in structured)
                 ):
                     continue
+                source_snapshot_key = (
+                    str(snapshot.dataset_id),
+                    str(snapshot.run_id),
+                    str(snapshot.device_id),
+                    snapshot.observed_at.isoformat(),
+                    json.dumps(
+                        structured,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        default=str,
+                    ),
+                )
+                if source_snapshot_key in seen_source_snapshots:
+                    continue
+                seen_source_snapshots.add(source_snapshot_key)
                 source_counts[source] += 1
                 rows.append(
                     (

@@ -85,11 +85,7 @@ class RuleAssetProductionPipelineService:
                 .filter(OfflinePatrolDeviceBindingRecord.job_id == offline_job_id)
                 .all()
             )
-            pending_binding_count = sum(
-                count
-                for status, count in binding_status_counts.items()
-                if status not in {"confirmed", "external"}
-            )
+            sample_device_count = sum(binding_status_counts.values())
             snapshots = (
                 db.query(
                     CommandSnapshot.parse_status,
@@ -172,10 +168,17 @@ class RuleAssetProductionPipelineService:
             job_status = str(job.status)
             preview = dict(job.preview_json or {})
 
+        command_unit_service = RuleAssetCommandUnitService()
+        command_units = command_unit_service.summary(offline_job_id)
         preview_totals = dict(preview.get("totals") or {})
-        parser_gap_count = sum(
+        raw_parser_gap_count = sum(
             int(preview_totals.get(key) or parse_counts.get(key) or 0)
             for key in ("template_missing", "parse_failed", "identity_unknown")
+        )
+        parser_gap_count = (
+            int((command_units.get("by_stage") or {}).get("parser_generation") or 0)
+            if int(command_units.get("total") or 0)
+            else raw_parser_gap_count
         )
         source_status = "completed" if source_count else "not_started"
         if job_status == "previewing":
@@ -184,9 +187,7 @@ class RuleAssetProductionPipelineService:
             preview_has_identity = int(preview_totals.get("device_count") or 0) > 0
             preview_has_commands = int(preview_totals.get("command_count") or 0) > 0
             preview_status = (
-                "completed"
-                if not pending_binding_count and preview_has_identity and preview_has_commands
-                else "blocked"
+                "completed" if preview_has_identity and preview_has_commands else "blocked"
             )
         else:
             preview_status = "not_started"
@@ -198,8 +199,12 @@ class RuleAssetProductionPipelineService:
             import_status = "blocked"
         else:
             import_status = "not_started"
+        command_unit_total = int(command_units.get("total") or 0)
+        command_unit_completed = int(command_units.get("completed") or 0)
         if parser_gap_count:
             parser_status = "blocked"
+        elif command_unit_total and command_unit_completed == command_unit_total:
+            parser_status = "completed"
         elif template_ids and len(active_template_ids) == len(template_ids):
             parser_status = "completed"
         elif template_ids:
@@ -269,8 +274,6 @@ class RuleAssetProductionPipelineService:
             review_status = "not_started"
             release_status = "not_started"
 
-        command_unit_service = RuleAssetCommandUnitService()
-        command_units = command_unit_service.summary(offline_job_id)
         with get_db_session() as db:
             unit_rows = (
                 db.query(
@@ -310,7 +313,7 @@ class RuleAssetProductionPipelineService:
         required_unit_ids = {
             str(unit_id)
             for unit_id, asset_mode in unit_rows
-            if str(asset_mode or "") != "ignored"
+            if str(asset_mode or "") not in {"ignored", "raw_hash"}
         }
         mapped_unit_ids = {
             item["command_unit_id"]
@@ -365,8 +368,10 @@ class RuleAssetProductionPipelineService:
         runtime_counts = Counter(item["status"] for item in runtime_targets)
         if release_status != "completed":
             runtime_status = "not_started"
-        elif unmapped_unit_count or not runtime_pairs:
+        elif unmapped_unit_count:
             runtime_status = "blocked"
+        elif not runtime_pairs:
+            runtime_status = "completed" if not required_unit_ids else "blocked"
         elif runtime_counts.get("invalid"):
             runtime_status = "blocked"
         elif runtime_counts.get("ready") == len(runtime_pairs):
@@ -384,22 +389,15 @@ class RuleAssetProductionPipelineService:
             ),
             _step(
                 "preview",
-                "预检与设备确认",
+                "预检与样本识别",
                 preview_status,
                 detail=(
-                    f"{pending_binding_count} 个设备匹配待确认"
-                    if pending_binding_count
-                    else (
-                        f"{sum(binding_status_counts.values())} 个设备身份已确认"
-                        f"（外部设备 {int(binding_status_counts.get('external') or 0)}）"
-                        if binding_status_counts
-                        else "预检已完成，未产生设备匹配项"
-                    )
+                    f"已识别 {sample_device_count} 个样本设备"
+                    if sample_device_count
+                    else "预检尚未识别出样本设备"
                 ),
                 counts={
-                    "pending_bindings": pending_binding_count,
-                    "confirmed_bindings": int(binding_status_counts.get("confirmed") or 0),
-                    "external_bindings": int(binding_status_counts.get("external") or 0),
+                    "sample_devices": sample_device_count,
                 },
             ),
             _step(
@@ -563,10 +561,6 @@ class RuleAssetProductionPipelineService:
             next_action = _action(
                 "run_preview", "执行预检", "识别设备、命令和 Parser 缺口", source_job_url
             )
-        elif pending_binding_count:
-            next_action = _action(
-                "confirm_devices", "确认设备匹配", "确认资产绑定或标记为外部设备", source_job_url
-            )
         elif job_status != "completed":
             next_action = _action(
                 "execute_import", "处理离线样本", "写入权威 Snapshot 和结构化结果", source_job_url
@@ -578,7 +572,7 @@ class RuleAssetProductionPipelineService:
                 "生成、验证并激活缺失 Parser 模板",
                 parser_url,
             )
-        elif not seed_count:
+        elif not seed_count and release_status != "completed":
             next_action = _action(
                 "repair_seed_jobs", "检查规则种子", "确认模板激活已幂等创建规则生成种子", asset_url
             )

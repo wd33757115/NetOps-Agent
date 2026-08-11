@@ -317,13 +317,13 @@ def test_ambiguous_device_binding_exposes_ranked_inventory_candidates():
         job = service.create_job(
             owner_id=owner_id,
             idempotency_key=f"offline-binding-{suffix}",
-            purpose="rule_asset_source",
-            job_type="parser_validation",
+            purpose="offline_patrol",
+            job_type="single_patrol",
             name="ambiguous identity evidence",
             periods=[
                 {
-                    "role": "sample",
-                    "label": "sample",
+                    "role": "current",
+                    "label": "current",
                     "observed_at": datetime.now(timezone.utc),
                 }
             ],
@@ -351,7 +351,7 @@ def test_ambiguous_device_binding_exposes_ranked_inventory_candidates():
                     OfflinePatrolDeviceBindingRecord(
                         id=f"binding-{suffix}",
                         job_id=job["id"],
-                        period_role="sample",
+                        period_role="current",
                         external_device_id=f"external-{suffix}",
                         device_name=observed_name,
                         management_ip=observed_ip,
@@ -396,13 +396,13 @@ def test_confirming_ambiguous_binding_immediately_recomputes_job_readiness():
         job = service.create_job(
             owner_id=owner_id,
             idempotency_key=f"offline-binding-ready-{suffix}",
-            purpose="rule_asset_source",
-            job_type="parser_validation",
+            purpose="offline_patrol",
+            job_type="single_patrol",
             name="identity confirmation readiness",
             periods=[
                 {
-                    "role": "sample",
-                    "label": "sample",
+                    "role": "current",
+                    "label": "current",
                     "observed_at": datetime.now(timezone.utc),
                 }
             ],
@@ -423,7 +423,7 @@ def test_confirming_ambiguous_binding_immediately_recomputes_job_readiness():
                 OfflinePatrolDeviceBindingRecord(
                     id=binding_id,
                     job_id=job["id"],
-                    period_role="sample",
+                    period_role="current",
                     external_device_id=f"external-ready-{suffix}",
                     device_name=f"SW-READY-{suffix}",
                     management_ip="192.0.2.242",
@@ -437,7 +437,7 @@ def test_confirming_ambiguous_binding_immediately_recomputes_job_readiness():
             row = db.get(OfflinePatrolJobRecord, job["id"])
             row.status = "blocked"
             row.preview_json = {
-                "periods": {"sample": {"files": []}},
+                "periods": {"current": {"files": []}},
                 "blockers": [
                     {
                         "code": "ambiguous_device_binding",

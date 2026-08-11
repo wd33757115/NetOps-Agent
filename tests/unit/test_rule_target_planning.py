@@ -108,6 +108,33 @@ def test_rule_target_compiler_is_multi_field_and_flattens_list_measurements():
     ]
 
 
+def test_rule_target_compiler_projects_history_before_policy_generation():
+    result = compile_rule_targets(
+        contract={
+            "required_fields": ["free_ratio"],
+            "optional_fields": [],
+            "state_semantics": {
+                "free_ratio": {
+                    "semantic_type": "gauge",
+                    "unit": "percent",
+                    "observation_type": "device.memory.utilization",
+                    "transform": {
+                        "op": "subtract",
+                        "args": [
+                            {"literal": 100},
+                            {"field": "free_ratio"},
+                        ],
+                    },
+                }
+            },
+        },
+        records=[{"free_ratio": "77.6"}],
+    )
+
+    values = result["historical_values_by_field"]["free_ratio"]
+    assert [round(float(value), 1) for value in values] == [22.4]
+
+
 def test_rule_target_compiler_only_promotes_evidenced_fault_semantics_to_events():
     result = compile_rule_targets(
         contract={

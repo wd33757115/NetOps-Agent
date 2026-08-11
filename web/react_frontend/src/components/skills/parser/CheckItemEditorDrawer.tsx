@@ -6,12 +6,13 @@ import {
   Drawer,
   Form,
   Input,
-  InputNumber,
   Select,
   Space,
+  Switch,
   Typography,
   message,
 } from 'antd'
+import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 
 import type {
   CanonicalObservationCatalog,
@@ -40,7 +41,16 @@ interface CheckItemFormValues {
   assessment_mode: CheckItemCatalogCheckItemDraftInput['assessment_mode']
   entity_type: string
   identity_dimensions: string[]
-  observation_types: string[]
+  canonical_fields: Array<{
+    name: string
+    observation_type: string
+    value_type: string
+    unit?: string
+    required: boolean
+  }>
+  tracked_fields: string[]
+  evaluation_json: string
+  events_json: string
   report_projection: string
   max_observation_age?: string
   max_collection_span?: string
@@ -64,6 +74,18 @@ const jsonObject = (value: string | undefined, label: string): Record<string, un
   }
 }
 
+const jsonArray = (value: string | undefined, label: string): Array<Record<string, unknown>> => {
+  try {
+    const parsed = JSON.parse(value || '[]')
+    if (!Array.isArray(parsed) || parsed.some((item) => !item || Array.isArray(item) || typeof item !== 'object')) {
+      throw new Error()
+    }
+    return parsed as Array<Record<string, unknown>>
+  } catch {
+    throw new Error(`${label}不是有效 JSON 数组`)
+  }
+}
+
 const initialValues = (checkItem?: ParserCheckItem): CheckItemFormValues => {
   const contract = checkItem?.canonical_contract || {}
   const observations = Array.isArray(contract.observations)
@@ -80,9 +102,18 @@ const initialValues = (checkItem?: ParserCheckItem): CheckItemFormValues => {
     identity_dimensions: Array.isArray(contract.identity_dimensions)
       ? contract.identity_dimensions.map(String)
       : ['device_id'],
-    observation_types: observations
-      .map((item) => String(item.observation_type || ''))
-      .filter(Boolean),
+    canonical_fields: observations.map((item) => ({
+      name: String(item.canonical_field || item.observation_type || ''),
+      observation_type: String(item.observation_type || ''),
+      value_type: String(item.value_type || item.semantic_type || 'text'),
+      unit: String(item.unit || ''),
+      required: item.required !== false,
+    })),
+    tracked_fields: Array.isArray((contract.change as Record<string, unknown> | undefined)?.tracked_fields)
+      ? ((contract.change as Record<string, unknown>).tracked_fields as unknown[]).map(String)
+      : observations.map((item) => String(item.canonical_field || '')).filter(Boolean),
+    evaluation_json: JSON.stringify(Array.isArray(contract.evaluation) ? contract.evaluation : [], null, 2),
+    events_json: JSON.stringify(Array.isArray(contract.events) ? contract.events : [], null, 2),
     report_projection: checkItem?.report_projection || 'auto',
     max_observation_age: String(checkItem?.freshness_policy?.max_observation_age || '24h'),
     max_collection_span: String(checkItem?.freshness_policy?.max_collection_span || '8h'),
@@ -111,8 +142,9 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
   onSubmit,
 }) => {
   const [form] = Form.useForm<CheckItemFormValues>()
-  const coverageModel = Form.useWatch('coverage_model', form)
   const resultMode = Form.useWatch('result_mode', form)
+  const assessmentMode = Form.useWatch('assessment_mode', form)
+  const coverageModel = Form.useWatch('coverage_model', form)
 
   useEffect(() => {
     if (open) form.setFieldsValue(initialValues(checkItem))
@@ -129,23 +161,65 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
     const definitions = new Map(
       (canonicalCatalog?.items || []).map((item) => [item.id, item]),
     )
-    const observations = (values.observation_types || []).map((observationType) => {
+    const observations = (values.canonical_fields || []).map((field) => {
+      const observationType = field.observation_type
       const existing = existingRows.get(observationType)
-      if (existing) return existing
       const definition = definitions.get(observationType)
       return {
+        ...(existing || {}),
         observation_type: observationType,
-        semantic_type: definition?.semantic_type,
-        ...(definition?.canonical_unit ? { unit: definition.canonical_unit } : {}),
+        canonical_field: field.name.trim(),
+        semantic_type: definition?.semantic_type || existing?.semantic_type || field.value_type,
+        value_type: field.value_type,
+        ...(field.unit?.trim()
+          ? { unit: field.unit.trim() }
+          : definition?.canonical_unit
+            ? { unit: definition.canonical_unit }
+            : {}),
         ...(definition?.dimensions?.length ? { dimensions: definition.dimensions } : {}),
-        required: true,
+        required: field.required,
       }
     })
+    const vocabulary = {
+      ...(typeof contract.parser_field_vocabulary === 'object' && contract.parser_field_vocabulary
+        ? contract.parser_field_vocabulary as Record<string, unknown>
+        : {}),
+    }
+    for (const identity of values.identity_dimensions || []) {
+      if (identity !== 'device_id') {
+        vocabulary[identity] = {
+          ...(typeof vocabulary[identity] === 'object' && vocabulary[identity]
+            ? vocabulary[identity] as Record<string, unknown>
+            : {}),
+          role: 'identity',
+        }
+      }
+    }
+    for (const observation of observations) {
+      const fieldName = String(observation.canonical_field || '')
+      if (!fieldName) continue
+      vocabulary[fieldName] = {
+        ...(typeof vocabulary[fieldName] === 'object' && vocabulary[fieldName]
+          ? vocabulary[fieldName] as Record<string, unknown>
+          : {}),
+        observation_type: observation.observation_type,
+        role: observation.semantic_type === 'state' ? 'state' : 'metric',
+        value_type: observation.value_type,
+        ...(observation.unit ? { unit: observation.unit } : {}),
+      }
+    }
     return {
       ...contract,
       entity_type: values.entity_type,
       identity_dimensions: values.identity_dimensions || [],
       observations,
+      parser_field_vocabulary: vocabulary,
+      change: {
+        ...(typeof contract.change === 'object' && contract.change ? contract.change : {}),
+        tracked_fields: values.tracked_fields || [],
+      },
+      evaluation: jsonArray(values.evaluation_json, '当前值判断规则'),
+      events: jsonArray(values.events_json, '事件规则'),
     }
   }
 
@@ -163,10 +237,19 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
   const save = async () => {
     try {
       const values = await form.validateFields()
-      if (values.result_mode === 'structured' && !(values.observation_types || []).length) {
+      if (values.result_mode === 'structured' && !(values.canonical_fields || []).length) {
         form.setFields([{
-          name: 'observation_types',
-          errors: ['结构化检查项至少需要一个标准观测字段'],
+          name: 'canonical_fields',
+          errors: ['结构化检查项至少需要一个标准字段'],
+        }])
+        message.error('结构化检查项至少需要一个标准字段')
+        return
+      }
+      const fieldNames = (values.canonical_fields || []).map((item) => item.name.trim())
+      if (new Set(fieldNames).size !== fieldNames.length) {
+        form.setFields([{
+          name: 'canonical_fields',
+          errors: ['标准列名不能重复'],
         }])
         return
       }
@@ -316,58 +399,178 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
           <Form.Item label="实体主键" name="identity_dimensions" rules={[{ required: true }]}>
             <Select mode="tags" tokenSeparators={[',']} placeholder="例如 device_id, vrf, peer_address" />
           </Form.Item>
-          <Form.Item className="check-item-catalog-form-wide" label="标准观测字段" name="observation_types">
-            <Select
-              mode="multiple"
-              showSearch
-              optionFilterProp="label"
-              loading={canonicalLoading}
-              placeholder="从平台已批准的厂商无关字段中选择"
-              options={(canonicalCatalog?.items || []).map((item) => ({
-                value: item.id,
-                label: `${item.id} · ${item.description || item.semantic_type}`,
-              }))}
-            />
-          </Form.Item>
+          <div className="check-item-catalog-form-wide">
+            <Form.List name="canonical_fields">
+              {(fields, { add, remove }) => (
+                <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                  {fields.map(({ key, name, ...restField }) => (
+                    <div className="check-item-adapter-output" key={key}>
+                      <div className="check-item-catalog-form-grid">
+                        <Form.Item
+                          {...restField}
+                          label="标准列名"
+                          name={[name, 'name']}
+                          rules={[{ required: true }, { pattern: /^[a-z][a-z0-9_]*$/, message: '使用稳定的小写 snake_case 名称' }]}
+                        >
+                          <Input placeholder="例如 cpu_usage_percent" />
+                        </Form.Item>
+                        <Form.Item
+                          {...restField}
+                          label="观测语义"
+                          name={[name, 'observation_type']}
+                          rules={[{ required: true }]}
+                        >
+                          <Select
+                            showSearch
+                            optionFilterProp="label"
+                            loading={canonicalLoading}
+                            options={(canonicalCatalog?.items || []).map((item) => ({
+                              value: item.id,
+                              label: `${item.id} · ${item.description || item.semantic_type}`,
+                            }))}
+                          />
+                        </Form.Item>
+                        <Form.Item
+                          {...restField}
+                          label="值类型"
+                          name={[name, 'value_type']}
+                          rules={[{ required: true }]}
+                        >
+                          <Select options={[
+                            'text', 'number', 'percent', 'enum', 'boolean',
+                            'interface_name', 'ip_or_unassigned',
+                          ].map((value) => ({ value, label: value }))} />
+                        </Form.Item>
+                        <Form.Item {...restField} label="单位" name={[name, 'unit']}>
+                          <Input placeholder="例如 percent、dbm、bytes" />
+                        </Form.Item>
+                        <Form.Item
+                          {...restField}
+                          label="必填"
+                          name={[name, 'required']}
+                          valuePropName="checked"
+                        >
+                          <Switch />
+                        </Form.Item>
+                      </div>
+                      <Button
+                        type="text"
+                        danger
+                        icon={<DeleteOutlined />}
+                        onClick={() => remove(name)}
+                      >
+                        删除字段
+                      </Button>
+                    </div>
+                  ))}
+                  <Button
+                    type="dashed"
+                    icon={<PlusOutlined />}
+                    onClick={() => add({ value_type: 'text', required: true })}
+                  >
+                    添加标准字段
+                  </Button>
+                </Space>
+              )}
+            </Form.List>
+          </div>
           <Form.Item className="check-item-catalog-form-wide">
             <Button onClick={synchronizeContract}>刷新标准输出契约</Button>
           </Form.Item>
         </div>
 
-        <Typography.Title level={5}>证据与完整性</Typography.Title>
+        {resultMode === 'structured' && (
+          <>
+            <Typography.Title level={5}>变化、当前值与事件</Typography.Title>
+            <Alert
+              type="info"
+              showIcon
+              message="这些规则属于检查项，所有厂商命令适配器共同复用"
+              description="没有历史基线时仍执行当前值判断；事件只消费已发布的确定性规则。空数组表示该检查项暂不产生对应结论。"
+              style={{ marginBottom: 16 }}
+            />
+            <Form.Item
+              label="变化跟踪字段"
+              name="tracked_fields"
+              extra="只比较这些标准列。CPU 等瞬时指标可以不加入，避免产生无意义变化。"
+            >
+              <Select mode="tags" tokenSeparators={[',']} placeholder="例如 oper_status, description" />
+            </Form.Item>
+            <Form.Item
+              label="当前值判断规则"
+              name="evaluation_json"
+              rules={[{ required: true }]}
+              extra={'示例：[ {"id":"cpu_high","field":"cpu_usage_percent","operator":">=","value":80,"severity":"warning"} ]'}
+            >
+              <Input.TextArea rows={6} />
+            </Form.Item>
+            <Form.Item
+              label="事件规则"
+              name="events_json"
+              rules={[{ required: true }]}
+              extra={'示例：[ {"id":"InterfaceDown","when":{"from":"up","to":"down"}}, {"id":"InterfaceUp","recovery_of":"InterfaceDown","when":{"to":"up"}} ]'}
+            >
+              <Input.TextArea rows={6} />
+            </Form.Item>
+          </>
+        )}
+
+        <Typography.Title level={5}>证据完整性策略</Typography.Title>
+        <Typography.Paragraph type="secondary">
+          明确结果时效、空输出解释与实体覆盖范围。健康检查项必须完整配置，避免运行时把未知或不完整数据误判为正常。
+        </Typography.Paragraph>
         <div className="check-item-catalog-form-grid">
-          <Form.Item label="观测最大年龄" name="max_observation_age" rules={[{ required: true }]}>
-            <Input placeholder="24h" />
+          <Form.Item
+            label="最大观测年龄"
+            name="max_observation_age"
+            rules={assessmentMode === 'health' ? [{ required: true }] : undefined}
+          >
+            <Input placeholder="例如 24h" />
           </Form.Item>
-          <Form.Item label="单次采集最大跨度" name="max_collection_span" rules={[{ required: true }]}>
-            <Input placeholder="8h" />
+          <Form.Item
+            label="最大采集跨度"
+            name="max_collection_span"
+            rules={assessmentMode === 'health' ? [{ required: true }] : undefined}
+          >
+            <Input placeholder="例如 8h" />
           </Form.Item>
-          <Form.Item label="空结果含义" name="empty_classification" rules={[{ required: true }]}>
+          <Form.Item
+            label="空结果分类"
+            name="empty_classification"
+            rules={assessmentMode === 'health' ? [{ required: true }] : undefined}
+          >
             <Select options={[
-              { value: 'invalid', label: '无效，不能判断' },
+              { value: 'invalid', label: '无效证据' },
               { value: 'expected_empty', label: '预期为空' },
               { value: 'not_applicable', label: '不适用' },
-              { value: 'unsupported', label: '设备不支持' },
             ]} />
           </Form.Item>
-          <Form.Item label="覆盖模型" name="coverage_model" rules={[{ required: true }]}>
+          <Form.Item
+            label="覆盖模型"
+            name="coverage_model"
+            rules={assessmentMode === 'health' ? [{ required: true }] : undefined}
+          >
             <Select options={[
-              { value: 'fixed', label: '固定实体数' },
-              { value: 'inventory_entity_set', label: '资产清单实体集' },
-              { value: 'derived_entity_set', label: '历史/关联结果推导' },
-              { value: 'command_reported_total', label: '命令声明总数' },
-              { value: 'non_exhaustive', label: '非穷举证据' },
+              { value: 'fixed', label: '固定实体数量' },
+              { value: 'derived_entity_set', label: '基于历史合格观测' },
+              { value: 'inventory_entity_set', label: '基于设备清单' },
+              { value: 'explicit_entity_set', label: '显式实体集合' },
+              { value: 'non_exhaustive', label: '非穷举观测' },
             ]} />
           </Form.Item>
           {coverageModel === 'fixed' && (
-            <Form.Item label="预期记录数" name="expected_count" rules={[{ required: true }]}>
-              <InputNumber min={0} precision={0} style={{ width: '100%' }} />
+            <Form.Item
+              label="预期实体数量"
+              name="expected_count"
+              rules={[{ required: true }]}
+            >
+              <Input type="number" min={1} placeholder="例如 1" />
             </Form.Item>
           )}
           <Form.Item label="覆盖基准来源" name="coverage_source">
             <Input placeholder="例如 previous_qualified_observation" />
           </Form.Item>
-          <Form.Item label="首次巡检处理" name="first_observation">
+          <Form.Item label="首次观测处理" name="first_observation">
             <Input placeholder="例如 unable_to_determine" />
           </Form.Item>
         </div>

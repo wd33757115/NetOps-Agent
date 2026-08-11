@@ -64,13 +64,13 @@ JOB_TYPES = {"parser_validation", "single_patrol", "history_compare"}
 JOB_ACTIVE_STATUSES = {"previewing", "queued", "running"}
 JOB_TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 INGESTION_BLOCKER_CODES = {
-    "ambiguous_device_binding",
     "empty_unverified",
     "file_invalid",
     "identity_unknown",
     "no_common_device",
 }
 PATROL_RUNTIME_BLOCKER_CODES = INGESTION_BLOCKER_CODES | {
+    "ambiguous_device_binding",
     "no_common_ready_parser",
     "parser_template_inactive",
     "template_missing",
@@ -853,7 +853,12 @@ class OfflinePatrolJobService:
                             "period_role": role,
                         },
                     )
-                self._upsert_device_bindings(job_id, role, previews[role])
+                self._upsert_device_bindings(
+                    job_id,
+                    role,
+                    previews[role],
+                    match_inventory=purpose == "offline_patrol",
+                )
 
             previews, output_review_items, output_dispositions = (
                 _apply_output_dispositions(
@@ -2415,7 +2420,14 @@ class OfflinePatrolJobService:
                 count += 1
         return count, total
 
-    def _upsert_device_bindings(self, job_id: str, role: str, preview: dict[str, Any]) -> None:
+    def _upsert_device_bindings(
+        self,
+        job_id: str,
+        role: str,
+        preview: dict[str, Any],
+        *,
+        match_inventory: bool = True,
+    ) -> None:
         devices: dict[str, dict[str, Any]] = {}
         for item in preview.get("files") or []:
             external_id = str(item.get("device_id") or "").strip()
@@ -2429,10 +2441,14 @@ class OfflinePatrolJobService:
             inventory = db.query(NetworkDevice).filter(NetworkDevice.status == "active").all()
             for external_id, identity in devices.items():
                 ip = str(identity.get("management_ip") or "").strip()
-                matches = _rank_inventory_matches(
-                    inventory,
-                    device_name=identity["device_name"],
-                    management_ip=ip,
+                matches = (
+                    _rank_inventory_matches(
+                        inventory,
+                        device_name=identity["device_name"],
+                        management_ip=ip,
+                    )
+                    if match_inventory
+                    else []
                 )
                 existing = (
                     db.query(OfflinePatrolDeviceBindingRecord)
@@ -2445,7 +2461,10 @@ class OfflinePatrolJobService:
                 )
                 if existing and existing.match_status in {"confirmed", "external"}:
                     continue
-                if len(matches) == 1:
+                if not match_inventory:
+                    confidence, reason = 1.0, "rule_asset_sample_identity"
+                    status, inventory_id = "external", None
+                elif len(matches) == 1:
                     candidate, confidence, reason = matches[0]
                     status, inventory_id = "suggested", candidate.id
                 elif matches:

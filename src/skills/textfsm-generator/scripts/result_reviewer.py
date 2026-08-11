@@ -286,11 +286,13 @@ TextFSM Value List fields:
 Objective field inventory evidence:
 {json.dumps(field_inventory, ensure_ascii=True, indent=2)}
 
-The final runtime consumes ParserSpec field names. If `aligned` is false, the
-candidate is not production-compatible: set `passed` to false and report the
-specific missing or extra names. Target `template` when source labels clearly
-map the template fields to ParserSpec names; target `parser_spec` only when the
-CLI proves the ParserSpec field itself is semantically wrong.
+Prefer the approved ParserSpec/check-item vocabulary whenever the meaning and unit
+are the same. If `aligned` is false, compare both inventories with the CLI instead
+of treating the generated ParserSpec as ground truth. Reject only when the candidate
+omits operationally valuable evidence, uses ambiguous names, or assigns a wrong
+meaning/unit. If the parsed table is faithful and only the generated ParserSpec is
+wrong, keep the candidate eligible for human review and target the diagnostic at
+`parser_spec`.
 
 Parsed-result representation contract:
 - A field declared with TextFSM `Value List` is represented as a native JSON array.

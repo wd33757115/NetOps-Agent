@@ -202,6 +202,35 @@ def _compile_approved_static_policy_constraints(
     return output
 
 
+def _compile_directional_threshold_keys(candidate: dict[str, Any]) -> dict[str, Any]:
+    """Normalize one model-proposed threshold into the runtime role namespace."""
+
+    output = dict(candidate)
+    thresholds = dict(output.get("thresholds") or {})
+    if not thresholds:
+        return output
+    compare_mode = str(output.get("compare_mode") or "").strip()
+    expected_roles = (
+        {"low", "critical_low"}
+        if compare_mode == "threshold_low_and_deadband"
+        else {"high", "critical_high"}
+        if compare_mode == "threshold_and_deadband"
+        else set()
+    )
+    if not expected_roles or expected_roles.intersection(thresholds):
+        return output
+    numeric_thresholds = [
+        value
+        for value in thresholds.values()
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+    ]
+    if len(numeric_thresholds) != 1:
+        return output
+    canonical_role = "low" if "low" in expected_roles else "high"
+    output["thresholds"] = {canonical_role: numeric_thresholds[0]}
+    return output
+
+
 def _validate_policy_constraints(policy: Any, constraints: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     allowed_modes = {str(item) for item in constraints.get("allowed_compare_modes") or []}
@@ -541,6 +570,9 @@ def run_change_policy_generation(params: dict[str, Any]) -> dict[str, Any]:
             compiled_candidate = _compile_approved_static_policy_constraints(
                 compiled_candidate,
                 policy_constraints,
+            )
+            compiled_candidate = _compile_directional_threshold_keys(
+                compiled_candidate
             )
             compiled_candidate["dimension_selector"] = dimension_selector
             policy = policy_from_dict(compiled_candidate)

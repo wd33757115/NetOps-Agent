@@ -15,25 +15,6 @@ interface ParserPageFixtures {
   runtimeAssembly?: Record<string, unknown>
 }
 
-const emptyProductionPage = {
-  items: [],
-  page: 1,
-  page_size: 25,
-  total: 0,
-  page_count: 0,
-  summary: {
-    total: 0,
-    action_required: 0,
-    in_progress: 0,
-    awaiting_approval: 0,
-    published: 0,
-    not_applicable: 0,
-    exception: 0,
-    by_bucket: {},
-    by_status: {},
-  },
-}
-
 const emptyRuntimeHealth = {
   items: [],
   page: 1,
@@ -54,30 +35,6 @@ const emptyRuntimeHealth = {
   },
 }
 
-const automationControl = {
-  settings: {
-    mode: 'disabled',
-    max_concurrency: 1,
-    max_generation_attempts: 3,
-    stale_run_seconds: 3600,
-    retry_delay_seconds: 300,
-    min_period_count: 2,
-    min_device_count: 2,
-    min_record_count: 10,
-    max_estimated_daily_events: 500,
-    allow_critical: false,
-    last_run: {},
-  },
-  scheduler: {
-    status: 'ok',
-    recorded_at: '2026-07-29T10:00:00Z',
-    age_seconds: 5,
-    worker_id: 'celery@e2e',
-  },
-  active_generation_runs: 0,
-  command_units: {},
-}
-
 async function authenticatedParserPage(
   page: Page,
   fixtures: ParserPageFixtures = {},
@@ -96,12 +53,8 @@ async function authenticatedParserPage(
       await route.fulfill({ json: admin })
       return
     }
-    if (path.endsWith('/parser/asset-production/check-items/')) {
-      await route.fulfill({ json: emptyProductionPage })
-      return
-    }
-    if (path.endsWith('/parser/asset-production/automation-control/')) {
-      await route.fulfill({ json: automationControl })
+    if (path.endsWith('/parser/check-items/')) {
+      await route.fulfill({ json: { items: [], total: 0, limit: 25, offset: 0 } })
       return
     }
     if (path.endsWith('/parser/coverage/')) {
@@ -208,9 +161,9 @@ test('loads product workspaces on demand without page overflow', async ({ page }
   const requests = await authenticatedParserPage(page)
 
   await expect.poll(
-    () => requests.some((path) => path.endsWith('/parser/asset-production/check-items/')),
+    () => requests.some((path) => path.endsWith('/parser/check-items/')),
   ).toBe(true)
-  expect(requests.some((path) => path.endsWith('/parser/templates/'))).toBe(false)
+  expect(requests.some((path) => path.includes('/parser/asset-production/'))).toBe(false)
   expect(requests.some((path) => path.endsWith('/parser/approval-audit/'))).toBe(false)
 
   await page.getByRole('button', { name: '已发布资产' }).click()

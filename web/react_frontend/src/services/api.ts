@@ -994,6 +994,13 @@ export interface OfflineCommandAssetUnit {
 }
 
 export interface OfflineCommandAssetUnitDetail extends OfflineCommandAssetUnit {
+  not_applicable_confirmation?: {
+    eligible: boolean
+    confirmed: boolean
+    evidence_count: number
+    classification?: 'valid_empty' | null
+    blockers: string[]
+  }
   stages: OfflineCommandAssetUnitStage[]
   evidence: Array<{
     snapshot_id: string
@@ -1025,200 +1032,6 @@ export interface OfflineCommandAssetUnitPage {
   total: number
   page_count: number
   summary: OfflineCommandAssetUnitSummary
-}
-
-export type RuleAssetGovernanceBucket =
-  | 'action_required'
-  | 'in_progress'
-  | 'awaiting_approval'
-  | 'published'
-  | 'not_applicable'
-  | 'exception'
-
-export type RuleAssetGovernanceStatus =
-  | 'preparing'
-  | 'ready_to_generate'
-  | 'generating'
-  | 'engineering_review'
-  | 'release_approval'
-  | 'published'
-  | 'not_applicable'
-  | 'blocked'
-  | 'failed'
-
-export type RuleAssetComponentStatus =
-  | 'not_started'
-  | 'ready_to_generate'
-  | 'generating'
-  | 'engineering_review'
-  | 'published'
-  | 'not_applicable'
-  | 'blocked'
-  | 'failed'
-
-export interface RuleAssetProductionUnit extends OfflineCommandAssetUnit {
-  governance_status: RuleAssetGovernanceStatus
-  governance_bucket: RuleAssetGovernanceBucket
-  component_statuses: {
-    parser: RuleAssetComponentStatus
-    contract: RuleAssetComponentStatus
-    policy: RuleAssetComponentStatus
-    event: RuleAssetComponentStatus
-  }
-  source_job: {
-    id: string
-    name: string
-    status: string
-    created_at?: string | null
-  }
-}
-
-export interface RuleAssetProductionUnitDetail
-  extends OfflineCommandAssetUnitDetail, RuleAssetProductionUnit {}
-
-export interface RuleAssetProductionSummary {
-  total: number
-  action_required: number
-  in_progress: number
-  awaiting_approval: number
-  published: number
-  not_applicable: number
-  exception: number
-  by_bucket: Record<string, number>
-  by_status: Record<string, number>
-}
-
-export interface RuleAssetProductionUnitPage {
-  items: RuleAssetProductionUnit[]
-  page: number
-  page_size: number
-  total: number
-  page_count: number
-  summary: RuleAssetProductionSummary
-}
-
-export interface RuleAssetCheckItemComponentStatuses {
-  identity: RuleAssetComponentStatus
-  parser: RuleAssetComponentStatus
-  contract: RuleAssetComponentStatus
-  current_state: RuleAssetComponentStatus
-  policy: RuleAssetComponentStatus
-  event: RuleAssetComponentStatus
-  comparison: RuleAssetComponentStatus
-  runtime_bundle: RuleAssetComponentStatus
-}
-
-export interface RuleAssetCheckItemProductionUnit {
-  id: string
-  check_item_id?: string | null
-  check_item_version_id?: string | null
-  name: string
-  display_name?: string
-  category: string
-  description: string
-  display_description?: string
-  result_mode?: string | null
-  assessment_mode?: string | null
-  asset_requirement_profile?: AssetRequirementProfile
-  governance_status: RuleAssetGovernanceStatus
-  governance_bucket: RuleAssetGovernanceBucket
-  current_stage: string
-  current_stage_label: string
-  progress_percent: number
-  sample_count: number
-  evidence_device_count: number
-  output_signature_count: number
-  blocker_count: number
-  implementation_count: number
-  command_count: number
-  vendors: string[]
-  component_statuses: RuleAssetCheckItemComponentStatuses
-  runtime_readiness?: {
-    operationally_ready: boolean
-    active_bundle?: Record<string, unknown> | null
-    blockers: RuntimeBundleAssemblyIssue[]
-    warnings: RuntimeBundleAssemblyIssue[]
-    preview_digest?: string | null
-  }
-  next_action?: OfflineRuleAssetPipelineAction
-  updated_at?: string | null
-  coverage: {
-    total: number
-    published: number
-    action_required: number
-    in_progress: number
-    awaiting_approval: number
-    exception: number
-  }
-  implementations: Array<Omit<RuleAssetProductionUnit, 'component_statuses'> & {
-    component_statuses: RuleAssetCheckItemComponentStatuses
-    implementation_id?: string | null
-    implementation_version_id?: string | null
-    implementation_name?: string | null
-    mapping_status: 'catalog_resolved' | 'unclassified' | 'not_required'
-    source_governance_status?: RuleAssetGovernanceStatus
-    source_governance_bucket?: RuleAssetGovernanceBucket
-    source_component_statuses?: Partial<
-      RuleAssetProductionUnit['component_statuses']
-    >
-    asset_requirement_profile?: AssetRequirementProfile
-    runtime_readiness?: {
-      operationally_ready: boolean
-      active_bundle?: Record<string, unknown> | null
-      blockers: RuntimeBundleAssemblyIssue[]
-      warnings: RuntimeBundleAssemblyIssue[]
-      preview_digest?: string | null
-    }
-  }>
-}
-
-export interface RuleAssetCheckItemProductionUnitPage {
-  items: RuleAssetCheckItemProductionUnit[]
-  page: number
-  page_size: number
-  total: number
-  page_count: number
-  summary: RuleAssetProductionSummary & { unclassified?: number }
-}
-
-export type RuleAssetAutomationMode = 'disabled' | 'generate_only'
-
-export interface RuleAssetAutomationSettings {
-  mode: RuleAssetAutomationMode
-  max_concurrency: number
-  max_generation_attempts: number
-  retry_delay_seconds: number
-  stale_run_seconds: number
-  min_period_count: number
-  min_device_count: number
-  min_record_count: number
-  max_estimated_daily_events: number
-  allow_critical: boolean
-  updated_at?: string | null
-  updated_by?: string | null
-  last_run?: {
-    ran_at?: string | null
-    success?: boolean
-    mode?: RuleAssetAutomationMode
-    dispatched_count?: number
-    published_count?: number
-    review_required_count?: number
-    failed_count?: number
-    summary?: string
-  }
-}
-
-export interface RuleAssetAutomationControl {
-  settings: RuleAssetAutomationSettings
-  scheduler: {
-    status: 'ok' | 'missing' | 'stale' | 'invalid' | 'unavailable'
-    recorded_at?: string | null
-    age_seconds?: number | null
-    worker_id?: string | null
-    error?: string | null
-  }
-  active_generation_runs: number
-  command_units: Record<string, number>
 }
 
 export interface OfflinePatrolReportRisk {
@@ -1752,314 +1565,6 @@ export interface RuntimeBundleAssemblyPayload {
   comparison_profile_version_id?: string | null
 }
 
-export type AssessmentPolicyRole =
-  | 'high'
-  | 'critical_high'
-  | 'low'
-  | 'critical_low'
-  | 'expected_state'
-  | 'applicability'
-
-export type AssessmentPolicyVersionStatus =
-  | 'draft'
-  | 'pending_review'
-  | 'pending_approval'
-  | 'approved'
-  | 'rejected'
-  | 'superseded'
-  | 'revoked'
-
-export type AssessmentPolicyGovernanceStatus =
-  | AssessmentPolicyVersionStatus
-  | 'bound_active'
-  | 'approved_unbound'
-  | 'empty'
-
-export interface AssessmentPolicyDecision {
-  id: string
-  policy_version_id: string
-  stage: 'submission' | 'semantic_review' | 'publication' | 'revocation'
-  decision: 'submitted' | 'approved' | 'rejected' | 'revoked'
-  actor: string
-  reason: string
-  policy_digest: string
-  request_digest: string
-  created_at: string
-}
-
-export interface AssessmentPolicyBinding {
-  id: string
-  profile_id: string
-  policy_version_id: string
-  check_item_id: string
-  observation_type: string
-  policy_role: AssessmentPolicyRole
-  binding_type: 'inventory_profile' | 'scope_override' | 'catalog_default'
-  scope_json: Record<string, unknown>
-  scope_digest: string
-  binding_digest: string
-  valid_from?: string | null
-  valid_until?: string | null
-  status: 'active' | 'ended' | 'revoked'
-  created_by: string
-  reason: string
-  ended_by?: string | null
-  end_reason?: string | null
-  ended_at?: string | null
-  created_at: string
-  updated_at: string
-}
-
-export interface AssessmentPolicyVersionSummary {
-  id: string
-  profile_id: string
-  check_item_version_id: string
-  version: number
-  digest: string
-  status: AssessmentPolicyVersionStatus
-  created_by: string
-  valid_from?: string | null
-  valid_until?: string | null
-  submitted_at?: string | null
-  semantic_reviewed_by?: string | null
-  semantic_review_reason?: string | null
-  semantic_reviewed_at?: string | null
-  approved_by?: string | null
-  approval_reason?: string | null
-  approved_at?: string | null
-  revoked_by?: string | null
-  revoke_reason?: string | null
-  revoked_at?: string | null
-  created_at: string
-  updated_at: string
-}
-
-export interface AssessmentPolicyProfile {
-  id: string
-  check_item_id: string
-  observation_type: string
-  policy_role: AssessmentPolicyRole
-  name: string
-  description?: string | null
-  status: 'draft' | 'active' | 'deprecated'
-  current_version: number
-  created_by: string
-  created_at: string
-  updated_at: string
-  latest_version?: AssessmentPolicyVersionSummary | null
-  latest_version_status: AssessmentPolicyVersionStatus | 'empty'
-  governance_status: AssessmentPolicyGovernanceStatus
-  production_status: 'bound_active' | 'not_bound'
-  active_binding_count: number
-}
-
-export interface AssessmentPolicyVersion extends AssessmentPolicyVersionSummary {
-  policy_json: Record<string, unknown>
-  evidence_refs_json: string[]
-  provenance_json: Record<string, unknown>
-  profile: Omit<AssessmentPolicyProfile,
-    'latest_version' | 'latest_version_status' | 'governance_status'
-    | 'production_status' | 'active_binding_count'>
-  decisions: AssessmentPolicyDecision[]
-  bindings: AssessmentPolicyBinding[]
-  capabilities: {
-    can_submit: boolean
-    can_semantic_review: boolean
-    can_publication_review: boolean
-    can_bind: boolean
-    can_revoke: boolean
-  }
-}
-
-export interface AssessmentPolicyProfilePage {
-  items: AssessmentPolicyProfile[]
-  page: number
-  page_size: number
-  total: number
-  page_count: number
-}
-
-export interface AssessmentPolicyVersionPage {
-  profile: Record<string, unknown>
-  items: AssessmentPolicyVersionSummary[]
-  page: number
-  page_size: number
-  total: number
-  page_count: number
-}
-
-export interface AssessmentPolicyVersionPayload {
-  check_item_id: string
-  check_item_version_id: string
-  observation_type: string
-  policy_role: AssessmentPolicyRole
-  name: string
-  description?: string
-  profile_id?: string
-  policy: Record<string, unknown>
-  evidence_refs: string[]
-  provenance?: Record<string, unknown>
-  valid_from?: string
-  valid_until?: string
-}
-
-export interface AssessmentPolicyResolutionPreview {
-  snapshot: Record<string, any>
-  resolution?: {
-    status: string
-    blocker_code?: string | null
-    effective_condition: Record<string, unknown>
-    should_evaluate: boolean
-    assessment_basis: Record<string, any>
-  } | null
-}
-
-export interface AssessmentPolicyImpactPreview {
-  schema_version: 'assessment-policy-impact-preview/v1'
-  policy_version_id: string
-  policy_version_digest: string
-  check_item_id: string
-  check_item_version_id: string
-  observation_type: string
-  policy_role: AssessmentPolicyRole
-  binding_type: AssessmentPolicyBinding['binding_type']
-  proposed_scope: Record<string, unknown>
-  target_selector: Record<string, unknown>
-  policy_effective_at: string
-  summary: {
-    target_count: number
-    counts: Record<string, number>
-    blocking_count: number
-  }
-  items: Array<{
-    device_id: string
-    device_name: string
-    management_ip: string
-    vendor: string
-    model: string
-    site: string
-    role: string
-    impact_status: string
-    reason_codes: string[]
-    candidate_matched: boolean
-    selected_policy?: Record<string, unknown> | null
-    snapshot_digest: string
-  }>
-  page: number
-  page_size: number
-  total: number
-  page_count: number
-  digest: string
-}
-
-export type AssessmentPolicyMigrationStatus =
-  | 'inventoried'
-  | 'draft_created'
-  | 'review_required'
-  | 'ignored'
-  | 'cutover'
-  | 'retired'
-
-export interface AssessmentPolicyMigrationSource {
-  id: string
-  source_type: string
-  source_locator: string
-  source_digest: string
-  check_item_id?: string | null
-  check_item_version_id?: string | null
-  device_id?: string | null
-  observation_type?: string | null
-  policy_role?: AssessmentPolicyRole | null
-  binding_type?: string | null
-  scope_json: Record<string, unknown>
-  source_payload_json: Record<string, unknown>
-  conversion_status: AssessmentPolicyMigrationStatus
-  reason_codes_json: string[]
-  inventoried_by: string
-  draft_policy_version_id?: string | null
-  first_seen_at: string
-  last_seen_at: string
-  converted_at?: string | null
-  created_at: string
-  updated_at: string
-}
-
-export interface AssessmentPolicyMigrationSourcePage {
-  items: AssessmentPolicyMigrationSource[]
-  page: number
-  page_size: number
-  total: number
-  page_count: number
-}
-
-export interface AssessmentPolicyMigrationInventoryResult {
-  schema_version: 'assessment-policy-migration-inventory/v1'
-  touched_source_ids: string[]
-  counts: Record<string, number>
-  execution_scan: {
-    enabled: boolean
-    page_size: number
-    next_execution_id?: string | null
-    complete: boolean
-  }
-}
-
-export interface AssessmentPolicyShadowResult {
-  id: string
-  input_digest: string
-  check_item_id: string
-  check_item_version_id: string
-  device_id: string
-  observation_type: string
-  rule_version_id?: string | null
-  legacy_snapshot_digest: string
-  governed_snapshot_digest: string
-  legacy_result_json: Record<string, any>
-  governed_result_json: Record<string, any>
-  difference_json: Record<string, any>
-  comparison_status: 'matched' | 'different' | 'governed_missing' | 'legacy_missing' | 'error'
-  created_by: string
-  created_at: string
-  legacy_snapshot?: Record<string, any>
-  governed_snapshot?: Record<string, any>
-}
-
-export interface AssessmentPolicyShadowResultPage {
-  items: AssessmentPolicyShadowResult[]
-  page: number
-  page_size: number
-  total: number
-  page_count: number
-}
-
-export interface AssessmentPolicyCutover {
-  id: string
-  check_item_id: string
-  check_item_version_id: string
-  device_id: string
-  resolver_mode: 'legacy_compat' | 'governed_only'
-  status: 'active' | 'superseded'
-  binding_ids_json: string[]
-  shadow_result_ids_json: string[]
-  evidence_digest: string
-  request_digest: string
-  created_by: string
-  reason: string
-  supersedes_id?: string | null
-  superseded_by_id?: string | null
-  superseded_at?: string | null
-  created_at: string
-  idempotent_replay?: boolean
-}
-
-export interface AssessmentPolicyCutoverPage {
-  items: AssessmentPolicyCutover[]
-  page: number
-  page_size: number
-  total: number
-  page_count: number
-}
-
 export type RolloutCampaignStatus =
   | 'draft'
   | 'target_frozen'
@@ -2447,6 +1952,7 @@ export interface ParserCheckItem {
     collector: string
     parser_requirement: string
     template_scope?: string | null
+    adapter_spec?: Record<string, unknown>
     output_quality_policy: Record<string, unknown>
     selection_priority: number
     status: string
@@ -2465,6 +1971,7 @@ export interface CheckItemCatalogImplementationCandidate {
   collector: string
   parser_requirement: 'structured' | 'normalized_diff' | 'hash_only' | 'evidence_only'
   template_scope?: string | null
+  adapter_spec?: Record<string, unknown>
   selection_priority: number
   output_quality_policy: Record<string, unknown>
   status: string
@@ -2596,6 +2103,7 @@ export interface CheckItemCatalogImplementationDraftInput {
   collector: string
   parser_requirement: 'structured' | 'normalized_diff' | 'hash_only' | 'evidence_only'
   template_scope?: string | null
+  adapter_spec?: Record<string, unknown>
   output_quality_policy?: Record<string, unknown>
   selection_priority: number
   reason?: string
@@ -3680,81 +3188,6 @@ export const skillApi = {
 }
 
 export const parserApi = {
-  assetProductionCheckItems: async (params: {
-    page?: number
-    page_size?: number
-    search?: string
-    bucket?: RuleAssetGovernanceBucket
-    governance_status?: RuleAssetGovernanceStatus
-    stage?: string
-    vendor?: string
-    model?: string
-    asset_mode?: string
-    offline_job_id?: string
-  } = {}): Promise<RuleAssetCheckItemProductionUnitPage> => {
-    const response = await api.get<RuleAssetCheckItemProductionUnitPage>(
-      '/parser/asset-production/check-items/',
-      { params },
-    )
-    return response.data
-  },
-  assetProductionUnits: async (params: {
-    page?: number
-    page_size?: number
-    search?: string
-    bucket?: RuleAssetGovernanceBucket
-    governance_status?: RuleAssetGovernanceStatus
-    stage?: string
-    vendor?: string
-    model?: string
-    asset_mode?: string
-    offline_job_id?: string
-  } = {}): Promise<RuleAssetProductionUnitPage> => {
-    const response = await api.get<RuleAssetProductionUnitPage>(
-      '/parser/asset-production/units/',
-      { params },
-    )
-    return response.data
-  },
-  assetProductionUnit: async (unitId: string, params: {
-    evidence_page?: number
-    evidence_page_size?: number
-  } = {}): Promise<RuleAssetProductionUnitDetail> => {
-    const response = await api.get<RuleAssetProductionUnitDetail>(
-      `/parser/asset-production/units/${unitId}/`,
-      { params },
-    )
-    return response.data
-  },
-  ruleAssetAutomationControl: async (): Promise<RuleAssetAutomationControl> => {
-    const response = await api.get<RuleAssetAutomationControl>(
-      '/parser/asset-production/automation-control/',
-    )
-    return response.data
-  },
-  updateRuleAssetAutomationControl: async (
-    data: RuleAssetAutomationSettings & { reason: string },
-  ): Promise<RuleAssetAutomationControl & { success: boolean }> => {
-    const response = await api.post<RuleAssetAutomationControl & { success: boolean }>(
-      '/parser/asset-production/automation-control/',
-      data,
-    )
-    return response.data
-  },
-  runRuleAssetAutomation: async (): Promise<{
-    success: boolean
-    mode: RuleAssetAutomationMode
-    dispatched_count: number
-    published_count: number
-    review_required_count: number
-    failed_count: number
-    summary?: string
-  }> => {
-    const response = await api.post(
-      '/parser/asset-production/automation-control/run/',
-    )
-    return response.data
-  },
   workItems: async (params: ParserPageParams = {}): Promise<ParserPage<ParserWorkItem>> => {
     const response = await api.get<ParserPage<ParserWorkItem>>('/parser/work-items/', { params })
     return response.data
@@ -3877,280 +3310,6 @@ export const parserApi = {
   },
   runtimeAssetHealth: async (): Promise<ParserRuntimeRuleAssetBundle> => {
     const response = await api.get<ParserRuntimeRuleAssetBundle>('/parser/runtime-assets/health/')
-    return response.data
-  },
-  assessmentPolicies: async (params: {
-    page?: number
-    page_size?: number
-    search?: string
-    check_item_id?: string
-    observation_type?: string
-    policy_role?: AssessmentPolicyRole
-    status?: AssessmentPolicyGovernanceStatus | 'profile_active' | 'profile_deprecated'
-  } = {}): Promise<AssessmentPolicyProfilePage> => {
-    const response = await api.get<AssessmentPolicyProfilePage>(
-      '/parser/assessment-policies/',
-      { params },
-    )
-    return response.data
-  },
-  assessmentPolicyVersions: async (
-    profileId: string,
-    params: { page?: number; page_size?: number; status?: AssessmentPolicyVersionStatus } = {},
-  ): Promise<AssessmentPolicyVersionPage> => {
-    const response = await api.get<AssessmentPolicyVersionPage>(
-      `/parser/assessment-policies/profiles/${profileId}/versions/`,
-      { params },
-    )
-    return response.data
-  },
-  assessmentPolicyVersion: async (versionId: string): Promise<AssessmentPolicyVersion> => {
-    const response = await api.get<AssessmentPolicyVersion>(
-      `/parser/assessment-policies/versions/${versionId}/`,
-    )
-    return response.data
-  },
-  createAssessmentPolicyVersion: async (
-    data: AssessmentPolicyVersionPayload,
-    idempotencyKey: string,
-  ): Promise<AssessmentPolicyVersion> => {
-    const response = await api.post<AssessmentPolicyVersion>(
-      '/parser/assessment-policies/versions/',
-      data,
-      { headers: { 'Idempotency-Key': idempotencyKey } },
-    )
-    return response.data
-  },
-  submitAssessmentPolicyVersion: async (
-    versionId: string,
-    reason: string,
-    idempotencyKey: string,
-  ): Promise<AssessmentPolicyVersion> => {
-    const response = await api.post<AssessmentPolicyVersion>(
-      `/parser/assessment-policies/versions/${versionId}/submit/`,
-      { reason },
-      { headers: { 'Idempotency-Key': idempotencyKey } },
-    )
-    return response.data
-  },
-  reviewAssessmentPolicySemantics: async (
-    versionId: string,
-    decision: 'approved' | 'rejected',
-    reason: string,
-    idempotencyKey: string,
-  ): Promise<AssessmentPolicyVersion> => {
-    const response = await api.post<AssessmentPolicyVersion>(
-      `/parser/assessment-policies/versions/${versionId}/semantic-review/`,
-      { decision, reason },
-      { headers: { 'Idempotency-Key': idempotencyKey } },
-    )
-    return response.data
-  },
-  reviewAssessmentPolicyPublication: async (
-    versionId: string,
-    decision: 'approved' | 'rejected',
-    reason: string,
-    idempotencyKey: string,
-  ): Promise<AssessmentPolicyVersion> => {
-    const response = await api.post<AssessmentPolicyVersion>(
-      `/parser/assessment-policies/versions/${versionId}/publication-review/`,
-      { decision, reason },
-      { headers: { 'Idempotency-Key': idempotencyKey } },
-    )
-    return response.data
-  },
-  revokeAssessmentPolicyVersion: async (
-    versionId: string,
-    reason: string,
-    idempotencyKey: string,
-  ): Promise<AssessmentPolicyVersion> => {
-    const response = await api.post<AssessmentPolicyVersion>(
-      `/parser/assessment-policies/versions/${versionId}/revoke/`,
-      { reason },
-      { headers: { 'Idempotency-Key': idempotencyKey } },
-    )
-    return response.data
-  },
-  bindAssessmentPolicyVersion: async (
-    versionId: string,
-    data: {
-      binding_type: AssessmentPolicyBinding['binding_type']
-      scope: Record<string, unknown>
-      reason: string
-      valid_from?: string
-      valid_until?: string
-      replaces_binding_id?: string
-    },
-    idempotencyKey: string,
-  ): Promise<AssessmentPolicyBinding> => {
-    const response = await api.post<AssessmentPolicyBinding>(
-      `/parser/assessment-policies/versions/${versionId}/bindings/`,
-      data,
-      { headers: { 'Idempotency-Key': idempotencyKey } },
-    )
-    return response.data
-  },
-  endAssessmentPolicyBinding: async (
-    bindingId: string,
-    reason: string,
-    idempotencyKey: string,
-  ): Promise<AssessmentPolicyBinding> => {
-    const response = await api.post<AssessmentPolicyBinding>(
-      `/parser/assessment-policy-bindings/${bindingId}/end/`,
-      { reason },
-      { headers: { 'Idempotency-Key': idempotencyKey } },
-    )
-    return response.data
-  },
-  previewAssessmentPolicyResolution: async (data: {
-    check_item_version_id: string
-    device: Record<string, unknown>
-    observation?: Record<string, unknown>
-    rule?: Record<string, unknown>
-    policy_effective_at?: string
-    include_legacy?: boolean
-    runtime_bundle_version_id?: string
-    runtime_bundle_digest?: string
-  }): Promise<AssessmentPolicyResolutionPreview> => {
-    const response = await api.post<AssessmentPolicyResolutionPreview>(
-      '/parser/assessment-policies/resolution-preview/',
-      data,
-    )
-    return response.data
-  },
-  previewAssessmentPolicyImpact: async (
-    versionId: string,
-    data: {
-      binding_type: AssessmentPolicyBinding['binding_type']
-      proposed_scope?: Record<string, unknown>
-      target_selector?: Record<string, unknown>
-      policy_effective_at?: string
-      page?: number
-      page_size?: number
-    },
-  ): Promise<AssessmentPolicyImpactPreview> => {
-    const response = await api.post<AssessmentPolicyImpactPreview>(
-      `/parser/assessment-policies/versions/${versionId}/impact-preview/`,
-      data,
-    )
-    return response.data
-  },
-  inventoryLegacyAssessmentPolicies: async (
-    data: {
-      check_item_ids?: string[]
-      include_execution_snapshots?: boolean
-      after_execution_id?: string
-      execution_page_size?: number
-    },
-    idempotencyKey: string,
-  ): Promise<AssessmentPolicyMigrationInventoryResult> => {
-    const response = await api.post<AssessmentPolicyMigrationInventoryResult>(
-      '/parser/assessment-policies/migration/inventory/',
-      data,
-      { headers: { 'Idempotency-Key': idempotencyKey } },
-    )
-    return response.data
-  },
-  assessmentPolicyMigrationSources: async (params: {
-    page?: number
-    page_size?: number
-    search?: string
-    conversion_status?: AssessmentPolicyMigrationStatus
-    source_type?: string
-    check_item_id?: string
-  } = {}): Promise<AssessmentPolicyMigrationSourcePage> => {
-    const response = await api.get<AssessmentPolicyMigrationSourcePage>(
-      '/parser/assessment-policies/migration/sources/',
-      { params },
-    )
-    return response.data
-  },
-  createAssessmentPolicyMigrationDraft: async (
-    sourceId: string,
-    idempotencyKey: string,
-  ): Promise<{
-    source: AssessmentPolicyMigrationSource
-    draft?: AssessmentPolicyVersion | null
-  }> => {
-    const response = await api.post(
-      `/parser/assessment-policies/migration/sources/${sourceId}/draft/`,
-      {},
-      { headers: { 'Idempotency-Key': idempotencyKey } },
-    )
-    return response.data
-  },
-  compareAssessmentPolicyShadow: async (
-    data: {
-      check_item_version_id: string
-      device: Record<string, unknown>
-      observation: Record<string, unknown>
-      rule: Record<string, unknown>
-      policy_effective_at: string
-      runtime_bundle_version_id?: string
-      runtime_bundle_digest?: string
-    },
-    idempotencyKey: string,
-  ): Promise<AssessmentPolicyShadowResult> => {
-    const response = await api.post<AssessmentPolicyShadowResult>(
-      '/parser/assessment-policies/migration/shadow-compare/',
-      data,
-      { headers: { 'Idempotency-Key': idempotencyKey } },
-    )
-    return response.data
-  },
-  assessmentPolicyShadowResults: async (params: {
-    page?: number
-    page_size?: number
-    comparison_status?: AssessmentPolicyShadowResult['comparison_status']
-    check_item_id?: string
-    device_id?: string
-  } = {}): Promise<AssessmentPolicyShadowResultPage> => {
-    const response = await api.get<AssessmentPolicyShadowResultPage>(
-      '/parser/assessment-policies/migration/shadow-results/',
-      { params },
-    )
-    return response.data
-  },
-  activateAssessmentPolicyCutover: async (
-    data: {
-      check_item_version_id: string
-      device_id: string
-      shadow_result_ids: string[]
-      reason: string
-    },
-    idempotencyKey: string,
-  ): Promise<AssessmentPolicyCutover> => {
-    const response = await api.post<AssessmentPolicyCutover>(
-      '/parser/assessment-policies/migration/cutovers/',
-      data,
-      { headers: { 'Idempotency-Key': idempotencyKey } },
-    )
-    return response.data
-  },
-  rollbackAssessmentPolicyCutover: async (
-    cutoverId: string,
-    reason: string,
-    idempotencyKey: string,
-  ): Promise<AssessmentPolicyCutover> => {
-    const response = await api.post<AssessmentPolicyCutover>(
-      `/parser/assessment-policies/migration/cutovers/${cutoverId}/rollback/`,
-      { reason },
-      { headers: { 'Idempotency-Key': idempotencyKey } },
-    )
-    return response.data
-  },
-  assessmentPolicyCutovers: async (params: {
-    page?: number
-    page_size?: number
-    status?: AssessmentPolicyCutover['status']
-    resolver_mode?: AssessmentPolicyCutover['resolver_mode']
-    check_item_id?: string
-    device_id?: string
-  } = {}): Promise<AssessmentPolicyCutoverPage> => {
-    const response = await api.get<AssessmentPolicyCutoverPage>(
-      '/parser/assessment-policies/migration/cutovers/',
-      { params },
-    )
     return response.data
   },
   checkItemRuntimeBundleHealth: async (params: {
@@ -4423,9 +3582,12 @@ export const parserApi = {
     id: string,
     data: { parser_spec: Record<string, unknown>; confirmed: boolean; reason: string },
   ) => (await api.put(`/parser/jobs/${id}/spec/`, data)).data,
-  suggestJobSpec: async (id: string) => (
+  suggestJobSpec: async (id: string, revisionInstruction = '') => (
     await api.post(`/parser/jobs/${id}/suggest-spec/`, {
-      reason: 'Generate ParserSpec draft from sanitized samples',
+      reason: revisionInstruction.trim()
+        ? 'Engineer requested a natural-language ParserSpec revision'
+        : 'Generate ParserSpec draft from sanitized samples',
+      revision_instruction: revisionInstruction.trim() || undefined,
     })
   ).data,
   updateJobSampleRole: async (
@@ -4607,6 +3769,22 @@ export const parserApi = {
     await api.post<CheckItemCatalogChange>('/parser/catalog/implementations/drafts/', data, {
       headers: { 'Idempotency-Key': idempotencyKey },
     })
+  ).data,
+  previewCommandAdapter: async (data: {
+    adapter_spec: Record<string, unknown>
+    record_sets: Record<string, Array<Record<string, unknown>>>
+    device_id?: string
+    adapter_version_id?: string
+  }): Promise<{
+    success: boolean
+    batches: Array<{
+      check_item_id: string
+      quality_status: string
+      records: Array<Record<string, unknown>>
+      errors: string[]
+    }>
+  }> => (
+    await api.post('/parser/catalog/command-adapters/preview/', data)
   ).data,
   deleteCollectionImplementation: async (
     implementationId: string,
@@ -4827,6 +4005,16 @@ export const ruleAssetSourceApi = {
     await api.get<OfflineCommandAssetUnitDetail>(
       `${RULE_ASSET_SOURCE_JOBS_BASE}/${id}/command-asset-units/${unitId}/`,
       { params },
+    )
+  ).data,
+  confirmCommandAssetNotApplicable: async (
+    id: string,
+    unitId: string,
+    payload: { reason: string },
+  ): Promise<{ success: boolean }> => (
+    await api.post(
+      `${RULE_ASSET_SOURCE_JOBS_BASE}/${id}/command-asset-units/${unitId}/confirm-not-applicable/`,
+      payload,
     )
   ).data,
 }

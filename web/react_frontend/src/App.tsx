@@ -17,6 +17,7 @@ const StoragePage = React.lazy(() => import('./pages/StoragePage'))
 const UsersPage = React.lazy(() => import('./pages/UsersPage'))
 const LoginPage = React.lazy(() => import('./pages/LoginPage'))
 const DevicesPage = React.lazy(() => import('./pages/DevicesPage'))
+const RuleAssetSourceJobDetailPage = React.lazy(() => import('./pages/RuleAssetSourceJobDetailPage'))
 
 const pageFallback = (
   <div className="grok-page-loading" role="status" aria-label="页面加载中">
@@ -27,7 +28,7 @@ const pageFallback = (
 const App: React.FC = () => {
   return (
     <AuthProvider>
-      <BrowserRouter>
+      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Suspense fallback={pageFallback}>
           <Routes>
           <Route path="/login" element={<LoginPage />} />
@@ -42,6 +43,7 @@ const App: React.FC = () => {
             <Route index element={<Navigate to="/chat" replace />} />
             <Route path="chat" element={<ChatPage />} />
             <Route path="skills" element={<SkillsPage />} />
+            <Route path="skills/parser/source-jobs/:jobId" element={<RuleAssetSourceJobDetailPage />} />
             <Route path="skills/:section" element={<SkillsPage />} />
             <Route path="devices" element={<DevicesPage />} />
             <Route path="knowledge" element={<KnowledgePage />} />

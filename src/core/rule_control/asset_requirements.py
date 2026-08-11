@@ -144,7 +144,7 @@ def event_rule_role_errors(
         )
 
     event_types_by_observation: dict[str, set[str]] = defaultdict(set)
-    for role in change_roles:
+    for role in roles:
         event_type = str(role.get("event_type") or "").strip()
         if not event_type:
             continue
@@ -244,8 +244,25 @@ def evaluate_requirement_replay_gate(
                 "asset_requirement_profile_does_not_require_historical_replay"
             ),
         }
+    replay_data = dict(replay) if isinstance(replay, Mapping) else {}
+    active_equivalence = dict(replay_data.get("active_asset_equivalence") or {})
+    if (
+        replay_data.get("success") is True
+        and int(replay_data.get("collision_count") or 0) == 0
+        and active_equivalence.get("success") is True
+        and int(active_equivalence.get("change_policy_count") or 0) > 0
+        and int(active_equivalence.get("event_rule_count") or 0) > 0
+    ):
+        return {
+            "success": True,
+            "errors": [],
+            "skipped": True,
+            "reason": "all_candidate_rules_are_active_equivalents",
+            "mode": "active_asset_equivalence",
+            "active_equivalence": active_equivalence,
+        }
     return evaluate_historical_replay_gate(
-        dict(replay) if isinstance(replay, Mapping) else None,
+        replay_data or None,
         dict(context_gate) if isinstance(context_gate, Mapping) else None,
     )
 

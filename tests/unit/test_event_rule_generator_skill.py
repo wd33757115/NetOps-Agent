@@ -80,6 +80,57 @@ def test_fanout_scopes_current_state_only_requirement_to_one_observation():
     assert scoped["required_event_types_by_observation"] == {}
 
 
+def test_fanout_scopes_recovery_constraints_out_of_current_state_target():
+    module = _load_skill_module()
+    constraints = {
+        "role_event_types": {
+            "high": "CpuUtilizationHigh",
+            "high_recovery": "CpuUtilizationRecovered",
+        },
+        "required_event_types": [
+            "CpuUtilizationHigh",
+            "CpuUtilizationRecovered",
+        ],
+        "required_event_classes": {
+            "CpuUtilizationHigh": "fault",
+            "CpuUtilizationRecovered": "recovery",
+        },
+        "required_severities": {
+            "CpuUtilizationHigh": "warning",
+            "CpuUtilizationRecovered": "info",
+        },
+        "required_recovery_pairs": [
+            {
+                "fault": "CpuUtilizationHigh",
+                "recovery": "CpuUtilizationRecovered",
+            }
+        ],
+        "max_rule_count": 2,
+    }
+
+    scoped = module._scoped_event_constraints(
+        constraints,
+        target={"required_rule_roles": ["current_state"]},
+    )
+
+    assert scoped["role_event_types"] == {
+        "high": "CpuUtilizationHigh"
+    }
+    assert scoped["required_event_types"] == ["CpuUtilizationHigh"]
+    assert scoped["required_event_classes"] == {
+        "CpuUtilizationHigh": "fault"
+    }
+    assert scoped["required_severities"] == {
+        "CpuUtilizationHigh": "warning"
+    }
+    assert scoped["required_recovery_pairs"] == []
+    assert scoped["max_rule_count"] == 1
+    assert module._scoped_event_constraints(
+        constraints,
+        target={"required_rule_roles": ["current_state", "change_event"]},
+    ) == constraints
+
+
 def test_current_state_numeric_rule_does_not_require_recovery():
     module = _load_skill_module()
     result = module._validate_llm_rules(

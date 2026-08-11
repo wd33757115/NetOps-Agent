@@ -16,6 +16,7 @@ import {
   type ParserPage,
   type ParserTemplateItem,
 } from '../../../services/api'
+import ParserTemplateApprovalDrawer from './ParserTemplateApprovalDrawer'
 
 type PublishedAssetKind = 'parser' | 'contract' | 'policy' | 'event'
 type PublishedAsset =
@@ -70,7 +71,7 @@ const assetIdentity = (kind: PublishedAssetKind, asset: PublishedAsset) => {
       title: item.canonical_command,
       scope: `${item.vendor} / ${item.profile}`,
       version: `v${item.version}`,
-      source: '-',
+      source: item.source_job_id || '-',
       activatedAt: item.created_at,
     }
   }
@@ -160,9 +161,9 @@ const PublishedAssetsWorkspace: React.FC<PublishedAssetsWorkspaceProps> = ({
   )
 
   const selectedId = selected ? assetId(kind, selected) : ''
-  const templatePreviewQuery = useQuery(
-    ['published-template-preview', selectedId],
-    () => parserApi.preview(selectedId),
+  const templateComparisonQuery = useQuery(
+    ['published-template-comparison', selectedId],
+    () => parserApi.comparison(selectedId),
     { enabled: Boolean(selectedId && kind === 'parser') },
   )
 
@@ -269,15 +270,7 @@ const PublishedAssetsWorkspace: React.FC<PublishedAssetsWorkspaceProps> = ({
   ]
 
   const detailIdentity = selected ? assetIdentity(kind, selected) : null
-  const detailJson = selected
-    ? kind === 'parser'
-      ? {
-        validation: (selected as ParserTemplateItem).validation_json,
-        template_sha256: templatePreviewQuery.data?.sha256,
-        hash_valid: templatePreviewQuery.data?.hash_valid,
-      }
-      : selected
-    : null
+  const detailJson = selected && kind !== 'parser' ? selected : null
 
   return (
     <div className="published-assets-workspace">
@@ -387,44 +380,53 @@ const PublishedAssetsWorkspace: React.FC<PublishedAssetsWorkspaceProps> = ({
         }}
       />
 
-      <Drawer
-        rootClassName="product-detail-drawer"
-        title={`${kindMeta[kind].label}详情`}
-        open={Boolean(selected)}
-        width={isMobile ? '100vw' : 760}
-        destroyOnClose
-        onClose={() => setSelected(undefined)}
-      >
-        {selected && detailIdentity && (
-          <Space direction="vertical" size={16} style={{ width: '100%' }}>
-            <Descriptions bordered size="small" column={isMobile ? 1 : 2}>
-              <Descriptions.Item label="资产名称" span={isMobile ? 1 : 2}>
-                {detailIdentity.title}
-              </Descriptions.Item>
-              <Descriptions.Item label="适用范围">{detailIdentity.scope}</Descriptions.Item>
-              <Descriptions.Item label="版本">{detailIdentity.version}</Descriptions.Item>
-              <Descriptions.Item label="运行状态"><Tag className="published-asset-active">生产生效</Tag></Descriptions.Item>
-              <Descriptions.Item label="激活时间">{formatTime(detailIdentity.activatedAt)}</Descriptions.Item>
-              <Descriptions.Item label="来源任务" span={isMobile ? 1 : 2}>
-                <Typography.Text copyable={detailIdentity.source !== '-'}>{detailIdentity.source}</Typography.Text>
-              </Descriptions.Item>
-              <Descriptions.Item label="发布门禁" span={isMobile ? 1 : 2}>
-                {validationLabel(kind, selected)}
-              </Descriptions.Item>
-            </Descriptions>
-            {kind === 'parser' && (
-              <>
-                <Typography.Title level={5}>TextFSM 模板</Typography.Title>
-                <pre className="product-code-panel">
-                  {templatePreviewQuery.isLoading ? '正在读取模板…' : templatePreviewQuery.data?.content || '模板内容不可用'}
-                </pre>
-              </>
-            )}
-            <Typography.Title level={5}>治理元数据</Typography.Title>
-            <pre className="product-code-panel">{JSON.stringify(detailJson, null, 2)}</pre>
-          </Space>
-        )}
-      </Drawer>
+      {kind === 'parser' ? (
+        <ParserTemplateApprovalDrawer
+          open={Boolean(selected)}
+          readOnly
+          title="Parser 模板详情"
+          drawerWidth="min(1440px, 92vw)"
+          expandedEvidence
+          evidenceOnly
+          onClose={() => setSelected(undefined)}
+          isMobile={isMobile}
+          loading={templateComparisonQuery.isLoading}
+          comparison={templateComparisonQuery.data}
+          onReview={() => undefined}
+          onApprove={() => undefined}
+        />
+      ) : (
+        <Drawer
+          rootClassName="product-detail-drawer"
+          title={`${kindMeta[kind].label}详情`}
+          open={Boolean(selected)}
+          width={isMobile ? '100vw' : 760}
+          destroyOnClose
+          onClose={() => setSelected(undefined)}
+        >
+          {selected && detailIdentity && (
+            <Space direction="vertical" size={16} style={{ width: '100%' }}>
+              <Descriptions bordered size="small" column={isMobile ? 1 : 2}>
+                <Descriptions.Item label="资产名称" span={isMobile ? 1 : 2}>
+                  {detailIdentity.title}
+                </Descriptions.Item>
+                <Descriptions.Item label="适用范围">{detailIdentity.scope}</Descriptions.Item>
+                <Descriptions.Item label="版本">{detailIdentity.version}</Descriptions.Item>
+                <Descriptions.Item label="运行状态"><Tag className="published-asset-active">生产生效</Tag></Descriptions.Item>
+                <Descriptions.Item label="激活时间">{formatTime(detailIdentity.activatedAt)}</Descriptions.Item>
+                <Descriptions.Item label="来源任务" span={isMobile ? 1 : 2}>
+                  <Typography.Text copyable={detailIdentity.source !== '-'}>{detailIdentity.source}</Typography.Text>
+                </Descriptions.Item>
+                <Descriptions.Item label="发布门禁" span={isMobile ? 1 : 2}>
+                  {validationLabel(kind, selected)}
+                </Descriptions.Item>
+              </Descriptions>
+              <Typography.Title level={5}>治理元数据</Typography.Title>
+              <pre className="product-code-panel">{JSON.stringify(detailJson, null, 2)}</pre>
+            </Space>
+          )}
+        </Drawer>
+      )}
     </div>
   )
 }

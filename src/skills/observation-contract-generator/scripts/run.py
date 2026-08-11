@@ -610,6 +610,8 @@ def _recipe_field_match_score(field: str, canonical_name: str) -> int:
         return 2
     if len(actual) >= len(expected) and actual[-len(expected) :] == expected:
         return 1
+    if len(expected) > len(actual) and expected[-len(actual) :] == actual:
+        return 1
     return 0
 
 
@@ -637,7 +639,15 @@ def _resolve_recipe_binding(
     if best_score <= 0:
         return None
     matches = sorted(field for field, score in scores.items() if score == best_score)
-    return matches[0] if len(matches) == 1 else None
+    if len(matches) == 1:
+        return matches[0]
+    shortest_length = min(len(_semantic_field_tokens(field)) for field in matches)
+    shortest = [
+        field
+        for field in matches
+        if len(_semantic_field_tokens(field)) == shortest_length
+    ]
+    return shortest[0] if len(shortest) == 1 else None
 
 
 def _compile_projection_expression(
@@ -824,9 +834,17 @@ def _apply_observation_target_constraints(
         str(item.get("observation_type") or "").strip()
         for item in observation_targets
         if str(item.get("observation_type") or "").strip()
+        and (
+            not str(item.get("semantic_type") or "").strip()
+            or str(item.get("semantic_type") or "").strip().casefold()
+            in COMPARABLE_SEMANTIC_TYPES
+        )
     }
     for target in observation_targets:
         observation_type = str(target.get("observation_type") or "").strip()
+        target_semantic_type = str(target.get("semantic_type") or "").strip().casefold()
+        if target_semantic_type and target_semantic_type not in COMPARABLE_SEMANTIC_TYPES:
+            continue
         if not str(target.get("canonical_field") or "").strip():
             continue
         matches = _target_field_matches(field_inventory, target, semantics)
@@ -843,6 +861,11 @@ def _apply_observation_target_constraints(
         str(target.get("observation_type") or "").strip(): target
         for target in observation_targets
         if str(target.get("observation_type") or "").strip()
+        and (
+            not str(target.get("semantic_type") or "").strip()
+            or str(target.get("semantic_type") or "").strip().casefold()
+            in COMPARABLE_SEMANTIC_TYPES
+        )
     }
     model_resolved: dict[str, list[str]] = {}
     for field, raw in semantics.items():
@@ -940,6 +963,9 @@ def _apply_observation_target_constraints(
             metadata = dict(raw)
             semantic_type = str(metadata.get("semantic_type") or "").strip().casefold()
             if semantic_type not in COMPARABLE_SEMANTIC_TYPES:
+                metadata.pop("observation_type", None)
+                metadata["monitor"] = False
+                semantics[field] = metadata
                 continue
             metadata.pop("observation_type", None)
             metadata["comparison_role"] = "metadata"
@@ -1233,7 +1259,77 @@ def _apply_canonical_identity_defaults(
             or not dimensions.get(dimension)
         ):
             dimensions[dimension] = expression
+
+    # A source record can legitimately be less granular than the canonical
+    # entity. For example, a single-channel record has an interface key but no
+    # explicit channel field. Do not let multiple canonical dimensions fall
+    # back to that same source key: retain the first proven mapping and give
+    # each missing trailing dimension a stable, dimension-specific sentinel.
+    field_inventory = {
+        str(item).strip()
+        for item in [
+            *(output.get("primary_keys") or []),
+            *(output.get("required_fields") or []),
+            *(output.get("optional_fields") or []),
+            *dict(output.get("validators") or {}),
+        ]
+        if str(item).strip()
+    }
+    seen_identity_expressions: dict[str, str] = {}
+    defaulted_identity_dimensions: list[str] = []
+    for dimension in identity_fields:
+        expression = dimensions.get(dimension)
+        if not isinstance(expression, dict):
+            continue
+        signature = json.dumps(
+            expression,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        if signature in seen_identity_expressions and dimension not in field_inventory:
+            dimensions[dimension] = {"literal": f"default:{dimension}"}
+            defaulted_identity_dimensions.append(dimension)
+            continue
+        seen_identity_expressions[signature] = dimension
+
+    # The catalog identity can be intentionally coarser than the approved
+    # Parser record key. Preserve every remaining source key as an explicit
+    # dimension so records cannot collapse while still keeping the canonical
+    # identity field order owned by the catalog.
+    referenced_source_fields = set(dimension_field_references(dimensions))
+    preserved_source_keys: list[str] = []
+    for source_key in (
+        str(item).strip()
+        for item in output.get("primary_keys") or []
+        if str(item).strip()
+    ):
+        if source_key in referenced_source_fields:
+            continue
+        dimension_name = source_key
+        if dimension_name in dimensions:
+            dimension_name = f"source_{source_key}"
+            suffix = 2
+            while dimension_name in dimensions:
+                dimension_name = f"source_{source_key}_{suffix}"
+                suffix += 1
+        dimensions[dimension_name] = {"field": source_key}
+        referenced_source_fields.add(source_key)
+        preserved_source_keys.append(source_key)
     output["entity_dimensions"] = dimensions
+    output["entity_identity_fields"] = identity_fields + [
+        dimension for dimension in dimensions if dimension not in identity_fields
+    ]
+    if preserved_source_keys or defaulted_identity_dimensions:
+        evidence = dict(output.get("evidence") or {})
+        if preserved_source_keys:
+            evidence["source_primary_keys_preserved"] = preserved_source_keys
+        if defaulted_identity_dimensions:
+            evidence["defaulted_canonical_identity_dimensions"] = {
+                dimension: f"default:{dimension}"
+                for dimension in defaulted_identity_dimensions
+            }
+        output["evidence"] = evidence
     try:
         normalized_identity_dimensions = normalize_dimensions(dimensions)
     except SemanticProjectionError:
@@ -1511,10 +1607,11 @@ def _contract_governance_errors(
         )
     if (
         expected_identity_fields
-        and identity_fields != expected_identity_fields
+        and identity_fields[: len(expected_identity_fields)]
+        != expected_identity_fields
     ):
         errors.append(
-            "entity_identity_fields must match the approved check item order: "
+            "entity_identity_fields must begin with the approved check item order: "
             + ", ".join(expected_identity_fields)
         )
 
@@ -1704,6 +1801,11 @@ def _contract_governance_errors(
             )
     expected_observation_types: set[str] = set()
     for target in observation_targets or []:
+        target_semantic_type = str(
+            target.get("semantic_type") or ""
+        ).strip().casefold()
+        if target_semantic_type and target_semantic_type not in COMPARABLE_SEMANTIC_TYPES:
+            continue
         observation_type = str(target.get("observation_type") or "").strip()
         if not observation_type:
             errors.append("observation target requires observation_type")
@@ -2591,13 +2693,28 @@ def run_contract_generation(params: dict[str, Any]) -> dict[str, Any]:
                 contract=target_bound,
                 records=records,
             )
+            enriched = _apply_canonical_identity_defaults(
+                enriched,
+                canonical_identity_constraint,
+                governed_field_dimensions={
+                    str(dimension).strip()
+                    for target in observation_targets
+                    for dimension in target.get("dimensions") or []
+                    if str(dimension).strip()
+                },
+            )
             report = _validate_contract_by_group(
                 command=command,
                 groups=record_groups,
                 candidate=enriched,
                 field_inventory=field_inventory,
                 contract_seed=(proposal_payload if isinstance(proposal_payload, dict) else None),
-                require_policy_targets=True,
+                require_policy_targets=bool(
+                    (params.get("rule_asset_requirements") or {}).get(
+                        "requires_change_policy",
+                        bool(observation_targets),
+                    )
+                ),
                 observation_targets=observation_targets,
                 strict_observation_targets=strict_observation_targets,
                 canonical_identity_constraint=canonical_identity_constraint,

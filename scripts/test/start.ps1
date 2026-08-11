@@ -112,7 +112,15 @@ if (-not (Test-Path $venvPython)) {
 
 Write-ColorOutput "[Step 0/7] Stop old processes and free ports..." "Yellow"
 Stop-ProjectAppProcesses -ProjectRoot $ProjectRoot
-Stop-DockerAppContainers
+$dockerOk = Test-DockerAvailable -TimeoutSec 5 -Quiet
+if ($dockerOk) {
+    $dockerOk = [bool](Stop-DockerAppContainers -SkipAvailabilityCheck)
+    if (-not $dockerOk) {
+        Write-ColorOutput "  [WARN] Docker stopped responding during app-container cleanup" "Yellow"
+    }
+} else {
+    Write-ColorOutput "  [WARN] Docker is not responding; skipped old app-container cleanup" "Yellow"
+}
 if (Test-Path $pidFile) {
     $old = Get-Content $pidFile -Raw | ConvertFrom-Json
     foreach ($name in $old.PSObject.Properties.Name) {
@@ -143,13 +151,10 @@ Write-ColorOutput "  [OK] Ports cleared" "Green"
 $dotEnv = Import-DotEnvFile -Path (Join-Path $ProjectRoot ".env")
 
 Write-ColorOutput "[Step 1/7] Check Docker..." "Yellow"
-$needDocker = (-not $SkipMiddleware) -or (-not $SkipLangfuse)
-$dockerOk = $false
 if ($SkipMiddleware -and $SkipLangfuse) {
     Write-ColorOutput '  [SKIP] SkipMiddleware + SkipLangfuse (no Docker stacks)' "Gray"
-} elseif (Test-DockerAvailable) {
+} elseif ($dockerOk) {
     Write-ColorOutput "  [OK] Docker is available" "Green"
-    $dockerOk = $true
 } elseif ($AllowNoDocker) {
     Write-ColorOutput '  [WARN] Docker not available; continuing (AllowNoDocker)' "Yellow"
 } else {
@@ -166,7 +171,7 @@ if ($dockerOk) {
     if ($SkipMiddleware) {
         Write-ColorOutput '  [SKIP] Middleware (SkipMiddleware)' "Gray"
     } else {
-        if (-not (Ensure-DockerReady -ComposeFile $middlewareCompose)) {
+        if (-not (Ensure-DockerReady -ComposeFile $middlewareCompose -SkipAvailabilityCheck)) {
             Write-ColorOutput "  [ERROR] middleware docker compose up failed" "Red"
             exit 1
         }
@@ -283,7 +288,7 @@ $coreCeleryEnv["CELERY_WORKER_ROLE"] = "core"
 $coreCeleryEnv["CELERY_WORKER_QUEUES"] = "netops.default,netops.firewall,netops.device,netops.health,netops.patrol"
 $coreCeleryLog = Join-Path $logDir "celery-core.log"
 $coreCeleryLauncher = Join-Path $logDir "celery-core-launcher.ps1"
-$coreCeleryCmd = "& '$py' -m celery -A src.core.celery_tasks.celery_app worker --loglevel=info -P solo --hostname=netops-core@%h -Q netops.default,netops.firewall,netops.device,netops.health,netops.patrol"
+$coreCeleryCmd = "& '$py' -m celery -A src.core.celery_tasks.celery_app worker --loglevel=info -P solo --concurrency=1 --hostname=netops-core@%h -Q netops.default,netops.firewall,netops.device,netops.health,netops.patrol"
 New-LauncherScript -Path $coreCeleryLauncher -WorkingDirectory $ProjectRoot -EnvVars $coreCeleryEnv -CommandLine $coreCeleryCmd -LogFile $coreCeleryLog -PreCommands @(
     'Remove-Item Env:DJANGO_SETTINGS_MODULE -ErrorAction SilentlyContinue'
 )
@@ -295,7 +300,7 @@ $aiCeleryEnv["CELERY_WORKER_ROLE"] = "ai"
 $aiCeleryEnv["CELERY_WORKER_QUEUES"] = "netops.ai"
 $aiCeleryLog = Join-Path $logDir "celery-ai.log"
 $aiCeleryLauncher = Join-Path $logDir "celery-ai-launcher.ps1"
-$aiCeleryCmd = "& '$py' -m celery -A src.core.celery_tasks.celery_app worker --loglevel=info -P solo --hostname=netops-ai@%h -Q netops.ai"
+$aiCeleryCmd = "& '$py' -m celery -A src.core.celery_tasks.celery_app worker --loglevel=info -P solo --concurrency=1 --hostname=netops-ai@%h -Q netops.ai"
 New-LauncherScript -Path $aiCeleryLauncher -WorkingDirectory $ProjectRoot -EnvVars $aiCeleryEnv -CommandLine $aiCeleryCmd -LogFile $aiCeleryLog -PreCommands @(
     'Remove-Item Env:DJANGO_SETTINGS_MODULE -ErrorAction SilentlyContinue'
 )

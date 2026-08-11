@@ -1074,6 +1074,82 @@ def _scoped_rule_asset_requirements(
     }
 
 
+def _scoped_event_constraints(
+    constraints: dict[str, Any],
+    *,
+    target: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Remove recovery-only constraints from current-state-only fan-out targets."""
+
+    scoped = dict(constraints or {})
+    target_roles = {
+        str(item).strip()
+        for item in (target or {}).get("required_rule_roles") or []
+        if str(item).strip()
+    }
+    if not target_roles or "change_event" in target_roles:
+        return scoped
+    if "current_state" not in target_roles:
+        return scoped
+
+    role_event_types = dict(scoped.get("role_event_types") or {})
+    event_classes = dict(scoped.get("required_event_classes") or {})
+    recovery_pairs = [
+        dict(item)
+        for item in scoped.get("required_recovery_pairs") or []
+        if isinstance(item, dict)
+    ]
+    recovery_event_types = {
+        str(item.get("recovery") or "").strip()
+        for item in recovery_pairs
+        if str(item.get("recovery") or "").strip()
+    }
+    recovery_event_types.update(
+        str(event_type)
+        for event_type, event_class in event_classes.items()
+        if str(event_class).strip().casefold() == "recovery"
+    )
+    filtered_roles = {
+        str(role): event_type
+        for role, event_type in role_event_types.items()
+        if "recovery" not in str(role).casefold()
+        and str(event_type) not in recovery_event_types
+    }
+    allowed_event_types = set(filtered_roles.values())
+    if not allowed_event_types:
+        allowed_event_types = {
+            str(event_type)
+            for event_type in scoped.get("required_event_types") or []
+            if str(event_type) not in recovery_event_types
+        }
+
+    scoped["role_event_types"] = filtered_roles
+    scoped["required_event_types"] = [
+        event_type
+        for event_type in scoped.get("required_event_types") or []
+        if str(event_type) in allowed_event_types
+    ]
+    scoped["required_event_classes"] = {
+        event_type: event_class
+        for event_type, event_class in event_classes.items()
+        if str(event_type) in allowed_event_types
+    }
+    scoped["required_severities"] = {
+        event_type: severity
+        for event_type, severity in dict(
+            scoped.get("required_severities") or {}
+        ).items()
+        if str(event_type) in allowed_event_types
+    }
+    scoped["required_recovery_pairs"] = []
+    if scoped.get("max_rule_count") is not None and allowed_event_types:
+        scoped["max_rule_count"] = min(
+            int(scoped["max_rule_count"]),
+            len(allowed_event_types),
+        )
+    return scoped
+
+
 def run_event_rule_generation(params: dict[str, Any]) -> dict[str, Any]:
     contract = params.get("contract")
     if not isinstance(contract, dict):
@@ -1143,6 +1219,10 @@ def run_event_rule_generation(params: dict[str, Any]) -> dict[str, Any]:
                 if isinstance(constraints_by_type, dict)
                 else (target or {}).get("event_constraints")
             )
+            scoped_constraints = _scoped_event_constraints(
+                dict(scoped_constraints or params.get("event_constraints") or {}),
+                target=target,
+            )
             scoped_contract = (
                 (target or {}).get("event_contract")
                 if isinstance((target or {}).get("event_contract"), dict)
@@ -1159,7 +1239,7 @@ def run_event_rule_generation(params: dict[str, Any]) -> dict[str, Any]:
                         target=target,
                         observation_type=observation_type,
                     ),
-                    "event_constraints": scoped_constraints or params.get("event_constraints"),
+                    "event_constraints": scoped_constraints,
                     "reserved_fault_event_types": {},
                 }
             )
@@ -1167,7 +1247,6 @@ def run_event_rule_generation(params: dict[str, Any]) -> dict[str, Any]:
             effective_constraints = dict(
                 result.get("effective_event_constraints")
                 or scoped_constraints
-                or params.get("event_constraints")
                 or {}
             )
             scoped_results.append(
