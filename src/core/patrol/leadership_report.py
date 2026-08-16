@@ -946,6 +946,127 @@ def _recommendations(
     return result
 
 
+def _display_evidence_value(value: Any, *, limit: int = 180) -> str:
+    if value is None:
+        return "无"
+    if isinstance(value, str):
+        rendered = value.strip() or "空字符串"
+    elif isinstance(value, (dict, list)):
+        rendered = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    else:
+        rendered = str(value)
+    rendered = re.sub(r"\s+", " ", rendered).strip()
+    return rendered if len(rendered) <= limit else f"{rendered[:limit - 3]}..."
+
+
+def _build_structured_event_evidence(
+    summary: dict[str, Any], events: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Join structured Change facts to their Event decision for report evidence."""
+
+    events_by_change: dict[str, dict[str, Any]] = {}
+    for event in events:
+        chain = dict(event.get("evidence_chain") or {})
+        change_id = str(event.get("source_change_id") or chain.get("change_id") or "")
+        if change_id:
+            events_by_change.setdefault(change_id, event)
+
+    items: list[dict[str, Any]] = []
+    for change in summary.get("changes") or []:
+        dimensions = dict(change.get("dimensions") or {})
+        if (
+            str(change.get("field") or "") == "raw_text_hash"
+            or str(change.get("observation_type") or "") == "raw.command.hash"
+            or "unstructured_diff" in dimensions
+        ):
+            continue
+        change_id = str(change.get("id") or change.get("change_id") or "")
+        event = events_by_change.get(change_id) or {}
+        baseline_value = (
+            change.get("old_value")
+            if "old_value" in change
+            else change.get("old")
+        )
+        current_value = (
+            change.get("new_value")
+            if "new_value" in change
+            else change.get("new")
+        )
+        event_type = event.get("event_type")
+        event_status = (
+            event.get("status_after_occurrence")
+            or event.get("status")
+            or change.get("event_status")
+            or "unknown"
+        )
+        items.append(
+            {
+                "change_id": change_id or None,
+                "device_id": change.get("device_id"),
+                "device_name": change.get("device_name") or change.get("device_id"),
+                "command": change.get("command"),
+                "entity_type": change.get("entity_type"),
+                "entity_key": change.get("entity_key"),
+                "field": change.get("field"),
+                "change_type": change.get("change_type"),
+                "baseline": {
+                    "snapshot_id": change.get("previous_snapshot_id"),
+                    "observation_id": change.get("previous_observation_id"),
+                    "value": baseline_value,
+                },
+                "current": {
+                    "snapshot_id": change.get("current_snapshot_id"),
+                    "observation_id": change.get("current_observation_id"),
+                    "value": current_value,
+                },
+                "event": {
+                    "event_id": event.get("id") or event.get("event_id"),
+                    "event_type": event_type,
+                    "event_label": _event_type_label(event_type) if event_type else "未触发 Event",
+                    "severity": event.get("severity"),
+                    "status": event_status,
+                    "reason": (
+                        event.get("decision_reason")
+                        or change.get("no_event_reason")
+                        or change.get("decision_reason")
+                    ),
+                },
+            }
+        )
+    items.sort(
+        key=lambda item: (
+            str(item.get("device_name") or ""),
+            str(item.get("command") or ""),
+            str(item.get("entity_key") or ""),
+            str(item.get("field") or ""),
+        )
+    )
+    event_fact_count = sum(bool((item.get("event") or {}).get("event_id")) for item in items)
+    return {
+        "schema_version": "structured-event-evidence/v1",
+        "structured_change_count": len(items),
+        "event_fact_count": event_fact_count,
+        "no_event_count": len(items) - event_fact_count,
+        "items": items,
+    }
+
+
+def _unstructured_evidence_text(
+    item: dict[str, Any], side: str, *, limit: int = 3
+) -> str:
+    evidence = dict(item.get(f"{side}_evidence") or {})
+    snapshot_id = str(evidence.get("snapshot_id") or "")
+    rows = list(evidence.get("excerpt") or [])[:limit]
+    text = "；".join(
+        _display_evidence_value(row.get("text"), limit=120) for row in rows
+    )
+    if evidence.get("excerpt_truncated"):
+        text = f"{text}；..." if text else "..."
+    if not text:
+        text = "无可展示的变化行"
+    return f"快照 {snapshot_id or '-'}；{text}"
+
+
 def build_leadership_report(
     patrol_batch_id: str,
     summary: dict[str, Any],
@@ -1004,6 +1125,7 @@ def build_leadership_report(
             parser_ready_count + template_missing_count + parse_failed_count
         )
     events = list(summary.get("events") or [])
+    structured_event_evidence = _build_structured_event_evidence(summary, events)
     recovery_event_count = sum(
         str(item.get("event_class") or "fault") == "recovery" for item in events
     )
@@ -1143,6 +1265,12 @@ def build_leadership_report(
             "unstructured_removed_line_count": int(
                 unstructured.get("removed_line_count") or 0
             ),
+            "structured_change_evidence_count": int(
+                structured_event_evidence.get("structured_change_count") or 0
+            ),
+            "structured_event_evidence_count": int(
+                structured_event_evidence.get("event_fact_count") or 0
+            ),
         },
         "risk_summary": {
             "total": len(risks),
@@ -1167,6 +1295,7 @@ def build_leadership_report(
         "domains": domains,
         "data_quality": quality,
         "rule_coverage": coverage,
+        "structured_event_evidence": structured_event_evidence,
         "unstructured_comparison": unstructured,
         "recommendations": _recommendations(
             assessment,
@@ -1337,8 +1466,41 @@ def render_leadership_markdown(report: dict[str, Any]) -> str:
         coverage_text = _domain_threshold_coverage_text(row)
         if coverage_text:
             lines.append(f"- {coverage_text}")
+    structured = dict(report.get("structured_event_evidence") or {})
+    lines.extend(["", "## 五、结构化变化与 Event 证据", ""])
+    if not structured.get("items"):
+        lines.append("本批次没有形成可比较的结构化状态变化。")
+    else:
+        lines.append(
+            f"共形成 {structured.get('structured_change_count')} 条结构化变化，"
+            f"其中 {structured.get('event_fact_count')} 条形成 Event。"
+        )
+        for item in list(structured.get("items") or [])[:20]:
+            event = dict(item.get("event") or {})
+            baseline = dict(item.get("baseline") or {})
+            current = dict(item.get("current") or {})
+            outcome = event.get("event_label") or "未触发 Event"
+            if event.get("severity"):
+                outcome = f"{outcome}（{SEVERITY_LABEL.get(_severity(event.get('severity')), event.get('severity'))}）"
+            lines.append(
+                f"- [{outcome}] {item.get('device_name') or '-'} / "
+                f"`{item.get('command') or '-'}` / {item.get('entity_key') or '-'} / "
+                f"{item.get('field') or '-'}"
+            )
+            lines.append(
+                f"  - 基线数据：{_display_evidence_value(baseline.get('value'))}"
+                f"（快照 {baseline.get('snapshot_id') or '-'}）"
+            )
+            lines.append(
+                f"  - 当前数据：{_display_evidence_value(current.get('value'))}"
+                f"（快照 {current.get('snapshot_id') or '-'}）"
+            )
+            if event.get("reason") and not event.get("event_id"):
+                lines.append(f"  - 未形成 Event 原因：{event.get('reason')}")
+        if len(structured.get("items") or []) > 20:
+            lines.append("- 其余结构化变化详见技术报告与事件数据附件。")
     unstructured = dict(report.get("unstructured_comparison") or {})
-    lines.extend(["", "## 五、非结构化输出变化", ""])
+    lines.extend(["", "## 六、非结构化文本对比证据", ""])
     if not unstructured.get("collected_output_count"):
         lines.append("本批次未采集配置、日志等已启用非结构化对比的命令输出。")
     elif not unstructured.get("changed_output_count"):
@@ -1366,22 +1528,24 @@ def render_leadership_markdown(report: dict[str, Any]) -> str:
                 + (f"，{categories}" if categories else "")
                 + f"；{_unstructured_preview_text(item)}"
             )
+            lines.append(f"  - 基线证据：{_unstructured_evidence_text(item, 'baseline')}")
+            lines.append(f"  - 当前证据：{_unstructured_evidence_text(item, 'current')}")
         if len(unstructured.get("items") or []) > 10:
             lines.append("- 其余变化详见技术报告和原始输出证据包。")
-    lines.extend(["", "## 六、处置建议", ""])
+    lines.extend(["", "## 七、处置建议", ""])
     for item in report["recommendations"]:
         lines.append(
             f"- {item['priority']}：{item['action']}"
             f"（责任：{item['owner']}；时限：{item['deadline']}）"
         )
-    lines.extend(["", "## 七、结论边界", ""])
+    lines.extend(["", "## 八、结论边界", ""])
     lines.extend(f"- {item}" for item in report["limitations"])
     evidence = report["evidence"]
     analysis = evidence.get("analysis") or {}
     lines.extend(
         [
             "",
-            "## 八、证据索引",
+            "## 九、证据索引",
             "",
             f"- Workflow Run：{evidence.get('workflow_run_id') or '-'}",
             f"- 分析尝试：{analysis.get('attempt_id') or '-'}",
@@ -1752,7 +1916,52 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
     else:
         add_styled_paragraph(doc, "未形成可用的分域检查结果。", first_line_indent=0.74)
 
-    _add_section(doc, "五、非结构化输出变化")
+    structured = dict(report.get("structured_event_evidence") or {})
+    _add_section(doc, "五、结构化变化与 Event 证据")
+    if not structured.get("items"):
+        add_styled_paragraph(doc, "本批次没有形成可比较的结构化状态变化。", first_line_indent=0.74)
+    else:
+        add_styled_paragraph(
+            doc,
+            f"共形成 {structured.get('structured_change_count')} 条结构化变化，"
+            f"其中 {structured.get('event_fact_count')} 条形成 Event；下表列出基线、当前数据和 Event 判定。",
+            first_line_indent=0.74,
+        )
+        structured_rows = []
+        for item in list(structured.get("items") or [])[:20]:
+            event = dict(item.get("event") or {})
+            baseline = dict(item.get("baseline") or {})
+            current = dict(item.get("current") or {})
+            outcome = event.get("event_label") or "未触发 Event"
+            if event.get("severity"):
+                outcome = f"{outcome} / {SEVERITY_LABEL.get(_severity(event.get('severity')), event.get('severity'))}"
+            if not event.get("event_id") and event.get("reason"):
+                outcome = f"{outcome}\n{event.get('reason')}"
+            structured_rows.append(
+                [
+                    outcome,
+                    item.get("device_name"),
+                    f"{item.get('command') or '-'}\n{item.get('entity_key') or '-'}",
+                    item.get("field"),
+                    _display_evidence_value(baseline.get("value"), limit=140),
+                    _display_evidence_value(current.get("value"), limit=140),
+                ]
+            )
+        _add_table(
+            doc,
+            ["Event 判定", "设备", "命令 / 对象", "字段", "基线数据", "当前数据"],
+            structured_rows,
+            [2.4, 2.2, 3.1, 1.8, 3.6, 3.6],
+            keep_rows_together=True,
+        )
+        if len(structured.get("items") or []) > 20:
+            add_styled_paragraph(
+                doc,
+                f"其余 {len(structured.get('items') or []) - 20} 条结构化变化详见技术报告与事件数据附件。",
+                first_line_indent=0.74,
+            )
+
+    _add_section(doc, "六、非结构化文本对比证据")
     unstructured = dict(report.get("unstructured_comparison") or {})
     if not unstructured.get("collected_output_count"):
         add_styled_paragraph(
@@ -1799,6 +2008,23 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
             unstructured_rows,
             [2.2, 2.8, 4.2, 2.0, 4.3],
         )
+        for item in list(unstructured.get("items") or [])[:8]:
+            add_styled_paragraph(
+                doc,
+                f"{item.get('device_name') or '-'} / {item.get('command') or '-'}："
+                "以下为脱敏的基线与当前文本证据。",
+                first_line_indent=0.74,
+            )
+            _add_table(
+                doc,
+                ["基线证据", "当前证据"],
+                [[
+                    _unstructured_evidence_text(item, "baseline", limit=4),
+                    _unstructured_evidence_text(item, "current", limit=4),
+                ]],
+                [8.4, 8.4],
+                keep_rows_together=True,
+            )
         if len(unstructured.get("items") or []) > 8:
             add_styled_paragraph(
                 doc,
@@ -1807,7 +2033,7 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
                 first_line_indent=0.74,
             )
 
-    _add_section(doc, "六、处置建议")
+    _add_section(doc, "七、处置建议")
     for index, item in enumerate(report["recommendations"], start=1):
         add_styled_paragraph(
             doc,
@@ -1816,7 +2042,7 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
             first_line_indent=0.74,
         )
 
-    _add_section(doc, "七、数据可信度与结论边界")
+    _add_section(doc, "八、数据可信度与结论边界")
     coverage = report["rule_coverage"]
     digests = [str(item) for item in coverage.get("bundle_digests") or []]
     digest_summary = "、".join(f"{item[:12]}…" for item in digests) or "未形成"
@@ -1844,7 +2070,7 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
         ordinal = chinese_ordinals[index] if index < len(chinese_ordinals) else str(index + 1)
         add_styled_paragraph(doc, f"（{ordinal}）{item}", first_line_indent=0.74)
 
-    _add_section(doc, "八、证据与附件")
+    _add_section(doc, "九、证据与附件")
     evidence = report["evidence"]
     analysis = dict(evidence.get("analysis") or {})
     attempt_id = str(analysis.get("attempt_id") or "-")

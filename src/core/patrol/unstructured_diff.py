@@ -272,12 +272,29 @@ def build_unstructured_diff(
     sensitive_line_count = 0
     max_preview = max(1, int(resolved.get("max_preview_lines") or 20))
     preview: list[dict[str, Any]] = []
+    baseline_evidence: list[dict[str, Any]] = []
+    current_evidence: list[dict[str, Any]] = []
+    baseline_evidence_total = 0
+    current_evidence_total = 0
     for operation, line in line_changes:
         category, label = _category(line, resolved)
         category_counts[category] += 1
         category_labels[category] = label
         redacted, sensitive = _redact_line(line, resolved)
         sensitive_line_count += int(sensitive)
+        evidence_row = {
+            "category": category,
+            "category_label": label,
+            "text": redacted,
+        }
+        if operation == "removed":
+            baseline_evidence_total += 1
+            if len(baseline_evidence) < max_preview:
+                baseline_evidence.append(evidence_row)
+        elif operation == "added":
+            current_evidence_total += 1
+            if len(current_evidence) < max_preview:
+                current_evidence.append(evidence_row)
         if len(preview) < max_preview:
             preview.append(
                 {
@@ -320,6 +337,18 @@ def build_unstructured_diff(
         "categories": categories,
         "preview": preview if changed else [],
         "preview_truncated": len(line_changes) > len(preview),
+        "baseline_evidence": {
+            "normalized_line_count": len(previous_lines),
+            "changed_line_count": removed if changed else 0,
+            "excerpt": baseline_evidence if changed else [],
+            "excerpt_truncated": baseline_evidence_total > len(baseline_evidence),
+        },
+        "current_evidence": {
+            "normalized_line_count": len(current_lines),
+            "changed_line_count": added if changed else 0,
+            "excerpt": current_evidence if changed else [],
+            "excerpt_truncated": current_evidence_total > len(current_evidence),
+        },
     }
 
 
@@ -352,6 +381,26 @@ def summarize_unstructured_changes(
         added += int(diff.get("added_line_count") or 0)
         removed += int(diff.get("removed_line_count") or 0)
         preview = list(diff.get("preview") or [])
+        baseline = dict(diff.get("baseline_evidence") or {})
+        current = dict(diff.get("current_evidence") or {})
+        legacy_baseline = [
+            {
+                "category": row.get("category"),
+                "category_label": row.get("category_label"),
+                "text": row.get("text"),
+            }
+            for row in preview
+            if row.get("operation") == "removed"
+        ]
+        legacy_current = [
+            {
+                "category": row.get("category"),
+                "category_label": row.get("category_label"),
+                "text": row.get("text"),
+            }
+            for row in preview
+            if row.get("operation") == "added"
+        ]
         items.append(
             {
                 "change_id": change.get("id") or change.get("change_id"),
@@ -369,6 +418,36 @@ def summarize_unstructured_changes(
                 "preview_truncated": bool(diff.get("preview_truncated")) or len(preview) > 4,
                 "previous_snapshot_id": change.get("previous_snapshot_id"),
                 "current_snapshot_id": change.get("current_snapshot_id"),
+                "baseline_evidence": {
+                    "snapshot_id": change.get("previous_snapshot_id"),
+                    "normalized_line_count": int(
+                        baseline.get("normalized_line_count")
+                        or diff.get("previous_line_count")
+                        or 0
+                    ),
+                    "changed_line_count": int(
+                        baseline.get("changed_line_count")
+                        or diff.get("removed_line_count")
+                        or 0
+                    ),
+                    "excerpt": list(baseline.get("excerpt") or legacy_baseline)[:12],
+                    "excerpt_truncated": bool(baseline.get("excerpt_truncated")),
+                },
+                "current_evidence": {
+                    "snapshot_id": change.get("current_snapshot_id"),
+                    "normalized_line_count": int(
+                        current.get("normalized_line_count")
+                        or diff.get("current_line_count")
+                        or 0
+                    ),
+                    "changed_line_count": int(
+                        current.get("changed_line_count")
+                        or diff.get("added_line_count")
+                        or 0
+                    ),
+                    "excerpt": list(current.get("excerpt") or legacy_current)[:12],
+                    "excerpt_truncated": bool(current.get("excerpt_truncated")),
+                },
             }
         )
     items.sort(

@@ -197,8 +197,11 @@ class ParserPolicy:
         return PolicyDecision(
             enabled=False,
             canonical_command=canonical,
-            handling="raw_only",
-            asset_mode="ignored",
+            # A command without a structural policy is still useful patrol
+            # evidence. Keep it out of Parser/contract generation, but retain
+            # it for baseline-to-current text comparison in the report.
+            handling="raw_hash_diff",
+            asset_mode=self._asset_mode("raw_hash_diff"),
         )
 
     @staticmethod

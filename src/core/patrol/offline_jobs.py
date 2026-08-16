@@ -1465,6 +1465,9 @@ class OfflinePatrolJobService:
                 "entity_type": item.get("entity_type"),
                 "entity_key": item.get("entity_key"),
                 "field": item.get("field"),
+                "dimensions": dict(item.get("dimensions") or {}),
+                "observation_type": item.get("observation_type"),
+                "comparison_type": item.get("comparison_type"),
                 "old_value": item.get("old"),
                 "new_value": item.get("new"),
                 "change_type": item.get("change_type"),
@@ -1577,6 +1580,19 @@ class OfflinePatrolJobService:
                     "reference_value": reference_value,
                     "domain": report_domain(item.get("entity_type"), item.get("event_type")),
                     "occurred_at": item.get("occurred_at"),
+                    "baseline_evidence": {
+                        "source": "structured_observation",
+                        "snapshot_id": change.get("previous_snapshot_id"),
+                        "observation_id": change.get("previous_observation_id"),
+                        "value": change.get("old_value", change.get("old")),
+                    },
+                    "current_evidence": {
+                        "source": "structured_observation",
+                        "snapshot_id": change.get("current_snapshot_id"),
+                        "observation_id": change.get("current_observation_id"),
+                        "observed_at": current_observation.get("observed_at"),
+                        "value": change.get("new_value", change.get("new")),
+                    },
                     "evidence_chain": evidence_chain,
                 }
             )
