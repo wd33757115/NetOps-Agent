@@ -1,10 +1,16 @@
 import React from 'react'
 import {
-  Alert, Button, Descriptions, Space, Table, Tag, Typography,
+  Alert, Button, Descriptions, Drawer, Space, Table, Tag, Typography,
 } from 'antd'
-import { DownloadOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
+import {
+  DownloadOutlined,
+  FileSearchOutlined,
+  SafetyCertificateOutlined,
+} from '@ant-design/icons'
 import type {
   OfflinePatrolAnalysisSummary,
+  OfflinePatrolComparisonEvidence,
+  OfflinePatrolComparisonEvidenceSide,
   OfflinePatrolReportRisk,
   OfflinePatrolReportTrendGroup,
 } from '../../services/api'
@@ -17,6 +23,9 @@ interface OfflinePatrolResultPanelProps {
   reportDownloading?: boolean
   onRetry: () => void
   onDownloadReport: () => void
+  onLoadComparisonEvidence: (
+    changeId: string,
+  ) => Promise<OfflinePatrolComparisonEvidence>
   onOpenRuleAssets: () => void
 }
 
@@ -96,6 +105,52 @@ const RiskEvidence: React.FC<{ row: OfflinePatrolReportRisk; isMobile: boolean }
   )
 }
 
+const displayEvidenceValue = (value: unknown) => {
+  if (value === null || value === undefined || value === '') return '-'
+  if (typeof value === 'string') return value
+  return JSON.stringify(value)
+}
+
+const CliEvidenceBlock: React.FC<{
+  label: string
+  evidence?: OfflinePatrolComparisonEvidenceSide
+}> = ({ label, evidence }) => (
+  <section
+    style={{
+      border: '1px solid #e5e7eb',
+      borderRadius: 6,
+      minWidth: 0,
+      padding: 12,
+    }}
+  >
+    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+      <Typography.Text strong>{label}</Typography.Text>
+      <Space size={6} wrap>
+        <Typography.Text type="secondary">
+          快照 {evidence?.snapshot_id || '-'}
+        </Typography.Text>
+        <Tag>{evidence?.parse_status || 'unknown'}</Tag>
+      </Space>
+      <Typography.Paragraph
+        copyable={evidence?.raw_text !== undefined && evidence?.raw_text !== null}
+        style={{
+          background: '#fafafa',
+          marginBottom: 0,
+          maxHeight: 420,
+          overflow: 'auto',
+          padding: 10,
+          whiteSpace: 'pre-wrap',
+          fontFamily: 'Consolas, "Courier New", monospace',
+          fontSize: 12,
+          lineHeight: 1.6,
+        }}
+      >
+        {evidence?.raw_text ?? '未保留原始 CLI 输出。'}
+      </Typography.Paragraph>
+    </Space>
+  </section>
+)
+
 const riskColumns = [
   {
     title: '等级', dataIndex: 'severity', width: 86,
@@ -124,6 +179,12 @@ const riskColumns = [
 ]
 
 type TrendRow = OfflinePatrolReportTrendGroup & { trend_status: string }
+type StructuredEvidenceRow = NonNullable<
+  OfflinePatrolAnalysisSummary['structured_event_evidence']
+>['items'][number]
+type UnstructuredEvidenceRow = NonNullable<
+  OfflinePatrolAnalysisSummary['unstructured_comparison']
+>['items'][number]
 
 const trendColumns = [
   {
@@ -145,8 +206,32 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
   reportDownloading,
   onRetry,
   onDownloadReport,
+  onLoadComparisonEvidence,
   onOpenRuleAssets,
 }) => {
+  const [comparisonEvidence, setComparisonEvidence] = React.useState<
+    OfflinePatrolComparisonEvidence | undefined
+  >()
+  const [comparisonEvidenceLoading, setComparisonEvidenceLoading] = React.useState(false)
+  const [comparisonEvidenceError, setComparisonEvidenceError] = React.useState<string>()
+  const [comparisonEvidenceOpen, setComparisonEvidenceOpen] = React.useState(false)
+
+  const openComparisonEvidence = async (changeId: string) => {
+    setComparisonEvidenceOpen(true)
+    setComparisonEvidenceLoading(true)
+    setComparisonEvidenceError(undefined)
+    setComparisonEvidence(undefined)
+    try {
+      setComparisonEvidence(await onLoadComparisonEvidence(changeId))
+    } catch (loadError) {
+      setComparisonEvidenceError(
+        loadError instanceof Error ? loadError.message : '完整 CLI 证据加载失败。',
+      )
+    } finally {
+      setComparisonEvidenceLoading(false)
+    }
+  }
+
   if (loading) return <Typography.Text type="secondary">正在汇总巡检事实...</Typography.Text>
   if (error || !report) {
     return (
@@ -179,6 +264,23 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
     && latestComparison.command_count !== previousComparison.command_count,
   )
   const analysis = report.evidence.analysis || {}
+  const structuredEvidence = report.structured_event_evidence?.items || []
+  const unstructuredEvidence = report.unstructured_comparison?.items || []
+  const parserFailureEvidenceCount = unstructuredEvidence.filter(
+    (item) => item.parser_failure_text_comparison,
+  ).length
+  const evidenceAction = (changeId?: string | null) => (
+    changeId ? (
+      <Button
+        type="link"
+        size="small"
+        icon={<FileSearchOutlined />}
+        onClick={() => { void openComparisonEvidence(changeId) }}
+      >
+        查看完整原文
+      </Button>
+    ) : '-'
+  )
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -268,6 +370,180 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
           description={`Parser Ready ${parserReady}/${parserEligible}，缺失模板 ${templateMissing}；未覆盖领域不能据此判定健康。`}
         />
       )}
+
+      {parserFailureEvidenceCount > 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          message={String(parserFailureEvidenceCount) + ' 项输出未完成 Parser 解析，已按原文文本比对'}
+          description="该类差异保留为 Parser 阻断项，不会作为结构化 Event 结论。"
+        />
+      )}
+
+      {structuredEvidence.length > 0 && (
+        <section>
+          <Typography.Title level={5}>结构化变化与 Event 证据</Typography.Title>
+          <Table<StructuredEvidenceRow>
+            rowKey={(row) => String(
+              row.change_id || [row.command, row.entity_key, row.field].join('-'),
+            )}
+            size="small"
+            pagination={structuredEvidence.length > 10 ? { pageSize: 10, showSizeChanger: false } : false}
+            dataSource={structuredEvidence}
+            columns={[
+              {
+                title: 'Event',
+                width: 160,
+                render: (_: unknown, row) => row.event?.event_label || '未触发 Event',
+              },
+              {
+                title: '设备',
+                width: 140,
+                render: (_: unknown, row) => row.device_name || row.device_id || '-',
+              },
+              {
+                title: '命令 / 对象',
+                width: 260,
+                render: (_: unknown, row) => (
+                  <Space direction="vertical" size={0}>
+                    <Typography.Text code>{row.command || '-'}</Typography.Text>
+                    <Typography.Text type="secondary">
+                      {formatOfflineEntityKey(row.entity_key || undefined)}
+                    </Typography.Text>
+                  </Space>
+                ),
+              },
+              { title: '字段', dataIndex: 'field', width: 140 },
+              {
+                title: '基线数据',
+                width: 170,
+                render: (_: unknown, row) => displayEvidenceValue(row.baseline?.value),
+              },
+              {
+                title: '当前数据',
+                width: 170,
+                render: (_: unknown, row) => displayEvidenceValue(row.current?.value),
+              },
+              {
+                title: '原文',
+                width: 132,
+                render: (_: unknown, row) => evidenceAction(row.change_id),
+              },
+            ]}
+            scroll={{ x: 1160 }}
+          />
+        </section>
+      )}
+
+      {unstructuredEvidence.length > 0 && (
+        <section>
+          <Typography.Title level={5}>文本对比证据</Typography.Title>
+          <Table<UnstructuredEvidenceRow>
+            rowKey={(row) => String(
+              row.change_id || [row.device_id, row.command].join('-'),
+            )}
+            size="small"
+            pagination={unstructuredEvidence.length > 10 ? { pageSize: 10, showSizeChanger: false } : false}
+            dataSource={unstructuredEvidence}
+            columns={[
+              {
+                title: '类型',
+                width: 156,
+                render: (_: unknown, row) => (
+                  <Space size={4}>
+                    <span>{row.profile_label || '文本输出'}</span>
+                    {row.parser_failure_text_comparison && <Tag color="warning">Parser 失败</Tag>}
+                  </Space>
+                ),
+              },
+              {
+                title: '设备',
+                width: 160,
+                render: (_: unknown, row) => row.device_name || row.device_id || '-',
+              },
+              {
+                title: '命令',
+                width: 300,
+                render: (_: unknown, row) => <Typography.Text code>{row.command || '-'}</Typography.Text>,
+              },
+              {
+                title: '变化',
+                width: 130,
+                render: (_: unknown, row) => '+' + String(row.added_line_count || 0)
+                  + ' / -' + String(row.removed_line_count || 0),
+              },
+              {
+                title: '原文',
+                width: 132,
+                render: (_: unknown, row) => evidenceAction(row.change_id),
+              },
+            ]}
+            scroll={{ x: 880 }}
+          />
+        </section>
+      )}
+
+      <Drawer
+        title={
+          comparisonEvidence?.command
+            ? 'CLI 原文证据 · ' + comparisonEvidence.command
+            : 'CLI 原文证据'
+        }
+        open={comparisonEvidenceOpen}
+        onClose={() => {
+          setComparisonEvidenceOpen(false)
+          setComparisonEvidence(undefined)
+          setComparisonEvidenceError(undefined)
+        }}
+        width={isMobile ? '100%' : 920}
+      >
+        {comparisonEvidenceLoading && (
+          <Typography.Text type="secondary">正在读取完整 CLI 原文...</Typography.Text>
+        )}
+        {comparisonEvidenceError && (
+          <Alert
+            type="error"
+            showIcon
+            message="完整 CLI 证据加载失败"
+            description={comparisonEvidenceError}
+          />
+        )}
+        {comparisonEvidence && (
+          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            {comparisonEvidence.parser_failure_text_comparison && (
+              <Alert
+                type="warning"
+                showIcon
+                message="Parser 未成功，本项仅提供文本差异证据"
+                description="请修复 Parser 后再使用结构化 Event 结论。"
+              />
+            )}
+            <Descriptions bordered size="small" column={isMobile ? 1 : 3}>
+              <Descriptions.Item label="比较方式">
+                {comparisonEvidence.comparison_kind === 'structured_event'
+                  ? '结构化数据 / Event'
+                  : 'CLI 原文文本对比'}
+              </Descriptions.Item>
+              <Descriptions.Item label="设备">
+                {comparisonEvidence.device_id || '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="命令">
+                <Typography.Text code>{comparisonEvidence.command || '-'}</Typography.Text>
+              </Descriptions.Item>
+            </Descriptions>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
+                gap: 12,
+              }}
+            >
+              <CliEvidenceBlock label="基线 CLI" evidence={comparisonEvidence.baseline || undefined} />
+              <CliEvidenceBlock label="当前 CLI" evidence={comparisonEvidence.current || undefined} />
+            </div>
+          </Space>
+        )}
+      </Drawer>
 
       <Space wrap>
         <Button icon={<SafetyCertificateOutlined />} onClick={onOpenRuleAssets}>查看规则资产包</Button>

@@ -96,6 +96,19 @@ def _snapshot_unstructured_diff(
         command=current.command_canonical,
         profile_name=selected_profile,
     )
+    parser_failure_statuses = sorted(
+        {
+            str(status)
+            for status in (previous.parse_status, current.parse_status)
+            if str(status) in {"template_missing", "parse_failed"}
+        }
+    )
+    if parser_failure_statuses:
+        base = {
+            **base,
+            "parser_failure_text_comparison": True,
+            "parser_failure_statuses": parser_failure_statuses,
+        }
     try:
         from src.core.patrol.config_diff_bridge import (
             compare_config_texts,
@@ -501,11 +514,17 @@ def _observation_unstructured_diff(
         return None
     metadata = dict(current.get("metadata_json") or {})
     comparison = dict(metadata.get("unstructured_comparison") or {})
-    return _snapshot_unstructured_diff(
+    diff = _snapshot_unstructured_diff(
         previous_snapshot,
         current_snapshot,
         profile_name=str(comparison.get("profile") or "") or None,
     )
+    if metadata.get("parser_failure_text_comparison"):
+        diff = {
+            **diff,
+            "parser_failure_text_comparison": True,
+        }
+    return diff
 
 
 def _observation_to_change(
@@ -566,7 +585,16 @@ def _observation_to_change(
         ),
         decision_reason=decision_reason
         or (policy_result or {}).get("decision_reason")
-        or ("unstructured_output_changed" if unstructured_diff is not None else None)
+        or (
+            "parser_failure_text_changed"
+            if (
+                unstructured_diff is not None
+                and unstructured_diff.get("parser_failure_text_comparison")
+            )
+            else "unstructured_output_changed"
+            if unstructured_diff is not None
+            else None
+        )
         or change_type,
         policy_snapshot=(policy_result or {}).get("policy_snapshot"),
         observed_at=str(basis.get("observed_at") or detected_at),
@@ -672,6 +700,8 @@ def detect_changes_between_snapshots(
     raw_comparison = (
         previous.parse_status == "raw_hashed"
         or current.parse_status == "raw_hashed"
+        or previous.parse_status in {"template_missing", "parse_failed"}
+        or current.parse_status in {"template_missing", "parse_failed"}
         or str((previous.metadata or {}).get("handling") or "") == "raw_hash_diff"
         or str((current.metadata or {}).get("handling") or "") == "raw_hash_diff"
     )
@@ -700,7 +730,11 @@ def detect_changes_between_snapshots(
                 confidence=0.9,
                 observation_type="raw.command.hash",
                 comparison_type=f"unstructured_{diff.get('comparison_mode')}",
-                decision_reason="unstructured_output_changed",
+                decision_reason=(
+                    "parser_failure_text_changed"
+                    if diff.get("parser_failure_text_comparison")
+                    else "unstructured_output_changed"
+                ),
                 policy_snapshot={
                     "profile": diff.get("profile"),
                     "profile_version": diff.get("profile_version"),
@@ -1269,6 +1303,15 @@ def _detect_observation_changes_against_history_impl(
                     )
                 previous = None
         if previous is None:
+            current_metadata = dict(current.get("metadata_json") or {})
+            if (
+                (
+                    str(current.get("field_name") or "") == "raw_text_hash"
+                    or _observation_type(current) == "raw.command.hash"
+                )
+                and current_metadata.get("parser_failure_text_comparison")
+            ):
+                continue
             if _collection_key(current) in prior_collections:
                 changes.append(
                     _observation_to_change(
@@ -1372,6 +1415,15 @@ def _detect_observation_changes_against_history_impl(
             heartbeat()
         if key in current_by_key:
             continue
+        previous_metadata = dict(previous.get("metadata_json") or {})
+        if (
+            (
+                str(previous.get("field_name") or "") == "raw_text_hash"
+                or _observation_type(previous) == "raw.command.hash"
+            )
+            and previous_metadata.get("parser_failure_text_comparison")
+        ):
+            continue
         collection_identity = _collection_identity(previous)
         if collection_identity not in authoritative_collections:
             continue
@@ -1433,6 +1485,60 @@ def _detect_observation_changes_against_history_impl(
         )
         for change in changes
     ]
+    raw_change_pairs = {
+        (
+            str(change.previous_snapshot_id or ""),
+            str(change.current_snapshot_id or ""),
+        )
+        for change in changes
+        if (
+            str(change.field or "") == "raw_text_hash"
+            or str(change.observation_type or "") == "raw.command.hash"
+        )
+    }
+    selected_device_ids = {str(item) for item in device_ids or []}
+    for current_snapshot in patrol_repository.list_run_snapshots(current_run_id):
+        if (
+            selected_device_ids
+            and str(current_snapshot.device_id) not in selected_device_ids
+        ):
+            continue
+        previous_snapshot = (
+            patrol_repository.find_snapshot(
+                run_id=previous_run_id,
+                device_id=current_snapshot.device_id,
+                command_canonical=canonicalize_command(current_snapshot.command_canonical),
+            )
+            if previous_run_id
+            else patrol_repository.find_previous_snapshot(
+                current_run_id=current_run_id,
+                device_id=current_snapshot.device_id,
+                command_canonical=current_snapshot.command_canonical,
+            )
+        )
+        if previous_snapshot is None:
+            continue
+        if not (
+            {
+                str(previous_snapshot.parse_status),
+                str(current_snapshot.parse_status),
+            }
+            & {"template_missing", "parse_failed"}
+        ):
+            continue
+        for fallback_change in detect_changes_between_snapshots(
+            previous_snapshot,
+            current_snapshot,
+        ):
+            pair = (
+                str(fallback_change.previous_snapshot_id or ""),
+                str(fallback_change.current_snapshot_id or ""),
+            )
+            if pair in raw_change_pairs:
+                continue
+            changes.append(fallback_change)
+            raw_change_pairs.add(pair)
+
     changes = [replace(change, change_id=deterministic_change_id(change)) for change in changes]
     for decision in decisions:
         decision["analysis_revision"] = analysis_revision

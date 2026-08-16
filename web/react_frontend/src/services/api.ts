@@ -766,6 +766,26 @@ export interface OfflinePatrolReportTrend {
   resolved_evidence_groups?: OfflinePatrolReportTrendGroup[]
 }
 
+export interface OfflinePatrolComparisonEvidenceSide {
+  snapshot_id?: string | null
+  run_id?: string | null
+  command?: string | null
+  observed_at?: string | null
+  parse_status?: string | null
+  raw_text?: string | null
+  structured_data?: unknown
+}
+
+export interface OfflinePatrolComparisonEvidence {
+  change_id?: string | null
+  device_id?: string | null
+  command?: string | null
+  comparison_kind?: 'structured_event' | 'unstructured_text' | string
+  parser_failure_text_comparison?: boolean
+  baseline?: OfflinePatrolComparisonEvidenceSide | null
+  current?: OfflinePatrolComparisonEvidenceSide | null
+}
+
 export interface OfflinePatrolAnalysisSummary {
   title: string
   generated_at: string
@@ -795,6 +815,47 @@ export interface OfflinePatrolAnalysisSummary {
   risks: OfflinePatrolReportRisk[]
   correlated_evidence: OfflinePatrolReportRisk[]
   trend?: OfflinePatrolReportTrend
+  structured_event_evidence?: {
+    structured_change_count: number
+    event_fact_count: number
+    no_event_count: number
+    items: Array<{
+      change_id?: string | null
+      device_id?: string | null
+      device_name?: string | null
+      command?: string | null
+      entity_key?: string | null
+      field?: string | null
+      baseline?: {
+        snapshot_id?: string | null
+        value?: unknown
+      }
+      current?: {
+        snapshot_id?: string | null
+        value?: unknown
+      }
+      event?: {
+        event_label?: string | null
+        severity?: string | null
+        status?: string | null
+      }
+    }>
+  }
+  unstructured_comparison?: {
+    collected_output_count: number
+    compared_output_count: number
+    changed_output_count: number
+    items: Array<{
+      change_id?: string | null
+      device_id?: string | null
+      device_name?: string | null
+      command?: string | null
+      profile_label?: string | null
+      added_line_count?: number
+      removed_line_count?: number
+      parser_failure_text_comparison?: boolean
+    }>
+  }
   data_quality: Record<string, unknown>
   evidence: Record<string, unknown> & {
     analysis?: {
@@ -2494,6 +2555,15 @@ const createOfflineJobApi = (base: string) => ({
     await api.get<OfflinePatrolAnalysisSummary>(`${base}/${id}/replay-summary/`, {
       timeout: 300000,
     })
+  ).data,
+  comparisonEvidence: async (
+    id: string,
+    changeId: string,
+  ): Promise<OfflinePatrolComparisonEvidence> => (
+    await api.get<OfflinePatrolComparisonEvidence>(
+      base + '/' + id + '/comparison-evidence/' + encodeURIComponent(changeId) + '/',
+      { timeout: 300000 },
+    )
   ).data,
   create: async (data: {
     job_type: OfflinePatrolJobType

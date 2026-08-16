@@ -383,6 +383,9 @@ def summarize_unstructured_changes(
         preview = list(diff.get("preview") or [])
         baseline = dict(diff.get("baseline_evidence") or {})
         current = dict(diff.get("current_evidence") or {})
+        comparison_evidence = dict(change.get("comparison_evidence") or {})
+        baseline_raw = dict(comparison_evidence.get("baseline") or {})
+        current_raw = dict(comparison_evidence.get("current") or {})
         legacy_baseline = [
             {
                 "category": row.get("category"),
@@ -409,6 +412,10 @@ def summarize_unstructured_changes(
                 "command": change.get("command"),
                 "profile": diff.get("profile"),
                 "profile_label": profile_label,
+                "comparison_kind": "unstructured_text",
+                "parser_failure_text_comparison": bool(
+                    diff.get("parser_failure_text_comparison")
+                ),
                 "added_line_count": int(diff.get("added_line_count") or 0),
                 "removed_line_count": int(diff.get("removed_line_count") or 0),
                 "changed_line_count": int(diff.get("changed_line_count") or 0),
@@ -419,7 +426,13 @@ def summarize_unstructured_changes(
                 "previous_snapshot_id": change.get("previous_snapshot_id"),
                 "current_snapshot_id": change.get("current_snapshot_id"),
                 "baseline_evidence": {
-                    "snapshot_id": change.get("previous_snapshot_id"),
+                    "snapshot_id": (
+                        baseline_raw.get("snapshot_id")
+                        or change.get("previous_snapshot_id")
+                    ),
+                    "observed_at": baseline_raw.get("observed_at"),
+                    "parse_status": baseline_raw.get("parse_status"),
+                    "raw_text": baseline_raw.get("raw_text"),
                     "normalized_line_count": int(
                         baseline.get("normalized_line_count")
                         or diff.get("previous_line_count")
@@ -434,7 +447,13 @@ def summarize_unstructured_changes(
                     "excerpt_truncated": bool(baseline.get("excerpt_truncated")),
                 },
                 "current_evidence": {
-                    "snapshot_id": change.get("current_snapshot_id"),
+                    "snapshot_id": (
+                        current_raw.get("snapshot_id")
+                        or change.get("current_snapshot_id")
+                    ),
+                    "observed_at": current_raw.get("observed_at"),
+                    "parse_status": current_raw.get("parse_status"),
+                    "raw_text": current_raw.get("raw_text"),
                     "normalized_line_count": int(
                         current.get("normalized_line_count")
                         or diff.get("current_line_count")

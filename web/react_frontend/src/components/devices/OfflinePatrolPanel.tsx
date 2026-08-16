@@ -693,6 +693,10 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
                 reportDownloading={artifactLoading === 'report'}
                 onRetry={() => analysisQuery.refetch()}
                 onDownloadReport={() => downloadArtifact(detail, 'report')}
+                onLoadComparisonEvidence={(changeId) => jobApi.comparisonEvidence(
+                  detail.id,
+                  changeId,
+                )}
                 onOpenRuleAssets={() => navigate(
                   isAssetSource
                     ? buildOfflineRuleBundleUrl(detail)

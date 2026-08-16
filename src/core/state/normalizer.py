@@ -173,18 +173,26 @@ def observations_from_snapshot(
     dataset_id: str | None,
     observation_contract_version: int | None = None,
 ) -> list[StateObservation]:
+    metadata_json = dict(snapshot.get("metadata_json") or {})
+    parse_status = str(snapshot.get("parse_status") or "")
+    parser_failure_text_comparison = parse_status in {
+        "template_missing",
+        "parse_failed",
+    }
+    raw_text_comparison = (
+        metadata_json.get("handling") == "raw_hash_diff"
+        or parser_failure_text_comparison
+    )
     structured = snapshot.get("structured_json")
+    if (
+        structured is None
+        and raw_text_comparison
+        and snapshot.get("raw_text_hash")
+    ):
+        structured = [{"raw_text_hash": snapshot.get("raw_text_hash")}]
     if structured is None:
         return []
-    contract = (
-        _template_contract(
-            snapshot.get("parser_template_id"),
-            contract_version=int(observation_contract_version),
-        )
-        if observation_contract_version is not None
-        else _template_contract(snapshot.get("parser_template_id"))
-    )
-    if (snapshot.get("metadata_json") or {}).get("handling") == "raw_hash_diff":
+    if raw_text_comparison:
         contract = {
             "entity_type": "raw_command_output",
             "primary_keys": [],
@@ -195,6 +203,15 @@ def observations_from_snapshot(
                 }
             },
         }
+    else:
+        contract = (
+            _template_contract(
+                snapshot.get("parser_template_id"),
+                contract_version=int(observation_contract_version),
+            )
+            if observation_contract_version is not None
+            else _template_contract(snapshot.get("parser_template_id"))
+        )
     entity_type = str(contract.get("entity_type") or "record")
     primary_keys = [str(key) for key in contract.get("primary_keys") or []]
     ignore_fields = {str(field).strip().lower() for field in contract.get("ignore_fields") or []}
@@ -426,9 +443,9 @@ def observations_from_snapshot(
                             "comparison_profile_version"
                         ),
                     }
-                    if (snapshot.get("metadata_json") or {}).get("handling")
-                    == "raw_hash_diff"
+                    if raw_text_comparison
                     else None,
+                    "parser_failure_text_comparison": parser_failure_text_comparison,
                     "semantics": field_semantics,
                     "dimensions": dimensions,
                     "value_index": value_index + 1 if value_index is not None else None,
@@ -496,9 +513,11 @@ def _build_snapshot_normalization(
         snapshot.get("parse_status")
         or ("parsed" if snapshot.get("structured_json") is not None else "parse_failed")
     )
+    parser_failure_text_comparison = parse_status in {
+        "template_missing",
+        "parse_failed",
+    }
     gated = {
-        "template_missing": ("blocked", "blocked_by_parser", "blocked_by_parser"),
-        "parse_failed": ("blocked", "blocked_by_parser", "blocked_by_parser"),
         "identity_unknown": ("blocked", "blocked_by_identity", "blocked_by_identity"),
         "ignored": ("skipped", "ignored_by_policy", "ignored"),
         "not_applicable": ("skipped", "not_applicable", "not_applicable"),
@@ -524,6 +543,37 @@ def _build_snapshot_normalization(
                 "observations": [],
             },
             [],
+            False,
+        )
+    if parser_failure_text_comparison:
+        observations = observations_from_snapshot(
+            snapshot,
+            mode=mode,
+            source=str(context["source"]),
+            dataset_id=context["dataset_id"],
+        )
+        return (
+            {
+                "success": False,
+                "snapshot_id": snapshot_id,
+                "mode": mode,
+                "parse_status": parse_status,
+                "normalization_status": "blocked",
+                "fact_status": "blocked_by_parser",
+                "failure_code": parse_status,
+                "error": (
+                    "Parser is unavailable; raw CLI text is retained for "
+                    "text comparison only"
+                ),
+                "no_observation_reason": "blocked_by_parser",
+                "comparison_mode": "raw_text_only",
+                "observation_count": len(observations),
+                "created_count": 0,
+                "current_state_updates": 0,
+                "updated_current_state": False,
+                "observations": [item.to_dict() for item in observations],
+            },
+            observations,
             False,
         )
     if parse_status == "parse_empty":
@@ -636,14 +686,15 @@ def normalize_snapshot(
             fact_status=str(result["fact_status"]),
             failure_code=result.get("failure_code"),
         )
+    if observations:
+        created, current_updates = repository.save_observations(
+            observations,
+            update_current_state=should_update_current,
+        )
+        result["created_count"] = created
+        result["current_state_updates"] = current_updates
     if not result["success"]:
         return result
-    created, current_updates = repository.save_observations(
-        observations,
-        update_current_state=should_update_current,
-    )
-    result["created_count"] = created
-    result["current_state_updates"] = current_updates
     return result
 
 
@@ -782,8 +833,9 @@ def _normalize_run_impl(
                 fact_status=str(snapshot_result["fact_status"]),
                 failure_code=snapshot_result.get("failure_code"),
             )
-        if snapshot_result["success"]:
+        if observations:
             valid_observations.extend(observations)
+        if snapshot_result["success"]:
             should_update_current = should_update_current or update_current
         else:
             patrol_repository.mark_collection_analysis_failed(
@@ -802,7 +854,10 @@ def _normalize_run_impl(
         remaining_created = created
         remaining_updates = current_updates
         for snapshot_result in results:
-            if not snapshot_result["success"]:
+            if (
+                not snapshot_result["success"]
+                and not snapshot_result.get("observations")
+            ):
                 continue
             count = int(snapshot_result["observation_count"])
             snapshot_result["created_count"] = min(count, remaining_created)

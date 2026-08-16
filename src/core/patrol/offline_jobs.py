@@ -1076,7 +1076,12 @@ class OfflinePatrolJobService:
         if not run_id:
             raise ValueError("offline patrol job has not produced a patrol run")
         if kind == "report":
-            report = self.build_leadership_report_data(job_id, detail=detail, run_id=run_id)
+            report = self.build_leadership_report_data(
+                job_id,
+                detail=detail,
+                run_id=run_id,
+                include_raw_evidence=True,
+            )
             return (
                 f"{job_id}-leadership-report.docx",
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -1114,6 +1119,7 @@ class OfflinePatrolJobService:
         detail: dict[str, Any] | None = None,
         run_id: str | None = None,
         analysis_attempt_id: str | None = None,
+        include_raw_evidence: bool = False,
     ) -> dict[str, Any]:
         """Return the same compact fact model used by the downloadable DOCX report."""
 
@@ -1128,6 +1134,7 @@ class OfflinePatrolJobService:
             detail,
             run_id,
             analysis_attempt_id=analysis_attempt_id,
+            include_raw_evidence=include_raw_evidence,
         )
         predecessor_id = (
             self._find_predecessor_history_job_id(job_id)
@@ -1172,6 +1179,94 @@ class OfflinePatrolJobService:
             issuer="网络运维中心",
             recipient="项目建设单位",
         )
+
+    @staticmethod
+    def _snapshot_comparison_evidence(snapshot: Any | None) -> dict[str, Any] | None:
+        if snapshot is None:
+            return None
+
+        def value(name: str) -> Any:
+            if isinstance(snapshot, dict):
+                return snapshot.get(name)
+            return getattr(snapshot, name, None)
+
+        observed_at = value("observed_at")
+        return {
+            "snapshot_id": value("snapshot_id") or value("id"),
+            "run_id": value("run_id"),
+            "command": value("command_canonical") or value("command"),
+            "observed_at": (
+                observed_at.isoformat()
+                if hasattr(observed_at, "isoformat")
+                else observed_at
+            ),
+            "parse_status": value("parse_status"),
+            "raw_text": value("raw_text"),
+            "structured_data": _json_safe(value("structured_json")),
+        }
+
+    @classmethod
+    def _comparison_evidence_for_change(
+        cls,
+        change: dict[str, Any],
+        *,
+        repository: PatrolRepository | None = None,
+        snapshot_cache: dict[str, Any | None] | None = None,
+    ) -> dict[str, Any]:
+        repository = repository or PatrolRepository()
+        snapshot_cache = snapshot_cache if snapshot_cache is not None else {}
+
+        def load(snapshot_id: Any) -> dict[str, Any] | None:
+            identifier = str(snapshot_id or "")
+            if not identifier:
+                return None
+            if identifier not in snapshot_cache:
+                snapshot_cache[identifier] = repository.get_snapshot(identifier)
+            return cls._snapshot_comparison_evidence(snapshot_cache[identifier])
+
+        dimensions = dict(change.get("dimensions") or {})
+        unstructured_diff = dict(dimensions.get("unstructured_diff") or {})
+        baseline = load(change.get("previous_snapshot_id"))
+        current = load(change.get("current_snapshot_id"))
+        parser_failure = bool(
+            unstructured_diff.get("parser_failure_text_comparison")
+            or (baseline or {}).get("parse_status")
+            in {"template_missing", "parse_failed"}
+            or (current or {}).get("parse_status")
+            in {"template_missing", "parse_failed"}
+        )
+        is_unstructured = bool(unstructured_diff) or (
+            str(change.get("field") or "") == "raw_text_hash"
+            or str(change.get("observation_type") or "") == "raw.command.hash"
+        )
+        return {
+            "change_id": change.get("id") or change.get("change_id"),
+            "device_id": change.get("device_id"),
+            "command": change.get("command"),
+            "comparison_kind": (
+                "unstructured_text" if is_unstructured else "structured_event"
+            ),
+            "parser_failure_text_comparison": parser_failure,
+            "baseline": baseline,
+            "current": current,
+        }
+
+    def get_comparison_evidence(
+        self,
+        job_id: str,
+        change_id: str,
+    ) -> dict[str, Any]:
+        detail = self.get_job(job_id)
+        periods = {item["role"]: item for item in detail.get("periods") or []}
+        current = periods.get("current") or periods.get("sample")
+        run_id = str((current or {}).get("patrol_run_id") or "")
+        if not run_id:
+            raise ValueError("offline patrol job has not produced a patrol run")
+        for change in ChangeEventRepository().list_changes(run_id=run_id):
+            candidate_id = str(change.get("change_id") or change.get("id") or "")
+            if candidate_id == change_id:
+                return self._comparison_evidence_for_change(change)
+        raise KeyError(f"change not found: {change_id}")
 
     @staticmethod
     def _find_predecessor_history_job_id(job_id: str) -> str | None:
@@ -1252,12 +1347,13 @@ class OfflinePatrolJobService:
                 return None
             return max(candidates)[2]
 
-    @staticmethod
     def _build_offline_leadership_summary(
+        self,
         detail: dict[str, Any],
         run_id: str,
         *,
         analysis_attempt_id: str | None = None,
+        include_raw_evidence: bool = False,
     ) -> dict[str, Any]:
         patrol_repository = PatrolRepository()
         run = patrol_repository.get_run(run_id) or {}
@@ -1485,6 +1581,15 @@ class OfflinePatrolJobService:
             }
             for item in changes_raw
         ]
+        if include_raw_evidence:
+            evidence_repository = PatrolRepository()
+            snapshot_cache: dict[str, Any | None] = {}
+            for change in changes:
+                change["comparison_evidence"] = self._comparison_evidence_for_change(
+                    change,
+                    repository=evidence_repository,
+                    snapshot_cache=snapshot_cache,
+                )
         changes_by_id = {str(item.get("id")): item for item in changes if item.get("id")}
         observations_by_id = {str(item.get("id")): item for item in observations if item.get("id")}
         rules_by_name: dict[str, dict[str, Any]] = {}

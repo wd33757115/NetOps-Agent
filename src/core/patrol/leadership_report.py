@@ -982,6 +982,9 @@ def _build_structured_event_evidence(
             continue
         change_id = str(change.get("id") or change.get("change_id") or "")
         event = events_by_change.get(change_id) or {}
+        comparison_evidence = dict(change.get("comparison_evidence") or {})
+        baseline_raw = dict(comparison_evidence.get("baseline") or {})
+        current_raw = dict(comparison_evidence.get("current") or {})
         baseline_value = (
             change.get("old_value")
             if "old_value" in change
@@ -1010,14 +1013,26 @@ def _build_structured_event_evidence(
                 "field": change.get("field"),
                 "change_type": change.get("change_type"),
                 "baseline": {
-                    "snapshot_id": change.get("previous_snapshot_id"),
+                    "snapshot_id": (
+                        baseline_raw.get("snapshot_id")
+                        or change.get("previous_snapshot_id")
+                    ),
                     "observation_id": change.get("previous_observation_id"),
                     "value": baseline_value,
+                    "observed_at": baseline_raw.get("observed_at"),
+                    "parse_status": baseline_raw.get("parse_status"),
+                    "raw_text": baseline_raw.get("raw_text"),
                 },
                 "current": {
-                    "snapshot_id": change.get("current_snapshot_id"),
+                    "snapshot_id": (
+                        current_raw.get("snapshot_id")
+                        or change.get("current_snapshot_id")
+                    ),
                     "observation_id": change.get("current_observation_id"),
                     "value": current_value,
+                    "observed_at": current_raw.get("observed_at"),
+                    "parse_status": current_raw.get("parse_status"),
+                    "raw_text": current_raw.get("raw_text"),
                 },
                 "event": {
                     "event_id": event.get("id") or event.get("event_id"),
@@ -1067,6 +1082,70 @@ def _unstructured_evidence_text(
     return f"快照 {snapshot_id or '-'}；{text}"
 
 
+def _full_cli_evidence_items(
+    report: dict[str, Any],
+) -> list[tuple[str, dict[str, Any], dict[str, Any], dict[str, Any]]]:
+    result: list[tuple[str, dict[str, Any], dict[str, Any], dict[str, Any]]] = []
+    seen: set[tuple[str, str, str]] = set()
+    groups = (
+        (
+            "结构化变化",
+            list(
+                dict(report.get("structured_event_evidence") or {}).get("items")
+                or []
+            ),
+        ),
+        (
+            "非结构化文本对比",
+            list(
+                dict(report.get("unstructured_comparison") or {}).get("items")
+                or []
+            ),
+        ),
+    )
+    for group_label, items in groups:
+        for item in items:
+            baseline = dict(
+                item.get("baseline") or item.get("baseline_evidence") or {}
+            )
+            current = dict(
+                item.get("current") or item.get("current_evidence") or {}
+            )
+            if (
+                baseline.get("raw_text") is None
+                and current.get("raw_text") is None
+            ):
+                continue
+            key = (
+                str(baseline.get("snapshot_id") or ""),
+                str(current.get("snapshot_id") or ""),
+                str(item.get("command") or ""),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append((group_label, item, baseline, current))
+    return result
+
+
+def _append_cli_evidence_markdown(
+    lines: list[str],
+    label: str,
+    evidence: dict[str, Any],
+) -> None:
+    raw_text = evidence.get("raw_text")
+    if raw_text is None:
+        return
+    lines.extend(
+        [
+            f"  - {label} CLI 原文（快照 {evidence.get('snapshot_id') or '-'}）：",
+            "~~~text",
+            str(raw_text),
+            "~~~",
+        ]
+    )
+
+
 def build_leadership_report(
     patrol_batch_id: str,
     summary: dict[str, Any],
@@ -1075,6 +1154,10 @@ def build_leadership_report(
     issuer: str = "网络运维中心",
     recipient: str = "项目建设单位",
 ) -> dict[str, Any]:
+    summary = dict(summary)
+    analysis_summary = dict(summary.get("analysis") or {})
+    analysis_summary.pop("rule_bundle_digest", None)
+    summary["analysis"] = analysis_summary
     if generated_at is None:
         generated_at = _report_datetime(
             (summary.get("analysis") or {}).get("completed_at")
@@ -1500,6 +1583,7 @@ def render_leadership_markdown(report: dict[str, Any]) -> str:
         if len(structured.get("items") or []) > 20:
             lines.append("- 其余结构化变化详见技术报告与事件数据附件。")
     unstructured = dict(report.get("unstructured_comparison") or {})
+    full_cli_evidence = _full_cli_evidence_items(report)
     lines.extend(["", "## 六、非结构化文本对比证据", ""])
     if not unstructured.get("collected_output_count"):
         lines.append("本批次未采集配置、日志等已启用非结构化对比的命令输出。")
@@ -1514,7 +1598,12 @@ def render_leadership_markdown(report: dict[str, Any]) -> str:
             f"{unstructured.get('compared_output_count')} 项，检测到 "
             f"{unstructured.get('changed_output_count')} 项有效变化；新增 "
             f"{unstructured.get('added_line_count')} 行、删除 "
-            f"{unstructured.get('removed_line_count')} 行。以下仅展示脱敏摘要。"
+            f"{unstructured.get('removed_line_count')} 行。"
+            + (
+                "完整 CLI 原文详见本报告附录。"
+                if full_cli_evidence
+                else "以下仅展示脱敏摘要。"
+            )
         )
         for item in list(unstructured.get("items") or [])[:10]:
             categories = "、".join(
@@ -1532,6 +1621,20 @@ def render_leadership_markdown(report: dict[str, Any]) -> str:
             lines.append(f"  - 当前证据：{_unstructured_evidence_text(item, 'current')}")
         if len(unstructured.get("items") or []) > 10:
             lines.append("- 其余变化详见技术报告和原始输出证据包。")
+    if full_cli_evidence:
+        lines.extend(["", "## 附录：完整 CLI 原文证据", ""])
+        for group_label, item, baseline, current in full_cli_evidence:
+            lines.append(
+                f"### {group_label} / "
+                f"{item.get('device_name') or item.get('device_id') or '-'} / "
+                f"{item.get('command') or '-'}"
+            )
+            if item.get("parser_failure_text_comparison"):
+                lines.append(
+                    "Parser 未成功，本项仅提供原文文本差异证据，不能替代结构化 Event 判定。"
+                )
+            _append_cli_evidence_markdown(lines, "基线", baseline)
+            _append_cli_evidence_markdown(lines, "当前", current)
     lines.extend(["", "## 七、处置建议", ""])
     for item in report["recommendations"]:
         lines.append(
@@ -1550,7 +1653,7 @@ def render_leadership_markdown(report: dict[str, Any]) -> str:
             f"- Workflow Run：{evidence.get('workflow_run_id') or '-'}",
             f"- 分析尝试：{analysis.get('attempt_id') or '-'}",
             f"- 分析版本：{analysis.get('revision') or '-'}",
-            f"- 规则包摘要：{analysis.get('rule_bundle_digest') or '-'}",
+            "- 规则包：本次分析已固化",
             f"- 权威 Change：{analysis.get('source_change_count') or 0} 条",
             "",
             f"{report['issuer']}",
@@ -1671,6 +1774,28 @@ def _normalize_docx_archive(content: bytes) -> bytes:
             target_info.comment = source_info.comment
             target.writestr(target_info, source.read(source_info.filename))
     return output_stream.getvalue()
+
+
+def _add_cli_evidence_docx(
+    doc: Any,
+    label: str,
+    evidence: dict[str, Any],
+) -> None:
+    raw_text = evidence.get("raw_text")
+    if raw_text is None:
+        return
+    add_styled_paragraph(
+        doc,
+        f"{label} CLI 原文（快照 {evidence.get('snapshot_id') or '-'}）：",
+        first_line_indent=0.74,
+    )
+    paragraph = doc.add_paragraph()
+    apply_fixed_line_spacing(paragraph)
+    paragraph.paragraph_format.left_indent = Pt(18)
+    paragraph.paragraph_format.first_line_indent = Pt(0)
+    run = paragraph.add_run(str(raw_text))
+    run.font.name = "Consolas"
+    run.font.size = Pt(8)
 
 
 def render_leadership_docx(report: dict[str, Any]) -> bytes:
@@ -1963,6 +2088,7 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
 
     _add_section(doc, "六、非结构化文本对比证据")
     unstructured = dict(report.get("unstructured_comparison") or {})
+    full_cli_evidence = _full_cli_evidence_items(report)
     if not unstructured.get("collected_output_count"):
         add_styled_paragraph(
             doc,
@@ -1979,12 +2105,18 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
     else:
         add_styled_paragraph(
             doc,
-            f"共采集 {unstructured.get('collected_output_count')} 项、比较 "
-            f"{unstructured.get('compared_output_count')} 项，检测到 "
-            f"{unstructured.get('changed_output_count')} 项有效变化；新增 "
-            f"{unstructured.get('added_line_count')} 行、删除 "
-            f"{unstructured.get('removed_line_count')} 行。下表按变化规模列示重点输出，"
-            "完整脱敏差异见技术报告，原文以受控原始输出为准。",
+            (
+                f"共采集 {unstructured.get('collected_output_count')} 项、比较 "
+                f"{unstructured.get('compared_output_count')} 项，检测到 "
+                f"{unstructured.get('changed_output_count')} 项有效变化；新增 "
+                f"{unstructured.get('added_line_count')} 行、删除 "
+                f"{unstructured.get('removed_line_count')} 行。下表按变化规模列示重点输出，"
+                + (
+                    "完整 CLI 原文详见本报告附录。"
+                    if full_cli_evidence
+                    else "完整脱敏差异见技术报告，原文以受控原始输出为准。"
+                )
+            ),
             first_line_indent=0.74,
         )
         unstructured_rows = []
@@ -2032,6 +2164,25 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
                 "领导报告不展开长日志正文，避免将滚动日志记录误读为独立故障。",
                 first_line_indent=0.74,
             )
+
+    if full_cli_evidence:
+        _add_section(doc, "附录：完整 CLI 原文证据")
+        for group_label, item, baseline, current in full_cli_evidence:
+            add_styled_paragraph(
+                doc,
+                f"{group_label} / "
+                f"{item.get('device_name') or item.get('device_id') or '-'} / "
+                f"{item.get('command') or '-'}",
+                first_line_indent=0.74,
+            )
+            if item.get("parser_failure_text_comparison"):
+                add_styled_paragraph(
+                    doc,
+                    "Parser 未成功，本项仅提供原文文本差异证据，不能替代结构化 Event 判定。",
+                    first_line_indent=0.74,
+                )
+            _add_cli_evidence_docx(doc, "基线", baseline)
+            _add_cli_evidence_docx(doc, "当前", current)
 
     _add_section(doc, "七、处置建议")
     for index, item in enumerate(report["recommendations"], start=1):

@@ -303,6 +303,21 @@ def get_offline_patrol_analysis_summary(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+@routes.get("/{job_id}/comparison-evidence/{change_id}")
+def get_offline_patrol_comparison_evidence(
+    job_id: str,
+    change_id: str,
+    user: CurrentUser = Depends(get_current_user),
+):
+    _detail_or_http(job_id, user)
+    try:
+        return OfflinePatrolJobService().get_comparison_evidence(job_id, change_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @routes.post("/{job_id}/sources", status_code=status.HTTP_201_CREATED)
 def attach_offline_patrol_source(
     job_id: str,
