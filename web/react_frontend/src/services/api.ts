@@ -3187,7 +3187,32 @@ export const skillApi = {
   },
 }
 
+export interface ParserValueMappingRule {
+  check_item: string
+  vendor: string
+  model: string
+  command: string
+  canonical: string
+  aliases: string[]
+}
+
+export interface ParserValueMappingConfig {
+  version: number
+  config_path: string
+  scoped_value_mappings: ParserValueMappingRule[]
+}
+
 export const parserApi = {
+  getValueMappings: async (): Promise<ParserValueMappingConfig> => {
+    const response = await api.get<ParserValueMappingConfig>('/parser/value-mappings/')
+    return response.data
+  },
+  updateValueMappings: async (data: {
+    scoped_value_mappings: ParserValueMappingRule[]
+  }): Promise<ParserValueMappingConfig> => {
+    const response = await api.put<ParserValueMappingConfig>('/parser/value-mappings/', data)
+    return response.data
+  },
   workItems: async (params: ParserPageParams = {}): Promise<ParserPage<ParserWorkItem>> => {
     const response = await api.get<ParserPage<ParserWorkItem>>('/parser/work-items/', { params })
     return response.data

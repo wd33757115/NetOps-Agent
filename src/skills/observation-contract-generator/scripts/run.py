@@ -2803,6 +2803,9 @@ def run_contract_generation(params: dict[str, Any]) -> dict[str, Any]:
             command=command,
             samples_text=samples_text,
             use_manual_profile=True,
+            check_item=params.get("check_item_id") or params.get("check_item"),
+            vendor=params.get("vendor"),
+            model=params.get("model"),
         )
         result = {
             "success": True,
@@ -2847,6 +2850,9 @@ def run_contract_generation(params: dict[str, Any]) -> dict[str, Any]:
                 command=command,
                 samples_text=samples_text,
                 use_manual_profile=True,
+                check_item=params.get("check_item_id") or params.get("check_item"),
+                vendor=params.get("vendor"),
+                model=params.get("model"),
             )
             validation = _validate_contract_by_group(
                 command=command,

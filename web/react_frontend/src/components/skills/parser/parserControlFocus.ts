@@ -139,6 +139,7 @@ export const isSubWorkspace = (workspace: ParserWorkspaceKey, value: string | nu
 const legacySubWorkspaceAliases: Partial<Record<ParserWorkspaceKey, Record<string, ParserSubWorkspaceKey>>> = {
   production: {
     'assessment-policies': 'catalog-management',
+    'check-items': 'catalog-management',
   },
   inventory: {
     templates: 'published-assets',
@@ -234,6 +235,12 @@ export const resolveParserControlFocus = (searchParams: URLSearchParams): Parser
     : legacyProductDestination(rawWorkspace, subWorkspace)
   const fallbackWorkspace = legacyDestination?.workspace || rawWorkspace || 'production'
   const fallbackSubWorkspace = legacyDestination?.subWorkspace || subWorkspace
+  const normalizedFallbackSubWorkspace = normalizeSubWorkspace(fallbackWorkspace, fallbackSubWorkspace)
+  const aliasedSubWorkspace = Boolean(
+    subWorkspace
+    && normalizedFallbackSubWorkspace
+    && subWorkspace !== normalizedFallbackSubWorkspace,
+  )
   let fallbackReason: ParserControlFocus['fallbackReason'] = null
   let fallbackMessage: string | null = null
 
@@ -252,11 +259,11 @@ export const resolveParserControlFocus = (searchParams: URLSearchParams): Parser
     kind: null,
     id: id || null,
     workspace: fallbackWorkspace,
-    subWorkspace: normalizeSubWorkspace(fallbackWorkspace, fallbackSubWorkspace),
+    subWorkspace: normalizedFallbackSubWorkspace,
     fallbackReason,
     fallbackMessage,
     focusHint: searchParams.get('command') || searchParams.get('q') || null,
-    legacyRedirect: Boolean(legacyDestination),
+    legacyRedirect: Boolean(legacyDestination || aliasedSubWorkspace),
     productAction: legacyDestination?.action || null,
   }
 

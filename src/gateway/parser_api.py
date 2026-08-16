@@ -88,7 +88,12 @@ from src.core.parser.repository import (
     parser_semantic_review_activation_errors,
 )
 from src.core.parser.runtime import ParserRuntime
+from src.core.parser.semantic_catalog import load_semantic_catalog
 from src.core.parser.tasks import dispatch_ready_parser_jobs
+from src.core.parser.value_mapping_config import (
+    parser_value_mapping_view,
+    save_value_mapping_document,
+)
 from src.core.parser.work_queue import ParserWorkQueueService
 from src.core.patrol.change_policy_repository import ChangePolicyRepository
 from src.core.patrol.event_rules import (
@@ -245,6 +250,10 @@ class ParserSpecUpdateRequest(BaseModel):
 class ParserSpecSuggestionRequest(BaseModel):
     reason: str | None = None
     revision_instruction: str | None = Field(default=None, max_length=4000)
+
+
+class ParserValueMappingUpdateRequest(BaseModel):
+    scoped_value_mappings: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ParserManualCandidateRequest(BaseModel):
@@ -665,6 +674,34 @@ def _raise_catalog_governance_error(exc: ValueError) -> None:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     status_code = 404 if "not found" in str(exc).casefold() else 422
     raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
+@router.get("/value-mappings")
+def get_parser_value_mappings(
+    _user: CurrentUser = Depends(get_current_user),
+):
+    try:
+        return parser_value_mapping_view()
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.put("/value-mappings")
+def update_parser_value_mappings(
+    payload: ParserValueMappingUpdateRequest,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    try:
+        save_value_mapping_document(
+            {
+                "version": 2,
+                "scoped_value_mappings": payload.scoped_value_mappings,
+            }
+        )
+        load_semantic_catalog.cache_clear()
+        return parser_value_mapping_view()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/asset-production/units")

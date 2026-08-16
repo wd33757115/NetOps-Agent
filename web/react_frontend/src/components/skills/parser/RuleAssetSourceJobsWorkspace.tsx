@@ -33,7 +33,7 @@ const RuleAssetSourceJobsWorkspace: React.FC = () => {
     : undefined
 
   return (
-    <Space direction="vertical" size={16} style={{ width: '100%' }}>
+    <Space className="parser-source-jobs-workspace" direction="vertical" size={16} style={{ width: '100%' }}>
       {isAssetGapSource && (
         <Alert
           showIcon

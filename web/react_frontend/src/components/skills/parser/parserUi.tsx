@@ -44,13 +44,13 @@ export const governanceStatusLabel = (status?: string) => {
 }
 
 export const codePanelStyle: React.CSSProperties = {
-  background: '#f5f5f5',
+  background: '#f7f8fa',
   border: '1px solid #e5e7eb',
-  borderRadius: 6,
+  borderRadius: 4,
   fontFamily: 'Consolas, Monaco, monospace',
   margin: 0,
   overflow: 'auto',
-  padding: 16,
+  padding: 14,
   whiteSpace: 'pre',
 }
 

@@ -70,6 +70,8 @@ import CoverageBackfillWorkspace from './parser/CoverageBackfillWorkspace'
 import AuditTimelineWorkspace from './parser/AuditTimelineWorkspace'
 import RuleGapsWorkspace from './parser/RuleGapsWorkspace'
 import ParserTemplateApprovalDrawer from './parser/ParserTemplateApprovalDrawer'
+import ParserValueMappingManager from './parser/ParserValueMappingManager'
+import './parser/parser-workspace.css'
 import WorkflowRunMonitor from './WorkflowRunMonitor'
 import {
   codePanelStyle,
@@ -1785,6 +1787,9 @@ const ParserControlTab: React.FC = () => {
   )
 
   return <div className="parser-control-root">
+      {!isMobile && <div className="parser-control-actions">
+        <ParserValueMappingManager />
+      </div>}
     {!isPrimaryProductWorkspace && (
       <>
     <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>

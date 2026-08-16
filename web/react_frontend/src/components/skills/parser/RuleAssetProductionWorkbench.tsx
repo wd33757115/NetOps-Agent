@@ -39,7 +39,7 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
   const currentView = view === 'policies' ? 'catalog' : view
 
   return (
-    <Space direction="vertical" size={16} style={{ width: '100%' }}>
+    <Space className="parser-production-workspace" direction="vertical" size={16} style={{ width: '100%' }}>
       <nav className="rule-asset-view-switch" aria-label="巡检规则资产">
         <Button
           type="text"

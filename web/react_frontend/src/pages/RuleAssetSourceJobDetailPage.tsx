@@ -6,6 +6,7 @@ import { Navigate, useParams } from 'react-router-dom'
 
 import { OfflineFileJobWorkbench } from '../components/devices/OfflinePatrolPanel'
 import GrokShellLayout from '../components/layout/GrokShellLayout'
+import '../components/skills/parser/parser-workspace.css'
 
 const RuleAssetSourceJobDetailPage: React.FC = () => {
   const { jobId } = useParams<{ jobId: string }>()
@@ -19,7 +20,9 @@ const RuleAssetSourceJobDetailPage: React.FC = () => {
       title="巡检规则资产"
       subtitle="查看样本证据、处理过程、命令适配器生产进度与回放结果"
     >
-      <OfflineFileJobWorkbench purpose="rule_asset_source" detailPageJobId={jobId} />
+      <div className="parser-detail-shell">
+        <OfflineFileJobWorkbench purpose="rule_asset_source" detailPageJobId={jobId} />
+      </div>
     </GrokShellLayout>
   )
 }

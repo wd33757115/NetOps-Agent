@@ -37,7 +37,7 @@ const StandardTableShell = <RecordType extends object>({
   })
 
   return (
-  <div ref={rootRef}>
+    <div ref={rootRef} className="parser-table-shell">
     {error && (
       <Alert
         type="error"

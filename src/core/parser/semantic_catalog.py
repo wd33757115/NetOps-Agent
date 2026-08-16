@@ -13,7 +13,12 @@ from typing import Any
 
 import yaml
 
-CATALOG_PATH = Path(__file__).with_name("assets") / "contract_semantics.v1.yaml"
+from src.core.parser.value_mapping_config import (
+    BASE_SEMANTIC_CATALOG_PATH,
+    resolve_scoped_schema_field,
+)
+
+CATALOG_PATH = BASE_SEMANTIC_CATALOG_PATH
 
 
 @dataclass(frozen=True)
@@ -46,7 +51,13 @@ def load_semantic_catalog(path: str | Path = CATALOG_PATH) -> dict[str, Any]:
         raise ValueError(f"unsupported parser semantic catalog: {target}")
     if not isinstance(payload.get("contract_profiles"), list):
         raise ValueError("parser semantic catalog has no contract_profiles list")
-    payload["catalog_hash"] = hashlib.sha256(content).hexdigest()
+    effective_content = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    payload["catalog_hash"] = hashlib.sha256(effective_content).hexdigest()
     return payload
 
 
@@ -367,6 +378,10 @@ def canonical_field_for_name(
 def canonical_schema_field(
     field_name: str,
     *,
+    check_item: str | None = None,
+    vendor: str | None = None,
+    model: str | None = None,
+    command: str | None = None,
     catalog_path: str | Path = CATALOG_PATH,
 ) -> str | None:
     """Resolve only an explicitly governed machine-field alias.
@@ -376,14 +391,22 @@ def canonical_schema_field(
     permissive for changing public field names such as ``serial_number``.
     """
 
+    if Path(catalog_path).resolve() == CATALOG_PATH.resolve():
+        scoped = resolve_scoped_schema_field(
+            field_name,
+            check_item=check_item,
+            vendor=vendor,
+            model=model,
+            command=command,
+        )
+        if scoped:
+            return scoped
     catalog = load_semantic_catalog(catalog_path)
     target = str(field_name or "").strip().casefold()
-    matches = {
-        str(canonical)
-        for canonical, aliases in dict(catalog.get("schema_field_aliases") or {}).items()
-        if target in {str(alias).strip().casefold() for alias in aliases or []}
-    }
-    return next(iter(matches)) if len(matches) == 1 else None
+    aliases_by_field = dict(catalog.get("schema_field_aliases") or {})
+    if target in aliases_by_field:
+        return target
+    return None
 
 
 def schema_field_aliases(

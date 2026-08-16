@@ -51,24 +51,6 @@ _PROJECTION_METADATA_COLUMNS = {
     "observed_at",
 }
 
-_TEXTFSM_VALUE_ALIASES = {
-    "POWERID": "POWER_SUPPLY",
-    "POWER_ID": "POWER_SUPPLY",
-    "PSU": "POWER_SUPPLY",
-    "PSU_ID": "POWER_SUPPLY",
-    "FIVE_SEC": "CPU_5S_PCT",
-    "FIVE_SECONDS": "CPU_5S_PCT",
-    "CPU_USAGE_5S": "CPU_5S_PCT",
-    "ONE_MIN": "CPU_1M_PCT",
-    "CPU_USAGE_1M": "CPU_1M_PCT",
-    "FIVE_MIN": "CPU_5M_PCT",
-    "CPU_USAGE_5M": "CPU_5M_PCT",
-    "TOTAL_MEMORY": "MEMORY_TOTAL",
-    "USED_MEMORY": "MEMORY_USED",
-    "USED_RATE": "MEMORY_USED_PCT",
-    "MEM_RATE": "MEMORY_USED_PCT",
-}
-
 _ASSESSMENT_STATUS_LABELS = {
     "healthy": "正常",
     "passed": "正常",
@@ -139,15 +121,25 @@ def _normalize_field_name(value: Any) -> str:
     return text or "VALUE"
 
 
-def _canonical_textfsm_field(command: str, value: Any) -> str:
+def _canonical_textfsm_field(
+    *,
+    check_item: str,
+    vendor: str,
+    model: str,
+    command: str,
+    value: Any,
+) -> str:
+    from src.core.parser.semantic_catalog import canonical_schema_field
+
     name = _normalize_field_name(value)
-    if name == "STATE":
-        normalized_command = command.lower()
-        if "power" in normalized_command or "environment" in normalized_command:
-            return "POWER_STATUS"
-        if "fan" in normalized_command:
-            return "FAN_STATUS"
-    return _TEXTFSM_VALUE_ALIASES.get(name, name)
+    canonical = canonical_schema_field(
+        name,
+        check_item=check_item,
+        vendor=vendor,
+        model=model,
+        command=command,
+    )
+    return _normalize_field_name(canonical or name)
 
 
 def _structured_records(structured: Any) -> list[tuple[str, dict[str, Any]]]:
@@ -181,11 +173,24 @@ def _structured_records(structured: Any) -> list[tuple[str, dict[str, Any]]]:
     return records
 
 
-def _normalize_record(command: str, record: Mapping[str, Any]) -> dict[str, Any]:
+def _normalize_record(
+    *,
+    check_item: str,
+    vendor: str,
+    model: str,
+    command: str,
+    record: Mapping[str, Any],
+) -> dict[str, Any]:
     normalized: dict[str, Any] = {}
     collisions: dict[str, Any] = {}
     for raw_name, value in record.items():
-        name = _canonical_textfsm_field(command, raw_name)
+        name = _canonical_textfsm_field(
+            check_item=check_item,
+            vendor=vendor,
+            model=model,
+            command=command,
+            value=raw_name,
+        )
         if name in normalized and normalized[name] != value:
             collisions[str(raw_name)] = value
             continue
@@ -329,6 +334,7 @@ def _append_evidence_rows(
     matrix: Mapping[str, Any],
     evidence: Mapping[str, Any],
     evidence_by_snapshot: Mapping[str, Mapping[str, Any]],
+    check_item_id: str = "",
 ) -> None:
     records = _structured_records(evidence.get("structured_json")) or [("", {})]
     for record_type, raw_record in records:
@@ -340,7 +346,29 @@ def _append_evidence_rows(
         if record_type:
             group.add_column("record_type", "记录类型")
             row["record_type"] = record_type
-        for name, value in _normalize_record(str(row.get("command") or ""), raw_record).items():
+        vendor = str(
+            evidence.get("vendor")
+            or evidence.get("manufacturer")
+            or matrix.get("vendor")
+            or matrix.get("manufacturer")
+            or ""
+        )
+        model = str(
+            evidence.get("model")
+            or evidence.get("device_model")
+            or evidence.get("profile")
+            or matrix.get("model")
+            or matrix.get("device_model")
+            or matrix.get("profile")
+            or ""
+        )
+        for name, value in _normalize_record(
+            check_item=check_item_id,
+            vendor=vendor,
+            model=model,
+            command=str(row.get("command") or ""),
+            record=raw_record,
+        ).items():
             column_id = f"value:{name}"
             group.add_column(column_id, name)
             row[column_id] = value
@@ -468,6 +496,7 @@ def _sheet_groups(report: Mapping[str, Any]) -> list[_SheetGroup]:
                 matrix=matrix,
                 evidence=evidence,
                 evidence_by_snapshot=evidence_by_snapshot,
+                check_item_id=check_item_id,
             )
             snapshot_id = str(evidence.get("snapshot_id") or "")
             if snapshot_id:
@@ -508,6 +537,7 @@ def _sheet_groups(report: Mapping[str, Any]) -> list[_SheetGroup]:
                     matrix=matrix,
                     evidence=evidence,
                     evidence_by_snapshot=evidence_by_snapshot,
+                    check_item_id=check_item_id,
                 )
                 if snapshot_id:
                     represented_snapshots.setdefault(check_item_id, set()).add(snapshot_id)
