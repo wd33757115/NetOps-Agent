@@ -11,7 +11,11 @@ import pytest
 from src.core.collection.policy import execution_plan_from_metadata
 from src.core.device_ops.tools import ActionType, PatrolTool, TaskResult
 from src.core.patrol import runner as patrol_runner
-from src.core.patrol.runner import DevicePatrolRunner, DevicePatrolRunRequest
+from src.core.patrol.runner import (
+    DevicePatrolRunner,
+    DevicePatrolRunRequest,
+    PatrolPlatformError,
+)
 
 
 def test_production_parser_preflight_does_not_block_cli_collection(monkeypatch, tmp_path):
@@ -82,6 +86,90 @@ def test_production_parser_preflight_does_not_block_cli_collection(monkeypatch, 
     assert result["coverage_preflight"][0]["coverage_status"] == "template_missing"
 
 
+def test_check_item_plan_uses_frozen_runtime_bundle_as_parser_authority(
+    monkeypatch,
+    tmp_path,
+):
+    output = tmp_path / "check-item-patrol.txt"
+    output.write_text(
+        "Command: display cpu\nOutput:\nSlot 0 CPU 5m: 91%\n",
+        encoding="utf-8",
+    )
+
+    class FakeCollector:
+        def collect_command_outputs(self, *, device, execution_plan):
+            return output
+
+    tool = PatrolTool.__new__(PatrolTool)
+    tool.policy_resolver = None
+    tool.cli_collector = FakeCollector()
+    tool.db_manager = SimpleNamespace()
+    monkeypatch.setattr(
+        tool,
+        "_production_coverage",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("legacy coverage must not re-decide a frozen bundle")
+        ),
+    )
+    monkeypatch.setattr(
+        "src.core.device_ops.tools.load_command_collection_manifest",
+        lambda _path: {
+            "status": "complete",
+            "commands": [{"command": "display cpu", "status": "complete"}],
+        },
+    )
+    monkeypatch.setattr(
+        "src.core.device_ops.tools._record_connection_health",
+        lambda *a, **k: None,
+    )
+    plan = execution_plan_from_metadata(
+        {
+            "device_id": "device-1",
+            "action": "patrol",
+            "mode": "production",
+            "profile_name": "check-item-profile",
+            "profile_version_id": "profile-v1",
+            "policy_source": "profile_binding",
+            "collection_items": [
+                {
+                    "command": "display cpu",
+                    "action": "patrol",
+                    "check_item_bindings": [
+                        {
+                            "check_item_id": "system.cpu_usage",
+                            "check_item_version_id": "cpu-v1",
+                            "implementation_version_id": "h3c-cpu-v1",
+                            "runtime_bundle_version_id": "bundle-v1",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    result = asyncio.run(
+        tool.patrol_device(
+            {
+                "device_id": "device-1",
+                "device_name": "SW1",
+                "ip": "10.0.0.1",
+                "vendor": "H3C",
+                "model": "S5130",
+            },
+            execution_plan=plan,
+        )
+    )
+
+    assert result["success"] is True
+    assert result["coverage_preflight"] == []
+    assert result["coverage_decision"] == {
+        "decision": "allow",
+        "failure_code": None,
+        "authority": "frozen_runtime_bundle",
+        "violations": [],
+    }
+
+
 def test_device_patrol_runner_executes_explicit_plan_and_persists_snapshots():
     captured: dict[str, object] = {}
 
@@ -140,6 +228,10 @@ def test_device_patrol_runner_executes_explicit_plan_and_persists_snapshots():
         ),
         minio_storage_factory=lambda: None,
         snapshot_persister=fake_snapshot_persister,
+        runtime_manifest_factory=lambda _bundle: {
+            "patrol_batch_id": "batch-runner-1",
+            "digest": "manifest-digest-1",
+        },
     )
 
     result = runner.run(
@@ -171,6 +263,10 @@ def test_device_patrol_runner_executes_explicit_plan_and_persists_snapshots():
     assert captured["snapshot_kwargs"]["ticket_id"] == "T-1"
     assert captured["snapshot_kwargs"]["mode"] == "parser_validation"
     assert captured["snapshot_kwargs"]["execution_plan_id"] == "plan-1"
+    assert (
+        captured["snapshot_kwargs"]["patrol_batch_id"]
+        == "batch-runner-1"
+    )
 
 
 def test_device_patrol_runner_fails_when_snapshot_persist_fails():
@@ -332,6 +428,61 @@ def test_device_patrol_runner_persists_successful_devices_from_partial_batch():
     assert result["status"] == "success"
     assert len(captured["details"]) == 2
     assert result["snapshot_devices"] == 1
+
+
+def test_device_patrol_runner_preserves_connection_failure_when_all_targets_fail():
+    class FakeDBManager:
+        pass
+
+    class FakeDeviceFilter:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class FakePatrolTool:
+        def __init__(self, db_manager):
+            self.db_manager = db_manager
+
+        async def patrol_by_filter(self, filter_params, save_baseline, mode):
+            return TaskResult(
+                success=False,
+                action=ActionType.PATROL,
+                message="all devices were unreachable",
+                total_devices=1,
+                success_devices=0,
+                failed_devices=1,
+                details=[
+                    {
+                        "success": False,
+                        "device_name": "SW-1",
+                        "failure_code": "connection_failed",
+                        "error": "SSH connection refused",
+                    }
+                ],
+                output_files=[],
+            )
+
+    runner = DevicePatrolRunner(
+        tools_loader=lambda: SimpleNamespace(
+            DBManager=FakeDBManager,
+            DeviceFilter=FakeDeviceFilter,
+            PatrolTool=FakePatrolTool,
+        ),
+        minio_storage_factory=lambda: None,
+        snapshot_persister=lambda **_kwargs: {
+            "snapshot_run_id": "run-unreachable",
+            "snapshot_storage": "postgresql",
+            "snapshot_devices": 0,
+            "snapshot_commands": 0,
+            "snapshot_errors": [],
+            "snapshot_health": "failed",
+            "collection_status": "failed",
+        },
+    )
+
+    with pytest.raises(PatrolPlatformError) as captured:
+        runner.run(DevicePatrolRunRequest(filter_params={"site": "dc-a"}))
+
+    assert captured.value.failure_code == "connection_failed"
 
 
 def test_device_patrol_runner_can_replay_execution_plan_by_id(monkeypatch):

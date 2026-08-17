@@ -106,6 +106,21 @@ def test_event_rule_validator_skill_validates_candidate_rule_list(tmp_path: Path
     } == {"CPUHigh", "CPURecovered"}
 
 
+def test_event_rule_validator_accepts_explicit_empty_candidate_set(tmp_path: Path):
+    result = _run_skill(
+        tmp_path,
+        {
+            "mode": "candidates",
+            "candidate_rules": [],
+            "agent_loop": True,
+        },
+    )
+
+    assert result["success"] is True
+    assert result["validation_report"]["rule_count"] == 0
+    assert result["agent_loop"]["ready_for_approval"] is True
+
+
 def test_candidate_fault_and_recovery_are_behavior_tested_in_isolation(tmp_path: Path):
     result = _run_skill(
         tmp_path,

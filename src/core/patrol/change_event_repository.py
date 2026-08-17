@@ -43,8 +43,14 @@ def _digest(parts: Iterable[Any]) -> str:
 
 
 def change_idempotency_key(change: Any) -> str:
+    lineage = (
+        getattr(change, "check_item_id", None),
+        getattr(change, "check_item_version_id", None),
+        getattr(change, "check_execution_id", None),
+    )
+    scoped_prefix = lineage if any(lineage) else ()
     return _digest(
-        (
+        (*scoped_prefix,
             change.previous_snapshot_id,
             change.current_snapshot_id,
             change.device_id,
@@ -117,6 +123,15 @@ class ChangeEventRepository:
                         "id": deterministic_change_id(change),
                         "idempotency_key": key,
                         "run_id": change.run_id,
+                        "check_item_id": getattr(
+                            change, "check_item_id", None
+                        ),
+                        "check_item_version_id": getattr(
+                            change, "check_item_version_id", None
+                        ),
+                        "check_execution_id": getattr(
+                            change, "check_execution_id", None
+                        ),
                         "device_id": change.device_id,
                         "canonical_command": change.command,
                         "entity_type": change.entity_type,
@@ -221,6 +236,9 @@ class ChangeEventRepository:
                 {
                     "change_id": row.id,
                     "run_id": row.run_id,
+                    "check_item_id": row.check_item_id,
+                    "check_item_version_id": row.check_item_version_id,
+                    "check_execution_id": row.check_execution_id,
                     "device_id": row.device_id,
                     "command": row.canonical_command,
                     "entity_type": row.entity_type,
@@ -333,6 +351,8 @@ class ChangeEventRepository:
                     if _event_not_older(event, active):
                         payload = dict(active.payload_json or {})
                         payload["latest_change"] = event.payload.get("change")
+                        payload["latest_evaluation"] = event.payload.get("evaluation")
+                        payload["latest_rule"] = event.payload.get("rule")
                         payload["latest_source_change_id"] = event.source_change_id
                         payload["latest_observed_at"] = event.occurred_at
                         active.payload_json = payload
@@ -402,6 +422,15 @@ class ChangeEventRepository:
                     NetworkEventRecord(
                         id=event.event_id,
                         idempotency_key=key,
+                        check_item_id=getattr(
+                            event, "check_item_id", None
+                        ),
+                        check_item_version_id=getattr(
+                            event, "check_item_version_id", None
+                        ),
+                        check_execution_id=getattr(
+                            event, "check_execution_id", None
+                        ),
                         event_type=event.event_type,
                         severity=event.severity,
                         device_id=event.device_id,
@@ -496,6 +525,12 @@ class ChangeEventRepository:
         return db.execute(stmt).scalar_one_or_none()
 
     def _decision_values(self, decision: dict[str, Any]) -> dict[str, Any]:
+        metadata = dict(decision.get("metadata") or {})
+        lineage = (
+            metadata.get("check_item_version_id"),
+            metadata.get("check_execution_id"),
+        )
+        scoped_suffix = lineage if any(lineage) else ()
         key = _digest(
             (
                 decision.get("run_id"),
@@ -506,6 +541,7 @@ class ChangeEventRepository:
                 decision.get("change_policy_version_id"),
                 decision.get("analysis_revision"),
                 decision.get("rule_bundle_digest"),
+                *scoped_suffix,
             )
         )
         return {
@@ -579,6 +615,18 @@ class ChangeEventRepository:
         payload.setdefault("event_class", _event_class(event))
         payload.setdefault("event_type", event.event_type)
         payload.setdefault("severity", event.severity)
+        payload.setdefault(
+            "check_item_id",
+            getattr(event, "check_item_id", None),
+        )
+        payload.setdefault(
+            "check_item_version_id",
+            getattr(event, "check_item_version_id", None),
+        )
+        payload.setdefault(
+            "check_execution_id",
+            getattr(event, "check_execution_id", None),
+        )
         payload.setdefault("device_id", event.device_id)
         payload.setdefault("entity_type", event.entity_type)
         payload.setdefault("entity_key", event.entity_key)
@@ -916,6 +964,9 @@ class ChangeEventRepository:
             return [
                 {
                     "event_id": row.id,
+                    "check_item_id": row.check_item_id,
+                    "check_item_version_id": row.check_item_version_id,
+                    "check_execution_id": row.check_execution_id,
                     "event_type": row.event_type,
                     "severity": row.severity,
                     "device_id": row.device_id,
@@ -1005,6 +1056,18 @@ class ChangeEventRepository:
                         "occurrence_kind": occurrence.occurrence_kind,
                         "event_type": payload.get("event_type") or event.event_type,
                         "severity": payload.get("severity") or occurrence.severity,
+                        "check_item_id": (
+                            payload.get("check_item_id")
+                            or event.check_item_id
+                        ),
+                        "check_item_version_id": (
+                            payload.get("check_item_version_id")
+                            or event.check_item_version_id
+                        ),
+                        "check_execution_id": (
+                            payload.get("check_execution_id")
+                            or event.check_execution_id
+                        ),
                         "device_id": payload.get("device_id") or event.device_id,
                         "entity_type": payload.get("entity_type") or event.entity_type,
                         "entity_key": payload.get("entity_key") or event.entity_key,

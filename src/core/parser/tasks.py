@@ -25,18 +25,14 @@ def dispatch_ready_parser_jobs(
     limit: int | None = None,
     repository: ParserJobRepository | None = None,
     celery_app=None,
-    allow_production: bool = False,
 ) -> dict:
     repository = repository or ParserJobRepository()
     celery_app = celery_app or celery
+    settings = get_settings()
     batch_limit = limit or int(os.getenv("PARSER_DISPATCH_BATCH_SIZE", "1"))
     dispatched: list[str] = []
     failed: list[dict[str, str]] = []
     for job in repository.list_dispatchable_jobs(limit=batch_limit, job_id=job_id):
-        if job.get("source_mode") == "production" and not (
-            get_settings().PARSER_LLM_GENERATION_ENABLED or allow_production
-        ):
-            continue
         task_id = str(uuid.uuid4())
         repository.mark_job_dispatched(job["id"], task_id)
         try:
@@ -49,6 +45,10 @@ def dispatch_ready_parser_jobs(
                 },
                 queue="netops.ai",
                 task_id=task_id,
+                soft_time_limit=int(
+                    settings.PARSER_GENERATION_TASK_SOFT_TIME_LIMIT_SECONDS
+                ),
+                time_limit=int(settings.PARSER_GENERATION_TASK_TIME_LIMIT_SECONDS),
             )
             dispatched.append(job["id"])
         except Exception as exc:
@@ -75,7 +75,11 @@ def dispatch_parser_jobs():
 
 @celery.task(name="reconcile_parser_jobs")
 def reconcile_parser_jobs():
-    return {"failed": ParserJobRepository().fail_stale_jobs()}
+    repository = ParserJobRepository()
+    return {
+        "finalized": repository.finalize_durable_successes(),
+        "failed": repository.fail_stale_jobs(),
+    }
 
 
 @celery.task(name="promote_parser_gap_ledger")
@@ -143,36 +147,8 @@ def publish_parser_outbox():
                             raise RuntimeError(
                                 str(seed_result.get("reason") or "rule asset seed failed")
                             )
-                        job_id = str((seed_result.get("job") or {}).get("id") or "")
-                        if job_id:
-                            try:
-                                auto_context = RuleAssetTemplateActivationService(
-                                    parser_repository=parser_repository,
-                                ).auto_build_context(job_id)
-                                context_ready = bool(auto_context.get("ready"))
-                                seed_result["auto_context"] = {
-                                    "success": True,
-                                    "context_id": auto_context.get("context_id"),
-                                    "ready": context_ready,
-                                    "quality": auto_context.get("quality"),
-                                }
-                                if (
-                                    context_ready
-                                    and get_settings().RULE_ASSET_AUTO_GENERATE_ENABLED
-                                ):
-                                    generation = RuleAssetTemplateActivationService(
-                                        parser_repository=parser_repository,
-                                    ).start_generation_workflow(
-                                        job_id,
-                                        context_id=str(auto_context["context_id"]),
-                                        actor="parser-template-activation",
-                                    )
-                                    seed_result["auto_generation"] = generation
-                            except Exception as auto_exc:
-                                seed_result["auto_context"] = {
-                                    "success": False,
-                                    "error": str(auto_exc),
-                                }
+                        if (seed_result.get("job") or {}).get("id"):
+                            seed_result["next_action"] = "attach_offline_asset_source_dataset"
                 except Exception as exc:
                     failure = {
                         "success": False,

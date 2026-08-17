@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import pytest
+
 from src.core.workflows.patrol_batch_projection import (
     MaterializePatrolBatchReportHandler,
     patrol_batch_source_digest,
@@ -136,3 +138,64 @@ def test_async_materializer_backfills_object_for_existing_database_cache():
 
     assert handler.handle("batch-1", [run]) == "# cached\n"
     assert writes[0]["object_key"].startswith("reports/patrol/batch-1/")
+
+
+def test_materializer_fails_closed_when_object_upload_fails():
+    repository = MemoryProjectionRepository()
+
+    class Storage:
+        def upload_file(self, *_args, **_kwargs):
+            return False
+
+    handler = MaterializePatrolBatchReportHandler(
+        summary_builder=lambda _batch_id, runs: {
+            "status": "completed",
+            "run_count": len(runs),
+        },
+        renderer=lambda *_args, **_kwargs: "# report\n",
+        repository=repository,
+        object_storage=Storage(),
+        source_revision_provider=lambda _runs: "facts-v1",
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="failed to upload patrol batch report artifact",
+    ):
+        handler.handle("batch-1", [_run()])
+
+    assert repository.rows == {}
+
+
+def test_materializer_propagates_projection_write_failure():
+    deleted: list[str] = []
+
+    class Repository:
+        def get(self, *_args, **_kwargs):
+            return None
+
+        def upsert(self, **_kwargs):
+            raise RuntimeError("projection unavailable")
+
+    class Storage:
+        def upload_file(self, *_args, **_kwargs):
+            return True
+
+        def delete_object(self, object_key):
+            deleted.append(object_key)
+            return True
+
+    handler = MaterializePatrolBatchReportHandler(
+        summary_builder=lambda _batch_id, runs: {
+            "status": "completed",
+            "run_count": len(runs),
+        },
+        renderer=lambda *_args, **_kwargs: "# report\n",
+        repository=Repository(),
+        object_storage=Storage(),
+        source_revision_provider=lambda _runs: "facts-v1",
+    )
+
+    with pytest.raises(RuntimeError, match="projection unavailable"):
+        handler.handle("batch-1", [_run()])
+    assert deleted[0].startswith("reports/patrol/batch-1/")

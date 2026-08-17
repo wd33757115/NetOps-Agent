@@ -15,9 +15,14 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - run: pip install ruff black
+      - run: pip install ruff black pyyaml
       - run: ruff check src/ tests/ scripts/
       - run: black --check --diff src/ tests/ scripts/
+      - name: Documentation governance gate
+        run: |
+          python scripts/docs/audit_docs.py --strict-unregistered --all-links
+          python scripts/deprecations/audit_deprecations.py
+          python scripts/check_utf8.py docs scripts/docs --mojibake
 
   test-fastapi:
     needs: lint

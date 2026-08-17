@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ipaddress
 import re
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -23,6 +22,7 @@ from src.core.parser.semantic_catalog import (
 from src.core.parser.semantic_catalog import (
     field_semantics as catalog_field_semantics,
 )
+from src.core.parser.value_types import is_unavailable_value, is_valid_ip_value
 
 
 @dataclass(frozen=True)
@@ -41,6 +41,13 @@ def _field_value(record: dict[str, Any], field_name: str) -> Any:
     return record.get(actual) if actual is not None else None
 
 
+def _has_field(record: dict[str, Any], field_name: str) -> bool:
+    if field_name in record:
+        return True
+    lowered = {str(key).lower() for key in record}
+    return field_name.lower() in lowered
+
+
 def _is_missing(value: Any) -> bool:
     if value is None or (isinstance(value, str) and not value.strip()):
         return True
@@ -53,6 +60,14 @@ def _check_required_fields(
     records: list[dict[str, Any]],
     required_fields: tuple[str, ...],
 ) -> tuple[int, list[str]]:
+    """Validate the record schema, not per-entity business applicability.
+
+    TextFSM emits a stable column for every declared Value, while a particular
+    entity may legitimately carry an empty value (no IP address, no description,
+    absent transceiver measurement). Primary-key validation and downstream
+    Observation/Coverage policy own non-empty identity and business completeness.
+    """
+
     if not required_fields:
         return 100, []
     if not records:
@@ -60,7 +75,7 @@ def _check_required_fields(
     missing = [
         field
         for field in required_fields
-        if any(_is_missing(_field_value(record, field)) for record in records)
+        if any(not _has_field(record, field) for record in records)
     ]
     coverage = round(100 * (len(required_fields) - len(missing)) / len(required_fields))
     return int(coverage), missing
@@ -93,6 +108,8 @@ def _validate_field_values(
             for value_index, raw in enumerate(raw_values):
                 if _is_missing(raw):
                     continue
+                if is_unavailable_value(raw, rules.get("unavailable_tokens")):
+                    continue
                 error_code: str | None = None
                 if rule_type == "percent":
                     value = _parse_percent(raw)
@@ -103,15 +120,11 @@ def _validate_field_values(
                     if allowed and str(raw).strip().lower() not in allowed:
                         error_code = "value_not_allowed"
                 elif rule_type in {"ip", "ip_or_unassigned"}:
-                    text = str(raw).strip()
-                    if not (
-                        rule_type == "ip_or_unassigned"
-                        and text.lower() in {"unassigned", "--", "none"}
+                    if not is_valid_ip_value(
+                        raw,
+                        allow_unassigned=rule_type == "ip_or_unassigned",
                     ):
-                        try:
-                            ipaddress.ip_interface(text)
-                        except ValueError:
-                            error_code = "value_not_ip"
+                        error_code = "value_not_ip"
                 elif rule_type == "interface_name":
                     text = str(raw).strip().lower()
                     if text in {
@@ -206,6 +219,15 @@ def proposal_from_dict(payload: dict[str, Any]) -> ContractProposal:
         entity_type=str(payload.get("entity_type") or payload.get("category") or "record"),
         primary_keys=tuple(str(item) for item in payload.get("primary_keys") or ()),
         required_fields=tuple(str(item) for item in payload.get("required_fields") or ()),
+        canonical_entity_type=(
+            str(payload.get("canonical_entity_type")).strip()
+            if payload.get("canonical_entity_type")
+            else None
+        ),
+        entity_identity_fields=tuple(
+            str(item) for item in payload.get("entity_identity_fields") or ()
+        ),
+        entity_dimensions=dict(payload.get("entity_dimensions") or {}),
         optional_fields=tuple(str(item) for item in payload.get("optional_fields") or ()),
         validators=dict(payload.get("validators") or {}),
         allow_empty=bool(payload.get("allow_empty", False)),

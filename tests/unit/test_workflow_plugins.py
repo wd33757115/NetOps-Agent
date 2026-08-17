@@ -101,6 +101,53 @@ def test_load_rule_asset_generation_workflow():
     assert tpl.steps[6].inputs["contract_result"] == "${steps.observation_contract.result}"
     assert tpl.steps[6].inputs["event_rule_validation"] == "${steps.event_rule_validation.result}"
     assert tpl.steps[6].inputs["event_rule_replay"] == "${steps.event_rule_replay.result}"
+    assert tpl.steps[3].inputs["rule_asset_requirements"] == (
+        "${context.rule_asset_requirements}"
+    )
+
+
+def test_rule_asset_workflow_skips_assets_not_required_by_profile():
+    from src.core.workflows.registry import resolve_active_steps
+
+    load_workflows(force=True)
+    tpl = get_template("rule-asset-generation")
+    assert tpl is not None
+    context = {
+        **tpl.test_context,
+        "rule_asset_requirements": {
+            "requires_change_policy": False,
+            "requires_event_rule_assets": False,
+            "requires_historical_replay": False,
+        },
+    }
+
+    active = resolve_active_steps(tpl, context)
+
+    assert [step.name for step in active] == [
+        "observation_contract",
+        "rule_target_planning",
+        "persist_assets",
+    ]
+
+
+def test_rule_asset_workflow_runs_full_health_asset_chain():
+    from src.core.workflows.registry import resolve_active_steps
+
+    load_workflows(force=True)
+    tpl = get_template("rule-asset-generation")
+    assert tpl is not None
+
+    active = resolve_active_steps(tpl, tpl.test_context)
+
+    assert [step.name for step in active] == [
+        "observation_contract",
+        "rule_target_planning",
+        "change_policy",
+        "event_rule",
+        "event_rule_validation",
+        "event_rule_replay",
+        "persist_assets",
+    ]
 
 
 def test_load_rule_asset_submit_workflow():
@@ -714,6 +761,73 @@ def test_archive_patrol_batch_writes_governance_context(monkeypatch):
     assert updated["run-1"]["patrol_batch_keep_until"] == "2026-12-31T00:00:00Z"
 
 
+def test_cancel_patrol_batch_stops_active_runs_and_records_reason(monkeypatch):
+    from types import SimpleNamespace
+
+    from src.gateway import workflow_api
+
+    runs = [
+        SimpleNamespace(
+            id="run-active",
+            template_name="patrol-change-event",
+            status="running",
+            context={"patrol_batch_id": "batch-cancel", "device_id": "device-1"},
+        )
+    ]
+    cancelled = []
+    reports = []
+
+    class FakeRepository:
+        def workflow_runs(self, _batch_id):
+            return runs
+
+        def cancel_dispatch(self, batch_id, *, actor, reason):
+            assert batch_id == "batch-cancel"
+            assert actor == "system"
+            assert reason == "operator requested stop"
+            return {
+                "found": True,
+                "changed": True,
+                "cancellable": True,
+                "idempotent": False,
+                "cancelled_at": "2026-08-02T00:00:00+00:00",
+                "workflow_run_ids": ["run-active"],
+                "celery_task_ids": [],
+                "device_ids": ["device-1"],
+                "runtime_manifest_id": None,
+            }
+
+    class FakeEngine:
+        @staticmethod
+        def cancel_run(run_id, *, actor, reason):
+            cancelled.append((run_id, actor, reason))
+            return {"changed": True, "run_id": run_id, "status": "cancelled"}
+
+        @staticmethod
+        def request_patrol_batch_report_if_terminal(batch_id):
+            reports.append(batch_id)
+            return False
+
+    monkeypatch.setattr(workflow_api, "PatrolBatchManifestRepository", FakeRepository)
+    monkeypatch.setattr(workflow_api, "WorkflowEngine", FakeEngine)
+
+    result = asyncio.run(
+        workflow_api.cancel_patrol_batch(
+            "batch-cancel",
+            workflow_api.PatrolBatchCancelRequest(reason="operator requested stop"),
+            user=None,
+        )
+    )
+
+    assert result["success"] is True
+    assert result["status"] == "cancelled"
+    assert result["cancelled_run_count"] == 1
+    assert cancelled == [
+        ("run-active", "system", "operator requested stop")
+    ]
+    assert reports == ["batch-cancel"]
+
+
 def test_retry_patrol_batch_rejects_archived_batch(monkeypatch):
     from types import SimpleNamespace
 
@@ -959,6 +1073,7 @@ def test_export_patrol_batch_report_summarizes_changes_and_events(monkeypatch):
         detected_at = FakeColumn("detected_at")
 
     class FakeNetworkEventRecord:
+        id = FakeColumn("id")
         run_id = FakeColumn("run_id")
         occurred_at = FakeColumn("occurred_at")
 
@@ -990,12 +1105,16 @@ def test_export_patrol_batch_report_summarizes_changes_and_events(monkeypatch):
         ],
         FakeNetworkEventRecord: [
             SimpleNamespace(
+                id="event-1",
                 run_id="snapshot-run-1",
+                source_change_id="change-1",
                 device_id="device-1",
                 event_type="InterfaceDown",
                 severity="critical",
+                status="open",
                 entity_type="interface",
                 entity_key="GE1/0/1",
+                payload_json={},
                 occurred_at="2026-06-21T10:04:00",
             )
         ],
@@ -1004,6 +1123,9 @@ def test_export_patrol_batch_report_summarizes_changes_and_events(monkeypatch):
     class FakeQuery:
         def __init__(self, items):
             self.items = list(items)
+
+        def join(self, *_args, **_kwargs):
+            return self
 
         def filter(self, predicate):
             self.items = [item for item in self.items if predicate(item)]
@@ -1016,7 +1138,9 @@ def test_export_patrol_batch_report_summarizes_changes_and_events(monkeypatch):
             return self.items
 
     class FakeSession:
-        def query(self, model):
+        def query(self, model, *additional_models):
+            if additional_models:
+                return FakeQuery([])
             return FakeQuery(rows_by_model.get(model, []))
 
     class FakeSessionContext:

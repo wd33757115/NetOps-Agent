@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import uuid
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -8,8 +9,10 @@ import pytest
 
 from src.core.parser.assets import TemplateAssetStore
 from src.core.parser.identity import DeviceIdentity
+from src.core.parser.parser_bundle import build_parser_bundle
 from src.core.parser.repository import ParserRepository, contract_digest
 from src.core.parser.runtime import ParserRuntime
+from src.core.parser.runtime_bundle import ParserRuntimeBundle
 from src.core.patrol.modes import normalize_patrol_mode
 from src.core.patrol.repository import PatrolRepository
 from src.core.state.repository import StateRepository
@@ -103,6 +106,52 @@ def test_unsupported_command_is_not_sent_to_template_resolver():
     assert registry.calls == []
 
 
+@pytest.mark.parametrize(
+    ("raw_text", "expected_status"),
+    [
+        ("Interface Status\nGi1/0/1 up\n--More--", "paged"),
+        ("Interface Status\n[truncated]\n", "truncated"),
+    ],
+)
+def test_frozen_output_quality_profile_blocks_incomplete_cli_before_parser(
+    raw_text,
+    expected_status,
+):
+    registry = FakeRegistry()
+    bundle = ParserRuntimeBundle.from_dict(
+        {
+            "vendor": "H3C",
+            "model": "S5130S-54S-HI-G",
+            "family": "Comware7",
+            "templates": {"display version": None},
+            "output_quality_profiles": {
+                "display version": {
+                    "version_id": "implementation-v2",
+                    "digest": "d" * 64,
+                    "policy": {
+                        "paging_patterns": [r"--More--"],
+                        "truncation_patterns": [r"\[truncated\]"],
+                    },
+                }
+            },
+        }
+    )
+
+    result = ParserRuntime(
+        registry=registry,
+        runtime_bundle=bundle,
+    ).parse(
+        identity=known_h3c_identity(),
+        command="display version",
+        raw_text=raw_text,
+    )
+
+    assert result.output_status == expected_status
+    assert result.failure_code == expected_status
+    assert result.parser_status == "unavailable"
+    assert registry.calls == []
+
+
 def test_unknown_identity_never_resolves_template():
     registry = FakeRegistry()
     result = ParserRuntime(registry=registry).parse(
@@ -165,6 +214,164 @@ Start
     assert result.structured_data == [
         {"model": "S5130S-54S-HI-G", "os_version": "7.1"}
     ]
+
+
+def test_active_template_promotes_catalog_command_missing_from_legacy_policy(tmp_path):
+    content = r"""Value switch_id (\d+)
+Value role (\S+)
+
+Start
+  ^\*?${switch_id}\s+${role}\s+ -> Record
+"""
+    store = TemplateAssetStore(tmp_path)
+    path, digest = store.write_immutable(
+        vendor="H3C",
+        profile="S5130S-54S-HI-G",
+        command="show switch detail",
+        version="1",
+        content=content,
+    )
+    template = SimpleNamespace(
+        id="catalog-parser-1",
+        version="1",
+        profile="S5130S-54S-HI-G",
+        asset_path=str(path),
+        sha256=digest,
+        category="switch_stack",
+        validation_json={
+            "entity_type": "switch_member",
+            "primary_keys": ["switch_id"],
+            "required_fields": ["switch_id", "role"],
+        },
+    )
+    runtime = ParserRuntime(
+        registry=FakeRegistry(template),
+        asset_store=store,
+    )
+
+    result = runtime.parse(
+        identity=known_h3c_identity(),
+        command="show switch detail",
+        raw_text="*1 Master 0011.2233.4455 10 4 Ready\n",
+    )
+    bundle = ParserRuntimeBundle.build(
+        identity=known_h3c_identity(),
+        commands=["show switch detail"],
+        runtime=runtime,
+    )
+
+    assert result.policy_status == "eligible"
+    assert result.handling == "structured"
+    assert result.parser_status == "success"
+    assert result.structured_data == [{"switch_id": "1", "role": "Master"}]
+    assert bundle.templates["show switch detail"].template_id == template.id
+
+
+def test_embedded_active_template_parses_without_a_local_worker_file(tmp_path):
+    content = r"""Value model (\S+)
+Value os_version (\S+)
+
+Start
+  ^Model:\s+${model}
+  ^Version:\s+${os_version} -> Record
+"""
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    template = SimpleNamespace(
+        id="embedded-t1",
+        version="1",
+        asset_path=f"postgresql://parser-template/{digest}",
+        template_text=content,
+        sha256=digest,
+    )
+
+    result = ParserRuntime(
+        registry=FakeRegistry(template),
+        asset_store=TemplateAssetStore(tmp_path),
+    ).parse(
+        identity=known_h3c_identity(),
+        command="display version",
+        raw_text="Model: S5130S-54S-HI-G\nVersion: 7.1\n",
+    )
+
+    assert result.parser_status == "success"
+    assert result.template_id == "embedded-t1"
+    assert not any(tmp_path.iterdir())
+
+
+def test_parser_runtime_returns_named_record_sets_from_one_command(tmp_path):
+    content = build_parser_bundle(
+        {
+            "device_version": r"""
+Value software_version (\S+)
+Value software_release (\S+)
+
+Start
+  ^Version:\s+${software_version},\s+Release\s+${software_release} -> Record
+""",
+            "slot_inventory": r"""
+Value slot (\d+)
+Value board_type (\S+)
+
+Start
+  ^Slot\s+${slot}:\s+${board_type} -> Record
+""",
+        }
+    ).serialize()
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    template = SimpleNamespace(
+        id="embedded-bundle",
+        version="1",
+        category="multi_record",
+        asset_path=f"postgresql://parser-template/{digest}",
+        template_text=content,
+        sha256=digest,
+        validation_json={
+            "record_sets": [
+                {
+                    "name": "device_version",
+                    "entity_type": "device",
+                    "primary_keys": [],
+                    "required_fields": ["software_version", "software_release"],
+                },
+                {
+                    "name": "slot_inventory",
+                    "entity_type": "device_slot",
+                    "primary_keys": ["slot"],
+                    "required_fields": ["slot", "board_type"],
+                },
+            ]
+        },
+    )
+
+    result = ParserRuntime(
+        registry=FakeRegistry(template),
+        asset_store=TemplateAssetStore(tmp_path),
+    ).parse(
+        identity=known_h3c_identity(),
+        command="display version",
+        raw_text=(
+            "Version: 7.1.064, Release 0821P18\n"
+            "Slot 0: MPU-60\n"
+            "Slot 1: MPU-60\n"
+        ),
+    )
+
+    assert result.parser_status == "success"
+    assert result.structured_data == {
+        "format": "netops.structured_record_sets/v1",
+        "record_sets": {
+            "device_version": [
+                {
+                    "software_version": "7.1.064",
+                    "software_release": "0821P18",
+                }
+            ],
+            "slot_inventory": [
+                {"slot": "0", "board_type": "MPU-60"},
+                {"slot": "1", "board_type": "MPU-60"},
+            ],
+        },
+    }
 
 
 def test_legal_empty_is_not_parse_failure(tmp_path):
@@ -244,6 +451,94 @@ Start
 
     assert result.parser_status == "failed"
     assert result.failure_code == "field_validation_failed"
+
+
+def test_parser_runtime_validates_textfsm_list_items_individually(tmp_path):
+    content = r"""Value Required interface (\S+)
+Value List ip_address (\S+)
+
+Start
+  ^Interface ${interface}
+  ^Address ${ip_address}
+  ^End -> Record
+"""
+    store = TemplateAssetStore(tmp_path)
+    path, digest = store.write_immutable(
+        vendor="H3C",
+        profile="S5130S-54S-HI-G",
+        command="display interface",
+        version="list-validator-1",
+        content=content,
+    )
+    template = SimpleNamespace(
+        id="list-validator-template",
+        version="list-validator-1",
+        asset_path=str(path),
+        sha256=digest,
+        category="interface_l3",
+        validation_json={
+            "entity_type": "interface_l3",
+            "primary_keys": ["interface"],
+            "required_fields": ["interface"],
+            "validators": {"ip_address": {"type": "ip_or_unassigned"}},
+        },
+    )
+
+    result = ParserRuntime(registry=FakeRegistry(template)).parse(
+        identity=known_h3c_identity(),
+        command="display interface",
+        raw_text="Interface Vlan-interface1\nAddress 10.0.0.1/24\nAddress --\nEnd\n",
+    )
+
+    assert result.parser_status == "success"
+    assert result.structured_data == [
+        {"interface": "Vlan-interface1", "ip_address": ["10.0.0.1/24", "--"]}
+    ]
+
+
+def test_parser_runtime_accepts_present_empty_fields_and_unassigned_ip(tmp_path):
+    content = r"""Value interface (\S+)
+Value ip_address (\S+)
+Value description (.*)
+
+Start
+  ^${interface}\s+${ip_address}\s*${description} -> Record
+"""
+    store = TemplateAssetStore(tmp_path)
+    path, digest = store.write_immutable(
+        vendor="H3C",
+        profile="S5130S-54S-HI-G",
+        command="display interface brief",
+        version="ip-unassigned-1",
+        content=content,
+    )
+    template = SimpleNamespace(
+        id="ip-unassigned-template",
+        version="ip-unassigned-1",
+        asset_path=str(path),
+        sha256=digest,
+        category="interface_l3",
+        validation_json={
+            "entity_type": "interface_l3",
+            "primary_keys": ["interface"],
+            "required_fields": ["interface", "ip_address", "description"],
+            "validators": {
+                "interface": {"type": "interface_name"},
+                "ip_address": {"type": "ip_or_unassigned"},
+            },
+        },
+    )
+
+    result = ParserRuntime(registry=FakeRegistry(template)).parse(
+        identity=known_h3c_identity(),
+        command="display interface brief",
+        raw_text="GE1/0/1 --\n",
+    )
+
+    assert result.parser_status == "success"
+    assert result.structured_data == [
+        {"interface": "GE1/0/1", "ip_address": "--", "description": ""}
+    ]
 
 
 def test_patrol_modes_are_normalized_without_storage_paths():

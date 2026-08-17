@@ -97,6 +97,28 @@ def get_skill_version(skill_name: str) -> str:
     return str(_load_frontmatter(skill_name).get("version") or "0.0.0")
 
 
+def get_skill_execution_timeout_seconds(
+    skill_name: str,
+    *,
+    default: int = 600,
+) -> int:
+    """Return a bounded wall-clock timeout declared by the Skill."""
+
+    fallback = max(1, int(default))
+    raw = _load_frontmatter(skill_name).get("execution_timeout_seconds")
+    if raw is None:
+        return fallback
+    try:
+        timeout = int(raw)
+    except (TypeError, ValueError):
+        logger.warning("Invalid Skill execution timeout %s: %r", skill_name, raw)
+        return fallback
+    if not 1 <= timeout <= 7200:
+        logger.warning("Out-of-range Skill execution timeout %s: %s", skill_name, timeout)
+        return fallback
+    return timeout
+
+
 def get_skill_cwd(skill_name: str) -> Path:
     script = resolve_entry_script(skill_name)
     if script:

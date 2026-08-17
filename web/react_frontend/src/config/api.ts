@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
-import { message } from 'antd'
 import { ApiError, resolveApiError } from '../utils/apiError'
+import { appMessage } from '../utils/appMessage'
 
 /** Django BFF 前缀：开发环境走 Vite 代理，生产环境由 Django 同源提供。 */
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
@@ -157,16 +157,16 @@ api.interceptors.response.use(
       }
       clearAuthStorage()
       if (!window.location.pathname.startsWith('/login')) {
-        message.error('登录已过期，请重新登录')
+        appMessage.error('登录已过期，请重新登录')
         window.location.href = '/login'
       }
     } else if (status === 401) {
       clearAuthStorage()
     } else if (status === 403) {
-      message.error('没有权限执行此操作')
+      appMessage.error('没有权限执行此操作')
     } else if (status && status >= 500) {
       const suffix = apiError.requestId ? ` (request_id: ${apiError.requestId})` : ''
-      message.error(`服务器错误: ${serverMessage}${suffix}`)
+      appMessage.error(`服务器错误: ${serverMessage}${suffix}`)
     }
 
     return Promise.reject(apiError)

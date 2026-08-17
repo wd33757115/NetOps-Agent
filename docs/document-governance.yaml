@@ -1,0 +1,441 @@
+schema_version: 1
+review_interval_days: 120
+
+documents:
+  - path: README.md
+    topic: documentation-index
+    status: active
+    owner: NetOps Platform
+    last_verified: 2026-07-30
+
+  - path: 01_系统架构设计.md
+    topic: system-architecture
+    status: active
+    owner: NetOps Architecture
+    last_verified: 2026-05-24
+
+  - path: 02_概要与详细设计.md
+    topic: system-detailed-design
+    status: active
+    owner: NetOps Architecture
+    last_verified: 2026-05-24
+
+  - path: 03_数据库设计 & 数据字典.md
+    topic: database-design
+    status: active
+    owner: NetOps Platform
+    last_verified: 2026-05-24
+
+  - path: 04_API 接口文档.md
+    topic: api-reference
+    status: active
+    owner: Gateway Platform
+    last_verified: 2026-05-24
+
+  - path: 05_编码 & 工程规范.md
+    topic: engineering-standards
+    status: active
+    owner: NetOps Platform
+    last_verified: 2026-05-24
+
+  - path: 06_环境 & 编译构建说明.md
+    topic: build-guide
+    status: active
+    owner: NetOps Platform
+    last_verified: 2026-05-24
+
+  - path: 07_系统配置说明.md
+    topic: configuration-reference
+    status: active
+    owner: NetOps Platform
+    last_verified: 2026-05-24
+
+  - path: 08_日志规范 & 日志字典.md
+    topic: logging-reference
+    status: active
+    owner: Observability Platform
+    last_verified: 2026-05-24
+
+  - path: 09_错误码定义文档.md
+    topic: error-code-reference
+    status: active
+    owner: Gateway Platform
+    last_verified: 2026-05-24
+
+  - path: 10_部署安装手册.md
+    topic: deployment-guide
+    status: active
+    owner: NetOps Operations
+    last_verified: 2026-05-24
+
+  - path: 11_运维技术手册 & 故障排查.md
+    topic: operations-guide
+    status: active
+    owner: NetOps Operations
+    last_verified: 2026-05-24
+
+  - path: 12_Supervisor路由与Skill执行流程.md
+    topic: supervisor-routing
+    status: active
+    owner: Agent Platform
+    last_verified: 2026-05-24
+
+  - path: 13_生产上线清单.md
+    topic: production-release-checklist
+    status: active
+    owner: NetOps Operations
+    last_verified: 2026-05-24
+
+  - path: adr/001-skill-system-architecture.md
+    topic: adr-skill-system
+    status: active
+    owner: NetOps Architecture
+    last_verified: 2026-05-24
+
+  - path: adr/002-progressive-disclosure.md
+    topic: adr-progressive-disclosure
+    status: active
+    owner: NetOps Architecture
+    last_verified: 2026-05-24
+
+  - path: adr/003-llm-based-routing.md
+    topic: adr-llm-routing
+    status: active
+    owner: NetOps Architecture
+    last_verified: 2026-05-24
+
+  - path: adr/004-production-hardening.md
+    topic: adr-production-hardening
+    status: active
+    owner: NetOps Architecture
+    last_verified: 2026-05-24
+
+  - path: adr/005-django-react-architecture.md
+    topic: adr-django-react
+    status: active
+    owner: NetOps Architecture
+    last_verified: 2026-05-24
+
+  - path: adr/006-docker-compose-orchestration.md
+    topic: adr-compose-orchestration
+    status: active
+    owner: NetOps Architecture
+    last_verified: 2026-05-24
+
+  - path: adr/007-generic-workflow-context.md
+    topic: adr-workflow-context
+    status: active
+    owner: NetOps Architecture
+    last_verified: 2026-05-24
+
+  - path: check-item-command-adapter-simplification-remediation-2026-08-10.md
+    topic: patrol-platform-architecture
+    status: active
+    owner: NetOps Platform
+    last_verified: 2026-08-10
+
+  - path: check-item-centered-patrol-platform-remediation-2026-07-27.md
+    topic: legacy-patrol-platform-architecture
+    status: superseded
+    owner: NetOps Platform
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
+
+  - path: implementation/check-item-platform-completion-matrix-2026-07-28.md
+    topic: patrol-platform-implementation-status
+    status: active
+    owner: NetOps Platform
+    last_verified: 2026-07-30
+
+  - path: implementation/check-item-platform-e2e-evidence-matrix-2026-07-30.md
+    topic: patrol-platform-e2e-evidence
+    status: active
+    owner: NetOps Platform
+    last_verified: 2026-07-30
+
+  - path: simple-parser-pipeline-v2-2026-07-22.md
+    topic: parser-generation-architecture
+    status: active
+    owner: Parser Platform
+    last_verified: 2026-07-28
+
+  - path: textfsm-generator-guide.md
+    topic: parser-generation-operations
+    status: active
+    owner: Parser Platform
+    last_verified: 2026-07-28
+
+  - path: patrol-report-canonical-observation-design-2026-07-27.md
+    topic: patrol-report-architecture
+    status: active
+    owner: NetOps Platform
+    last_verified: 2026-07-28
+
+  - path: rule-asset-control-plane-guide.md
+    topic: rule-asset-operations
+    status: active
+    owner: Rule Asset Platform
+    last_verified: 2026-07-28
+
+  - path: adr/008-check-item-business-identity.md
+    topic: check-item-business-identity-decision
+    status: active
+    owner: NetOps Architecture
+    last_verified: 2026-07-28
+
+  - path: observation-fabric-system-design.md
+    topic: observation-fabric
+    status: active
+    owner: NetOps Platform
+    last_verified: 2026-07-28
+
+  - path: patrol-change-event-pipeline.md
+    topic: patrol-change-event-operations
+    status: active
+    owner: NetOps Platform
+    last_verified: 2026-07-30
+
+  - path: patrol-parser-dual-mode-guide.md
+    topic: patrol-parser-dual-mode
+    status: active
+    owner: Parser Platform
+    last_verified: 2026-07-28
+
+  - path: rule-asset-unattended-automation-2026-07-27.md
+    topic: rule-asset-automation
+    status: active
+    owner: Rule Asset Platform
+    last_verified: 2026-07-30
+
+  - path: textfsm-deepseek-thinking-tool-loop-2026-07-26.md
+    topic: parser-model-tool-protocol
+    status: active
+    owner: Parser Platform
+    last_verified: 2026-07-28
+
+  - path: unstructured-patrol-comparison-remediation-2026-07-19.md
+    topic: unstructured-patrol-comparison
+    status: active
+    owner: NetOps Platform
+    last_verified: 2026-07-28
+
+  - path: SKILL_CREATION_GUIDE.md
+    topic: skill-authoring-guide
+    status: active
+    owner: Agent Platform
+    last_verified: 2026-05-24
+
+  - path: 测试手册.md
+    topic: testing-guide
+    status: active
+    owner: NetOps Quality
+    last_verified: 2026-05-24
+
+  - path: auth-rbac-plan.md
+    topic: auth-rbac-plan
+    status: proposed
+    owner: Gateway Platform
+
+  - path: device-management-control-plane-roadmap.md
+    topic: device-control-plane-roadmap
+    status: proposed
+    owner: Device Platform
+
+  - path: langfuse-sse-plan.md
+    topic: langfuse-sse-plan
+    status: proposed
+    owner: Observability Platform
+
+  - path: storage-minio-plan.md
+    topic: storage-minio-plan
+    status: proposed
+    owner: Storage Platform
+
+  - path: system-overall-design-and-phased-implementation-plan.md
+    topic: overall-platform-evolution
+    status: proposed
+    owner: NetOps Architecture
+
+  - path: architecture-simplification-remediation-2026-07-12.md
+    topic: legacy-architecture-simplification
+    status: superseded
+    owner: NetOps Architecture
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
+
+  - path: llm-rule-control-plane-implementation-plan.md
+    topic: legacy-llm-rule-control-plane
+    status: superseded
+    owner: Rule Asset Platform
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
+
+  - path: parser-automation-guide.md
+    topic: legacy-parser-automation
+    status: superseded
+    owner: Parser Platform
+    superseded_by: simple-parser-pipeline-v2-2026-07-22.md
+
+  - path: parser-compatibility-optical-threshold-remediation-2026-07-18.md
+    topic: legacy-parser-optical-remediation
+    status: superseded
+    owner: Parser Platform
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
+
+  - path: parser-control-plane-productization-remediation-2026-07-19.md
+    topic: legacy-parser-control-plane
+    status: superseded
+    owner: Parser Platform
+    superseded_by: simple-parser-pipeline-v2-2026-07-22.md
+
+  - path: patrol-capacity-baseline-2026-07-21.md
+    topic: legacy-patrol-capacity-baseline
+    status: superseded
+    owner: NetOps Platform
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
+
+  - path: patrol-chain-audit-and-remediation-plan-2026-07.md
+    topic: legacy-patrol-chain-audit
+    status: superseded
+    owner: NetOps Platform
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
+
+  - path: patrol-chain-best-practice-remediation-2026-07-19.md
+    topic: legacy-patrol-best-practice
+    status: superseded
+    owner: NetOps Platform
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
+
+  - path: patrol-chain-failure-semantics-remediation-2026-07.md
+    topic: legacy-patrol-failure-semantics
+    status: superseded
+    owner: NetOps Platform
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
+
+  - path: patrol-chain-integrity-recovery-remediation-2026-07-11.md
+    topic: legacy-patrol-integrity-recovery
+    status: superseded
+    owner: NetOps Platform
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
+
+  - path: patrol-chain-replay-integrity-remediation-2026-07-11.md
+    topic: legacy-patrol-replay-integrity
+    status: superseded
+    owner: NetOps Platform
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
+
+  - path: patrol-degradation-parser-asset-closure-2026-07-12.md
+    topic: legacy-patrol-parser-closure
+    status: superseded
+    owner: NetOps Platform
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
+
+  - path: patrol-output-capability-and-raw-handling-2026-07-12.md
+    topic: legacy-patrol-output-capability
+    status: superseded
+    owner: NetOps Platform
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
+
+  - path: patrol-productionization-roadmap-2026-07-20.md
+    topic: legacy-patrol-productionization
+    status: superseded
+    owner: NetOps Platform
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
+
+  - path: patrol-production-readiness-remediation-2026-07-11.md
+    topic: legacy-patrol-production-readiness
+    status: superseded
+    owner: NetOps Platform
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
+
+  - path: patrol-rule-pipeline-implementation-2026-07-21.md
+    topic: legacy-patrol-rule-pipeline
+    status: superseded
+    owner: Rule Asset Platform
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
+
+  - path: patrol-runtime-concurrency-remediation-2026-07-11.md
+    topic: legacy-patrol-runtime-concurrency
+    status: superseded
+    owner: NetOps Platform
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
+
+  - path: rule-asset-control-plane-and-leadership-report-2026-07-14.md
+    topic: legacy-rule-asset-and-report
+    status: superseded
+    owner: Rule Asset Platform
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
+
+  - path: rule-asset-control-plane-final-detailed-design-2026-07-23.md
+    topic: legacy-rule-asset-control-plane-ui
+    status: superseded
+    owner: Rule Asset Platform
+    superseded_by: check-item-command-adapter-simplification-remediation-2026-08-10.md
+
+  - path: textfsm-parser-agent-loop-design-2026-07-13.md
+    topic: legacy-parser-generation-architecture
+    status: superseded
+    owner: Parser Platform
+    superseded_by: simple-parser-pipeline-v2-2026-07-22.md
+
+  - path: deep-research-report-aligned-roadmap-2026-06-20.md
+    topic: historical-research-roadmap
+    status: archived
+    owner: NetOps Platform
+
+  - path: device-management-patrol-priority-plan-2026-06.md
+    topic: historical-device-patrol-priority
+    status: archived
+    owner: Device Platform
+
+  - path: device-management-patrol-update-2026-06-21.md
+    topic: historical-device-patrol-update
+    status: archived
+    owner: Device Platform
+
+  - path: netops-platform-evolution-plan-2026-06.md
+    topic: historical-platform-evolution
+    status: archived
+    owner: NetOps Architecture
+
+  - path: phase-1-6-implementation-status.md
+    topic: historical-phase-implementation-status
+    status: archived
+    owner: NetOps Platform
+
+  - path: postgres-phase1-6-validation-2026-06-22.md
+    topic: historical-postgres-validation
+    status: archived
+    owner: NetOps Quality
+
+  - path: test-reports/patrol-change-event-test-report-20260613.md
+    topic: historical-patrol-change-event-test
+    status: archived
+    owner: NetOps Quality
+
+  - path: test-reports/patrol-chat-workflow-browser-test-20260613.md
+    topic: historical-patrol-browser-test
+    status: archived
+    owner: NetOps Quality
+
+  - path: test-reports/phase1-6-offline-validation-2026-06-28.md
+    topic: historical-offline-validation
+    status: archived
+    owner: NetOps Quality
+
+  - path: test-reports/textfsm-offline-assets-2026-06-13.md
+    topic: historical-textfsm-offline-assets
+    status: archived
+    owner: NetOps Quality
+
+  - path: API文档.md
+    topic: legacy-api-document-redirect
+    status: archived
+    owner: NetOps Platform
+
+  - path: DEPLOYMENT.md
+    topic: legacy-deployment-document-redirect
+    status: archived
+    owner: NetOps Platform
+
+  - path: logging-handbook.md
+    topic: legacy-logging-document-redirect
+    status: archived
+    owner: NetOps Platform

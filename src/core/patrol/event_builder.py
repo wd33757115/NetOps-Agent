@@ -20,7 +20,10 @@ from src.core.patrol.event_rules import (
     event_rules_from_snapshot,
     load_event_rules,
     match_event_rules,
+    resolve_threshold_reference,
+    to_float,
 )
+from src.core.state.observation_applicability import context_from_change
 
 
 @dataclass(frozen=True)
@@ -36,6 +39,9 @@ class NetworkEvent:
     occurred_at: str
     status: str
     payload: dict[str, Any]
+    check_item_id: str | None = None
+    check_item_version_id: str | None = None
+    check_execution_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -43,6 +49,61 @@ class NetworkEvent:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _event_evaluation_evidence(
+    rule: EventRule,
+    change: dict[str, Any],
+) -> dict[str, Any]:
+    """Freeze the values and criterion that caused one rule match."""
+
+    condition = dict(rule.condition or {})
+    kind = str(condition.get("kind") or "")
+    context = dict(context_from_change(change) or {})
+    reference_field, reference_value = resolve_threshold_reference(
+        condition,
+        context,
+    )
+    reference_source: str | None = None
+    recovery_boundary: float | None = None
+    hysteresis = to_float(condition.get("hysteresis"))
+
+    if reference_field and reference_value is not None:
+        reference_source = str(context.get("threshold_source") or f"context:{reference_field}")
+        if kind == "threshold_field_high_recovery" and hysteresis is not None:
+            recovery_boundary = reference_value - hysteresis
+        elif kind == "threshold_field_low_recovery" and hysteresis is not None:
+            recovery_boundary = reference_value + hysteresis
+    else:
+        static_key_by_kind = {
+            "threshold": "gte",
+            "threshold_recovery": "lt",
+            "threshold_lte": "lte",
+            "threshold_low_recovery": "low",
+        }
+        static_key = static_key_by_kind.get(kind)
+        if static_key:
+            reference_value = to_float(condition.get(static_key))
+            if reference_value is not None:
+                reference_field = static_key
+                reference_source = "event_rule_static"
+        if kind == "threshold_low_recovery" and reference_value is not None:
+            recovery_boundary = to_float(condition.get("gt"))
+            if recovery_boundary is None and hysteresis is not None:
+                recovery_boundary = reference_value + hysteresis
+
+    return {
+        "condition_kind": kind or None,
+        "field": change.get("field"),
+        "previous_value": change.get("old"),
+        "current_value": change.get("new"),
+        "unit": change.get("unit") or context.get("unit"),
+        "reference_field": reference_field,
+        "reference_value": reference_value,
+        "reference_source": reference_source,
+        "hysteresis": hysteresis,
+        "recovery_boundary": recovery_boundary,
+    }
 
 
 def _event_correlation_identity(
@@ -67,13 +128,32 @@ def _event_correlation_identity(
         if value is None or value == "":
             value = {"missing": True, "entity_key": entity_key}
         resolved[str(key)] = value
+    check_item_version_id = str(
+        change.get("check_item_version_id") or ""
+    )
+    if check_item_version_id:
+        resolved["check_item_version_id"] = check_item_version_id
+    canonical_values = [
+        [key, resolved[str(key)]] for key in correlation_keys
+    ]
+    if check_item_version_id:
+        canonical_values.insert(
+            0,
+            ["check_item_version_id", check_item_version_id],
+        )
     canonical = json.dumps(
-        [[key, resolved[str(key)]] for key in correlation_keys],
+        canonical_values,
         ensure_ascii=False,
         separators=(",", ":"),
         default=str,
     )
-    legacy = "|".join(str(values.get(key) or "") for key in correlation_keys)
+    legacy = (
+        ""
+        if check_item_version_id
+        else "|".join(
+            str(values.get(key) or "") for key in correlation_keys
+        )
+    )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest(), resolved, legacy
 
 
@@ -81,6 +161,11 @@ def build_events_from_changes(
     changes: list[dict[str, Any]],
     *,
     rules: list[EventRule] | None = None,
+    rules_by_check_item_version_id: dict[str, list[EventRule]] | None = None,
+    rules_by_device_and_check_item_version_id: dict[
+        str, dict[str, list[EventRule]]
+    ]
+    | None = None,
     heartbeat: Any | None = None,
 ) -> list[NetworkEvent]:
     events: list[NetworkEvent] = []
@@ -89,7 +174,35 @@ def build_events_from_changes(
     for index, change in enumerate(changes):
         if heartbeat is not None:
             heartbeat()
-        matched_rules = match_event_rules(change, rules=rules, preordered=True)
+        check_item_version_id = str(
+            change.get("check_item_version_id") or ""
+        )
+        device_rule_map = (
+            rules_by_device_and_check_item_version_id.get(
+                str(change.get("device_id") or ""),
+                {},
+            )
+            if rules_by_device_and_check_item_version_id is not None
+            else None
+        )
+        if device_rule_map is not None:
+            effective_rules = list(
+                device_rule_map.get(check_item_version_id, [])
+            )
+        elif rules_by_check_item_version_id is not None:
+            effective_rules = list(
+                rules_by_check_item_version_id.get(
+                    check_item_version_id,
+                    [],
+                )
+            )
+        else:
+            effective_rules = rules
+        matched_rules = match_event_rules(
+            change,
+            rules=effective_rules,
+            preordered=True,
+        )
         if not matched_rules:
             continue
         entity_type = str(change.get("entity_type") or "unknown")
@@ -143,17 +256,32 @@ def build_events_from_changes(
                         change.get("observed_at") or change.get("detected_at") or occurred_at
                     ),
                     status="historical" if historical_backfill else "open",
+                    check_item_id=(
+                        str(change.get("check_item_id") or "") or None
+                    ),
+                    check_item_version_id=(
+                        check_item_version_id or None
+                    ),
+                    check_execution_id=(
+                        str(change.get("check_execution_id") or "") or None
+                    ),
                     payload={
                         "change": change,
                         "rule": {
                             "rule_id": rule.rule_id,
+                            "version_id": rule.version_id,
                             "version": rule.version,
                             "priority": rule.priority,
                             "exclusive": rule.exclusive,
                             "event_class": rule.event_class,
+                            "condition": dict(rule.condition or {}),
                             "recovery": dict(rule.recovery or {}),
                             "correlation_keys": list(rule.correlation_keys),
                         },
+                        "evaluation": _event_evaluation_evidence(
+                            rule,
+                            change,
+                        ),
                         "correlation_key": correlation_key,
                         "correlation_dimensions": correlation_dimensions,
                         "legacy_correlation_key": legacy_correlation_key,
@@ -189,6 +317,7 @@ def summarize_no_event_changes(
     event_change_ids: set[str],
     *,
     active_rule_count: int | None = None,
+    active_rule_counts_by_change_id: dict[str, int] | None = None,
     limit: int = 10,
 ) -> dict[str, Any]:
     no_event_changes = [
@@ -205,8 +334,16 @@ def summarize_no_event_changes(
         str(change.get("change_type") or "unknown") for change in no_event_changes
     )
 
+    def rule_count(change: dict[str, Any]) -> int | None:
+        if active_rule_counts_by_change_id is None:
+            return active_rule_count
+        return active_rule_counts_by_change_id.get(
+            str(change.get("change_id") or "")
+        )
+
     by_reason = Counter(
-        no_event_reason(change, active_rule_count=active_rule_count) for change in no_event_changes
+        no_event_reason(change, active_rule_count=rule_count(change))
+        for change in no_event_changes
     )
     examples = [
         {
@@ -219,7 +356,10 @@ def summarize_no_event_changes(
             "change_type": change.get("change_type"),
             "old": change.get("old"),
             "new": change.get("new"),
-            "reason": no_event_reason(change, active_rule_count=active_rule_count),
+            "reason": no_event_reason(
+                change,
+                active_rule_count=rule_count(change),
+            ),
         }
         for change in no_event_changes[:limit]
     ]
@@ -326,15 +466,46 @@ def build_events_from_params(params: dict[str, Any]) -> dict[str, Any]:
     )
 
     supplied_rule_snapshot: list[dict[str, Any]] | None = None
+    supplied_rule_snapshots_by_check_item: dict[
+        str, list[dict[str, Any]]
+    ] | None = None
+    supplied_rule_snapshots_by_target: dict[
+        str, dict[str, list[dict[str, Any]]]
+    ] | None = None
     if params.get("runtime_asset_manifest"):
-        from src.core.patrol.runtime_manifest import validate_patrol_runtime_manifest
+        from src.core.patrol.runtime_manifest import (
+            resolve_patrol_runtime_rule_assets,
+        )
 
-        manifest = validate_patrol_runtime_manifest(
+        rule_assets = resolve_patrol_runtime_rule_assets(
             dict(params.get("runtime_asset_manifest") or {})
         )
         supplied_rule_snapshot = list(
-            dict(manifest.get("rule_assets") or {}).get("event_rules") or []
+            rule_assets.get("event_rules") or []
         )
+        scoped_rule_snapshot = rule_assets.get(
+            "event_rules_by_check_item_version_id"
+        )
+        if scoped_rule_snapshot is not None:
+            supplied_rule_snapshots_by_check_item = {
+                str(key): list(value or [])
+                for key, value in dict(scoped_rule_snapshot).items()
+            }
+        target_rule_snapshot = rule_assets.get(
+            "event_rules_by_device_and_check_item_version_id"
+        )
+        if target_rule_snapshot is not None:
+            supplied_rule_snapshots_by_target = {
+                str(device_id): {
+                    str(check_item_version_id): list(rows or [])
+                    for check_item_version_id, rows in dict(
+                        check_items or {}
+                    ).items()
+                }
+                for device_id, check_items in dict(
+                    target_rule_snapshot
+                ).items()
+            }
     run_id = params.get("run_id")
     if not run_id:
         rules = (
@@ -342,7 +513,31 @@ def build_events_from_params(params: dict[str, Any]) -> dict[str, Any]:
             if supplied_rule_snapshot is not None
             else None
         )
-        return _build_events_from_params_impl(params, rules=rules)
+        scoped_rules = (
+            {
+                key: event_rules_from_snapshot(value)
+                for key, value in supplied_rule_snapshots_by_check_item.items()
+            }
+            if supplied_rule_snapshots_by_check_item is not None
+            else None
+        )
+        target_rules = (
+            {
+                device_id: {
+                    check_item_version_id: event_rules_from_snapshot(rows)
+                    for check_item_version_id, rows in check_items.items()
+                }
+                for device_id, check_items in supplied_rule_snapshots_by_target.items()
+            }
+            if supplied_rule_snapshots_by_target is not None
+            else None
+        )
+        return _build_events_from_params_impl(
+            params,
+            rules=rules,
+            rules_by_check_item_version_id=scoped_rules,
+            rules_by_device_and_check_item_version_id=target_rules,
+        )
     patrol_repository = PatrolRepository()
     supplied_changes = (
         list(params.get("changes") or [])
@@ -362,8 +557,30 @@ def build_events_from_params(params: dict[str, Any]) -> dict[str, Any]:
             if supplied_rule_snapshot is not None
             else None
         )
+        scoped_rules = (
+            {
+                key: event_rules_from_snapshot(value)
+                for key, value in supplied_rule_snapshots_by_check_item.items()
+            }
+            if supplied_rule_snapshots_by_check_item is not None
+            else None
+        )
+        target_rules = (
+            {
+                device_id: {
+                    check_item_version_id: event_rules_from_snapshot(rows)
+                    for check_item_version_id, rows in check_items.items()
+                }
+                for device_id, check_items in supplied_rule_snapshots_by_target.items()
+            }
+            if supplied_rule_snapshots_by_target is not None
+            else None
+        )
         return _build_events_from_params_impl(
-            {**params, "changes": supplied_changes}, rules=rules
+            {**params, "changes": supplied_changes},
+            rules=rules,
+            rules_by_check_item_version_id=scoped_rules,
+            rules_by_device_and_check_item_version_id=target_rules,
         )
     frozen_rules = (
         EventRuleRepository().snapshot_active_rules()
@@ -371,6 +588,18 @@ def build_events_from_params(params: dict[str, Any]) -> dict[str, Any]:
         else supplied_rule_snapshot
     )
     frozen_rules = json.loads(json.dumps(frozen_rules, default=str))
+    frozen_scoped_rules = json.loads(
+        json.dumps(
+            supplied_rule_snapshots_by_check_item or {},
+            default=str,
+        )
+    )
+    frozen_target_rules = json.loads(
+        json.dumps(
+            supplied_rule_snapshots_by_target or {},
+            default=str,
+        )
+    )
     input_revision_digest = hashlib.sha256(
         json.dumps(
             [
@@ -401,7 +630,13 @@ def build_events_from_params(params: dict[str, Any]) -> dict[str, Any]:
         run_id=str(run_id),
         stage="event_building",
         scope=scope,
-        rule_bundle={"event_rules": frozen_rules},
+        rule_bundle={
+            "event_rules": frozen_rules,
+            "event_rules_by_check_item_version_id": frozen_scoped_rules,
+            "event_rules_by_device_and_check_item_version_id": (
+                frozen_target_rules
+            ),
+        },
     )
     if attempt["reused"]:
         occurrences = ChangeEventRepository().list_event_occurrences(run_id=str(run_id))
@@ -432,6 +667,31 @@ def build_events_from_params(params: dict[str, Any]) -> dict[str, Any]:
     heartbeat.start()
     try:
         rules = event_rules_from_snapshot(list(attempt["rule_bundle"].get("event_rules") or []))
+        scoped_rules = {
+            str(key): event_rules_from_snapshot(list(value or []))
+            for key, value in dict(
+                attempt["rule_bundle"].get(
+                    "event_rules_by_check_item_version_id"
+                )
+                or {}
+            ).items()
+        }
+        target_rules = {
+            str(device_id): {
+                str(check_item_version_id): event_rules_from_snapshot(
+                    list(rows or [])
+                )
+                for check_item_version_id, rows in dict(
+                    check_items or {}
+                ).items()
+            }
+            for device_id, check_items in dict(
+                attempt["rule_bundle"].get(
+                    "event_rules_by_device_and_check_item_version_id"
+                )
+                or {}
+            ).items()
+        }
         heartbeat(force=True)
         result = _build_events_from_params_impl(
             {
@@ -440,6 +700,16 @@ def build_events_from_params(params: dict[str, Any]) -> dict[str, Any]:
                 "_analysis_updates_run_status": updates_run_status,
             },
             rules=rules,
+            rules_by_check_item_version_id=(
+                scoped_rules
+                if supplied_rule_snapshots_by_check_item is not None
+                else None
+            ),
+            rules_by_device_and_check_item_version_id=(
+                target_rules
+                if supplied_rule_snapshots_by_target is not None
+                else None
+            ),
             heartbeat=heartbeat,
         )
         heartbeat.stop()
@@ -481,6 +751,11 @@ def _build_events_from_params_impl(
     params: dict[str, Any],
     *,
     rules: list[EventRule] | None,
+    rules_by_check_item_version_id: dict[str, list[EventRule]] | None = None,
+    rules_by_device_and_check_item_version_id: dict[
+        str, dict[str, list[EventRule]]
+    ]
+    | None = None,
     heartbeat: Any | None = None,
 ) -> dict[str, Any]:
     from src.core.patrol.repository import PatrolRepository
@@ -499,6 +774,10 @@ def _build_events_from_params_impl(
     events = build_events_from_changes(
         list(changes or []),
         rules=effective_rules,
+        rules_by_check_item_version_id=rules_by_check_item_version_id,
+        rules_by_device_and_check_item_version_id=(
+            rules_by_device_and_check_item_version_id
+        ),
         heartbeat=heartbeat,
     )
     persist = params.get("persist", True)
@@ -531,6 +810,33 @@ def _build_events_from_params_impl(
     persisted_event_count = int(event_persistence["persisted_occurrence_count"])
     event_change_ids = {event.source_change_id for event in events if event.source_change_id}
     event_change_ids = {str(change_id) for change_id in event_change_ids}
+    if rules_by_device_and_check_item_version_id is not None:
+        active_rule_counts_by_change_id = {
+            str(change.get("change_id") or ""): len(
+                rules_by_device_and_check_item_version_id.get(
+                    str(change.get("device_id") or ""),
+                    {},
+                ).get(
+                    str(change.get("check_item_version_id") or ""),
+                    [],
+                )
+            )
+            for change in changes or []
+            if change.get("change_id")
+        }
+    elif rules_by_check_item_version_id is not None:
+        active_rule_counts_by_change_id = {
+            str(change.get("change_id") or ""): len(
+                rules_by_check_item_version_id.get(
+                    str(change.get("check_item_version_id") or ""),
+                    [],
+                )
+            )
+            for change in changes or []
+            if change.get("change_id")
+        }
+    else:
+        active_rule_counts_by_change_id = None
     no_event_count = 0
     if persist:
         no_event_change_ids = [
@@ -544,7 +850,13 @@ def _build_events_from_params_impl(
             decision_reasons={
                 str(change["change_id"]): no_event_reason(
                     change,
-                    active_rule_count=len(effective_rules),
+                    active_rule_count=(
+                        active_rule_counts_by_change_id.get(
+                            str(change["change_id"])
+                        )
+                        if active_rule_counts_by_change_id is not None
+                        else len(effective_rules)
+                    ),
                 )
                 for change in changes or []
                 if change.get("change_id") and str(change["change_id"]) in no_event_change_ids
@@ -574,6 +886,9 @@ def _build_events_from_params_impl(
             list(changes or []),
             event_change_ids,
             active_rule_count=len(effective_rules),
+            active_rule_counts_by_change_id=(
+                active_rule_counts_by_change_id
+            ),
         ),
         "storage": "postgresql",
         "events": [event.to_dict() for event in events],

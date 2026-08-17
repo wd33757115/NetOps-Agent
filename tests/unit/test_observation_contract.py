@@ -38,6 +38,53 @@ def test_observation_contract_digest_changes_with_semantics():
     assert first["contract_sha256"] != observation_contract_digest(changed)
 
 
+def test_observation_contract_digest_includes_record_set_relations():
+    base_validation = {
+        "entity_type": "multi_record",
+        "record_sets": [
+            {
+                "name": "measurements",
+                "entity_type": "sensor",
+                "primary_keys": ["interface"],
+                "required_fields": ["interface", "value"],
+            },
+            {
+                "name": "thresholds",
+                "entity_type": "sensor_threshold",
+                "primary_keys": ["interface"],
+                "required_fields": ["interface", "low"],
+            },
+        ],
+    }
+    without_relation = build_contract_payload(
+        source_type="cli",
+        schema_id="template-multi",
+        validation=base_validation,
+    )
+    with_relation = build_contract_payload(
+        source_type="cli",
+        schema_id="template-multi",
+        validation={
+            **base_validation,
+            "record_set_relations": [
+                {
+                    "source_record_set": "measurements",
+                    "target_record_set": "thresholds",
+                    "join_keys": {"interface": "interface"},
+                    "threshold_bindings": {
+                        "value": {"critical_low": "low"}
+                    },
+                }
+            ],
+        },
+    )
+
+    assert with_relation["record_set_relations"][0]["name"] == (
+        "measurements_to_thresholds"
+    )
+    assert without_relation["contract_sha256"] != with_relation["contract_sha256"]
+
+
 def test_parser_template_registration_persists_observation_contract():
     token = uuid.uuid4().hex
     repository = ParserRepository()
@@ -127,6 +174,86 @@ def test_observation_contract_rejects_same_version_different_digest():
                 version=1,
                 status="active",
             )
+    finally:
+        with get_db_session() as db:
+            db.query(ObservationContractRecord).filter(
+                ObservationContractRecord.schema_id == schema_id
+            ).delete(synchronize_session=False)
+
+
+def test_observation_contract_promotes_legacy_digest_when_semantics_match():
+    token = uuid.uuid4().hex
+    repository = ObservationContractRepository()
+    schema_id = f"legacy-digest-{token}"
+    validation = {
+        "entity_type": "interface",
+        "primary_keys": ["interface_name"],
+        "required_fields": ["interface_name", "status"],
+        "validators": {"interface_name": {"type": "interface_name"}},
+    }
+    try:
+        draft = repository.upsert_contract(
+            source_type="cli",
+            schema_id=schema_id,
+            validation=validation,
+            version=2,
+            status="draft",
+        )
+        legacy_digest = "legacy-digest-before-record-set-relations"
+        with get_db_session() as db:
+            row = db.get(ObservationContractRecord, draft.contract_id)
+            row.contract_sha256 = legacy_digest
+            row.record_set_relations_json = None
+
+        active = repository.upsert_contract(
+            source_type="cli",
+            schema_id=schema_id,
+            validation=validation,
+            version=2,
+            status="active",
+        )
+
+        assert active.contract_id == draft.contract_id
+        assert active.version == 2
+        assert active.status == "active"
+        assert active.contract_sha256 == legacy_digest
+    finally:
+        with get_db_session() as db:
+            db.query(ObservationContractRecord).filter(
+                ObservationContractRecord.schema_id == schema_id
+            ).delete(synchronize_session=False)
+
+
+def test_create_contract_version_reuses_legacy_digest_when_semantics_match():
+    token = uuid.uuid4().hex
+    repository = ObservationContractRepository()
+    schema_id = f"legacy-version-{token}"
+    validation = {
+        "entity_type": "interface",
+        "primary_keys": ["interface_name"],
+        "required_fields": ["interface_name", "status"],
+    }
+    try:
+        first = repository.create_contract_version(
+            source_type="cli",
+            schema_id=schema_id,
+            validation=validation,
+            status="draft",
+        )
+        with get_db_session() as db:
+            row = db.get(ObservationContractRecord, first.contract_id)
+            row.contract_sha256 = "legacy-digest-before-record-set-relations"
+            row.record_set_relations_json = None
+
+        repeated = repository.create_contract_version(
+            source_type="cli",
+            schema_id=schema_id,
+            validation=validation,
+            status="draft",
+        )
+
+        assert repeated.contract_id == first.contract_id
+        assert repeated.version == 1
     finally:
         with get_db_session() as db:
             db.query(ObservationContractRecord).filter(
@@ -246,6 +373,61 @@ def test_parser_template_status_change_deactivates_observation_contract():
                 .one()
             )
             assert row.status == "deprecated"
+    finally:
+        with get_db_session() as db:
+            db.query(ObservationContractRecord).filter(
+                ObservationContractRecord.source_template_id == template_id
+            ).delete(synchronize_session=False)
+            db.query(ParserTemplate).filter(ParserTemplate.id == template_id).delete(
+                synchronize_session=False
+            )
+
+
+def test_parser_template_rejection_does_not_rebuild_legacy_contract_content():
+    token = uuid.uuid4().hex
+    repository = ParserRepository()
+    template_id = repository.register_template(
+        vendor="H3C",
+        model=f"S5130-{token}",
+        family="Comware7",
+        profile=f"S5130-{token}",
+        command="display interface brief",
+        category="interface",
+        version=f"v-{token}",
+        asset_path=f"/tmp/template-{token}.textfsm",
+        sha256="3" * 64,
+        status="draft",
+        validation={
+            "entity_type": "interface",
+            "primary_keys": ["interface"],
+            "required_fields": ["interface", "status"],
+        },
+    )
+    legacy_digest = "legacy-contract-digest"
+    try:
+        with get_db_session() as db:
+            contract = (
+                db.query(ObservationContractRecord)
+                .filter(ObservationContractRecord.source_template_id == template_id)
+                .one()
+            )
+            contract.contract_sha256 = legacy_digest
+
+        repository.set_template_status(
+            template_id,
+            "rejected",
+            actor="reviewer",
+            reason="reissue immutable candidate evidence",
+        )
+
+        with get_db_session() as db:
+            contract = (
+                db.query(ObservationContractRecord)
+                .filter(ObservationContractRecord.source_template_id == template_id)
+                .one()
+            )
+            assert contract.status == "deprecated"
+            assert contract.contract_sha256 == legacy_digest
     finally:
         with get_db_session() as db:
             db.query(ObservationContractRecord).filter(

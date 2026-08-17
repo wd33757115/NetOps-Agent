@@ -42,9 +42,14 @@ def _definition_from_candidate(candidate: dict[str, Any], index: int) -> EventRu
 
 
 def _candidate_definitions(params: dict[str, Any]) -> list[EventRuleDefinition]:
-    candidates = params.get("candidate_rules") or params.get("rules")
-    if not isinstance(candidates, list) or not candidates:
-        raise ValueError("candidate_rules must be a non-empty list")
+    if "candidate_rules" in params:
+        candidates = params["candidate_rules"]
+    elif "rules" in params:
+        candidates = params["rules"]
+    else:
+        raise ValueError("candidate_rules is required")
+    if not isinstance(candidates, list):
+        raise ValueError("candidate_rules must be a list")
     definitions: list[EventRuleDefinition] = []
     for index, candidate in enumerate(candidates, start=1):
         if not isinstance(candidate, dict):
@@ -62,6 +67,11 @@ def run_replay(params: dict[str, Any]) -> dict[str, Any]:
         limit=int(params.get("limit") or 1000),
         include_active_collisions=params.get("include_active_collisions") is not False,
         run_ids=run_ids,
+        candidate_contract=(
+            dict(params["candidate_contract"])
+            if isinstance(params.get("candidate_contract"), dict)
+            else None
+        ),
     )
 
 

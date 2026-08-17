@@ -1,6 +1,6 @@
 import React from 'react'
 import {
-  Alert, Button, Descriptions, Drawer, Space, Table, Tag, Typography,
+  Alert, Button, Descriptions, Drawer, Space, Spin, Table, Tag, Typography,
 } from 'antd'
 import {
   DownloadOutlined,
@@ -232,7 +232,52 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
     }
   }
 
-  if (loading) return <Typography.Text type="secondary">正在汇总巡检事实...</Typography.Text>
+  const [loadingTimedOut, setLoadingTimedOut] = React.useState(false)
+  const [loadingAttempt, setLoadingAttempt] = React.useState(0)
+
+  React.useEffect(() => {
+    if (!loading) {
+      setLoadingTimedOut(false)
+      return undefined
+    }
+    const timeoutId = window.setTimeout(() => setLoadingTimedOut(true), 30_000)
+    return () => window.clearTimeout(timeoutId)
+  }, [loading, loadingAttempt])
+
+  const retryLoading = () => {
+    setLoadingTimedOut(false)
+    setLoadingAttempt((current) => current + 1)
+    onRetry()
+  }
+
+  if (loading && loadingTimedOut) {
+    return (
+      <Alert
+        type="warning"
+        showIcon
+        message="验证与回放生成时间较长"
+        description="已等待 30 秒，任务可能仍在后台处理。可以重新检查结果，不会修改已经生成的规则资产。"
+        action={<Button size="small" onClick={retryLoading}>重新检查</Button>}
+      />
+    )
+  }
+
+  if (loading) {
+    return (
+      <Alert
+        type="info"
+        showIcon
+        message="正在生成验证与回放结果"
+        description={(
+          <Space size={8}>
+            <Spin size="small" />
+            <span>正在等待后端汇总两个周期的巡检事实、变化和事件，最长等待 30 秒。</span>
+          </Space>
+        )}
+        action={<Button size="small" onClick={retryLoading}>重新请求</Button>}
+        />
+      )
+  }
   if (error || !report) {
     return (
       <Alert
@@ -240,7 +285,7 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
         showIcon
         message="巡检分析摘要加载失败"
         description="原始结果仍保留，可重试读取同源报告事实。"
-        action={<Button size="small" onClick={onRetry}>重试</Button>}
+        action={<Button size="small" onClick={retryLoading}>重试</Button>}
       />
     )
   }

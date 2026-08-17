@@ -287,8 +287,6 @@ class RuleGenerationJobRepository:
                 RuleGenerationJobRecord,
                 RuleGenerationJobRecord.id == RuleApprovalAuditRecord.job_id,
             )
-            if action:
-                query = query.filter(RuleApprovalAuditRecord.action == action)
             if asset_type:
                 query = query.filter(RuleGenerationJobRecord.asset_type == asset_type)
             if actor:
@@ -304,6 +302,17 @@ class RuleGenerationJobRepository:
                         RuleApprovalAuditRecord.reason.ilike(pattern),
                     )
                 )
+            summary_rows = (
+                query.with_entities(
+                    RuleApprovalAuditRecord.action,
+                    func.count(RuleApprovalAuditRecord.id),
+                )
+                .group_by(RuleApprovalAuditRecord.action)
+                .all()
+            )
+            action_counts = {str(item_action): int(count) for item_action, count in summary_rows}
+            if action:
+                query = query.filter(RuleApprovalAuditRecord.action == action)
             total = query.order_by(None).count()
             rows = (
                 query.order_by(
@@ -320,6 +329,12 @@ class RuleGenerationJobRepository:
                 "total": total,
                 "limit": page_size,
                 "offset": page_offset,
+                "summary": {
+                    "total": sum(action_counts.values()),
+                    "approved": action_counts.get("approved", 0),
+                    "rejected": action_counts.get("rejected", 0),
+                    "deprecated": action_counts.get("deprecated", 0),
+                },
             }
 
     def list_agent_loop_attempts_page(
@@ -713,6 +728,8 @@ class RuleGenerationJobRepository:
             blockers.append("historical replay failed")
         if replay and int(replay.get("collision_count") or 0) > 0:
             blockers.append("historical replay has collisions")
+        if replay and int(replay.get("sampled_change_count") or 0) <= 0:
+            blockers.append("historical replay contains no Change evidence")
         return blockers
 
     @classmethod
@@ -772,6 +789,11 @@ class RuleGenerationJobRepository:
             "ready_for_approval": agent_loop.get("ready_for_approval"),
             "next_action": agent_loop.get("next_action"),
             "attempt_count": agent_loop.get("attempt_count") or len(attempts),
+            "total_attempt_count": agent_loop.get("total_attempt_count")
+            or agent_loop.get("attempt_count")
+            or len(attempts),
+            "target_count": agent_loop.get("target_count"),
+            "max_attempts_per_target": agent_loop.get("max_attempts_per_target"),
             "last_stage": last_attempt.get("stage"),
             "last_success": last_attempt.get("success"),
             "revision_request": agent_loop.get("revision_request"),

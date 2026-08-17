@@ -83,6 +83,11 @@ urlpatterns = [
         name="bff_patrol_batch_devices",
     ),
     path(
+        "workflows/runs/patrol-batches/<str:patrol_batch_id>/check-results",
+        workflows.proxy_patrol_batch_check_results,
+        name="bff_patrol_batch_check_results",
+    ),
+    path(
         "workflows/runs/patrol-batches/<str:patrol_batch_id>/archive/",
         workflows.proxy_patrol_batch_archive,
         name="bff_patrol_batch_archive",
@@ -91,6 +96,11 @@ urlpatterns = [
         "workflows/runs/patrol-batches/<str:patrol_batch_id>/restore/",
         workflows.proxy_patrol_batch_restore,
         name="bff_patrol_batch_restore",
+    ),
+    path(
+        "workflows/runs/patrol-batches/<str:patrol_batch_id>/cancel/",
+        workflows.proxy_patrol_batch_cancel,
+        name="bff_patrol_batch_cancel",
     ),
     path(
         "workflows/runs/patrol-batches/<str:patrol_batch_id>/rerun/",
@@ -133,9 +143,19 @@ urlpatterns = [
         name="bff_patrol_batch_leadership_report",
     ),
     path(
+        "workflows/runs/patrol-batches/<str:patrol_batch_id>/report.xlsx",
+        workflows.proxy_patrol_batch_technical_workbook,
+        name="bff_patrol_batch_technical_workbook",
+    ),
+    path(
         "workflows/runs/patrol-batches/<str:patrol_batch_id>/report.json",
         workflows.proxy_patrol_batch_leadership_report_json,
         name="bff_patrol_batch_leadership_report_json",
+    ),
+    path(
+        "workflows/runs/patrol-batches/<str:patrol_batch_id>/evidence.zip",
+        workflows.proxy_patrol_batch_evidence_package,
+        name="bff_patrol_batch_evidence_package",
     ),
     path("workflows/runs/test/", workflows.proxy_workflow_test_run, name="bff_workflow_test_run"),
     path("workflows/<str:run_id>/timeline/", workflows.proxy_workflow_timeline, name="bff_workflow_timeline"),
@@ -212,6 +232,11 @@ urlpatterns = [
         "patrol/offline-jobs/<path:path>/",
         patrol.proxy_offline_patrol_job_path,
         name="bff_offline_patrol_job_path",
+    ),
+    path(
+        "patrol/<path:path>",
+        patrol.proxy_patrol_path,
+        name="bff_patrol_path",
     ),
     path("maintenance/<path:path>/", maintenance.proxy_maintenance_path, name="bff_maintenance_path"),
     path("devices/", devices.proxy_devices_collection, name="bff_devices_collection"),

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from src.common.config import get_settings
-from src.core.parser.backfill import ParserBackfillService
+from src.core.parser.backfill import ParserBackfillService, _historical_analysis_pairs
 from src.core.parser.repository import ParserRepository
 from src.core.patrol.repository import PatrolRepository
 from src.infrastructure.db.models import (
@@ -20,6 +20,8 @@ from src.infrastructure.db.models import (
     NetworkEventOutboxRecord,
     NetworkEventRecord,
     ObservationContractRecord,
+    OfflinePatrolJobRecord,
+    OfflinePatrolPeriodRecord,
     ParserBackfillJobRecord,
     ParserBackfillResultRecord,
     ParserTemplate,
@@ -35,6 +37,11 @@ def test_parser_backfill_is_dry_run_first_idempotent_and_silent(
     monkeypatch,
 ):
     token = uuid.uuid4().hex
+    refreshed_template_ids: list[str] = []
+    monkeypatch.setattr(
+        "src.core.parser.backfill._refresh_rule_asset_command_units",
+        lambda template_id: refreshed_template_ids.append(template_id) or 1,
+    )
     run_id = f"backfill-run-{token}"
     excluded_run_id = f"backfill-excluded-run-{token}"
     validation_run_id = f"backfill-validation-run-{token}"
@@ -95,7 +102,7 @@ Start
         command="display interface brief",
         command_canonical="display interface brief",
         raw_text="GE1/0/1 UP UP\n",
-        parse_status="template_missing",
+        parse_status="ignored",
         execution_item_id=f"item-{token}",
         import_fingerprint=f"snapshot-{token}",
     )
@@ -180,9 +187,13 @@ Start
             job_id,
             actor="approver",
             reason="validated historical repair",
+            analyze_changes=True,
         )
         assert committed["status"] == "completed"
         assert committed["summary"]["created_observation_count"] == 2
+        assert committed["summary"]["analysis_status"] == "completed"
+        assert committed["summary"]["rule_asset_projection_refresh_count"] == 1
+        assert refreshed_template_ids == [template_id]
         with get_db_session() as db:
             observations = (
                 db.query(StateObservationRecord)
@@ -260,14 +271,18 @@ Start
         validation_commit = service.commit(
             validation_job_id,
             actor="approver",
-            reason="validated rule source repair",
+            reason="",
         )
         assert validation_commit["summary"]["created_observation_count"] == 2
+        assert validation_commit["summary"]["rule_asset_projection_refresh_count"] == 1
+        assert refreshed_template_ids == [template_id, template_id]
         assert validation_commit["summary"]["production_run_count"] == 0
         assert validation_commit["summary"]["analysis_skipped_run_count"] == 1
         assert validation_commit["summary"]["change_count"] == 0
         assert validation_commit["summary"]["event_count"] == 0
+        assert validation_commit["summary"]["analysis_status"] == "not_requested"
         with get_db_session() as db:
+            assert db.get(ParserBackfillJobRecord, validation_job_id).approval_reason == ""
             validation_observations = (
                 db.query(StateObservationRecord)
                 .filter(StateObservationRecord.snapshot_id == validation_snapshot_id)
@@ -312,3 +327,169 @@ Start
             db.query(PatrolRun).filter_by(id=validation_run_id).delete()
             db.query(ObservationContractRecord).filter_by(source_template_id=template_id).delete()
             db.query(ParserTemplate).filter_by(id=template_id).delete()
+
+
+def test_parser_backfill_uses_only_the_authoritative_offline_period_run(
+    tmp_path: Path,
+) -> None:
+    token = uuid.uuid4().hex
+    dataset_id = f"backfill-authoritative-dataset-{token}"
+    offline_job_id = f"offline-backfill-{token[:20]}"
+    run_ids = [f"backfill-authority-{token[:16]}-{attempt}" for attempt in range(1, 4)]
+    template_path = tmp_path / "show_interface_transceiver_detail.textfsm"
+    template_text = r"""Value Required INTERFACE (\S+)
+Value Required RX_POWER_DBM (-?\d+(?:\.\d+)?)
+
+Start
+  ^${INTERFACE}\s+${RX_POWER_DBM}\s*$$ -> Record
+"""
+    template_path.write_text(template_text, encoding="utf-8")
+    template_id = ParserRepository().register_template(
+        vendor="Cisco",
+        model=f"N9K-{token[:8]}",
+        family="Nexus",
+        profile=f"N9K-{token[:8]}",
+        command="show interface transceiver detail",
+        category="interface_optical",
+        version="v1",
+        asset_path=str(template_path),
+        sha256=hashlib.sha256(template_path.read_bytes()).hexdigest(),
+        validation={
+            "entity_type": "interface_optical",
+            "primary_keys": ["INTERFACE"],
+            "required_fields": ["INTERFACE", "RX_POWER_DBM"],
+            "regression_validation": {
+                "passed": True,
+                "sample_count": 1,
+                "passed_samples": 1,
+            },
+        },
+        status="active",
+    )
+    patrol = PatrolRepository()
+    snapshot_ids: list[str] = []
+    try:
+        for attempt, run_id in enumerate(run_ids, start=1):
+            patrol.create_run(
+                run_id=run_id,
+                mode="parser_validation",
+                source="offline_import",
+            )
+            snapshot_id, _ = patrol.save_snapshot_idempotent(
+                run_id=run_id,
+                device_id="N9K-1",
+                device_name="N9K-1",
+                vendor="Cisco",
+                model=f"N9K-{token[:8]}",
+                command="show interface transceiver detail",
+                command_canonical="show interface transceiver detail",
+                raw_text="Eth1/1 -7.20\n",
+                parse_status="template_missing",
+                execution_item_id=f"item-{token}-{attempt}",
+                import_fingerprint=f"snapshot-{token}-{attempt}",
+            )
+            snapshot_ids.append(snapshot_id)
+
+        now = datetime.now(timezone.utc)
+        with get_db_session() as db:
+            for snapshot_id in snapshot_ids:
+                db.get(CommandSnapshot, snapshot_id).dataset_id = dataset_id
+            db.add(
+                OfflinePatrolJobRecord(
+                    id=offline_job_id,
+                    idempotency_key=hashlib.sha256(offline_job_id.encode()).hexdigest(),
+                    purpose="rule_asset_source",
+                    job_type="parser_validation",
+                    name="authoritative Parser backfill fixture",
+                    owner_id="pytest",
+                    status="completed",
+                    progress_json={"phase": "completed", "percent": 100},
+                    created_at=now,
+                    updated_at=now,
+                    completed_at=now,
+                )
+            )
+            db.flush()
+            db.add(
+                OfflinePatrolPeriodRecord(
+                    id=f"period-{token[:20]}",
+                    job_id=offline_job_id,
+                    role="sample",
+                    label="sample",
+                    observed_at=now,
+                    dataset_id=dataset_id,
+                    patrol_run_id=run_ids[-1],
+                    status="completed",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+        targets = ParserBackfillService()._target_snapshots(
+            template_id,
+            {
+                "dataset_ids": [dataset_id],
+                "run_modes": ["parser_validation"],
+                "limit": 1000,
+            },
+        )
+
+        assert [(snapshot.run_id, mode) for snapshot, mode in targets] == [
+            (run_ids[-1], "parser_validation")
+        ]
+    finally:
+        with get_db_session() as db:
+            db.query(OfflinePatrolPeriodRecord).filter_by(job_id=offline_job_id).delete()
+            db.query(OfflinePatrolJobRecord).filter_by(id=offline_job_id).delete()
+            db.query(PatrolRun).filter(PatrolRun.id.in_(run_ids)).delete(
+                synchronize_session=False
+            )
+            db.query(ObservationContractRecord).filter_by(
+                source_template_id=template_id
+            ).delete()
+            db.query(ParserTemplate).filter_by(id=template_id).delete()
+
+
+def test_historical_analysis_pairs_require_an_explicit_offline_baseline() -> None:
+    token = uuid.uuid4().hex
+    production_id = f"production-{token}"
+    baseline_id = f"baseline-{token}"
+    current_id = f"current-{token}"
+    single_id = f"single-{token}"
+    patrol = PatrolRepository()
+    try:
+        patrol.create_run(run_id=production_id, mode="production", source="unit-test")
+        patrol.create_run(run_id=baseline_id, mode="parser_validation", source="unit-test")
+        patrol.create_run(run_id=current_id, mode="parser_validation", source="unit-test")
+        patrol.create_run(run_id=single_id, mode="parser_validation", source="unit-test")
+        with get_db_session() as db:
+            baseline = db.get(PatrolRun, baseline_id)
+            current = db.get(PatrolRun, current_id)
+            single = db.get(PatrolRun, single_id)
+            baseline.started_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+            baseline.metadata_json = {
+                "offline_job_id": f"offline-pair-{token}",
+                "period_role": "baseline",
+            }
+            current.started_at = datetime(2026, 2, 1, tzinfo=timezone.utc)
+            current.metadata_json = {
+                "offline_job_id": f"offline-pair-{token}",
+                "period_role": "current",
+            }
+            single.started_at = datetime(2026, 3, 1, tzinfo=timezone.utc)
+            single.metadata_json = {
+                "offline_job_id": f"offline-single-{token}",
+                "period_role": "current",
+            }
+
+        assert _historical_analysis_pairs(
+            {production_id, baseline_id, current_id, single_id}
+        ) == [
+            (current_id, baseline_id),
+            (production_id, None),
+        ]
+    finally:
+        with get_db_session() as db:
+            db.query(PatrolRun).filter(
+                PatrolRun.id.in_([production_id, baseline_id, current_id, single_id])
+            ).delete(synchronize_session=False)

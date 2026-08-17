@@ -34,6 +34,46 @@ SPEC.loader.exec_module(MODULE)
 run_persist = MODULE.run_persist
 
 
+def test_persister_links_latest_bundle_to_generation_seed():
+    updates = []
+
+    class FakeRepository:
+        @staticmethod
+        def get_job(job_id):
+            assert job_id == "seed-1"
+            return {
+                "id": job_id,
+                "source_ref": "parser_template:template-1",
+                "payload_json": {"workflow": "rule-asset-generation"},
+            }
+
+        @staticmethod
+        def update_payload(job_id, *, payload):
+            updates.append((job_id, payload))
+
+    MODULE._link_seed_to_bundle(
+        FakeRepository(),
+        {
+            "rule_generation_seed_job_id": "seed-1",
+            "rule_generation_context_id": "context-1",
+            "source_ref": "parser_template:template-1",
+        },
+        {"id": "bundle-1", "status": "rejected"},
+    )
+
+    assert updates == [
+        (
+            "seed-1",
+            {
+                "workflow": "rule-asset-generation",
+                "latest_bundle_id": "bundle-1",
+                "latest_bundle_status": "rejected",
+                "latest_bundle_context_id": "context-1",
+            },
+        )
+    ]
+
+
 def _accept_engineering_review(bundle_id: str) -> None:
     RuleAssetEngineeringRevisionService().review(
         bundle_id,
@@ -76,6 +116,60 @@ def test_rule_asset_persister_rejects_implicit_vendor_model_command_identity():
         )
 
 
+def test_current_state_event_rule_validation_does_not_require_change_replay():
+    report = MODULE._event_rule_validation_report(
+        {
+            "rule_asset_requirements": {
+                "schema_version": "rule-asset-requirements/v1",
+                "requires_observation_contract": True,
+                "requires_change_policy": True,
+                "requires_current_state_rule": True,
+                "requires_event_rule": False,
+                "requires_event_rule_assets": True,
+                "requires_historical_replay": False,
+                "current_state_observation_types": ["environment.fan.state"],
+                "change_policy_observation_types": ["environment.fan.state"],
+            },
+            "event_rule_validation": {"success": True},
+        },
+        {
+            "success": True,
+            "generation_provider": "llm",
+            "rules": [
+                {
+                    "name": "fan-current-state",
+                    "evaluation_scope": "current_state",
+                }
+            ],
+        },
+    )
+
+    assert report["success"] is True
+    assert report["replay_required"] is False
+    assert report["historical_replay"] is None
+    assert report.get("errors") is None
+
+
+def test_explicit_event_rule_replay_requirement_overrides_asset_profile():
+    report = MODULE._event_rule_validation_report(
+        {
+            "rule_asset_requirements": {
+                "requires_current_state_rule": True,
+                "requires_event_rule": False,
+                "requires_event_rule_assets": True,
+                "requires_historical_replay": False,
+            },
+            "require_event_rule_replay": True,
+            "event_rule_validation": {"success": True},
+        },
+        {"success": True, "rules": []},
+    )
+
+    assert report["success"] is False
+    assert report["replay_required"] is True
+    assert report["errors"] == ["historical replay result is required"]
+
+
 def test_rule_asset_persister_creates_pending_approval_assets():
     suffix = uuid.uuid4().hex
     schema_id = f"cli:Generic:LAB:display cpu:{suffix}"
@@ -94,6 +188,12 @@ def test_rule_asset_persister_creates_pending_approval_assets():
                 "category": "cpu",
                 "entity_type": "cpu",
                 "primary_keys": ["slot"],
+                "canonical_entity_type": "cpu_scope",
+                "entity_identity_fields": ["scope", "scope_id"],
+                "entity_dimensions": {
+                    "scope": {"literal": "slot"},
+                    "scope_id": {"field": "slot"},
+                },
                 "required_fields": ["slot", "cpu_5s"],
                 "optional_fields": ["cpu_1m", "cpu_5m"],
                 "validators": {"cpu_5s": {"type": "percent"}},
@@ -229,6 +329,12 @@ def test_rule_asset_persister_creates_pending_approval_assets():
             )
             assert contract is not None
             assert contract.status == "draft"
+            assert contract.canonical_entity_type == "cpu_scope"
+            assert contract.entity_identity_fields_json == ["scope", "scope_id"]
+            assert contract.entity_dimensions_json == {
+                "scope": {"literal": "slot"},
+                "scope_id": {"field": "slot"},
+            }
             policy_version_id = next(
                 job["asset_version_id"]
                 for job in result["jobs"]
@@ -243,9 +349,25 @@ def test_rule_asset_persister_creates_pending_approval_assets():
         with pytest.raises(RuleGenerationJobStateError, match="governed through bundle"):
             RuleAssetApprovalService().approve(contract_job["id"], actor="pytest")
         _accept_engineering_review(result["bundle"]["id"])
+        with pytest.raises(
+            RuleGenerationJobStateError,
+            match="approver different from the candidate creator",
+        ):
+            RuleAssetApprovalService().approve(
+                result["bundle"]["id"],
+                actor="api:pytest",
+            )
+        with pytest.raises(
+            RuleGenerationJobStateError,
+            match="approver different from the engineering reviewer",
+        ):
+            RuleAssetApprovalService().approve(
+                result["bundle"]["id"],
+                actor="rule-engineer",
+            )
         activated = RuleAssetApprovalService().approve(
             result["bundle"]["id"],
-            actor="pytest",
+            actor="rule-approver",
         )
         assert activated["atomic"] is True
         assert len(activated["asset_activations"]) == 3
@@ -440,6 +562,8 @@ def test_rule_asset_bundle_atomically_activates_multiple_change_policies():
         "event_rule_replay": {
             "success": True,
             "collision_count": 0,
+            "sampled_change_count": 1,
+            "total_change_count": 1,
             "matched_change_count": 1,
         },
     }
@@ -451,7 +575,10 @@ def test_rule_asset_bundle_atomically_activates_multiple_change_policies():
         assert result["bundle"]["status"] == "pending_approval"
 
         _accept_engineering_review(result["bundle"]["id"])
-        activated = RuleAssetApprovalService().approve(result["bundle"]["id"], actor="pytest")
+        activated = RuleAssetApprovalService().approve(
+            result["bundle"]["id"],
+            actor="rule-approver",
+        )
 
         assert activated["atomic"] is True
         assert (
@@ -560,6 +687,8 @@ def _versioned_bundle_params(suffix: str, revision: int) -> dict:
         "event_rule_replay": {
             "success": True,
             "collision_count": 0,
+            "sampled_change_count": 1,
+            "total_change_count": 1,
             "matched_change_count": 1,
         },
     }
@@ -572,7 +701,10 @@ def test_bundle_rollback_restores_exact_activation_snapshot():
     third = None
     try:
         _accept_engineering_review(first["bundle"]["id"])
-        RuleAssetApprovalService().approve(first["bundle"]["id"], actor="pytest")
+        RuleAssetApprovalService().approve(
+            first["bundle"]["id"],
+            actor="rule-approver",
+        )
         first_versions = {job["job_type"]: job["asset_version_id"] for job in first["jobs"]}
 
         second = run_persist(_versioned_bundle_params(suffix, 2))
@@ -606,7 +738,10 @@ def test_bundle_rollback_restores_exact_activation_snapshot():
 
         third = run_persist(_versioned_bundle_params(suffix, 3))
         _accept_engineering_review(third["bundle"]["id"])
-        activated = RuleAssetApprovalService().approve(third["bundle"]["id"], actor="pytest")
+        activated = RuleAssetApprovalService().approve(
+            third["bundle"]["id"],
+            actor="rule-approver",
+        )
         snapshot = activated["activation_snapshot"]
         previous_ids = {
             item["asset_type"]: item["previous_active_version_ids"] for item in snapshot["assets"]

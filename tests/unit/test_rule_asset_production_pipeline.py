@@ -62,6 +62,7 @@ def test_empty_offline_job_pipeline_points_to_source_upload():
         assert result["next_action"]["code"] == "upload_sources"
         assert result["next_action"]["target_url"].startswith("/skills/parser?")
         assert "workspace=production" in result["next_action"]["target_url"]
+        assert "source_job_tab=sources" in result["next_action"]["target_url"]
         assert "/devices" not in result["next_action"]["target_url"]
         assert [item["key"] for item in result["steps"]] == [
             "source",
@@ -73,6 +74,7 @@ def test_empty_offline_job_pipeline_points_to_source_upload():
             "generation",
             "review",
             "release",
+            "runtime_bundle",
         ]
         assert (
             next(item for item in result["steps"] if item["key"] == "backfill")["optional"] is True
@@ -256,6 +258,9 @@ def test_pipeline_projects_rule_rows_before_database_session_closes():
         assert next(step for step in result["steps"] if step["key"] == "review")[
             "status"
         ] == "completed"
+        assert next(
+            step for step in result["steps"] if step["key"] == "runtime_bundle"
+        )["status"] == "not_started"
     finally:
         with get_db_session() as db:
             db.query(RuleAssetCommandUnitRecord).filter(
@@ -285,7 +290,7 @@ def test_pipeline_projects_rule_rows_before_database_session_closes():
             )
 
 
-def test_parser_gaps_do_not_mark_confirmed_device_preview_as_blocked():
+def test_rule_asset_sample_identity_never_requires_inventory_confirmation():
     suffix = uuid.uuid4().hex[:12]
     job_id = f"offline-pipeline-preview-{suffix}"
     dataset_id = f"dataset-pipeline-preview-{suffix}"
@@ -337,7 +342,7 @@ def test_parser_gaps_do_not_mark_confirmed_device_preview_as_blocked():
                 period_role="sample",
                 external_device_id=f"external-{suffix}",
                 device_name="External switch",
-                match_status="external",
+                match_status="ambiguous",
                 confidence=1.0,
                 confirmed_by="pytest",
                 confirmed_at=now,
@@ -350,12 +355,10 @@ def test_parser_gaps_do_not_mark_confirmed_device_preview_as_blocked():
         preview_step = next(step for step in result["steps"] if step["key"] == "preview")
         parser_step = next(step for step in result["steps"] if step["key"] == "parser")
         assert preview_step["status"] == "completed"
-        assert preview_step["counts"] == {
-            "pending_bindings": 0,
-            "confirmed_bindings": 0,
-            "external_bindings": 1,
-        }
+        assert preview_step["label"] == "预检与样本识别"
+        assert preview_step["counts"] == {"sample_devices": 1}
         assert parser_step["status"] == "blocked"
+        assert result["next_action"]["code"] != "confirm_devices"
     finally:
         with get_db_session() as db:
             db.query(OfflinePatrolDeviceBindingRecord).filter(

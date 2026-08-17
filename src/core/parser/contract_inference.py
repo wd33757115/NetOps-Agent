@@ -32,6 +32,9 @@ class ContractProposal:
     entity_type: str
     primary_keys: tuple[str, ...]
     required_fields: tuple[str, ...]
+    canonical_entity_type: str | None = None
+    entity_identity_fields: tuple[str, ...] = ()
+    entity_dimensions: dict[str, Any] | None = None
     optional_fields: tuple[str, ...] = ()
     validators: dict[str, dict[str, Any]] | None = None
     allow_empty: bool = False
@@ -896,7 +899,14 @@ def _normalize_table_column_bindings(
     )
 
 
-def _normalize_semantic_field_aliases(proposal: ContractProposal) -> ContractProposal:
+def _normalize_semantic_field_aliases(
+    proposal: ContractProposal,
+    *,
+    check_item: str | None = None,
+    vendor: str | None = None,
+    model: str | None = None,
+    command: str | None = None,
+) -> ContractProposal:
     """Rename fields through governed evidence and schema-name semantics.
 
     Literal source labels remain authoritative. A qualified machine field name is
@@ -905,6 +915,15 @@ def _normalize_semantic_field_aliases(proposal: ContractProposal) -> ContractPro
     """
 
     evidence = json.loads(json.dumps(dict(proposal.evidence or {})))
+    previous_scope = dict(evidence.get("value_mapping_scope") or {})
+    resolved_scope = {
+        "check_item": check_item or previous_scope.get("check_item") or proposal.category,
+        "vendor": vendor or previous_scope.get("vendor"),
+        "model": model or previous_scope.get("model"),
+        "command": command or previous_scope.get("command"),
+    }
+    if all(str(value or "").strip() for value in resolved_scope.values()):
+        evidence["value_mapping_scope"] = resolved_scope
     field_bindings = dict(evidence.get("field_bindings") or {})
     declared = [*proposal.required_fields, *proposal.optional_fields]
     declared_set = set(declared)
@@ -916,6 +935,11 @@ def _normalize_semantic_field_aliases(proposal: ContractProposal) -> ContractPro
         # generic label alias (e.g. a "Name" column matching description's
         # aliases) would silently change identity semantics. Keys stay stable.
         if field in primary:
+            continue
+        scoped_canonical = canonical_schema_field(field, **resolved_scope)
+        if scoped_canonical and scoped_canonical != field:
+            candidates[field] = scoped_canonical
+            resolution_sources[field] = "scoped_value_mapping"
             continue
         raw = field_bindings.get(field) or []
         bindings = raw if isinstance(raw, list) else [raw]
@@ -1465,6 +1489,9 @@ def infer_contract(
     llm_call: Callable[[str], str] | None = None,
     review_catalog: bool = False,
     use_manual_profile: bool = False,
+    check_item: str | None = None,
+    vendor: str | None = None,
+    model: str | None = None,
 ) -> ContractProposal:
     """Infer one Contract from sample evidence.
 
@@ -1561,6 +1588,10 @@ Use an empty primary_keys list only when every sample proves a singleton entity.
                     ),
                     samples_text=samples_text,
                 ),
+                check_item=check_item,
+                vendor=vendor,
+                model=model,
+                command=command,
             ),
             samples_text=samples_text,
         ),
@@ -1588,6 +1619,9 @@ def revise_contract(
     structure_profile: dict[str, Any],
     diagnostic: dict[str, Any],
     llm_call: Callable[[str], str],
+    check_item: str | None = None,
+    vendor: str | None = None,
+    model: str | None = None,
 ) -> ContractProposal:
     """Revise Contract evidence without silently weakening requirements."""
 
@@ -1636,6 +1670,10 @@ variant, or propose separate contracts when the variants cannot share a schema.
                     ),
                     samples_text=samples_text,
                 ),
+                check_item=check_item,
+                vendor=vendor,
+                model=model,
+                command=command,
             ),
             samples_text=samples_text,
         ),

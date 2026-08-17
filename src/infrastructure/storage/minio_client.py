@@ -8,6 +8,7 @@ BASE_DIR = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
 import io
+import hashlib
 import logging
 from pathlib import Path
 from typing import BinaryIO, Optional
@@ -131,6 +132,42 @@ class MinIOStorage:
             finally:
                 response.close()
                 response.release_conn()
+        except S3Error:
+            return None
+
+    def sha256_object(
+        self,
+        object_name: str,
+        *,
+        chunk_size: int = 1024 * 1024,
+    ) -> dict[str, int | str] | None:
+        """Stream an object once and return its byte size and SHA-256."""
+
+        if not self._client:
+            return None
+        if chunk_size < 1:
+            raise ValueError("chunk_size must be positive")
+        try:
+            response = self._client.get_object(
+                self._bucket_name,
+                object_name,
+            )
+            digest = hashlib.sha256()
+            size = 0
+            try:
+                while True:
+                    chunk = response.read(chunk_size)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+                    size += len(chunk)
+            finally:
+                response.close()
+                response.release_conn()
+            return {
+                "sha256": digest.hexdigest(),
+                "size": size,
+            }
         except S3Error:
             return None
 

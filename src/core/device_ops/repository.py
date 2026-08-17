@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any
+
+from sqlalchemy import or_
 
 from src.infrastructure.db.models import (
     NetworkDevice,
@@ -46,6 +49,43 @@ def sanitize_device_attributes(attributes: dict[str, Any] | None) -> dict[str, A
     next_attributes = dict(attributes or {})
     next_attributes.pop("patrol_commands", None)
     return next_attributes
+
+
+def _embedded_assessment_policy_digests(
+    attributes: dict[str, Any] | None,
+) -> set[str]:
+    payload = dict(attributes or {})
+    sources = list(
+        payload.get("assessment_policy_bindings")
+        or payload.get("assessment_policies")
+        or []
+    )
+    return {
+        json.dumps(
+            source,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+        for source in sources
+    }
+
+
+def reject_new_embedded_assessment_policies(
+    attributes: dict[str, Any] | None,
+    *,
+    existing_attributes: dict[str, Any] | None,
+) -> None:
+    """Keep legacy values readable while preventing new mutable policy writes."""
+
+    incoming = _embedded_assessment_policy_digests(attributes)
+    existing = _embedded_assessment_policy_digests(existing_attributes)
+    if not incoming.issubset(existing):
+        raise ValueError(
+            "embedded assessment policy writes are disabled; create a governed "
+            "AssessmentPolicy draft and binding in the rule asset control plane"
+        )
 
 
 def _selector_matches(device: dict[str, Any], selector: dict[str, Any]) -> bool:
@@ -155,6 +195,12 @@ class DeviceRepository:
     ) -> dict[str, Any] | None:
         with get_db_session() as db:
             row = db.get(NetworkDevice, device_id)
+            reject_new_embedded_assessment_policies(
+                attributes,
+                existing_attributes=(
+                    dict(row.attributes_json or {}) if row is not None else None
+                ),
+            )
             if row is None:
                 return None
             for field, value in {
@@ -196,6 +242,11 @@ class DeviceRepository:
             row = db.get(NetworkDevice, device_id)
             if row is None:
                 return None
+            if attributes is not None:
+                reject_new_embedded_assessment_policies(
+                    attributes,
+                    existing_attributes=dict(row.attributes_json or {}),
+                )
             groups = self._groups_by_device(db, [device_id]).get(device_id, [])
             snapshot = self._legacy_shape(row, groups=groups)
             db.add(
@@ -389,6 +440,7 @@ class DeviceRepository:
     def get_devices_by_filter(
         self,
         *,
+        search: str | None = None,
         device_id: str | None = None,
         group: str | None = None,
         device_name: str | None = None,
@@ -405,6 +457,17 @@ class DeviceRepository:
     ) -> list[dict[str, Any]]:
         with get_db_session() as db:
             query = db.query(NetworkDevice)
+            if search:
+                pattern = f"%{str(search).strip()}%"
+                query = query.filter(
+                    or_(
+                        NetworkDevice.id.ilike(pattern),
+                        NetworkDevice.device_name.ilike(pattern),
+                        NetworkDevice.management_ip.ilike(pattern),
+                        NetworkDevice.vendor.ilike(pattern),
+                        NetworkDevice.model.ilike(pattern),
+                    )
+                )
             if device_id:
                 query = query.filter(NetworkDevice.id == device_id)
             if group:

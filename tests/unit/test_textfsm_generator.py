@@ -1,3560 +1,1508 @@
-# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
-# SPDX-License-Identifier: Apache-2.0
-
-"""textfsm-generator 单元测试（不调用 LLM）。"""
-
 from __future__ import annotations
 
-import hashlib
+import json
 import sys
-import tempfile
-import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-SCRIPTS = PROJECT_ROOT / "src" / "skills" / "textfsm-generator" / "scripts"
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+SCRIPTS = ROOT / "src" / "skills" / "textfsm-generator" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-from config_loader import (  # noqa: E402
-    CategorySpec,
-    find_category,
-    load_command_mapping,
-    resolve_device_mapping,
-)
-from db_reader import (  # noqa: E402
-    TemplateCandidate,
-    discover_missing_template_candidates,
-)
-from device_detector import detect_device_identity  # noqa: E402
-from directory_reader import discover_directory_candidates  # noqa: E402
 from generate_templates import (  # noqa: E402
-    Candidate,
-    _category_spec_from_contract,
-    _evaluate_agent_candidate,
-    _generation_succeeded,
-    _job_candidate,
-    cmd_to_template_filename,
-    resolve_template_path,
+    _process_simple_job,
+    generate_templates,
 )
-from llm_generator import build_generation_prompt  # noqa: E402
-from template_providers import (  # noqa: E402
-    EvidenceHierarchicalRowProvider,
-    EvidenceRepeatedBlockProvider,
-    EvidenceSingletonProvider,
-    ProviderContext,
-    expected_entity_count_from_evidence,
-)
-from template_synthesizer import (  # noqa: E402
-    expected_min_records,
-    expected_primary_key_tuples,
-    synthesize_template,
-)
-from template_validator import (  # noqa: E402
-    canonicalize_template_fields,
-    check_required_fields,
-    repair_record_boundary_candidate,
-    strip_llm_template,
-    validate_field_values,
-    validate_template,
+from llm_generator import TextFSMToolTurn  # noqa: E402
+from parser_model import canonicalize_model_fields, strip_model_template  # noqa: E402
+from spec_suggester import (  # noqa: E402
+    _build_prompt,
+    _enrich_structural_spec,
+    _nested_record_layout,
+    _normalize_spec,
+    _ntc_parser_spec_draft,
+    _representative_data_samples,
+    _semantic_valid_empty_spec_draft,
+    suggest_parser_spec,
 )
 
-from src.core.parser.assets import TemplateAssetStore, safe_slug  # noqa: E402
-from src.core.parser.contract_inference import (  # noqa: E402
-    ContractProposal,
-    govern_contract_candidate,
-    infer_contract,
-    infer_field_semantics,
+from src.core.parser_generation import ParserReviewReport  # noqa: E402
+from src.core.check_items.parser_capability import (  # noqa: E402
+    build_parser_field_naming_context,
 )
-from src.core.parser.contract_validation import (  # noqa: E402
-    proposal_from_dict,
-    validate_contract_candidate,
-)
-from src.core.parser.policy import (  # noqa: E402
-    SHARED_PARSER_CONFIG_ROOT,
-    ParserPolicy,
-)
-from src.core.parser.semantic_catalog import field_aliases  # noqa: E402
-from src.core.parser.structure_profiler import profile_sample_set  # noqa: E402
-from src.core.patrol.command_splitter import split_cli_capture  # noqa: E402
-from src.core.patrol.raw_importer import _read_text_best_effort  # noqa: E402
-
-try:
-    import textfsm  # noqa: F401
-
-    HAS_TEXTFSM = True
-except ImportError:
-    HAS_TEXTFSM = False
 
 
-SAMPLE_TEMPLATE = """Value Slot (\\S+)
-Value CPU_5S (\\d+)
-Value CPU_1M (\\d+)
-Value CPU_5M (\\d+)
+def test_parser_spec_prompt_keeps_derived_and_pivoted_values_out_of_textfsm():
+    prompt = _build_prompt(
+        {
+            "vendor": "H3C",
+            "profile": "S6850",
+            "canonical_command": "display transceiver diagnosis interface",
+        },
+        [{"id": "sample-1", "sanitized_text": "Current values"}],
+        [],
+    )
+
+    assert "Never invent an implicit, default, ordinal" in prompt
+    assert "into synthetic records" in prompt
+    assert "ObservationContract may unpivot or union them" in prompt
+    assert "Do not return expected_records" in prompt
+    assert "model-authored record list is not an acceptance" in prompt
+    assert "do not create several required boolean fields" in prompt
+    assert "presence=optional" in prompt
+    assert "never downgrade a numeric field to text" in prompt
+
+
+def test_semantic_valid_empty_spec_draft_accepts_governed_header_only_table():
+    draft = _semantic_valid_empty_spec_draft(
+        job={
+            "canonical_command": "show ip interface brief",
+        },
+        samples=[
+            {
+                "sanitized_text": (
+                    'IP Interface Status for VRF "default"(1)\n'
+                    "Interface            IP Address      Interface Status\n"
+                )
+            }
+        ],
+    )
+
+    assert draft is not None
+    spec, profile_id = draft
+    assert profile_id == "interface-l3"
+    record_set = spec["record_sets"][0]
+    assert record_set["allow_empty"] is True
+    assert record_set["presence"] == "optional"
+    assert record_set["primary_keys"] == ["interface"]
+    assert set(record_set["fields"]) >= {
+        "interface",
+        "oper_status",
+        "protocol_status",
+    }
+
+
+def test_semantic_valid_empty_spec_draft_accepts_governed_vrrp_header():
+    draft = _semantic_valid_empty_spec_draft(
+        job={"canonical_command": "show vrrp brief"},
+        samples=[
+            {
+                "sanitized_text": (
+                    "Interface          Grp Pri Time  Own Pre State   "
+                    "Master addr     Group addr\n"
+                )
+            }
+        ],
+    )
+
+    assert draft is not None
+    spec, profile_id = draft
+    assert profile_id == "vrrp-generic"
+    assert spec["record_sets"][0]["allow_empty"] is True
+
+
+def test_parser_spec_prompt_uses_trusted_parser_value_shapes_as_execution_evidence():
+    prompt = _build_prompt(
+        {
+            "vendor": "Cisco",
+            "model": "N9K-C9364C",
+            "canonical_command": "show interface status",
+        },
+        [{"id": "sample-1", "sanitized_text": "Eth1/1 connected trunk auto 40G"}],
+        [],
+        [
+            {
+                "provider": "ntc_templates",
+                "template_name": "cisco_nxos_show_interface_status.textfsm",
+                "field_profiles": {
+                    "speed": {
+                        "examples": ["auto", "40G", "100G"],
+                        "value_shape": "text",
+                    },
+                    "vlan_id": {
+                        "examples": ["trunk", "routed"],
+                        "value_shape": "text",
+                    },
+                },
+            }
+        ],
+    )
+
+    assert "cisco_nxos_show_interface_status.textfsm" in prompt
+    assert '"speed"' in prompt
+    assert '"vlan_id"' in prompt
+    assert "do not replace them with an" in prompt
+    assert "auto, 40G, routed or trunk" in prompt
+
+
+def test_parser_spec_prompt_prefers_check_item_field_names_without_making_them_a_gate():
+    prompt = _build_prompt(
+        {
+            "vendor": "Cisco",
+            "model": "N9K-C9364C",
+            "canonical_command": "show interface status",
+        },
+        [{"id": "sample-1", "sanitized_text": "Eth1/1 connected"}],
+        [],
+        [],
+        {
+            "schema_version": "parser-field-naming-guidance/v1",
+            "resolved": True,
+            "check_items": [
+                {
+                    "check_item_id": "interface.oper_status",
+                    "preferred_identity_fields": ["interface"],
+                    "preferred_observation_fields": [
+                        {
+                            "preferred_name": "status",
+                            "observation_type": "interface.oper_status",
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    assert "Approved check-item field naming guidance" in prompt
+    assert '"preferred_name": "status"' in prompt
+    assert "keeps TextFSM Value names stable across vendors and models" in prompt
+    assert "naming difference by itself" in prompt
+    assert "ObservationContract is the final" in prompt
+
+
+def test_parser_spec_normalization_prefers_unambiguous_check_item_field_name():
+    warnings: list[str] = []
+    spec = _normalize_spec(
+        {
+            "parser_spec": {
+                "version": 2,
+                "business_purpose": "Inspect optical power by interface and channel.",
+                "record_sets": [
+                    {
+                        "name": "interface_lane",
+                        "entity": "interface_lane",
+                        "primary_keys": ["interface", "lane"],
+                        "fields": {
+                            "interface": {"required": True, "type": "interface_name"},
+                            "lane": {
+                                "required": True,
+                                "type": "number",
+                                "canonical_candidate": "interface_optical.channel",
+                            },
+                            "rx_power": {
+                                "required": True,
+                                "type": "number",
+                                "canonical_candidate": "interface.optical.rx_power",
+                            },
+                        },
+                    }
+                ],
+            }
+        },
+        warnings=warnings,
+        field_naming_context={
+            "check_items": [
+                {
+                    "preferred_identity_fields": ["interface", "channel"],
+                    "preferred_observation_fields": [
+                        {
+                            "preferred_name": "rx_power_dbm",
+                            "observation_type": "interface.optical.rx_power",
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+
+    record_set = spec["record_sets"][0]
+    assert record_set["primary_keys"] == ["interface", "channel"]
+    assert set(record_set["fields"]) == {"interface", "channel", "rx_power_dbm"}
+    assert "preferred approved check-item field name channel over lane" in warnings
+    assert "preferred approved check-item field name rx_power_dbm over rx_power" in warnings
+
+
+def test_parser_spec_normalization_unifies_governed_optical_value_aliases():
+    context = build_parser_field_naming_context(
+        vendor="Cisco",
+        model="N9K-C9364C",
+        family="NXOS9K",
+        profile="NEXUS9000",
+        command="show interface transceiver detail",
+        sample_text="Ethernet1/1 Rx Power -3.10 dBm",
+    )
+    warnings: list[str] = []
+
+    spec = _normalize_spec(
+        {
+            "parser_spec": {
+                "version": 2,
+                "business_purpose": "Inspect per-lane optical diagnostics.",
+                "record_sets": [
+                    {
+                        "name": "optical_lane",
+                        "entity": "interface_optical",
+                        "primary_keys": ["interface", "lane_number"],
+                        "fields": {
+                            "interface": {
+                                "required": True,
+                                "type": "interface_name",
+                            },
+                            "lane_number": {"required": True, "type": "number"},
+                            "temperature": {"required": True, "type": "number"},
+                            "rx_power": {"required": True, "type": "number"},
+                            "rx_power_high_alarm": {
+                                "required": True,
+                                "type": "number",
+                            },
+                        },
+                    }
+                ],
+            }
+        },
+        warnings=warnings,
+        field_naming_context=context,
+    )
+
+    record_set = spec["record_sets"][0]
+    assert record_set["primary_keys"] == ["interface", "channel"]
+    assert set(record_set["fields"]) == {
+        "interface",
+        "channel",
+        "temperature_celsius",
+        "rx_power_dbm",
+        "rx_high_alarm_dbm",
+    }
+    assert any("channel over lane_number" in item for item in warnings)
+    assert any("rx_high_alarm_dbm over rx_power_high_alarm" in item for item in warnings)
+
+
+def test_parser_spec_prompt_samples_are_deduplicated_and_bounded():
+    samples = [
+        {"id": "one-a", "sanitized_text": "same"},
+        {"id": "one-b", "sanitized_text": "same"},
+        {"id": "two", "sanitized_text": "two"},
+        {"id": "three", "sanitized_text": "three"},
+        {"id": "four", "sanitized_text": "four"},
+    ]
+
+    selected = _representative_data_samples(samples, limit=3)
+
+    assert [item["id"] for item in selected] == ["one-a", "two", "three"]
+
+
+def _job() -> dict:
+    return {
+        "id": "simple-job-1",
+        "pipeline_version": "simple_v2",
+        "generation_strategy": "deterministic_fallback",
+        "vendor": "H3C",
+        "model": "S5130",
+        "profile": "S5130",
+        "family": None,
+        "canonical_command": "display interface brief",
+        "parser_spec_sha256": "spec-sha",
+        "parser_spec_json": {
+            "entity": "interface",
+            "primary_keys": ["interface"],
+            "fields": {
+                "interface": {
+                    "required": True,
+                    "type": "interface_name",
+                    "source_labels": ["Interface"],
+                },
+                "status": {
+                    "required": True,
+                    "type": "enum",
+                    "values": ["UP", "DOWN"],
+                    "source_labels": ["Link"],
+                },
+            },
+        },
+        "generation_readiness": {"ready": True, "blockers": []},
+        "structure_variant_count": 1,
+        "structure_signatures": ["layout-1"],
+        "samples": [
+            {
+                "id": "sample-generation",
+                "snapshot_id": "snapshot-generation",
+                "sample_role": "generation",
+                "expectation_json": {
+                    "record_count": 1,
+                    "primary_keys": [["GE1/0/1"]],
+                },
+                "sanitization_status": "sanitized",
+                "sanitized_text": "Interface Link\nGE1/0/1 UP\n",
+            },
+            {
+                "id": "sample-acceptance",
+                "snapshot_id": "snapshot-acceptance",
+                "sample_role": "acceptance",
+                "expectation_json": {
+                    "record_count": 1,
+                    "primary_keys": [["GE1/0/1"]],
+                },
+                "sanitization_status": "sanitized",
+                "sanitized_text": "Interface Link\nGE1/0/1 UP\n",
+            },
+        ],
+    }
+
+
+@pytest.fixture(autouse=True)
+def _stub_independent_reviewer(monkeypatch):
+    class Reviewer:
+        def review(self, **_kwargs):
+            return ParserReviewReport(
+                passed=True,
+                summary="independent review passed",
+                primary_key_assessment={"passed": True},
+                completeness_assessment={"passed": True},
+            )
+
+    monkeypatch.setattr(
+        "generate_templates.IndependentParserResultReviewer",
+        lambda: Reviewer(),
+    )
+
+
+def test_model_output_is_stripped_and_field_names_are_canonicalized():
+    raw = """Explanation
+```textfsm
+Value Required INTERFACE (\\S+)
+Value Status (\\S+)
+Value FreeRatio (\\S+)
 
 Start
-  ^Slot\\s+${Slot}\\s+CPU\\s+5s\\s+1m\\s+5m
-  ^${Slot}\\s+${CPU_5S}\\s+${CPU_1M}\\s+${CPU_5M}
+^${INTERFACE}\\s+${Status}\\s+${FreeRatio} -> Record
+```
 """
-
-SAMPLE_CLI = """Slot  CPU 5s 1m 5m
-0     10   12  15
-1     8    9   11
-"""
-
-
-class TestConfigLoader(unittest.TestCase):
-    def test_batch_success_requires_agent_acceptance_not_only_sample_rate(self):
-        blocked = SimpleNamespace(accepted=False, validation_pass_rate=1.0)
-        accepted = SimpleNamespace(accepted=True, validation_pass_rate=1.0)
-
-        self.assertFalse(
-            _generation_succeeded(
-                [blocked],
-                unresolved_files=[],
-                minimum_pass_rate=1.0,
-            )
-        )
-        self.assertTrue(
-            _generation_succeeded(
-                [accepted],
-                unresolved_files=[],
-                minimum_pass_rate=1.0,
-            )
-        )
-        self.assertFalse(
-            _generation_succeeded(
-                [],
-                unresolved_files=[],
-                minimum_pass_rate=1.0,
-            )
-        )
-
-    @patch("src.core.parser.repository.ParserTemplateRepository.list_templates")
-    def test_load_mapping_from_active_template_assets(self, list_templates):
-        list_templates.return_value = [
-            {
-                "vendor": "H3C",
-                "profile": "S5130S-54S-HI-G",
-                "canonical_command": "display cpu",
-                "category": "cpu",
-                "family": "Comware7",
-            }
-        ]
-        mappings = load_command_mapping(SHARED_PARSER_CONFIG_ROOT / "command_policy.yaml")
-        self.assertTrue(mappings)
-        cat = find_category("H3C", "S5130S-54S-HI-G", "display cpu", mappings)
-        self.assertEqual(cat, "cpu")
-
-    def test_policy_is_vendor_neutral(self):
-        decision = ParserPolicy().decide(
-            vendor="NewVendor",
-            model="NewModel",
-            family=None,
-            command="show version",
-        )
-        self.assertTrue(decision.enabled)
-
-    @patch("src.core.parser.repository.ParserTemplateRepository.list_templates")
-    def test_resolve_device_model(self, list_templates):
-        list_templates.return_value = [
-            {
-                "vendor": "H3C",
-                "profile": "S5130S-54S-HI-G",
-                "canonical_command": "display cpu",
-                "category": "cpu",
-                "family": "Comware7",
-            }
-        ]
-        mappings = load_command_mapping(SHARED_PARSER_CONFIG_ROOT / "command_policy.yaml")
-        self.assertEqual(
-            resolve_device_mapping("S5130S-54S-HI-G", mappings),
-            ("H3C", "S5130S-54S-HI-G"),
-        )
-
-    def test_command_aliases_are_database_assets(self):
-        from config_loader import normalize_command
-
-        self.assertEqual(normalize_command("display cpu-us"), "display cpu")
-        self.assertEqual(
-            normalize_command("show env power"),
-            "show environment power",
-        )
+    cleaned = canonicalize_model_fields(
+        strip_model_template(raw),
+        ("interface", "status", "free_ratio"),
+    )
+    assert "Explanation" not in cleaned
+    assert "Required" not in cleaned
+    assert "Value interface" in cleaned
+    assert "Value status" in cleaned
+    assert "${interface}" in cleaned
+    assert "${status}" in cleaned
+    assert "Value free_ratio" in cleaned
+    assert "${free_ratio}" in cleaned
 
 
-class TestDbReader(unittest.TestCase):
-    def test_dedupe_by_vendor_model_command(self):
-        mappings = load_command_mapping(SHARED_PARSER_CONFIG_ROOT / "command_policy.yaml")
-        snapshots = [
-            SimpleNamespace(
-                parse_status="template_missing",
-                vendor="H3C",
-                model="S5130S-54S-HI-G",
-                command_canonical="display cpu",
-                raw_text=SAMPLE_CLI,
-                device_id="sw1-10.0.0.1",
+@patch("parser_model.create_textfsm_tool_session")
+def test_simple_job_uses_deterministic_pipeline_without_llm(mock_session, tmp_path):
+    job = _job()
+    job["model"] = None
+    contexts = {
+        snapshot_id: {
+            "mode": "parser_validation",
+            "snapshot": SimpleNamespace(
+                snapshot_id=snapshot_id,
+                raw_text="Interface Link\nGE1/0/1 UP\n",
             ),
-            SimpleNamespace(
-                parse_status="template_missing",
-                vendor="H3C",
-                model="S5130S-54S-HI-G",
-                command_canonical="display cpu",
-                raw_text=SAMPLE_CLI,
-                device_id="sw2-10.0.0.2",
-            ),
-        ]
-        with patch("db_reader.PatrolRepository") as repository:
-            repository.return_value.list_dataset_snapshots.return_value = snapshots
-            items = discover_missing_template_candidates(None, None, mappings)
-            self.assertEqual(len(items), 1)
-            self.assertEqual(items[0].vendor, "H3C")
-            self.assertEqual(items[0].model, "S5130S-54S-HI-G")
+        }
+        for snapshot_id in ("snapshot-generation", "snapshot-acceptance")
+    }
+    attempts: list[dict] = []
+    with patch("generate_templates.NtcTemplateResolver") as ntc_resolver:
+        ntc_resolver.return_value.resolve.return_value = (None, [])
+        with patch("generate_templates.PatrolRepository") as patrol_repository:
+            patrol_repository.return_value.get_snapshot_context.side_effect = contexts.get
+            with patch("generate_templates.ParserJobRepository") as job_repository:
+                job_repository.return_value.create_generation_attempt.side_effect = (
+                    lambda **payload: (
+                        attempts.append(payload) or {"id": f"attempt-{len(attempts)}"}
+                    )
+                )
+                report = _process_simple_job(
+                    job,
+                    reports_dir=tmp_path / "reports",
+                    publish=False,
+                    dry_run=True,
+                )
+
+    assert report.accepted is True
+    assert report.template_generated is False
+    assert report.agent_loop["pipeline_version"] == "simple_v2"
+    assert report.agent_loop["model_calls"] == 0
+    assert [item["action"] for item in attempts] == ["deterministic:table"]
+    assert ntc_resolver.return_value.resolve.call_args.kwargs["device"]["model"] == (
+        job["profile"]
+    )
+    mock_session.assert_not_called()
 
 
-class TestTemplateValidator(unittest.TestCase):
-    def test_semantic_aliases_strip_generic_field_qualifiers(self):
-        self.assertIn("protocol", field_aliases("protocol_status"))
-        self.assertIn("interface", field_aliases("interface_name"))
-
-    def test_semantic_governance_removes_units_from_non_numeric_fields(self):
-        proposal = ContractProposal(
-            category="inventory",
-            entity_type="component",
-            primary_keys=("component",),
-            required_fields=("component",),
-            optional_fields=("mac_address",),
-            state_semantics={
-                "component": {"semantic_type": "identity"},
-                "mac_address": {"semantic_type": "text", "unit": "ip"},
-            },
-            evidence={},
-            source="llm",
-        )
-
-        governed = govern_contract_candidate(proposal)
-
-        self.assertEqual(governed.state_semantics["mac_address"], {"semantic_type": "text"})
-        self.assertEqual(
-            governed.evidence["semantic_reference_governance"]["removed_units"]["mac_address"][
-                "reason"
-            ],
-            "unit_requires_numeric_semantic_type",
-        )
-
-    def test_semantic_governance_forces_every_primary_key_to_identity(self):
-        proposal = ContractProposal(
-            category="hardware",
-            entity_type="fan",
-            primary_keys=("slot_id", "fan_id"),
-            required_fields=("slot_id", "fan_id", "state"),
-            state_semantics={
-                "slot_id": {"semantic_type": "identity"},
-                "fan_id": {
-                    "semantic_type": "text",
-                    "observation_type": "invented.fan_id",
-                },
-                "state": {"semantic_type": "state"},
-            },
-            evidence={},
-            source="llm_revision",
-        )
-
-        governed = govern_contract_candidate(proposal)
-
-        self.assertEqual(
-            governed.state_semantics["slot_id"],
-            {"semantic_type": "identity"},
-        )
-        self.assertEqual(
-            governed.state_semantics["fan_id"],
-            {"semantic_type": "identity"},
-        )
-        correction = governed.evidence["semantic_reference_governance"][
-            "corrected_primary_key_semantics"
-        ]["fan_id"]
-        self.assertEqual(correction["reason"], "primary_key_requires_identity_semantics")
-        self.assertEqual(correction["previous"]["semantic_type"], "text")
-
-    def test_contract_normalizes_unambiguous_table_label_to_canonical_field(self):
-        sample = """Interface  Link  Description
-GE1/0/1   UP    uplink
-GE1/0/2   DOWN  spare
-"""
-        samples_text = f'<CLI_SAMPLE id="sample-1" sha256="abc">\n{sample}</CLI_SAMPLE>'
-
-        proposal = infer_contract(
-            command="inspect arbitrary ports",
-            samples_text=samples_text,
-            structure_profile=profile_sample_set([("sample-1", sample)]),
-            llm_call=lambda _prompt: (
-                """{
-              "category": "ports",
-              "entity_type": "port",
-              "primary_keys": ["interface"],
-              "required_fields": ["interface", "link"],
-              "optional_fields": ["description"],
-              "validators": {
-                "interface": {"type": "interface_name"},
-                "link": {"type": "enum", "values": ["UP", "DOWN"]},
-                "description": {"type": "text"}
-              },
-              "state_semantics": {
-                "interface": {"semantic_type": "text"},
-                "link": {"semantic_type": "text"}
-              },
-              "evidence": {"field_bindings": {
-                "interface": [{"sample_id": "sample-1", "line": 2,
-                  "source_label": "Interface", "source_value": "GE1/0/1",
-                  "capture_kind": "column"}],
-                "link": [{"sample_id": "sample-1", "line": 2,
-                  "source_label": "Link", "source_value": "UP",
-                  "capture_kind": "column"}],
-                "description": [{"sample_id": "sample-1", "line": 2,
-                  "source_label": "Description", "source_value": "uplink",
-                  "capture_kind": "column"}]
-              }}
-            }"""
-            ),
-        )
-
-        self.assertNotIn("link", proposal.required_fields)
-        self.assertIn("status", proposal.required_fields)
-        self.assertEqual(proposal.state_semantics["interface"], {"semantic_type": "identity"})
-        self.assertEqual(proposal.state_semantics["status"]["semantic_type"], "state")
-        self.assertIn("status", proposal.evidence["field_bindings"])
-        self.assertEqual(
-            proposal.evidence["semantic_field_normalization"]["mapping"],
-            {"link": "status"},
-        )
-
-    def test_persisted_contract_reapplies_semantic_field_normalization(self):
-        proposal = ContractProposal(
-            category="ports",
-            entity_type="port",
-            primary_keys=("interface",),
-            required_fields=("interface", "link"),
-            validators={
-                "interface": {"type": "interface_name"},
-                "link": {"type": "enum", "values": ["UP", "DOWN"]},
-            },
-            state_semantics={
-                "interface": {"semantic_type": "text"},
-                "link": {"semantic_type": "text"},
-            },
-            evidence={
-                "field_bindings": {
-                    "interface": [{
-                        "sample_id": "sample-1",
-                        "line": 2,
-                        "source_label": "Interface",
-                        "source_value": "GE1/0/1",
-                        "capture_kind": "column",
-                    }],
-                    "link": [{
-                        "sample_id": "sample-1",
-                        "line": 2,
-                        "source_label": "Link",
-                        "source_value": "UP",
-                        "capture_kind": "column",
-                    }],
-                }
-            },
-            source="llm_proposal",
-        )
-
-        governed = govern_contract_candidate(proposal)
-
-        self.assertEqual(governed.required_fields, ("interface", "status"))
-        self.assertNotIn("link", governed.validators)
-        self.assertEqual(governed.state_semantics["status"]["semantic_type"], "state")
-        self.assertEqual(
-            governed.evidence["semantic_field_normalization"]["mapping"],
-            {"link": "status"},
-        )
-
-    def test_qualified_optical_fields_normalize_without_vendor_logic(self):
-        proposal = ContractProposal(
-            category="optics",
-            entity_type="transceiver_diagnostic",
-            primary_keys=("interface",),
-            required_fields=("interface",),
-            optional_fields=(
-                "current_rx_power_dbm",
-                "current_tx_power_dbm",
-                "warning_low_rx_power_dbm",
-                "alarm_low_rx_power_dbm",
-                "status",
-            ),
-            validators={
-                "interface": {"type": "interface_name"},
-                "current_rx_power_dbm": {"type": "number"},
-                "current_tx_power_dbm": {"type": "number"},
-                "warning_low_rx_power_dbm": {"type": "number"},
-                "alarm_low_rx_power_dbm": {"type": "number"},
-                "status": {"type": "text"},
-            },
-            evidence={
-                "field_bindings": {
-                    "interface": [{"capture_kind": "record_anchor"}],
-                    "current_rx_power_dbm": [{
-                        "source_label": "30 3.32 2.82 -5.34 -6.32",
-                        "capture_kind": "column",
-                    }],
-                    "current_tx_power_dbm": [{
-                        "source_label": "30 3.32 2.82 -5.34 -6.32",
-                        "capture_kind": "column",
-                    }],
-                    "warning_low_rx_power_dbm": [{
-                        "source_label": "Low 0 2.97 2.97 -15.00 -9.50",
-                        "capture_kind": "column",
-                    }],
-                    "alarm_low_rx_power_dbm": [{
-                        "source_label": "Low 0 2.97 2.97 -18.01 -12.50",
-                        "capture_kind": "column",
-                    }],
-                    "status": [{
-                        "source_label": "The transceiver is absent.",
-                        "source_value": "absent",
-                        "capture_kind": "key_value",
-                    }],
-                }
-            },
-            source="llm_proposal",
-        )
-
-        governed = govern_contract_candidate(proposal)
-
-        self.assertEqual(governed.primary_keys, ("interface",))
-        self.assertEqual(
-            governed.optional_fields,
-            (
-                "rx_power_dbm",
-                "tx_power_dbm",
-                "rx_low_warning_dbm",
-                "rx_low_alarm_dbm",
-                "transceiver_present",
-            ),
-        )
-        normalization = governed.evidence["semantic_field_normalization"]
-        self.assertEqual(
-            normalization["resolution_sources"]["current_rx_power_dbm"],
-            "qualified_field_name",
-        )
-        self.assertEqual(
-            normalization["resolution_sources"]["status"],
-            "literal_label",
-        )
-
-    def test_semantic_name_normalization_skips_colliding_context_fields(self):
-        proposal = ContractProposal(
-            category="optics",
-            entity_type="transceiver_diagnostic",
-            primary_keys=("interface",),
-            required_fields=("interface",),
-            optional_fields=("current_rx_power_dbm", "measured_rx_power_dbm"),
-            evidence={"field_bindings": {}},
-            source="llm_proposal",
-        )
-
-        governed = govern_contract_candidate(proposal)
-
-        self.assertEqual(governed.optional_fields, proposal.optional_fields)
-        self.assertEqual(
-            governed.evidence["semantic_field_normalization"]["skipped_collisions"],
-            {
-                "current_rx_power_dbm": "rx_power_dbm",
-                "measured_rx_power_dbm": "rx_power_dbm",
-            },
-        )
-
-    def test_redacted_serial_contract_is_generalized_for_runtime_values(self):
-        sample = """Power 1:
-MANU SERIAL NUMBER : <SERIAL>
-"""
-
-        proposal = infer_contract(
-            command="inspect component inventory",
-            samples_text=(f'<CLI_SAMPLE id="sample-1" sha256="abc">\n{sample}</CLI_SAMPLE>'),
-            structure_profile=profile_sample_set([("sample-1", sample)]),
-            llm_call=lambda _prompt: (
-                """{
-              "category": "inventory",
-              "entity_type": "component",
-              "primary_keys": ["component"],
-              "required_fields": ["component"],
-              "optional_fields": ["serial_number"],
-              "validators": {
-                "component": {"type": "regex", "pattern": "^Power \\\\d+:$"},
-                "serial_number": {"type": "regex", "pattern": "^<SERIAL>$"}
-              },
-              "evidence": {"field_bindings": {
-                "component": [{"sample_id": "sample-1", "line": 1,
-                  "source_label": "Power 1:", "source_value": "Power 1:",
-                  "capture_kind": "record_anchor"}],
-                "serial_number": [{"sample_id": "sample-1", "line": 2,
-                  "source_label": "MANU SERIAL NUMBER : <SERIAL>",
-                  "source_value": "<SERIAL>", "capture_kind": "key_value"}]
-              }}
-            }"""
-            ),
-        )
-
-        serial_validator = proposal.validators["serial_number"]
-        self.assertRegex("PSU456", serial_validator["pattern"])
-        self.assertNotEqual(serial_validator["pattern"], "^<SERIAL>$")
-        self.assertEqual(
-            proposal.evidence["redaction_validator_normalization"]["strategy"],
-            "privacy_placeholder_to_runtime_type",
-        )
-        valid, diagnostics = validate_contract_candidate(
-            proposal,
-            structure_profile=profile_sample_set([("sample-1", sample)]),
-            samples_text=(f'<CLI_SAMPLE id="sample-1" sha256="abc">\n{sample}</CLI_SAMPLE>'),
-        )
-        self.assertTrue(valid, [item.message for item in diagnostics])
-
-    def test_contract_prunes_hallucinated_optional_binding_without_command_rules(self):
-        sample = """Port1 diagnostic information:
-The module is absent.
-Port2 diagnostic information:
-The module does not support diagnostics.
-"""
-        samples_text = f'<CLI_SAMPLE id="sample-1" sha256="abc">\n{sample}</CLI_SAMPLE>'
-
-        proposal = infer_contract(
-            command="inspect arbitrary modules",
-            samples_text=samples_text,
-            structure_profile=profile_sample_set([("sample-1", sample)]),
-            llm_call=lambda _prompt: (
-                """{
-              "category": "module_diagnostics",
-              "entity_type": "module",
-              "primary_keys": ["module"],
-              "required_fields": ["module"],
-              "optional_fields": ["diagnosis_status", "invented_metric"],
-              "validators": {
-                "module": {"type": "text"},
-                "diagnosis_status": {
-                  "type": "regex",
-                  "pattern": "^The module is (absent|does not support diagnostics)\\\\.$"
-                },
-                "invented_metric": {"type": "number"}
-              },
-              "state_semantics": {
-                "invented_metric": {"semantic_type": "gauge", "unit": "count"}
-              },
-              "evidence": {"field_bindings": {
-                "module": [
-                  {"sample_id": "sample-1", "line": 1,
-                   "source_label": "Port1 diagnostic information:", "source_value": "Port1",
-                   "capture_kind": "literal"},
-                  {"sample_id": "sample-1", "line": 3,
-                   "source_label": "Port2 diagnostic information:", "source_value": "Port2",
-                   "capture_kind": "literal"}
-                ],
-                "diagnosis_status": [
-                  {"sample_id": "sample-1", "line": 2,
-                   "source_label": "The module is absent.",
-                   "source_value": "The module is absent.", "capture_kind": "key_value"},
-                  {"sample_id": "sample-1", "line": 4,
-                   "source_label": "The module is absent.",
-                   "source_value": "The module is absent.", "capture_kind": "key_value"},
-                  {"sample_id": "sample-1", "line": 4,
-                   "source_label": "The module does not support diagnostics.",
-                   "source_value": "The module does not support diagnostics.",
-                   "capture_kind": "key_value"}
-                ],
-                "invented_metric": [
-                  {"sample_id": "sample-1", "line": 4,
-                   "source_label": "Metric:", "source_value": "42",
-                   "capture_kind": "key_value"}
-                ]
-              }}
-            }"""
-            ),
-        )
-
-        status_bindings = proposal.evidence["field_bindings"]["diagnosis_status"]
-        self.assertEqual(len(status_bindings), 2)
-        self.assertEqual(
-            {binding["capture_kind"] for binding in proposal.evidence["field_bindings"]["module"]},
-            {"record_anchor"},
-        )
-        self.assertEqual(
-            proposal.evidence["capture_kind_governance"]["strategy"],
-            "bounded_parser_ir_alias_mapping",
-        )
-        self.assertEqual(proposal.validators["diagnosis_status"], {"type": "text"})
-        self.assertIn(
-            "diagnosis_status",
-            proposal.evidence["validator_evidence_governance"]["fields"],
-        )
-        self.assertNotIn("invented_metric", proposal.optional_fields)
-        self.assertNotIn("invented_metric", proposal.validators)
-        self.assertNotIn("invented_metric", proposal.state_semantics or {})
-        governance = proposal.evidence["literal_evidence_governance"]
-        self.assertEqual(len(governance["removed_bindings"]), 2)
-        self.assertEqual(governance["removed_optional_fields"], ["invented_metric"])
-        valid, diagnostics = validate_contract_candidate(
-            proposal,
-            structure_profile=profile_sample_set([("sample-1", sample)]),
-            samples_text=samples_text,
-        )
-        self.assertTrue(valid, [item.message for item in diagnostics])
-
-    def test_contract_keeps_singleton_preamble_fields_before_repeated_sections(self):
-        sample = """Software Version: 7.1.070
-Boot Image: flash:/boot.bin
-System Image: flash:/system.bin
-Feature Images:
-  flash:/feature.bin
+@patch("parser_model.create_textfsm_tool_session")
+def test_context_table_job_uses_deterministic_pipeline_without_llm(
+    mock_session,
+    tmp_path,
+):
+    raw = """Memory statistics are measured in KB:
 Slot 1:
-  Board Type: S5130
+             Total      Used      Free    Shared   Buffers    Cached   FreeRatio
+Mem:       1946044   1034320    911724         0      4860    209388       47.4%
+-/+ Buffers/Cache:    820072   1125972
+Swap:            0         0         0
 """
-        samples_text = f'<CLI_SAMPLE id="sample-1" sha256="abc">\n{sample}</CLI_SAMPLE>'
-        structure = profile_sample_set([("sample-1", sample)])
-        proposal = infer_contract(
-            command="inspect arbitrary software inventory",
-            samples_text=samples_text,
-            structure_profile=structure,
-            llm_call=lambda _prompt: (
-                """{
-              "category": "software_inventory",
-              "entity_type": "device_software",
-              "primary_keys": [],
-              "required_fields": ["software_version"],
-              "optional_fields": ["slot_id"],
-              "validators": {
-                "software_version": {"type": "text"},
-                "slot_id": {"type": "text"}
-              },
-              "evidence": {"field_bindings": {
-                "software_version": [{"sample_id": "sample-1", "line": 1,
-                  "source_label": "Software Version:", "source_value": "7.1.070",
-                  "capture_kind": "key_value"}],
-                "slot_id": [{"sample_id": "sample-1", "line": 6,
-                  "source_label": "Slot 1:", "source_value": "Slot 1:",
-                  "capture_kind": "record_anchor"}]
-              }}
-            }"""
-            ),
-        )
-
-        self.assertEqual(proposal.required_fields, ("software_version",))
-        self.assertEqual(
-            proposal.evidence["entity_scope_governance"]["scope"],
-            "singleton",
-        )
-        valid, diagnostics = validate_contract_candidate(
-            proposal,
-            structure_profile=structure,
-            samples_text=samples_text,
-        )
-        self.assertTrue(valid, [item.message for item in diagnostics])
-
-    def test_contract_normalizes_exact_sample_regex_without_weakening_typed_regex(self):
-        sample = """Hardware Model: S5130SHIG-8307P24
-Serial Index: 8307
-"""
-        samples_text = f'<CLI_SAMPLE id="sample-1" sha256="abc">\n{sample}</CLI_SAMPLE>'
-        proposal = infer_contract(
-            command="inspect arbitrary inventory",
-            samples_text=samples_text,
-            structure_profile=profile_sample_set([("sample-1", sample)]),
-            llm_call=lambda _prompt: (
-                """{
-              "category": "inventory",
-              "entity_type": "device_inventory",
-              "primary_keys": [],
-              "required_fields": ["hardware_model"],
-              "optional_fields": ["serial_index"],
-              "validators": {
-                "hardware_model": {"type": "regex", "pattern": "^S5130SHIG-8307P24$"},
-                "serial_index": {"type": "regex", "pattern": "^\\\\d+$"}
-              },
-              "evidence": {"field_bindings": {
-                "hardware_model": [{"sample_id": "sample-1", "line": 1,
-                  "source_label": "Hardware Model:", "source_value": "S5130SHIG-8307P24",
-                  "capture_kind": "key_value"}],
-                "serial_index": [{"sample_id": "sample-1", "line": 2,
-                  "source_label": "Serial Index:", "source_value": "8307",
-                  "capture_kind": "key_value"}]
-              }}
-            }"""
-            ),
-        )
-
-        self.assertEqual(proposal.validators["hardware_model"], {"type": "text"})
-        self.assertEqual(
-            proposal.validators["serial_index"],
-            {"type": "regex", "pattern": r"^\d+$"},
-        )
-
-    def test_repeated_entity_contract_still_requires_a_primary_key(self):
-        sample = """Port1:
-  Status: up
-Port2:
-  Status: down
-"""
-        samples_text = f'<CLI_SAMPLE id="sample-1" sha256="abc">\n{sample}</CLI_SAMPLE>'
-        proposal = ContractProposal(
-            category="module_status",
-            entity_type="module",
-            primary_keys=(),
-            required_fields=("module",),
-            validators={"module": {"type": "text"}},
-            evidence={
-                "field_bindings": {
-                    "module": [
-                        {
-                            "sample_id": "sample-1",
-                            "line": 1,
-                            "source_label": "Port1:",
-                            "source_value": "Port1:",
-                            "capture_kind": "record_anchor",
-                        },
-                        {
-                            "sample_id": "sample-1",
-                            "line": 3,
-                            "source_label": "Port2:",
-                            "source_value": "Port2:",
-                            "capture_kind": "record_anchor",
-                        },
-                    ]
-                }
+    job = {
+        **_job(),
+        "canonical_command": "inspect memory",
+        "parser_spec_json": {
+            "entity": "memory_statistics",
+            "primary_keys": ["slot"],
+            "fields": {
+                "slot": {"required": True, "type": "text", "source_labels": ["Slot"]},
+                "total": {"required": True, "type": "number", "source_labels": ["Total"]},
+                "used": {"required": True, "type": "number", "source_labels": ["Used"]},
+                "free": {"required": True, "type": "number", "source_labels": ["Free"]},
+                "shared": {
+                    "required": True,
+                    "type": "number",
+                    "source_labels": ["Shared"],
+                },
+                "buffers": {
+                    "required": True,
+                    "type": "number",
+                    "source_labels": ["Buffers"],
+                },
+                "cached": {
+                    "required": True,
+                    "type": "number",
+                    "source_labels": ["Cached"],
+                },
+                "free_ratio": {
+                    "required": True,
+                    "type": "percent",
+                    "source_labels": ["FreeRatio"],
+                },
             },
-            source="llm_proposal",
-        )
-
-        valid, diagnostics = validate_contract_candidate(
-            proposal,
-            structure_profile=profile_sample_set([("sample-1", sample)]),
-            samples_text=samples_text,
-        )
-
-        self.assertFalse(valid)
-        self.assertIn(
-            "multi-entity samples require explicit primary keys",
-            [item.message for item in diagnostics],
-        )
-
-    def test_contract_rejects_parent_only_key_for_repeated_child_entities(self):
-        sample = """Slot 1:
-  Fan 1 State: Normal
-  Fan 2 State: Normal
-"""
-        samples_text = f'<CLI_SAMPLE id="sample-1" sha256="abc">\n{sample}</CLI_SAMPLE>'
-        proposal = ContractProposal(
-            category="hardware",
-            entity_type="fan",
-            primary_keys=("slot_id",),
-            required_fields=("slot_id", "fan_id", "state"),
-            validators={
-                "slot_id": {"type": "text"},
-                "fan_id": {"type": "text"},
-                "state": {"type": "text"},
-            },
-            evidence={
-                "field_bindings": {
-                    "slot_id": [{"sample_id": "sample-1", "line": 1,
-                        "source_label": "Slot 1:", "source_value": "Slot 1:",
-                        "capture_kind": "record_anchor"}],
-                    "fan_id": [
-                        {"sample_id": "sample-1", "line": 2,
-                         "source_label": "Fan 1", "source_value": "Fan 1",
-                         "capture_kind": "key_value"},
-                        {"sample_id": "sample-1", "line": 3,
-                         "source_label": "Fan 2", "source_value": "Fan 2",
-                         "capture_kind": "key_value"},
-                    ],
-                    "state": [
-                        {"sample_id": "sample-1", "line": 2,
-                         "source_label": "State:", "source_value": "Normal",
-                         "capture_kind": "key_value"},
-                        {"sample_id": "sample-1", "line": 3,
-                         "source_label": "State:", "source_value": "Normal",
-                         "capture_kind": "key_value"},
-                    ],
-                }
-            },
-            source="llm_proposal",
-        )
-
-        valid, diagnostics = validate_contract_candidate(
-            proposal,
-            structure_profile=profile_sample_set([("sample-1", sample)]),
-            samples_text=samples_text,
-        )
-
-        self.assertFalse(valid)
-        self.assertIn(
-            "primary keys do not distinguish all evidenced entities; "
-            "include the repeated entity identity in the key",
-            [item.message for item in diagnostics],
-        )
-
-    def test_evidence_entity_count_uses_repeated_required_field_lines(self):
-        cli = "Slot 1:\n  Fan 1 State: Normal\n  Fan 2 State: Normal\n"
-        spec = CategorySpec(
-            name="hardware",
-            entity_type="fan",
-            primary_keys=["slot_id", "fan_id"],
-            required_fields=["slot_id", "fan_id", "state"],
-            optional_fields=[],
-            validators={},
-        )
-        bindings = {
-            "slot_id": [{"line": 1, "source_label": "Slot 1:",
-                         "source_value": "Slot 1:", "capture_kind": "record_anchor"}],
-            "fan_id": [
-                {"line": 2, "source_label": "Fan 1", "source_value": "Fan 1",
-                 "capture_kind": "key_value"},
-                {"line": 3, "source_label": "Fan 2", "source_value": "Fan 2",
-                 "capture_kind": "key_value"},
-            ],
-            "state": [
-                {"line": 2, "source_label": "State:", "source_value": "Normal",
-                 "capture_kind": "key_value"},
-                {"line": 3, "source_label": "State:", "source_value": "Normal",
-                 "capture_kind": "key_value"},
-            ],
-        }
-
-        self.assertEqual(
-            expected_entity_count_from_evidence(cli, spec, field_bindings=bindings),
-            2,
-        )
-
-    def test_table_binding_normalization_keeps_same_header_in_original_context(self):
-        sample = """Port1 diagnostic information:
-  Current values:
-    Temp(C) Voltage(V)
-    40      3.30
-  Alarm thresholds:
-    Temp(C) Voltage(V)
-    High 80 3.60
-    Low -10 3.00
-Port2 diagnostic information:
-  Current values:
-    Temp(C) Voltage(V)
-    41      3.31
-  Alarm thresholds:
-    Temp(C) Voltage(V)
-    High 81 3.61
-    Low -11 2.99
-"""
-        samples_text = f'<CLI_SAMPLE id="sample-1" sha256="abc">\n{sample}</CLI_SAMPLE>'
-        proposal = infer_contract(
-            command="inspect arbitrary sensor blocks",
-            samples_text=samples_text,
-            structure_profile=profile_sample_set([("sample-1", sample)]),
-            llm_call=lambda _prompt: (
-                """{
-              "category": "sensor",
-              "entity_type": "port_sensor",
-              "primary_keys": ["port"],
-              "required_fields": ["port"],
-              "optional_fields": ["temperature_celsius", "voltage_v"],
-              "validators": {
-                "port": {"type": "text"},
-                "temperature_celsius": {"type": "number"},
-                "voltage_v": {"type": "number"}
-              },
-              "evidence": {"field_bindings": {
-                "port": [
-                  {"sample_id": "sample-1", "line": 1,
-                   "source_label": "Port1 diagnostic information:", "source_value": "Port1",
-                   "capture_kind": "record_anchor"},
-                  {"sample_id": "sample-1", "line": 9,
-                   "source_label": "Port2 diagnostic information:", "source_value": "Port2",
-                   "capture_kind": "record_anchor"}
-                ],
-                "temperature_celsius": [
-                  {"sample_id": "sample-1", "line": 4,
-                   "source_label": "Temp", "source_value": "40", "capture_kind": "column"},
-                  {"sample_id": "sample-1", "line": 12,
-                   "source_label": "Temp", "source_value": "41", "capture_kind": "column"}
-                ],
-                "voltage_v": [
-                  {"sample_id": "sample-1", "line": 4,
-                   "source_label": "Voltage", "source_value": "3.30", "capture_kind": "column"},
-                  {"sample_id": "sample-1", "line": 12,
-                   "source_label": "Voltage", "source_value": "3.31", "capture_kind": "column"}
-                ]
-              }}
-            }"""
-            ),
-        )
-
-        temperatures = {
-            binding["source_value"]
-            for binding in proposal.evidence["field_bindings"]["temperature_celsius"]
-        }
-        voltages = {
-            binding["source_value"] for binding in proposal.evidence["field_bindings"]["voltage_v"]
-        }
-        self.assertEqual(temperatures, {"40", "41"})
-        self.assertEqual(voltages, {"3.30", "3.31"})
-        self.assertNotIn("80", temperatures)
-        self.assertNotIn("3.60", voltages)
-
-    def test_contract_rejects_mutually_exclusive_sibling_anchor_keys(self):
-        sample = """Slot 1 CPU 0:
-DEVICE_NAME: Switch
-Fan 1:
-DEVICE_NAME: Fan
-Power 1:
-DEVICE_NAME: Power
-"""
-        samples_text = f'<CLI_SAMPLE id="sample-1" sha256="abc">\n{sample}</CLI_SAMPLE>'
-        proposal = proposal_from_dict(
+        },
+        "samples": [
             {
-                "category": "inventory",
-                "entity_type": "component",
-                "primary_keys": ["slot_cpu", "fan_id", "power_id"],
-                "required_fields": ["slot_cpu", "fan_id", "power_id"],
-                "optional_fields": [],
-                "validators": {},
-                "source": "llm_proposal",
-                "evidence": {
-                    "field_bindings": {
-                        "slot_cpu": [
-                            {
-                                "sample_id": "sample-1",
-                                "line": 1,
-                                "source_label": "Slot 1 CPU 0:",
-                                "source_value": "Slot 1 CPU 0:",
-                                "capture_kind": "record_anchor",
-                            }
-                        ],
-                        "fan_id": [
-                            {
-                                "sample_id": "sample-1",
-                                "line": 3,
-                                "source_label": "Fan 1:",
-                                "source_value": "Fan 1:",
-                                "capture_kind": "record_anchor",
-                            }
-                        ],
-                        "power_id": [
-                            {
-                                "sample_id": "sample-1",
-                                "line": 5,
-                                "source_label": "Power 1:",
-                                "source_value": "Power 1:",
-                                "capture_kind": "record_anchor",
-                            }
-                        ],
-                    }
+                "id": "sample-memory",
+                "snapshot_id": "snapshot-memory",
+                "sample_role": "generation",
+                "expectation_json": {
+                    "record_count": 1,
+                    "primary_keys": [["1"]],
                 },
+                "sanitization_status": "sanitized",
+                "sanitized_text": raw,
             }
-        )
+        ],
+    }
+    attempts: list[dict] = []
+    context = {
+        "mode": "parser_validation",
+        "snapshot": SimpleNamespace(snapshot_id="snapshot-memory", raw_text=raw),
+    }
+    with patch("generate_templates.PatrolRepository") as patrol_repository:
+        patrol_repository.return_value.get_snapshot_context.return_value = context
+        with patch("generate_templates.ParserJobRepository") as job_repository:
+            job_repository.return_value.create_generation_attempt.side_effect = lambda **payload: (
+                attempts.append(payload) or {"id": f"attempt-{len(attempts)}"}
+            )
+            report = _process_simple_job(
+                job,
+                reports_dir=tmp_path / "reports",
+                publish=False,
+                dry_run=True,
+            )
 
-        valid, diagnostics = validate_contract_candidate(
-            proposal,
-            structure_profile=profile_sample_set([("sample-1", sample)]),
-            samples_text=samples_text,
-        )
+    assert report.accepted is True
+    assert report.compile_success is True
+    assert report.record_count == 1
+    assert attempts[0]["action"] == "deterministic:table"
+    assert "Value Filldown slot" in attempts[0]["template_text"]
+    assert report.parsed_records[0]["free_ratio"] == "47.4%"
+    mock_session.assert_not_called()
 
-        self.assertFalse(valid)
-        self.assertIn("disjoint sibling record anchors", diagnostics[0].message)
-        self.assertEqual(diagnostics[0].allowed_action, "request_contract_review")
 
-    def test_contract_allows_nested_composite_anchor_keys(self):
-        sample = """Slot 1:
-  Fan 1:
-    State: normal
-  Fan 2:
-    State: normal
-"""
-        samples_text = f'<CLI_SAMPLE id="sample-1" sha256="abc">\n{sample}</CLI_SAMPLE>'
-        proposal = proposal_from_dict(
-            {
-                "category": "inventory",
-                "entity_type": "fan",
-                "primary_keys": ["slot", "fan"],
-                "required_fields": ["slot", "fan"],
-                "optional_fields": [],
-                "validators": {},
-                "source": "llm_proposal",
-                "evidence": {
-                    "field_bindings": {
-                        "slot": [
-                            {
-                                "sample_id": "sample-1",
-                                "line": 1,
-                                "source_label": "Slot 1:",
-                                "source_value": "Slot 1:",
-                                "capture_kind": "record_anchor",
-                            }
-                        ],
-                        "fan": [
-                            {
-                                "sample_id": "sample-1",
-                                "line": 2,
-                                "source_label": "Fan 1:",
-                                "source_value": "Fan 1:",
-                                "capture_kind": "record_anchor",
-                            },
-                            {
-                                "sample_id": "sample-1",
-                                "line": 4,
-                                "source_label": "Fan 2:",
-                                "source_value": "Fan 2:",
-                                "capture_kind": "record_anchor",
-                            },
-                        ],
-                    }
-                },
-            }
-        )
-
-        valid, diagnostics = validate_contract_candidate(
-            proposal,
-            structure_profile=profile_sample_set([("sample-1", sample)]),
-            samples_text=samples_text,
-        )
-
-        self.assertTrue(valid, [item.message for item in diagnostics])
-
-    def test_derived_only_contract_field_is_not_a_textfsm_capture(self):
-        spec = _category_spec_from_contract(
-            {
-                "category": "item",
-                "entity_type": "item",
-                "primary_keys": ["item"],
-                "required_fields": ["item"],
-                "optional_fields": ["normalized_state", "metric"],
-                "validators": {
-                    "normalized_state": {"type": "enum", "values": ["up"]},
-                    "metric": {"type": "number"},
-                },
-                "evidence": {
-                    "field_bindings": {
-                        "normalized_state": [{"capture_kind": "derived"}],
-                        "metric": [{"capture_kind": "column"}],
-                    }
-                },
-            }
-        )
-
-        self.assertEqual(spec.required_fields, ["item"])
-        self.assertEqual(spec.optional_fields, ["metric"])
-        self.assertNotIn("normalized_state", spec.validators)
-
-    def test_optical_contract_comes_from_versioned_semantic_catalog(self):
-        proposal = infer_contract(
-            command="display transceiver diagnosis interface",
-            samples_text="ignored",
-            use_manual_profile=True,
-            llm_call=lambda _prompt: self.fail("LLM must not redefine the platform contract"),
-        )
-
-        self.assertEqual(proposal.category, "interface_optical")
-        self.assertEqual(proposal.entity_type, "interface_optical")
-        self.assertEqual(proposal.primary_keys, ("interface",))
-        self.assertEqual(proposal.required_fields, ("interface",))
-        self.assertIn("rx_power_dbm", proposal.optional_fields)
-        self.assertFalse(proposal.allow_empty)
-        rx_semantics = infer_field_semantics(proposal)["rx_power_dbm"]
-        self.assertEqual(rx_semantics["semantic_type"], "gauge")
-        self.assertEqual(rx_semantics["unit"], "dbm")
-        self.assertEqual(
-            rx_semantics["observation_type"],
-            "interface.optical.rx_power",
-        )
-        self.assertEqual(rx_semantics["applicability"]["on_missing_context"], "reject")
-        self.assertIn(
-            "measurement_not_applicable",
-            {item["code"] for item in rx_semantics["applicability"]["exclude_when"]},
-        )
-        self.assertTrue(proposal.source.startswith("semantic_catalog:"))
-        self.assertEqual(
-            proposal.evidence["catalog_version"],
-            "parser-semantic-catalog-v1",
-        )
-        self.assertEqual(
-            proposal.to_dict()["state_semantics"]["rx_power_dbm"]["observation_type"],
-            "interface.optical.rx_power",
-        )
-        self.assertEqual(
-            proposal.to_dict()["state_semantics"]["tx_power_dbm"]["observation_type"],
-            "interface.optical.tx_power",
-        )
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_optical_absent_marker_cannot_hide_unparsed_entities(self):
-        template = """Value interface (NEVER_MATCHES)
-
-Start
-  ^${interface} -> Record
-"""
-        cli = """GigabitEthernet1/0/1 transceiver diagnostic information:
-The transceiver is absent.
-Twenty-FiveGigE1/0/1 transceiver diagnostic information:
-  Current diagnostic parameters:
-"""
-        spec = infer_contract(
-            command="display transceiver diagnosis interface",
-            samples_text=cli,
-            use_manual_profile=True,
-        ).to_category_spec()
-        minimum = expected_min_records(cli, spec)
-        result = validate_template(
-            template,
-            cli,
-            list(spec.required_fields),
-            allow_empty=True,
-            empty_patterns=[r"The transceiver is absent\."],
-            primary_keys=spec.primary_keys,
-            expected_min_records=minimum,
-        )
-
-        self.assertEqual(minimum, 2)
-        self.assertFalse(result.is_valid)
-        self.assertIn("cannot be accepted", " ".join(result.errors))
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_unsupported_set_action_is_rejected_before_generation_acceptance(self):
-        template = """Value interface (\\S+)
-
-Start
-  ^${interface} -> Set interface $1
-"""
-        result = validate_template(template, "Gi1/0/1\n", ["interface"])
-
-        self.assertFalse(result.compile_success)
-        self.assertIn("unsupported TextFSM actions", result.errors[0])
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_h3c_optical_synthesizer_parses_every_interface_block(self):
-        cli = """GigabitEthernet1/0/57 transceiver diagnostic information:
-The transceiver is absent.
-HundredGigE1/0/25 transceiver diagnostic information:
-  Current diagnostic parameters:
-[module]  Temp.(C) Voltage(V)
-          47         3.31
-[channel] Bias(mA)  RX power(dBm)  TX power(dBm)
-    1     6.53      -1.44          -1.81
-    2     6.59      -1.53          -1.31
-  Alarm thresholds:
-          Temp.(C) Voltage(V)  Bias(mA)  RX power(dBm)  TX power(dBm)
-    High  80         3.60        12.00     3.40           0.50
-    Low   -10        3.00        0.00      -10.50         -8.60
-Twenty-FiveGigE1/0/1 transceiver diagnostic information:
-  Current diagnostic parameters:
-    Temp.(C) Voltage(V)  Bias(mA)  RX power(dBm)  TX power(dBm)
-    39         3.30        6.38      -18.20         -2.16
-  Alarm thresholds:
-          Temp.(C) Voltage(V)  Bias(mA)  RX power(dBm)  TX power(dBm)
-    High  81         3.80        16.50     1.00           1.00
-    Low   0          2.81        1.00      -11.90         -10.30
-Twenty-FiveGigE1/0/2 transceiver diagnostic information:
-The transceiver does not support this function.
-"""
-        proposal = infer_contract(
-            command="display transceiver diagnosis interface",
-            samples_text=cli,
-            use_manual_profile=True,
-        )
-        spec = proposal.to_category_spec()
-        sample = SimpleNamespace(output=cli, file_path="sample", device_id="switch-1")
-        synthesized = synthesize_template(
-            command="display transceiver diagnosis interface",
-            samples=(sample,),
-            spec=spec,
-        )
-        expected_keys = expected_primary_key_tuples(cli, spec)
-        result = validate_template(
-            synthesized.template_text,
-            cli,
-            list(spec.required_fields),
-            spec.validators,
-            primary_keys=spec.primary_keys,
-            expected_min_records=expected_min_records(cli, spec),
-            expected_primary_keys=expected_keys,
-        )
-
-        self.assertEqual(
-            synthesized.strategy,
-            "section_block:h3c_transceiver_diagnostics",
-        )
-        self.assertTrue(result.is_valid, result.errors)
-        self.assertEqual(result.record_count, 4)
-        self.assertEqual(
-            {row["interface"] for row in result.records},
-            {key[0] for key in expected_keys},
-        )
-        powered = next(row for row in result.records if row["interface"] == "Twenty-FiveGigE1/0/1")
-        self.assertEqual(powered["rx_power_dbm"], "-18.20")
-        self.assertEqual(powered["rx_low_alarm_dbm"], "-11.90")
-        multi_lane = next(row for row in result.records if row["interface"] == "HundredGigE1/0/25")
-        self.assertEqual(multi_lane["rx_power_dbm"], "")
-        self.assertEqual(multi_lane["rx_power_channel_1_dbm"], "-1.44")
-        self.assertEqual(multi_lane["rx_power_channel_2_dbm"], "-1.53")
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_missing_optical_entity_key_is_reported_to_llm_repair(self):
-        template = """Value interface (\\S+)
-
-Start
-  ^Keep-${interface} -> Record
-"""
-        result = validate_template(
-            template,
-            "Keep-Gi1/0/1\nGi1/0/2\n",
-            ["interface"],
-            primary_keys=["interface"],
-            expected_primary_keys={("Gi1/0/1",), ("Gi1/0/2",)},
-        )
-
-        self.assertFalse(result.is_valid)
-        self.assertIn("missing expected entity keys: Gi1/0/2", result.errors)
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_unexpected_entity_key_is_reported_to_llm_repair(self):
-        template = """Value interface (\\S+)
-
-Start
-  ^${interface} -> Record
-"""
-        result = validate_template(
-            template,
-            "Gi1/0/1\nLegend\n",
-            ["interface"],
-            primary_keys=["interface"],
-            expected_primary_keys={("Gi1/0/1",)},
-        )
-
-        self.assertFalse(result.is_valid)
-        self.assertIn("unexpected entity keys: Legend", result.errors)
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_four_layer_validation(self):
-        # 字段名映射为模板 Value 名（大写+下划线是 TextFSM 惯例，配置用小写）
-        template = """Value slot (\\d+)
-Value cpu_5s (\\d+)
-Value cpu_1m (\\d+)
-Value cpu_5m (\\d+)
-
-Start
-  ^Slot\\s+CPU
-  ^${slot}\\s+${cpu_5s}\\s+${cpu_1m}\\s+${cpu_5m} -> Record
-"""
-        cli = "Slot CPU\n0 10 12 15\n1 8 9 11\n"
-        required = ["slot", "cpu_5s", "cpu_1m", "cpu_5m"]
-        validators = {
-            "cpu_5s": {"type": "percent"},
-            "cpu_1m": {"type": "percent"},
-            "cpu_5m": {"type": "percent"},
-        }
-        result = validate_template(template, cli, required, validators)
-        self.assertTrue(result.compile_success)
-        self.assertGreater(result.record_count, 0)
-        self.assertEqual(result.missing_fields, [])
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_duplicate_primary_key_fails_template_validation(self):
-        template = """Value interface (\\S+)
+@patch("parser_model.create_textfsm_tool_session")
+def test_third_semantic_rejection_yields_executable_human_review_candidate(
+    mock_session,
+    tmp_path,
+):
+    job = _job()
+    job["samples"] = [dict(job["samples"][0])]
+    job["samples"][0]["sanitized_text"] = "UNMATCHED OUTPUT"
+    template = """Value interface (\\S+)
 Value status (\\S+)
 
 Start
-  ^${interface}\\s+${status} -> Record
-"""
-        result = validate_template(
-            template,
-            "Gi1/0/1 up\nGi1/0/1 down\n",
-            ["interface", "status"],
-            primary_keys=["interface"],
-        )
-
-        self.assertFalse(result.is_valid)
-        self.assertTrue(result.key_errors)
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_expected_min_records_fails_underparsed_multi_entity_output(self):
-        template = """Value slot (\\d+)
-Value fan (\\d+)
-Value state (.+)
-Value Filldown direction (.+)
-
-Start
-  ^Slot\\s+${slot}: -> Slot
-
-Slot
-  ^\\s+Fan\\s+${fan}: -> Fan
-  ^Slot\\s+\\d+: -> Record Slot
-
-Fan
-  ^\\s+State\\s+:\\s+${state}
-  ^\\s+Airflow Direction:\\s+${direction}
-  ^\\s+Fan\\s+\\d+: -> Record Fan
-
-EOF
-"""
-        cli = """Slot 1:
- Fan 1:
- State    : Normal
- Airflow Direction: Port-to-power
- Fan 2:
- State    : Normal
- Airflow Direction: Port-to-power
+  ^NEVER\\s+${interface}\\s+${status} -> Record
 """
 
-        result = validate_template(
-            template,
-            cli,
-            ["slot", "fan", "state"],
-            primary_keys=["slot", "fan"],
-            expected_min_records=2,
-        )
+    feedbacks = []
 
-        self.assertFalse(result.is_valid)
-        self.assertIn("below expected minimum 2", result.completeness_errors[0])
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_deterministic_h3c_display_fan_template_parses_all_fans(self):
-        cli = """Slot 1:
- Fan 1:
- State    : Normal
- Airflow Direction: Port-to-power
- Prefer Airflow Direction: Port-to-power
- Fan 2:
- State    : Normal
- Airflow Direction: Port-to-power
- Prefer Airflow Direction: Port-to-power
- Fan 3:
- State    : Normal
- Airflow Direction: Port-to-power
- Prefer Airflow Direction: Port-to-power
- Fan 4:
- State    : Normal
- Airflow Direction: Port-to-power
- Prefer Airflow Direction: Port-to-power
-
- Slot 2:
- Fan 1:
- State    : Normal
- Airflow Direction: Port-to-power
- Prefer Airflow Direction: Port-to-power
- Fan 2:
- State    : Normal
- Airflow Direction: Port-to-power
- Prefer Airflow Direction: Port-to-power
- Fan 3:
- State    : Normal
- Airflow Direction: Port-to-power
- Prefer Airflow Direction: Port-to-power
- Fan 4:
- State    : Normal
- Airflow Direction: Port-to-power
- Prefer Airflow Direction: Port-to-power
-"""
-        candidate = Candidate(
-            vendor="H3C",
-            model="S6860-54HF",
-            family="Comware7",
-            command="display fan",
-            category="fan",
-            samples=(
-                SimpleNamespace(
-                    output=cli,
-                    file_path="sample",
-                    device_id="device-1",
-                    command="display fan",
-                ),
-            ),
-        )
-        spec = CategorySpec(
-            name="fan",
-            required_fields=["slot", "fan", "state"],
-            optional_fields=["direction", "speed", "model"],
-            entity_type="fan",
-            primary_keys=["slot", "fan"],
-            validators={},
-        )
-
-        synthesized = synthesize_template(
-            command=candidate.command,
-            samples=candidate.samples,
-            spec=spec,
-        )
-        self.assertIsNotNone(synthesized)
-        template = synthesized.template_text
-        result = validate_template(
-            template,
-            cli,
-            spec.required_fields,
-            primary_keys=spec.primary_keys,
-            expected_min_records=8,
-        )
-
-        self.assertTrue(result.is_valid)
-        self.assertEqual(result.record_count, 8)
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_synthesizer_parses_simple_slot_fan_state_blocks(self):
-        cli = """Slot 1:
- Fan 1:
- State    : Normal
-"""
-        spec = CategorySpec(
-            name="fan",
-            required_fields=["slot", "fan", "state"],
-            optional_fields=["direction", "speed", "model"],
-            entity_type="fan",
-            primary_keys=["slot", "fan"],
-            validators={},
-        )
-        candidate = Candidate(
-            vendor="H3C",
-            model="S5130S-52S-HI",
-            family="Comware7",
-            command="display fan",
-            category="fan",
-            samples=(
-                SimpleNamespace(
-                    output=cli,
-                    file_path="sample",
-                    device_id="device-1",
-                    command="display fan",
-                ),
-            ),
-        )
-
-        synthesized = synthesize_template(
-            command=candidate.command,
-            samples=candidate.samples,
-            spec=spec,
-        )
-        result = validate_template(
-            synthesized.template_text,
-            cli,
-            spec.required_fields,
-            primary_keys=spec.primary_keys,
-            expected_min_records=1,
-        )
-
-        self.assertEqual(synthesized.strategy, "section_block:slot_fan_state")
-        self.assertTrue(result.is_valid)
-        self.assertEqual(result.records[0]["slot"], "1")
-        self.assertEqual(result.records[0]["fan"], "1")
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_synthesizer_parses_index_status_speedlevel_table(self):
-        cli = """Index  Status     Speedlevel
- ----------------------------
- 1      Normal     1
-"""
-        proposal = infer_contract(command="display fan", samples_text=cli, use_manual_profile=True)
-        spec = CategorySpec(
-            name=proposal.category,
-            required_fields=list(proposal.required_fields),
-            optional_fields=list(proposal.optional_fields),
-            entity_type=proposal.entity_type,
-            primary_keys=list(proposal.primary_keys),
-            validators=proposal.validators or {},
-        )
-        sample = SimpleNamespace(
-            output=cli,
-            file_path="sample",
-            device_id="device-1",
-            command="display fan",
-        )
-
-        synthesized = synthesize_template(
-            command="display fan",
-            samples=(sample,),
-            spec=spec,
-        )
-        result = validate_template(
-            synthesized.template_text,
-            cli,
-            spec.required_fields,
-            primary_keys=spec.primary_keys,
-            expected_min_records=1,
-        )
-
-        self.assertEqual(proposal.primary_keys, ("fan",))
-        self.assertEqual(synthesized.strategy, "table:index_status_speedlevel")
-        self.assertTrue(result.is_valid)
-        self.assertEqual(result.records[0]["fan"], "1")
-        self.assertEqual(result.records[0]["state"], "Normal")
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_synthesizer_parses_inventory_name_pid_pairs(self):
-        cli = """NAME: "Chassis",  DESCR: "Nexus9000 C9364C Chassis"
-PID: N9K-C9364C          ,  VID: V01 ,  SN: FDO22350PHA
-
-NAME: "Fan 1",  DESCR: "Nexus9000 C9364C Chassis Fan Module"
-PID: NXA-FAN-160CFM-PI   ,  VID: V01 ,  SN: N/A
-"""
-        spec = CategorySpec(
-            name="inventory",
-            required_fields=["component", "name"],
-            optional_fields=["pid", "serial", "vendor"],
-            entity_type="inventory_component",
-            primary_keys=["component"],
-            validators={},
-        )
-        sample = SimpleNamespace(
-            output=cli,
-            file_path="sample",
-            device_id="device-1",
-            command="show inventory",
-        )
-
-        synthesized = synthesize_template(
-            command="show inventory",
-            samples=(sample,),
-            spec=spec,
-        )
-        result = validate_template(
-            synthesized.template_text,
-            cli,
-            spec.required_fields,
-            primary_keys=spec.primary_keys,
-            expected_min_records=2,
-        )
-
-        self.assertEqual(synthesized.strategy, "paired_lines:name_descr_pid_sn")
-        self.assertTrue(result.is_valid)
-        self.assertEqual(result.record_count, 2)
-        self.assertEqual(result.records[0]["component"], "Chassis")
-        self.assertEqual(result.records[0]["pid"], "N9K-C9364C")
-        self.assertEqual(result.records[1]["serial"], "N/A")
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_synthesizer_parses_inventory_with_blank_serial(self):
-        cli = """NAME: "Fan Tray", DESCR: "Cisco ISR4450 Fan Assembly"
-PID: ACS-4450-FANASSY  , VID:    , SN:
-
-NAME: "module 0", DESCR: "Cisco ISR4451 Built-In NIM controller"
-PID: ISR4451-X/K9      , VID:    , SN:
-"""
-        proposal = infer_contract(
-            command="show inventory", samples_text=cli, use_manual_profile=True
-        )
-        spec = CategorySpec(
-            name=proposal.category,
-            required_fields=list(proposal.required_fields),
-            optional_fields=list(proposal.optional_fields),
-            entity_type=proposal.entity_type,
-            primary_keys=list(proposal.primary_keys),
-            validators=proposal.validators or {},
-        )
-        sample = SimpleNamespace(
-            output=cli,
-            file_path="sample",
-            device_id="device-1",
-            command="show inventory",
-        )
-
-        synthesized = synthesize_template(
-            command="show inventory",
-            samples=(sample,),
-            spec=spec,
-        )
-        result = validate_template(
-            synthesized.template_text,
-            cli,
-            spec.required_fields,
-            primary_keys=spec.primary_keys,
-            expected_min_records=2,
-        )
-
-        self.assertEqual(proposal.primary_keys, ("component",))
-        self.assertTrue(result.is_valid)
-        self.assertEqual(result.record_count, 2)
-        self.assertEqual(result.records[0]["serial"], "")
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_synthesizer_parses_ios_interface_status_with_blank_name(self):
-        cli = """Port      Name               Status       Vlan       Duplex  Speed Type
-Gi1/0/1                      connected    704        a-full a-1000 10/100/1000BaseTX
-Gi1/0/22  To-BaoLeiJi1       connected    704        a-full  a-100 10/100/1000BaseTX
-Gi1/0/23                     notconnect   704          auto   auto 10/100/1000BaseTX
-"""
-        spec = CategorySpec(
-            name="interface_l2",
-            required_fields=["interface", "status"],
-            optional_fields=["vlan", "duplex", "speed", "description", "type"],
-            entity_type="interface_l2",
-            primary_keys=["interface"],
-            validators={"interface": {"type": "interface_name"}},
-        )
-        sample = SimpleNamespace(
-            output=cli,
-            file_path="sample",
-            device_id="device-1",
-            command="show interface status",
-        )
-
-        synthesized = synthesize_template(
-            command="show interface status",
-            samples=(sample,),
-            spec=spec,
-        )
-        result = validate_template(
-            synthesized.template_text,
-            cli,
-            spec.required_fields,
-            primary_keys=spec.primary_keys,
-            expected_min_records=expected_min_records(cli, spec),
-        )
-
-        self.assertEqual(synthesized.strategy, "fixed_width_table:interface_status")
-        self.assertTrue(result.is_valid)
-        self.assertEqual(result.record_count, 3)
-        self.assertEqual(result.records[0]["interface"], "Gi1/0/1")
-        self.assertEqual(result.records[0]["description"], "")
-        self.assertEqual(result.records[1]["description"], "To-BaoLeiJi1")
-        self.assertEqual(result.records[2]["status"], "notconnect")
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_synthesizer_parses_nxos_interface_status_sections(self):
-        cli = """--------------------------------------------------------------------------------
-Port          Name               Status    Vlan      Duplex  Speed   Type
---------------------------------------------------------------------------------
-mgmt0         --                 connected routed    full    1000    --
-
---------------------------------------------------------------------------------
-Port          Name               Status    Vlan      Duplex  Speed   Type
---------------------------------------------------------------------------------
-Eth1/3        Connect_to_XA-FOTI connected routed    full    40G     QSFP-40G-SR-BD
-Eth1/13       --                 xcvrAbsen routed    auto    auto    --
-"""
-        spec = CategorySpec(
-            name="interface_l2",
-            required_fields=["interface", "status"],
-            optional_fields=["vlan", "duplex", "speed", "description", "type"],
-            entity_type="interface_l2",
-            primary_keys=["interface"],
-            validators={"interface": {"type": "interface_name"}},
-        )
-        sample = SimpleNamespace(
-            output=cli,
-            file_path="sample",
-            device_id="device-1",
-            command="show interface status",
-        )
-
-        synthesized = synthesize_template(
-            command="show interface status",
-            samples=(sample,),
-            spec=spec,
-        )
-        result = validate_template(
-            synthesized.template_text,
-            cli,
-            spec.required_fields,
-            primary_keys=spec.primary_keys,
-            expected_min_records=expected_min_records(cli, spec),
-        )
-
-        self.assertTrue(result.is_valid)
-        self.assertEqual(result.record_count, 3)
-        self.assertEqual(result.records[0]["interface"], "mgmt0")
-        self.assertEqual(result.records[1]["description"], "Connect_to_XA-FOTI")
-        self.assertEqual(result.records[2]["status"], "xcvrAbsen")
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_synthesizer_parses_nxos_environment_power(self):
-        cli = """Power Supply:
-Voltage: 12 Volts
-Power                      Actual             Actual        Total
-Supply    Model            Output             Input      Capacity       Status
-                           (Watts )           (Watts )     (Watts )
--------  ----------  ---------------  ------  ----------  --------------------
-1        NXA-PAC-1200W-PI      126 W              158 W      1200 W      Ok
-2        NXA-PAC-1200W-PI      138 W              158 W      1200 W      Ok
-"""
-        proposal = infer_contract(
-            command="show environment power", samples_text=cli, use_manual_profile=True
-        )
-        spec = CategorySpec(
-            name=proposal.category,
-            required_fields=list(proposal.required_fields),
-            optional_fields=list(proposal.optional_fields),
-            entity_type=proposal.entity_type,
-            primary_keys=list(proposal.primary_keys),
-            validators=proposal.validators or {},
-        )
-        sample = SimpleNamespace(
-            output=cli,
-            file_path="sample",
-            device_id="device-1",
-            command="show environment power",
-        )
-
-        synthesized = synthesize_template(
-            command="show environment power",
-            samples=(sample,),
-            spec=spec,
-        )
-        result = validate_template(
-            synthesized.template_text,
-            cli,
-            spec.required_fields,
-            primary_keys=spec.primary_keys,
-            expected_min_records=expected_min_records(cli, spec),
-        )
-
-        self.assertEqual(proposal.primary_keys, ("power_supply",))
-        self.assertEqual(synthesized.strategy, "fixed_width_table:environment_power")
-        self.assertTrue(result.is_valid)
-        self.assertEqual(result.record_count, 2)
-        self.assertEqual(result.records[0]["power_supply"], "1")
-        self.assertEqual(result.records[0]["output_watts"], "126")
-        self.assertEqual(result.records[1]["state"], "Ok")
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_synthesizer_parses_nxos_environment_fan(self):
-        cli = """Fan:
----------------------------------------------------------------------------
-Fan             Model                Hw     Direction       Status
----------------------------------------------------------------------------
-Fan1(sys_fan1)  NXA-FAN-160CFM-PI    --     front-to-back   Ok
-Fan_in_PS1      --                   --     front-to-back   Ok
-Fan Zone Speed: Zone 1: 0x66
-Fan Air Filter : NotSupported
-"""
-        proposal = infer_contract(
-            command="show environment fan", samples_text=cli, use_manual_profile=True
-        )
-        spec = CategorySpec(
-            name=proposal.category,
-            required_fields=list(proposal.required_fields),
-            optional_fields=list(proposal.optional_fields),
-            entity_type=proposal.entity_type,
-            primary_keys=list(proposal.primary_keys),
-            validators=proposal.validators or {},
-        )
-        sample = SimpleNamespace(
-            output=cli,
-            file_path="sample",
-            device_id="device-1",
-            command="show environment fan",
-        )
-
-        synthesized = synthesize_template(
-            command="show environment fan",
-            samples=(sample,),
-            spec=spec,
-        )
-        result = validate_template(
-            synthesized.template_text,
-            cli,
-            spec.required_fields,
-            primary_keys=spec.primary_keys,
-            expected_min_records=expected_min_records(cli, spec),
-        )
-
-        self.assertEqual(proposal.primary_keys, ("fan",))
-        self.assertEqual(synthesized.strategy, "fixed_width_table:environment_fan")
-        self.assertTrue(result.is_valid)
-        self.assertEqual(result.record_count, 2)
-        self.assertEqual(result.records[0]["fan"], "Fan1(sys_fan1)")
-        self.assertEqual(result.records[0]["state"], "Ok")
-        self.assertEqual(result.records[1]["model"], "--")
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_synthesizer_parses_nxos_environment_temperature(self):
-        cli = """Temperature:
---------------------------------------------------------------------
-Module   Sensor        MajorThresh   MinorThres   CurTemp     Status
-                       (Celsius)     (Celsius)    (Celsius)
---------------------------------------------------------------------
-1        FRONT           70              42          24         Ok
-1        CPU             90              80          44         Ok
-"""
-        proposal = infer_contract(
-            command="show environment temperature", samples_text=cli, use_manual_profile=True
-        )
-        spec = CategorySpec(
-            name=proposal.category,
-            required_fields=list(proposal.required_fields),
-            optional_fields=list(proposal.optional_fields),
-            entity_type=proposal.entity_type,
-            primary_keys=list(proposal.primary_keys),
-            validators=proposal.validators or {},
-        )
-        sample = SimpleNamespace(
-            output=cli,
-            file_path="sample",
-            device_id="device-1",
-            command="show environment temperature",
-        )
-
-        synthesized = synthesize_template(
-            command="show environment temperature",
-            samples=(sample,),
-            spec=spec,
-        )
-        result = validate_template(
-            synthesized.template_text,
-            cli,
-            spec.required_fields,
-            primary_keys=spec.primary_keys,
-            expected_min_records=expected_min_records(cli, spec),
-        )
-
-        self.assertEqual(synthesized.strategy, "fixed_width_table:environment_temperature")
-        self.assertTrue(result.is_valid)
-        self.assertEqual(result.record_count, 2)
-        self.assertEqual(result.records[0]["component"], "1")
-        self.assertEqual(result.records[0]["location"], "FRONT")
-        self.assertEqual(result.records[1]["reading"], "44")
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_synthesizer_parses_nxos_system_resources_as_singleton(self):
-        cli = """Load average:   1 minute: 0.69   5 minutes: 0.73   15 minutes: 0.62
-Processes   :   678 total, 1 running
-CPU states  :   1.75% user,   3.62% kernel,   94.61% idle
-        CPU0 states  :   0.00% user,   2.04% kernel,   97.95% idle
-Memory usage:   32828228K total,   6512772K used,   26315456K free
-Current memory status: OK
-"""
-        proposal = infer_contract(
-            command="show system resources", samples_text=cli, use_manual_profile=True
-        )
-        spec = CategorySpec(
-            name=proposal.category,
-            required_fields=list(proposal.required_fields),
-            optional_fields=list(proposal.optional_fields),
-            entity_type=proposal.entity_type,
-            primary_keys=list(proposal.primary_keys),
-            validators=proposal.validators or {},
-        )
-        sample = SimpleNamespace(
-            output=cli,
-            file_path="sample",
-            device_id="device-1",
-            command="show system resources",
-        )
-
-        synthesized = synthesize_template(
-            command="show system resources",
-            samples=(sample,),
-            spec=spec,
-        )
-        result = validate_template(
-            synthesized.template_text,
-            cli,
-            spec.required_fields,
-            validators=spec.validators,
-            primary_keys=spec.primary_keys,
-            expected_min_records=expected_min_records(cli, spec),
-        )
-
-        self.assertEqual(proposal.primary_keys, ())
-        self.assertEqual(synthesized.strategy, "key_value_block:system_resources")
-        self.assertTrue(result.is_valid)
-        self.assertEqual(result.record_count, 1)
-        self.assertEqual(result.records[0]["cpu_idle"], "94.61")
-        self.assertEqual(result.records[0]["total"], "32828228")
-        self.assertEqual(result.records[0]["memory_status"], "OK")
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_synthesizer_parses_nxos_vpc_status_rows(self):
-        cli = """vPC domain id                     : 300
-Peer status                       : peer adjacency formed ok
-vPC role                          : primary
-
-vPC Peer-link status
----------------------------------------------------------------------
-id    Port   Status Active vlans
---    ----   ------ -------------------------------------------------
-1     Po300  up     1,7,9-11
-
-vPC status
-----------------------------------------------------------------------------
-Id    Port          Status Consistency Reason                Active vlans
---    ------------  ------ ----------- ------                ---------------
-400   Po400         up     success     success               1,7,9-11
-401   Po401         down   failed      ConsistencyCheck      851
-"""
-        proposal = infer_contract(command="show vpc", samples_text=cli, use_manual_profile=True)
-        spec = CategorySpec(
-            name=proposal.category,
-            required_fields=list(proposal.required_fields),
-            optional_fields=list(proposal.optional_fields),
-            entity_type=proposal.entity_type,
-            primary_keys=list(proposal.primary_keys),
-            validators=proposal.validators or {},
-            allow_empty=proposal.allow_empty,
-            empty_patterns=list(proposal.empty_patterns),
-        )
-        sample = SimpleNamespace(
-            output=cli,
-            file_path="sample",
-            device_id="device-1",
-            command="show vpc",
-        )
-
-        synthesized = synthesize_template(
-            command="show vpc",
-            samples=(sample,),
-            spec=spec,
-        )
-        result = validate_template(
-            synthesized.template_text,
-            cli,
-            spec.required_fields,
-            primary_keys=spec.primary_keys,
-            expected_min_records=expected_min_records(cli, spec),
-        )
-
-        self.assertEqual(proposal.primary_keys, ("member", "peer"))
-        self.assertEqual(synthesized.strategy, "fixed_width_table:vpc_status")
-        self.assertTrue(result.is_valid)
-        self.assertEqual(result.record_count, 3)
-        self.assertEqual(result.records[0]["member"], "1")
-        self.assertEqual(result.records[0]["peer"], "Po300")
-        self.assertEqual(result.records[1]["consistency"], "success")
-        self.assertEqual(result.records[2]["state"], "down")
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_synthesizer_parses_h3c_manuinfo_sections(self):
-        cli = """Slot 1 CPU 0:
-DEVICE_NAME          : S5130S-54S-HI-G
-DEVICE_SERIAL_NUMBER : 219801A3R36242V0004N
-MAC_ADDRESS          : 6CE2-D38C-EC1D
-MANUFACTURING_DATE   : 2024-05-06
-VENDOR_NAME          : H3C
-PRODUCT ID           : LS-5130S-54S-HI-G
-Power 1:
-Failed to display the manufacture information of the specified power.
-"""
-        proposal = infer_contract(
-            command="display device manuinfo", samples_text=cli, use_manual_profile=True
-        )
-        spec = CategorySpec(
-            name=proposal.category,
-            required_fields=list(proposal.required_fields),
-            optional_fields=list(proposal.optional_fields),
-            entity_type=proposal.entity_type,
-            primary_keys=list(proposal.primary_keys),
-            validators=proposal.validators or {},
-        )
-        sample = SimpleNamespace(output=cli, file_path="sample", device_id="device-1")
-
-        synthesized = synthesize_template(
-            command="display device manuinfo",
-            samples=(sample,),
-            spec=spec,
-        )
-        result = validate_template(
-            synthesized.template_text,
-            cli,
-            spec.required_fields,
-            primary_keys=spec.primary_keys,
-            expected_min_records=expected_min_records(cli, spec),
-        )
-
-        self.assertEqual(synthesized.strategy, "section_block:h3c_manuinfo")
-        self.assertTrue(result.is_valid)
-        self.assertEqual(result.record_count, 1)
-        self.assertEqual(result.records[0]["component"], "Slot 1 CPU 0")
-        self.assertEqual(result.records[0]["serial"], "219801A3R36242V0004N")
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_synthesizer_parses_h3c_memory_slots(self):
-        cli = """Memory statistics are measured in KB:
-Slot 0:
-             Total      Used      Free    Shared   Buffers    Cached   FreeRatio
-Mem:       2026244    790556   1235688         0      1476    241232       61.1%
--/+ Buffers/Cache:    547848   1478396
-Swap:           0         0         0
-
-Slot 1:
-             Total      Used      Free    Shared   Buffers    Cached   FreeRatio
-Mem:       2026244    753580   1272664         0      1476    239212       62.9%
-"""
-        proposal = infer_contract(
-            command="display memory", samples_text=cli, use_manual_profile=True
-        )
-        spec = CategorySpec(
-            name=proposal.category,
-            required_fields=list(proposal.required_fields),
-            optional_fields=list(proposal.optional_fields),
-            entity_type=proposal.entity_type,
-            primary_keys=list(proposal.primary_keys),
-            validators=proposal.validators or {},
-        )
-        sample = SimpleNamespace(output=cli, file_path="sample", device_id="device-1")
-
-        synthesized = synthesize_template(command="display memory", samples=(sample,), spec=spec)
-        result = validate_template(
-            synthesized.template_text,
-            cli,
-            spec.required_fields,
-            validators=spec.validators,
-            primary_keys=spec.primary_keys,
-            expected_min_records=expected_min_records(cli, spec),
-        )
-
-        self.assertEqual(synthesized.strategy, "section_table:h3c_memory")
-        self.assertTrue(result.is_valid)
-        self.assertEqual(result.record_count, 2)
-        self.assertEqual(result.records[0]["slot"], "0")
-        self.assertEqual(result.records[1]["free_ratio"], "62.9")
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_synthesizer_parses_h3c_power_variants(self):
-        slot_cli = """Slot 1:
- Input Power: --
- PowerID  State  Mode   Current(A)  Voltage(V)  Power(W) FanDirection
- 1        Normal AC     --          --          --       --
- 2        Normal AC     --          --          --       --
-"""
-        index_cli = """Index          Status
-  ----------------------
-  PWR1          normal
-  PWR2          normal
-"""
-        for cli, expected_strategy, expected_count in (
-            (slot_cli, "section_table:h3c_power_slot", 2),
-            (index_cli, "simple_table:h3c_power_index", 2),
-        ):
-            proposal = infer_contract(
-                command="display power", samples_text=cli, use_manual_profile=True
-            )
-            spec = CategorySpec(
-                name=proposal.category,
-                required_fields=list(proposal.required_fields),
-                optional_fields=list(proposal.optional_fields),
-                entity_type=proposal.entity_type,
-                primary_keys=list(proposal.primary_keys),
-                validators=proposal.validators or {},
-            )
-            sample = SimpleNamespace(output=cli, file_path="sample", device_id="device-1")
-            synthesized = synthesize_template(command="display power", samples=(sample,), spec=spec)
-            result = validate_template(
-                synthesized.template_text,
-                cli,
-                spec.required_fields,
-                primary_keys=spec.primary_keys,
-                expected_min_records=expected_min_records(cli, spec),
+    class FailedSession:
+        def next(self, feedback=None):
+            feedbacks.append(feedback)
+            return TextFSMToolTurn(
+                candidate_text=template,
+                submission_mode="native_tool_call",
+                model_name="deepseek-v4-pro",
+                token_usage={},
+                latency_ms=1,
             )
 
-            self.assertEqual(synthesized.strategy, expected_strategy)
-            self.assertTrue(result.is_valid)
-            self.assertEqual(result.record_count, expected_count)
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_synthesizer_parses_h3c_environment_variants(self):
-        slot_cli = """System temperature information (degree centigrade):
- ----------------------------------------------------------------------
- Slot  Sensor    Temperature  Lower  Warning  Alarm  Shutdown
- 1     hotspot 1 37           0      65       70     NA
- 1     hotspot 2 58           0      88       102    107
-"""
-        subslot_cli = """Slot Subslot  Sensor  ID Temperature LowerLimit WarningLimit AlarmLimit
------------------------------------------------------------------------
-0    0        hotspot 1  33          0          57           65
-2    0        inflow  1  27          -5         50           60
-"""
-        for cli, expected_strategy, expected_count in (
-            (slot_cli, "fixed_width_table:h3c_environment_slot", 2),
-            (subslot_cli, "fixed_width_table:h3c_environment_subslot", 2),
-        ):
-            proposal = infer_contract(
-                command="display environment", samples_text=cli, use_manual_profile=True
-            )
-            spec = CategorySpec(
-                name=proposal.category,
-                required_fields=list(proposal.required_fields),
-                optional_fields=list(proposal.optional_fields),
-                entity_type=proposal.entity_type,
-                primary_keys=list(proposal.primary_keys),
-                validators=proposal.validators or {},
-            )
-            sample = SimpleNamespace(output=cli, file_path="sample", device_id="device-1")
-            synthesized = synthesize_template(
-                command="display environment", samples=(sample,), spec=spec
-            )
-            result = validate_template(
-                synthesized.template_text,
-                cli,
-                spec.required_fields,
-                primary_keys=spec.primary_keys,
-                expected_min_records=expected_min_records(cli, spec),
-            )
-
-            self.assertEqual(synthesized.strategy, expected_strategy)
-            self.assertTrue(result.is_valid)
-            self.assertEqual(result.record_count, expected_count)
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_synthesizer_parses_h3c_irf_and_accepts_empty_mlag(self):
-        irf_cli = """MemberID    Role    Priority  CPU-Mac         Description
- *+1        Master  1         00e0-fc0f-8c02  ---
---------------------------------------------------
-"""
-        proposal = infer_contract(
-            command="display irf", samples_text=irf_cli, use_manual_profile=True
-        )
-        spec = CategorySpec(
-            name=proposal.category,
-            required_fields=list(proposal.required_fields),
-            optional_fields=list(proposal.optional_fields),
-            entity_type=proposal.entity_type,
-            primary_keys=list(proposal.primary_keys),
-            validators=proposal.validators or {},
-            allow_empty=proposal.allow_empty,
-            empty_patterns=list(proposal.empty_patterns),
-        )
-        sample = SimpleNamespace(output=irf_cli, file_path="sample", device_id="device-1")
-        synthesized = synthesize_template(command="display irf", samples=(sample,), spec=spec)
-        result = validate_template(
-            synthesized.template_text,
-            irf_cli,
-            spec.required_fields,
-            primary_keys=spec.primary_keys,
-            expected_min_records=expected_min_records(irf_cli, spec),
-        )
-        self.assertEqual(synthesized.strategy, "fixed_width_table:h3c_irf")
-        self.assertTrue(result.is_valid)
-        self.assertEqual(result.records[0]["member"], "1")
-
-        empty_cli = "M-LAG is not configured.\n"
-        proposal = infer_contract(
-            command="display m-lag system",
-            samples_text=empty_cli,
-            use_manual_profile=True,
-        )
-        spec = CategorySpec(
-            name=proposal.category,
-            required_fields=list(proposal.required_fields),
-            optional_fields=list(proposal.optional_fields),
-            entity_type=proposal.entity_type,
-            primary_keys=list(proposal.primary_keys),
-            validators=proposal.validators or {},
-            allow_empty=proposal.allow_empty,
-            empty_patterns=list(proposal.empty_patterns),
-        )
-        sample = SimpleNamespace(output=empty_cli, file_path="sample", device_id="device-1")
-        synthesized = synthesize_template(
-            command="display m-lag system", samples=(sample,), spec=spec
-        )
-        result = validate_template(
-            synthesized.template_text,
-            empty_cli,
-            spec.required_fields,
-            allow_empty=spec.allow_empty,
-            empty_patterns=list(spec.empty_patterns),
-            primary_keys=spec.primary_keys,
-            expected_min_records=expected_min_records(empty_cli, spec),
-        )
-        self.assertEqual(synthesized.strategy, "empty_allowed:not_configured")
-        self.assertTrue(result.is_valid)
-        self.assertTrue(result.empty_accepted)
-
-    def test_strip_llm_fence(self):
-        raw = "```textfsm\nValue X (\\d+)\n\nStart\n  ^${X}\n```"
-        cleaned = strip_llm_template(raw)
-        self.assertIn("Value X", cleaned)
-        self.assertNotIn("```", cleaned)
-
-    def test_template_field_names_are_canonicalized_to_contract_casing(self):
-        template = """Value Filldown,Required INTERFACE (\\S+)
-Value Required RX_LEVEL (-?\\d+(?:\\.\\d+)?)
-
-Start
-  ^${INTERFACE}\\s+${RX_LEVEL} -> Record
-"""
-
-        normalized = canonicalize_template_fields(
-            template,
-            ["interface", "rx_level"],
-        )
-
-        self.assertIn("Value Filldown interface (\\S+)", normalized)
-        self.assertIn("Value rx_level (-?\\d+(?:\\.\\d+)?)", normalized)
-        self.assertNotIn("Required", normalized)
-        self.assertIn("^${interface}\\s+${rx_level} -> Record", normalized)
-
-    def test_evidence_repeated_block_provider_supports_composite_primary_keys(self):
-        cli = """Slot 1 CPU 0:
-DEVICE_NAME : S5130-A
-SERIAL : SERIAL-A
-Slot 2 CPU 0:
-DEVICE_NAME : S5130-B
-SERIAL : SERIAL-B
-"""
-        sample_id = f"sample-{hashlib.sha256(cli.encode()).hexdigest()[:12]}"
-        spec = CategorySpec(
-            name="device_manufacturing_info",
-            required_fields=["slot", "cpu"],
-            optional_fields=["device_name", "serial"],
-            entity_type="device_manufacturing_info",
-            primary_keys=["slot", "cpu"],
-            validators={
-                "slot": {"type": "number"},
-                "cpu": {"type": "number"},
-            },
-        )
-        bindings = {
-            "slot": [
-                {
-                    "sample_id": sample_id,
-                    "line": 1,
-                    "source_label": "Slot 1 CPU 0:",
-                    "source_value": "1",
-                },
-                {
-                    "sample_id": sample_id,
-                    "line": 4,
-                    "source_label": "Slot 2 CPU 0:",
-                    "source_value": "2",
-                },
-            ],
-            "cpu": [
-                {
-                    "sample_id": sample_id,
-                    "line": 1,
-                    "source_label": "Slot 1 CPU 0:",
-                    "source_value": "0",
-                },
-                {
-                    "sample_id": sample_id,
-                    "line": 4,
-                    "source_label": "Slot 2 CPU 0:",
-                    "source_value": "0",
-                },
-            ],
-            "device_name": [
-                {
-                    "sample_id": sample_id,
-                    "line": 2,
-                    "source_label": "DEVICE_NAME : S5130-A",
-                    "source_value": "S5130-A",
-                },
-                {
-                    "sample_id": sample_id,
-                    "line": 5,
-                    "source_label": "DEVICE_NAME : S5130-B",
-                    "source_value": "S5130-B",
-                },
-            ],
-            "serial": [
-                {
-                    "sample_id": sample_id,
-                    "line": 3,
-                    "source_label": "SERIAL : SERIAL-A",
-                    "source_value": "SERIAL-A",
-                },
-                {
-                    "sample_id": sample_id,
-                    "line": 6,
-                    "source_label": "SERIAL : SERIAL-B",
-                    "source_value": "SERIAL-B",
-                },
-            ],
-        }
-        candidate = EvidenceRepeatedBlockProvider().propose(
-            ProviderContext(
-                command="display device manuinfo",
-                samples=(SimpleNamespace(output=cli),),
-                spec=spec,
-                structure_profile={"dominant_layout": "repeated_block"},
-                field_bindings=bindings,
-                evidence_samples={sample_id: cli},
-            )
-        )
-
-        self.assertIsNotNone(candidate)
-        self.assertIn("Continue.Record", candidate.template_text)
-        result = validate_template(
-            candidate.template_text,
-            cli,
-            spec.required_fields,
-            spec.validators,
-            primary_keys=spec.primary_keys,
-            expected_min_records=2,
-            expected_record_count=2,
-            field_bindings=bindings,
-            sample_id=sample_id,
-            evidence_line_map={line: line for line in range(1, 7)},
-        )
-        self.assertTrue(result.is_valid, result.errors)
-        self.assertEqual(
-            [(row["slot"], row["cpu"]) for row in result.records],
-            [("1", "0"), ("2", "0")],
-        )
-
-    def test_repeated_block_provider_does_not_compile_derived_sample_literals(self):
-        cli = """Ten-GigabitEthernet1/0/49
-Current 30 3.32 2.82 -5.34 -6.32
-Ten-GigabitEthernet1/0/50
-The transceiver is absent.
-"""
-        sample_id = f"sample-{hashlib.sha256(cli.encode()).hexdigest()[:12]}"
-        spec = CategorySpec(
-            name="interface_optical",
-            required_fields=["interface"],
-            optional_fields=["rx_power_dbm", "transceiver_present"],
-            entity_type="interface_optical",
-            primary_keys=["interface"],
-            validators={
-                "interface": {"type": "interface_name"},
-                "rx_power_dbm": {"type": "number"},
-                "transceiver_present": {"type": "text"},
-            },
-        )
-        bindings = {
-            "interface": [
-                {
-                    "sample_id": sample_id,
-                    "line": 1,
-                    "source_label": "Ten-GigabitEthernet1/0/49",
-                    "source_value": "Ten-GigabitEthernet1/0/49",
-                    "capture_kind": "record_anchor",
-                },
-                {
-                    "sample_id": sample_id,
-                    "line": 3,
-                    "source_label": "Ten-GigabitEthernet1/0/50",
-                    "source_value": "Ten-GigabitEthernet1/0/50",
-                    "capture_kind": "record_anchor",
-                },
-            ],
-            "rx_power_dbm": [{
-                "sample_id": sample_id,
-                "line": 2,
-                "source_label": "Current 30 3.32 2.82 -5.34 -6.32",
-                "source_value": "-5.34",
-                "capture_kind": "column",
-            }],
-            "transceiver_present": [{
-                "sample_id": sample_id,
-                "line": 4,
-                "source_label": "The transceiver is absent.",
-                "source_value": "absent",
-                "capture_kind": "derived",
-            }],
-        }
-
-        candidate = EvidenceRepeatedBlockProvider().propose(
-            ProviderContext(
-                command="inspect arbitrary optical output",
-                samples=(SimpleNamespace(output=cli),),
-                spec=spec,
-                structure_profile={"dominant_layout": "repeated_block"},
-                field_bindings=bindings,
-                evidence_samples={sample_id: cli},
-            )
-        )
-
-        self.assertIsNotNone(candidate)
-        self.assertNotIn("Value transceiver_present", candidate.template_text)
-        self.assertNotIn("transceiver\\s+is\\s+absent", candidate.template_text)
-        result = validate_template(
-            candidate.template_text,
-            cli,
-            spec.required_fields,
-            spec.validators,
-            primary_keys=spec.primary_keys,
-            expected_min_records=2,
-            expected_record_count=2,
-            field_bindings={
-                "interface": bindings["interface"],
-                "rx_power_dbm": bindings["rx_power_dbm"],
-            },
-            sample_id=sample_id,
-            evidence_line_map={line: line for line in range(1, 5)},
-        )
-        self.assertTrue(result.is_valid, result.errors)
-        self.assertEqual(
-            [row["interface"] for row in result.records],
-            ["Ten-GigabitEthernet1/0/49", "Ten-GigabitEthernet1/0/50"],
-        )
-
-    def test_evidence_hierarchy_provider_uses_parent_filldown_for_child_rows(self):
-        cli = """Slot 1:
-Fan 1 State: Normal
-Fan 2 State: Normal
-"""
-        sample_id = f"sample-{hashlib.sha256(cli.encode()).hexdigest()[:12]}"
-        spec = CategorySpec(
-            name="cooling_status",
-            required_fields=["slot_id", "fan_id", "state"],
-            optional_fields=[],
-            entity_type="fan",
-            primary_keys=["slot_id", "fan_id"],
-            validators={
-                "slot_id": {"type": "regex", "pattern": r"^Slot \d+:$"},
-                "fan_id": {"type": "regex", "pattern": r"^Fan \d+$"},
-                "state": {"type": "enum", "values": ["Normal"]},
-            },
-        )
-        bindings = {
-            "slot_id": [{
-                "sample_id": sample_id,
-                "line": 1,
-                "source_label": "Slot 1:",
-                "source_value": "Slot 1:",
-                "capture_kind": "record_anchor",
-            }],
-            "fan_id": [
-                {
-                    "sample_id": sample_id,
-                    "line": 2,
-                    "source_label": "Fan 1 State: Normal",
-                    "source_value": "Fan 1",
-                    "capture_kind": "key_value",
-                },
-                {
-                    "sample_id": sample_id,
-                    "line": 3,
-                    "source_label": "Fan 2 State: Normal",
-                    "source_value": "Fan 2",
-                    "capture_kind": "key_value",
-                },
-            ],
-            "state": [
-                {
-                    "sample_id": sample_id,
-                    "line": 2,
-                    "source_label": "Fan 1 State: Normal",
-                    "source_value": "Normal",
-                    "capture_kind": "key_value",
-                },
-                {
-                    "sample_id": sample_id,
-                    "line": 3,
-                    "source_label": "Fan 2 State: Normal",
-                    "source_value": "Normal",
-                    "capture_kind": "key_value",
-                },
-            ],
-        }
-        candidate = EvidenceHierarchicalRowProvider().propose(
-            ProviderContext(
-                command="inspect arbitrary cooling output",
-                samples=(SimpleNamespace(output=cli),),
-                spec=spec,
-                structure_profile={"dominant_layout": "repeated_block"},
-                field_bindings=bindings,
-                evidence_samples={sample_id: cli},
-            )
-        )
-
-        self.assertIsNotNone(candidate)
-        self.assertIn("Value Filldown slot_id", candidate.template_text)
-        self.assertIn("-> Record", candidate.template_text)
-        self.assertRegex(candidate.template_text, r"(?m)^EOF$")
-        result = validate_template(
-            candidate.template_text,
-            cli,
-            spec.required_fields,
-            spec.validators,
-            primary_keys=spec.primary_keys,
-            expected_min_records=2,
-            expected_record_count=2,
-            field_bindings=bindings,
-            sample_id=sample_id,
-            evidence_line_map={1: 1, 2: 2, 3: 3},
-        )
-        self.assertTrue(result.is_valid, result.errors)
-        self.assertEqual(
-            [(row["slot_id"], row["fan_id"], row["state"]) for row in result.records],
-            [
-                ("Slot 1:", "Fan 1", "Normal"),
-                ("Slot 1:", "Fan 2", "Normal"),
-            ],
-        )
-
-    def test_evidence_singleton_provider_compiles_one_bounded_snapshot_record(self):
-        cli = """H3C Comware Platform Software
-Software Version: 7.1.070
-Hardware Model: S5130S-54S-HI-G
-Feature Images:
-  flash:/feature-a.bin
-  flash:/feature-b.bin
-Patch Version: None
-Slot 1:
-  Board Type: S5130S-54S-HI-G
-"""
-        sample_id = f"sample-{hashlib.sha256(cli.encode()).hexdigest()[:12]}"
-        spec = CategorySpec(
-            name="device_version",
-            required_fields=["software_version", "hardware_model"],
-            optional_fields=["feature_images", "patch_version", "slot_id", "unsafe_note"],
-            entity_type="device_version",
-            primary_keys=[],
-            validators={
-                "software_version": {"type": "text"},
-                "hardware_model": {"type": "text"},
-                "feature_images": {"type": "regex", "pattern": r"^flash:/\S+\.bin$"},
-                "patch_version": {"type": "regex", "pattern": "^None$"},
-                "slot_id": {"type": "regex", "pattern": r"^Slot\s+\d+:$"},
-                "unsafe_note": {"type": "text"},
-            },
-        )
-        bindings = {
-            "software_version": [{
-                "sample_id": sample_id,
-                "line": 2,
-                "source_label": "Software Version:",
-                "source_value": "7.1.070",
-                "capture_kind": "key_value",
-            }],
-            "hardware_model": [{
-                "sample_id": sample_id,
-                "line": 3,
-                "source_label": "Hardware Model:",
-                "source_value": "S5130S-54S-HI-G",
-                "capture_kind": "key_value",
-            }],
-            "feature_images": [
-                {
-                    "sample_id": sample_id,
-                    "line": 5,
-                    "source_label": "flash:/feature-a.bin",
-                    "source_value": "flash:/feature-a.bin",
-                    "capture_kind": "literal",
-                },
-                {
-                    "sample_id": sample_id,
-                    "line": 6,
-                    "source_label": "flash:/feature-b.bin",
-                    "source_value": "flash:/feature-b.bin",
-                    "capture_kind": "literal",
-                },
-            ],
-            "patch_version": [{
-                "sample_id": sample_id,
-                "line": 7,
-                "source_label": "Patch Version:",
-                "source_value": "None",
-                "capture_kind": "key_value",
-            }],
-            "slot_id": [{
-                "sample_id": sample_id,
-                "line": 8,
-                "source_label": "Slot 1:",
-                "source_value": "Slot 1:",
-                "capture_kind": "record_anchor",
-            }],
-            "unsafe_note": [{
-                "sample_id": sample_id,
-                "line": 1,
-                "source_label": "H3C Comware Platform Software",
-                "source_value": "H3C Comware Platform Software",
-                "capture_kind": "literal",
-            }],
-        }
-        candidate = EvidenceSingletonProvider().propose(
-            ProviderContext(
-                command="inspect arbitrary version output",
-                samples=(SimpleNamespace(output=cli),),
-                spec=spec,
-                structure_profile={"dominant_layout": "repeated_block"},
-                field_bindings=bindings,
-                evidence_samples={sample_id: cli},
-                entity_scope="singleton",
-            )
-        )
-
-        self.assertIsNotNone(candidate)
-        self.assertEqual(candidate.provider, "generic_evidence_singleton")
-        self.assertIn("Record EOF", candidate.template_text)
-        self.assertIn("Value List feature_images", candidate.template_text)
-        self.assertIn("Value patch_version", candidate.template_text)
-        self.assertIn("Value slot_id", candidate.template_text)
-        self.assertNotIn("Value unsafe_note", candidate.template_text)
-        result = validate_template(
-            candidate.template_text,
-            cli,
-            spec.required_fields,
-            spec.validators,
-            expected_min_records=1,
-            expected_record_count=1,
-            field_bindings={
-                field: items
-                for field, items in bindings.items()
-                if field != "unsafe_note"
-            },
-            sample_id=sample_id,
-            evidence_line_map={line: line for line in range(1, 10)},
-        )
-        self.assertTrue(result.is_valid, result.errors)
-        self.assertEqual(len(result.records), 1)
-        self.assertEqual(result.records[0]["software_version"], "7.1.070")
-        self.assertEqual(result.records[0]["hardware_model"], "S5130S-54S-HI-G")
-        self.assertEqual(
-            result.records[0]["feature_images"],
-            ["flash:/feature-a.bin", "flash:/feature-b.bin"],
-        )
-        self.assertEqual(result.records[0]["patch_version"], "None")
-        self.assertEqual(result.records[0]["slot_id"], "Slot 1:")
-
-    def test_evidence_singleton_provider_requires_governed_singleton_scope(self):
-        spec = CategorySpec(
-            name="status",
-            required_fields=["status"],
-            optional_fields=[],
-            entity_type="status",
-            primary_keys=[],
-            validators={"status": {"type": "text"}},
-        )
-        context = ProviderContext(
-            command="inspect arbitrary status",
-            samples=(SimpleNamespace(output="Status: up\n"),),
-            spec=spec,
-            structure_profile={"dominant_layout": "key_value"},
-            field_bindings={"status": [{
-                "sample_id": "sample-1",
-                "line": 1,
-                "source_label": "Status:",
-                "source_value": "up",
-                "capture_kind": "key_value",
-            }]},
-            evidence_samples={"sample-1": "Status: up\n"},
-        )
-
-        self.assertIsNone(EvidenceSingletonProvider().propose(context))
-
-    def test_evidence_entity_count_ignores_nested_component_headers(self):
-        cli = """Slot 1 CPU 0:
-DEVICE_NAME : S5130S-54S-HI-G
-Fan 1:
-State : Normal
-Fan 2:
-State : Normal
-Power 1:
-State : Normal
-"""
-        sample_id = f"sample-{hashlib.sha256(cli.encode()).hexdigest()[:12]}"
-        spec = CategorySpec(
-            name="device_manufacturing_info",
-            required_fields=["slot", "cpu"],
-            optional_fields=["device_name"],
-            entity_type="device_manufacturing_info",
-            primary_keys=["slot", "cpu"],
-            validators={"slot": {"type": "number"}, "cpu": {"type": "number"}},
-        )
-        bindings = {
-            "slot": [
-                {
-                    "sample_id": sample_id,
-                    "line": 1,
-                    "source_label": "Slot 1 CPU 0:",
-                    "source_value": "1",
-                }
-            ],
-            "cpu": [
-                {
-                    "sample_id": sample_id,
-                    "line": 1,
-                    "source_label": "Slot 1 CPU 0:",
-                    "source_value": "0",
-                }
-            ],
-        }
-
-        self.assertEqual(
-            expected_entity_count_from_evidence(cli, spec, field_bindings=bindings),
-            1,
-        )
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_record_boundary_diagnostic_gets_platform_repair(self):
-        template = r"""Value slot (\d+)
-Value cpu (\d+)
-Value device_name (\S+)
-
-Start
-  ^Slot\s+${slot}\s+CPU\s+${cpu}:$$ -> Record
-  ^DEVICE_NAME\s+:\s+${device_name}$$
-  ^Slot\s+\d+\s+CPU\s+\d+:$$ -> Record
-
-EOF
-"""
-        diagnostic = {
-            "allowed_action": "repair_record_boundary",
-            "actual": {"record_transition_fields": ["slot", "cpu"]},
-        }
-        repaired = repair_record_boundary_candidate(
-            template,
-            diagnostic,
-            primary_keys=["slot", "cpu"],
-        )
-
-        self.assertIsNotNone(repaired)
-        self.assertIn("Continue.Record", repaired)
-        self.assertIn("__NETOPS_TEXTFSM_END_OF_INPUT", repaired)
-        result = validate_template(
-            repaired,
-            "Slot 1 CPU 0:\nDEVICE_NAME : A\nSlot 2 CPU 0:\nDEVICE_NAME : B\n",
-            ["slot", "cpu", "device_name"],
-            primary_keys=["slot", "cpu"],
-            expected_min_records=2,
-            expected_record_count=2,
-        )
-        self.assertTrue(result.is_valid, result.errors)
-        self.assertEqual(len(result.records), 2)
-
-    def test_record_boundary_repair_accepts_scalar_actual_diagnostic(self):
-        template = """Value Filldown slot_id (Slot \\d+:)
-Value fan_id (Fan \\d+)
-
-Start
-  ^${slot_id}\\s*$$ -> Record
-  ^\\s+${fan_id}\\s*$$ -> Record
-
-EOF
-"""
-
-        repaired = repair_record_boundary_candidate(
-            template,
-            {"allowed_action": "repair_record_boundary", "actual": 3},
-            primary_keys=["slot_id"],
-        )
-
-        self.assertIsNotNone(repaired)
-
-    def test_strip_llm_template_normalizes_state_comments_and_rule_indent(self):
-        raw = """Value item (\\S+)
-
-Start
-# explanation that TextFSM must not parse
-^${item} -> Record
-"""
-
-        cleaned = strip_llm_template(raw)
-
-        self.assertNotIn("# explanation", cleaned)
-        self.assertIn("  ^${item} -> Record", cleaned)
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_agent_reports_early_record_boundary_without_domain_rules(self):
-        template = """Value item (\\S+)
-Value metric (-?\\d+(?:\\.\\d+)?)
-
-Start
-  ^Item\\s+${item}: -> Record
-  ^Metric:\\s+\\S+
-"""
-        sample = SimpleNamespace(
-            output="Item A:\nMetric: 10\nItem B:\nMetric: 20\n",
-            file_path="sample",
-            device_id="device-1",
-        )
-        contract = {
-            "category": "measurement",
-            "entity_type": "item_measurement",
-            "primary_keys": ["item"],
-            "required_fields": ["item"],
-            "optional_fields": ["metric"],
-            "validators": {"metric": {"type": "number"}},
-            "evidence": {
-                "field_bindings": {
-                    "item": [{"sample_id": "sample-1", "line": 1}],
-                    "metric": [{"sample_id": "sample-1", "line": 2}],
-                }
-            },
-        }
-
-        evaluation = _evaluate_agent_candidate(
-            template_text=template,
-            contract=contract,
-            positive_samples=(sample,),
-            sample_roles={},
-            negative_samples=(),
-        )
-
-        self.assertFalse(evaluation.success)
-        self.assertIn(
-            "record_boundary_error",
-            {diagnostic.code for diagnostic in evaluation.diagnostics},
-        )
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_validator_rejects_cross_entity_field_shift_with_valid_key_set(self):
-        cli = (
-            "Node A:\nName: Alpha\nMetric: 10\n"
-            "Node B:\nName: Beta\nMetric: 20\n"
-            "Node C:\nName: Gamma\nMetric: 30\n"
-        )
-        template = r"""Value Filldown entity_key (Node [A-Z]:)
-Value name ([A-Za-z]+)
-Value metric (\d+)
-
-Start
-  ^${entity_key}\s*$$ -> Record
-  ^Name:\s+${name}\s*$$
-  ^Metric:\s+${metric}\s*$$
-
-EOF
-"""
-        sample_id = f"sample-{hashlib.sha256(cli.encode()).hexdigest()[:12]}"
-        bindings = {
-            "entity_key": [
-                {"sample_id": sample_id, "line": 1, "capture_kind": "record_anchor"},
-                {"sample_id": sample_id, "line": 4, "capture_kind": "record_anchor"},
-                {"sample_id": sample_id, "line": 7, "capture_kind": "record_anchor"},
-            ],
-            "name": [
-                {"sample_id": sample_id, "line": 2, "capture_kind": "key_value"},
-                {"sample_id": sample_id, "line": 5, "capture_kind": "key_value"},
-                {"sample_id": sample_id, "line": 8, "capture_kind": "key_value"},
-            ],
-            "metric": [
-                {"sample_id": sample_id, "line": 3, "capture_kind": "key_value"},
-                {"sample_id": sample_id, "line": 6, "capture_kind": "key_value"},
-                {"sample_id": sample_id, "line": 9, "capture_kind": "key_value"},
-            ],
-        }
-
-        result = validate_template(
-            template,
-            cli,
-            ["entity_key"],
-            primary_keys=["entity_key"],
-            expected_min_records=3,
-            expected_record_count=3,
-            expected_primary_keys={("Node A:",), ("Node B:",), ("Node C:",)},
-            field_bindings=bindings,
-            sample_id=sample_id,
-            evidence_line_map={line: line for line in range(1, 10)},
-        )
-
-        self.assertFalse(result.is_valid)
-        self.assertTrue(result.evidence_errors)
-        self.assertIn(
-            "record_evidence_mismatch",
-            {diagnostic.code for diagnostic in result.diagnostics},
-        )
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_validator_accepts_evidence_aligned_repeated_blocks(self):
-        cli = "Node A:\nMetric: 10\nNode B:\nMetric: 20\n"
-        template = r"""Value entity_key (Node [A-Z]:)
-Value metric (\d+)
-
-Start
-  ^${entity_key}\s*$$ -> Block
-
-Block
-  ^Metric:\s+${metric}\s*$$ -> Record Start
-
-EOF
-"""
-        sample_id = f"sample-{hashlib.sha256(cli.encode()).hexdigest()[:12]}"
-        bindings = {
-            "entity_key": [
-                {"sample_id": sample_id, "line": 1, "capture_kind": "record_anchor"},
-                {"sample_id": sample_id, "line": 3, "capture_kind": "record_anchor"},
-            ],
-            "metric": [
-                {"sample_id": sample_id, "line": 2, "capture_kind": "key_value"},
-                {"sample_id": sample_id, "line": 4, "capture_kind": "key_value"},
-            ],
-        }
-
-        result = validate_template(
-            template,
-            cli,
-            ["entity_key"],
-            primary_keys=["entity_key"],
-            expected_min_records=2,
-            expected_record_count=2,
-            expected_primary_keys={("Node A:",), ("Node B:",)},
-            field_bindings=bindings,
-            sample_id=sample_id,
-            evidence_line_map={line: line for line in range(1, 5)},
-        )
-
-        self.assertTrue(result.is_valid, result.errors)
-        self.assertEqual(result.evidence_errors, [])
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_validator_rejects_more_records_than_detected_entities(self):
-        template = """Value item (\\S+)
-
-Start
-  ^${item} -> Record
-"""
-        result = validate_template(
-            template,
-            "A\nB\nC\n",
-            ["item"],
-            primary_keys=["item"],
-            expected_min_records=2,
-            expected_record_count=2,
-        )
-
-        self.assertFalse(result.is_valid)
-        self.assertIn(
-            "record_boundary_error",
-            {diagnostic.code for diagnostic in result.diagnostics},
-        )
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_agent_rejects_unparsed_numeric_entity_variant(self):
-        template = """Value item (\\S+)
-Value first (-?\\d+(?:\\.\\d+)?)
-Value second (-?\\d+(?:\\.\\d+)?)
-
-Start
-  ^Item\\s+${item}: -> Block
-
-Block
-  ^${first}\\s+${second}$$
-  ^End$$ -> Record Start
-
-EOF
-"""
-        sample = SimpleNamespace(
-            output="Item A:\n10 20\nEnd\nItem B:\n30 40 50\nEnd\n",
-            file_path="sample",
-            device_id="device-1",
-        )
-        contract = {
-            "category": "measurement",
-            "entity_type": "item",
-            "primary_keys": ["item"],
-            "required_fields": ["item"],
-            "optional_fields": ["first", "second"],
-            "validators": {
-                "first": {"type": "number"},
-                "second": {"type": "number"},
-            },
-            "evidence": {
-                "field_bindings": {
-                    "item": [{"sample_id": "sample-1", "line": 1, "capture_kind": "record_anchor"}],
-                    "first": [{"sample_id": "sample-1", "line": 2, "capture_kind": "column"}],
-                    "second": [{"sample_id": "sample-1", "line": 2, "capture_kind": "column"}],
-                }
-            },
-        }
-
-        evaluation = _evaluate_agent_candidate(
-            template_text=template,
-            contract=contract,
-            positive_samples=(sample,),
-            sample_roles={},
-            negative_samples=(),
-        )
-
-        self.assertFalse(evaluation.success)
-        self.assertFalse(evaluation.report["hard_gates"]["variant_coverage"])
-        self.assertIn(
-            "uncovered_structured_line",
-            {diagnostic.code for diagnostic in evaluation.diagnostics},
-        )
-
-    def test_strip_llm_preserves_invalid_action_for_diagnostic_repair(self):
-        raw = """Value Filldown SLOT (\\d+)
-Value FAN (\\d+)
-Value STATE (\\S+)
-
-Start
-  ^Slot ${SLOT}: -> Slot.Record
-
-Slot
-  ^\\s+Fan ${FAN}: ${STATE} -> Record
-"""
-        cleaned = strip_llm_template(raw)
-        self.assertIn("Slot.Record", cleaned)
-        result = validate_template(
-            cleaned,
-            "Slot 1:\n Fan 1: Normal\n Fan 2: Normal\n",
-            ["SLOT", "FAN", "STATE"],
-            primary_keys=["SLOT", "FAN"],
-        )
-        self.assertFalse(result.is_valid)
-        self.assertEqual(result.diagnostics[0].code, "unsupported_platform_construct")
-
-    def test_field_value_percent(self):
-        errors = validate_field_values(
-            [{"cpu_5s": "150"}],
-            {"cpu_5s": {"type": "percent"}},
-        )
-        self.assertTrue(errors)
-
-    def test_required_field_coverage(self):
-        cov, missing = check_required_fields([{"a": "1"}], ["a", "b"])
-        self.assertEqual(missing, ["b"])
-        self.assertEqual(cov, 50)
-
-    @unittest.skipUnless(HAS_TEXTFSM, "textfsm not installed")
-    def test_allow_known_empty_output(self):
-        template = """Value interface (\\S+)
-Value group (\\d+)
-Value state (\\S+)
-
-Start
-  ^${interface}\\s+${group}\\s+${state} -> Record
-"""
-        result = validate_template(
-            template,
-            "VRRP4 is not configured.",
-            ["interface", "group", "state"],
-            allow_empty=True,
-            empty_patterns=[r"VRRP4 is not configured"],
-        )
-        self.assertTrue(result.is_valid)
-        self.assertTrue(result.empty_accepted)
-
-
-class TestInputParser(unittest.TestCase):
-    def test_parse_display_fan_block(self):
-        from input_parser import parse_chat_cli_block
-
-        text = """<SW1>display fan
- Slot 1:
- Fan 1:
- State    : Normal
- Fan 2:
- State    : Normal"""
-        parsed = parse_chat_cli_block(text)
-        self.assertEqual(parsed.command, "display fan")
-        self.assertEqual(parsed.device_prompt, "SW1")
-        self.assertIn("Slot 1:", parsed.raw_output)
-        self.assertIn("Fan 1:", parsed.raw_output)
-
-    def test_extract_from_params(self):
-        from input_parser import extract_direct_input
-
-        direct = extract_direct_input({"user_query": "display fan\nline1\nline2"})
-        self.assertIsNotNone(direct)
-        assert direct is not None
-        self.assertEqual(direct.command, "display fan")
-        self.assertEqual(direct.raw_output, "line1\nline2")
-
-    def test_extract_intent_only_falls_back_to_database(self):
-        from input_parser import extract_direct_input
-
-        self.assertIsNone(extract_direct_input({"user_query": "生成textfsm解析模板"}))
-
-    def test_explicit_cli_still_raises_when_invalid(self):
-        from input_parser import extract_direct_input
-
-        with self.assertRaises(ValueError):
-            extract_direct_input({"raw_output": "只有一行没有命令"})
-
-    def test_parse_with_natural_language_prefix(self):
-        from input_parser import parse_chat_cli_block
-
-        text = """生成TEXTFSM解析模板，<SW1>display fan
- Slot 1:
- Fan 1:
- State    : Normal"""
-        parsed = parse_chat_cli_block(text)
-        self.assertEqual(parsed.command, "display fan")
-        self.assertEqual(parsed.device_prompt, "SW1")
-        self.assertIn("Slot 1:", parsed.raw_output)
-
-    def test_infer_vendor_model_semantic(self):
-        from unittest.mock import patch
-
-        from input_parser import infer_vendor_model, parse_chat_cli_block
-
-        text = """帮我给华三核心交换机 S5590 生成 textfsm 模板
-<SW>display cpu
-Slot 1 CPU 0 CPU usage:
-      21% in last 5 seconds"""
-        direct = parse_chat_cli_block(text)
-
-        with patch("semantic_extract.extract_device_context", return_value=("H3C", "S5590")):
-            vendor, model = infer_vendor_model(
-                {"user_query": text},
-                direct,
-                known_devices=["H3C S5590", "Huawei CE12800"],
-            )
-        self.assertEqual(vendor, "H3C")
-        self.assertEqual(model, "S5590")
-
-    def test_infer_vendor_model_skips_semantic_when_disabled(self):
-        from unittest.mock import patch
-
-        from input_parser import infer_vendor_model, parse_chat_cli_block
-
-        text = "display fan\nSlot 1:\nFan 1:\nState : Normal"
-        direct = parse_chat_cli_block(text)
-
-        with patch("semantic_extract.extract_device_context") as mock_extract:
-            vendor, model = infer_vendor_model(
-                {"user_query": text, "use_semantic_extraction": False},
-                direct,
-            )
-            mock_extract.assert_not_called()
-        self.assertEqual(vendor, "Huawei")
-        self.assertEqual(model, "Generic")
-
-    def test_semantic_parse_json(self):
-        from semantic_extract import _parse_json_object, build_extract_prompt
-
-        data = _parse_json_object('说明\n{"vendor": "H3C", "model": "S5590"}')
-        self.assertEqual(data.get("vendor"), "H3C")
-        self.assertEqual(data.get("model"), "S5590")
-
-        prompt = build_extract_prompt(
-            "华三 S5590 生成模板",
-            known_devices=["H3C S5590"],
-            command="display cpu",
-        )
-        self.assertIn("H3C S5590", prompt)
-        self.assertIn("自然语义", prompt)
-
-
-class TestGenerateFlow(unittest.TestCase):
-    def test_template_path_compatible_with_patrol(self):
-        path = resolve_template_path(Path("/tmp/templates"), "CE12800", "display cpu-usage")
-        self.assertEqual(path.name, "display_cpu-usage.textfsm")
-        self.assertEqual(path.parent.name, "CE12800")
-
-    @patch("generate_templates.infer_contract")
-    @patch("generate_templates.generate_template_text")
-    def test_end_to_end_with_mock_llm(self, mock_llm, mock_contract):
-        mock_contract.return_value = infer_contract(
-            command="display cpu",
-            samples_text="Slot CPU\n0 10 12 15",
-            use_manual_profile=True,
-        )
-        mock_llm.return_value = """Value slot (\\d+)
-Value cpu_5s (\\d+)
-Value cpu_1m (\\d+)
-Value cpu_5m (\\d+)
-
-Start
-  ^Slot\\s+CPU
-  ^${slot}\\s+${cpu_5s}\\s+${cpu_1m}\\s+${cpu_5m} -> Record
-"""
-        skill_root = SHARED_PARSER_CONFIG_ROOT
-
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
-            tmp = Path(tmpdir)
-            templates = tmp / "templates"
-            reports = tmp / "reports"
-
-            from generate_templates import generate_templates
-
-            cli = "Slot CPU\n0 10 12 15\n"
-            candidate = TemplateCandidate(
-                vendor="H3C",
-                model="S5130S-54S-HI-G",
-                command="display cpu",
-                sample_output=cli,
-                source_table="netops_command_snapshots",
-                device_id="sw1-10.0.0.1",
-            )
-            with patch(
-                "generate_templates.discover_missing_template_candidates",
-                return_value=[candidate],
-            ):
-                result = generate_templates(
+    mock_session.return_value = FailedSession()
+
+    class RejectingReviewer:
+        def review(self, **_kwargs):
+            return ParserReviewReport(
+                passed=False,
+                summary="Positive data sample produced no records.",
+                diagnostics=(
                     {
-                        "templates_dir": str(templates),
-                        "reports_dir": str(reports),
-                        "mapping_config": str(skill_root / "command_policy.yaml"),
-                        "max_retries": 1,
-                        "publish": False,
+                        "code": "missing_records",
+                        "sample_id": "sample-generation",
+                        "target": "record_scope",
+                        "message": "positive sample produced no records",
+                    },
+                ),
+                primary_key_assessment={"passed": False},
+                completeness_assessment={"passed": False},
+            )
+
+    attempts: list[dict] = []
+    context = {
+        "mode": "parser_validation",
+        "snapshot": SimpleNamespace(
+            snapshot_id="snapshot-generation",
+            raw_text="UNMATCHED OUTPUT",
+        ),
+    }
+    with patch("generate_templates.NtcTemplateResolver") as ntc_resolver:
+        ntc_resolver.return_value.resolve.return_value = (None, [])
+        with patch(
+            "generate_templates.IndependentParserResultReviewer",
+            lambda: RejectingReviewer(),
+        ), patch("generate_templates.PatrolRepository") as patrol_repository:
+            patrol_repository.return_value.get_snapshot_context.return_value = context
+            with patch("generate_templates.ParserJobRepository") as job_repository:
+                repository = job_repository.return_value
+                model_calls: list[dict] = []
+                repository.reserve_model_call.side_effect = lambda job_id, **payload: (
+                    model_calls.append({"job_id": job_id, **payload})
+                    or {
+                        "id": f"call-{len(model_calls)}",
+                        "call_number": len(model_calls),
+                        "generation_run_id": payload["generation_run_id"],
                     }
                 )
-            self.assertTrue(result["success"])
-            self.assertEqual(result["validation_pass_rate"], 1.0)
-            out_file = templates / "S5130S-54S-HI-G" / cmd_to_template_filename("display cpu")
-            self.assertFalse(out_file.is_file())
-            report_files = list(reports.glob("*.json"))
-            self.assertTrue(report_files)
-
-    @patch("generate_templates.infer_contract")
-    @patch("generate_templates.generate_template_text")
-    def test_direct_input_mode(self, mock_llm, mock_contract):
-        mock_contract.return_value = infer_contract(
-            command="display fan",
-            samples_text="Slot 1:\nFan 1:\nState: Normal",
-            use_manual_profile=True,
-        )
-        mock_llm.return_value = """Value slot (\\d+)
-Value fan (\\d+)
-Value state (\\S+)
-
-Start
-  ^Slot\\s+${slot}:
-  ^Fan\\s+${fan}:
-  ^State\\s+:\\s+${state}
-"""
-        skill_root = SHARED_PARSER_CONFIG_ROOT
-        cli = """Slot 1:
-Fan 1:
-State    : Normal
-Fan 2:
-State    : Normal"""
-        user_query = f"<SW>display fan\n{cli}"
-
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
-            tmp = Path(tmpdir)
-            from generate_templates import generate_templates
-
-            result = generate_templates(
-                {
-                    "user_query": user_query,
-                    "vendor": "Huawei",
-                    "model": "Generic",
-                    "templates_dir": str(tmp / "templates"),
-                    "reports_dir": str(tmp / "reports"),
-                    "mapping_config": str(skill_root / "command_policy.yaml"),
-                    "max_retries": 1,
-                    "publish": False,
-                }
-            )
-            self.assertEqual(result["mode"], "direct")
-            self.assertTrue(result.get("parsed_records") or result["success_count"] >= 0)
-            self.assertIn("display fan", result["message"])
-
-    @patch("generate_templates.infer_contract")
-    @patch("generate_templates.generate_template_text")
-    def test_directory_mode_publishes_shared_asset(self, mock_llm, mock_contract):
-        mock_contract.return_value = infer_contract(
-            command="display version",
-            samples_text="H3C Comware Software, Version 7.1",
-            use_manual_profile=True,
-        )
-        mock_llm.return_value = """Value model (\\S+)
-Value os_version (\\S+)
-
-Start
-  ^H3C Comware Software, Version ${os_version},
-  ^H3C ${model} uptime -> Record
-"""
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
-            tmp = Path(tmpdir)
-            capture = tmp / "SW1-10.0.0.1.txt"
-            capture.write_text(
-                "<SW1>display version\n"
-                "H3C Comware Software, Version 7.1.070, Release 1\n"
-                "H3C S5130S-54S-HI-G uptime is 1 week\n",
-                encoding="utf-8",
-            )
-            from generate_templates import generate_templates
-
-            result = generate_templates(
-                {
-                    "source_path": str(capture),
-                    "templates_dir": str(tmp / "shared"),
-                    "reports_dir": str(tmp / "reports"),
-                    "max_retries": 0,
-                    "publish": False,
-                }
-            )
-            self.assertEqual(result["mode"], "directory")
-            self.assertEqual(result["files_scanned"], 1)
-            self.assertEqual(result["devices_detected"], 1)
-            self.assertEqual(result["validation_pass_rate"], 1.0)
-            self.assertFalse((tmp / "shared").exists())
-
-    @patch("generate_templates.generate_template_text")
-    def test_unconfigured_directory_command_does_not_call_llm(self, mock_llm):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
-            tmp = Path(tmpdir)
-            capture = tmp / "SW1-10.0.0.1.txt"
-            capture.write_text(
-                "<SW1>display version\n"
-                "H3C Comware Software, Version 7.1.070, Release 1\n"
-                "H3C S5130S-54S-HI-G uptime is 1 week\n"
-                "<SW1>display clock\n12:00:00\n",
-                encoding="utf-8",
-            )
-            from generate_templates import generate_templates
-
-            result = generate_templates(
-                {
-                    "source_path": str(capture),
-                    "command": "display clock",
-                    "templates_dir": str(tmp / "shared"),
-                    "reports_dir": str(tmp / "reports"),
-                }
-            )
-            mock_llm.assert_not_called()
-            self.assertEqual(result["candidate_groups"], 0)
-            self.assertEqual(result["skipped_commands"][0]["command"], "display clock")
-
-
-class TestOfflineDirectoryDiscovery(unittest.TestCase):
-    def _discover(self, directory: Path):
-        from config_loader import load_command_mapping
-
-        return discover_directory_candidates(
-            directory,
-            mappings=load_command_mapping(SHARED_PARSER_CONFIG_ROOT / "command_policy.yaml"),
-        )
-
-    def test_multiple_same_model_files_are_grouped_once(self):
-        capture = (
-            "<SW>display version\n"
-            "H3C Comware Software, Version 7.1.070, Release 1\n"
-            "H3C S5130S-54S-HI-G uptime is 1 week\n"
-            "<SW>display cpu\n"
-            "Slot 1 CPU 0 CPU usage:\n"
-            "  10% in last 5 seconds\n"
-            "  9% in last 1 minute\n"
-            "  8% in last 5 minutes\n"
-            "<SW>display clock\n12:00:00\n"
-        )
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
-            directory = Path(tmpdir)
-            (directory / "SW1-10.0.0.1.txt").write_text(capture, encoding="utf-8")
-            (directory / "SW2-10.0.0.2.txt").write_text(capture, encoding="utf-8")
-            discovery = self._discover(directory)
-
-        self.assertEqual(discovery.files_scanned, 2)
-        self.assertEqual(discovery.devices_detected, 2)
-        self.assertEqual(discovery.unresolved_files, ())
-        cpu_groups = [
-            candidate for candidate in discovery.candidates if candidate.command == "display cpu"
-        ]
-        self.assertEqual(len(cpu_groups), 1)
-        self.assertEqual(len(cpu_groups[0].samples), 2)
-        self.assertEqual(cpu_groups[0].vendor, "H3C")
-        self.assertEqual(cpu_groups[0].model, "S5130S-54S-HI-G")
-        self.assertTrue(
-            any(
-                item["command"] == "display clock" and item["reason"] == "command_not_configured"
-                for item in discovery.skipped_commands
-            )
-        )
-
-    def test_version_evidence_has_high_confidence(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
-            path = Path(tmpdir) / "CORE1-10.0.0.1.txt"
-            path.write_text(
-                "CORE1#show version\n"
-                "Cisco Nexus Operating System (NX-OS) Software\n"
-                "  cisco Nexus9000 C9364C Chassis\n",
-                encoding="utf-8",
-            )
-            blocks = split_cli_capture(_read_text_best_effort(path))
-            identity = detect_device_identity(
-                path=path,
-                blocks=blocks,
-                config={},
-            )
-        self.assertEqual((identity.vendor, identity.model), ("Cisco", "N9K-C9364C"))
-        self.assertGreaterEqual(identity.confidence, 0.99)
-        self.assertEqual(identity.evidence_command, "show version")
-
-
-class TestSharedTextfsmAssets(unittest.TestCase):
-    def test_safe_model_and_command_paths(self):
-        self.assertEqual(safe_slug("ISR4451-X/K9"), "ISR4451-X_K9")
-        self.assertEqual(safe_slug("show ip interface brief"), "show_ip_interface_brief")
-
-    def test_immutable_asset_and_hash_verification(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
-            store = TemplateAssetStore(Path(tmpdir))
-            path, digest = store.write_immutable(
-                vendor="Cisco",
-                profile="N9K-C9364C",
-                command="show version",
-                version="1",
-                content="template",
-            )
-            self.assertTrue(store.verify(path, digest))
-            self.assertEqual(path.parent.name, "N9K-C9364C")
-            self.assertEqual(path.name, "show_version__1.textfsm")
-            with self.assertRaises(FileExistsError):
-                store.write_immutable(
-                    vendor="Cisco",
-                    profile="N9K-C9364C",
-                    command="show version",
-                    version="1",
-                    content="different",
+                repository.complete_model_call.return_value = {}
+                repository.create_generation_attempt.side_effect = lambda **payload: (
+                    attempts.append(payload) or {"id": f"attempt-{len(attempts)}"}
+                )
+                report = _process_simple_job(
+                    job,
+                    reports_dir=tmp_path / "reports",
+                    publish=False,
+                    dry_run=True,
                 )
 
-    def test_global_raw_hash_policy(self):
-        decision = ParserPolicy().decide(
-            vendor="Cisco",
-            model="N9K-C9364C",
-            family="NXOS9K",
-            command="show running-config",
-        )
-        self.assertFalse(decision.enabled)
-        self.assertEqual(decision.handling, "raw_hash_diff")
+    assert report.accepted is True
+    assert report.compile_success is True
+    assert report.record_count == 0
+    assert report.passed_samples == 1
+    assert report.validation_pass_rate == 1.0
+    assert report.agent_loop["stop_reason"] == (
+        "human_review_required:independent_semantic_review_failed"
+    )
+    assert feedbacks[0] is None
+    assert len(feedbacks) == 3
+    assert all(
+        item["failure_type"] == "independent_semantic_review_failed"
+        for item in feedbacks[1:]
+    )
+    assert all(item["parsed_results"] for item in feedbacks[1:])
+    assert len(attempts) == 3
 
 
-class TestParserJobSamples(unittest.TestCase):
-    def test_generation_prompt_allows_filldown_for_parent_primary_keys(self):
-        prompt = build_generation_prompt(
-            vendor="H3C",
-            model="S6860-54HF",
-            command="display fan",
-            cli_output="Slot 1\n Fan 1 Normal",
-            required_fields=["slot", "fan", "state"],
-            primary_keys=["slot", "fan"],
-        )
-        self.assertIn("Value Filldown", prompt)
-        self.assertIn("slot, fan", prompt)
-
-    def test_job_candidate_accepts_postgresql_validation_samples(self):
-        job = {
-            "vendor": "H3C",
-            "model": "S6860-54HF",
-            "profile": "S6860-54HF",
-            "family": "Comware7",
-            "canonical_command": "display fan",
-            "samples": [
-                {
-                    "snapshot_id": "sample-a",
-                    "snapshot_source": "postgresql",
-                    "sanitization_status": "sanitized",
-                    "sanitized_text": "Slot 1 Fan 1 Normal",
-                },
-                {
-                    "snapshot_id": "sample-b",
-                    "snapshot_source": "postgresql",
-                    "sanitization_status": "sanitized",
-                    "sanitized_text": "Slot 1 Fan 1 Normal",
-                },
-            ],
-        }
-        contexts = {
-            sample_id: {
-                "mode": "parser_validation",
-                "snapshot": SimpleNamespace(
-                    snapshot_id=sample_id,
-                    device_id=f"device-{sample_id}",
-                    command_canonical="display fan",
-                    raw_text="Slot 1 Fan 1 Normal",
-                ),
+def test_generation_requires_job_id_before_any_files_are_written(tmp_path):
+    with pytest.raises(ValueError, match="job_id is required"):
+        generate_templates(
+            {
+                "source_path": str(tmp_path / "legacy-input"),
+                "reports_dir": str(tmp_path / "reports"),
             }
-            for sample_id in ("sample-a", "sample-b")
-        }
-        with patch("generate_templates.ParserJobRepository") as parser_repository:
-            parser_repository.return_value.get_job.return_value = job
-            with patch("generate_templates.PatrolRepository") as patrol_repository:
-                patrol_repository.return_value.get_snapshot_context.side_effect = (
-                    lambda snapshot_id: contexts[snapshot_id]
-                )
-                candidate = _job_candidate({"job_id": "job-1"})
-        self.assertIsNotNone(candidate)
-        self.assertEqual(len(candidate.samples), 2)
-
-    def test_job_candidate_separates_raw_validation_from_sanitized_prompt(self):
-        job = {
-            "source_mode": "production",
-            "vendor": "H3C",
-            "model": "S6860-54HF",
-            "profile": "S6860-54HF",
-            "family": "Comware7",
-            "canonical_command": "display fan",
-            "samples": [
-                {
-                    "snapshot_id": "sample-production",
-                    "snapshot_source": "postgresql",
-                    "device_id": "device-1",
-                    "sanitization_status": "sanitized",
-                    "sanitized_text": "Slot 1 Fan 1 Normal",
-                }
-            ],
-        }
-        with patch("generate_templates.ParserJobRepository") as repository:
-            repository.return_value.get_job.return_value = job
-            with patch("generate_templates.PatrolRepository") as patrol_repository:
-                patrol_repository.return_value.get_snapshot_context.return_value = {
-                    "mode": "production",
-                    "snapshot": SimpleNamespace(
-                        snapshot_id="sample-production",
-                        device_id="device-1",
-                        command_canonical="display fan",
-                        raw_text="Slot 1 Fan 1 Normal raw",
-                    ),
-                }
-                candidate = _job_candidate({"job_id": "job-1"})
-        self.assertEqual(candidate.samples[0].output, "Slot 1 Fan 1 Normal raw")
-        self.assertEqual(candidate.samples[0].prompt_output, "Slot 1 Fan 1 Normal")
-        patrol_repository.return_value.get_snapshot_context.assert_called_once_with(
-            "sample-production"
         )
+    assert not (tmp_path / "reports").exists()
 
-    def test_job_candidate_supports_validation_and_production_samples_in_one_job(self):
-        job = {
-            "source_mode": "production",
-            "vendor": "H3C",
-            "model": "S6860-54HF",
-            "profile": "Comware7",
-            "family": "Comware7",
-            "canonical_command": "display fan",
-            "samples": [
+
+def test_legacy_job_cannot_execute_even_when_requested(monkeypatch):
+    class Repository:
+        def get_job(self, *_args, **_kwargs):
+            return {"id": "legacy", "pipeline_version": "legacy"}
+
+    monkeypatch.setattr("generate_templates.ParserJobRepository", Repository)
+    with pytest.raises(ValueError, match="legacy Parser jobs are read-only"):
+        generate_templates({"job_id": "legacy"})
+
+
+def test_spec_suggester_classifies_valid_empty_without_calling_llm(monkeypatch):
+    recorded: list[dict] = []
+
+    class Repository:
+        def record_parser_spec_suggestion(self, job_id, **payload):
+            recorded.append({"job_id": job_id, **payload})
+
+        def get_job(self, job_id, **_kwargs):
+            return {
+                "id": job_id,
+                "vendor": "H3C",
+                "profile": "S5130",
+                "canonical_command": "display m-lag system",
+                "samples": [
+                    {
+                        "id": "sample-1",
+                        "sanitization_status": "sanitized",
+                        "sanitized_text": "M-LAG is not configured.",
+                    }
+                ],
+            }
+
+    llm = SimpleNamespace()
+    llm.call = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        AssertionError("valid-empty classification must not call the LLM")
+    )
+    monkeypatch.setattr("spec_suggester.ParserJobRepository", Repository)
+    monkeypatch.setattr("spec_suggester.call_llm", llm.call)
+
+    result = suggest_parser_spec(
+        {
+            "job_id": "job-empty",
+            "suggestion_task_id": "task-1",
+        }
+    )
+
+    assert result["success"] is True
+    assert result["suggestion"]["classification"] == "no_positive_data"
+    assert result["suggestion"]["sample_suggestions"][0]["recommended_role"] == "negative"
+    assert [item["status"] for item in recorded] == ["running", "ready"]
+
+
+def test_spec_suggester_normalizes_and_validates_a_weaker_model_response(monkeypatch):
+    recorded: list[dict] = []
+
+    class Repository:
+        def record_parser_spec_suggestion(self, job_id, **payload):
+            recorded.append({"job_id": job_id, **payload})
+
+        def get_job(self, job_id, **_kwargs):
+            return {
+                "id": job_id,
+                "vendor": "H3C",
+                "profile": "S5130",
+                "canonical_command": "display environment",
+                "samples": [
+                    {
+                        "id": "sample-data",
+                        "sanitization_status": "sanitized",
+                        "sanitized_text": ("Slot Sensor Temperature Warning\n1 hotspot-1 36 65\n"),
+                    }
+                ],
+            }
+
+    model_response = json.dumps(
+        {
+            "parser_spec": {
+                "entity": "Temperature Sensor",
+                "primary_keys": "sensor",
+                "fields": [
+                    {
+                        "name": "sensor",
+                        "required": False,
+                        "type": "string",
+                        "canonical_candidate": "environment.sensor.5m",
+                    },
+                    {"name": "temperature", "required": True, "type": "integer"},
+                ],
+            },
+            "sample_plans": [
                 {
-                    "snapshot_id": "sample-validation",
-                    "snapshot_source": "postgresql",
-                    "device_id": "validation-device",
-                    "sanitization_status": "sanitized",
-                    "sanitized_text": "Slot 1 Fan 1 Normal",
-                },
-                {
-                    "snapshot_id": "sample-production",
-                    "snapshot_source": "postgresql",
-                    "device_id": "production-device",
-                    "sanitization_status": "sanitized",
-                    "sanitized_text": "Slot 2 Fan 1 Normal",
-                },
+                    "sample_id": "sample-data",
+                    "target_section": "temperature sensor table",
+                    "record_unit": "one sensor row",
+                    "record_start": "slot and sensor columns",
+                    "record_end": "end of physical row",
+                    "exclude_sections": [],
+                    "ambiguities": [],
+                }
             ],
+            "confidence": 0.7,
+            "rationale": "One row per sensor.",
         }
-        contexts = {
-            "sample-validation": {
-                "mode": "parser_validation",
-                "snapshot": SimpleNamespace(
-                    snapshot_id="sample-validation",
-                    device_id="validation-device",
-                    command_canonical="display fan",
-                    raw_text="Slot 1 Fan 1 Normal",
-                ),
+    )
+    monkeypatch.setattr("spec_suggester.ParserJobRepository", Repository)
+    monkeypatch.setattr("spec_suggester.call_llm", lambda *_args, **_kwargs: model_response)
+
+    result = suggest_parser_spec({"job_id": "job-data", "suggestion_task_id": "task-data"})
+
+    spec = result["suggestion"]["parser_spec"]
+    assert spec["entity"] == "temperature_sensor"
+    assert spec["primary_keys"] == ["sensor"]
+    assert spec["fields"]["sensor"] == {"required": True, "type": "text"}
+    assert spec["fields"]["temperature_celsius"]["type"] == "number"
+    assert result["suggestion"]["normalization_warnings"] == [
+        "ignored invalid canonical_candidate for sensor: environment.sensor.5m",
+        "preferred approved check-item field name temperature_celsius over temperature",
+    ]
+    assert recorded[-1]["status"] == "ready"
+    assert recorded[-1]["auto_adopt"] is True
+
+
+def test_spec_suggester_uses_executed_ntc_schema_before_calling_llm(monkeypatch):
+    recorded: list[dict] = []
+
+    class Repository:
+        def record_parser_spec_suggestion(self, job_id, **payload):
+            recorded.append({"job_id": job_id, **payload})
+
+        def get_job(self, job_id, **_kwargs):
+            return {
+                "id": job_id,
+                "vendor": "Cisco",
+                "model": "WS-C2960XR-24TS-I",
+                "family": "IOS",
+                "profile": "IOS-C2960",
+                "canonical_command": "show ip interface brief",
+                "samples": [
+                    {
+                        "id": "sample-data",
+                        "sanitization_status": "sanitized",
+                        "sanitized_text": (
+                            "Interface IP-Address OK? Method Status Protocol\n"
+                            "Vlan1 10.0.0.1 YES manual up up\n"
+                        ),
+                    }
+                ],
+            }
+
+    monkeypatch.setattr("spec_suggester.ParserJobRepository", Repository)
+    monkeypatch.setattr(
+        "spec_suggester._field_naming_context",
+        lambda *_args, **_kwargs: {
+            "semantic_profile_id": "interface-l3",
+            "preferred_value_names": [
+                "interface",
+                "ip_address",
+                "oper_status",
+                "protocol_status",
+            ],
+            "check_items": [
+                {"preferred_identity_fields": ["interface"]}
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        "spec_suggester.call_llm",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("an executable trusted template must be reviewed after parsing")
+        ),
+    )
+
+    result = suggest_parser_spec(
+        {"job_id": "job-ntc", "suggestion_task_id": "task-ntc"}
+    )
+
+    suggestion = result["suggestion"]
+    record_set = suggestion["parser_spec"]["record_sets"][0]
+    assert suggestion["draft_source"] == "ntc_templates_objective_execution"
+    assert suggestion["model_called"] is False
+    assert record_set["primary_keys"] == ["interface"]
+    assert set(record_set["fields"]) == {
+        "interface",
+        "ip_address",
+        "protocol_status",
+        "oper_status",
+    }
+    assert recorded[-1]["status"] == "ready"
+    assert recorded[-1]["auto_adopt"] is True
+
+
+def test_ntc_parser_spec_keeps_version_identifiers_as_text():
+    draft = _ntc_parser_spec_draft(
+        job={"canonical_command": "show version"},
+        data_samples=[{"sanitized_text": "BIOS: version 05.31"}],
+        evidence=[
+            {
+                "template_name": "cisco_nxos_show_version.textfsm",
+                "sample_record_counts": {"sample-1": 1},
+                "field_profiles": {
+                    "bios_version": {
+                        "value_shape": "number",
+                        "examples": ["05.31"],
+                        "observed_non_empty_count": 1,
+                    },
+                    "os_version": {
+                        "value_shape": "number",
+                        "examples": ["9.3"],
+                        "observed_non_empty_count": 1,
+                    },
+                    "uptime_days": {
+                        "value_shape": "number",
+                        "examples": ["12"],
+                        "observed_non_empty_count": 1,
+                    },
+                },
+            }
+        ],
+        field_naming_context={"check_items": []},
+    )
+
+    fields = draft["record_sets"][0]["fields"]
+    assert fields["bios_version"]["type"] == "text"
+    assert fields["os_version"]["type"] == "text"
+    assert fields["uptime_days"]["type"] == "number"
+
+
+def test_ntc_parser_spec_uses_check_item_vocabulary_and_preserves_source_label():
+    context = build_parser_field_naming_context(
+        vendor="Cisco",
+        model="WS-C2960XR-24TS-I",
+        family="IOS",
+        profile="CISCO_IOS",
+        command="show version",
+    )
+    draft = _ntc_parser_spec_draft(
+        job={"canonical_command": "show version"},
+        data_samples=[{"sanitized_text": "System image file is flash:/image.bin"}],
+        evidence=[
+            {
+                "template_name": "cisco_ios_show_version.textfsm",
+                "sample_record_counts": {"sample-1": 1},
+                "field_profiles": {
+                    "running_image": {
+                        "value_shape": "text",
+                        "examples": ["flash:/image.bin"],
+                        "observed_non_empty_count": 1,
+                    },
+                    "rommon_version": {
+                        "value_shape": "text",
+                        "examples": ["15.2(3r)E1"],
+                        "observed_non_empty_count": 1,
+                    },
+                },
+            }
+        ],
+        field_naming_context=context,
+    )
+
+    fields = draft["record_sets"][0]["fields"]
+    assert set(fields) == {"boot_image", "bootloader_version"}
+    assert fields["boot_image"]["source_labels"] == ["running_image"]
+    assert fields["bootloader_version"]["source_labels"] == ["rommon_version"]
+
+
+def test_spec_suggester_promotes_ip_when_evidence_contains_unassigned_values(
+    monkeypatch,
+):
+    recorded: list[dict] = []
+
+    class Repository:
+        def record_parser_spec_suggestion(self, job_id, **payload):
+            recorded.append({"job_id": job_id, **payload})
+
+        def get_job(self, job_id, **_kwargs):
+            return {
+                "id": job_id,
+                "vendor": "Generic",
+                "profile": "Router",
+                "canonical_command": "inspect interface brief",
+                "samples": [
+                    {
+                        "id": "sample-interface",
+                        "sanitization_status": "sanitized",
+                        "sanitized_text": (
+                            "Interface Link Primary IP\n"
+                            "GE1/0/1 UP --\n"
+                        ),
+                    }
+                ],
+            }
+
+    model_response = json.dumps(
+        {
+            "parser_spec": {
+                "version": 2,
+                "business_purpose": "Inspect routed interfaces.",
+                "record_sets": [
+                    {
+                        "name": "interfaces",
+                        "entity": "interface",
+                        "cardinality": "repeated",
+                        "primary_keys": ["interface"],
+                        "fields": {
+                            "interface": {
+                                "required": True,
+                                "type": "interface",
+                            },
+                            "primary_ip": {
+                                "required": True,
+                                "type": "ip",
+                                "evidence": ["GE1/0/1 UP --"],
+                            },
+                        },
+                        "expected_records": [
+                            {
+                                "sample_id": "sample-interface",
+                                "records": [
+                                    {
+                                        "interface": "GE1/0/1",
+                                        "primary_ip": None,
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
             },
-            "sample-production": {
-                "mode": "production",
-                "snapshot": SimpleNamespace(
-                    snapshot_id="sample-production",
-                    device_id="production-device",
-                    command_canonical="display fan",
-                    raw_text="Slot 2 Fan 1 Normal",
-                ),
-            },
+            "sample_plans": [],
         }
-        with patch("generate_templates.ParserJobRepository") as repository:
-            repository.return_value.get_job.return_value = job
-            with patch("generate_templates.PatrolRepository") as patrol_repository:
-                patrol_repository.return_value.get_snapshot_context.side_effect = contexts.get
-                candidate = _job_candidate({"job_id": "job-1"})
+    )
+    monkeypatch.setattr("spec_suggester.ParserJobRepository", Repository)
+    monkeypatch.setattr("spec_suggester.call_llm", lambda *_args, **_kwargs: model_response)
 
-        self.assertEqual(
-            [sample.output for sample in candidate.samples],
-            ["Slot 1 Fan 1 Normal", "Slot 2 Fan 1 Normal"],
-        )
+    result = suggest_parser_spec(
+        {
+            "job_id": "job-interface",
+            "suggestion_task_id": "task-interface",
+        }
+    )
 
-    def test_job_candidate_rejects_unsanitized_production_sample(self):
-        job = {
-            "source_mode": "production",
-            "vendor": "H3C",
-            "model": "S6860-54HF",
-            "profile": "S6860-54HF",
-            "canonical_command": "display fan",
-            "samples": [
+    spec = result["suggestion"]["parser_spec"]
+    assert (
+        spec["record_sets"][0]["fields"]["primary_ip"]["type"]
+        == "ip_or_unassigned"
+    )
+    assert "expected_records" not in spec["record_sets"][0]
+    assert result["suggestion"]["normalization_warnings"] == [
+        "promoted primary_ip from ip to ip_or_unassigned because "
+        "the sample evidence contains an unassigned value"
+    ]
+    assert recorded[-1]["status"] == "ready"
+
+
+def test_spec_suggester_preserves_optional_branches_and_numeric_missing_tokens(
+    monkeypatch,
+):
+    recorded: list[dict] = []
+
+    class Repository:
+        def record_parser_spec_suggestion(self, job_id, **payload):
+            recorded.append({"job_id": job_id, **payload})
+
+        def get_job(self, job_id, **_kwargs):
+            return {
+                "id": job_id,
+                "vendor": "H3C",
+                "profile": "S6850",
+                "canonical_command": "display transceiver diagnosis interface",
+                "samples": [
+                    {
+                        "id": "sample-optical",
+                        "sanitization_status": "sanitized",
+                        "sanitized_text": "FortyGigE1/0/1 Current Rx Power -4.70 N/A",
+                    }
+                ],
+            }
+
+    model_response = json.dumps(
+        {
+            "parser_spec": {
+                "version": 2,
+                "business_purpose": "Inspect optical power.",
+                "record_sets": [
+                    {
+                        "name": "optical_channels",
+                        "entity": "interface_optical_channel",
+                        "cardinality": "repeated",
+                        "presence": "optional",
+                        "primary_keys": ["interface", "channel"],
+                        "fields": {
+                            "interface": {
+                                "required": True,
+                                "type": "interface_name",
+                            },
+                            "channel": {"required": True, "type": "number"},
+                            "rx_power_dbm": {
+                                "required": True,
+                                "type": "number",
+                                "role": "metric",
+                                "unavailable_tokens": "N/A",
+                                "evidence": ["Current Rx Power -4.70 N/A"],
+                            },
+                        },
+                    }
+                ],
+            },
+            "sample_plans": [],
+        }
+    )
+    monkeypatch.setattr("spec_suggester.ParserJobRepository", Repository)
+    monkeypatch.setattr("spec_suggester.call_llm", lambda *_args, **_kwargs: model_response)
+
+    result = suggest_parser_spec(
+        {"job_id": "job-optical", "suggestion_task_id": "task-optical"}
+    )
+
+    record_set = result["suggestion"]["parser_spec"]["record_sets"][0]
+    assert record_set["presence"] == "optional"
+    assert record_set["fields"]["rx_power_dbm"]["type"] == "number"
+    assert record_set["fields"]["rx_power_dbm"]["unavailable_tokens"] == ["N/A"]
+    assert result["suggestion"]["normalization_warnings"] == []
+    assert recorded[-1]["status"] == "ready"
+
+
+def test_spec_suggester_does_not_override_explicit_composite_metric_type(monkeypatch):
+    recorded: list[dict] = []
+
+    class Repository:
+        def record_parser_spec_suggestion(self, job_id, **payload):
+            recorded.append({"job_id": job_id, **payload})
+
+        def get_job(self, job_id, **_kwargs):
+            return {
+                "id": job_id,
+                "vendor": "Cisco",
+                "profile": "WS-C2960XR-24TS-I",
+                "canonical_command": "show env all",
+                "samples": [
+                    {
+                        "id": "sample-environment",
+                        "sanitization_status": "sanitized",
+                        "sanitized_text": "1A PWR-C2-250WAC SERIAL OK Good N/A 250/0",
+                    }
+                ],
+            }
+
+    model_response = json.dumps(
+        {
+            "parser_spec": {
+                "version": 2,
+                "business_purpose": "Inspect power supplies.",
+                "record_sets": [
+                    {
+                        "name": "power_supplies",
+                        "entity": "power_supply",
+                        "cardinality": "repeated",
+                        "primary_keys": ["slot"],
+                        "fields": {
+                            "slot": {"required": True, "type": "text"},
+                            "watts": {
+                                "required": True,
+                                "type": "text",
+                                "role": "metric",
+                                "evidence": ["250/0"],
+                            },
+                        },
+                    }
+                ],
+            },
+            "sample_plans": [],
+        }
+    )
+    monkeypatch.setattr("spec_suggester.ParserJobRepository", Repository)
+    monkeypatch.setattr("spec_suggester.call_llm", lambda *_args, **_kwargs: model_response)
+
+    result = suggest_parser_spec(
+        {"job_id": "job-environment", "suggestion_task_id": "task-environment"}
+    )
+
+    watts = result["suggestion"]["parser_spec"]["record_sets"][0]["fields"]["watts"]
+    assert watts["type"] == "text"
+    assert result["suggestion"]["normalization_warnings"] == []
+    assert recorded[-1]["status"] == "ready"
+
+
+def test_spec_suggester_keeps_record_plan_advisory_without_compiler_derived_expectations(
+    monkeypatch,
+):
+    recorded: list[dict] = []
+
+    class Repository:
+        def record_parser_spec_suggestion(self, job_id, **payload):
+            recorded.append({"job_id": job_id, **payload})
+
+        def get_job(self, job_id, **_kwargs):
+            return {
+                "id": job_id,
+                "vendor": "Cisco",
+                "profile": "N9K-C93180YC-FX",
+                "canonical_command": "show interface status",
+                "samples": [
+                    {
+                        "id": "sample-table",
+                        "sanitization_status": "sanitized",
+                        "sanitized_text": (
+                            "Port          Status       Vlan\n"
+                            "Eth1/1        connected    10\n"
+                            "Eth1/2        notconnect   20\n"
+                        ),
+                    }
+                ],
+            }
+
+    model_response = json.dumps(
+        {
+            "parser_spec": {
+                "entity": "interface",
+                "primary_keys": ["interface"],
+                "fields": {
+                    "interface": {
+                        "required": True,
+                        "type": "interface",
+                        "source_labels": ["Port"],
+                    },
+                    "status": {
+                        "required": True,
+                        "type": "string",
+                        "source_labels": ["Status"],
+                    },
+                    "vlan": {
+                        "required": True,
+                        "type": "string",
+                        "source_labels": ["Vlan"],
+                    },
+                },
+            },
+            "sample_plans": [
                 {
-                    "snapshot_id": "sample-production",
-                    "snapshot_source": "postgresql",
-                    "device_id": "device-1",
-                    "sanitization_status": "pending_sanitization",
+                    "sample_id": "sample-table",
+                    "target_section": "interface status table",
+                    "record_unit": "one interface row",
+                    "record_start": "interface name",
+                    "record_end": "end of physical row",
+                    "exclude_sections": ["table heading"],
+                    "ambiguities": [],
+                }
+            ],
+            "confidence": 0.6,
+            "rationale": "One row per interface.",
+        }
+    )
+    monkeypatch.setattr("spec_suggester.ParserJobRepository", Repository)
+    monkeypatch.setattr("spec_suggester.call_llm", lambda *_args, **_kwargs: model_response)
+
+    result = suggest_parser_spec({"job_id": "job-table", "suggestion_task_id": "task-table"})
+
+    sample = result["suggestion"]["sample_suggestions"][0]
+    assert "expectation" not in sample
+    assert sample["semantic_plan"]["record_unit"] == "one interface row"
+    assert sample["semantic_plan"]["exclude_sections"] == ["table heading"]
+    assert recorded[-1]["status"] == "ready"
+
+
+def test_spec_suggester_preserves_llm_scope_plan_for_summary_plus_table_layout(
+    monkeypatch,
+):
+    recorded: list[dict] = []
+    sample_text = """Domain id                        : 300
+Peer status                      : peer formed
+
+Member status
+-----------------------------------------------------------------------
+Id    Port          Status Consistency Reason       Active ranges
+--    ------------  ------ ----------- ------------ -------------
+400   Po400         up     success     success      1-20
+401   Po401         up     success     success      50
+
+402   Po402         up     success     success      60-70
+"""
+
+    class Repository:
+        def record_parser_spec_suggestion(self, job_id, **payload):
+            recorded.append({"job_id": job_id, **payload})
+
+        def get_job(self, job_id, **_kwargs):
+            return {
+                "id": job_id,
+                "vendor": "Generic",
+                "profile": "Switch",
+                "canonical_command": "inspect redundancy",
+                "samples": [
+                    {
+                        "id": "sample-summary-table",
+                        "sanitization_status": "sanitized",
+                        "sanitized_text": sample_text,
+                    }
+                ],
+            }
+
+    weak_response = json.dumps(
+        {
+            "parser_spec": {
+                "entity": "redundancy_member",
+                "primary_keys": ["member_id"],
+                "fields": {
+                    "member_id": {
+                        "required": True,
+                        "type": "number",
+                        "source_labels": ["Id"],
+                    },
+                    "port": {
+                        "required": True,
+                        "type": "interface",
+                        "source_labels": ["Port"],
+                    },
+                    "status": {
+                        "required": True,
+                        "type": "string",
+                        "source_labels": ["Status"],
+                    },
+                    "consistency": {
+                        "required": True,
+                        "type": "string",
+                        "source_labels": ["Consistency"],
+                    },
+                    "reason": {
+                        "required": True,
+                        "type": "string",
+                        "source_labels": ["Reason"],
+                    },
+                    "active_ranges": {
+                        "required": True,
+                        "type": "string",
+                        "source_labels": ["Active ranges"],
+                    },
+                    "domain_id": {
+                        "required": True,
+                        "type": "number",
+                        "source_labels": ["Domain id"],
+                    },
+                    "peer_status": {
+                        "required": True,
+                        "type": "string",
+                        "source_labels": ["Peer status"],
+                    },
+                },
+            },
+            "sample_plans": [
+                {
+                    "sample_id": "sample-summary-table",
+                    "target_section": "Member status",
+                    "record_unit": "one member row",
+                    "record_start": "numeric member id",
+                    "record_end": "end of member row",
+                    "exclude_sections": ["domain summary"],
+                    "ambiguities": [],
+                }
+            ],
+            "confidence": 0.7,
+            "rationale": "One record per member row.",
+        }
+    )
+    monkeypatch.setattr("spec_suggester.ParserJobRepository", Repository)
+    monkeypatch.setattr("spec_suggester.call_llm", lambda *_args, **_kwargs: weak_response)
+
+    result = suggest_parser_spec(
+        {"job_id": "job-summary-table", "suggestion_task_id": "task-summary-table"}
+    )
+
+    sample = result["suggestion"]["sample_suggestions"][0]
+    assert "expectation" not in sample
+    assert sample["semantic_plan"]["target_section"] == "Member status"
+    assert sample["semantic_plan"]["exclude_sections"] == ["domain summary"]
+    assert recorded[-1]["status"] == "ready"
+
+
+def test_spec_suggester_does_not_silently_rewrite_llm_contract_with_command_heuristics(
+    monkeypatch,
+):
+    recorded: list[dict] = []
+    sample_text = """Ethernet1/1
+    transceiver is not present
+
+Ethernet1/2
+    transceiver is present
+           SFP Detail Diagnostics Information (internal calibration)
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  Tx Power      -6.61 dBm       0.99 dBm  -13.56 dBm   -3.00 dBm     -9.50 dBm
+  Rx Power      -5.60 dBm       3.95 dBm  -21.54 dBm    0.00 dBm    -17.21 dBm
+
+Ethernet1/3
+    transceiver is present
+Lane Number:1 Network Lane
+           SFP Detail Diagnostics Information (internal calibration)
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  Tx Power      -2.94 dBm       1.99 dBm  -11.61 dBm   -1.00 dBm     -7.61 dBm
+  Rx Power      -2.02 dBm       3.39 dBm  -13.56 dBm    2.39 dBm     -9.50 dBm
+Lane Number:2 Network Lane
+           SFP Detail Diagnostics Information (internal calibration)
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+  Tx Power      -3.15 dBm       1.99 dBm  -11.61 dBm   -1.00 dBm     -7.61 dBm
+  Rx Power      -2.36 dBm       3.39 dBm  -13.56 dBm    2.39 dBm     -9.50 dBm
+"""
+
+    class Repository:
+        def record_parser_spec_suggestion(self, job_id, **payload):
+            recorded.append({"job_id": job_id, **payload})
+
+        def get_job(self, job_id, **_kwargs):
+            return {
+                "id": job_id,
+                "vendor": "Cisco",
+                "profile": "N9K",
+                "canonical_command": "show optics detail",
+                "samples": [
+                    {
+                        "id": "sample-optics",
+                        "sanitization_status": "sanitized",
+                        "sanitized_text": sample_text,
+                    }
+                ],
+            }
+
+    weak_response = json.dumps(
+        {
+            "parser_spec": {
+                "entity": "transceiver",
+                "primary_keys": ["interface"],
+                "fields": {
+                    "interface": {
+                        "required": True,
+                        "type": "interface",
+                        "source_labels": ["Ethernet1/1", "Ethernet1/2", "Ethernet1/3"],
+                    },
+                    "tx_power_dbm": {
+                        "required": False,
+                        "type": "number",
+                        "source_labels": ["Tx Power"],
+                    },
+                    "rx_power_dbm": {
+                        "required": False,
+                        "type": "number",
+                        "source_labels": ["Rx Power"],
+                    },
+                },
+            },
+            "sample_plans": [
+                {
+                    "sample_id": "sample-optics",
+                    "target_section": "transceiver diagnostics",
+                    "record_unit": "one interface block",
+                    "record_start": "interface heading",
+                    "record_end": "next interface heading",
+                    "exclude_sections": [],
+                    "ambiguities": ["lane data may require a composite key"],
                 }
             ],
         }
-        with patch("generate_templates.ParserJobRepository") as repository:
-            repository.return_value.get_job.return_value = job
-            with patch("generate_templates.PatrolRepository") as patrol_repository:
-                patrol_repository.return_value.get_snapshot_context.return_value = {
-                    "mode": "production",
-                    "snapshot": SimpleNamespace(snapshot_id="sample-production"),
-                }
-                with self.assertRaisesRegex(ValueError, "not sanitized"):
-                    _job_candidate({"job_id": "job-1"})
+    )
+    monkeypatch.setattr("spec_suggester.ParserJobRepository", Repository)
+    monkeypatch.setattr("spec_suggester.call_llm", lambda *_args, **_kwargs: weak_response)
+
+    result = suggest_parser_spec({"job_id": "job-optics", "suggestion_task_id": "task-optics"})
+
+    suggestion = result["suggestion"]
+    spec = suggestion["parser_spec"]
+    assert spec["primary_keys"] == ["interface"]
+    assert "channel" not in spec["fields"]
+    assert "rx_power_low_warning_dbm" not in spec["fields"]
+    assert suggestion["sample_suggestions"][0]["semantic_plan"]["ambiguities"] == [
+        "lane data may require a composite key"
+    ]
+    assert recorded[-1]["status"] == "ready"
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_nested_layout_prefers_child_repeated_inside_parent_block():
+    raw_text = """Ethernet1/1
+    transceiver is present
+    Note: calibrated values
+    Note: thresholds are module supplied
+    SFP Detail Diagnostics Information (internal calibration)
+Ethernet1/2
+    transceiver is present
+    Note: calibrated values
+Lane Number:1
+    Rx Power -2.10 dBm -1.00 dBm -15.00 dBm -2.00 dBm -13.00 dBm
+Lane Number:2
+    Rx Power -2.20 dBm -1.00 dBm -15.00 dBm -2.00 dBm -13.00 dBm
+"""
+
+    layout = _nested_record_layout(raw_text)
+
+    assert layout is not None
+    keys, labels = layout
+    assert keys == [
+        ("Ethernet1/1", "SFP"),
+        ("Ethernet1/2", "1"),
+        ("Ethernet1/2", "2"),
+    ]
+    assert "Lane Number:" in labels
+
+
+def test_structural_enrichment_does_not_duplicate_existing_grouped_thresholds():
+    spec = {
+        "entity": "measurement",
+        "primary_keys": ["interface"],
+        "fields": {
+            "interface": {
+                "required": True,
+                "type": "interface_name",
+                "source_labels": ["Ethernet1/1"],
+            },
+            "rx_power_current": {
+                "required": False,
+                "type": "number",
+                "source_labels": ["Rx Power"],
+            },
+            "rx_power_alarm_high": {
+                "required": False,
+                "type": "number",
+                "source_labels": ["Rx Power High Alarm"],
+            },
+            "rx_power_alarm_low": {
+                "required": False,
+                "type": "number",
+                "source_labels": ["Rx Power Low Alarm"],
+            },
+            "rx_power_warning_high": {
+                "required": False,
+                "type": "number",
+                "source_labels": ["Rx Power High Warning"],
+            },
+            "rx_power_warning_low": {
+                "required": False,
+                "type": "number",
+                "source_labels": ["Rx Power Low Warning"],
+            },
+            "rx_power_current_low_warning_dbm": {
+                "required": False,
+                "type": "number",
+                "source_labels": ["Rx Power/Warnings/Low"],
+            },
+        },
+        "allow_empty": False,
+        "empty_patterns": [],
+    }
+    sample = {
+        "sanitized_text": """Ethernet1/1
+    transceiver is present
+    SFP Detail Diagnostics Information (internal calibration)
+                Current              Alarms                  Warnings
+                Measurement     High        Low         High          Low
+    Rx Power    -2.10 dBm       -1.00 dBm   -15.00 dBm  -2.00 dBm   -13.00 dBm
+"""
+    }
+
+    enriched = _enrich_structural_spec(spec, [sample])
+
+    rx_fields = [name for name in enriched["fields"] if name.startswith("rx_power")]
+    assert sorted(rx_fields) == [
+        "rx_power_alarm_high",
+        "rx_power_alarm_low",
+        "rx_power_current",
+        "rx_power_warning_high",
+        "rx_power_warning_low",
+    ]

@@ -12,7 +12,7 @@ from pathlib import Path
 
 TEXTFSM_RUNTIME_VERSION = "2.1.0"
 DIALECT_VERSION = "textfsm-2.1.0-platform-v3"
-PROMPT_VERSION = "textfsm-writer-v4"
+PROMPT_VERSION = "textfsm-writer-v6"
 
 
 class TextFSMDialectError(RuntimeError):
@@ -76,13 +76,7 @@ def assert_textfsm_runtime(
 
 def _prompt_path() -> Path:
     src_root = Path(__file__).resolve().parents[2]
-    return (
-        src_root
-        / "skills"
-        / "textfsm-generator"
-        / "prompts"
-        / "textfsm-2.1.0.md"
-    )
+    return src_root / "skills" / "textfsm-generator" / "prompts" / "textfsm-2.1.0.md"
 
 
 def load_dialect_prompt(
@@ -111,10 +105,7 @@ def build_textfsm_system_prompt(
     profile: TextFSMDialectProfile = DEFAULT_TEXTFSM_DIALECT,
 ) -> str:
     assert_textfsm_runtime(profile)
-    return (
-        f"Dialect hash: {dialect_hash(profile)}\n"
-        f"{load_dialect_prompt(profile)}"
-    )
+    return f"Dialect hash: {dialect_hash(profile)}\n{load_dialect_prompt(profile)}"
 
 
 def _value_options(line: str) -> tuple[str, ...] | None:
@@ -142,9 +133,7 @@ def _lint_action(action: str) -> str | None:
         if re.fullmatch(r"[A-Za-z_]\w*", token):
             return None
         return f"unsupported TextFSM actions: {action!r}"
-    if len(tokens) == 2 and tokens[0] == "Record" and re.fullmatch(
-        r"[A-Za-z_]\w*", tokens[1]
-    ):
+    if len(tokens) == 2 and tokens[0] == "Record" and re.fullmatch(r"[A-Za-z_]\w*", tokens[1]):
         return None
     return f"unsupported TextFSM actions: {action!r}"
 
@@ -235,9 +224,7 @@ def lint_textfsm_template(
 
         textfsm.TextFSM(io.StringIO(template_text))
     except Exception as exc:
-        violations.append(
-            DialectViolation("template_syntax_error", f"compile failed: {exc}")
-        )
+        violations.append(DialectViolation("template_syntax_error", f"compile failed: {exc}"))
 
     unique: dict[tuple[object, ...], DialectViolation] = {}
     for item in violations:

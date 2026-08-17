@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -11,6 +12,7 @@ from sqlalchemy import or_, text
 from src.core.observation.contracts import (
     ObservationContract,
     build_contract_payload,
+    observation_contract_digest,
 )
 from src.infrastructure.db.models import ObservationContractRecord, ParserTemplate
 from src.infrastructure.db.postgres import get_db_session
@@ -18,6 +20,81 @@ from src.infrastructure.db.postgres import get_db_session
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _state_identity(
+    *,
+    entity_type: str | None,
+    primary_keys: Any,
+    canonical_entity_type: str | None = None,
+    entity_identity_fields: Any = None,
+    entity_dimensions: Any = None,
+    record_sets: Any = None,
+) -> tuple[Any, ...]:
+    def identity(
+        item: dict[str, Any],
+        *,
+        name: str,
+        fallback_entity_type: str | None,
+        fallback_primary_keys: Any,
+    ) -> tuple[Any, ...]:
+        source_entity_type = str(item.get("entity_type") or fallback_entity_type or "record")
+        source_primary_keys = tuple(
+            str(key)
+            for key in (
+                item.get("primary_keys") if "primary_keys" in item else fallback_primary_keys
+            )
+            or ()
+        )
+        canonical_type = str(
+            item.get("canonical_entity_type") or canonical_entity_type or source_entity_type
+        )
+        identity_fields = tuple(
+            str(key)
+            for key in (
+                item.get("entity_identity_fields")
+                if "entity_identity_fields" in item
+                else entity_identity_fields
+            )
+            or source_primary_keys
+        )
+        dimensions = (
+            item.get("entity_dimensions") if "entity_dimensions" in item else entity_dimensions
+        ) or {}
+        return (
+            name,
+            source_entity_type,
+            source_primary_keys,
+            canonical_type,
+            identity_fields,
+            json.dumps(
+                dimensions,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ),
+        )
+
+    normalized_sets = [dict(item) for item in record_sets or () if isinstance(item, dict)]
+    if normalized_sets:
+        return tuple(
+            identity(
+                item,
+                name=str(item.get("name") or item.get("entity_type") or ""),
+                fallback_entity_type=entity_type,
+                fallback_primary_keys=primary_keys,
+            )
+            for item in normalized_sets
+        )
+    return (
+        identity(
+            {},
+            name="default",
+            fallback_entity_type=entity_type,
+            fallback_primary_keys=primary_keys,
+        ),
+    )
 
 
 def _row_to_contract(row: ObservationContractRecord) -> ObservationContract:
@@ -30,12 +107,23 @@ def _row_to_contract(row: ObservationContractRecord) -> ObservationContract:
         entity_type=row.entity_type,
         primary_keys=tuple(row.primary_keys_json or ()),
         required_fields=tuple(row.required_fields_json or ()),
+        canonical_entity_type=row.canonical_entity_type,
+        entity_identity_fields=tuple(row.entity_identity_fields_json or ()),
+        entity_dimensions=dict(row.entity_dimensions_json or {}),
         optional_fields=tuple(row.optional_fields_json or ()),
         validators=dict(row.validators_json or {}),
         ignore_fields=tuple(row.ignore_fields_json or ()),
         allow_empty=bool(row.allow_empty),
         empty_patterns=tuple(row.empty_patterns_json or ()),
         state_semantics=dict(row.state_semantics_json or {}),
+        record_sets=tuple(
+            dict(item) for item in row.record_sets_json or () if isinstance(item, dict)
+        ),
+        record_set_relations=tuple(
+            dict(item)
+            for item in row.record_set_relations_json or ()
+            if isinstance(item, dict)
+        ),
         version=int(row.version or 1),
         contract_sha256=row.contract_sha256,
         status=row.status,
@@ -43,8 +131,58 @@ def _row_to_contract(row: ObservationContractRecord) -> ObservationContract:
     )
 
 
+def _current_semantic_digest_from_row(row: ObservationContractRecord) -> str:
+    """Rehash persisted semantics with the current digest schema.
+
+    Contract digest schemas can gain optional semantic fields over time. Existing
+    immutable rows retain their original digest, so equality must also compare
+    their persisted meaning after applying today's empty-value normalization.
+    """
+
+    return observation_contract_digest(
+        {
+            "source_type": row.source_type,
+            "schema_id": row.schema_id,
+            "entity_type": row.entity_type,
+            "primary_keys": tuple(row.primary_keys_json or ()),
+            "canonical_entity_type": row.canonical_entity_type,
+            "entity_identity_fields": tuple(row.entity_identity_fields_json or ()),
+            "entity_dimensions": dict(row.entity_dimensions_json or {}),
+            "required_fields": tuple(row.required_fields_json or ()),
+            "optional_fields": tuple(row.optional_fields_json or ()),
+            "validators": dict(row.validators_json or {}),
+            "ignore_fields": tuple(row.ignore_fields_json or ()),
+            "allow_empty": bool(row.allow_empty),
+            "empty_patterns": tuple(row.empty_patterns_json or ()),
+            "state_semantics": dict(row.state_semantics_json or {}),
+            "record_sets": tuple(
+                dict(item)
+                for item in row.record_sets_json or ()
+                if isinstance(item, dict)
+            ),
+            "record_set_relations": tuple(
+                dict(item)
+                for item in row.record_set_relations_json or ()
+                if isinstance(item, dict)
+            ),
+        }
+    )
+
+
+def _row_semantically_matches_payload(
+    row: ObservationContractRecord,
+    payload: dict[str, Any],
+) -> bool:
+    return _current_semantic_digest_from_row(row) == payload["contract_sha256"]
+
+
 class ObservationContractRepository:
     """Persist and resolve source-agnostic observation contracts."""
+
+    def get_by_id(self, contract_id: str) -> ObservationContract | None:
+        with get_db_session() as db:
+            row = db.get(ObservationContractRecord, str(contract_id))
+            return _row_to_contract(row) if row else None
 
     def upsert_contract(
         self,
@@ -114,14 +252,29 @@ class ObservationContractRepository:
                 .filter(
                     ObservationContractRecord.source_type == source_type,
                     ObservationContractRecord.schema_id == schema_id,
-                    ObservationContractRecord.contract_sha256
-                    == probe["contract_sha256"],
+                    ObservationContractRecord.contract_sha256 == probe["contract_sha256"],
                 )
                 .order_by(ObservationContractRecord.version.desc())
                 .first()
             )
             if existing is not None:
                 return _row_to_contract(existing)
+            legacy_equivalent = next(
+                (
+                    row
+                    for row in db.query(ObservationContractRecord)
+                    .filter(
+                        ObservationContractRecord.source_type == source_type,
+                        ObservationContractRecord.schema_id == schema_id,
+                    )
+                    .order_by(ObservationContractRecord.version.desc())
+                    .all()
+                    if _row_semantically_matches_payload(row, probe)
+                ),
+                None,
+            )
+            if legacy_equivalent is not None:
+                return _row_to_contract(legacy_equivalent)
             latest = (
                 db.query(ObservationContractRecord.version)
                 .filter(
@@ -192,7 +345,10 @@ class ObservationContractRepository:
                 created_at=now,
             )
             db.add(row)
-        elif row.contract_sha256 != payload["contract_sha256"]:
+        elif (
+            row.contract_sha256 != payload["contract_sha256"]
+            and not _row_semantically_matches_payload(row, payload)
+        ):
             raise ValueError(
                 "observation contract version is immutable; create a new version "
                 f"for {payload['source_type']}:{payload['schema_id']} "
@@ -230,6 +386,9 @@ class ObservationContractRepository:
         if row.entity_type is None:
             row.entity_type = payload["entity_type"]
             row.primary_keys_json = list(payload["primary_keys"])
+            row.canonical_entity_type = payload["canonical_entity_type"]
+            row.entity_identity_fields_json = list(payload["entity_identity_fields"])
+            row.entity_dimensions_json = dict(payload["entity_dimensions"])
             row.required_fields_json = list(payload["required_fields"])
             row.optional_fields_json = list(payload["optional_fields"])
             row.validators_json = payload["validators"]
@@ -237,6 +396,10 @@ class ObservationContractRepository:
             row.allow_empty = bool(payload["allow_empty"])
             row.empty_patterns_json = list(payload["empty_patterns"])
             row.state_semantics_json = payload["state_semantics"]
+            row.record_sets_json = [dict(item) for item in payload["record_sets"]]
+            row.record_set_relations_json = [
+                dict(item) for item in payload["record_set_relations"]
+            ]
             row.contract_sha256 = payload["contract_sha256"]
         row.status = payload["status"]
         row.updated_at = now
@@ -258,6 +421,27 @@ class ObservationContractRepository:
                 template,
                 status=status,
             )
+
+    def deprecate_from_parser_template_row(
+        self,
+        db,
+        template_id: str,
+    ) -> int:
+        """Retire existing derived contracts without rebuilding immutable content."""
+
+        now = _utcnow()
+        rows = (
+            db.query(ObservationContractRecord)
+            .filter(ObservationContractRecord.source_template_id == template_id)
+            .with_for_update()
+            .all()
+        )
+        for row in rows:
+            row.status = "deprecated"
+            row.deprecated_at = row.deprecated_at or now
+            row.updated_at = now
+        db.flush()
+        return len(rows)
 
     def upsert_from_parser_template_row(
         self,
@@ -285,12 +469,23 @@ class ObservationContractRepository:
             .order_by(ObservationContractRecord.version.desc())
             .first()
         )
-        next_identity = (
-            str(validation.get("entity_type") or template.category or "record"),
-            tuple(validation.get("primary_keys") or ()),
+        next_identity = _state_identity(
+            entity_type=str(validation.get("entity_type") or template.category or "record"),
+            primary_keys=validation.get("primary_keys"),
+            canonical_entity_type=validation.get("canonical_entity_type"),
+            entity_identity_fields=validation.get("entity_identity_fields"),
+            entity_dimensions=validation.get("entity_dimensions"),
+            record_sets=validation.get("record_sets"),
         )
         previous_identity = (
-            (str(previous.entity_type), tuple(previous.primary_keys_json or ()))
+            _state_identity(
+                entity_type=previous.entity_type,
+                primary_keys=previous.primary_keys_json,
+                canonical_entity_type=previous.canonical_entity_type,
+                entity_identity_fields=previous.entity_identity_fields_json,
+                entity_dimensions=previous.entity_dimensions_json,
+                record_sets=previous.record_sets_json,
+            )
             if previous is not None
             else None
         )

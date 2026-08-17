@@ -94,10 +94,33 @@ def _asset_states(children: dict[str, object]):
     }
 
 
+def _context_meta(
+    *,
+    offline_job_id: str = "offline-q2-q3",
+    dataset_ids: list[str] | None = None,
+):
+    return {
+        "context-1": {
+            "record": SimpleNamespace(
+                offline_job_id=offline_job_id,
+                dataset_ids_json=dataset_ids or ["dataset-q2", "dataset-q3"],
+                context_digest="context-digest-1",
+            ),
+            "offline_job_ids": [offline_job_id],
+            "source_integrity": {
+                "success": True,
+                "context_id": "context-1",
+                "context_digest": "context-digest-1",
+            },
+        }
+    }
+
+
 def test_bundle_read_model_blocks_stale_report_when_children_are_missing():
     result = RuleAssetBundleService._serialize(
         _bundle_row(["contract", "policy", "rule"]),
         {},
+        context_by_id=_context_meta(),
     )
 
     assert result["release_ready"] is False
@@ -116,6 +139,7 @@ def test_bundle_read_model_marks_current_complete_bundle_release_ready():
         _bundle_row(list(children)),
         children,
         _asset_states(children),
+        _context_meta(),
     )
 
     assert result["release_ready"] is True
@@ -141,6 +165,11 @@ def test_bundle_read_model_marks_current_complete_bundle_release_ready():
             "candidate_record_count": 548,
             "sampled_record_count": 354,
         },
+        "source_integrity": {
+            "success": True,
+            "context_id": "context-1",
+            "context_digest": "context-digest-1",
+        },
     }
     assert result["replay"]["event_types"] == {
         "transceiver_rx_power_low": 4,
@@ -162,6 +191,7 @@ def test_bundle_read_model_exposes_immutable_offline_context_scope():
     context = SimpleNamespace(
         offline_job_id="offline-q2-q3",
         dataset_ids_json=["dataset-q2", "dataset-q3"],
+        context_digest="context-digest-1",
     )
 
     result = RuleAssetBundleService._serialize(
@@ -172,6 +202,11 @@ def test_bundle_read_model_exposes_immutable_offline_context_scope():
             "context-1": {
                 "record": context,
                 "offline_job_ids": ["offline-q2-q3"],
+                "source_integrity": {
+                    "success": True,
+                    "context_id": "context-1",
+                    "context_digest": "context-digest-1",
+                },
             }
         },
     )
@@ -198,6 +233,7 @@ def test_bundle_read_model_blocks_when_persisted_asset_is_missing():
         _bundle_row(list(children)),
         children,
         states,
+        _context_meta(),
     )
 
     assert result["release_ready"] is False
@@ -221,6 +257,7 @@ def test_bundle_read_model_blocks_replay_from_another_context():
         row,
         children,
         _asset_states(children),
+        _context_meta(),
     )
 
     assert result["release_ready"] is False
@@ -241,8 +278,133 @@ def test_bundle_read_model_requires_engineering_review_before_release():
         row,
         children,
         _asset_states(children),
+        _context_meta(),
     )
 
     assert result["release_ready"] is False
     assert "engineering review has not accepted the generated candidates" in result["blockers"]
     assert next(step for step in result["steps"] if step["key"] == "review")["status"] == "ready"
+
+
+def test_bundle_read_model_blocks_successful_but_empty_historical_replay():
+    children = {
+        "contract": _child("contract", "OBSERVATION_CONTRACT"),
+        "policy": _child("policy", "CHANGE_POLICY"),
+        "rule": _child("rule", "EVENT_RULE"),
+    }
+    row = _bundle_row(list(children))
+    row.validation_report_json["historical_replay"].update(
+        sampled_change_count=0,
+        total_change_count=0,
+        matched_change_count=0,
+        scope={
+            "mode": "run_ids",
+            "run_ids": ["run-a"],
+            "run_id_count": 1,
+            "sampled_run_ids": [],
+            "sampled_run_id_count": 0,
+            "missing_run_ids": ["run-a"],
+        },
+    )
+
+    result = RuleAssetBundleService._serialize(
+        row,
+        children,
+        _asset_states(children),
+        _context_meta(),
+    )
+
+    assert result["release_ready"] is False
+    assert result["replay_gate"]["evidence_success"] is False
+    assert "historical replay contains no Change evidence" in result["blockers"]
+    assert next(step for step in result["steps"] if step["key"] == "replay")["status"] == "blocked"
+
+
+def test_bundle_read_model_accepts_contract_only_evidence_profile():
+    requirements = {
+        "schema_version": "rule-asset-requirements/v1",
+        "requires_observation_contract": True,
+        "requires_change_policy": False,
+        "requires_current_state_rule": False,
+        "requires_event_rule": False,
+        "requires_event_rule_assets": False,
+        "requires_historical_replay": False,
+    }
+    children = {
+        "contract": _child("contract", "OBSERVATION_CONTRACT"),
+    }
+    row = _bundle_row(list(children))
+    row.payload_json["asset_requirements"] = requirements
+    row.validation_report_json["bundle_gate"].update(
+        asset_requirements=requirements,
+        asset_counts={"OBSERVATION_CONTRACT": 1},
+    )
+    row.validation_report_json["historical_replay"] = None
+    states = _asset_states(children)
+    states["contract"]["observation_types"] = ["interface.ip.address"]
+
+    result = RuleAssetBundleService._serialize(
+        row,
+        children,
+        states,
+        _context_meta(dataset_ids=["dataset-q1"]),
+    )
+
+    assert result["release_ready"] is True
+    assert result["observation_type"] == "interface.ip.address"
+    assert result["observation_types"] == ["interface.ip.address"]
+    assert result["semantic_label"] == "interface.ip.address"
+    assert result["replay_gate"]["skipped"] is True
+    assert next(step for step in result["steps"] if step["key"] == "policy")[
+        "status"
+    ] == "skipped"
+    assert next(step for step in result["steps"] if step["key"] == "rules")[
+        "status"
+    ] == "skipped"
+
+
+def test_bundle_read_model_requires_current_state_coverage_per_observation():
+    requirements = {
+        "schema_version": "rule-asset-requirements/v1",
+        "requires_observation_contract": True,
+        "requires_change_policy": False,
+        "requires_current_state_rule": True,
+        "requires_event_rule": False,
+        "requires_event_rule_assets": True,
+        "requires_historical_replay": False,
+        "current_state_observation_types": ["interface.oper_status"],
+    }
+    children = {
+        "contract": _child("contract", "OBSERVATION_CONTRACT"),
+        "rule": _child("rule", "EVENT_RULE"),
+    }
+    row = _bundle_row(list(children))
+    row.payload_json["asset_requirements"] = requirements
+    row.validation_report_json["bundle_gate"].update(
+        asset_requirements=requirements,
+        asset_counts={
+            "OBSERVATION_CONTRACT": 1,
+            "EVENT_RULE": 1,
+        },
+    )
+    row.validation_report_json["historical_replay"] = None
+    states = _asset_states(children)
+    states["rule"].update(
+        evaluation_scope="current_state",
+        event_class="fault",
+        event_type="InterfaceDown",
+        observation_types=["device.cpu.utilization"],
+    )
+
+    result = RuleAssetBundleService._serialize(
+        row,
+        children,
+        states,
+        _context_meta(dataset_ids=["dataset-q1"]),
+    )
+
+    assert result["release_ready"] is False
+    assert (
+        "bundle requires current-state rule coverage for interface.oper_status"
+        in result["blockers"]
+    )

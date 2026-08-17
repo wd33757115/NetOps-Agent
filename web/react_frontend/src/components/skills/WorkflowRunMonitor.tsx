@@ -6,6 +6,7 @@ import { Alert, Card, Collapse, Descriptions, List, Space, Spin, Steps, Tag, Typ
 import { LinkOutlined } from '@ant-design/icons'
 import { useQuery } from 'react-query'
 import { workflowApi, WorkflowTimelineEvent } from '../../services/api'
+import { openAuthenticatedEventStream } from '../../services/authenticatedSse'
 import { GrokChip } from '../ui/GrokUi'
 
 const { Text } = Typography
@@ -15,6 +16,7 @@ interface WorkflowRunMonitorProps {
   onClose?: () => void
   embedded?: boolean
   plain?: boolean
+  subjectLabel?: string
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -26,6 +28,12 @@ const STATUS_COLOR: Record<string, string> = {
 
 function hasArtifacts(value?: Record<string, unknown> | null) {
   return !!value && Object.keys(value).length > 0
+}
+
+function formatTimestamp(value?: string | null) {
+  if (!value) return '-'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
 }
 
 type ArtifactMeta = {
@@ -114,15 +122,24 @@ const patrolStepMeta: Record<string, { label: string; description: string }> = {
 const displayStatus = (status?: string | null) => {
   const labels: Record<string, string> = {
     pending: '等待中', queued: '排队中', running: '运行中', completed: '完成', failed: '失败',
+    cancelled: '已取消',
   }
   return labels[String(status || '')] || status || '-'
 }
 
-const WorkflowRunMonitor: React.FC<WorkflowRunMonitorProps> = ({ runId, onClose, embedded, plain }) => {
+const WorkflowRunMonitor: React.FC<WorkflowRunMonitorProps> = ({
+  runId,
+  onClose,
+  embedded,
+  plain,
+  subjectLabel = '设备执行',
+}) => {
   const [liveEvents, setLiveEvents] = useState<WorkflowTimelineEvent[]>([])
+  const [liveStreamUnavailable, setLiveStreamUnavailable] = useState(false)
 
   useEffect(() => {
     setLiveEvents([])
+    setLiveStreamUnavailable(false)
   }, [runId])
 
   const { data: run, isLoading, refetch } = useQuery(
@@ -171,7 +188,7 @@ const WorkflowRunMonitor: React.FC<WorkflowRunMonitorProps> = ({ runId, onClose,
 
   useEffect(() => {
     if (!runId || !runStatus) return undefined
-    if (runStatus === 'completed' || runStatus === 'failed') return undefined
+    if (['completed', 'failed', 'cancelled'].includes(runStatus)) return undefined
 
     const timer = window.setInterval(() => {
       refetch()
@@ -181,30 +198,29 @@ const WorkflowRunMonitor: React.FC<WorkflowRunMonitorProps> = ({ runId, onClose,
 
   useEffect(() => {
     if (!runId || !runStatus) return undefined
-    if (runStatus === 'completed' || runStatus === 'failed') return undefined
+    if (['completed', 'failed', 'cancelled'].includes(runStatus)) return undefined
 
     const url = workflowApi.getRunEventsStreamUrl(runId)
-    const es = new EventSource(url, { withCredentials: true })
-
-    const onTimeline = (e: MessageEvent) => {
-      try {
-        const payload = JSON.parse(e.data) as WorkflowTimelineEvent
-        setLiveEvents((prev) => [...prev, payload])
-      } catch {
-        /* ignore */
-      }
-    }
-    const onDone = () => {
-      refetch()
-      es.close()
-    }
-
-    es.addEventListener('timeline', onTimeline)
-    es.addEventListener('progress', onTimeline)
-    es.addEventListener('done', onDone)
-    es.onerror = () => es.close()
-
-    return () => es.close()
+    let close = () => {}
+    close = openAuthenticatedEventStream(url, {
+      onOpen: () => setLiveStreamUnavailable(false),
+      onEvent: (event) => {
+        if (event.event === 'done') {
+          refetch()
+          close()
+          return
+        }
+        if (!['timeline', 'progress', 'message'].includes(event.event)) return
+        try {
+          const payload = JSON.parse(event.data) as WorkflowTimelineEvent
+          setLiveEvents((prev) => [...prev, payload])
+        } catch {
+          /* ignore malformed SSE */
+        }
+      },
+      onError: () => setLiveStreamUnavailable(true),
+    })
+    return close
   }, [runId, runStatus, refetch])
 
   if (!runId) return null
@@ -215,13 +231,24 @@ const WorkflowRunMonitor: React.FC<WorkflowRunMonitorProps> = ({ runId, onClose,
         <Spin />
       ) : run ? (
         <>
-          <Alert
-            type={run.status === 'failed' ? 'error' : run.status === 'completed' ? 'success' : 'info'}
-            showIcon
-            message={`设备执行${displayStatus(run.status)}`}
-            description="步骤轨道展示完整处理流程；事件日志按实际时间记录每一步的开始、完成和错误。"
-            style={{ marginBottom: 12 }}
-          />
+          {(!plain || run.status === 'failed') && (
+            <Alert
+              type={run.status === 'failed' ? 'error' : run.status === 'completed' ? 'success' : 'info'}
+              showIcon
+              message={`${subjectLabel}${displayStatus(run.status)}`}
+              description="步骤轨道展示完整处理流程；事件日志按实际时间记录每一步的开始、完成和错误。"
+              style={{ marginBottom: 12 }}
+            />
+          )}
+          {liveStreamUnavailable && (
+            <Alert
+              type="warning"
+              showIcon
+              message="实时日志流暂不可用"
+              description="运行状态仍按 2.5 秒轮询刷新，错误详情可能延迟显示。"
+              style={{ marginBottom: 12 }}
+            />
+          )}
           <div className="grok-chip-row" style={{ marginBottom: 8 }}>
             <GrokChip tone={run.status === 'completed' ? 'ok' : run.status === 'failed' ? 'warn' : undefined}>
               {displayStatus(run.status)}
@@ -235,8 +262,8 @@ const WorkflowRunMonitor: React.FC<WorkflowRunMonitorProps> = ({ runId, onClose,
             )}
           </div>
           <Descriptions size="small" bordered column={2} style={{ marginTop: 10 }}>
-            <Descriptions.Item label="开始时间">{run.created_at || '-'}</Descriptions.Item>
-            <Descriptions.Item label="完成时间">{run.completed_at || '-'}</Descriptions.Item>
+            <Descriptions.Item label="开始时间">{formatTimestamp(run.created_at)}</Descriptions.Item>
+            <Descriptions.Item label="完成时间">{formatTimestamp(run.completed_at)}</Descriptions.Item>
             <Descriptions.Item label="总耗时">{durationText(run.created_at, run.completed_at)}</Descriptions.Item>
             <Descriptions.Item label="执行编号">
               <Text copyable={{ text: run.run_id }} code>{run.run_id}</Text>

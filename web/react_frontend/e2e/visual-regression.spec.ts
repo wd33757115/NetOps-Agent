@@ -306,6 +306,34 @@ async function installAuthenticatedApi(page: Page) {
         },
       })
     }
+    if (path.endsWith('/parser/check-items/')) {
+      return route.fulfill({
+        json: { items: [], total: 0, limit: 25, offset: 0 },
+      })
+    }
+    if (path.endsWith('/parser/check-item-runtime-bundles/health/')) {
+      return route.fulfill({
+        json: {
+          items: [],
+          page: 1,
+          page_size: 25,
+          total: 0,
+          page_count: 0,
+          summary: {
+            scope: 'active_catalog',
+            catalog_version: 1,
+            check_item_count: 0,
+            implementation_pair_count: 0,
+            ready_count: 0,
+            missing_count: 0,
+            invalid_count: 0,
+            ready_rate: 0,
+            ready: true,
+            status_counts: {},
+          },
+        },
+      })
+    }
     if (path.endsWith('/parser/dispatch-control/')) {
       return route.fulfill({ json: { auto_dispatch_enabled: false } })
     }
@@ -352,7 +380,9 @@ test('devices visual baseline', async ({ page }) => {
 test('parser control plane visual baseline', async ({ page }) => {
   await installAuthenticatedApi(page)
   await page.goto('/skills/parser')
-  await expect(page.getByRole('tab', { name: /今日待办/ })).toBeVisible()
+  await expect(page.getByText('巡检规则资产', { exact: true }).first()).toBeVisible()
+  await expect(page.getByRole('button', { name: '生产工作台', exact: true }))
+    .toHaveAttribute('aria-current', 'page')
   await settle(page)
   await expect(page).toHaveScreenshot('parser-control-plane.png')
 })

@@ -1,120 +1,158 @@
 <!-- SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com> -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Patrol Change Event Pipeline
+# 巡检状态、变化与事件运行指南
 
-## 目标
+## 1. 文档定位
 
-把巡检能力从“生成报告”演进为：
+本文说明生产巡检执行线中，原始命令输出如何形成状态、变化、事件、风险和报告事实。平台当前以
+PostgreSQL 为权威数据面；Redis Stream 只承担可选事件分发，MinIO 承担受权限控制的原始输出与报告
+制品存储。历史 SQLite 参数和 `patrol.db` 不再是运行时合同。
 
-```text
-CLI 原始输出
-  -> Command Block
-  -> Snapshot
-  -> Change
-  -> Network Event
-```
+最高层业务身份是检查项，例如 `system.cpu_usage`、`interface.oper_status` 和
+`interface.optical_power`。命令、Parser 和厂商字段只是某类设备上的采集实现。
 
-当前 MVP 支持 H3C Comware `<device>display ...` 与 Cisco IOS
-`device#show ...` 两类离线巡检文件。
-
-## 数据层次
-
-### Snapshot
-
-`netops_device_snapshots` 保存一次巡检中每条命令的状态：
-
-- 原始 CLI 输出及 SHA-256
-- 可选结构化 JSON
-- 设备、命令、厂商、型号、采集时间
-- parser 名称、版本和解析状态
-
-原始输出必须保留，以便 TextFSM 模板升级后重新解析。
-
-### Change
-
-`netops_network_changes` 保存两次快照之间的字段级变化。
-
-结构化快照按 `primary_keys` 匹配实体并比较字段；未结构化快照仅生成
-`raw_text_hash` 变化，置信度为 `0.5`。
-
-### Event
-
-`netops_network_events` 保存具有运维意义的变化。当前内置规则：
-
-- CPU 达到 90%：`CPUHigh`
-- 接口 up -> down：`InterfaceDown`
-- 接口 down -> up：`InterfaceUp`
-- BGP Established -> 非 Established：`BGPNeighborLost`
-- BGP 恢复 Established：`BGPNeighborEstablished`
-- 配置类命令原始输出变化：`ConfigChanged`
-
-事件可选发布到 Redis Stream `netops:network.events.v1`。
-
-## Skill
-
-### patrol-raw-ingestor
-
-```json
-{
-  "file_path": "E:/patrol/SW1-10.0.0.1_2025-12-24_10-00-00.log",
-  "db_path": "src/skills/shared/databases/patrol.db",
-  "vendor": "Cisco",
-  "model": "C2960X"
-}
-```
-
-### change-detector
-
-直接比较 JSON：
-
-```json
-{
-  "previous_snapshot": [{"interface": "Gi1/0/1", "status": "up"}],
-  "current_snapshot": [{"interface": "Gi1/0/1", "status": "down"}],
-  "entity_type": "interface",
-  "primary_keys": ["interface"]
-}
-```
-
-也可使用 `previous_snapshot_id/current_snapshot_id` 或
-`previous_run_id/current_run_id` 从 SQLite 读取。
-
-### event-builder
-
-```json
-{
-  "changes": [
-    {
-      "change_id": "change-1",
-      "device_id": "SW1",
-      "entity_type": "interface",
-      "entity_key": "Gi1/0/1",
-      "field": "status",
-      "old": "up",
-      "new": "down",
-      "change_type": "modified"
-    }
-  ]
-}
-```
-
-传入 `db_path` 时可持久化事件；设置 `publish=true` 时尝试发布 Redis
-Stream，Redis 不可用不会影响 SQLite 结果。
-
-## 下一阶段
-
-当前已提供 `patrol-change-event` Workflow：
+## 2. 权威链路
 
 ```text
-device-patrol -> change-detector -> event-builder
+目标设备 × 检查项
+  -> 冻结执行计划与 RuntimeBundle
+  -> 采集原始 CLI 并保存 CommandSnapshot
+  -> EvidenceQualification / CoverageDecision
+  -> Parser Runtime
+  -> StateObservation
+  -> CurrentStateRule / Finding
+  -> ChangePolicy / Change
+  -> EventRule / NetworkEvent / EventOccurrence
+  -> RiskCase / CheckAssessment
+  -> ReportManifest / 报告与证据链
 ```
 
-三个 Skill 保持独立，Workflow 负责参数传递。普通 `device-patrol` 只写 Snapshot，
-不会自行生成 Change 或 Event。
+关键边界：
 
-后续工作：
+- 原始 CLI 先落证据，再进行解析；Parser 升级后可以基于不可变 Snapshot 回放。
+- Parser、ObservationContract、CurrentStateRule、ChangePolicy 和 EventRule 必须来自同一个冻结
+  RuntimeBundle，运行中不得临时改用另一版资产。
+- Change 是事实差异，Event 是规则命中的运维语义，RiskCase 是跨批次持续跟踪对象；三者不能互相
+  替代。
+- `event_count=0` 只表示没有形成事件，不能单独证明设备健康。
+- 每个未形成事件的 Change 都必须保存 `no_event` 分类原因。
+- 采集、身份、Parser、覆盖或规则证据不足时，Assessment 必须是“无法判断”或“不适用”，不能静默
+  省略，更不能计入健康。
 
-1. TextFSM Parser Profile 提供 `entity_type`、`primary_keys` 和字段语义。
-2. 将 SQLite MVP 模型迁移或双写到 PostgreSQL。
-3. 增加事件查询 API 和事件时间线页面。
+## 3. 两条执行路径
+
+### 3.1 在线巡检
+
+`src/workflows/network/patrol-change-event/WORKFLOW.yaml` 的实际步骤为：
+
+```text
+device-patrol
+  -> state-normalizer
+  -> change-detector
+  -> event-builder
+```
+
+调用上下文示例：
+
+```json
+{
+  "filter_params": {"group": "生产环境"},
+  "execution_plan_id": "approved-plan-version-id",
+  "ticket_id": "PATROL-20260730",
+  "mode": "production",
+  "publish_events": false
+}
+```
+
+`publish_events` 默认必须为 `false`。只有业务确认需要进入正式事件流，且当前 RuntimeBundle 与报告
+用途允许时，才可显式启用发布。
+
+### 3.2 双周期历史离线对比
+
+`src/workflows/network/patrol-history-change-event/WORKFLOW.yaml` 的实际步骤为：
+
+```text
+执行前质量门禁
+  -> 导入 baseline
+  -> baseline 状态标准化
+  -> 导入 current
+  -> current 状态标准化
+  -> Change 检测
+  -> Event 构建
+  -> 历史报告生成
+```
+
+两个周期必须提供真实采集时间，且 baseline 早于 current。历史离线标准化使用
+`update_current_state=false`，默认 `publish_events=false`；因此历史样本不会覆盖当前状态，也不会被
+包装成当前网络健康结论。
+
+## 4. 结构化与非结构化命令
+
+### 4.1 结构化路径
+
+适用于 CPU、内存、接口状态、光功率等需要跨厂商统一字段的检查项：
+
+```text
+Snapshot
+  -> Parser
+  -> canonical observation_type
+  -> ChangePolicy
+  -> EventRule
+```
+
+不同厂商命令可以不同，但映射到同一 canonical observation 后，报告使用同一列名和语义。
+
+### 4.2 原文变化路径
+
+运行配置、启动配置和部分诊断输出可以在命令策略中声明 `raw_hash_diff`。这类输出：
+
+- 保存原始输出摘要和版本化差异；
+- 可以形成 `raw_text_hash` Change；
+- 默认不自动提升为故障事件；
+- 只有经过审批、作用域明确的规则才能把特定原文变化升级为 Event。
+
+### 4.3 空输出与设备错误
+
+平台必须区分：
+
+- 命令合法但当前没有业务记录；
+- 设备/型号不支持该命令；
+- 权限不足、超时、截断或命令错误；
+- Parser 缺失或解析失败。
+
+这些状态分别进入 EvidenceQualification、CoverageDecision 和 Assessment，不得统一归为“无异常”。
+
+## 5. 持久化与幂等
+
+- Snapshot 通过内容 fingerprint 幂等写入 PostgreSQL，重复投递不得产生重复事实。
+- Change、Event、EventOccurrence 和 RiskCase 使用稳定幂等键与来源引用。
+- Worker 重投递必须创建新 attempt，并由 Redis fencing token 阻止旧 owner 继续写入。
+- Redis 分发失败不能回滚已经提交的 PostgreSQL 事件事实；Outbox 负责可靠重试。
+- 报告只读取冻结的 ReportManifest，迟到事实需要生成新版本，不能改写已签发制品。
+
+## 6. 运行排错顺序
+
+按事实层逐级检查，不要只看 Workflow 是否完成：
+
+1. 目标设备与检查项是否进入冻结计划。
+2. CommandSnapshot 是否存在，采集状态和原始摘要是否可信。
+3. Parser 是否为冻结版本，`parse_status` 是否成功。
+4. 是否形成预期 StateObservation，实体键和单位是否正确。
+5. ChangePolicy 是否允许比较，基线是否兼容。
+6. Change 是否形成；未形成时查看比较与覆盖原因。
+7. EventRule 是否命中；未命中时查看 `no_event` 原因。
+8. RiskCase、Assessment 和报告数字是否与上述事实一致。
+
+## 7. 验证命令
+
+```powershell
+venv\Scripts\python.exe -m pytest tests\unit\test_patrol_change_event_pipeline.py tests\unit\test_patrol_failure_semantics.py -q
+venv\Scripts\python.exe -m pytest tests\integration\test_patrol_runtime_fault_injection.py -q
+venv\Scripts\python.exe scripts\test\check_item_golden_runtime_replay.py
+```
+
+总体产品合同、资产治理和报告权限以
+[检查项中心巡检平台改造方案](./check-item-command-adapter-simplification-remediation-2026-08-10.md) 为准；
+实际完成状态以
+[实施与验收矩阵](./implementation/check-item-platform-completion-matrix-2026-07-28.md) 为准。

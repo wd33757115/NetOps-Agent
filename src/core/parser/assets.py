@@ -62,6 +62,28 @@ class TemplateAssetStore:
             raise
         return target, digest
 
-    def verify(self, path: str | Path, sha256: str) -> bool:
+    def verify(
+        self,
+        path: str | Path,
+        sha256: str,
+        embedded_text: str | None = None,
+    ) -> bool:
+        if embedded_text is not None:
+            return hashlib.sha256(embedded_text.encode("utf-8")).hexdigest() == sha256
         target = Path(path)
         return target.is_file() and hashlib.sha256(target.read_bytes()).hexdigest() == sha256
+
+    def read(
+        self,
+        path: str | Path,
+        sha256: str,
+        embedded_text: str | None = None,
+    ) -> str:
+        if embedded_text is not None:
+            if not self.verify(path, sha256, embedded_text):
+                raise ValueError("embedded Parser asset hash mismatch")
+            return embedded_text
+        target = Path(path)
+        if not self.verify(target, sha256):
+            raise ValueError("Parser asset file is missing or its hash does not match")
+        return target.read_text(encoding="utf-8")

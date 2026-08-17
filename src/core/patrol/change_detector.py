@@ -65,6 +65,9 @@ class NetworkChange:
     policy_snapshot: dict[str, Any] | None = None
     observed_at: str | None = None
     processed_at: str | None = None
+    check_item_id: str | None = None
+    check_item_version_id: str | None = None
+    check_execution_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -124,7 +127,10 @@ def _snapshot_unstructured_diff(
             base = {
                 **base,
                 "config_diff": config_diff,
-                "comparison_mode": config_diff.get("comparison_mode") or base.get("comparison_mode"),
+                "comparison_mode": (
+                    config_diff.get("comparison_mode")
+                    or base.get("comparison_mode")
+                ),
                 "changed": bool(base.get("changed") or config_diff.get("changed")),
             }
     except Exception as exc:
@@ -145,6 +151,7 @@ def _validate_explicit_run_pair(
     previous_run_id: str,
     current_run_id: str,
     allow_longitudinal_offline_comparison: bool = False,
+    allow_partial_normalization: bool = False,
 ) -> None:
     if previous_run_id == current_run_id:
         raise ExplicitBaselineNotReadyError("explicit baseline and current run must be different")
@@ -161,12 +168,15 @@ def _validate_explicit_run_pair(
 
     previous_status = str(previous_run.get("analysis_status") or "").strip().lower()
     current_status = str(current_run.get("analysis_status") or "").strip().lower()
-    if previous_status and previous_status not in _EXPLICIT_COMPARISON_READY_STATUSES:
+    ready_statuses = set(_EXPLICIT_COMPARISON_READY_STATUSES)
+    if allow_partial_normalization:
+        ready_statuses.add("normalized_partial")
+    if previous_status and previous_status not in ready_statuses:
         raise ExplicitBaselineNotReadyError(
             "explicit baseline must complete normalization before comparison: "
             f"run={previous_run_id}, analysis_status={previous_status}"
         )
-    if current_status and current_status not in _EXPLICIT_COMPARISON_READY_STATUSES:
+    if current_status and current_status not in ready_statuses:
         raise ExplicitBaselineNotReadyError(
             "current run must complete normalization before comparison: "
             f"run={current_run_id}, analysis_status={current_status}"
@@ -314,11 +324,19 @@ def _policy_compare_result(
             (current.get("metadata_json") or {}).get(APPLICABILITY_CONTEXT_KEY)
             or {}
         ),
+        dimensions=dict(
+            current.get("dimensions_json")
+            or current.get("dimensions")
+            or {}
+        ),
     )
     result["policy_id"] = active.get("policy_id")
     result["policy_version_id"] = active.get("version_id")
     result["observation_type"] = observation_type
-    result["comparison_type"] = policy_payload.get("compare_mode")
+    result["comparison_type"] = (
+        result.get("selected_compare_mode")
+        or policy_payload.get("compare_mode")
+    )
     result["decision_reason"] = (
         "threshold_unknown"
         if result.get("threshold_status") == "threshold_unknown"
@@ -477,7 +495,11 @@ def _entity_dimensions(
 
 def _observation_dimensions(observation: dict[str, Any]) -> dict[str, Any]:
     metadata = dict(observation.get("metadata_json") or {})
-    explicit = metadata.get("dimensions")
+    explicit = (
+        observation.get("dimensions_json")
+        or observation.get("dimensions")
+        or metadata.get("dimensions")
+    )
     if isinstance(explicit, dict):
         dimensions = dict(explicit)
     else:
@@ -887,17 +909,81 @@ def detect_changes_from_params(params: dict[str, Any]) -> dict[str, Any]:
     use_versioned = bool(params.get("use_versioned_parser_results", False))
     use_state_observations = bool(params.get("use_state_observations", False))
     supplied_policy_bundle: list[dict[str, Any]] | None = None
+    supplied_policy_bundles_by_check_item: dict[
+        str, list[dict[str, Any]]
+    ] | None = None
+    comparison_scopes: list[dict[str, Any]] | None = None
+    suppress_initial_collection_item_ids: set[str] = set()
     if params.get("runtime_asset_manifest"):
-        from src.core.patrol.runtime_manifest import validate_patrol_runtime_manifest
+        from src.core.patrol.runtime_manifest import (
+            comparison_scopes_for_device,
+            first_observation_collection_action_ids,
+            resolve_patrol_runtime_rule_assets,
+        )
 
-        manifest = validate_patrol_runtime_manifest(
-            dict(params.get("runtime_asset_manifest") or {})
+        runtime_manifest = dict(
+            params.get("runtime_asset_manifest") or {}
         )
+        rule_assets = resolve_patrol_runtime_rule_assets(runtime_manifest)
         supplied_policy_bundle = list(
-            dict(manifest.get("rule_assets") or {})
-            .get("change_policies", {})
-            .values()
+            dict(rule_assets.get("change_policies") or {}).values()
         )
+        raw_device_ids = params.get("device_ids") or []
+        supplied_device_ids = (
+            [str(item) for item in raw_device_ids]
+            if isinstance(raw_device_ids, (list, tuple, set))
+            else [str(raw_device_ids)]
+        )
+        manifest_device_candidates = sorted(
+            {
+                str(item.get("device_id") or "")
+                for item in runtime_manifest.get("decisions") or []
+                if isinstance(item, dict) and item.get("device_id")
+            }
+        )
+        manifest_device_id = str(
+            params.get("device_id")
+            or next(iter(supplied_device_ids), "")
+            or (
+                manifest_device_candidates[0]
+                if len(manifest_device_candidates) == 1
+                else ""
+            )
+        )
+        target_policy_bundles = rule_assets.get(
+            "change_policies_by_device_and_check_item_version_id"
+        )
+        if target_policy_bundles is not None:
+            supplied_policy_bundles_by_check_item = {
+                str(key): list(value or [])
+                for key, value in dict(
+                    dict(target_policy_bundles).get(
+                        manifest_device_id,
+                        {},
+                    )
+                ).items()
+            }
+        else:
+            supplied_policy_bundles_by_check_item = {
+                str(key): list(value or [])
+                for key, value in dict(
+                    rule_assets.get(
+                        "change_policies_by_check_item_version_id"
+                    )
+                    or {}
+                ).items()
+            }
+        comparison_scopes = comparison_scopes_for_device(
+            runtime_manifest,
+            device_id=manifest_device_id,
+        )
+        if not comparison_scopes:
+            suppress_initial_collection_item_ids = (
+                first_observation_collection_action_ids(
+                    runtime_manifest,
+                    device_id=manifest_device_id,
+                )
+            )
 
     if params.get("current_run_id") and use_state_observations:
         device_ids = params.get("device_ids")
@@ -914,8 +1000,21 @@ def detect_changes_from_params(params: dict[str, Any]) -> dict[str, Any]:
             kwargs["allow_longitudinal_offline_comparison"] = bool(
                 params.get("allow_longitudinal_offline_comparison")
             )
+        if "allow_partial_normalization" in params:
+            kwargs["allow_partial_normalization"] = bool(
+                params.get("allow_partial_normalization")
+            )
         if supplied_policy_bundle is not None:
             kwargs["policy_bundle"] = supplied_policy_bundle
+        if comparison_scopes:
+            kwargs["comparison_scopes"] = comparison_scopes
+            kwargs[
+                "policy_bundles_by_check_item_version_id"
+            ] = supplied_policy_bundles_by_check_item or {}
+        if suppress_initial_collection_item_ids:
+            kwargs["suppress_initial_collection_item_ids"] = sorted(
+                suppress_initial_collection_item_ids
+            )
         return detect_observation_changes_against_history(
             current_run_id=str(params["current_run_id"]),
             previous_run_id=(
@@ -1012,22 +1111,50 @@ def detect_observation_changes_against_history(
     missing_confirmations: int = 2,
     analysis_revision: str = "original",
     allow_longitudinal_offline_comparison: bool = False,
+    allow_partial_normalization: bool = False,
     policy_bundle: list[dict[str, Any]] | None = None,
+    suppress_initial_collection_item_ids: list[str] | None = None,
+    comparison_scopes: list[dict[str, Any]] | None = None,
+    policy_bundles_by_check_item_version_id: dict[
+        str, list[dict[str, Any]]
+    ]
+    | None = None,
 ) -> dict[str, Any]:
     patrol_repository = PatrolRepository()
     state_repository = StateRepository()
+    normalized_scopes = json.loads(
+        json.dumps(list(comparison_scopes or []), default=str)
+    )
+    if normalized_scopes and previous_run_id:
+        raise ValueError(
+            "a frozen check-item comparison plan cannot use previous_run_id"
+        )
     if device_ids:
         input_observations = state_repository.list_run_observations(
             current_run_id, device_ids=device_ids
         )
     else:
         input_observations = state_repository.list_run_observations(current_run_id)
-    if previous_run_id:
+    if normalized_scopes:
+        baseline_run_ids = sorted(
+            {
+                str(item.get("baseline_run_id"))
+                for item in normalized_scopes
+                if item.get("comparison_status") == "comparable"
+                and item.get("baseline_run_id")
+            }
+        )
+        prior_observations = state_repository.list_observations_for_runs(
+            baseline_run_ids,
+            device_ids=device_ids,
+        )
+    elif previous_run_id:
         _validate_explicit_run_pair(
             patrol_repository,
             previous_run_id=previous_run_id,
             current_run_id=current_run_id,
             allow_longitudinal_offline_comparison=allow_longitudinal_offline_comparison,
+            allow_partial_normalization=allow_partial_normalization,
         )
         prior_observations = (
             state_repository.list_observations_for_runs([previous_run_id], device_ids=device_ids)
@@ -1051,6 +1178,7 @@ def detect_observation_changes_against_history(
                     [item.get("id"), item.get("snapshot_id"), item.get("observed_at")]
                     for item in sorted(prior_observations, key=lambda row: str(row.get("id") or ""))
                 ],
+                "comparison_scopes": normalized_scopes,
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -1058,6 +1186,20 @@ def detect_observation_changes_against_history(
         ).encode()
     ).hexdigest()
     if not persist:
+        if normalized_scopes:
+            return _detect_scoped_observation_changes_impl(
+                current_run_id=current_run_id,
+                device_ids=device_ids,
+                persist=False,
+                missing_confirmations=missing_confirmations,
+                current_observations=input_observations,
+                prior_observations=prior_observations,
+                comparison_scopes=normalized_scopes,
+                policy_bundles_by_check_item_version_id=(
+                    policy_bundles_by_check_item_version_id or {}
+                ),
+                analysis_revision=analysis_revision,
+            )
         return _detect_observation_changes_against_history_impl(
             current_run_id=current_run_id,
             previous_run_id=previous_run_id,
@@ -1068,6 +1210,9 @@ def detect_observation_changes_against_history(
             prior_observations=prior_observations,
             analysis_revision=analysis_revision,
             policy_bundle=policy_bundle,
+            suppress_initial_collection_item_ids=(
+                suppress_initial_collection_item_ids
+            ),
         )
     frozen_policies = (
         ChangePolicyRepository().list_active_policies()
@@ -1075,6 +1220,21 @@ def detect_observation_changes_against_history(
         else policy_bundle
     )
     frozen_policies = json.loads(json.dumps(frozen_policies, default=str))
+    frozen_scoped_policies = json.loads(
+        json.dumps(
+            policy_bundles_by_check_item_version_id or {},
+            default=str,
+        )
+    )
+    if normalized_scopes and any(
+        item.get("comparison_status") == "comparable"
+        and str(item.get("check_item_version_id") or "")
+        not in frozen_scoped_policies
+        for item in normalized_scopes
+    ):
+        raise ValueError(
+            "frozen ChangePolicy scope is missing for a comparable check item"
+        )
     scope = {
         "device_ids": sorted({str(item) for item in device_ids or []}),
         "full_run": not bool(device_ids),
@@ -1084,12 +1244,21 @@ def detect_observation_changes_against_history(
         "input_revision_digest": input_revision_digest,
         "analysis_revision": analysis_revision,
         "allow_longitudinal_offline_comparison": bool(allow_longitudinal_offline_comparison),
+        "suppress_initial_collection_item_ids": sorted(
+            set(suppress_initial_collection_item_ids or [])
+        ),
+        "comparison_scopes": normalized_scopes,
     }
     attempt = patrol_repository.begin_analysis_attempt(
         run_id=current_run_id,
         stage="change_detection",
         scope=scope,
-        rule_bundle={"change_policies": frozen_policies},
+        rule_bundle={
+            "change_policies": frozen_policies,
+            "change_policies_by_check_item_version_id": (
+                frozen_scoped_policies
+            ),
+        },
     )
     if attempt["reused"]:
         persisted = ChangeEventRepository().list_changes(run_id=current_run_id)
@@ -1127,19 +1296,42 @@ def detect_observation_changes_against_history(
             pass
     heartbeat.start()
     try:
-        result = _detect_observation_changes_against_history_impl(
-            current_run_id=current_run_id,
-            previous_run_id=previous_run_id,
-            device_ids=device_ids,
-            persist=persist,
-            missing_confirmations=missing_confirmations,
-            policy_bundle=list(attempt["rule_bundle"].get("change_policies") or []),
-            current_observations=input_observations,
-            prior_observations=prior_observations,
-            heartbeat=heartbeat,
-            analysis_revision=analysis_revision,
-            rule_bundle_digest=str(attempt["rule_bundle_digest"]),
-        )
+        if normalized_scopes:
+            result = _detect_scoped_observation_changes_impl(
+                current_run_id=current_run_id,
+                device_ids=device_ids,
+                persist=persist,
+                missing_confirmations=missing_confirmations,
+                current_observations=input_observations,
+                prior_observations=prior_observations,
+                comparison_scopes=normalized_scopes,
+                policy_bundles_by_check_item_version_id=dict(
+                    attempt["rule_bundle"].get(
+                        "change_policies_by_check_item_version_id"
+                    )
+                    or {}
+                ),
+                heartbeat=heartbeat,
+                analysis_revision=analysis_revision,
+                rule_bundle_digest=str(attempt["rule_bundle_digest"]),
+            )
+        else:
+            result = _detect_observation_changes_against_history_impl(
+                current_run_id=current_run_id,
+                previous_run_id=previous_run_id,
+                device_ids=device_ids,
+                persist=persist,
+                missing_confirmations=missing_confirmations,
+                policy_bundle=list(attempt["rule_bundle"].get("change_policies") or []),
+                current_observations=input_observations,
+                prior_observations=prior_observations,
+                heartbeat=heartbeat,
+                analysis_revision=analysis_revision,
+                rule_bundle_digest=str(attempt["rule_bundle_digest"]),
+                suppress_initial_collection_item_ids=(
+                    suppress_initial_collection_item_ids
+                ),
+            )
         heartbeat.stop()
         patrol_repository.complete_analysis_attempt(
             str(attempt["attempt_id"]),
@@ -1179,6 +1371,7 @@ def detect_historical_backfill_changes(
     *,
     run_id: str,
     backfill_job_id: str,
+    previous_run_id: str | None = None,
 ) -> dict[str, Any]:
     """Derive only facts introduced by one approved historical backfill."""
     state_repository = StateRepository()
@@ -1188,17 +1381,28 @@ def detect_historical_backfill_changes(
         if (item.get("metadata_json") or {}).get("backfill_job_id") == backfill_job_id
     ]
     state_keys = {str(item.get("state_key") or "") for item in current}
-    prior = [
-        item
-        for item in state_repository.list_prior_observations_for_run(run_id)
-        if str(item.get("state_key") or "") in state_keys
-    ]
+    if previous_run_id:
+        prior_candidates = state_repository.list_run_observations(previous_run_id)
+        prior = [
+            item
+            for item in prior_candidates
+            if (item.get("metadata_json") or {}).get("backfill_job_id")
+            == backfill_job_id
+            and str(item.get("state_key") or "") in state_keys
+        ]
+    else:
+        prior = [
+            item
+            for item in state_repository.list_prior_observations_for_run(run_id)
+            if str(item.get("state_key") or "") in state_keys
+        ]
     policies = ChangePolicyRepository().list_active_policies()
     bundle_digest = hashlib.sha256(
         json.dumps(policies, sort_keys=True, separators=(",", ":"), default=str).encode()
     ).hexdigest()
     return _detect_observation_changes_against_history_impl(
         current_run_id=run_id,
+        previous_run_id=previous_run_id,
         persist=True,
         missing_confirmations=2,
         policy_bundle=policies,
@@ -1222,6 +1426,9 @@ def _detect_observation_changes_against_history_impl(
     heartbeat: Any | None = None,
     analysis_revision: str = "original",
     rule_bundle_digest: str | None = None,
+    suppress_initial_collection_item_ids: list[str] | None = None,
+    collection_results: list[dict[str, Any]] | None = None,
+    include_internal: bool = False,
 ) -> dict[str, Any]:
     repository = StateRepository()
     patrol_repository = PatrolRepository()
@@ -1254,6 +1461,12 @@ def _detect_observation_changes_against_history_impl(
     decisions: list[dict[str, Any]] = []
     compared_observations = 0
     baseline_observations = 0
+    suppressed_initial_observations = 0
+    suppressed_initial_actions = set(
+        str(item)
+        for item in suppress_initial_collection_item_ids or []
+        if str(item)
+    )
     detected_at = _now()
     if current_observations is None:
         if device_ids:
@@ -1265,7 +1478,10 @@ def _detect_observation_changes_against_history_impl(
             current_observations = repository.list_run_observations(current_run_id)
     current_observations = _deduplicate_current_observations(current_observations)
     current_by_key = {_state_key(item): item for item in current_observations}
-    collection_results = patrol_repository.list_collection_results(current_run_id)
+    if collection_results is None:
+        collection_results = patrol_repository.list_collection_results(
+            current_run_id
+        )
     current_collection_results = _aggregate_collection_results(collection_results)
     authoritative_collections = {
         key
@@ -1311,6 +1527,25 @@ def _detect_observation_changes_against_history_impl(
                 )
                 and current_metadata.get("parser_failure_text_comparison")
             ):
+                continue
+            collection_item_id = str(
+                dict(current.get("metadata_json") or {}).get(
+                    "collection_item_id"
+                )
+                or ""
+            )
+            if collection_item_id in suppressed_initial_actions:
+                baseline_observations += 1
+                suppressed_initial_observations += 1
+                decisions.append(
+                    _change_decision(
+                        run_id=current_run_id,
+                        previous=None,
+                        current=current,
+                        decision="suppressed",
+                        reason="first_observation_current_state_only",
+                    )
+                )
                 continue
             if _collection_key(current) in prior_collections:
                 changes.append(
@@ -1561,7 +1796,7 @@ def _detect_observation_changes_against_history_impl(
             )
             for change in changes
         ]
-    return {
+    result = {
         "success": True,
         "current_run_id": current_run_id,
         "previous_run_id": previous_run_id,
@@ -1569,6 +1804,7 @@ def _detect_observation_changes_against_history_impl(
         "compared_observations": compared_observations,
         "baseline_observations": baseline_observations,
         "initial_observations": sum(1 for change in changes if change.change_type == "initial"),
+        "suppressed_initial_observations": suppressed_initial_observations,
         "added_observations": sum(1 for change in changes if change.change_type == "added"),
         "deleted_observations": sum(1 for change in changes if change.change_type == "deleted"),
         "missing_observations": sum(1 for change in changes if change.change_type == "missing"),
@@ -1576,6 +1812,279 @@ def _detect_observation_changes_against_history_impl(
             1 for change in changes if change.change_type == "reappeared"
         ),
         "authoritative_collection_count": len(authoritative_collections),
+        "change_count": len(changes),
+        "persisted_change_count": persisted_change_count,
+        "change_decision_count": len(decisions),
+        "storage": "postgresql",
+        "source": "state_observation",
+        "changes": [change.to_dict() for change in changes],
+    }
+    if include_internal:
+        result.update(
+            {
+                "_change_objects": changes,
+                "_derived_observations": derived_observations,
+                "_decisions": decisions,
+            }
+        )
+    return result
+
+
+def _detect_scoped_observation_changes_impl(
+    *,
+    current_run_id: str,
+    device_ids: list[str] | None,
+    persist: bool,
+    missing_confirmations: int,
+    current_observations: list[dict[str, Any]],
+    prior_observations: list[dict[str, Any]],
+    comparison_scopes: list[dict[str, Any]],
+    policy_bundles_by_check_item_version_id: dict[
+        str, list[dict[str, Any]]
+    ],
+    heartbeat: Any | None = None,
+    analysis_revision: str = "original",
+    rule_bundle_digest: str | None = None,
+) -> dict[str, Any]:
+    """Compare each check item only with its signed ComparisonContext."""
+
+    patrol_repository = PatrolRepository()
+    collection_results = patrol_repository.list_collection_results(
+        current_run_id
+    )
+    current_by_action: dict[str, list[dict[str, Any]]] = {}
+    for observation in current_observations:
+        action_id = str(
+            dict(observation.get("metadata_json") or {}).get(
+                "collection_item_id"
+            )
+            or ""
+        )
+        if action_id:
+            current_by_action.setdefault(action_id, []).append(observation)
+    prior_by_snapshot: dict[str, list[dict[str, Any]]] = {}
+    for observation in prior_observations:
+        snapshot_id = str(observation.get("snapshot_id") or "")
+        if snapshot_id:
+            prior_by_snapshot.setdefault(snapshot_id, []).append(observation)
+
+    changes: list[NetworkChange] = []
+    decisions: list[dict[str, Any]] = []
+    derived_observations: list[Any] = []
+    compared_observations = 0
+    baseline_observations = 0
+    suppressed_comparison_observations = 0
+    scope_status_counts: dict[str, int] = {}
+
+    for scope in comparison_scopes:
+        if heartbeat is not None:
+            heartbeat()
+        check_item_version_id = str(
+            scope.get("check_item_version_id") or ""
+        )
+        execution_id = str(scope.get("check_execution_id") or "")
+        context_id = str(scope.get("comparison_context_id") or "")
+        status = str(scope.get("comparison_status") or "baseline_missing")
+        if not check_item_version_id or not execution_id or not context_id:
+            raise ValueError("comparison scope identity is incomplete")
+        scope_status_counts[status] = scope_status_counts.get(status, 0) + 1
+        action_ids = {
+            str(item)
+            for item in scope.get("collection_action_ids") or []
+            if str(item)
+        }
+        scoped_current = [
+            observation
+            for action_id in sorted(action_ids)
+            for observation in current_by_action.get(action_id, [])
+        ]
+        lineage = {
+            "check_item_id": str(scope.get("check_item_id") or "") or None,
+            "check_item_version_id": check_item_version_id,
+            "check_execution_id": execution_id,
+            "comparison_context_id": context_id,
+            "comparison_context_digest": str(
+                scope.get("comparison_context_digest") or ""
+            ),
+            "comparison_status": status,
+            "selection_reason": str(
+                scope.get("selection_reason") or status
+            ),
+        }
+        if status != "comparable":
+            baseline_observations += len(scoped_current)
+            suppressed_comparison_observations += len(scoped_current)
+            for current in scoped_current:
+                decision = _change_decision(
+                    run_id=current_run_id,
+                    previous=None,
+                    current=current,
+                    decision="suppressed",
+                    reason=f"comparison_not_permitted:{status}",
+                )
+                decision["metadata"] = {
+                    **dict(decision.get("metadata") or {}),
+                    **lineage,
+                }
+                decisions.append(decision)
+            continue
+
+        scoped_policies = list(
+            policy_bundles_by_check_item_version_id.get(
+                check_item_version_id,
+                [],
+            )
+        )
+        if not scoped_policies:
+            suppressed_comparison_observations += len(scoped_current)
+            for current in scoped_current:
+                decision = _change_decision(
+                    run_id=current_run_id,
+                    previous=None,
+                    current=current,
+                    decision="suppressed",
+                    reason="change_not_enabled_by_runtime_bundle",
+                )
+                decision["metadata"] = {
+                    **dict(decision.get("metadata") or {}),
+                    **lineage,
+                }
+                decisions.append(decision)
+            continue
+
+        baseline_snapshot_ids = {
+            str(item)
+            for item in scope.get("baseline_snapshot_ids") or []
+            if str(item)
+        }
+        baseline_run_id = str(scope.get("baseline_run_id") or "")
+        if not baseline_snapshot_ids or not baseline_run_id:
+            raise ExplicitBaselineNotReadyError(
+                "comparable scope has no frozen baseline evidence: "
+                f"{check_item_version_id}"
+            )
+        scoped_prior = [
+            observation
+            for snapshot_id in sorted(baseline_snapshot_ids)
+            for observation in prior_by_snapshot.get(snapshot_id, [])
+            if str(observation.get("run_id") or "") == baseline_run_id
+        ]
+        if not scoped_prior:
+            raise ExplicitBaselineNotReadyError(
+                "frozen baseline produced no StateObservation records: "
+                f"context={context_id}, run={baseline_run_id}"
+            )
+        result = _detect_observation_changes_against_history_impl(
+            current_run_id=current_run_id,
+            previous_run_id=baseline_run_id,
+            device_ids=device_ids,
+            persist=False,
+            missing_confirmations=missing_confirmations,
+            policy_bundle=scoped_policies,
+            current_observations=scoped_current,
+            prior_observations=scoped_prior,
+            heartbeat=heartbeat,
+            analysis_revision=analysis_revision,
+            rule_bundle_digest=rule_bundle_digest,
+            collection_results=collection_results,
+            include_internal=True,
+        )
+        compared_observations += int(result.get("compared_observations") or 0)
+        baseline_observations += int(result.get("baseline_observations") or 0)
+        for change in result.get("_change_objects") or []:
+            scoped_change = replace(
+                change,
+                check_item_id=lineage["check_item_id"],
+                check_item_version_id=check_item_version_id,
+                check_execution_id=execution_id,
+            )
+            changes.append(
+                replace(
+                    scoped_change,
+                    change_id=deterministic_change_id(scoped_change),
+                )
+            )
+        for decision in result.get("_decisions") or []:
+            decision["metadata"] = {
+                **dict(decision.get("metadata") or {}),
+                **lineage,
+            }
+            decisions.append(decision)
+        derived_observations.extend(
+            result.get("_derived_observations") or []
+        )
+
+    unique_derived: dict[str, Any] = {}
+    for observation in derived_observations:
+        key = str(
+            getattr(observation, "idempotency_key", None)
+            or getattr(observation, "observation_id", None)
+            or id(observation)
+        )
+        unique_derived.setdefault(key, observation)
+    for decision in decisions:
+        decision["analysis_revision"] = analysis_revision
+        decision["rule_bundle_digest"] = rule_bundle_digest
+    persisted_change_count = (
+        save_changes(
+            changes,
+            derived_observations=list(unique_derived.values()),
+            decisions=decisions,
+        )
+        if persist
+        else 0
+    )
+    if persist:
+        canonical_ids = ChangeEventRepository().canonical_change_ids(changes)
+        changes = [
+            replace(
+                change,
+                change_id=canonical_ids.get(
+                    change_idempotency_key(change),
+                    change.change_id,
+                ),
+            )
+            for change in changes
+        ]
+    authoritative_collection_count = len(
+        {
+            key
+            for key, item in _aggregate_collection_results(
+                collection_results
+            ).items()
+            if item.get("authoritative_for_deletion") is True
+        }
+    )
+    return {
+        "success": True,
+        "current_run_id": current_run_id,
+        "previous_run_id": None,
+        "device_ids": device_ids or [],
+        "comparison_scope_count": len(comparison_scopes),
+        "comparison_scope_status_counts": dict(
+            sorted(scope_status_counts.items())
+        ),
+        "compared_observations": compared_observations,
+        "baseline_observations": baseline_observations,
+        "suppressed_comparison_observations": (
+            suppressed_comparison_observations
+        ),
+        "initial_observations": sum(
+            1 for change in changes if change.change_type == "initial"
+        ),
+        "added_observations": sum(
+            1 for change in changes if change.change_type == "added"
+        ),
+        "deleted_observations": sum(
+            1 for change in changes if change.change_type == "deleted"
+        ),
+        "missing_observations": sum(
+            1 for change in changes if change.change_type == "missing"
+        ),
+        "reappeared_observations": sum(
+            1 for change in changes if change.change_type == "reappeared"
+        ),
+        "authoritative_collection_count": authoritative_collection_count,
         "change_count": len(changes),
         "persisted_change_count": persisted_change_count,
         "change_decision_count": len(decisions),

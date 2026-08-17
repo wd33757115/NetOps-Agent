@@ -86,6 +86,46 @@ def _clean_body(lines: list[str]) -> str:
     return "\n".join(cleaned).strip()
 
 
+def _prompt_markers(lines: list[str]) -> list[tuple[int, str, str, str]]:
+    markers: list[tuple[int, str, str, str]] = []
+    for idx, line in enumerate(lines):
+        parsed = _parse_prompt(line.strip())
+        if not parsed:
+            continue
+        prompt_device, command, style = parsed
+        if _looks_like_command(command):
+            markers.append((idx, prompt_device, command, style))
+    return markers
+
+
+def _split_prompt_lines(
+    lines: list[str],
+    *,
+    device_name: str | None,
+    line_offset: int = 0,
+) -> list[CommandBlock]:
+    markers = _prompt_markers(lines)
+    fallback_device = device_name or (markers[0][1] if markers else None)
+    blocks: list[CommandBlock] = []
+    for pos, (line_idx, prompt_device, command, style) in enumerate(markers):
+        next_idx = markers[pos + 1][0] if pos + 1 < len(markers) else len(lines)
+        body = _clean_body(lines[line_idx + 1 : next_idx])
+        if not body:
+            continue
+        blocks.append(
+            CommandBlock(
+                device_name=fallback_device or prompt_device,
+                command=command.strip(),
+                command_canonical=canonicalize_command(command),
+                raw_output=body,
+                start_line=line_offset + line_idx + 1,
+                end_line=line_offset + next_idx,
+                prompt_style=style,
+            )
+        )
+    return blocks
+
+
 def inspect_raw_capture(text: str) -> RawCaptureMetadata:
     observed_at_text = None
     device_name = None
@@ -124,15 +164,47 @@ def _split_command_report(text: str, device_name: str | None) -> list[CommandBlo
     blocks: list[CommandBlock] = []
     for pos, (line_idx, command) in enumerate(markers):
         next_idx = markers[pos + 1][0] if pos + 1 < len(markers) else len(lines)
-        body_lines = lines[line_idx + 1 : next_idx]
-        while body_lines and (
-            not body_lines[0].strip() or REPORT_OUTPUT_RE.match(body_lines[0])
+        body_start = line_idx + 1
+        body_end = next_idx
+        while body_start < body_end and (
+            not lines[body_start].strip() or REPORT_OUTPUT_RE.match(lines[body_start])
         ):
-            body_lines.pop(0)
-        while body_lines and (
-            not body_lines[-1].strip() or SEPARATOR_RE.match(body_lines[-1])
+            body_start += 1
+        while body_end > body_start and (
+            not lines[body_end - 1].strip() or SEPARATOR_RE.match(lines[body_end - 1])
         ):
-            body_lines.pop()
+            body_end -= 1
+        body_lines = lines[body_start:body_end]
+
+        # Some field-export reports wrap a raw terminal transcript inside the
+        # output of the next labelled command. In that case the device prompts
+        # are the authoritative command boundaries. Keep any real prefix as the
+        # labelled command output, then split the embedded transcript normally.
+        embedded_markers = _prompt_markers(body_lines)
+        if embedded_markers:
+            prefix_end = embedded_markers[0][0]
+            prefix_body = _clean_body(body_lines[:prefix_end])
+            if prefix_body and _looks_like_command(command):
+                blocks.append(
+                    CommandBlock(
+                        device_name=device_name or "unknown",
+                        command=command,
+                        command_canonical=canonicalize_command(command),
+                        raw_output=prefix_body,
+                        start_line=body_start + 1,
+                        end_line=body_start + prefix_end,
+                        prompt_style="command_report",
+                    )
+                )
+            blocks.extend(
+                _split_prompt_lines(
+                    body_lines[prefix_end:],
+                    device_name=device_name,
+                    line_offset=body_start + prefix_end,
+                )
+            )
+            continue
+
         body = "\n".join(body_lines).strip()
         # Report markers prove the command was executed; preserve a zero-line body so
         # OutputClassifier can distinguish valid empty from unsupported or uncertain.
@@ -151,7 +223,19 @@ def _split_command_report(text: str, device_name: str | None) -> list[CommandBlo
                 prompt_style="command_report",
             )
         )
-    return blocks
+
+    # A later embedded transcript can supply the real output for an earlier
+    # empty report placeholder. Once non-empty evidence exists, retaining that
+    # placeholder would incorrectly classify the same command as empty.
+    commands_with_output = {
+        block.command_canonical for block in blocks if block.raw_output.strip()
+    }
+    return [
+        block
+        for block in blocks
+        if block.raw_output.strip()
+        or block.command_canonical not in commands_with_output
+    ]
 
 
 def split_cli_capture(text: str, *, device_name: str | None = None) -> list[CommandBlock]:
@@ -165,35 +249,7 @@ def split_cli_capture(text: str, *, device_name: str | None = None) -> list[Comm
         return _split_command_report(text, device_name)
 
     lines = [line.replace("\x00", "") for line in text.splitlines()]
-    markers: list[tuple[int, str, str, str]] = []
-    fallback_device = device_name
-    for idx, line in enumerate(lines):
-        parsed = _parse_prompt(line.strip())
-        if not parsed:
-            continue
-        prompt_device, command, style = parsed
-        fallback_device = fallback_device or prompt_device
-        if _looks_like_command(command):
-            markers.append((idx, prompt_device, command, style))
-
-    blocks: list[CommandBlock] = []
-    for pos, (line_idx, prompt_device, command, style) in enumerate(markers):
-        next_idx = markers[pos + 1][0] if pos + 1 < len(markers) else len(lines)
-        body = _clean_body(lines[line_idx + 1 : next_idx])
-        if not body:
-            continue
-        blocks.append(
-            CommandBlock(
-                device_name=fallback_device or prompt_device,
-                command=command.strip(),
-                command_canonical=canonicalize_command(command),
-                raw_output=body,
-                start_line=line_idx + 1,
-                end_line=next_idx,
-                prompt_style=style,
-            )
-        )
-    return blocks
+    return _split_prompt_lines(lines, device_name=device_name)
 
 
 def infer_device_from_filename(path: str | Path) -> tuple[str | None, str | None]:

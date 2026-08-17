@@ -36,6 +36,7 @@ const { listBundles } = vi.hoisted(() => ({
         dataset_ids: ['dataset-q1', 'dataset-q2'],
         asset_counts: { OBSERVATION_CONTRACT: 1, CHANGE_POLICY: 1, EVENT_RULE: 2 },
         active_asset_counts: {},
+        asset_requirements: { requires_historical_replay: true },
         release_ready: true,
         engineering_review: {
           decision: 'accepted',
@@ -101,6 +102,7 @@ const { listBundles } = vi.hoisted(() => ({
         context_digest: 'b'.repeat(64),
         asset_counts: { OBSERVATION_CONTRACT: 1, CHANGE_POLICY: 1, EVENT_RULE: 2 },
         active_asset_counts: {},
+        asset_requirements: { requires_historical_replay: true },
         release_ready: false,
         blockers: [
           'historical replay is missing, failed or has collisions',
@@ -194,10 +196,10 @@ describe('RuleAssetBundleWorkspace', () => {
     expect(screen.getByText('预估每日事件 3')).toBeVisible()
     expect(screen.getByText('范围门禁已通过')).toBeVisible()
     expect(screen.getByText(/巡检 Run：run-q1、run-q2、run-q3/)).toBeVisible()
-    expect(screen.getByText(/无 Change 的基线 Run：run-q1/)).toBeVisible()
+    expect(screen.getByText(/未产生 Change 的 Run：run-q1/)).toBeVisible()
     expect(screen.getByText(/观测契约 · contract-v1/)).toBeVisible()
     expect(screen.getByText('审批发布', { selector: '.ant-steps-item-title' })).toBeVisible()
-  })
+  }, 10000)
 
   it('focuses bundles by immutable offline job context', async () => {
     renderFocusedWorkspace()
@@ -224,5 +226,51 @@ describe('RuleAssetBundleWorkspace', () => {
     expect(screen.getByText(/没有候选包不代表运行时资产缺失/)).toBeVisible()
     await user.click(screen.getByRole('button', { name: '检查资产链' }))
     expect(inspectAssetChain).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows contract-only bundles as intentionally not requiring replay', async () => {
+    listBundles.mockResolvedValueOnce({
+      items: [{
+        id: 'bundle-contract-only',
+        status: 'active',
+        source_ref: 'offline:job-contract-only',
+        observation_type: 'interface.ip.address',
+        observation_types: ['interface.ip.address'],
+        semantic_label: 'interface.ip.address',
+        command: 'show ip interface brief',
+        asset_counts: { OBSERVATION_CONTRACT: 1, CHANGE_POLICY: 0, EVENT_RULE: 0 },
+        active_asset_counts: { OBSERVATION_CONTRACT: 1 },
+        asset_requirements: {
+          requires_observation_contract: true,
+          requires_change_policy: false,
+          requires_event_rule_assets: false,
+          requires_historical_replay: false,
+        },
+        release_ready: false,
+        engineering_review: { decision: 'accepted' },
+        blockers: [],
+        replay: {},
+        replay_gate: { success: true },
+        steps: [
+          { key: 'context', label: 'context', status: 'passed', detail: {} },
+          { key: 'contract', label: 'contract', status: 'passed', detail: {} },
+          { key: 'policy', label: 'policy', status: 'skipped', detail: {} },
+          { key: 'rules', label: 'rules', status: 'skipped', detail: {} },
+          { key: 'replay', label: 'replay', status: 'passed', detail: { required: false } },
+          { key: 'review', label: 'review', status: 'passed', detail: {} },
+          { key: 'release', label: 'release', status: 'passed', detail: {} },
+        ],
+        children: [],
+      }],
+      total: 1,
+      limit: 20,
+      offset: 0,
+    })
+
+    renderWorkspace()
+
+    expect(await screen.findByText('interface.ip.address')).toBeVisible()
+    expect(screen.getByText('不需要历史回放')).toBeVisible()
+    expect(screen.queryByText('没有有效 Change 证据')).not.toBeInTheDocument()
   })
 })

@@ -1,0 +1,123 @@
+catalog_id: netops.canonical-observations
+catalog_version: 2
+status: active
+
+observation_types:
+  - id: device.software.version
+    description: Device operating-system software version as an inventory fact.
+    semantic_type: state
+    value_types: [text]
+    dimensions: []
+    assessment_roles: [change, evidence]
+
+  - id: device.hardware.model
+    description: Device chassis or platform model as an inventory fact.
+    semantic_type: state
+    value_types: [text]
+    dimensions: []
+    assessment_roles: [change, evidence]
+
+  - id: device.cpu.utilization
+    description: CPU utilization for one canonical CPU scope and time window.
+    semantic_type: gauge
+    value_types: [number]
+    canonical_unit: percent
+    dimensions: [window]
+    allowed_dimension_values:
+      window: [instant, 5s, 1m, 5m, 15m]
+    assessment_roles: [current_state, change]
+
+  - id: device.memory.utilization
+    description: Used memory as a percentage of total memory for one memory scope.
+    semantic_type: gauge
+    value_types: [number]
+    canonical_unit: percent
+    dimensions: []
+    assessment_roles: [current_state, change]
+
+  - id: device.memory.used
+    description: Used memory capacity for one memory scope.
+    semantic_type: gauge
+    value_types: [number]
+    canonical_unit: bytes
+    dimensions: []
+    assessment_roles: [change, evidence]
+
+  - id: device.memory.total
+    description: Total available memory capacity for one memory scope.
+    semantic_type: gauge
+    value_types: [number]
+    canonical_unit: bytes
+    dimensions: []
+    assessment_roles: [change, evidence]
+
+  - id: interface.oper_status
+    description: Current forwarding or physical link operational state of an interface.
+    semantic_type: state
+    value_types: [text]
+    allowed_values:
+      [up, down, admin_down, absent, error_disabled, unavailable, unknown]
+    dimensions: []
+    assessment_roles: [current_state, change]
+
+  - id: interface.admin_status
+    description: Explicit configured administrative enable or shutdown state; protocol state is not administrative state.
+    semantic_type: state
+    value_types: [text]
+    allowed_values: [up, down, unknown]
+    dimensions: []
+    assessment_roles: [change, evidence]
+
+  - id: interface.optical.presence
+    description: Whether an optical transceiver is physically present and diagnosable on the interface channel.
+    semantic_type: state
+    value_types: [boolean, text]
+    allowed_values: [present, absent, unknown]
+    dimensions: [channel]
+    assessment_roles: [current_state, change]
+
+  - id: interface.optical.rx_power
+    description: Current received optical power measurement for one interface channel.
+    semantic_type: gauge
+    value_types: [number]
+    canonical_unit: dbm
+    dimensions: [channel]
+    assessment_roles: [current_state, change]
+
+  - id: interface.optical.tx_power
+    description: Current transmitted optical power measurement for one interface channel.
+    semantic_type: gauge
+    value_types: [number]
+    canonical_unit: dbm
+    dimensions: [channel]
+    assessment_roles: [current_state, change]
+
+  - id: interface.optical.rx_low_warning
+    description: Device-reported low receive-power warning threshold for one interface channel.
+    semantic_type: threshold
+    value_types: [number]
+    canonical_unit: dbm
+    dimensions: [channel]
+    assessment_roles: [reference]
+
+  - id: interface.optical.tx_low_warning
+    description: Device-reported low transmit-power warning threshold for one interface channel.
+    semantic_type: threshold
+    value_types: [number]
+    canonical_unit: dbm
+    dimensions: [channel]
+    assessment_roles: [reference]
+
+  - id: environment.fan.state
+    description: Current presence and operating health state of one fan.
+    semantic_type: state
+    value_types: [text]
+    dimensions: []
+    assessment_roles: [current_state, change]
+
+  - id: environment.power.state
+    description: Current presence and operating health state of one power supply.
+    semantic_type: state
+    value_types: [text]
+    dimensions: []
+    assessment_roles: [current_state, change]

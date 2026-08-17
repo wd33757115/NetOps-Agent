@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
+import re
+
 TEXTFSM_END_OF_INPUT = "__NETOPS_TEXTFSM_END_OF_INPUT_7F3A9C__"
+
+
+def _remove_incidental_trailing_whitespace(value: str) -> str:
+    """Remove terminal CLI padding without changing indentation or columns."""
+
+    return re.sub(r"[\t ]+(?=\r?$)", "", value, flags=re.MULTILINE)
 
 
 def prepare_textfsm_input(template_text: str, cli_output: str) -> str:
@@ -14,7 +22,7 @@ def prepare_textfsm_input(template_text: str, cli_output: str) -> str:
     been read. A template opts in by matching the reserved marker literally.
     """
 
-    raw = str(cli_output or "")
+    raw = _remove_incidental_trailing_whitespace(str(cli_output or ""))
     if TEXTFSM_END_OF_INPUT not in str(template_text or ""):
         return raw
     if any(line.strip() == TEXTFSM_END_OF_INPUT for line in raw.splitlines()):

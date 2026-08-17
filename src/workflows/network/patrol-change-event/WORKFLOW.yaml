@@ -37,6 +37,7 @@ steps:
     skill: change-detector
     inputs:
       current_run_id: ${steps.patrol.result.snapshot_run_id}
+      device_id: ${context.device_id}
       use_state_observations: true
       persist: true
       runtime_asset_manifest: ${steps.patrol.result.runtime_asset_manifest}
@@ -49,6 +50,8 @@ steps:
       persist: true
       publish: ${context.publish_events}
       runtime_asset_manifest: ${steps.patrol.result.runtime_asset_manifest}
+      patrol_batch_id: ${context.patrol_batch_id}
+      device_id: ${context.device_id}
 
 on_complete:
   message: 巡检变化分析已完成

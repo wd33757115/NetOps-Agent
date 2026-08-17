@@ -6,11 +6,31 @@ import hashlib
 import ipaddress
 import json
 import uuid
+from dataclasses import replace
 from typing import Any
 
+from src.core.check_items.catalog import (
+    CheckItemCatalogRepository,
+    CheckItemDefinition,
+)
+from src.core.check_items.command_adapter import (
+    CommandAdapterError,
+    ObservationBatch,
+    execute_adapter,
+)
 from src.core.observation import ObservationContractRepository
+from src.core.observation.record_set_relations import (
+    materialize_record_set_references,
+)
+from src.core.observation.semantic_projection import (
+    SemanticProjectionError,
+    dimension_value_signature,
+    project_value,
+    resolve_dimensions,
+)
 from src.core.parser.key_contract import EntityKeyError, build_entity_key
 from src.core.parser.repository import ParserTemplateRepository
+from src.core.parser.value_types import is_unassigned_ip, is_unavailable_value
 from src.core.state.domain import StateObservation
 from src.core.state.observation_applicability import (
     APPLICABILITY_CONTEXT_KEY,
@@ -25,6 +45,169 @@ PLACEHOLDER_NORMALIZED_FIELDS = {"description"}
 
 class ObservationContractVersionError(ValueError):
     """Raised when replay cannot resolve the immutable contract version."""
+
+
+def _adapter_record_sets(structured: Any) -> dict[str, list[dict[str, Any]]]:
+    if isinstance(structured, dict) and isinstance(
+        structured.get("record_sets"), dict
+    ):
+        return {
+            str(name): _records(rows)
+            for name, rows in structured["record_sets"].items()
+        }
+    if isinstance(structured, dict):
+        candidate_sets = {
+            str(name): _records(rows)
+            for name, rows in structured.items()
+            if isinstance(rows, list)
+        }
+        if candidate_sets:
+            return candidate_sets
+    return {"default": _records(structured)}
+
+
+def _adapter_contract(check_item: CheckItemDefinition) -> dict[str, Any]:
+    """Compile one check-item definition into the legacy normalizer shape."""
+
+    canonical = dict(check_item.canonical_contract or {})
+    observations = [
+        dict(item)
+        for item in canonical.get("observations") or []
+        if isinstance(item, dict)
+    ]
+    state_semantics: dict[str, dict[str, Any]] = {}
+    validators: dict[str, dict[str, Any]] = {}
+    for observation in observations:
+        field = str(observation.get("canonical_field") or "").strip()
+        if not field:
+            continue
+        semantics = {
+            key: value
+            for key, value in observation.items()
+            if key not in {"canonical_field", "required", "mapping_guidance"}
+        }
+        explicit_thresholds = observation.get("threshold_references")
+        if isinstance(explicit_thresholds, dict):
+            semantics["threshold_references"] = dict(explicit_thresholds)
+        state_semantics[field] = semantics
+        semantic_type = str(observation.get("semantic_type") or "").strip()
+        value_type = str(observation.get("value_type") or "").strip()
+        if value_type:
+            validators[field] = {"type": value_type}
+        elif semantic_type in {"gauge", "counter", "number", "percentage"}:
+            validators[field] = {"type": "number"}
+
+    primary_keys = [
+        str(item)
+        for item in (
+            canonical.get("primary_keys")
+            or canonical.get("identity_dimensions")
+            or []
+        )
+        if str(item) and str(item) != "device_id"
+    ]
+    observable_fields = set(state_semantics)
+    known_fields = set(dict(canonical.get("parser_field_vocabulary") or {}))
+    ignored_fields = sorted(known_fields - observable_fields - set(primary_keys))
+    return {
+        "contract_id": check_item.version_id,
+        "contract_version": check_item.version,
+        "contract_sha256": check_item.digest,
+        "schema_id": check_item.version_id,
+        "source_type": "cli",
+        "entity_type": str(canonical.get("entity_type") or check_item.id),
+        "canonical_entity_type": str(
+            canonical.get("canonical_entity_type")
+            or canonical.get("entity_type")
+            or check_item.id
+        ),
+        "primary_keys": primary_keys,
+        "entity_identity_fields": primary_keys,
+        "state_semantics": state_semantics,
+        "validators": validators,
+        "ignore_fields": ignored_fields,
+        "record_sets": [],
+    }
+
+
+def _adapter_projection(
+    snapshot: dict[str, Any],
+    *,
+    mode: str,
+    source: str,
+    dataset_id: str | None,
+) -> tuple[list[StateObservation], tuple[ObservationBatch, ...]] | None:
+    version_id = str(snapshot.get("implementation_version_id") or "").strip()
+    if not version_id:
+        return None
+    context = CheckItemCatalogRepository().get_implementation_version_context(
+        version_id
+    )
+    if context is None:
+        return None
+    implementation, check_items = context
+    if not implementation.adapter_spec:
+        return None
+    parser_id = str(
+        dict(implementation.adapter_spec.get("parser") or {}).get("template_id")
+        or ""
+    ).strip()
+    snapshot_parser_id = str(snapshot.get("parser_template_id") or "").strip()
+    if parser_id != snapshot_parser_id:
+        raise SemanticProjectionError(
+            "command adapter Parser binding does not match the snapshot Parser version"
+        )
+
+    items_by_id = {item.id: item for item in check_items}
+    batches = execute_adapter(
+        implementation.adapter_spec,
+        record_sets=_adapter_record_sets(snapshot.get("structured_json")),
+        check_items={
+            item.id: {
+                "version_id": item.version_id,
+                "canonical_contract": item.canonical_contract,
+            }
+            for item in check_items
+        },
+        device_id=str(snapshot.get("inventory_device_id") or snapshot["device_id"]),
+        adapter_version_id=implementation.version_id,
+        evidence={
+            "snapshot_id": snapshot.get("id"),
+            "parser_template_id": snapshot.get("parser_template_id"),
+            "raw_text_hash": snapshot.get("raw_text_hash"),
+            "canonical_command": snapshot.get("canonical_command"),
+        },
+        observed_at=snapshot.get("observed_at"),
+    )
+    observations: list[StateObservation] = []
+    for batch in batches:
+        if not batch.records:
+            continue
+        check_item = items_by_id[batch.check_item_id]
+        child_snapshot = dict(snapshot)
+        child_snapshot["structured_json"] = list(batch.records)
+        projected = observations_from_snapshot(
+            child_snapshot,
+            mode=mode,
+            source=source,
+            dataset_id=dataset_id,
+            _contract_override=_adapter_contract(check_item),
+        )
+        for observation in projected:
+            observations.append(
+                replace(
+                    observation,
+                    metadata={
+                        **dict(observation.metadata or {}),
+                        "check_item_id": check_item.id,
+                        "check_item_version_id": check_item.version_id,
+                        "command_adapter_id": implementation.id,
+                        "command_adapter_version_id": implementation.version_id,
+                        "observation_batch_quality": batch.quality_status,
+                    },
+                )
+            )
+    return _reconcile_snapshot_observations(observations), batches
 
 
 def _records(value: Any) -> list[dict[str, Any]]:
@@ -66,6 +249,8 @@ def _normalize_observation_value(
         text = value.strip()
         if field in PLACEHOLDER_NORMALIZED_FIELDS and text.lower() in EMPTY_PLACEHOLDERS:
             return ""
+        if is_unavailable_value(text, (validator or {}).get("unavailable_tokens")):
+            return None
         if validator_type in {"number", "percent"}:
             numeric_text = text.rstrip("%").strip()
             try:
@@ -73,7 +258,7 @@ def _normalize_observation_value(
             except ValueError:
                 return text
         if validator_type == "ip_or_unassigned":
-            if text.lower() in {"unassigned", "unset", "none", "n/a", "--", "-"}:
+            if is_unassigned_ip(text):
                 return text.lower()
             try:
                 if "/" in text:
@@ -148,6 +333,57 @@ def _template_contract(
     return validation
 
 
+def _frozen_snapshot_contract(
+    snapshot: dict[str, Any],
+) -> dict[str, Any] | None:
+    metadata = dict(snapshot.get("metadata_json") or {})
+    refs = [
+        dict(item)
+        for item in metadata.get("observation_contract_refs") or []
+        if isinstance(item, dict)
+    ]
+    if not refs:
+        return None
+    template_id = str(snapshot.get("parser_template_id") or "").strip()
+    matches = [
+        item
+        for item in refs
+        if str(item.get("schema_id") or "").strip() == template_id
+    ]
+    identities = {
+        (
+            str(item.get("contract_id") or "").strip(),
+            str(item.get("digest") or "").strip(),
+        )
+        for item in matches
+    }
+    if len(identities) != 1:
+        raise ObservationContractVersionError(
+            "frozen RuntimeBundle does not identify exactly one "
+            f"ObservationContract for Parser {template_id or '<missing>'}"
+        )
+    contract_id, expected_digest = next(iter(identities))
+    if not contract_id or len(expected_digest) != 64:
+        raise ObservationContractVersionError(
+            "frozen ObservationContract identity is incomplete"
+        )
+    contract = ObservationContractRepository().get_by_id(contract_id)
+    if contract is None:
+        raise ObservationContractVersionError(
+            f"frozen ObservationContract not found: {contract_id}"
+        )
+    validation = contract.to_validation_dict()
+    if (
+        str(validation.get("schema_id") or "") != template_id
+        or str(validation.get("contract_sha256") or "")
+        != expected_digest
+    ):
+        raise ObservationContractVersionError(
+            "frozen ObservationContract digest or Parser binding changed"
+        )
+    return validation
+
+
 def _looks_like_header_artifact(
     record: dict[str, Any],
     *,
@@ -165,6 +401,34 @@ def _looks_like_header_artifact(
     return interface in {"ifname", "intf"} and status in {"status", "link"}
 
 
+def _reconcile_snapshot_observations(
+    observations: list[StateObservation],
+) -> list[StateObservation]:
+    """Deduplicate one canonical fact and reject ambiguous same-snapshot values."""
+
+    by_state_key: dict[str, StateObservation] = {}
+    by_observation_id: dict[str, StateObservation] = {}
+    for observation in observations:
+        existing = by_state_key.get(observation.state_key)
+        if (
+            existing is not None
+            and existing.observation_id != observation.observation_id
+        ):
+            raise SemanticProjectionError(
+                "one snapshot produced conflicting canonical values for "
+                f"{observation.observation_type or observation.field_name} "
+                f"at entity {observation.entity_key}"
+            )
+        by_state_key[observation.state_key] = observation
+        by_observation_id.setdefault(
+            observation.observation_id,
+            observation,
+        )
+    # Preserve the contract/record traversal order.  Reconciliation must not
+    # silently reorder fields consumed by reports or downstream integrations.
+    return list(by_observation_id.values())
+
+
 def observations_from_snapshot(
     snapshot: dict[str, Any],
     *,
@@ -172,6 +436,8 @@ def observations_from_snapshot(
     source: str,
     dataset_id: str | None,
     observation_contract_version: int | None = None,
+    _contract_override: dict[str, Any] | None = None,
+    _record_set_name: str | None = None,
 ) -> list[StateObservation]:
     metadata_json = dict(snapshot.get("metadata_json") or {})
     parse_status = str(snapshot.get("parse_status") or "")
@@ -204,16 +470,106 @@ def observations_from_snapshot(
             },
         }
     else:
-        contract = (
-            _template_contract(
-                snapshot.get("parser_template_id"),
-                contract_version=int(observation_contract_version),
+    else:
+        if _contract_override is None:
+            adapter_projection = _adapter_projection(
+                snapshot,
+                mode=mode,
+                source=source,
+                dataset_id=dataset_id,
             )
+            if adapter_projection is not None:
+                return adapter_projection[0]
+        frozen_contract_version = (
+            int(observation_contract_version)
             if observation_contract_version is not None
-            else _template_contract(snapshot.get("parser_template_id"))
+            else None
         )
-    entity_type = str(contract.get("entity_type") or "record")
+        frozen_contract = (
+            None
+            if _contract_override is not None
+            or frozen_contract_version is not None
+            else _frozen_snapshot_contract(snapshot)
+        )
+        contract = (
+            dict(_contract_override)
+            if _contract_override is not None
+            else dict(frozen_contract)
+            if frozen_contract is not None
+            else (
+                _template_contract(
+                    snapshot.get("parser_template_id"),
+                    contract_version=frozen_contract_version,
+                )
+                if frozen_contract_version is not None
+                else _template_contract(snapshot.get("parser_template_id"))
+            )
+        )
+        record_sets = [
+            dict(item)
+            for item in contract.get("record_sets") or ()
+            if isinstance(item, dict)
+        ]
+        if record_sets:
+            if isinstance(structured, dict) and isinstance(
+                structured.get("record_sets"), dict
+            ):
+                structured_sets = dict(structured["record_sets"])
+            elif isinstance(structured, dict) and all(
+                str(item.get("name") or "") in structured for item in record_sets
+            ):
+                structured_sets = structured
+            elif len(record_sets) == 1:
+                structured_sets = {
+                    str(record_sets[0].get("name") or "default"): structured
+                }
+            else:
+                raise ValueError(
+                    "multi-record ObservationContract requires structured_json.record_sets"
+                )
+            structured_sets, record_sets = materialize_record_set_references(
+                contract=contract,
+                structured_sets=structured_sets,
+            )
+            observations: list[StateObservation] = []
+            for record_set in record_sets:
+                name = str(record_set.get("name") or "").strip()
+                if not name:
+                    raise ValueError("ObservationContract record set requires name")
+                child_snapshot = dict(snapshot)
+                child_snapshot["structured_json"] = structured_sets.get(name, [])
+                child_contract = {
+                    **contract,
+                    **record_set,
+                    "schema_id": contract.get("schema_id"),
+                    "contract_id": contract.get("contract_id"),
+                    "contract_version": contract.get("contract_version"),
+                    "contract_sha256": contract.get("contract_sha256"),
+                    "record_sets": [],
+                }
+                observations.extend(
+                    observations_from_snapshot(
+                        child_snapshot,
+                        mode=mode,
+                        source=source,
+                        dataset_id=dataset_id,
+                        observation_contract_version=frozen_contract_version,
+                        _contract_override=child_contract,
+                        _record_set_name=name,
+                    )
+                )
+            return _reconcile_snapshot_observations(observations)
+    source_entity_type = str(contract.get("entity_type") or "record")
+    entity_type = str(
+        contract.get("canonical_entity_type") or source_entity_type
+    )
     primary_keys = [str(key) for key in contract.get("primary_keys") or []]
+    entity_identity_fields = [
+        str(key)
+        for key in contract.get("entity_identity_fields") or []
+        if str(key).strip()
+    ]
+    entity_dimensions = dict(contract.get("entity_dimensions") or {})
     ignore_fields = {str(field).strip().lower() for field in contract.get("ignore_fields") or []}
     ignore_fields.update(DEFAULT_IGNORE_FIELDS)
     state_semantics = dict(contract.get("state_semantics") or {})
@@ -222,10 +578,37 @@ def observations_from_snapshot(
     external_device_id = str(snapshot["device_id"])
     state_device_id = str(snapshot.get("inventory_device_id") or external_device_id)
 
+    def emits_empty_value(field_name: str) -> bool:
+        normalized_name = str(field_name).strip().lower()
+        semantics = state_semantics.get(field_name) or state_semantics.get(
+            normalized_name
+        )
+        return bool(
+            isinstance(semantics, dict)
+            and semantics.get("emit_when_empty") is True
+        )
+
+    def emits_state_observation(field_name: str) -> bool:
+        normalized_name = str(field_name).strip().lower()
+        semantics = state_semantics.get(field_name) or state_semantics.get(
+            normalized_name
+        )
+        if not isinstance(semantics, dict):
+            return True
+        if semantics.get("ignore") is True or semantics.get("monitor") is False:
+            return False
+        comparison_role = str(
+            semantics.get("comparison_role") or ""
+        ).strip()
+        return not comparison_role or comparison_role == "observation"
+
     def append_observation(
         *,
         record: dict[str, Any],
+        normalized_record: dict[str, Any],
         entity_key: str,
+        source_entity_key: str,
+        canonical_identity: dict[str, Any] | None,
         field_name: str,
         raw_value: Any,
         value_index: int | None,
@@ -234,7 +617,13 @@ def observations_from_snapshot(
         validator = validators.get(field_name) or validators.get(normalized_field_name)
         if not isinstance(validator, dict):
             validator = {}
-        value = _normalize_observation_value(
+        validator_type = str(validator.get("type") or "").lower()
+        unavailable_token = (
+            str(raw_value).strip()
+            if is_unavailable_value(raw_value, validator.get("unavailable_tokens"))
+            else None
+        )
+        source_value = _normalize_observation_value(
             str(field_name),
             raw_value,
             validator=validator,
@@ -245,12 +634,18 @@ def observations_from_snapshot(
         if not isinstance(field_semantics, dict):
             field_semantics = {}
         field_semantics = dict(field_semantics)
-        validator_type = str(validator.get("type") or "").lower()
         if validator_type == "percent":
             field_semantics.setdefault("semantic_type", "percentage")
             field_semantics.setdefault("unit", "%")
         elif validator_type == "ip_or_unassigned":
             field_semantics.setdefault("semantic_type", "ip_address")
+        value = project_value(
+            field_name=normalized_field_name,
+            source_value=source_value,
+            normalized_record=normalized_record,
+            field_semantics=field_semantics,
+            value_index=value_index,
+        )
         context_fields = set(
             applicability_context_fields(field_semantics.get("applicability"))
         )
@@ -259,14 +654,21 @@ def observations_from_snapshot(
             for item in field_semantics.get("context_fields") or []
             if str(item).strip()
         )
+        threshold_references = {
+            str(role): dict(reference)
+            for role, reference in dict(
+                field_semantics.get("threshold_references") or {}
+            ).items()
+            if isinstance(reference, dict)
+        }
         observation_context = None
-        if context_fields:
+        if context_fields or threshold_references:
             observation_context = {}
             for context_field in context_fields:
                 context_validator = validators.get(context_field)
                 if not isinstance(context_validator, dict):
                     context_validator = {}
-                context_value = record.get(context_field)
+                context_value = normalized_record.get(context_field)
                 if value_index is not None and isinstance(context_value, list):
                     context_value = (
                         context_value[value_index]
@@ -280,31 +682,53 @@ def observations_from_snapshot(
                 )
             threshold_fields = sorted(
                 {
-                    str(reference.get("field_name") or "")
-                    for reference in dict(
-                        field_semantics.get("threshold_references") or {}
-                    ).values()
-                    if isinstance(reference, dict)
-                    and str(reference.get("field_name") or "").strip()
+                    str(reference.get("context_key") or reference.get("field_name") or "")
+                    for reference in threshold_references.values()
+                    if str(reference.get("field_name") or "").strip()
                 }
             )
             runtime_threshold_fields: list[str] = []
-            for role, raw_reference in dict(
-                field_semantics.get("threshold_references") or {}
-            ).items():
-                if not isinstance(raw_reference, dict):
-                    continue
-                source_field = str(raw_reference.get("field_name") or "").strip()
+            threshold_reference_sources: dict[str, Any] = {}
+            for role, raw_reference in threshold_references.items():
+                source_field = str(
+                    raw_reference.get("runtime_field_name")
+                    or raw_reference.get("field_name")
+                    or ""
+                ).strip()
                 context_key = str(
                     raw_reference.get("context_key") or source_field
                 ).strip()
                 if not source_field or not context_key:
                     continue
-                source_value = observation_context.get(source_field)
+                source_value = normalized_record.get(source_field)
+                if source_value in (None, ""):
+                    continue
+                reference_validator = raw_reference.get("validator")
+                if not isinstance(reference_validator, dict):
+                    reference_validator = validators.get(
+                        str(raw_reference.get("field_name") or "")
+                    )
+                if not isinstance(reference_validator, dict):
+                    reference_validator = {}
+                source_value = _normalize_observation_value(
+                    str(raw_reference.get("field_name") or source_field),
+                    source_value,
+                    validator=reference_validator,
+                )
                 if source_value in (None, ""):
                     continue
                 observation_context[context_key] = source_value
                 runtime_threshold_fields.append(context_key)
+                threshold_reference_sources[str(role)] = {
+                    key: raw_reference.get(key)
+                    for key in (
+                        "source",
+                        "record_set_name",
+                        "relation_name",
+                        "field_name",
+                    )
+                    if raw_reference.get(key) is not None
+                }
             populated_thresholds = [
                 field
                 for field in threshold_fields
@@ -317,6 +741,16 @@ def observations_from_snapshot(
                 observation_context["threshold_source"] = "device_output"
                 observation_context["threshold_confidence"] = "authoritative"
                 observation_context["threshold_fields"] = populated_thresholds
+                if threshold_reference_sources:
+                    observation_context["threshold_reference_sources"] = (
+                        threshold_reference_sources
+                    )
+        dimensions = resolve_dimensions(
+            field_semantics.get("dimensions"),
+            normalized_record,
+            value_index=value_index,
+        )
+        dimension_signature = dimension_value_signature(dimensions)
         value_text, value_number, value_type = _value_parts(value)
         observation_type = (
             str(field_semantics.get("observation_type"))
@@ -330,7 +764,7 @@ def observations_from_snapshot(
                 entity_type,
                 entity_key,
                 semantic_field,
-                value_index,
+                dimension_signature,
             ]
         )
         observation_key = _digest(
@@ -339,8 +773,8 @@ def observations_from_snapshot(
                 state_device_id,
                 entity_type,
                 entity_key,
-                field_name,
-                value_index,
+                semantic_field,
+                dimension_signature,
                 value,
             ]
         )
@@ -350,12 +784,6 @@ def observations_from_snapshot(
             (snapshot.get("metadata_json") or {}).get("command_ordinal") or 0
         )
         fact_order_key = f"{command_ordinal:020d}|{execution_item_id}|{observation_id}"
-        dimensions = None
-        if value_index is not None:
-            dimensions = {
-                **{str(key): record.get(key) for key in primary_keys},
-                "value_index": value_index + 1,
-            }
         observations.append(
             StateObservation(
                 observation_id=observation_id,
@@ -387,10 +815,18 @@ def observations_from_snapshot(
                     else None
                 ),
                 unit=(
-                    str(field_semantics.get("unit"))
-                    if field_semantics.get("unit")
+                    str(
+                        field_semantics.get("canonical_unit")
+                        or field_semantics.get("unit")
+                    )
+                    if (
+                        field_semantics.get("canonical_unit")
+                        or field_semantics.get("unit")
+                    )
                     else None
                 ),
+                dimensions=dimensions,
+                dimension_signature=dimension_signature,
                 value=value,
                 value_text=value_text,
                 value_number=value_number,
@@ -406,6 +842,11 @@ def observations_from_snapshot(
                 metadata={
                     "canonical_command": snapshot["canonical_command"],
                     "primary_keys": primary_keys,
+                    "source_entity_type": source_entity_type,
+                    "source_entity_key": source_entity_key,
+                    "canonical_entity_type": entity_type,
+                    "entity_identity_fields": entity_identity_fields,
+                    "canonical_identity": canonical_identity,
                     "evidence_id": snapshot.get("evidence_id"),
                     "source_type": str(snapshot.get("source_type") or "cli"),
                     "external_device_id": external_device_id,
@@ -431,6 +872,10 @@ def observations_from_snapshot(
                     "observation_type": field_semantics.get("observation_type"),
                     "semantic_type": field_semantics.get("semantic_type"),
                     "unit": field_semantics.get("unit"),
+                    "canonical_unit": field_semantics.get("canonical_unit"),
+                    "source_value": source_value if value != source_value else None,
+                    "availability": "unavailable" if unavailable_token else "available",
+                    "unavailable_token": unavailable_token,
                     "parser_contract_version": snapshot.get("contract_version"),
                     "observation_contract_id": contract.get("contract_id"),
                     "observation_contract_version": contract.get("contract_version"),
@@ -448,6 +893,8 @@ def observations_from_snapshot(
                     "parser_failure_text_comparison": parser_failure_text_comparison,
                     "semantics": field_semantics,
                     "dimensions": dimensions,
+                    "dimension_signature": dimension_signature,
+                    "record_set_name": _record_set_name,
                     "value_index": value_index + 1 if value_index is not None else None,
                     APPLICABILITY_CONTEXT_KEY: observation_context,
                 },
@@ -457,40 +904,113 @@ def observations_from_snapshot(
     for record in _records(structured):
         if _looks_like_header_artifact(
             record,
-            entity_type=entity_type,
+            entity_type=source_entity_type,
             primary_keys=primary_keys,
         ):
             continue
-        entity_key = build_entity_key(record, primary_keys)
+        normalized_record: dict[str, Any] = {}
+        for record_field, record_value in record.items():
+            normalized_name = str(record_field).strip().lower()
+            record_validator = validators.get(record_field) or validators.get(
+                normalized_name
+            )
+            if not isinstance(record_validator, dict):
+                record_validator = {}
+            if isinstance(record_value, list):
+                normalized_value = [
+                    _normalize_observation_value(
+                        str(record_field),
+                        item,
+                        validator=record_validator,
+                    )
+                    for item in record_value
+                ]
+            else:
+                normalized_value = _normalize_observation_value(
+                    str(record_field),
+                    record_value,
+                    validator=record_validator,
+                )
+            normalized_record[record_field] = normalized_value
+            normalized_record.setdefault(normalized_name, normalized_value)
+        source_entity_key = build_entity_key(record, primary_keys)
+        canonical_identity: dict[str, Any] | None = None
+        if entity_dimensions:
+            from src.core.check_items.identity import normalize_entity_identity
+
+            resolved_identity = resolve_dimensions(
+                entity_dimensions,
+                normalized_record,
+                context={"device_id": state_device_id},
+            )
+            identity_fields = entity_identity_fields or list(
+                entity_dimensions
+            )
+            if (
+                len(identity_fields) != len(set(identity_fields))
+                or set(identity_fields) != set(resolved_identity)
+            ):
+                raise SemanticProjectionError(
+                    "entity_identity_fields must uniquely match entity_dimensions"
+                )
+            identity_decision = normalize_entity_identity(
+                entity_type=entity_type,
+                identity_values=resolved_identity,
+                primary_keys=identity_fields,
+            )
+            entity_key = identity_decision.entity_key
+            canonical_identity = {
+                "values": identity_decision.values,
+                "policy_id": identity_decision.policy_id,
+                "policy_version": identity_decision.policy_version,
+                "policy_digest": identity_decision.policy_digest,
+                "matched_policy_index": identity_decision.matched_policy_index,
+            }
+        else:
+            entity_key = source_entity_key
         for field_name in sorted(record):
             normalized_field_name = str(field_name).strip().lower()
-            if normalized_field_name in ignore_fields or field_name in primary_keys:
+            if (
+                normalized_field_name in ignore_fields
+                or field_name in primary_keys
+                or not emits_state_observation(str(field_name))
+            ):
                 continue
             raw_value = record.get(field_name)
             if isinstance(raw_value, list):
                 for value_index, item in enumerate(raw_value):
-                    if item is None or (isinstance(item, str) and not item.strip()):
+                    if (
+                        item is None
+                        or (isinstance(item, str) and not item.strip())
+                    ) and not emits_empty_value(str(field_name)):
                         continue
                     append_observation(
                         record=record,
+                        normalized_record=normalized_record,
                         entity_key=entity_key,
+                        source_entity_key=source_entity_key,
+                        canonical_identity=canonical_identity,
                         field_name=str(field_name),
                         raw_value=item,
                         value_index=value_index,
                     )
                 continue
-            if raw_value is None or (
-                isinstance(raw_value, str) and not raw_value.strip()
-            ):
+            if (
+                raw_value is None
+                or (isinstance(raw_value, str) and not raw_value.strip())
+            ) and not emits_empty_value(str(field_name)):
                 continue
             append_observation(
                 record=record,
+                normalized_record=normalized_record,
                 entity_key=entity_key,
+                source_entity_key=source_entity_key,
+                canonical_identity=canonical_identity,
                 field_name=str(field_name),
                 raw_value=raw_value,
                 value_index=None,
             )
-    return observations
+    return _reconcile_snapshot_observations(observations)
 
 
 def _build_snapshot_normalization(
@@ -523,6 +1043,8 @@ def _build_snapshot_normalization(
         "not_applicable": ("skipped", "not_applicable", "not_applicable"),
         "empty_unverified": ("blocked", "empty_unverified", "blocked_by_output"),
         "command_error": ("blocked", "command_error", "blocked_by_output"),
+        "truncated": ("blocked", "truncated", "blocked_by_output"),
+        "paged": ("blocked", "paged", "blocked_by_output"),
     }.get(parse_status)
     if gated is not None:
         normalization_status, reason, fact_status = gated
@@ -576,7 +1098,9 @@ def _build_snapshot_normalization(
             observations,
             False,
         )
-    if parse_status == "parse_empty":
+    if parse_status == "parse_empty" and not snapshot.get(
+        "implementation_version_id"
+    ):
         return (
             {
                 "success": True,
@@ -615,16 +1139,35 @@ def _build_snapshot_normalization(
             should_update_current,
         )
     try:
-        observations = observations_from_snapshot(
+        adapter_projection = _adapter_projection(
             context["snapshot"],
             mode=mode,
             source=str(context["source"]),
             dataset_id=context["dataset_id"],
         )
-    except (EntityKeyError, ObservationContractVersionError) as exc:
+        if adapter_projection is None:
+            observations = observations_from_snapshot(
+                context["snapshot"],
+                mode=mode,
+                source=str(context["source"]),
+                dataset_id=context["dataset_id"],
+            )
+            batches: tuple[ObservationBatch, ...] = ()
+        else:
+            observations, batches = adapter_projection
+    except (
+        CommandAdapterError,
+        EntityKeyError,
+        ObservationContractVersionError,
+        SemanticProjectionError,
+    ) as exc:
         failure_code = (
             "contract_version_unavailable"
             if isinstance(exc, ObservationContractVersionError)
+            else "adapter_mapping_invalid"
+            if isinstance(exc, CommandAdapterError)
+            else "semantic_projection_invalid"
+            if isinstance(exc, SemanticProjectionError)
             else "entity_key_invalid"
         )
         return (
@@ -643,6 +1186,49 @@ def _build_snapshot_normalization(
             [],
             should_update_current,
         )
+    batch_rows = [batch.to_dict() for batch in batches]
+    quality_statuses = {batch.quality_status for batch in batches}
+    if batches and not observations:
+        if quality_statuses == {"not_applicable"}:
+            normalization_status = "skipped"
+            fact_status = "not_applicable"
+            no_observation_reason = "not_applicable"
+            success = True
+        elif quality_statuses <= {"valid_empty"}:
+            normalization_status = "empty"
+            fact_status = "empty"
+            no_observation_reason = "legitimate_empty"
+            success = True
+        else:
+            normalization_status = "failed"
+            fact_status = "blocked_by_contract"
+            no_observation_reason = "adapter_output_unavailable"
+            success = False
+        return (
+            {
+                "success": success,
+                "snapshot_id": snapshot_id,
+                "mode": mode,
+                "parse_status": parse_status,
+                "normalization_status": normalization_status,
+                "fact_status": fact_status,
+                "failure_code": (
+                    None if success else "adapter_output_unavailable"
+                ),
+                "no_observation_reason": no_observation_reason,
+                "observation_count": 0,
+                "created_count": 0,
+                "current_state_updates": 0,
+                "updated_current_state": should_update_current and success,
+                "observations": [],
+                "observation_batches": batch_rows,
+                "authoritative_for_deletion": bool(
+                    batches and quality_statuses <= {"complete", "valid_empty"}
+                ),
+            },
+            [],
+            should_update_current and success,
+        )
     normalization_status = "normalized" if observations else "empty"
     return (
         {
@@ -658,6 +1244,17 @@ def _build_snapshot_normalization(
             "current_state_updates": 0,
             "updated_current_state": should_update_current,
             "observations": [item.to_dict() for item in observations],
+            "observation_batches": batch_rows,
+            "partial": bool(
+                batches
+                and any(
+                    batch.quality_status != "complete" for batch in batches
+                )
+            ),
+            "authoritative_for_deletion": bool(
+                not batches
+                or quality_statuses <= {"complete", "valid_empty"}
+            ),
         },
         observations,
         should_update_current,
@@ -685,6 +1282,16 @@ def normalize_snapshot(
             normalization_status=str(result["normalization_status"]),
             fact_status=str(result["fact_status"]),
             failure_code=result.get("failure_code"),
+            authoritative_for_deletion=(
+                False
+                if result.get("authoritative_for_deletion") is False
+                else None
+            ),
+            metadata={
+                "observation_batches": result.get("observation_batches") or [],
+            }
+            if "observation_batches" in result
+            else None,
         )
     if observations:
         created, current_updates = repository.save_observations(
@@ -832,6 +1439,19 @@ def _normalize_run_impl(
                 normalization_status=str(snapshot_result["normalization_status"]),
                 fact_status=str(snapshot_result["fact_status"]),
                 failure_code=snapshot_result.get("failure_code"),
+                authoritative_for_deletion=(
+                    False
+                    if snapshot_result.get("authoritative_for_deletion") is False
+                    else None
+                ),
+                metadata={
+                    "observation_batches": snapshot_result.get(
+                        "observation_batches"
+                    )
+                    or [],
+                }
+                if "observation_batches" in snapshot_result
+                else None,
             )
         if observations:
             valid_observations.extend(observations)

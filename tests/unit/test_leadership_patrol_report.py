@@ -140,6 +140,7 @@ def test_leadership_report_includes_safe_non_structured_change_summary():
     assert "## 五、非结构化输出变化" in markdown
     assert "<redacted>" in markdown
     assert "非结构化输出变化" in document_text
+    assert "即使巡检流程执行完成" in document_text
     assert "public-community" not in markdown
     unstructured_table = next(
         table
@@ -197,6 +198,47 @@ def test_current_state_uses_initial_fault_semantics_and_suppresses_admin_down():
     assert result["finding_count"] == 1
     assert result["findings"][0]["event_type"] == "InterfaceDown"
     assert result["findings"][0]["entity_key"] == '["GE1/0/1"]'
+
+
+def test_both_scope_transition_is_evaluated_as_current_state():
+    result = evaluate_current_state(
+        [
+            {
+                "id": "obs-fan-1",
+                "device_id": "sw-1",
+                "device_name": "SW1",
+                "entity_type": "environment_fan",
+                "entity_key": '["Fan1"]',
+                "field": "fan_status",
+                "observation_type": "environment.fan.state",
+                "value": "down",
+                "command": "show environment fan",
+            }
+        ],
+        [
+            {
+                "rule_id": "environment-fan-state.down",
+                "event_type": "environment_fan_state_down",
+                "severity": "major",
+                "event_class": "fault",
+                "evaluation_scope": "both",
+                "condition": {
+                    "kind": "transition",
+                    "entity_types": ["environment_fan"],
+                    "fields": ["fan_status"],
+                    "observation_types": ["environment.fan.state"],
+                    "from_group": "up",
+                    "to_group": "down",
+                    "allow_initial_target": False,
+                },
+            }
+        ],
+        rule_source="test",
+    )
+
+    assert result["evaluated_observation_count"] == 1
+    assert result["finding_count"] == 1
+    assert result["findings"][0]["event_type"] == "environment_fan_state_down"
 
 
 def test_current_optical_value_is_evaluated_without_waiting_for_a_change():
@@ -376,10 +418,14 @@ def test_current_optical_value_uses_device_reference_threshold():
 
     assert result["finding_count"] == 1
     assert result["findings"][0]["value"] == -36.96
-    assert result["findings"][0]["condition"]["reference_field"] == (
+    finding = result["findings"][0]
+    assert finding["condition"]["kind"] == "threshold_lte"
+    assert finding["condition"]["lte"] == -14.1
+    assert finding["reference_field"] == "alarm_low_rx_power_dbm"
+    assert finding["reference_value"] == -14.1
+    assert finding["assessment_basis"]["threshold_binding"]["reference_field"] == (
         "alarm_low_rx_power_dbm"
     )
-    assert result["findings"][0]["reference_value"] == -14.1
 
 
 def test_current_optical_state_reports_unknown_when_device_threshold_is_missing():
@@ -621,7 +667,7 @@ def test_leadership_report_uses_frozen_analysis_time_and_is_reproducible():
         }
 
 
-def test_leadership_report_does_not_double_count_optical_signal_on_down_interface():
+def test_leadership_report_requires_approved_episode_association_before_merging():
     summary = _summary()
     summary["runs"] = [
         {
@@ -651,6 +697,8 @@ def test_leadership_report_does_not_double_count_optical_signal_on_down_interfac
             "value": -36.96,
             "unit": "dBm",
             "rule_id": "optical-rx-critical",
+            "risk_case_id": "risk-optical",
+            "risk_episode_id": "episode-optical",
         }
     ]
     summary["events"] = [
@@ -666,9 +714,31 @@ def test_leadership_report_does_not_double_count_optical_signal_on_down_interfac
             "field": "status",
             "current_value": "DOWN",
             "rule_id": "interface-down",
+            "risk_case_id": "risk-interface",
+            "risk_episode_id": "episode-interface",
         }
     ]
     summary["event_count"] = 1
+
+    unreviewed_report = build_leadership_report("batch-correlated", summary)
+
+    assert unreviewed_report["risk_summary"]["total"] == 2
+    assert unreviewed_report["risk_summary"]["correlated_evidence_count"] == 0
+
+    summary["risk_episode_associations"] = [
+        {
+            "id": "association-1",
+            "primary_risk_case_id": "risk-interface",
+            "primary_risk_episode_id": "episode-interface",
+            "related_risk_case_id": "risk-optical",
+            "related_risk_episode_id": "episode-optical",
+            "relation_type": "causal_symptom",
+            "status": "approved",
+            "source_type": "manual",
+            "reviewed_by": "independent-reviewer",
+            "evidence_refs_json": ["event:event-interface-down"],
+        }
+    ]
 
     report = build_leadership_report("batch-correlated", summary)
 

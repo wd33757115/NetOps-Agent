@@ -299,12 +299,16 @@ class MaterializePatrolBatchReportHandler:
         object_key = None
         if self._object_storage is not None:
             candidate_key = f"reports/patrol/{patrol_batch_id}/{source_digest}.md"
-            if self._object_storage.upload_file(
+            uploaded = self._object_storage.upload_file(
                 candidate_key,
                 markdown.encode("utf-8"),
                 content_type="text/markdown; charset=utf-8",
-            ):
-                object_key = candidate_key
+            )
+            if not uploaded:
+                raise RuntimeError(
+                    "failed to upload patrol batch report artifact"
+                )
+            object_key = candidate_key
         try:
             self._repository.upsert(
                 patrol_batch_id=patrol_batch_id,
@@ -315,5 +319,11 @@ class MaterializePatrolBatchReportHandler:
                 object_key=object_key,
             )
         except Exception:
-            pass
+            if (
+                object_key
+                and self._object_storage is not None
+                and hasattr(self._object_storage, "delete_object")
+            ):
+                self._object_storage.delete_object(object_key)
+            raise
         return markdown

@@ -101,3 +101,45 @@ def test_runtime_bundle_rejects_mutated_template_record():
             canonical_command="show interface status",
             registry=registry,
         )
+
+
+def test_runtime_bundle_pins_output_quality_profile_and_detects_tampering():
+    bundle = ParserRuntimeBundle.from_dict(
+        {
+            "vendor": "Cisco",
+            "model": "C2960",
+            "family": "IOS-C2960",
+            "templates": {"show interface status": None},
+            "output_quality_profiles": {
+                "show interface status": {
+                    "version_id": "implementation-v2",
+                    "digest": "d" * 64,
+                    "policy": {
+                        "paging_patterns": [r"--More--"],
+                        "minimum_non_whitespace_chars": 1,
+                    },
+                }
+            },
+        }
+    )
+
+    restored = ParserRuntimeBundle.from_dict(bundle.to_dict())
+
+    assert restored.digest == bundle.digest
+    assert restored.output_quality_profile(
+        "show interface status"
+    ) == {
+        "version_id": "implementation-v2",
+        "digest": "d" * 64,
+        "policy": {
+            "paging_patterns": [r"--More--"],
+            "minimum_non_whitespace_chars": 1,
+        },
+    }
+
+    tampered = bundle.to_dict()
+    tampered["output_quality_profiles"]["show interface status"][
+        "policy"
+    ]["minimum_non_whitespace_chars"] = 10
+    with pytest.raises(ValueError, match="digest mismatch"):
+        ParserRuntimeBundle.from_dict(tampered)

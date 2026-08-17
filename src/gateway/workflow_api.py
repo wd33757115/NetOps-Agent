@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import re
@@ -17,18 +18,30 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from src.auth.dependencies import get_optional_user, require_role
 from src.auth.models import CurrentUser
+from src.core.check_items.batch_results import (
+    CheckItemBatchResultService,
+)
+from src.core.check_items.report_contract import raw_evidence_set_digest
+from src.core.check_items.report_manifest import ReportManifestService
+from src.core.check_items.report_release import ReportReleaseService
+from src.core.check_items.reporting import (
+    ReportArtifact,
+    load_attached_report_artifact,
+)
+from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
 from src.core.patrol.leadership_report import (
     build_leadership_report,
     render_leadership_docx,
     render_leadership_json,
 )
 from src.core.patrol.patrol_report_service import PatrolReportService
+from src.core.patrol.reporting import render_patrol_batch_xlsx
 from src.core.workflows.dsl import GenerateOptions, WorkflowDSL
 from src.core.workflows.engine import WorkflowEngine
 from src.core.workflows.events import get_workflow_timeline
@@ -50,6 +63,7 @@ from src.core.workflows.patrol_batch_service import (
     iter_patrol_event_export_rows,
     iter_patrol_raw_snapshot_rows,
     list_patrol_raw_output_artifacts,
+    list_patrol_run_raw_output_artifacts,
     list_patrol_snapshot_run_ids,
 )
 from src.core.workflows.registry import (
@@ -73,6 +87,7 @@ from src.gateway.schemas import (
     WorkflowStepResponse,
     WorkflowTimelineEvent,
 )
+from src.observability.deprecations import observe_legacy_path
 from src.observability.langfuse import get_trace_url
 
 router = APIRouter(prefix="/api/v1/workflows", tags=["Workflows"])
@@ -121,6 +136,15 @@ class PatrolBatchGovernanceRequest(BaseModel):
     reason: str | None = Field(default=None, description="归档、恢复或保留策略调整原因")
     keep_until: str | None = Field(default=None, description="可选保留到期时间，ISO8601 字符串")
     force: bool = Field(default=False, description="是否允许归档仍在运行的批次")
+
+
+class PatrolBatchCancelRequest(BaseModel):
+    reason: str = Field(
+        ...,
+        min_length=3,
+        max_length=1000,
+        description="Operator-provided reason recorded in the audit trail",
+    )
 
 
 class WorkflowPreviewRequest(BaseModel):
@@ -216,6 +240,151 @@ def _build_patrol_batch_leadership_report(
         patrol_batch_id,
         summary,
         generated_at=datetime.now(timezone.utc),
+    )
+
+
+def _build_check_item_report_artifact(
+    patrol_batch_id: str,
+    artifact_name: str,
+    *,
+    report_manifest_id: str | None = None,
+) -> tuple[dict[str, Any], ReportArtifact] | None:
+    """Use frozen check-item facts when the batch has switched runtimes."""
+
+    if not PatrolBatchManifestRepository().has_runtime_manifest(
+        patrol_batch_id
+    ):
+        return None
+    manifest_service = ReportManifestService()
+    manifest = (
+        manifest_service.get(report_manifest_id)
+        if report_manifest_id
+        else manifest_service.latest_for_batch(patrol_batch_id)
+    )
+    if manifest is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "report artifacts have not been materialized; "
+                "request report generation first"
+            ),
+        )
+    if str(manifest.get("patrol_batch_id") or "") != patrol_batch_id:
+        raise HTTPException(
+            status_code=409,
+            detail="report manifest batch identity mismatch",
+        )
+    release = ReportReleaseService().get_for_manifest(
+        str(manifest["id"])
+    )
+    artifact_keys = dict(
+        manifest.get("artifact_object_keys_json") or {}
+    )
+    artifact_digests = dict(
+        manifest.get("artifact_sha256_json") or {}
+    )
+    if release is not None:
+        release_digests = dict(
+            release.get("artifact_sha256_json") or {}
+        )
+        if (
+            str(release.get("source_facts_digest") or "")
+            != str(manifest.get("source_digest") or "")
+            or release_digests != artifact_digests
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "released report metadata does not match its "
+                    "immutable manifest"
+                ),
+            )
+        try:
+            artifact = load_attached_report_artifact(
+                manifest,
+                artifact_name,
+            )
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(
+                status_code=409,
+                detail=str(exc),
+            ) from exc
+        return {
+            **manifest,
+            "_delivery_status": "released",
+            "_release_digest": str(
+                release.get("release_digest") or ""
+            ),
+        }, artifact
+    if artifact_name in artifact_keys and artifact_name in artifact_digests:
+        try:
+            artifact = load_attached_report_artifact(
+                manifest,
+                artifact_name,
+            )
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(
+                status_code=409,
+                detail=str(exc),
+            ) from exc
+        return manifest, artifact
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            f"report artifact {artifact_name!r} has not been "
+            "materialized for this manifest"
+        ),
+    )
+
+
+def _check_item_report_response(
+    manifest: dict[str, Any],
+    artifact: ReportArtifact,
+) -> Response:
+    facts_status = str(manifest.get("status") or "draft")
+    status = str(
+        manifest.get("_delivery_status")
+        or (
+            "pending_signoff"
+            if facts_status == "final"
+            else "facts_not_final"
+        )
+    )
+    filename = artifact.filename
+    if status != "released":
+        stem, separator, suffix = filename.rpartition(".")
+        qualifier = (
+            "preview"
+            if facts_status == "final"
+            else "partial"
+        )
+        filename = (
+            f"{stem}-{qualifier}.{suffix}"
+            if separator
+            else f"{filename}-{qualifier}"
+        )
+    return Response(
+        content=artifact.content,
+        media_type=artifact.content_type,
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{filename}"'
+            ),
+            "X-NetOps-Report-Status": status,
+            "X-NetOps-Report-Facts-Status": facts_status,
+            "X-NetOps-Report-Source-Digest": str(
+                manifest.get("source_digest") or ""
+            ),
+            "X-NetOps-Report-Release-Digest": str(
+                manifest.get("_release_digest") or ""
+            ),
+            "X-NetOps-Report-Manifest-Id": str(
+                manifest.get("id") or ""
+            ),
+            "X-NetOps-Report-Version": str(
+                manifest.get("version") or ""
+            ),
+        },
     )
 
 
@@ -834,6 +1003,12 @@ async def list_patrol_batches(
         legacy_page = {"items": [], "total": 0}
     manifest_total = int(manifest_page.get("total") or 0)
     legacy_total = int(legacy_page.get("total") or 0)
+    if legacy_total:
+        observe_legacy_path(
+            "legacy-patrol-batch-history-reader",
+            "merge_legacy_batch_history",
+            outcome="rows_returned",
+        )
     merged_items = sorted(
         [*(manifest_page.get("items") or []), *(legacy_page.get("items") or [])],
         key=_patrol_batch_sort_key,
@@ -858,6 +1033,7 @@ async def list_patrol_batch_devices(
     patrol_batch_id: str,
     limit: int = 50,
     offset: int = 0,
+    cursor: str | None = None,
     search: str | None = None,
     selection_status: str | None = None,
 ):
@@ -868,6 +1044,7 @@ async def list_patrol_batch_devices(
             patrol_batch_id,
             limit=limit,
             offset=offset,
+            cursor=cursor,
             search=search,
             selection_status=selection_status,
         )
@@ -879,6 +1056,139 @@ async def list_patrol_batch_devices(
             detail="device manifest is unavailable for this legacy patrol batch",
         )
     return result
+
+
+@router.post("/runs/patrol-batches/{patrol_batch_id}/cancel")
+async def cancel_patrol_batch(
+    patrol_batch_id: str,
+    request: PatrolBatchCancelRequest,
+    user: CurrentUser | None = Depends(get_optional_user),
+):
+    reason = request.reason.strip()
+    if len(reason) < 3:
+        raise HTTPException(
+            status_code=422,
+            detail="cancellation reason must contain at least 3 non-space characters",
+        )
+    actor = user.user_id if user else "system"
+    runs = _list_patrol_batch_runs(patrol_batch_id)
+    repository = PatrolBatchManifestRepository()
+    dispatch_result = repository.cancel_dispatch(
+        patrol_batch_id,
+        actor=actor,
+        reason=reason,
+    )
+    if dispatch_result is None and not runs:
+        raise HTTPException(status_code=404, detail="patrol batch not found")
+    if dispatch_result and dispatch_result.get("blocked_reason") == "archived":
+        raise HTTPException(
+            status_code=409,
+            detail="patrol batch is archived; restore it before cancellation",
+        )
+
+    active_runs = [
+        run
+        for run in runs
+        if str(run.status or "").lower() in ACTIVE_PATROL_RUN_STATUSES
+    ]
+    already_cancelled = bool(dispatch_result and dispatch_result.get("idempotent")) or (
+        bool(runs)
+        and not active_runs
+        and any(str(run.status or "").lower() == "cancelled" for run in runs)
+    )
+    if (
+        not active_runs
+        and not already_cancelled
+        and not bool(dispatch_result and dispatch_result.get("changed"))
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="patrol batch has no active or pending work to cancel",
+        )
+
+    run_ids = {
+        str(run.id) for run in active_runs
+    } | {
+        str(value)
+        for value in (dispatch_result or {}).get("workflow_run_ids", [])
+        if value
+    }
+    cancellation_results = [
+        WorkflowEngine.cancel_run(
+            run_id,
+            actor=actor,
+            reason=reason,
+        )
+        for run_id in sorted(run_ids)
+    ]
+
+    revoked_task_ids: list[str] = []
+    try:
+        from src.core.celery_tasks.celery_app import celery
+
+        for task_id in (dispatch_result or {}).get("celery_task_ids", []):
+            celery.control.revoke(str(task_id), terminate=False)
+            revoked_task_ids.append(str(task_id))
+    except Exception:
+        pass
+
+    finalization_errors: list[dict[str, str]] = []
+    if (dispatch_result or {}).get("runtime_manifest_id"):
+        from src.core.check_items import CheckItemRunFinalizer
+
+        finalizer = CheckItemRunFinalizer()
+        for device_id in (dispatch_result or {}).get("device_ids", []):
+            try:
+                finalizer.fail_device(
+                    patrol_batch_id=patrol_batch_id,
+                    device_id=str(device_id),
+                    reason_code="patrol_batch_cancelled",
+                    status="cancelled",
+                    evidence_refs=tuple(sorted(run_ids | set(revoked_task_ids))),
+                )
+            except Exception as exc:
+                finalization_errors.append(
+                    {"device_id": str(device_id), "error": str(exc)}
+                )
+
+    WorkflowEngine.request_patrol_batch_report_if_terminal(
+        patrol_batch_id,
+    )
+    try:
+        from src.core.patrol.batch_events import publish_patrol_batch_event
+
+        publish_patrol_batch_event(
+            {
+                "type": "batch_cancelled",
+                "patrol_batch_id": patrol_batch_id,
+                "cancelled_by": actor,
+                "reason": reason,
+                "cancelled_run_count": sum(
+                    1 for item in cancellation_results if item.get("changed")
+                ),
+            }
+        )
+    except Exception:
+        pass
+
+    return {
+        "success": True,
+        "patrol_batch_id": patrol_batch_id,
+        "status": "cancelled",
+        "idempotent": already_cancelled,
+        "cancelled_at": (dispatch_result or {}).get("cancelled_at") or _now_iso(),
+        "cancelled_by": actor,
+        "reason": reason,
+        "affected_runs": len(run_ids),
+        "cancelled_run_count": sum(
+            1 for item in cancellation_results if item.get("changed")
+        ),
+        "revoked_task_count": len(revoked_task_ids),
+        "cancelled_device_count": len(
+            (dispatch_result or {}).get("device_ids", [])
+        ),
+        "finalization_errors": finalization_errors,
+    }
 
 
 @router.post("/runs/patrol-batches/{patrol_batch_id}/archive")
@@ -1069,7 +1379,84 @@ async def get_patrol_batch_summary(patrol_batch_id: str):
     runs = _list_patrol_batch_runs(patrol_batch_id)
     if not runs and not _patrol_batch_manifest_exists(patrol_batch_id):
         raise HTTPException(status_code=404, detail="patrol batch not found")
-    return _build_patrol_batch_summary(patrol_batch_id, runs)
+    summary = _build_patrol_batch_summary(patrol_batch_id, runs)
+    check_item_summary = CheckItemBatchResultService().summary(
+        patrol_batch_id
+    )
+    if check_item_summary is not None:
+        summary["check_item_summary"] = check_item_summary
+        deliverables = dict(summary.get("deliverables") or {})
+        deliverables["evidence_package_url"] = (
+            f"/api/v1/workflows/runs/patrol-batches/"
+            f"{patrol_batch_id}/evidence.zip"
+        )
+        summary["deliverables"] = deliverables
+    return summary
+
+
+@router.get(
+    "/runs/patrol-batches/{patrol_batch_id}/check-results"
+)
+async def list_patrol_batch_check_results(
+    patrol_batch_id: str,
+    limit: int = 50,
+    offset: int = 0,
+    cursor: str | None = None,
+    search: str | None = None,
+    assessment_status: str | None = None,
+    completeness_status: str | None = None,
+    source_identity_status: str | None = None,
+    output_quality_status: str | None = None,
+    freshness_status: str | None = None,
+    coverage_status: str | None = None,
+    _user: CurrentUser = Depends(require_role(["admin", "operator"])),
+):
+    try:
+        return CheckItemBatchResultService().list_results(
+            patrol_batch_id,
+            limit=limit,
+            offset=offset,
+            cursor=cursor,
+            search=search,
+            assessment_status=assessment_status,
+            completeness_status=completeness_status,
+            source_identity_status=source_identity_status,
+            output_quality_status=output_quality_status,
+            freshness_status=freshness_status,
+            coverage_status=coverage_status,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        status_code = (
+            404
+            if "patrol batch not found" in message
+            else 400
+            if "cursor" in message or "offset exceeds" in message
+            else 422
+        )
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
+@router.get(
+    "/runs/patrol-batches/{patrol_batch_id}/check-results/{execution_id}"
+)
+async def get_patrol_batch_check_result_detail(
+    patrol_batch_id: str,
+    execution_id: str,
+    entry_limit: int = Query(50, ge=1, le=200),
+    entry_offset: int = Query(0, ge=0),
+    _user: CurrentUser = Depends(require_role(["admin", "operator"])),
+):
+    try:
+        return CheckItemBatchResultService().get_result_detail(
+            patrol_batch_id,
+            execution_id,
+            entry_limit=entry_limit,
+            entry_offset=entry_offset,
+        )
+    except ValueError as exc:
+        status_code = 404 if "not found" in str(exc) else 422
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
 @router.get("/runs/patrol-batches/{patrol_batch_id}/export.csv")
@@ -1196,10 +1583,55 @@ def _device_inventory_csv(devices: list[dict[str, Any]]) -> bytes:
     return ("\ufeff" + output.getvalue()).encode("utf-8")
 
 
+def _device_inventory_text(devices: list[dict[str, Any]]) -> bytes:
+    fields = (
+        "device_id",
+        "device_name",
+        "management_ip",
+        "selection_status",
+        "preflight_status",
+        "connection_status",
+        "workflow_status",
+        "failure_code",
+        "error_message",
+        "raw_cli_file_count",
+    )
+    labels = (
+        "设备ID",
+        "设备名称",
+        "管理地址",
+        "选择状态",
+        "预检状态",
+        "登录状态",
+        "执行状态",
+        "失败代码",
+        "失败原因",
+        "原始文件数",
+    )
+    lines = ["\t".join(labels)]
+    for device in devices:
+        lines.append(
+            "\t".join(
+                str(
+                    ""
+                    if device.get(field) is None
+                    else device.get(field)
+                )
+                .replace("\t", " ")
+                .replace("\r", " ")
+                .replace("\n", " ")
+                for field in fields
+            )
+        )
+    return ("\ufeff" + "\n".join(lines) + "\n").encode("utf-8")
+
+
 def _write_original_cli_files(
     output: zipfile.ZipFile,
     archive_data: bytes,
     device_dir: str,
+    *,
+    file_hashes: dict[str, str] | None = None,
 ) -> int:
     written = 0
     try:
@@ -1208,18 +1640,105 @@ def _write_original_cli_files(
                 member_path = Path(member.filename)
                 if member.is_dir() or member_path.is_absolute() or ".." in member_path.parts:
                     continue
-                if member_path.suffix.lower() != ".txt":
+                if member_path.suffix.lower() not in {".txt", ".log"}:
                     continue
-                output.writestr(f"{device_dir}/{member_path.as_posix()}", source.read(member))
+                relative_path = member_path.with_suffix(".txt").as_posix()
+                destination = f"{device_dir}/{relative_path}"
+                data = source.read(member)
+                output.writestr(destination, data)
+                if file_hashes is not None:
+                    file_hashes[destination] = hashlib.sha256(data).hexdigest()
                 written += 1
     except zipfile.BadZipFile:
         return 0
     return written
 
 
+def _resolve_raw_cli_manifest(
+    patrol_batch_id: str,
+    report_manifest_id: str | None,
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    service = ReportManifestService()
+    manifest = (
+        service.get(report_manifest_id)
+        if report_manifest_id
+        else service.latest_for_batch(patrol_batch_id)
+    )
+    if manifest is None:
+        if report_manifest_id:
+            raise HTTPException(status_code=404, detail="report manifest not found")
+        return None, []
+    if str(manifest.get("patrol_batch_id") or "") != patrol_batch_id:
+        raise HTTPException(
+            status_code=409,
+            detail="report manifest does not belong to patrol batch",
+        )
+    evidence_index = [
+        dict(item)
+        for item in (manifest.get("source_facts_json") or {}).get("evidence_index") or []
+        if isinstance(item, dict)
+    ]
+    expected_digest = str(manifest.get("raw_evidence_set_digest") or "")
+    if not expected_digest or raw_evidence_set_digest(evidence_index) != expected_digest:
+        raise HTTPException(
+            status_code=409,
+            detail="report manifest raw evidence digest mismatch",
+        )
+    return manifest, evidence_index
+
+
+def _raw_cli_verification_text(
+    *,
+    patrol_batch_id: str,
+    manifest: dict[str, Any] | None,
+    evidence_index: list[dict[str, Any]],
+    file_hashes: dict[str, str],
+) -> bytes:
+    lines = [
+        "原始输出校验清单",
+        f"巡检批次\t{patrol_batch_id}",
+        f"报告Manifest\t{str((manifest or {}).get('id') or '-')}",
+        f"报告版本\t{str((manifest or {}).get('version') or '-')}",
+        f"原始证据集合摘要\t{str((manifest or {}).get('raw_evidence_set_digest') or '-')}",
+        "",
+        "归档文件\tSHA-256",
+    ]
+    lines.extend(f"{path}\t{digest}" for path, digest in sorted(file_hashes.items()))
+    lines.extend(
+        [
+            "",
+            "Snapshot ID\t设备\t管理地址\t命令\t原始输出SHA-256\t源文件SHA-256\tPatrolRun",
+        ]
+    )
+    for item in sorted(
+        evidence_index,
+        key=lambda row: (
+            str(row.get("device_name") or ""),
+            str(row.get("canonical_command") or ""),
+            str(row.get("snapshot_id") or ""),
+        ),
+    ):
+        lines.append(
+            "\t".join(
+                str(value or "").replace("\t", " ").replace("\r", " ").replace("\n", " ")
+                for value in (
+                    item.get("snapshot_id"),
+                    item.get("device_name"),
+                    item.get("management_ip"),
+                    item.get("canonical_command"),
+                    item.get("raw_text_hash"),
+                    item.get("source_file_hash"),
+                    item.get("run_id"),
+                )
+            )
+        )
+    return ("\ufeff" + "\n".join(lines) + "\n").encode("utf-8")
+
+
 @router.get("/runs/patrol-batches/{patrol_batch_id}/raw-cli.zip")
 async def export_patrol_batch_raw_cli(
     patrol_batch_id: str,
+    report_manifest_id: str | None = Query(default=None),
     _user: CurrentUser = Depends(require_role(["admin"])),
 ):
     from src.infrastructure.storage.minio_client import get_minio_storage
@@ -1227,19 +1746,67 @@ async def export_patrol_batch_raw_cli(
     runs = _list_patrol_batch_runs(patrol_batch_id)
     if not runs:
         raise HTTPException(status_code=404, detail="patrol batch not found")
-    run_ids = [str(run.id) for run in runs]
-    artifacts_by_run = list_patrol_raw_output_artifacts(run_ids)
-    if not artifacts_by_run:
-        raise HTTPException(status_code=404, detail="raw CLI archives are unavailable")
+    manifest, evidence_index = _resolve_raw_cli_manifest(
+        patrol_batch_id,
+        report_manifest_id,
+    )
+    workflow_run_ids = [str(run.id) for run in runs]
+    expected_snapshot_run_ids = sorted(
+        {str(item.get("run_id") or "") for item in evidence_index if item.get("run_id")}
+    )
+    if manifest is not None:
+        artifacts_by_run = list_patrol_run_raw_output_artifacts(
+            expected_snapshot_run_ids
+        )
+        source_rows = [
+            {
+                "run_id": run_id,
+                "artifact": artifacts_by_run.get(run_id),
+                "device_id": next(
+                    (
+                        str(item.get("device_id") or "")
+                        for item in evidence_index
+                        if str(item.get("run_id") or "") == run_id
+                    ),
+                    run_id,
+                ),
+                "device_name": next(
+                    (
+                        str(item.get("device_name") or "")
+                        for item in evidence_index
+                        if str(item.get("run_id") or "") == run_id
+                    ),
+                    run_id,
+                ),
+            }
+            for run_id in expected_snapshot_run_ids
+        ]
+    else:
+        artifacts_by_run = list_patrol_raw_output_artifacts(workflow_run_ids)
+        source_rows = [
+            {
+                "run_id": str(run.id),
+                "artifact": artifacts_by_run.get(str(run.id)),
+                "device_id": str((run.context or {}).get("device_id") or ""),
+                "device_name": str(
+                    (run.context or {}).get("device_name")
+                    or (run.context or {}).get("device_id")
+                    or run.id
+                ),
+            }
+            for run in runs
+        ]
 
     storage = get_minio_storage()
-    if not storage.is_ready():
+    if any(item.get("artifact") for item in source_rows) and not storage.is_ready():
         raise HTTPException(status_code=503, detail="MinIO is unavailable")
 
     temp = tempfile.NamedTemporaryFile(prefix="patrol-raw-cli-", suffix=".zip", delete=False)
     temp_path = Path(temp.name)
     temp.close()
     exported_file_counts: dict[str, int] = {}
+    exported_hashes: dict[str, str] = {}
+    actual_source_identities: set[tuple[str, str]] = set()
     try:
         with zipfile.ZipFile(
             temp_path,
@@ -1247,22 +1814,74 @@ async def export_patrol_batch_raw_cli(
             compression=zipfile.ZIP_DEFLATED,
             allowZip64=True,
         ) as output:
-            for run in runs:
-                artifact = artifacts_by_run.get(str(run.id))
+            used_directories: set[str] = set()
+            for source_row in source_rows:
+                artifact = source_row.get("artifact")
                 key = _artifact_object_key(artifact.get("download_url") if artifact else None)
                 if not artifact or not key:
                     continue
                 archive_data = storage.download_file(key)
                 if archive_data is None:
                     continue
-                context = dict(run.context or {})
-                device_id = str(context.get("device_id") or "")
-                device_dir = _safe_archive_component(
-                    context.get("device_name") or context.get("device_id"),
+                device_id = str(source_row.get("device_id") or "")
+                base_dir = _safe_archive_component(
+                    source_row.get("device_name") or device_id,
                     "device",
                 )
-                written = _write_original_cli_files(output, archive_data, device_dir)
+                device_dir = base_dir
+                if device_dir.casefold() in used_directories:
+                    suffix = _safe_archive_component(device_id, "duplicate")[-16:]
+                    device_dir = f"{base_dir}-{suffix}"
+                used_directories.add(device_dir.casefold())
+                run_hashes: dict[str, str] = {}
+                written = _write_original_cli_files(
+                    output,
+                    archive_data,
+                    device_dir,
+                    file_hashes=run_hashes,
+                )
+                exported_hashes.update(run_hashes)
+                actual_source_identities.update(
+                    (str(source_row.get("run_id") or ""), digest)
+                    for digest in run_hashes.values()
+                )
                 exported_file_counts[device_id] = written
+
+            if manifest is not None:
+                missing_source_hashes = [
+                    str(item.get("snapshot_id") or "")
+                    for item in evidence_index
+                    if not item.get("source_file_hash")
+                ]
+                expected_source_identities = {
+                    (
+                        str(item.get("run_id") or ""),
+                        str(item.get("source_file_hash") or ""),
+                    )
+                    for item in evidence_index
+                    if item.get("run_id") and item.get("source_file_hash")
+                }
+                if missing_source_hashes:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "message": "raw output source hashes are incomplete",
+                            "snapshot_ids": missing_source_hashes[:20],
+                        },
+                    )
+                if actual_source_identities != expected_source_identities:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "message": "raw output files do not match frozen report evidence",
+                            "missing_count": len(
+                                expected_source_identities - actual_source_identities
+                            ),
+                            "unexpected_count": len(
+                                actual_source_identities - expected_source_identities
+                            ),
+                        },
+                    )
 
             devices = _list_all_patrol_batch_devices(patrol_batch_id)
             for device in devices:
@@ -1272,10 +1891,29 @@ async def export_patrol_batch_raw_cli(
             failed_devices = [
                 device for device in devices if device.get("connection_status") == "failed"
             ]
-            output.writestr("devices.csv", _device_inventory_csv(devices))
+            missing_output_devices = [
+                device
+                for device in devices
+                if int(device.get("raw_cli_file_count") or 0) == 0
+                and device.get("connection_status") != "failed"
+            ]
+            output.writestr("设备列表.txt", _device_inventory_text(devices))
             output.writestr(
-                "login-failed-devices.csv",
-                _device_inventory_csv(failed_devices),
+                "登录失败设备列表.txt",
+                _device_inventory_text(failed_devices),
+            )
+            output.writestr(
+                "原始输出缺失设备列表.txt",
+                _device_inventory_text(missing_output_devices),
+            )
+            output.writestr(
+                "原始输出校验清单.txt",
+                _raw_cli_verification_text(
+                    patrol_batch_id=patrol_batch_id,
+                    manifest=manifest,
+                    evidence_index=evidence_index,
+                    file_hashes=exported_hashes,
+                ),
             )
     except Exception:
         temp_path.unlink(missing_ok=True)
@@ -1289,12 +1927,24 @@ async def export_patrol_batch_raw_cli(
         finally:
             temp_path.unlink(missing_ok=True)
 
+    headers = {
+        "Content-Disposition": f'attachment; filename="{patrol_batch_id}-raw-output.zip"',
+        "X-NetOps-Raw-File-Count": str(len(exported_hashes)),
+    }
+    if manifest is not None:
+        headers.update(
+            {
+                "X-NetOps-Report-Manifest-Id": str(manifest.get("id") or ""),
+                "X-NetOps-Report-Version": str(manifest.get("version") or ""),
+                "X-NetOps-Raw-Evidence-Set-Digest": str(
+                    manifest.get("raw_evidence_set_digest") or ""
+                ),
+            }
+        )
     return StreamingResponse(
         generate(),
         media_type="application/zip",
-        headers={
-            "Content-Disposition": f'attachment; filename="{patrol_batch_id}-raw-output.zip"'
-        },
+        headers=headers,
     )
 
 
@@ -1346,11 +1996,19 @@ async def export_patrol_batch_events(
 @router.get("/runs/patrol-batches/{patrol_batch_id}/report.md")
 async def export_patrol_batch_report(
     patrol_batch_id: str,
+    report_manifest_id: str | None = Query(default=None),
     _user: CurrentUser = Depends(require_role(["admin", "operator"])),
 ):
     runs = _list_patrol_batch_runs(patrol_batch_id)
     if not runs and not _patrol_batch_manifest_exists(patrol_batch_id):
         raise HTTPException(status_code=404, detail="patrol batch not found")
+    check_item_artifact = _build_check_item_report_artifact(
+        patrol_batch_id,
+        "markdown",
+        report_manifest_id=report_manifest_id,
+    )
+    if check_item_artifact is not None:
+        return _check_item_report_response(*check_item_artifact)
     markdown = _build_patrol_batch_report(patrol_batch_id, runs)
     return Response(
         content=markdown,
@@ -1362,11 +2020,19 @@ async def export_patrol_batch_report(
 @router.get("/runs/patrol-batches/{patrol_batch_id}/report.docx")
 async def export_patrol_batch_leadership_report(
     patrol_batch_id: str,
+    report_manifest_id: str | None = Query(default=None),
     _user: CurrentUser = Depends(require_role(["admin", "operator"])),
 ):
     runs = _list_patrol_batch_runs(patrol_batch_id)
     if not runs and not _patrol_batch_manifest_exists(patrol_batch_id):
         raise HTTPException(status_code=404, detail="patrol batch not found")
+    check_item_artifact = _build_check_item_report_artifact(
+        patrol_batch_id,
+        "docx",
+        report_manifest_id=report_manifest_id,
+    )
+    if check_item_artifact is not None:
+        return _check_item_report_response(*check_item_artifact)
     report = _build_patrol_batch_leadership_report(patrol_batch_id, runs)
     content = render_leadership_docx(report)
     return Response(
@@ -1382,14 +2048,53 @@ async def export_patrol_batch_leadership_report(
     )
 
 
-@router.get("/runs/patrol-batches/{patrol_batch_id}/report.json")
-async def export_patrol_batch_leadership_report_json(
+@router.get("/runs/patrol-batches/{patrol_batch_id}/report.xlsx")
+async def export_patrol_batch_technical_workbook(
     patrol_batch_id: str,
+    report_manifest_id: str | None = Query(default=None),
     _user: CurrentUser = Depends(require_role(["admin", "operator"])),
 ):
     runs = _list_patrol_batch_runs(patrol_batch_id)
     if not runs and not _patrol_batch_manifest_exists(patrol_batch_id):
         raise HTTPException(status_code=404, detail="patrol batch not found")
+    check_item_artifact = _build_check_item_report_artifact(
+        patrol_batch_id,
+        "excel",
+        report_manifest_id=report_manifest_id,
+    )
+    if check_item_artifact is not None:
+        return _check_item_report_response(*check_item_artifact)
+    summary = _build_patrol_batch_summary(patrol_batch_id, runs)
+    content = render_patrol_batch_xlsx(patrol_batch_id, summary)
+    return Response(
+        content=content,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{patrol_batch_id}-technical-report.xlsx"'
+            )
+        },
+    )
+
+
+@router.get("/runs/patrol-batches/{patrol_batch_id}/report.json")
+async def export_patrol_batch_leadership_report_json(
+    patrol_batch_id: str,
+    report_manifest_id: str | None = Query(default=None),
+    _user: CurrentUser = Depends(require_role(["admin", "operator"])),
+):
+    runs = _list_patrol_batch_runs(patrol_batch_id)
+    if not runs and not _patrol_batch_manifest_exists(patrol_batch_id):
+        raise HTTPException(status_code=404, detail="patrol batch not found")
+    check_item_artifact = _build_check_item_report_artifact(
+        patrol_batch_id,
+        "json",
+        report_manifest_id=report_manifest_id,
+    )
+    if check_item_artifact is not None:
+        return _check_item_report_response(*check_item_artifact)
     report = _build_patrol_batch_leadership_report(patrol_batch_id, runs)
     return Response(
         content=render_leadership_json(report),
@@ -1400,6 +2105,31 @@ async def export_patrol_batch_leadership_report_json(
             )
         },
     )
+
+
+@router.get("/runs/patrol-batches/{patrol_batch_id}/evidence.zip")
+async def export_patrol_batch_evidence_package(
+    patrol_batch_id: str,
+    report_manifest_id: str | None = Query(default=None),
+    _user: CurrentUser = Depends(require_role(["admin", "operator"])),
+):
+    runs = _list_patrol_batch_runs(patrol_batch_id)
+    if not runs and not _patrol_batch_manifest_exists(patrol_batch_id):
+        raise HTTPException(status_code=404, detail="patrol batch not found")
+    check_item_artifact = _build_check_item_report_artifact(
+        patrol_batch_id,
+        "evidence",
+        report_manifest_id=report_manifest_id,
+    )
+    if check_item_artifact is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "evidence package requires a check-item runtime manifest; "
+                "legacy batches keep their existing raw-output exports"
+            ),
+        )
+    return _check_item_report_response(*check_item_artifact)
 
 
 @router.post("/runs/test")

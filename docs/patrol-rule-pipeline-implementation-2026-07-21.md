@@ -1,5 +1,9 @@
 # 巡检链路 + 规则生成链路实施验收记录（2026-07-21）
 
+<!-- document-status: superseded -->
+> **历史文档，已被取代。** 本文中的“已落地”仅代表当时基线，不代表当前产品完成状态。
+> 当前权威方案见[检查项中心的巡检与规则资产平台总体改造方案](check-item-command-adapter-simplification-remediation-2026-08-10.md)。
+
 ## 已落地
 
 | 项 | 状态 | 说明 |

@@ -213,6 +213,9 @@ class DevicePatrolLaunchRequest(BaseModel):
     ticket_id: str | None = None
     launch_mode: str = "workflow"
     workflow_name: str = "patrol-change-event"
+    scope_contract: dict[str, Any] | None = None
+    scope_exclusions: dict[str, dict[str, Any]] | None = None
+    scope_not_applicable: dict[str, dict[str, Any]] | None = None
 
 
 class AgentModuleControlRequest(BaseModel):
@@ -743,9 +746,77 @@ def _runtime_rule_asset_health(
     }
 
 
+def _plan_check_item_ids(plan: Any) -> tuple[str, ...]:
+    return tuple(
+        str(item)
+        for item in (getattr(plan, "check_item_ids", ()) or ())
+        if str(item)
+    )
+
+
+def _preview_check_item_effective_plan(
+    *,
+    device: dict[str, Any],
+    plan: Any,
+) -> dict[str, Any] | None:
+    """Resolve the authoritative check-item plan behind a device preview."""
+
+    check_item_ids = _plan_check_item_ids(plan)
+    if not check_item_ids:
+        return None
+
+    from src.core.check_items.planning import (
+        CheckItemEffectivePlanService,
+        EffectivePlanRequest,
+        build_inventory_snapshot,
+        build_target_manifest,
+    )
+
+    device_id = str(device.get("device_id") or device.get("id") or "").strip()
+    if not device_id:
+        raise ValueError("check-item effective plan requires a device_id")
+    profile_version_id = (
+        str(getattr(plan, "profile_version_id", "") or "").strip() or None
+    )
+    selector = {"device_ids": [device_id]}
+    target = build_target_manifest(devices=[device], selector=selector)
+    inventory = build_inventory_snapshot([device])
+    effective = CheckItemEffectivePlanService().preview(
+        EffectivePlanRequest(
+            patrol_batch_id=f"device-plan-preview-{uuid.uuid4()}",
+            devices=(dict(device),),
+            check_item_ids=check_item_ids,
+            check_item_ids_by_device={device_id: check_item_ids},
+            profile_version_id=profile_version_id,
+            profile_version_ids_by_device={
+                device_id: profile_version_id,
+            },
+            target_manifest_digest=str(target["digest"]),
+            inventory_snapshot_digest=str(inventory["digest"]),
+            current_observed_at=datetime.now(timezone.utc),
+            actor="device-effective-plan-preview",
+        )
+    )
+    return {
+        "manifest_id": effective.manifest_id,
+        "manifest_digest": effective.manifest_digest,
+        "manifest": dict(effective.manifest),
+        "decisions": [dict(item) for item in effective.decisions],
+        "collection_actions": [
+            dict(item) for item in effective.collection_actions
+        ],
+        "executions": [dict(item) for item in effective.executions],
+        "terminal_assessments": [
+            dict(item) for item in effective.terminal_assessments
+        ],
+        "asset_gaps": [dict(item) for item in effective.asset_gaps],
+    }
+
+
 def _execution_plan_violations(plan: Any, mode: str) -> list[dict[str, Any]]:
     policy_source = str(getattr(plan, "policy_source", "") or "").strip()
     commands = list(getattr(plan, "commands", []) or [])
+    check_item_ids = _plan_check_item_ids(plan)
     profile_version_id = str(getattr(plan, "profile_version_id", "") or "").strip()
     normalized_mode = normalize_patrol_mode(mode)
     if normalized_mode != PRODUCTION_MODE and commands:
@@ -760,11 +831,14 @@ def _execution_plan_violations(plan: Any, mode: str) -> list[dict[str, Any]]:
                 "profile_name": getattr(plan, "profile_name", None),
             }
         )
-    if not commands:
+    if not commands and not check_item_ids:
         violations.append(
             {
                 "failure_code": "collection_commands_required",
-                "message": "patrol requires commands from an active command profile binding",
+                "message": (
+                    "patrol requires check items or commands from an active "
+                    "profile binding"
+                ),
                 "policy_source": policy_source or "unknown",
                 "profile_name": getattr(plan, "profile_name", None),
             }
@@ -2509,7 +2583,8 @@ def _patrol_readiness(
             **summary,
             "policy_source": plan.policy_source,
             "profile_name": plan.profile_name,
-            "profile_version_id": plan.profile_version_id,
+            "profile_version_id": getattr(plan, "profile_version_id", None),
+            "check_item_ids": list(_plan_check_item_ids(plan)),
         }
     except Exception as exc:
         return {
@@ -2522,6 +2597,7 @@ def _patrol_readiness(
             "policy_source": None,
             "profile_name": None,
             "profile_version_id": None,
+            "check_item_ids": [],
             "violations": [],
             "connection_issues": [],
             "error": str(exc),
@@ -2705,6 +2781,7 @@ def _patrol_launch_preview(
     rows: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
+    plans_by_device: dict[str, Any] = {}
     for device in devices:
         try:
             plan = resolver.build_plan(
@@ -2712,23 +2789,52 @@ def _patrol_launch_preview(
                 action="patrol",
                 mode=normalize_patrol_mode(payload.mode),
             )
+            plans_by_device[str(device.get("device_id") or "")] = plan
             commands = plan.command_texts()
             plan_violations = _execution_plan_violations(plan, payload.mode)
+            plan_check_item_ids = _plan_check_item_ids(plan)
+            check_item_mode = bool(plan_check_item_ids)
             parser_coverage = (
                 _production_parser_coverage(device, commands)
-                if normalize_patrol_mode(payload.mode) == PRODUCTION_MODE
+                if (
+                    normalize_patrol_mode(payload.mode) == PRODUCTION_MODE
+                    and not check_item_mode
+                )
                 else []
             )
             from src.core.patrol.coverage_policy import decide_parser_coverage
 
-            coverage_decision = decide_parser_coverage(
-                coverage=parser_coverage,
-                mode=payload.mode,
+            coverage_decision = (
+                {
+                    "decision": "proceed",
+                    "failure_code": None,
+                    "violations": [],
+                    "reason": (
+                        "parser readiness is evaluated by the frozen "
+                        "check-item runtime bundle"
+                    ),
+                }
+                if check_item_mode
+                else decide_parser_coverage(
+                    coverage=parser_coverage,
+                    mode=payload.mode,
+                )
             )
             coverage_violations = list(coverage_decision.get("violations") or [])
-            runtime_asset_health = _runtime_rule_asset_health(
-                mode=payload.mode,
-                coverage=parser_coverage,
+            runtime_asset_health = (
+                {
+                    "status": "effective_plan_required",
+                    "ready": True,
+                    "collection_ready": True,
+                    "analysis_ready": None,
+                    "event_evaluation_ready": None,
+                    "check_item_ids": list(plan_check_item_ids),
+                }
+                if check_item_mode
+                else _runtime_rule_asset_health(
+                    mode=payload.mode,
+                    coverage=parser_coverage,
+                )
             )
             connection_issues = _connection_preflight(device)
             if plan_violations or connection_issues:
@@ -2752,6 +2858,8 @@ def _patrol_launch_preview(
                     {
                         "device_id": device.get("device_id"),
                         "device_name": device.get("device_name"),
+                        "ip": device.get("ip") or device.get("management_ip"),
+                        "plan": plan.to_metadata(),
                         "error": "device patrol preflight failed",
                         "failure_code": failure_code,
                         "plan_violations": plan_violations,
@@ -2767,6 +2875,8 @@ def _patrol_launch_preview(
                     {
                         "device_id": device.get("device_id"),
                         "device_name": device.get("device_name"),
+                        "ip": device.get("ip") or device.get("management_ip"),
+                        "plan": plan.to_metadata(),
                         "error": "parser coverage blocked launch",
                         "failure_code": coverage_decision["failure_code"],
                         "plan_violations": [],
@@ -2782,6 +2892,8 @@ def _patrol_launch_preview(
                     {
                         "device_id": device.get("device_id"),
                         "device_name": device.get("device_name"),
+                        "ip": device.get("ip") or device.get("management_ip"),
+                        "plan": plan.to_metadata(),
                         "error": "parser coverage skipped device",
                         "failure_code": coverage_decision["failure_code"],
                         "plan_violations": [],
@@ -2816,6 +2928,65 @@ def _patrol_launch_preview(
                     "error": str(exc),
                 }
             )
+    check_item_ids_by_device = {
+        device_id: list(check_item_ids)
+        for device_id, plan in plans_by_device.items()
+        if (check_item_ids := _plan_check_item_ids(plan))
+    }
+    profile_version_ids_by_device = {
+        device_id: getattr(plan, "profile_version_id", None)
+        for device_id, plan in plans_by_device.items()
+        if _plan_check_item_ids(plan)
+    }
+    if check_item_ids_by_device and len(check_item_ids_by_device) != len(devices):
+        missing_device_ids = sorted(
+            {
+                str(device.get("device_id") or "")
+                for device in devices
+            }
+            - set(check_item_ids_by_device)
+        )
+        errors.append(
+            {
+                "error": (
+                    "a patrol batch cannot mix check-item profiles with "
+                    "legacy command-only profiles"
+                ),
+                "failure_code": "mixed_patrol_profile_governance_mode",
+                "device_ids": missing_device_ids,
+            }
+        )
+        rows = []
+    scope_preview = None
+    if check_item_ids_by_device:
+        try:
+            from src.core.check_items.catalog import (
+                CheckItemCatalogRepository,
+            )
+            from src.core.check_items.scope import resolve_patrol_scope
+
+            catalog = CheckItemCatalogRepository().load_active()
+            scope_preview = resolve_patrol_scope(
+                contract=payload.scope_contract,
+                devices=devices,
+                selected_check_item_ids_by_device=(
+                    check_item_ids_by_device
+                ),
+                check_item_version_ids={
+                    item.id: item.version_id
+                    for item in catalog.check_items
+                },
+                exclusions=payload.scope_exclusions,
+                not_applicable=payload.scope_not_applicable,
+            ).to_dict()
+        except ValueError as exc:
+            errors.append(
+                {
+                    "error": str(exc),
+                    "failure_code": "patrol_scope_contract_invalid",
+                }
+            )
+            rows = []
     return {
         "success": not errors,
         "target_count": len(devices),
@@ -2829,6 +3000,13 @@ def _patrol_launch_preview(
         "platform_readiness": platform_readiness,
         "quality_readiness": _patrol_target_quality_readiness(rows),
         "module_violations": [],
+        "target_devices": [
+            _redact_device(device) for device in devices
+        ],
+        "check_item_ids_by_device": check_item_ids_by_device,
+        "profile_version_ids_by_device": profile_version_ids_by_device,
+        "check_item_mode": bool(check_item_ids_by_device),
+        "scope_preview": scope_preview,
         "rows": rows,
         "errors": errors,
         "skipped": skipped,
@@ -2917,6 +3095,7 @@ def _patrol_target_snapshot(payload: DevicePatrolLaunchRequest) -> dict[str, Any
     result_count=lambda result: len(result.get("items") or []),
 )
 def list_devices(
+    search: str | None = None,
     device_id: str | None = None,
     device_name: str | None = None,
     ip: str | None = None,
@@ -2942,6 +3121,7 @@ def list_devices(
     elif normalized_status is not None:
         normalized_status = normalize_device_status(normalized_status)
     devices = repository.get_devices_by_filter(
+        search=search,
         device_id=device_id,
         device_name=device_name,
         ip=ip,
@@ -3365,6 +3545,25 @@ async def stream_patrol_batch_events(batch_id: str):
 
 @router.post("/patrol/launch")
 def launch_device_patrol(payload: DevicePatrolLaunchRequest, request: Request):
+    if payload.launch_mode not in {"workflow", "direct"}:
+        raise HTTPException(status_code=400, detail="launch_mode must be workflow or direct")
+    try:
+        patrol_mode = normalize_patrol_mode(payload.mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if payload.launch_mode == "direct" and patrol_mode == PRODUCTION_MODE:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": (
+                    "production check-item patrol batches must use the governed "
+                    "Workflow orchestration path"
+                ),
+                "failure_code": "direct_check_item_patrol_disabled",
+                "next_action": "set launch_mode=workflow",
+            },
+        )
+
     preview = _patrol_launch_preview(payload, DeviceRepository())
     platform_readiness = preview.get("platform_readiness") or {}
     if not platform_readiness.get("can_launch", False):
@@ -3384,8 +3583,22 @@ def launch_device_patrol(payload: DevicePatrolLaunchRequest, request: Request):
                 "errors": preview["errors"],
             },
         )
-    if payload.launch_mode not in {"workflow", "direct"}:
-        raise HTTPException(status_code=400, detail="launch_mode must be workflow or direct")
+    if payload.launch_mode == "direct" and preview.get(
+        "check_item_mode"
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": (
+                    "check-item patrol batches must use the governed "
+                    "Workflow orchestration path"
+                ),
+                "failure_code": (
+                    "direct_check_item_patrol_disabled"
+                ),
+                "next_action": "set launch_mode=workflow",
+            },
+        )
     try:
         result = StartPatrolHandler(
             plan_repository=ExecutionPlanRepository(),
@@ -3395,13 +3608,34 @@ def launch_device_patrol(payload: DevicePatrolLaunchRequest, request: Request):
             StartPatrolCommand(
                 rows=preview["rows"],
                 target_count=preview["target_count"],
-                skipped_errors=preview["errors"],
+                skipped_errors=[
+                    *preview["errors"],
+                    *preview.get("skipped", []),
+                ],
                 launch_mode=payload.launch_mode,
                 workflow_name=payload.workflow_name,
                 mode=payload.mode,
                 save_baseline=payload.save_baseline,
                 ticket_id=payload.ticket_id,
                 target_snapshot=_patrol_target_snapshot(payload),
+                target_devices=list(
+                    preview.get("target_devices") or []
+                ),
+                check_item_ids_by_device=dict(
+                    preview.get("check_item_ids_by_device") or {}
+                ),
+                profile_version_ids_by_device=dict(
+                    preview.get("profile_version_ids_by_device") or {}
+                ),
+                scope_contract=(
+                    dict(payload.scope_contract)
+                    if payload.scope_contract is not None
+                    else None
+                ),
+                scope_exclusions=dict(payload.scope_exclusions or {}),
+                scope_not_applicable=dict(
+                    payload.scope_not_applicable or {}
+                ),
             )
         )
     except ValueError as exc:
@@ -3520,30 +3754,130 @@ def preview_device_plan(device_id: str, payload: DevicePlanPreviewRequest):
         action=payload.action,
         mode=normalized_mode,
     )
-    commands = plan.command_texts()
-    parser_coverage = (
-        _production_parser_coverage(device, commands) if normalized_mode == PRODUCTION_MODE else []
+    plan_metadata = plan.to_metadata()
+    check_item_plan = _preview_check_item_effective_plan(
+        device=device,
+        plan=plan,
     )
+    if check_item_plan is not None:
+        collection_actions = list(
+            check_item_plan.get("collection_actions") or []
+        )
+        commands = list(
+            dict.fromkeys(
+                str(item.get("command") or "").strip()
+                for item in collection_actions
+                if str(item.get("command") or "").strip()
+            )
+        )
+        plan_metadata.update(
+            {
+                "runtime_manifest_id": check_item_plan["manifest_id"],
+                "runtime_manifest_digest": check_item_plan[
+                    "manifest_digest"
+                ],
+                "collection_items": [
+                    {
+                        "command": item.get("command"),
+                        "action": payload.action,
+                        "collection_item_id": item.get("id"),
+                        "fallback_rank": item.get("fallback_rank", 0),
+                        "check_item_bindings": list(
+                            item.get("bindings") or []
+                        ),
+                    }
+                    for item in collection_actions
+                ],
+            }
+        )
+        parser_coverage: list[dict[str, Any]] = []
+    else:
+        commands = plan.command_texts()
+        parser_coverage = (
+            _production_parser_coverage(device, commands)
+            if normalized_mode == PRODUCTION_MODE
+            else []
+        )
     connection_issues = _connection_preflight(device)
     plan_violations = _execution_plan_violations(plan, normalized_mode)
-    runtime_asset_health = _runtime_rule_asset_health(
-        mode=normalized_mode,
-        coverage=parser_coverage,
-    )
-    coverage_summary = _coverage_summary(
-        mode=normalized_mode,
-        commands=commands,
-        coverage=parser_coverage,
-        connection_issues=connection_issues,
-        plan_violations=plan_violations,
-        runtime_asset_health=runtime_asset_health,
-    )
+    if check_item_plan is not None:
+        decisions = list(check_item_plan.get("decisions") or [])
+        unresolved = [
+            item
+            for item in decisions
+            if item.get("status") not in {"resolved", "not_applicable"}
+        ]
+        runtime_asset_health = {
+            "status": "blocked" if unresolved else "ready",
+            "ready": not unresolved,
+            "collection_ready": not unresolved,
+            "analysis_ready": not unresolved,
+            "event_evaluation_ready": not unresolved,
+            "check_item_ids": list(_plan_check_item_ids(plan)),
+            "runtime_manifest_id": check_item_plan["manifest_id"],
+            "runtime_manifest_digest": check_item_plan[
+                "manifest_digest"
+            ],
+            "decisions": decisions,
+            "blockers": unresolved,
+        }
+        coverage_summary = {
+            "status": (
+                "blocked"
+                if plan_violations or connection_issues or unresolved
+                else "ready"
+            ),
+            "mode": normalized_mode,
+            "command_count": len(commands),
+            "eligible_count": len(decisions),
+            "ready_count": sum(
+                item.get("status") == "resolved" for item in decisions
+            ),
+            "not_applicable_count": sum(
+                item.get("status") == "not_applicable"
+                for item in decisions
+            ),
+            "blocked_count": len(unresolved),
+            "coverage_rate": (
+                sum(item.get("status") == "resolved" for item in decisions)
+                / len(
+                    [
+                        item
+                        for item in decisions
+                        if item.get("status") != "not_applicable"
+                    ]
+                )
+                if any(
+                    item.get("status") != "not_applicable"
+                    for item in decisions
+                )
+                else 1.0
+            ),
+            "violations": unresolved,
+            "plan_violations": plan_violations,
+            "connection_issues": connection_issues,
+            "runtime_asset_health": runtime_asset_health,
+        }
+    else:
+        runtime_asset_health = _runtime_rule_asset_health(
+            mode=normalized_mode,
+            coverage=parser_coverage,
+        )
+        coverage_summary = _coverage_summary(
+            mode=normalized_mode,
+            commands=commands,
+            coverage=parser_coverage,
+            connection_issues=connection_issues,
+            plan_violations=plan_violations,
+            runtime_asset_health=runtime_asset_health,
+        )
     from src.core.rule_control.command_four_state import command_four_states
 
     return {
         "success": True,
         "device": _redact_device(device),
-        "plan": plan.to_metadata(),
+        "plan": plan_metadata,
+        "check_item_effective_plan": check_item_plan,
         "commands": commands,
         "parser_coverage": parser_coverage,
         "coverage_summary": coverage_summary,

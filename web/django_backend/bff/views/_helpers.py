@@ -8,6 +8,18 @@ from django.http import HttpRequest
 from ..roles import user_thread_prefix
 
 
+_FORWARDED_CLIENT_HEADERS = {
+    "HTTP_AUTHORIZATION": "Authorization",
+    "CONTENT_TYPE": "Content-Type",
+    "HTTP_ACCEPT": "Accept",
+    "HTTP_IDEMPOTENCY_KEY": "Idempotency-Key",
+    "HTTP_IF_MATCH": "If-Match",
+    "HTTP_IF_NONE_MATCH": "If-None-Match",
+    "HTTP_LAST_EVENT_ID": "Last-Event-ID",
+    "HTTP_RANGE": "Range",
+}
+
+
 def _request_user_role(request: HttpRequest) -> str:
     role = getattr(request, "bff_user_role", None)
     if role:
@@ -36,11 +48,11 @@ def parse_json_body(request: HttpRequest) -> dict:
 
 def forward_client_headers(request: HttpRequest) -> dict:
     """将客户端可转发的请求头传递给 FastAPI，并注入 BFF 可信用户上下文。"""
-    headers: dict[str, str] = {}
-    if auth := request.META.get("HTTP_AUTHORIZATION"):
-        headers["Authorization"] = auth
-    if content_type := request.META.get("CONTENT_TYPE"):
-        headers["Content-Type"] = content_type
+    headers = {
+        target: str(value)
+        for source, target in _FORWARDED_CLIENT_HEADERS.items()
+        if (value := request.META.get(source))
+    }
 
     user = getattr(request, "user", None)
     if user and getattr(user, "is_authenticated", False):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -13,8 +14,10 @@ from src.core.rule_control.dataset_context import (
 )
 from src.infrastructure.db.models import (
     CommandSnapshot,
+    FileMetadata,
     OfflinePatrolJobRecord,
     OfflinePatrolPeriodRecord,
+    OfflinePatrolSourceFileRecord,
     ParserTemplate,
     PatrolDataset,
     PatrolRun,
@@ -67,6 +70,82 @@ def test_snapshot_sampling_represents_peers_before_repeating_large_capture():
 
     assert {record["row"] for record in records} == {"a-1", "b-1", "c-1"}
     assert set(groups) == {"device-a", "device-b", "device-c"}
+
+
+def test_snapshot_sampling_represents_named_record_sets_before_repeating_large_table():
+    candidates = [
+        (
+            "period-a",
+            "device-a",
+            {
+                "__record_set__": "interface_status",
+                "interface": f"GE1/0/{index}",
+            },
+        )
+        for index in range(1, 201)
+    ]
+    candidates.extend(
+        [
+            (
+                "period-a",
+                "device-a",
+                {
+                    "__record_set__": "module_measurements",
+                    "interface": "GE1/0/1",
+                    "rx_power_dbm": -18.2,
+                },
+            ),
+            (
+                "period-a",
+                "device-a",
+                {
+                    "__record_set__": "diagnostic_thresholds",
+                    "interface": "GE1/0/1",
+                    "rx_low_warning_dbm": -17.0,
+                },
+            ),
+        ]
+    )
+
+    records, groups = _round_robin_snapshot_records(candidates, max_records=3)
+
+    assert {record["__record_set__"] for record in records} == {
+        "interface_status",
+        "module_measurements",
+        "diagnostic_thresholds",
+    }
+    assert groups == {"device-a": records}
+
+
+def test_snapshot_sampling_preserves_rare_low_cardinality_states():
+    candidates = []
+    for period in ("period-a", "period-b"):
+        for device in ("device-a", "device-b"):
+            candidates.extend(
+                (
+                    period,
+                    device,
+                    {
+                        "interface": f"Eth1/{index}",
+                        "status": "connected" if index < 130 else "noOperMem",
+                    },
+                )
+                for index in range(1, 141)
+            )
+    candidates[-2] = (
+        "period-b",
+        "device-b",
+        {"interface": "Eth1/139", "status": "notconnec"},
+    )
+
+    records, groups = _round_robin_snapshot_records(candidates, max_records=20)
+
+    assert {record["status"] for record in records} == {
+        "connected",
+        "notconnec",
+        "noOperMem",
+    }
+    assert set(groups) == {"device-a", "device-b"}
 
 
 def test_rule_context_prefers_comparable_contract_semantics_over_identity_default():
@@ -313,6 +392,10 @@ def test_dataset_rule_context_is_immutable_balanced_and_sanitized():
                     collection_status="completed",
                     run_purpose="parser_validation",
                     attempt_number=0,
+                    metadata_json={
+                        "offline_job_id": offline_job_id,
+                        "period_role": "baseline" if index == 0 else "current",
+                    },
                 )
             )
             db.add(
@@ -341,6 +424,33 @@ def test_dataset_rule_context_is_immutable_balanced_and_sanitized():
                     status="completed",
                 )
             )
+            file_id = f"file-{index}-{suffix}"
+            db.add(
+                FileMetadata(
+                    id=file_id,
+                    name=f"period-{index}.txt",
+                    object_key=f"tests/{suffix}/period-{index}.txt",
+                    owner_id="unit-test",
+                    visibility="private",
+                    size_bytes=128 + index,
+                    status="active",
+                    is_deleted=False,
+                )
+            )
+            db.add(
+                OfflinePatrolSourceFileRecord(
+                    id=f"source-{index}-{suffix}",
+                    job_id=offline_job_id,
+                    period_role="baseline" if index == 0 else "current",
+                    file_id=file_id,
+                    relative_path=f"period-{index}.txt",
+                    sha256=hashlib.sha256(
+                        f"period-{index}-{suffix}".encode()
+                    ).hexdigest(),
+                    size_bytes=128 + index,
+                    status="verified",
+                )
+            )
             db.add(
                 CommandSnapshot(
                     id=f"snapshot-{index}-{suffix}",
@@ -360,6 +470,26 @@ def test_dataset_rule_context_is_immutable_balanced_and_sanitized():
                     parse_status="parsed" if index == 1 else "template_missing",
                 )
             )
+            if index == 0:
+                db.add(
+                    CommandSnapshot(
+                        id=f"snapshot-duplicate-{index}-{suffix}",
+                        run_id=run_ids[index],
+                        dataset_id=dataset_id,
+                        device_id=f"device-{index}",
+                        execution_item_id=f"item-duplicate-{index}",
+                        device_name=f"SW{index + 1}",
+                        management_ip=f"10.0.0.{index + 1}",
+                        command="display transceiver diagnosis interface",
+                        canonical_command="display transceiver diagnosis interface",
+                        parser_template_id=template_id,
+                        observed_at=observed_at + timedelta(days=index),
+                        structured_json=records[index],
+                        raw_text=f"raw CLI with password secret-{index}",
+                        raw_text_hash=f"hash-{index}-{suffix}",
+                        parse_status="parsed",
+                    )
+                )
             if index == 0:
                 db.add(
                     SnapshotParseResult(
@@ -464,6 +594,24 @@ def test_dataset_rule_context_is_immutable_balanced_and_sanitized():
         ):
             assert forbidden not in serialized
         assert "identity-" in serialized
+
+        loaded = service.load(context_id=first["context_id"], job_id=job_id)
+        assert loaded["context_digest"] == first["context_digest"]
+        with get_db_session() as db:
+            source = (
+                db.query(OfflinePatrolSourceFileRecord)
+                .filter(
+                    OfflinePatrolSourceFileRecord.job_id == offline_job_id,
+                    OfflinePatrolSourceFileRecord.period_role == "current",
+                )
+                .one()
+            )
+            source.status = "attached"
+        with pytest.raises(
+            ValueError,
+            match="source evidence changed|verified SHA-256",
+        ):
+            service.load(context_id=first["context_id"], job_id=job_id)
     finally:
         with get_db_session() as db:
             db.query(RuleGenerationContextRecord).filter(
@@ -481,6 +629,15 @@ def test_dataset_rule_context_is_immutable_balanced_and_sanitized():
             db.query(OfflinePatrolPeriodRecord).filter(
                 OfflinePatrolPeriodRecord.job_id == offline_job_id
             ).delete(synchronize_session=False)
+            source_file_ids = [
+                f"file-{index}-{suffix}" for index in range(2)
+            ]
+            db.query(OfflinePatrolSourceFileRecord).filter(
+                OfflinePatrolSourceFileRecord.job_id == offline_job_id
+            ).delete(synchronize_session=False)
+            db.query(FileMetadata).filter(
+                FileMetadata.id.in_(source_file_ids)
+            ).delete(synchronize_session=False)
             db.query(PatrolRun).filter(PatrolRun.id.in_(all_run_ids)).delete(
                 synchronize_session=False
             )
@@ -496,3 +653,22 @@ def test_dataset_rule_context_is_immutable_balanced_and_sanitized():
             db.query(OfflinePatrolJobRecord).filter(
                 OfflinePatrolJobRecord.id == offline_job_id
             ).delete(synchronize_session=False)
+
+
+def test_sanitize_preserves_list_valued_ip_fields():
+    from src.core.rule_control.dataset_context import _sanitize
+
+    removed = {}
+    pseudonymized = {}
+    result = _sanitize(
+        {"ip_address": ["10.34.2.13/27", "unassigned"]},
+        removed=removed,
+        pseudonymized=pseudonymized,
+    )
+
+    assert isinstance(result["ip_address"], list)
+    assert len(result["ip_address"]) == 2
+    assert result["ip_address"][0] != "10.34.2.13/27"
+    assert "/27" in result["ip_address"][0]
+    assert result["ip_address"][1] == "unassigned"
+    assert pseudonymized == {"ip_address": 1}

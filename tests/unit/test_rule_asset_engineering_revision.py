@@ -1,13 +1,27 @@
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import datetime, timezone
 
+import pytest
+
+from src.core.rule_control.approval import RuleAssetApprovalService
 from src.core.rule_control.engineering_revision import RuleAssetEngineeringRevisionService
+from src.core.rule_control.jobs import RuleGenerationJobStateError
 from src.core.rule_control.repository import RuleGenerationJobRepository
+from src.core.rule_control.source_scope import (
+    require_immutable_rule_asset_source_datasets,
+    rule_generation_context_digest,
+)
 from src.infrastructure.db.models import (
+    FileMetadata,
     ObservationContractRecord,
     OfflinePatrolJobRecord,
+    OfflinePatrolPeriodRecord,
+    OfflinePatrolSourceFileRecord,
+    PatrolDataset,
+    PatrolRun,
     RuleGenerationContextRecord,
     RuleGenerationJobRecord,
 )
@@ -24,6 +38,11 @@ def _create_bundle() -> dict[str, str]:
         "contract": f"contract-{suffix}",
         "context": f"context-{suffix}",
         "offline_job": f"offline-{suffix}",
+        "period": f"period-{suffix}",
+        "dataset": f"dataset-{suffix}",
+        "run": f"run-{suffix}",
+        "file": f"file-{suffix}",
+        "source": f"source-{suffix}",
     }
     now = datetime.now(timezone.utc)
     contract = {
@@ -75,6 +94,92 @@ def _create_bundle() -> dict[str, str]:
                 completed_at=now,
             )
         )
+        db.add(
+            FileMetadata(
+                id=ids["file"],
+                name="interface-brief.txt",
+                object_key=f"tests/engineering-revision/{suffix}/interface-brief.txt",
+                owner_id="pytest",
+                visibility="private",
+                size_bytes=64,
+                status="active",
+                is_deleted=False,
+            )
+        )
+        db.add(
+            PatrolDataset(
+                id=ids["dataset"],
+                name=ids["dataset"],
+                mode="parser_validation",
+                source="offline_import",
+                status="active",
+            )
+        )
+        db.flush()
+        db.add(
+            PatrolRun(
+                id=ids["run"],
+                logical_run_id=ids["run"],
+                mode="parser_validation",
+                source="offline_import",
+                dataset_id=ids["dataset"],
+                status="completed",
+                collection_status="completed",
+                run_purpose="parser_validation",
+                metadata_json={
+                    "offline_job_id": ids["offline_job"],
+                    "period_role": "sample",
+                },
+            )
+        )
+        db.flush()
+        db.add(
+            OfflinePatrolPeriodRecord(
+                id=ids["period"],
+                job_id=ids["offline_job"],
+                role="sample",
+                label="sample",
+                observed_at=now,
+                dataset_id=ids["dataset"],
+                patrol_run_id=ids["run"],
+                status="completed",
+            )
+        )
+        db.add(
+            OfflinePatrolSourceFileRecord(
+                id=ids["source"],
+                job_id=ids["offline_job"],
+                period_role="sample",
+                file_id=ids["file"],
+                relative_path="interface-brief.txt",
+                sha256=hashlib.sha256(suffix.encode()).hexdigest(),
+                size_bytes=64,
+                status="verified",
+            )
+        )
+        db.flush()
+        source_scope = require_immutable_rule_asset_source_datasets(
+            db,
+            [ids["dataset"]],
+        )
+        context_payload = {
+            "records": [{"interface": "Gi1/0/1", "status": "up"}],
+            "record_groups": [],
+            "replay_run_ids": [ids["run"]],
+        }
+        privacy = {
+            "success": True,
+            "raw_cli_included": False,
+            "scope_type": "offline_period_authoritative_runs",
+            "source_scope_digest": source_scope["scope_digest"],
+            "source_scope_manifest": source_scope["manifest"],
+        }
+        context_digest = rule_generation_context_digest(
+            job_id=ids["bundle"],
+            dataset_ids=[ids["dataset"]],
+            context=context_payload,
+            privacy=privacy,
+        )
         db.add_all(
             [
                 RuleGenerationJobRecord(
@@ -93,6 +198,7 @@ def _create_bundle() -> dict[str, str]:
                             ids["rule_job"],
                         ],
                         "context_id": ids["context"],
+                        "context_digest": context_digest,
                         "command": "display interface brief",
                         "vendor": "H3C",
                         "model": "LAB",
@@ -100,8 +206,25 @@ def _create_bundle() -> dict[str, str]:
                     validation_report_json={
                         "success": True,
                         "bundle_gate": {"success": True, "blockers": []},
-                        "context_gate": {"success": True},
-                        "historical_replay": {"success": True, "collision_count": 0},
+                        "context_gate": {
+                            "success": True,
+                            "mode": "immutable_dataset_context",
+                            "context_id": ids["context"],
+                            "context_digest": context_digest,
+                            "replay_run_ids": [ids["run"]],
+                        },
+                        "historical_replay": {
+                            "success": True,
+                            "collision_count": 0,
+                            "sampled_change_count": 1,
+                            "total_change_count": 1,
+                            "matched_change_count": 1,
+                            "scope": {
+                                "mode": "run_ids",
+                                "run_ids": [ids["run"]],
+                                "run_id_count": 1,
+                            },
+                        },
                     },
                     created_by="pytest",
                     created_at=now,
@@ -154,18 +277,10 @@ def _create_bundle() -> dict[str, str]:
                 id=ids["context"],
                 job_id=ids["bundle"],
                 offline_job_id=ids["offline_job"],
-                dataset_ids_json=[f"dataset-{suffix}"],
-                context_json={
-                    "records": [{"interface": "Gi1/0/1", "status": "up"}],
-                    "record_groups": [],
-                    "replay_run_ids": [f"run-{suffix}"],
-                },
-                context_digest=f"context-digest-{suffix}",
-                privacy_report_json={
-                    "success": True,
-                    "raw_cli_included": False,
-                    "scope_type": "offline_period_authoritative_runs",
-                },
+                dataset_ids_json=[ids["dataset"]],
+                context_json=context_payload,
+                context_digest=context_digest,
+                privacy_report_json=privacy,
                 created_by="pytest",
                 created_at=now,
             )
@@ -208,6 +323,21 @@ def _cleanup(ids: dict[str, str]) -> None:
                 [ids["bundle"], ids["contract_job"], ids["policy_job"], ids["rule_job"]]
             )
         ).delete(synchronize_session=False)
+        db.query(OfflinePatrolSourceFileRecord).filter(
+            OfflinePatrolSourceFileRecord.id == ids["source"]
+        ).delete(synchronize_session=False)
+        db.query(OfflinePatrolPeriodRecord).filter(
+            OfflinePatrolPeriodRecord.id == ids["period"]
+        ).delete(synchronize_session=False)
+        db.query(PatrolRun).filter(PatrolRun.id == ids["run"]).delete(
+            synchronize_session=False
+        )
+        db.query(PatrolDataset).filter(PatrolDataset.id == ids["dataset"]).delete(
+            synchronize_session=False
+        )
+        db.query(FileMetadata).filter(FileMetadata.id == ids["file"]).delete(
+            synchronize_session=False
+        )
         db.query(OfflinePatrolJobRecord).filter(
             OfflinePatrolJobRecord.id == ids["offline_job"]
         ).delete(synchronize_session=False)
@@ -240,12 +370,76 @@ def test_engineering_review_exposes_candidates_and_records_acceptance():
         _cleanup(ids)
 
 
+def test_engineering_review_acceptance_note_is_optional():
+    ids = _create_bundle()
+    try:
+        result = RuleAssetEngineeringRevisionService().review(
+            ids["bundle"],
+            decision="accepted",
+            actor="rule-engineer",
+        )
+
+        assert result["review"]["decision"] == "accepted"
+        assert result["review"]["reason"] == ""
+    finally:
+        _cleanup(ids)
+
+
+def test_engineering_revision_request_still_requires_actionable_reason():
+    ids = _create_bundle()
+    try:
+        with pytest.raises(ValueError, match="revision request"):
+            RuleAssetEngineeringRevisionService().review(
+                ids["bundle"],
+                decision="revision_requested",
+                actor="rule-engineer",
+            )
+    finally:
+        _cleanup(ids)
+
+
+def test_engineering_review_rejects_candidate_creator():
+    ids = _create_bundle()
+    try:
+        with pytest.raises(
+            ValueError,
+            match="reviewer different from the candidate creator",
+        ):
+            RuleAssetEngineeringRevisionService().review(
+                ids["bundle"],
+                decision="accepted",
+                actor="api:pytest",
+                reason="creator must not review the generated candidates",
+            )
+    finally:
+        _cleanup(ids)
+
+
+def test_engineering_review_allows_explicit_admin_override_for_candidate_creator():
+    ids = _create_bundle()
+    try:
+        result = RuleAssetEngineeringRevisionService().review(
+            ids["bundle"],
+            decision="accepted",
+            actor="api:pytest",
+            reason="administrator completed the review with an audited override",
+            allow_same_actor=True,
+        )
+
+        assert result["review"]["decision"] == "accepted"
+        assert result["review"]["separation_of_duties_override"] is True
+    finally:
+        _cleanup(ids)
+
+
 def test_engineering_revision_creates_replacement_bundle_after_validation(monkeypatch):
     ids = _create_bundle()
     created_bundle_ids: list[str] = []
 
     def fake_execute(skill_name, params):
         if skill_name == "observation-contract-generator":
+            assert params["allow_semantic_overrides"] is True
+            assert params["require_policy_targets"] is True
             return {
                 "success": True,
                 "proposal": params["proposal"],
@@ -319,4 +513,30 @@ def test_engineering_revision_creates_replacement_bundle_after_validation(monkey
                 db.query(RuleGenerationJobRecord).filter(
                     RuleGenerationJobRecord.id.in_(created_bundle_ids)
                 ).delete(synchronize_session=False)
+        _cleanup(ids)
+
+
+def test_final_approval_rejects_source_changed_after_engineering_review():
+    ids = _create_bundle()
+    try:
+        RuleAssetEngineeringRevisionService().review(
+            ids["bundle"],
+            decision="accepted",
+            actor="rule-engineer",
+            reason="candidate semantics and immutable evidence verified",
+        )
+        with get_db_session() as db:
+            source = db.get(OfflinePatrolSourceFileRecord, ids["source"])
+            source.status = "attached"
+
+        with pytest.raises(
+            RuleGenerationJobStateError,
+            match="source evidence is no longer releasable",
+        ):
+            RuleAssetApprovalService().approve(
+                ids["bundle"],
+                actor="rule-approver",
+                reason="release after engineering review",
+            )
+    finally:
         _cleanup(ids)

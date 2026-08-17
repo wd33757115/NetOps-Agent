@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -9,6 +11,11 @@ import pytest
 from kombu import Connection
 
 from src.auth.token_store import get_redis
+from src.core.check_items.report_manifest import ReportManifestService
+from src.core.check_items.reporting import (
+    CheckItemReportMaterializer,
+    build_check_item_report_view,
+)
 from src.core.events.idempotency import (
     claim_processing,
     is_processed,
@@ -27,15 +34,29 @@ from src.core.patrol.change_event_repository import (
     deterministic_change_id,
 )
 from src.core.patrol.change_policy_repository import ChangePolicyRepository
+from src.core.patrol.concurrency import (
+    PatrolConcurrencyLeaseLostError,
+    RedisExclusiveFencedLease,
+)
 from src.core.patrol.event_builder import NetworkEvent
 from src.core.patrol.repository import PatrolRepository
 from src.core.workflows.patrol_batch_service import iter_patrol_event_export_rows
-from src.core.workflows.repository import create_notification
+from src.core.workflows.repository import (
+    cancel_workflow_run,
+    create_notification,
+    mark_step_completed,
+    mark_step_failed,
+    update_run_status,
+)
 from src.gateway.audit_service import write_audit_log
 from src.infrastructure.db.models import (
     AuditLogRecord,
     ChangePolicyRecord,
     ChangePolicyVersionRecord,
+    CheckAssessmentRecord,
+    CheckExecutionRecord,
+    CheckItemRuntimeManifestRecord,
+    CheckItemVersionRecord,
     NetworkChangeRecord,
     NetworkEventOccurrenceRecord,
     NetworkEventRecord,
@@ -46,10 +67,508 @@ from src.infrastructure.db.models import (
     PatrolBatchDeviceRecord,
     PatrolBatchRecord,
     PatrolRun,
+    WorkflowRun,
+    WorkflowStepRecord,
 )
 from src.infrastructure.db.postgres import get_db_session
+from src.infrastructure.storage.minio_client import get_minio_storage
 
 pytestmark = pytest.mark.integration
+
+
+def test_cancelled_patrol_run_rejects_late_success_callback(postgres_available):
+    del postgres_available
+    suffix = uuid.uuid4().hex
+    batch_id = f"cancel-fault-{suffix}"
+    run_id = f"cancel-run-{suffix}"
+    target_id = f"cancel-target-{suffix}"
+    step_id = f"cancel-step-{suffix}"
+    now = datetime.now(timezone.utc)
+    with get_db_session() as db:
+        db.add(
+            PatrolBatchRecord(
+                patrol_batch_id=batch_id,
+                workflow_name="patrol-change-event",
+                launch_mode="workflow",
+                patrol_mode="production",
+                target_type="device",
+                target_label="fault injection",
+                selector_json={},
+                target_count=1,
+                launched_count=1,
+                skipped_count=0,
+                dispatch_status="completed",
+                report_status="not_requested",
+                archived=False,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        db.flush()
+        db.add(
+            WorkflowRun(
+                id=run_id,
+                template_name="patrol-change-event",
+                source="device-management",
+                status="running",
+                context={"patrol_batch_id": batch_id, "device_id": f"device-{suffix}"},
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        db.add(
+            PatrolBatchDeviceRecord(
+                id=target_id,
+                patrol_batch_id=batch_id,
+                device_id=f"device-{suffix}",
+                selection_status="launched",
+                preflight_status="ready",
+                workflow_run_id=run_id,
+                dispatch_status="dispatched",
+                dispatch_attempts=1,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        db.add(
+            WorkflowStepRecord(
+                id=step_id,
+                run_id=run_id,
+                step_index=0,
+                step_name="collect",
+                skill_name="device-patrol",
+                celery_task_id=f"task-{suffix}",
+                status="running",
+                started_at=now,
+                created_at=now,
+            )
+        )
+    try:
+        batch_cancel = PatrolBatchManifestRepository().cancel_dispatch(
+            batch_id,
+            actor="fault-injection",
+            reason="verify terminal fencing",
+        )
+        run_cancel = cancel_workflow_run(
+            run_id,
+            actor="fault-injection",
+            reason="verify terminal fencing",
+        )
+        repeated = cancel_workflow_run(
+            run_id,
+            actor="fault-injection",
+            reason="verify terminal fencing",
+        )
+
+        assert batch_cancel is not None and batch_cancel["changed"] is True
+        assert run_cancel["changed"] is True
+        assert repeated["idempotent"] is True
+        assert mark_step_completed(step_id, {"success": True}) is False
+        assert mark_step_failed(step_id, "late worker failure") is False
+        assert update_run_status(run_id, "completed") is False
+        assert update_run_status(
+            run_id,
+            "failed",
+            error="late worker failure",
+        ) is False
+
+        with get_db_session() as db:
+            assert db.get(PatrolBatchRecord, batch_id).dispatch_status == "cancelled"
+            assert db.get(WorkflowRun, run_id).status == "cancelled"
+            assert db.get(WorkflowStepRecord, step_id).status == "cancelled"
+            assert db.get(PatrolBatchDeviceRecord, target_id).dispatch_status == "cancelled"
+    finally:
+        with get_db_session() as db:
+            db.query(WorkflowStepRecord).filter_by(run_id=run_id).delete()
+            db.query(PatrolBatchDeviceRecord).filter_by(patrol_batch_id=batch_id).delete()
+            db.query(WorkflowRun).filter_by(id=run_id).delete()
+            db.query(PatrolBatchRecord).filter_by(patrol_batch_id=batch_id).delete()
+
+
+def test_cancelled_unlaunched_target_settles_full_check_item_denominator(
+    postgres_available,
+):
+    del postgres_available
+    suffix = uuid.uuid4().hex
+    batch_id = f"cancel-denominator-{suffix}"
+    manifest_id = f"manifest-{suffix}"
+    manifest_digest = uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        f"manifest|{suffix}",
+    ).hex * 2
+    completed_device = f"completed-{suffix}"
+    cancelled_device = f"cancelled-{suffix}"
+    failed_device = f"failed-{suffix}"
+    timeout_device = f"timeout-{suffix}"
+    run_id = f"completed-run-{suffix}"
+    timeout_run_id = f"timeout-run-{suffix}"
+    now = datetime.now(timezone.utc)
+    with get_db_session() as db:
+        check_version = (
+            db.query(CheckItemVersionRecord)
+            .filter(
+                CheckItemVersionRecord.status == "active",
+                CheckItemVersionRecord.check_item_id == "device.version",
+            )
+            .order_by(CheckItemVersionRecord.check_item_id)
+            .first()
+        )
+        if check_version is None:
+            pytest.skip("an active check-item version is required")
+        check_version_id = str(check_version.id)
+        completed_execution_id = f"execution-completed-{suffix}"
+        cancelled_execution_id = f"execution-cancelled-{suffix}"
+        completed_assessment_id = f"assessment-completed-{suffix}"
+        target_manifest_digest = "a" * 64
+        inventory_snapshot_digest = "b" * 64
+        manifest_payload = {
+            "patrol_batch_id": batch_id,
+            "target_manifest_digest": target_manifest_digest,
+            "inventory_snapshot_digest": inventory_snapshot_digest,
+            "check_item_versions": [check_version_id],
+            "collection_actions": [],
+            "runtime_bundle_refs": [],
+            "comparison_contexts": [],
+            "entity_identity_policy_versions": [],
+            "assessment_schema_version": "check-assessment/v1",
+            "report_schema_version": "check-item-report/v5",
+            "device_check_item_versions": {
+                completed_device: [check_version_id],
+                cancelled_device: [check_version_id],
+                failed_device: [check_version_id],
+                timeout_device: [check_version_id],
+            }
+        }
+        manifest_digest = hashlib.sha256(
+            json.dumps(
+                manifest_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        manifest_payload["digest"] = manifest_digest
+        db.add(
+            PatrolBatchRecord(
+                patrol_batch_id=batch_id,
+                workflow_name="patrol-change-event",
+                launch_mode="workflow",
+                patrol_mode="production",
+                report_purpose="shadow_validation",
+                target_type="manual",
+                target_label="cancel denominator fault injection",
+                selector_json={},
+                target_count=4,
+                launched_count=2,
+                skipped_count=0,
+                target_manifest_digest=target_manifest_digest,
+                inventory_snapshot_digest=inventory_snapshot_digest,
+                runtime_manifest_id=manifest_id,
+                runtime_manifest_digest=manifest_digest,
+                dispatch_status="cancelled",
+                report_status="not_requested",
+                archived=False,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        db.flush()
+        db.add(
+            CheckItemRuntimeManifestRecord(
+                id=manifest_id,
+                patrol_batch_id=batch_id,
+                schema_version=2,
+                target_manifest_digest=target_manifest_digest,
+                inventory_snapshot_digest=inventory_snapshot_digest,
+                check_item_versions_json=[check_version_id],
+                collection_actions_json=[],
+                runtime_bundle_refs_json=[],
+                comparison_context_ids_json=[],
+                entity_identity_policy_versions_json=[],
+                assessment_schema_version="check-assessment/v1",
+                report_schema_version="check-item-report/v5",
+                manifest_json=manifest_payload,
+                digest=manifest_digest,
+                status="frozen",
+                created_by="fault-injection",
+                created_at=now,
+            )
+        )
+        db.add(
+            WorkflowRun(
+                id=run_id,
+                template_name="patrol-change-event",
+                source="device-management",
+                status="completed",
+                context={
+                    "patrol_batch_id": batch_id,
+                    "device_id": completed_device,
+                },
+                created_at=now,
+                updated_at=now,
+                completed_at=now,
+            )
+        )
+        db.add(
+            WorkflowRun(
+                id=timeout_run_id,
+                template_name="patrol-change-event",
+                source="device-management",
+                status="failed",
+                context={
+                    "patrol_batch_id": batch_id,
+                    "device_id": timeout_device,
+                    "failure_code": "command_timeout",
+                },
+                error_message="command exceeded deadline",
+                created_at=now,
+                updated_at=now,
+                completed_at=now,
+            )
+        )
+        db.add_all(
+            [
+                PatrolBatchDeviceRecord(
+                    id=f"target-completed-{suffix}",
+                    patrol_batch_id=batch_id,
+                    device_id=completed_device,
+                    selection_status="launched",
+                    preflight_status="ready",
+                    workflow_run_id=run_id,
+                    dispatch_status="dispatched",
+                    dispatch_attempts=1,
+                    created_at=now,
+                    updated_at=now,
+                ),
+                PatrolBatchDeviceRecord(
+                    id=f"target-cancelled-{suffix}",
+                    patrol_batch_id=batch_id,
+                    device_id=cancelled_device,
+                    selection_status="selected",
+                    preflight_status="ready",
+                    dispatch_status="cancelled",
+                    dispatch_attempts=0,
+                    failure_code="patrol_batch_cancelled",
+                    created_at=now,
+                    updated_at=now,
+                ),
+                PatrolBatchDeviceRecord(
+                    id=f"target-failed-{suffix}",
+                    patrol_batch_id=batch_id,
+                    device_id=failed_device,
+                    selection_status="selected",
+                    preflight_status="failed",
+                    dispatch_status="failed",
+                    dispatch_attempts=3,
+                    failure_code="credential_missing",
+                    error_message="credential is unavailable",
+                    created_at=now,
+                    updated_at=now,
+                ),
+                PatrolBatchDeviceRecord(
+                    id=f"target-timeout-{suffix}",
+                    patrol_batch_id=batch_id,
+                    device_id=timeout_device,
+                    selection_status="launched",
+                    preflight_status="ready",
+                    workflow_run_id=timeout_run_id,
+                    dispatch_status="dispatched",
+                    dispatch_attempts=1,
+                    failure_code="command_timeout",
+                    error_message="command exceeded deadline",
+                    created_at=now,
+                    updated_at=now,
+                ),
+            ]
+        )
+        db.add_all(
+            [
+                CheckExecutionRecord(
+                    id=completed_execution_id,
+                    idempotency_key=completed_execution_id,
+                    patrol_batch_id=batch_id,
+                    device_id=completed_device,
+                    check_item_version_id=check_version_id,
+                    collection_action_ids_json=[],
+                    execution_status="completed",
+                    assessment_id=completed_assessment_id,
+                    reason_codes_json=[],
+                    observation_count=1,
+                    observed_entity_count=1,
+                    target_manifest_digest="a" * 64,
+                    evidence_refs_json=[run_id],
+                    completed_at=now,
+                    created_at=now,
+                    updated_at=now,
+                ),
+                CheckExecutionRecord(
+                    id=cancelled_execution_id,
+                    idempotency_key=cancelled_execution_id,
+                    patrol_batch_id=batch_id,
+                    device_id=cancelled_device,
+                    check_item_version_id=check_version_id,
+                    collection_action_ids_json=[],
+                    execution_status="planned",
+                    reason_codes_json=[],
+                    target_manifest_digest="a" * 64,
+                    evidence_refs_json=[],
+                    created_at=now,
+                    updated_at=now,
+                ),
+                CheckExecutionRecord(
+                    id=f"execution-failed-{suffix}",
+                    idempotency_key=f"execution-failed-{suffix}",
+                    patrol_batch_id=batch_id,
+                    device_id=failed_device,
+                    check_item_version_id=check_version_id,
+                    collection_action_ids_json=[],
+                    execution_status="planned",
+                    reason_codes_json=[],
+                    target_manifest_digest="a" * 64,
+                    evidence_refs_json=[],
+                    created_at=now,
+                    updated_at=now,
+                ),
+                CheckExecutionRecord(
+                    id=f"execution-timeout-{suffix}",
+                    idempotency_key=f"execution-timeout-{suffix}",
+                    patrol_batch_id=batch_id,
+                    device_id=timeout_device,
+                    check_item_version_id=check_version_id,
+                    collection_action_ids_json=[],
+                    execution_status="planned",
+                    reason_codes_json=[],
+                    target_manifest_digest="a" * 64,
+                    evidence_refs_json=[timeout_run_id],
+                    created_at=now,
+                    updated_at=now,
+                ),
+            ]
+        )
+        db.flush()
+        db.add(
+            CheckAssessmentRecord(
+                id=completed_assessment_id,
+                idempotency_key=completed_assessment_id,
+                patrol_batch_id=batch_id,
+                device_id=completed_device,
+                check_item_version_id=check_version_id,
+                execution_id=completed_execution_id,
+                assessment_status="informational",
+                completeness_status="complete",
+                comparison_status="first_observation",
+                observed_entity_count=1,
+                evaluated_entity_count=1,
+                threshold_unknown_count=0,
+                current_finding_ids_json=[],
+                risk_case_ids_json=[],
+                blocking_reason_codes_json=[],
+                assessment_basis_json={},
+                evidence_digest="c" * 64,
+                assessed_at=now,
+                created_at=now,
+            )
+        )
+    try:
+        requested = PatrolBatchManifestRepository().request_terminal_report(
+            batch_id
+        )
+
+        assert requested is True
+        PatrolBatchManifestRepository._reconcile_failed_check_item_workflows(
+            batch_id
+        )
+        manifest = ReportManifestService().build(
+            batch_id,
+            generated_by="fault-injection",
+        )
+        report = build_check_item_report_view(manifest)
+        assert manifest["status"] == "final"
+        assert report["coverage"]["expected_check_count"] == 4
+        assert report["coverage"]["assessed_check_count"] == 4
+        assert report["assessment_counts"] == {
+            "informational": 1,
+            "unable_to_determine": 3,
+        }
+        materialized = CheckItemReportMaterializer().materialize(
+            batch_id,
+            generated_by="fault-injection",
+        )
+        assert set(materialized["artifact_object_keys"]) == {
+            "markdown",
+            "docx",
+            "excel",
+            "json",
+            "evidence",
+        }
+        with get_db_session() as db:
+            batch = db.get(PatrolBatchRecord, batch_id)
+            executions = {
+                str(item.device_id): item
+                for item in db.query(CheckExecutionRecord)
+                .filter(CheckExecutionRecord.patrol_batch_id == batch_id)
+                .all()
+            }
+            assessments = {
+                str(item.device_id): item
+                for item in db.query(CheckAssessmentRecord)
+                .filter(CheckAssessmentRecord.patrol_batch_id == batch_id)
+                .all()
+            }
+            assert len(assessments) == 4
+            assert batch.report_status == "queued"
+            assert executions[completed_device].execution_status == "completed"
+            assert assessments[completed_device].assessment_status == "informational"
+            assert executions[cancelled_device].execution_status == "cancelled"
+            assert assessments[cancelled_device].assessment_status == (
+                "unable_to_determine"
+            )
+            assert "patrol_batch_cancelled" in (
+                assessments[cancelled_device].blocking_reason_codes_json
+            )
+            assert executions[failed_device].execution_status == (
+                "collection_failed"
+            )
+            assert assessments[failed_device].assessment_status == (
+                "unable_to_determine"
+            )
+            assert "credential_missing" in (
+                assessments[failed_device].blocking_reason_codes_json
+            )
+            assert executions[timeout_device].execution_status == (
+                "collection_failed"
+            )
+            assert assessments[timeout_device].assessment_status == (
+                "unable_to_determine"
+            )
+            assert "command_timeout" in (
+                assessments[timeout_device].blocking_reason_codes_json
+            )
+    finally:
+        get_minio_storage().delete_objects_by_prefix(
+            f"reports/patrol/{batch_id}"
+        )
+        with get_db_session() as db:
+            db.query(CheckAssessmentRecord).filter(
+                CheckAssessmentRecord.patrol_batch_id == batch_id
+            ).delete(synchronize_session=False)
+            db.query(CheckExecutionRecord).filter(
+                CheckExecutionRecord.patrol_batch_id == batch_id
+            ).delete(synchronize_session=False)
+            db.query(PatrolBatchDeviceRecord).filter_by(
+                patrol_batch_id=batch_id
+            ).delete(synchronize_session=False)
+            db.query(WorkflowRun).filter(
+                WorkflowRun.id.in_([run_id, timeout_run_id])
+            ).delete(
+                synchronize_session=False
+            )
+            db.query(CheckItemRuntimeManifestRecord).filter_by(
+                id=manifest_id
+            ).delete(synchronize_session=False)
+            db.query(PatrolBatchRecord).filter_by(
+                patrol_batch_id=batch_id
+            ).delete(synchronize_session=False)
 
 
 def test_patrol_batch_targets_are_claimed_once_across_concurrent_dispatchers(
@@ -256,6 +775,31 @@ def test_real_redis_processing_lease_can_be_renewed():
         )
     finally:
         client.delete(f"{IDEMPOTENCY_PROCESSING_PREFIX}{group}:{event_id}")
+
+
+def test_real_redis_device_fence_rejects_worker_after_lease_loss():
+    client = _redis_or_skip()
+    scope = f"device-{uuid.uuid4().hex}"
+    leases = RedisExclusiveFencedLease(
+        lease_seconds=30,
+        wait_seconds=1,
+        key_prefix=f"netops:test:patrol-device:{uuid.uuid4().hex}",
+    )
+    first = leases.acquire(scope)
+    second = None
+    try:
+        client.delete(first.key)
+        second = leases.acquire(scope)
+
+        assert second.fencing_token > first.fencing_token
+        with pytest.raises(PatrolConcurrencyLeaseLostError):
+            leases.assert_lease(first)
+        leases.release(first)
+        leases.assert_lease(second)
+    finally:
+        if second is not None:
+            leases.release(second)
+        client.delete(first.key, first.fence_key)
 
 
 def test_real_redis_pending_message_is_reclaimed_after_worker_loss():

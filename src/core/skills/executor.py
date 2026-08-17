@@ -18,7 +18,12 @@ from typing import Any
 
 import requests
 
-from src.core.skills.resolver import get_entry_output_mode, get_skill_cwd, resolve_entry_script
+from src.core.skills.resolver import (
+    get_entry_output_mode,
+    get_skill_cwd,
+    get_skill_execution_timeout_seconds,
+    resolve_entry_script,
+)
 from src.core.workflows.artifacts import make_file_artifact
 from src.infrastructure.storage.minio_client import get_minio_storage
 
@@ -55,7 +60,26 @@ _ZIP_CLI_SKILLS = frozenset({"itsm-change-ticket-writer"})
 
 
 class SkillExecutionError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, payload: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.payload = dict(payload or {})
+
+
+def _parse_last_json_payload(*streams: str) -> dict[str, Any] | None:
+    """Return the last JSON object emitted by a subprocess, if one exists."""
+
+    for stream in streams:
+        for line in reversed((stream or "").splitlines()):
+            candidate = line.strip()
+            if not candidate:
+                continue
+            try:
+                payload = json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                return payload
+    return None
 
 
 def _download_url_to_path(url: str, dest: Path) -> None:
@@ -169,18 +193,43 @@ def _run_subprocess_skill(skill_name: str, params: dict[str, Any]) -> dict[str, 
         if policy_path and skill_name == "firewall-policy-generator":
             cmd.extend(["--policy", policy_path])
 
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            timeout=600,
-            cwd=str(get_skill_cwd(skill_name)),
-            env=_skill_subprocess_env(),
-        )
+        timeout_seconds = get_skill_execution_timeout_seconds(skill_name)
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                timeout=timeout_seconds,
+                cwd=str(get_skill_cwd(skill_name)),
+                env=_skill_subprocess_env(),
+            )
+        except subprocess.TimeoutExpired as exc:
+            stdout = exc.stdout if isinstance(exc.stdout, bytes) else str(exc.stdout or "").encode()
+            stderr = exc.stderr if isinstance(exc.stderr, bytes) else str(exc.stderr or "").encode()
+            payload = _parse_last_json_payload(
+                _decode_subprocess_bytes(stdout),
+                _decode_subprocess_bytes(stderr),
+            ) or {}
+            payload.update(
+                {
+                    "success": False,
+                    "error": "skill_execution_timeout",
+                    "failure_code": "skill_execution_timeout",
+                    "timeout_seconds": timeout_seconds,
+                }
+            )
+            raise SkillExecutionError(
+                f"Skill execution timed out ({skill_name}, {timeout_seconds}s)",
+                payload=payload,
+            ) from exc
         stdout_text = _decode_subprocess_bytes(result.stdout or b"")
         stderr_text = _decode_subprocess_bytes(result.stderr or b"")
         if result.returncode != 0:
             detail = (stderr_text or stdout_text or "").strip()
-            raise SkillExecutionError(f"Skill 脚本失败 ({skill_name}): {detail}")
+            payload = _parse_last_json_payload(stdout_text, stderr_text)
+            raise SkillExecutionError(
+                f"Skill 脚本失败 ({skill_name}): {detail}",
+                payload=payload,
+            )
 
         skill_result = _parse_skill_stdout(stdout_text)
         if not skill_result.get("success", True) and skill_result.get("error"):

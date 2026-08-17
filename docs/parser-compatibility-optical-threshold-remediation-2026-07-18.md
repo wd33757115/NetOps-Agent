@@ -1,5 +1,9 @@
 # Parser 兼容域与光模块动态阈值改造
 
+<!-- document-status: superseded -->
+> **历史文档，已被取代。** 本文仅保留审计背景，不再作为当前实现、操作或完成状态依据。
+> 当前权威方案见[检查项中心的巡检与规则资产平台总体改造方案](check-item-command-adapter-simplification-remediation-2026-08-10.md)。
+
 日期：2026-07-18
 
 ## 项目目标

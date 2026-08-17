@@ -232,3 +232,120 @@ def test_cli_manifest_preserves_duplicate_command_item_identity(tmp_path):
         "optical-after",
     ]
     assert [item["command_ordinal"] for item in commands] == [0, 1]
+
+
+def test_check_item_collection_skips_fallback_after_usable_primary(tmp_path):
+    calls = []
+    binding = {
+        "check_item_version_id": "check-cpu-v1",
+        "implementation_version_id": "impl-cpu-v1",
+        "runtime_bundle_version_id": "bundle-cpu-v1",
+    }
+
+    class FakeConnection:
+        def send_command(self, command, read_timeout=60):
+            calls.append(command)
+            return "CPU usage: 20%"
+
+        def disconnect(self):
+            pass
+
+    output_file = CLICommandCollector(
+        output_root=tmp_path,
+        connector=lambda _device: FakeConnection(),
+    ).collect_command_outputs(
+        device={"device_name": "SW1", "ip": "10.0.0.1"},
+        execution_plan=ExecutionPlan(
+            device_id="device-1",
+            action="patrol",
+            mode="production",
+            profile_name="check-items",
+            profile_version_id="profile-v1",
+            commands=(
+                CollectionItem(
+                    command="display cpu-usage",
+                    action="patrol",
+                    collection_item_id="action-primary",
+                    fallback_rank=0,
+                    check_item_bindings=(binding,),
+                ),
+                CollectionItem(
+                    command="display cpu",
+                    action="patrol",
+                    collection_item_id="action-fallback",
+                    fallback_rank=1,
+                    check_item_bindings=({**binding, "fallback_rank": 1},),
+                ),
+            ),
+        ),
+    )
+
+    manifest = load_command_collection_manifest(output_file)
+    assert calls == ["display cpu-usage"]
+    assert [item["status"] for item in manifest["commands"]] == [
+        "complete",
+        "ignored_legacy_fallback",
+    ]
+    assert manifest["status"] == "complete"
+    assert manifest["command_selection"] == {
+        "policy": "primary_only",
+        "unsupported_action": "log_only",
+    }
+    assert manifest["check_item_fallback"]["enabled"] is False
+    assert manifest["check_item_fallback"]["satisfied_binding_count"] == 1
+
+
+def test_check_item_collection_logs_primary_failure_without_using_fallback(tmp_path):
+    calls = []
+    binding = {
+        "check_item_version_id": "check-cpu-v1",
+        "implementation_version_id": "impl-cpu-v1",
+        "runtime_bundle_version_id": "bundle-cpu-v1",
+    }
+
+    class FakeConnection:
+        def send_command(self, command, read_timeout=60):
+            calls.append(command)
+            if command == "display cpu-usage":
+                return "% Unrecognized command found at '^' position."
+            return "CPU usage: 35%"
+
+        def disconnect(self):
+            pass
+
+    output_file = CLICommandCollector(
+        output_root=tmp_path,
+        connector=lambda _device: FakeConnection(),
+    ).collect_command_outputs(
+        device={"device_name": "SW1", "ip": "10.0.0.1"},
+        execution_plan=ExecutionPlan(
+            device_id="device-1",
+            action="patrol",
+            mode="production",
+            profile_name="check-items",
+            profile_version_id="profile-v1",
+            commands=(
+                CollectionItem(
+                    command="display cpu-usage",
+                    action="patrol",
+                    fallback_rank=0,
+                    check_item_bindings=(binding,),
+                ),
+                CollectionItem(
+                    command="display cpu",
+                    action="patrol",
+                    fallback_rank=1,
+                    check_item_bindings=({**binding, "fallback_rank": 1},),
+                ),
+            ),
+        ),
+    )
+
+    manifest = load_command_collection_manifest(output_file)
+    assert calls == ["display cpu-usage"]
+    assert [item["status"] for item in manifest["commands"]] == [
+        "command_unsupported",
+        "ignored_legacy_fallback",
+    ]
+    assert not manifest["commands"][1]["selected_for_bindings"]
+    assert manifest["status"] == "failed"

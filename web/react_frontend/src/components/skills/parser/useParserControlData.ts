@@ -132,7 +132,7 @@ export const useParserControlData = (filters: ParserControlFilters) => {
   }, [filters.workspace, queryClient])
 
   const { data: coverage, error: coverageError } = useQuery(
-    'parser-coverage', parserApi.coverage, RULE_ASSET_POLLING,
+    'parser-coverage', () => parserApi.coverage(), RULE_ASSET_POLLING,
   )
 
   const workItemParams = pageParams(filters.pages.workItems, {

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from src.core.patrol.change_policy import normalize_dimension_selector
 from src.core.patrol.event_rules import (
     EventRule,
     EventRuleDefinition,
@@ -567,6 +568,80 @@ def generate_validation_cases_for_rule(
                 },
             )
         )
+    elif kind == "field_change":
+        cases.append(
+            EventRuleValidationCase(
+                name=f"{definition.rule_id}-positive-field-change",
+                change={
+                    "entity_type": entity_type,
+                    "entity_key": "entity=1",
+                    "field": field,
+                    "old": "version-old",
+                    "new": "version-new",
+                    "change_type": "modified",
+                },
+                expected_event_type=definition.event_type,
+                expected_rule_id=definition.rule_id,
+            )
+        )
+        cases.append(
+            EventRuleValidationCase(
+                name=f"{definition.rule_id}-negative-unchanged-field",
+                change={
+                    "entity_type": entity_type,
+                    "entity_key": "entity=1",
+                    "field": field,
+                    "old": "version-same",
+                    "new": "version-same",
+                    "change_type": "modified",
+                },
+            )
+        )
+        cases.append(
+            EventRuleValidationCase(
+                name=f"{definition.rule_id}-negative-initial-field",
+                change={
+                    "entity_type": entity_type,
+                    "entity_key": "entity=1",
+                    "field": field,
+                    "old": None,
+                    "new": "version-new",
+                    "change_type": "initial",
+                },
+            )
+        )
+    dimension_selector = normalize_dimension_selector(condition.get("dimensions"))
+    if dimension_selector:
+        for case in cases:
+            case.change["dimensions"] = {
+                **dict(case.change.get("dimensions") or {}),
+                **dimension_selector,
+            }
+        positive = next(
+            (case for case in cases if case.expected_event_type is not None),
+            None,
+        )
+        if positive is not None:
+            mismatch_dimensions = dict(positive.change.get("dimensions") or {})
+            first_name = next(iter(dimension_selector))
+            current = dimension_selector[first_name]
+            mismatch_dimensions[first_name] = (
+                not current
+                if isinstance(current, bool)
+                else current + 1
+                if isinstance(current, (int, float))
+                else f"{current}__other"
+            )
+            cases.append(
+                EventRuleValidationCase(
+                    name=f"{definition.rule_id}-negative-other-dimension",
+                    change={
+                        **positive.change,
+                        "dimensions": mismatch_dimensions,
+                    },
+                )
+            )
+
     applicability = condition.get("applicability")
     if applicability:
         for case in cases:
@@ -619,6 +694,7 @@ def validate_event_rule_condition(condition: dict[str, Any]) -> list[str]:
         "threshold_field_low_recovery",
         "entity_status_down",
         "raw_config_hash",
+        "field_change",
     }
     if kind not in supported:
         return [f"unsupported or missing condition.kind: {kind or '<empty>'}"]
@@ -706,14 +782,28 @@ def validate_event_rule_condition(condition: dict[str, Any]) -> list[str]:
             "fields",
             "applicability",
         },
+        "field_change": {
+            "kind",
+            "entity_types",
+            "fields",
+            "allow_initial",
+            "applicability",
+        },
         "raw_config_hash": {"kind", "command_markers"},
     }
     for condition_kind, keys in allowed_keys.items():
         if condition_kind != "raw_config_hash":
             keys.add("observation_types")
+            keys.add("dimensions")
+        if condition_kind.startswith("threshold"):
+            keys.add("threshold_role")
     unknown_keys = sorted(set(condition) - allowed_keys[kind])
     if unknown_keys:
         errors.append(f"condition contains unsupported keys for {kind}: " + ", ".join(unknown_keys))
+    if "threshold_role" in condition and not str(
+        condition.get("threshold_role") or ""
+    ).strip():
+        errors.append("condition.threshold_role must be a non-empty string")
 
     def require_list(key: str) -> None:
         value = condition.get(key)
@@ -732,6 +822,14 @@ def validate_event_rule_condition(condition: dict[str, Any]) -> list[str]:
         return errors
     if "observation_types" in condition:
         require_list("observation_types")
+    if "dimensions" in condition:
+        try:
+            selector = normalize_dimension_selector(condition.get("dimensions"))
+        except ValueError as exc:
+            errors.append(f"condition.dimensions is invalid: {exc}")
+        else:
+            if not selector:
+                errors.append("condition.dimensions must not be empty when provided")
     if condition.get("applicability"):
         errors.extend(validate_applicability(condition["applicability"]))
     require_list("fields")

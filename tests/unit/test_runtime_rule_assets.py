@@ -60,6 +60,41 @@ class FakeEventRuleRepository:
         ]
 
 
+class EmptyEventRuleRepository:
+    def snapshot_active_rules(self):
+        return []
+
+
+class GovernedContractRepository:
+    def get_active_validation_dict(self, *, source_type, schema_id):
+        return {
+            "source_type": source_type,
+            "schema_id": schema_id,
+            "entity_type": "device",
+            "primary_keys": ["device_name"],
+            "state_semantics": {
+                "software_version": {
+                    "semantic_type": "text",
+                    "observation_type": "device.software_version",
+                    "event_generation": True,
+                    "event_role": "change_only",
+                },
+                "memory_size": {
+                    "semantic_type": "gauge",
+                    "observation_type": "device.memory_size",
+                    "event_generation": True,
+                    "event_role": "capacity",
+                },
+                "uptime": {
+                    "semantic_type": "text",
+                    "observation_type": "device.uptime",
+                    "event_generation": True,
+                    "event_role": "health",
+                },
+            },
+        }
+
+
 def test_runtime_rule_asset_resolver_reports_active_assets_and_missing_gaps():
     contracts = FakeContractRepository()
     policies = FakeChangePolicyRepository()
@@ -163,3 +198,18 @@ def test_runtime_inventory_health_uses_all_active_assets_and_exact_rule_scope():
     assert bundle.event_evaluation_ready is True
     assert bundle.observation_types == ["interface.oper_status"]
     assert bundle.missing_event_rules == []
+
+
+def test_runtime_requires_only_executable_explicit_event_semantics():
+    bundle = RuntimeRuleAssetResolver(
+        contract_repository=GovernedContractRepository(),
+        change_policy_repository=FakeChangePolicyRepository(),
+        event_rule_repository=EmptyEventRuleRepository(),
+    ).load_bundle(
+        observation_schemas=[("cli", "template-version")],
+        observation_types=[],
+    )
+
+    assert bundle.missing_event_rules == ["device.software_version"]
+    assert "device.memory_size" not in bundle.missing_event_rules
+    assert "device.uptime" not in bundle.missing_event_rules

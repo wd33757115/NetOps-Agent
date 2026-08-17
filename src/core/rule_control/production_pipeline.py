@@ -6,6 +6,7 @@ from collections import Counter
 from typing import Any
 from urllib.parse import urlencode
 
+from src.core.check_items.runtime_bundle import CheckItemRuntimeBundleService
 from src.core.rule_control.command_asset_units import RuleAssetCommandUnitService
 from src.core.rule_control.source_scope import require_rule_asset_source_job
 from src.infrastructure.db.models import (
@@ -15,6 +16,8 @@ from src.infrastructure.db.models import (
     OfflinePatrolSourceFileRecord,
     ParserBackfillJobRecord,
     ParserTemplate,
+    RuleAssetCommandUnitCheckItemRecord,
+    RuleAssetCommandUnitRecord,
     RuleGenerationContextRecord,
     RuleGenerationJobRecord,
 )
@@ -82,11 +85,7 @@ class RuleAssetProductionPipelineService:
                 .filter(OfflinePatrolDeviceBindingRecord.job_id == offline_job_id)
                 .all()
             )
-            pending_binding_count = sum(
-                count
-                for status, count in binding_status_counts.items()
-                if status not in {"confirmed", "external"}
-            )
+            sample_device_count = sum(binding_status_counts.values())
             snapshots = (
                 db.query(
                     CommandSnapshot.parse_status,
@@ -169,10 +168,17 @@ class RuleAssetProductionPipelineService:
             job_status = str(job.status)
             preview = dict(job.preview_json or {})
 
+        command_unit_service = RuleAssetCommandUnitService()
+        command_units = command_unit_service.summary(offline_job_id)
         preview_totals = dict(preview.get("totals") or {})
-        parser_gap_count = sum(
+        raw_parser_gap_count = sum(
             int(preview_totals.get(key) or parse_counts.get(key) or 0)
             for key in ("template_missing", "parse_failed", "identity_unknown")
+        )
+        parser_gap_count = (
+            int((command_units.get("by_stage") or {}).get("parser_generation") or 0)
+            if int(command_units.get("total") or 0)
+            else raw_parser_gap_count
         )
         source_status = "completed" if source_count else "not_started"
         if job_status == "previewing":
@@ -181,9 +187,7 @@ class RuleAssetProductionPipelineService:
             preview_has_identity = int(preview_totals.get("device_count") or 0) > 0
             preview_has_commands = int(preview_totals.get("command_count") or 0) > 0
             preview_status = (
-                "completed"
-                if not pending_binding_count and preview_has_identity and preview_has_commands
-                else "blocked"
+                "completed" if preview_has_identity and preview_has_commands else "blocked"
             )
         else:
             preview_status = "not_started"
@@ -195,8 +199,12 @@ class RuleAssetProductionPipelineService:
             import_status = "blocked"
         else:
             import_status = "not_started"
+        command_unit_total = int(command_units.get("total") or 0)
+        command_unit_completed = int(command_units.get("completed") or 0)
         if parser_gap_count:
             parser_status = "blocked"
+        elif command_unit_total and command_unit_completed == command_unit_total:
+            parser_status = "completed"
         elif template_ids and len(active_template_ids) == len(template_ids):
             parser_status = "completed"
         elif template_ids:
@@ -266,6 +274,111 @@ class RuleAssetProductionPipelineService:
             review_status = "not_started"
             release_status = "not_started"
 
+        with get_db_session() as db:
+            unit_rows = (
+                db.query(
+                    RuleAssetCommandUnitRecord.id,
+                    RuleAssetCommandUnitRecord.asset_mode,
+                )
+                .filter(
+                    RuleAssetCommandUnitRecord.offline_job_id == offline_job_id
+                )
+                .all()
+            )
+            link_rows = [
+                {
+                    "command_unit_id": str(item.command_unit_id),
+                    "check_item_id": str(item.check_item_id),
+                    "check_item_version_id": str(item.check_item_version_id),
+                    "implementation_id": str(item.implementation_id),
+                    "implementation_version_id": str(
+                        item.implementation_version_id
+                    ),
+                }
+                for item in (
+                    db.query(RuleAssetCommandUnitCheckItemRecord)
+                    .join(
+                        RuleAssetCommandUnitRecord,
+                        RuleAssetCommandUnitRecord.id
+                        == RuleAssetCommandUnitCheckItemRecord.command_unit_id,
+                    )
+                    .filter(
+                        RuleAssetCommandUnitRecord.offline_job_id
+                        == offline_job_id
+                    )
+                    .all()
+                )
+            ]
+
+        required_unit_ids = {
+            str(unit_id)
+            for unit_id, asset_mode in unit_rows
+            if str(asset_mode or "") not in {"ignored", "raw_hash"}
+        }
+        mapped_unit_ids = {
+            item["command_unit_id"]
+            for item in link_rows
+            if item["command_unit_id"] in required_unit_ids
+        }
+        unmapped_unit_count = len(required_unit_ids - mapped_unit_ids)
+        runtime_target_map = {
+            (
+                item["check_item_version_id"],
+                item["implementation_version_id"],
+            ): {
+                "check_item_id": item["check_item_id"],
+                "check_item_version_id": item["check_item_version_id"],
+                "implementation_id": item["implementation_id"],
+                "implementation_version_id": item[
+                    "implementation_version_id"
+                ],
+            }
+            for item in link_rows
+            if item["command_unit_id"] in required_unit_ids
+        }
+        runtime_pairs = tuple(sorted(runtime_target_map))
+        runtime_resolutions = CheckItemRuntimeBundleService().get_active_many(
+            runtime_pairs
+        )
+        runtime_targets: list[dict[str, Any]] = []
+        for pair in runtime_pairs:
+            resolved = runtime_resolutions.get(pair) or {}
+            blockers = [str(item) for item in resolved.get("blockers") or ()]
+            bundle = resolved.get("bundle")
+            target_status = (
+                "invalid"
+                if blockers
+                else "ready"
+                if bundle is not None
+                else "missing"
+            )
+            runtime_targets.append(
+                {
+                    **runtime_target_map[pair],
+                    "status": target_status,
+                    "blocking_reasons": blockers,
+                    "bundle_version_id": (
+                        bundle.get("version_id") if bundle is not None else None
+                    ),
+                    "bundle_digest": (
+                        bundle.get("digest") if bundle is not None else None
+                    ),
+                }
+            )
+        runtime_counts = Counter(item["status"] for item in runtime_targets)
+        if release_status != "completed":
+            runtime_status = "not_started"
+        elif unmapped_unit_count:
+            runtime_status = "blocked"
+        elif not runtime_pairs:
+            runtime_status = "completed" if not required_unit_ids else "blocked"
+        elif runtime_counts.get("invalid"):
+            runtime_status = "blocked"
+        elif runtime_counts.get("ready") == len(runtime_pairs):
+            runtime_status = "completed"
+        else:
+            runtime_status = "ready"
+
         steps = [
             _step(
                 "source",
@@ -276,22 +389,15 @@ class RuleAssetProductionPipelineService:
             ),
             _step(
                 "preview",
-                "预检与设备确认",
+                "预检与样本识别",
                 preview_status,
                 detail=(
-                    f"{pending_binding_count} 个设备匹配待确认"
-                    if pending_binding_count
-                    else (
-                        f"{sum(binding_status_counts.values())} 个设备身份已确认"
-                        f"（外部设备 {int(binding_status_counts.get('external') or 0)}）"
-                        if binding_status_counts
-                        else "预检已完成，未产生设备匹配项"
-                    )
+                    f"已识别 {sample_device_count} 个样本设备"
+                    if sample_device_count
+                    else "预检尚未识别出样本设备"
                 ),
                 counts={
-                    "pending_bindings": pending_binding_count,
-                    "confirmed_bindings": int(binding_status_counts.get("confirmed") or 0),
-                    "external_bindings": int(binding_status_counts.get("external") or 0),
+                    "sample_devices": sample_device_count,
                 },
             ),
             _step(
@@ -356,6 +462,23 @@ class RuleAssetProductionPipelineService:
                 detail=f"{int(bundle_counts.get('active') or 0)} 个资产包已进入生产",
                 counts={"active": int(bundle_counts.get("active") or 0)},
             ),
+            _step(
+                "runtime_bundle",
+                "生产运行包装配",
+                runtime_status,
+                detail=(
+                    f"{int(runtime_counts.get('ready') or 0)}/{len(runtime_pairs)} "
+                    "个检查项与采集实现已有健康 Active RuntimeBundle；"
+                    f"{unmapped_unit_count} 个规则生产单元尚未归类"
+                ),
+                counts={
+                    "targets": len(runtime_pairs),
+                    "ready": int(runtime_counts.get("ready") or 0),
+                    "missing": int(runtime_counts.get("missing") or 0),
+                    "invalid": int(runtime_counts.get("invalid") or 0),
+                    "unmapped_units": unmapped_unit_count,
+                },
+            ),
         ]
 
         dataset_query = ",".join(dataset_ids)
@@ -366,6 +489,16 @@ class RuleAssetProductionPipelineService:
                 "source_job_id": offline_job_id,
                 "offline_job_id": offline_job_id,
                 "dataset_ids": dataset_query,
+            }
+        )
+        parser_url = "/skills/parser?" + urlencode(
+            {
+                "workspace": "production",
+                "subtab": "asset-production-units",
+                "source_job_id": offline_job_id,
+                "offline_job_id": offline_job_id,
+                "dataset_ids": dataset_query,
+                "action": "parser",
             }
         )
         backfill_url = "/skills/parser?" + urlencode(
@@ -389,9 +522,36 @@ class RuleAssetProductionPipelineService:
                 "workspace": "production",
                 "subtab": "source-jobs",
                 "source_job_id": offline_job_id,
-                "source_job_tab": "overview",
+                "source_job_tab": "sources",
             }
         )
+        runtime_target = next(
+            (
+                item
+                for item in runtime_targets
+                if item["status"] != "ready"
+            ),
+            runtime_targets[0] if runtime_targets else None,
+        )
+        runtime_url_params = {
+            "workspace": "runtime",
+            "subtab": "coverage-backfill",
+            "source_job_id": offline_job_id,
+            "offline_job_id": offline_job_id,
+        }
+        if runtime_target is not None:
+            runtime_url_params.update(
+                {
+                    "search": runtime_target["check_item_id"],
+                    "check_item_version_id": runtime_target[
+                        "check_item_version_id"
+                    ],
+                    "implementation_version_id": runtime_target[
+                        "implementation_version_id"
+                    ],
+                }
+            )
+        runtime_url = "/skills/parser?" + urlencode(runtime_url_params)
 
         if not source_count:
             next_action = _action(
@@ -401,22 +561,18 @@ class RuleAssetProductionPipelineService:
             next_action = _action(
                 "run_preview", "执行预检", "识别设备、命令和 Parser 缺口", source_job_url
             )
-        elif pending_binding_count:
+        elif job_status != "completed":
             next_action = _action(
-                "confirm_devices", "确认设备匹配", "确认资产绑定或标记为外部设备", source_job_url
+                "execute_import", "处理离线样本", "写入权威 Snapshot 和结构化结果", source_job_url
             )
         elif parser_gap_count:
             next_action = _action(
                 "resolve_parser_gaps",
                 "处理 Parser 缺口",
                 "生成、验证并激活缺失 Parser 模板",
-                asset_url,
+                parser_url,
             )
-        elif job_status != "completed":
-            next_action = _action(
-                "execute_import", "处理离线样本", "写入权威 Snapshot 和结构化结果", source_job_url
-            )
-        elif not seed_count:
+        elif not seed_count and release_status != "completed":
             next_action = _action(
                 "repair_seed_jobs", "检查规则种子", "确认模板激活已幂等创建规则生成种子", asset_url
             )
@@ -436,9 +592,32 @@ class RuleAssetProductionPipelineService:
             next_action = _action(
                 "approve_release", "审批发布", "审批后原子激活整套规则资产", bundle_url
             )
+        elif runtime_status != "completed":
+            next_action = _action(
+                (
+                    "classify_check_items"
+                    if unmapped_unit_count
+                    else "assemble_runtime_bundle"
+                ),
+                (
+                    "归类检查项"
+                    if unmapped_unit_count
+                    else "校验并装配运行包"
+                ),
+                (
+                    f"仍有 {unmapped_unit_count} 个生产单元未绑定检查项；"
+                    "完成归类后才能形成生产运行包"
+                    if unmapped_unit_count
+                    else "按检查项与采集实现校验完整资产，并独立审批激活 RuntimeBundle"
+                ),
+                parser_url if unmapped_unit_count else runtime_url,
+            )
         else:
             next_action = _action(
-                "completed", "资产链路已完成", "当前离线证据对应资产已进入生产", bundle_url
+                "completed",
+                "资产链路已完成",
+                "当前离线证据对应规则资产和生产运行包均已进入生产",
+                runtime_url,
             )
 
         required_steps = [item for item in steps if not item["optional"]]
@@ -454,11 +633,10 @@ class RuleAssetProductionPipelineService:
                     backfill_url,
                 )
             )
-        command_units = RuleAssetCommandUnitService().summary(offline_job_id)
         return {
             "offline_job_id": offline_job_id,
             "status": "completed"
-            if release_status == "completed"
+            if runtime_status == "completed"
             else "blocked"
             if any(item["status"] == "blocked" for item in required_steps)
             else "in_progress",
@@ -472,4 +650,5 @@ class RuleAssetProductionPipelineService:
             "context_ids": sorted(context_ids),
             "bundle_ids": [item["id"] for item in bundles],
             "command_units": command_units,
+            "runtime_targets": runtime_targets,
         }

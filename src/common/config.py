@@ -2,21 +2,37 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import re
+from pathlib import Path
 
 from dotenv import load_dotenv
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-load_dotenv()
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+ENV_FILE = PROJECT_ROOT / ".env"
+load_dotenv(ENV_FILE)
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_ignore_empty=True, extra="ignore")
+    model_config = SettingsConfigDict(env_ignore_empty=True, extra="ignore")
 
     LLM_PROVIDER: str = "deepseek"
     DEEPSEEK_API_KEY: str = ""
-    LLM_MODEL: str = "deepseek-chat"
+    DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
+    LLM_MODEL: str = "deepseek-v4-pro"
     LLM_TEMPERATURE: float = 0.1
+    LLM_REQUEST_TIMEOUT_SECONDS: int = 240
+    # Parser generation has an explicit wall-clock budget in addition to the
+    # provider SDK's connect/read/write timeout.
+    PARSER_MODEL_REQUEST_HARD_TIMEOUT_SECONDS: int = 480
+    PARSER_GENERATION_TOTAL_TIMEOUT_SECONDS: int = 1500
+    PARSER_MODEL_CALL_HEARTBEAT_SECONDS: int = 15
+    PARSER_LLM_MAX_COMPLETION_TOKENS: int = 32768
+    PARSER_LLM_REVIEW_MAX_COMPLETION_TOKENS: int = 8192
+    # Optional HMAC key for stable Parser-sample pseudonyms. Empty reuses JWT.
+    PARSER_SANITIZATION_SECRET: str = ""
+    PARSER_GENERATION_TASK_SOFT_TIME_LIMIT_SECONDS: int = 1740
+    PARSER_GENERATION_TASK_TIME_LIMIT_SECONDS: int = 1800
 
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
@@ -37,7 +53,7 @@ class Settings(BaseSettings):
     # 空字符串表示自动：Windows → solo，Linux/macOS → prefork
     CELERY_WORKER_POOL: str = ""
     CELERY_WORKER_QUEUES: str = (
-        "netops.default,netops.firewall,netops.health,netops.patrol,netops.ai"
+        "netops.default,netops.firewall,netops.device,netops.health,netops.patrol,netops.ai"
     )
     CELERY_WORKER_ROLE: str = "all"
     CELERY_BEAT_HEARTBEAT_INTERVAL_SECONDS: int = 15
@@ -139,6 +155,7 @@ class Settings(BaseSettings):
 
     # 巡检并发与规则运行时治理
     PATROL_MAX_CONCURRENCY: int = 50
+    PATROL_SITE_MAX_CONCURRENCY: int = 10
     PATROL_DISTRIBUTED_CONCURRENCY_ENABLED: bool = True
     PATROL_CONCURRENCY_FAIL_CLOSED: bool = True
     PATROL_CONCURRENCY_LEASE_SECONDS: int = 180
@@ -147,6 +164,12 @@ class Settings(BaseSettings):
     PATROL_WORKFLOW_RUNNING_STALE_SECONDS: int = 900
     PATROL_WORKFLOW_QUEUED_STALE_SECONDS: int = 14_400
     PATROL_LOCAL_OUTPUT_RETENTION_HOURS: int = 72
+    PATROL_OFFLINE_CURRENT_MAX_AGE_HOURS: int = 24
+    PATROL_CURRENT_AUTHORITY_REQUEST_TTL_HOURS: int = 4
+    # 批次结果深分页游标：空密钥时复用 JWT_SECRET_KEY。
+    CHECK_ITEM_RESULT_CURSOR_SECRET: str = ""
+    CHECK_ITEM_RESULT_CURSOR_TTL_SECONDS: int = 3600
+    CHECK_ITEM_RESULT_MAX_OFFSET: int = 1000
     # block=exclude from ready with error; skip=exclude with skip code; warn=allow launch
     PATROL_PARSER_COVERAGE_POLICY: str = "skip"
     REDIS_RECONNECT_BACKOFF_SECONDS: int = 5
@@ -163,6 +186,14 @@ class Settings(BaseSettings):
     PARSER_BOOTSTRAP_SHARED_TEMPLATES_ON_STARTUP: bool = False
     PARSER_BACKLOG_ALERT_THRESHOLD: int = 20
     PARSER_CANDIDATE_STALE_MINUTES: int = 60
+    # Stale parser-job reclamation: dispatched-but-unclaimed jobs and jobs whose
+    # worker died after marking them running are treated as failed past these ages.
+    # A queued generation may legitimately wait behind several 30-minute
+    # Parser jobs when the AI worker uses the Windows solo pool.  Keep the
+    # dispatch watchdog above that normal queueing window; running jobs still
+    # use the separate execution timeout below.
+    PARSER_JOB_PENDING_STALE_MINUTES: int = 60
+    PARSER_JOB_RUNNING_STALE_MINUTES: int = 30
     PARSER_BLOCKED_RATIO_ALERT_THRESHOLD: float = 0.2
     # Production template_missing / parse_failed → gap ledger only (no auto LLM).
     PRODUCTION_GAP_LEDGER_ENABLED: bool = True

@@ -5,7 +5,10 @@ import uuid
 from datetime import datetime, timezone
 
 from src.core.patrol.event_rules import EventRuleDefinition
-from src.core.patrol.rule_replay import replay_event_rule_definitions
+from src.core.patrol.rule_replay import (
+    replay_event_rule_definitions,
+    replay_event_rule_definitions_against_changes,
+)
 from src.infrastructure.db.models import NetworkChangeRecord
 from src.infrastructure.db.postgres import get_db_session
 
@@ -94,6 +97,175 @@ def test_event_rule_replay_matches_historical_change_without_private_payload():
             db.query(NetworkChangeRecord).filter(
                 NetworkChangeRecord.id.in_([change_id, excluded_change_id])
             ).delete(synchronize_session=False)
+
+
+def test_in_memory_event_rule_replay_reports_real_matches_and_rate():
+    definition = EventRuleDefinition(
+        rule_id="cpu-high-candidate",
+        version=1,
+        event_type="CPUHigh",
+        severity="warning",
+        condition={
+            "kind": "threshold",
+            "entity_types": ["cpu"],
+            "fields": ["cpu_5s"],
+            "gte": 90,
+        },
+    )
+    result = replay_event_rule_definitions_against_changes(
+        [definition],
+        [
+            {
+                "change_id": "change-high",
+                "run_id": "period-q3",
+                "device_id": "device-a",
+                "entity_type": "cpu",
+                "entity_key": "slot=1",
+                "field": "cpu_5s",
+                "old": 30,
+                "new": 95,
+                "change_type": "modified",
+                "detected_at": "2026-07-01T00:00:00+00:00",
+            },
+            {
+                "change_id": "change-normal",
+                "run_id": "period-q3",
+                "device_id": "device-b",
+                "entity_type": "cpu",
+                "entity_key": "slot=1",
+                "field": "cpu_5s",
+                "old": 30,
+                "new": 45,
+                "change_type": "modified",
+                "detected_at": "2026-07-03T00:00:00+00:00",
+            },
+        ],
+        include_active_collisions=False,
+    )
+
+    assert result["success"] is True
+    assert result["sampled_change_count"] == 2
+    assert result["matched_change_count"] == 1
+    assert result["event_count"] == 1
+    assert result["event_types"] == {"CPUHigh": 1}
+    assert result["collision_count"] == 0
+    assert result["estimated_daily_event_count"] == 0.5
+    assert result["estimated_daily_event_count_basis"] == "observed_window"
+    assert result["estimated_daily_event_count_reliable"] is False
+    assert result["representativeness"]["match_rate"] == 0.5
+    assert result["representativeness"]["window_days"] == 2.0
+    assert result["representativeness"]["sparse_history"] is True
+
+
+def test_candidate_contract_projects_pre_contract_state_changes_for_replay():
+    definition = EventRuleDefinition(
+        rule_id="transceiver-restored-candidate",
+        version=1,
+        event_type="TransceiverRestored",
+        severity="info",
+        condition={
+            "kind": "transition",
+            "entity_types": ["interface_optical"],
+            "fields": ["status"],
+            "from_group": "down",
+            "to_group": "up",
+        },
+    )
+    result = replay_event_rule_definitions_against_changes(
+        [definition],
+        [
+            {
+                "change_id": "change-restored",
+                "run_id": "period-q3",
+                "device_id": "device-a",
+                "entity_type": "interface_transceiver",
+                "entity_key": '["GE1/0/1"]',
+                "field": "status",
+                "old": "The transceiver is absent.",
+                "new": "Current diagnostic parameters:",
+                "change_type": "modified",
+            }
+        ],
+        include_active_collisions=False,
+        candidate_contract={
+            "record_sets": [
+                {
+                    "name": "interface_transceiver_status",
+                    "entity_type": "interface_transceiver",
+                    "canonical_entity_type": "interface_optical",
+                    "primary_keys": ["interface_name"],
+                    "entity_dimensions": {
+                        "interface": {"field": "interface_name"},
+                    },
+                    "state_semantics": {
+                        "status": {
+                            "observation_type": "interface.optical.presence",
+                            "value_mapping": {
+                                "The transceiver is absent.": "absent",
+                                "Current diagnostic parameters:": "present",
+                            },
+                        }
+                    },
+                }
+            ]
+        },
+    )
+
+    assert result["matched_change_count"] == 1
+    assert result["event_types"] == {"TransceiverRestored": 1}
+    assert result["matched_entity_types"] == {"interface_optical": 1}
+    assert result["candidate_projection"] == {
+        "enabled": True,
+        "projected_change_count": 1,
+    }
+
+
+def test_in_memory_event_rule_replay_blocks_candidate_collisions():
+    shared_condition = {
+        "kind": "threshold",
+        "entity_types": ["cpu"],
+        "fields": ["cpu_5s"],
+        "gte": 90,
+    }
+    result = replay_event_rule_definitions_against_changes(
+        [
+            EventRuleDefinition(
+                rule_id="cpu-high-a",
+                version=1,
+                event_type="CPUHighA",
+                severity="warning",
+                condition=shared_condition,
+            ),
+            EventRuleDefinition(
+                rule_id="cpu-high-b",
+                version=1,
+                event_type="CPUHighB",
+                severity="warning",
+                condition=shared_condition,
+            ),
+        ],
+        [
+            {
+                "change_id": "change-high",
+                "run_id": "period-q3",
+                "device_id": "device-a",
+                "entity_type": "cpu",
+                "entity_key": "slot=1",
+                "field": "cpu_5s",
+                "old": 30,
+                "new": 95,
+                "change_type": "modified",
+            }
+        ],
+        include_active_collisions=False,
+    )
+
+    assert result["success"] is False
+    assert result["matched_change_count"] == 1
+    assert result["collision_count"] == 1
+    assert result["unexpected_matches"][0]["collision_type"] == (
+        "candidate_candidate"
+    )
 
 
 def test_event_rule_replay_preserves_dynamic_threshold_context_and_dimensions():

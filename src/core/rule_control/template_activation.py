@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from src.core.parser.repository import ParserTemplateRepository
@@ -120,23 +121,30 @@ class RuleAssetTemplateActivationService:
         self,
         job_id: str,
         *,
+        dataset_ids: list[str] | None = None,
         actor: str | None = None,
     ) -> dict[str, Any]:
-        """Build immutable context from parser-template snapshots when possible.
-
-        Contexts that fail the quality gate (too few sampled records or a
-        mostly-empty target field) are persisted for inspection but do NOT mark
-        the job ready: missing_context is kept so operators attach a real
-        offline dataset instead of generating from unreliable samples.
-        """
+        """Build immutable context only from an explicit offline asset-source dataset."""
         from src.core.rule_control.dataset_context import DatasetRuleGenerationContextService
 
-        prepared = DatasetRuleGenerationContextService().prepare_from_parser_template(
+        selected_dataset_ids = sorted(
+            {str(item).strip() for item in (dataset_ids or []) if str(item).strip()}
+        )
+        if not selected_dataset_ids:
+            raise ValueError(
+                "select an offline patrol dataset before building rule generation context"
+            )
+        prepared = DatasetRuleGenerationContextService().prepare(
             job_id=job_id,
+            dataset_ids=selected_dataset_ids,
             created_by=actor or "parser-template-activation",
         )
-        quality = dict((prepared.get("privacy") or {}).get("quality") or {})
-        quality_passed = bool(quality.get("passed", True))
+        quality = {
+            "passed": bool((prepared.get("context") or {}).get("records")),
+            "record_count": len((prepared.get("context") or {}).get("records") or []),
+            "scope": "offline_period_authoritative_runs",
+        }
+        quality_passed = quality["passed"]
         job = self.job_repository.get_job(job_id)
         payload = dict((job or {}).get("payload_json") or {})
         payload["auto_context_id"] = prepared["context_id"]
@@ -263,14 +271,34 @@ class RuleAssetTemplateActivationService:
         from src.core.workflows.engine import WorkflowEngine
 
         workflow_context = dict(prepared["context"])
+        workflow_context["rule_generation_seed_job_id"] = job_id
         workflow_context["rule_generation_context_id"] = context_id
         workflow_context["rule_generation_context_digest"] = immutable_context["context_digest"]
+        workflow_context["rule_generation_actor"] = actor or "parser-control-plane"
         run_id = WorkflowEngine.start(
             "rule-asset-generation",
             workflow_context,
             source="parser-control-plane",
             user_id=actor,
         )
+        job = self.job_repository.get_job(job_id) or {}
+        payload = dict(job.get("payload_json") or {})
+        run_history = [
+            dict(item)
+            for item in payload.get("generation_workflow_runs") or []
+            if isinstance(item, dict)
+        ]
+        run_history.append(
+            {
+                "run_id": run_id,
+                "context_id": context_id,
+                "context_digest": immutable_context["context_digest"],
+            }
+        )
+        payload["latest_generation_run_id"] = run_id
+        payload["latest_generation_context_id"] = context_id
+        payload["generation_workflow_runs"] = run_history[-20:]
+        self.job_repository.update_job(job_id, payload_json=payload)
         return {
             "success": True,
             "workflow": "rule-asset-generation",
@@ -281,20 +309,133 @@ class RuleAssetTemplateActivationService:
         }
 
 
-def _contract_seed(template: Any, validation: dict[str, Any]) -> dict[str, Any]:
+def _safe_source_field_hints(raw_fields: Any) -> dict[str, dict[str, Any]]:
+    """Keep semantic labels while excluding raw evidence and device identity."""
+
+    if not isinstance(raw_fields, dict):
+        return {}
+    hints: dict[str, dict[str, Any]] = {}
+    identity_pattern = re.compile(
+        r"(?:\b\d{1,3}(?:\.\d{1,3}){3}\b|"
+        r"\b[0-9a-f]{2}(?::[0-9a-f]{2}){5}\b)",
+        re.IGNORECASE,
+    )
+    for raw_name, raw_config in raw_fields.items():
+        if not isinstance(raw_config, dict):
+            continue
+        field_name = str(raw_name).strip()
+        if not field_name:
+            continue
+        labels = []
+        for raw_label in raw_config.get("source_labels") or []:
+            label = " ".join(str(raw_label).split())
+            if (
+                not label
+                or len(label) > 160
+                or identity_pattern.search(label)
+            ):
+                continue
+            labels.append(label)
+        hint = {
+            **({"source_labels": list(dict.fromkeys(labels))} if labels else {}),
+            **(
+                {"role": str(raw_config["role"])}
+                if raw_config.get("role")
+                else {}
+            ),
+            **(
+                {"change_behavior": str(raw_config["change_behavior"])}
+                if raw_config.get("change_behavior")
+                else {}
+            ),
+            **(
+                {"monitor": bool(raw_config["monitor"])}
+                if raw_config.get("monitor") is not None
+                else {}
+            ),
+            **(
+                {"canonical_candidate": str(raw_config["canonical_candidate"])}
+                if raw_config.get("canonical_candidate")
+                else {}
+            ),
+        }
+        if hint:
+            hints[field_name] = hint
+    return hints
+
+
+def _parser_spec_hints(validation: dict[str, Any]) -> tuple[
+    dict[str, dict[str, Any]],
+    dict[str, dict[str, dict[str, Any]]],
+]:
+    spec = validation.get("parser_spec")
+    if not isinstance(spec, dict):
+        spec = validation.get("source_parser_spec")
+    if not isinstance(spec, dict):
+        return {}, {}
+    raw_sets = spec.get("record_sets")
+    if isinstance(raw_sets, dict):
+        raw_sets = [
+            {"name": str(name), **dict(config)}
+            for name, config in raw_sets.items()
+            if isinstance(config, dict)
+        ]
+    if isinstance(raw_sets, list):
+        by_set = {
+            str(item.get("name") or item.get("entity") or "").strip(): (
+                _safe_source_field_hints(item.get("fields"))
+            )
+            for item in raw_sets
+            if isinstance(item, dict)
+            and str(item.get("name") or item.get("entity") or "").strip()
+        }
+        return {}, by_set
+    return _safe_source_field_hints(spec.get("fields")), {}
+
+
+def build_contract_seed(template: Any, validation: dict[str, Any]) -> dict[str, Any]:
+    parent_hints, record_set_hints = _parser_spec_hints(validation)
+    record_sets = [
+        {
+            **dict(item),
+            **(
+                {
+                    "source_field_hints": record_set_hints.get(
+                        str(item.get("name") or ""),
+                        {},
+                    )
+                }
+                if record_set_hints.get(str(item.get("name") or ""))
+                else {}
+            ),
+        }
+        for item in validation.get("record_sets") or []
+        if isinstance(item, dict)
+    ]
     return {
         "category": getattr(template, "category", None),
         "entity_type": validation.get("entity_type") or getattr(template, "category", None),
         "primary_keys": list(validation.get("primary_keys") or []),
+        "canonical_entity_type": validation.get("canonical_entity_type"),
+        "entity_identity_fields": list(
+            validation.get("entity_identity_fields") or []
+        ),
+        "entity_dimensions": dict(validation.get("entity_dimensions") or {}),
         "required_fields": list(validation.get("required_fields") or []),
         "optional_fields": list(validation.get("optional_fields") or []),
         "ignore_fields": list(validation.get("ignore_fields") or []),
         "allow_empty": bool(validation.get("allow_empty")),
+        "empty_patterns": list(validation.get("empty_patterns") or []),
         "validators": dict(validation.get("validators") or {}),
         "state_semantics": dict(validation.get("state_semantics") or {}),
+        "source_field_hints": parent_hints,
+        "record_sets": record_sets,
         "contract_version": validation.get("contract_version"),
         "contract_sha256": validation.get("contract_sha256"),
     }
+
+
+_contract_seed = build_contract_seed
 
 
 def _workflow_context_defaults(
@@ -460,4 +601,9 @@ def _generation_context_missing(
         dict,
     ):
         missing.append("field_semantics:object")
+    target_resolution = str(
+        context.get("target_resolution") or ""
+    ).strip()
+    if target_resolution == "unclassified":
+        missing.append("check_item_target")
     return list(dict.fromkeys(missing))

@@ -144,7 +144,7 @@ async def proxy_request(
         req_kwargs["timeout"] = httpx.Timeout(timeout)
     if params:
         req_kwargs["params"] = params
-    if data is not None and method in ("POST", "PUT", "PATCH"):
+    if data is not None and method in ("POST", "PUT", "PATCH", "DELETE"):
         req_kwargs["json"] = data
 
     try:
@@ -283,6 +283,21 @@ async def proxy_binary_to_fastapi(
         status=response.status_code,
         content_type=response.headers.get("content-type", "application/octet-stream"),
     )
-    if cd := response.headers.get("content-disposition"):
-        http_resp["Content-Disposition"] = cd
+    response_header_allowlist = (
+        "Content-Disposition",
+        "Accept-Ranges",
+        "Content-Range",
+        "ETag",
+        "X-NetOps-Report-Status",
+        "X-NetOps-Report-Facts-Status",
+        "X-NetOps-Report-Source-Digest",
+        "X-NetOps-Report-Release-Digest",
+        "X-NetOps-Report-Manifest-Id",
+        "X-NetOps-Report-Version",
+        "X-NetOps-Raw-Evidence-Set-Digest",
+        "X-NetOps-Raw-File-Count",
+    )
+    for header_name in response_header_allowlist:
+        if value := response.headers.get(header_name):
+            http_resp[header_name] = value
     return http_resp

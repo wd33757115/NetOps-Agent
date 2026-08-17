@@ -1,5 +1,9 @@
 # Parser 控制面产品化改造目标与实施计划
 
+<!-- document-status: superseded -->
+> **历史文档，已被取代。** 本文仅保留审计背景，不再作为当前实现依据。
+> 当前 Parser 生成架构见 [Simple Parser Pipeline v2](simple-parser-pipeline-v2-2026-07-22.md)。
+
 ## 1. 项目目标
 
 将当前面向研发调试的 Parser 控制台改造成可供生产运维、规则工程和审计人员共同使用的资产治理产品。改造完成后，控制面必须满足以下目标：

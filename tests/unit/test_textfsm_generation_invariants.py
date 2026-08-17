@@ -10,14 +10,13 @@ from src.core.parser.structure_profiler import profile_cli_structure
 
 ROOT = Path(__file__).resolve().parents[2]
 AUTOMATIC_GENERATION_FILES = (
-    ROOT / "src/core/parser/contract_inference.py",
-    ROOT / "src/core/parser/contract_validation.py",
-    ROOT / "src/core/parser/generation_agent.py",
-    ROOT / "src/core/parser/parser_ir.py",
-    ROOT / "src/core/parser/structure_profiler.py",
+    ROOT / "src/core/parser_generation/service.py",
+    ROOT / "src/core/parser_generation/validation.py",
+    ROOT / "src/core/parser_generation/compilers/table.py",
+    ROOT / "src/core/parser_generation/compilers/key_value.py",
+    ROOT / "src/core/parser_generation/compilers/repeated_block.py",
     ROOT / "src/skills/textfsm-generator/scripts/generate_templates.py",
-    ROOT / "src/skills/textfsm-generator/scripts/template_providers.py",
-    ROOT / "src/skills/textfsm-generator/scripts/template_validator.py",
+    ROOT / "src/skills/textfsm-generator/scripts/parser_model.py",
 )
 
 

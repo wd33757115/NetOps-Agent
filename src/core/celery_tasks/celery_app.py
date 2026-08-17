@@ -52,6 +52,7 @@ celery = Celery(
         "src.core.patrol.tasks",
         "src.core.patrol.offline_tasks",
         "src.core.rule_control.engineering_revision_async",
+        "src.core.rule_control.tasks",
     ],
 )
 
@@ -76,11 +77,15 @@ _celery_conf: dict = {
         "src.core.celery_tasks.tasks.execute_device_patrol_task": {"queue": "netops.patrol"},
         "dispatch_patrol_batch": {"queue": "netops.patrol"},
         "reconcile_patrol_batch_dispatches": {"queue": "netops.patrol"},
+        "reconcile_current_authority_dispatches": {"queue": "netops.patrol"},
         "reconcile_patrol_batch_reports": {"queue": "netops.patrol"},
         "record_celery_beat_heartbeat": {"queue": "netops.health"},
         "cleanup_expired_patrol_outputs": {"queue": "netops.patrol"},
         "materialize_patrol_batch_report": {"queue": "netops.patrol"},
         "publish_network_event_outbox": {"queue": "netops.patrol"},
+        "publish_rollout_outbox": {"queue": "netops.patrol"},
+        "execute_rollout_stage": {"queue": "netops.patrol"},
+        "reconcile_rollout_live_captures": {"queue": "netops.patrol"},
         "reconcile_patrol_runs": {"queue": "netops.patrol"},
         "preview_offline_patrol_job": {"queue": "netops.ai"},
         "dispatch_parser_jobs": {"queue": "netops.ai"},
@@ -88,6 +93,7 @@ _celery_conf: dict = {
         "sanitize_parser_samples": {"queue": "netops.ai"},
         "reconcile_parser_jobs": {"queue": "netops.ai"},
         "validate_rule_asset_engineering_revision": {"queue": "netops.ai"},
+        "reconcile_rule_asset_automation": {"queue": "netops.ai"},
         "promote_parser_gap_ledger": {"queue": "netops.ai"},
     },
     "task_default_queue": "netops.default",
@@ -145,9 +151,24 @@ celery.conf.beat_schedule = {
         "schedule": 5.0,
         "options": {"queue": "netops.patrol"},
     },
+    "publish-rollout-outbox": {
+        "task": "publish_rollout_outbox",
+        "schedule": 5.0,
+        "options": {"queue": "netops.patrol"},
+    },
+    "reconcile-rollout-live-captures": {
+        "task": "reconcile_rollout_live_captures",
+        "schedule": 10.0,
+        "options": {"queue": "netops.patrol"},
+    },
     "reconcile-parser-jobs": {
         "task": "reconcile_parser_jobs",
         "schedule": 60.0,
+        "options": {"queue": "netops.ai"},
+    },
+    "reconcile-rule-asset-automation": {
+        "task": "reconcile_rule_asset_automation",
+        "schedule": 30.0,
         "options": {"queue": "netops.ai"},
     },
     "promote-parser-gap-ledger": {
@@ -163,6 +184,11 @@ celery.conf.beat_schedule = {
     "reconcile-patrol-batch-dispatches": {
         "task": "reconcile_patrol_batch_dispatches",
         "schedule": 15.0,
+        "options": {"queue": "netops.patrol"},
+    },
+    "reconcile-current-authority-dispatches": {
+        "task": "reconcile_current_authority_dispatches",
+        "schedule": 10.0,
         "options": {"queue": "netops.patrol"},
     },
     "cleanup-expired-patrol-outputs": {

@@ -19,11 +19,14 @@ from src.core.ingestion.adapters.cli import (
     command_collection_manifest_path,
     load_command_collection_manifest,
 )
+from src.core.patrol import concurrency as patrol_concurrency
 from src.core.patrol.change_event_repository import ChangeEventRepository
 from src.core.patrol.concurrency import (
     DistributedPatrolSemaphore,
+    HierarchicalPatrolLeaseManager,
     PatrolConcurrencyLeaseLostError,
     PatrolConcurrencyUnavailableError,
+    RedisExclusiveFencedLease,
 )
 from src.core.patrol.event_builder import (
     build_events_from_changes,
@@ -238,6 +241,141 @@ def test_distributed_patrol_lease_guard_stops_remaining_commands():
         DistributedPatrolSemaphore.assert_lease(lease)
 
 
+class _StatefulLeaseRedis:
+    def __init__(self):
+        self.values: dict[str, str] = {}
+        self.counters: dict[str, int] = {}
+        self.zsets: dict[str, dict[str, int]] = {}
+
+    def eval(self, script, _number_of_keys, *args):
+        if script == patrol_concurrency._EXCLUSIVE_ACQUIRE_SCRIPT:
+            lease_key, fence_key, token, _ttl_ms = args
+            if lease_key in self.values:
+                return 0
+            fence = self.counters.get(fence_key, 0) + 1
+            self.counters[fence_key] = fence
+            self.values[lease_key] = token
+            return fence
+        if script == patrol_concurrency._EXCLUSIVE_RENEW_SCRIPT:
+            lease_key, token, _ttl_ms = args
+            return int(self.values.get(lease_key) == token)
+        if script == patrol_concurrency._EXCLUSIVE_VERIFY_SCRIPT:
+            lease_key, token = args
+            return int(self.values.get(lease_key) == token)
+        if script == patrol_concurrency._EXCLUSIVE_RELEASE_SCRIPT:
+            lease_key, token = args
+            if self.values.get(lease_key) != token:
+                return 0
+            self.values.pop(lease_key, None)
+            return 1
+        if script == patrol_concurrency._ACQUIRE_SCRIPT:
+            key, now_ms, expires_ms, limit, token = args
+            active = {
+                member: expires
+                for member, expires in self.zsets.get(key, {}).items()
+                if expires > int(now_ms)
+            }
+            self.zsets[key] = active
+            if len(active) >= int(limit):
+                return 0
+            active[token] = int(expires_ms)
+            return 1
+        if script == patrol_concurrency._RENEW_SCRIPT:
+            key, token, expires_ms, _ttl = args
+            if token not in self.zsets.get(key, {}):
+                return 0
+            self.zsets[key][token] = int(expires_ms)
+            return 1
+        raise AssertionError("unexpected Redis script")
+
+    def zrem(self, key, token):
+        self.zsets.get(key, {}).pop(token, None)
+
+
+def test_device_fencing_rejects_stale_owner_after_new_lease(monkeypatch):
+    redis = _StatefulLeaseRedis()
+    monkeypatch.setattr(patrol_concurrency, "get_redis", lambda: redis)
+    leases = RedisExclusiveFencedLease(
+        lease_seconds=30,
+        wait_seconds=1,
+    )
+
+    first = leases.acquire("device-1")
+    redis.values.pop(first.key)
+    second = leases.acquire("device-1")
+
+    assert second.fencing_token > first.fencing_token
+    with pytest.raises(PatrolConcurrencyLeaseLostError):
+        leases.assert_lease(first)
+    leases.release(first)
+    leases.assert_lease(second)
+
+
+def test_hierarchical_lease_releases_global_site_and_device(monkeypatch):
+    redis = _StatefulLeaseRedis()
+    monkeypatch.setattr(patrol_concurrency, "get_redis", lambda: redis)
+    global_semaphore = DistributedPatrolSemaphore(
+        limit=2,
+        lease_seconds=30,
+        wait_seconds=1,
+    )
+    manager = HierarchicalPatrolLeaseManager(
+        global_semaphore=global_semaphore,
+        site_limit=1,
+        lease_seconds=30,
+        wait_seconds=1,
+    )
+
+    lease = manager.acquire(device_id="device-1", site="xian")
+    assert lease.fencing_token == 1
+    with manager.maintain(lease):
+        manager.assert_lease(lease)
+        assert lease.global_lease.token in redis.zsets[lease.global_lease.key]
+        assert lease.site_lease.token in redis.zsets[lease.site_lease.key]
+        assert redis.values[lease.device_lease.key] == lease.device_lease.token
+
+    assert lease.global_lease.token not in redis.zsets[lease.global_lease.key]
+    assert lease.site_lease.token not in redis.zsets[lease.site_lease.key]
+    assert lease.device_lease.key not in redis.values
+
+
+def test_lost_lease_before_progress_persistence_is_not_swallowed(tmp_path):
+    guard_calls = 0
+    progress_calls = 0
+
+    class FakeConnection:
+        def send_command(self, _command, read_timeout=60):
+            return "Version 1"
+
+        def disconnect(self):
+            return None
+
+    def guard():
+        nonlocal guard_calls
+        guard_calls += 1
+        if guard_calls == 2:
+            raise PatrolConcurrencyLeaseLostError("fenced")
+
+    def progress(**_kwargs):
+        nonlocal progress_calls
+        progress_calls += 1
+
+    collector = CLICommandCollector(
+        output_root=tmp_path,
+        connector=lambda _device: FakeConnection(),
+        progress_callback=progress,
+        continuation_guard=guard,
+    )
+
+    with pytest.raises(PatrolConcurrencyLeaseLostError):
+        collector.collect_command_outputs(
+            device={"device_name": "SW1", "ip": "10.0.0.1"},
+            execution_plan=_plan("show version"),
+        )
+
+    assert progress_calls == 0
+
+
 def test_patrol_batch_is_bounded_and_isolates_device_lease_failure():
     devices = [{"device_id": f"device-{index}", "device_name": f"SW{index}"} for index in range(4)]
 
@@ -249,19 +387,27 @@ def test_patrol_batch_is_bounded_and_isolates_device_lease_failure():
         def __init__(self):
             self.acquire_count = 0
 
-        def acquire(self):
+        def acquire(self, *, device_id, site):
+            assert device_id
+            assert site
             self.acquire_count += 1
             if self.acquire_count == 1:
                 raise TimeoutError("lease unavailable")
-            return SimpleNamespace(effective_mode="distributed")
+            return SimpleNamespace(
+                effective_mode="distributed_hierarchical",
+                fencing_token=self.acquire_count,
+            )
 
         @contextmanager
         def maintain(self, lease):
             yield lease
 
+        def assert_lease(self, lease):
+            assert lease.fencing_token
+
     tool = PatrolTool(FakeManager())
     tool.max_concurrency = 2
-    tool.distributed_semaphore = FakeSemaphore()
+    tool.hierarchical_lease_manager = FakeSemaphore()
     active = 0
     peak_active = 0
 
@@ -285,6 +431,70 @@ def test_patrol_batch_is_bounded_and_isolates_device_lease_failure():
     assert result.failed_devices == 1
     assert peak_active <= 2
     assert result.details[0]["failure_code"] == "concurrency_lease_timeout"
+
+
+def test_device_result_is_persisted_before_hierarchical_lease_release():
+    devices = [
+        {
+            "device_id": "device-1",
+            "device_name": "SW1",
+            "site": "xian",
+        }
+    ]
+
+    class FakeManager:
+        def get_devices_by_filter(self, _filter):
+            return devices
+
+    class FakeLeaseManager:
+        def __init__(self):
+            self.in_context = False
+
+        def acquire(self, *, device_id, site):
+            assert (device_id, site) == ("device-1", "xian")
+            return SimpleNamespace(
+                effective_mode="distributed_hierarchical",
+                fencing_token=17,
+            )
+
+        @contextmanager
+        def maintain(self, lease):
+            self.in_context = True
+            try:
+                yield lease
+            finally:
+                self.in_context = False
+
+        def assert_lease(self, lease):
+            assert self.in_context is True
+            assert lease.fencing_token == 17
+
+    lease_manager = FakeLeaseManager()
+    persisted: list[dict] = []
+
+    def persist(result):
+        assert lease_manager.in_context is True
+        persisted.append(dict(result))
+        return {"snapshot_devices": 1}
+
+    tool = PatrolTool(FakeManager(), result_callback=persist)
+    tool.hierarchical_lease_manager = lease_manager
+
+    async def patrol_device(device, *_args, **_kwargs):
+        return {
+            "inventory_device_id": device["device_id"],
+            "success": True,
+            "collection_status": "complete",
+        }
+
+    tool.patrol_device = patrol_device
+    result = asyncio.run(
+        tool.patrol_by_filter(DeviceFilter(), mode="parser_validation")
+    )
+
+    assert result.success is True
+    assert persisted[0]["device_fencing_token"] == 17
+    assert persisted[0]["concurrency_mode"] == "distributed_hierarchical"
 
 
 def test_patrol_worker_redelivery_allocates_new_attempt(monkeypatch):

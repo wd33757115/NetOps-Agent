@@ -10,7 +10,9 @@ param(
     [switch]$SkipSeed,
     [switch]$SkipSmoke,
     [switch]$SkipBuild,
-    [int]$WaitSeconds = 60
+    [int]$WaitSeconds = 60,
+    [int]$DockerProbeTimeoutSec = 8,
+    [int]$DockerOperationTimeoutSec = 1200
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,6 +20,7 @@ $ErrorActionPreference = "Stop"
 function Write-Step($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
 function Write-Ok($msg) { Write-Host "  [OK] $msg" -ForegroundColor Green }
 function Write-Warn($msg) { Write-Host "  [WARN] $msg" -ForegroundColor Yellow }
+. (Join-Path $ProjectRoot "scripts\_docker_utils.ps1")
 
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host "  NetOps Production - Start" -ForegroundColor Cyan
@@ -59,17 +62,24 @@ if ($UseSupervisorV1) {
 }
 
 Write-Step ("Docker compose up USE_SUPERVISOR_V2=" + $env:USE_SUPERVISOR_V2)
+if (-not (Test-DockerAvailable -TimeoutSec $DockerProbeTimeoutSec)) {
+    throw "Docker Desktop is unavailable or still starting; retry after Docker reports Ready"
+}
 $upArgs = @("compose") + $composeArgs + @("--profile", "core", "up", "-d")
 if (-not $SkipBuild) { $upArgs += "--build" }
-docker @upArgs
+$upResult = Invoke-DockerCommand -Arguments $upArgs -TimeoutSec $DockerOperationTimeoutSec -ShowOutput -ProgressLabel "Building and starting production containers"
+if (-not $upResult.Succeeded) {
+    throw "docker compose up failed or timed out"
+}
 Write-Ok "Containers started"
 
 Write-Step ("Wait $WaitSeconds seconds for healthchecks")
 Start-Sleep -Seconds $WaitSeconds
 
 Write-Step "Django migrate"
-docker compose @composeArgs exec -T django python manage.py migrate --noinput 2>$null
-if ($LASTEXITCODE -ne 0) {
+$migrateArgs = @("compose") + $composeArgs + @("exec", "-T", "django", "python", "manage.py", "migrate", "--noinput")
+$migrateResult = Invoke-DockerCommand -Arguments $migrateArgs -TimeoutSec 180 -ShowOutput -ProgressLabel "Running Django migrations"
+if (-not $migrateResult.Succeeded) {
     Write-Warn "Migration failed; retry after containers become healthy."
 } else {
     Write-Ok "migrate done"
@@ -77,8 +87,9 @@ if ($LASTEXITCODE -ne 0) {
 
 if (-not $SkipSeed) {
     Write-Step "Seed auth users (admin/viewer demo accounts)"
-    docker compose @composeArgs exec -T django python manage.py seed_auth_users 2>$null
-    if ($LASTEXITCODE -eq 0) {
+    $seedArgs = @("compose") + $composeArgs + @("exec", "-T", "django", "python", "manage.py", "seed_auth_users")
+    $seedResult = Invoke-DockerCommand -Arguments $seedArgs -TimeoutSec 120 -ShowOutput -ProgressLabel "Seeding auth users"
+    if ($seedResult.Succeeded) {
         Write-Ok "seed_auth_users done"
     } else {
         Write-Warn "seed_auth_users skipped or failed; users may already exist."
@@ -86,7 +97,11 @@ if (-not $SkipSeed) {
 }
 
 Write-Step "Container status"
-docker compose @composeArgs --profile core ps
+$statusArgs = @("compose") + $composeArgs + @("--profile", "core", "ps")
+$statusResult = Invoke-DockerCommand -Arguments $statusArgs -TimeoutSec 30 -ShowOutput
+if (-not $statusResult.Succeeded) {
+    Write-Warn "Unable to read container status."
+}
 
 if (-not $SkipSmoke) {
     Write-Step "Smoke test"

@@ -18,17 +18,29 @@ def validate_rule_asset_engineering_revision_task(
     reason: str,
     idempotency_key: str,
 ) -> dict[str, Any]:
-    from src.core.rule_control.engineering_revision import RuleAssetEngineeringRevisionService
-
-    result = RuleAssetEngineeringRevisionService().revise(
-        bundle_id,
-        contract=contract,
-        change_policies=change_policies,
-        event_rules=event_rules,
-        actor=actor,
-        reason=reason,
-        idempotency_key=idempotency_key,
+    from src.core.rule_control.engineering_revision import (
+        RuleAssetEngineeringRevisionError,
+        RuleAssetEngineeringRevisionService,
     )
+
+    try:
+        result = RuleAssetEngineeringRevisionService().revise(
+            bundle_id,
+            contract=contract,
+            change_policies=change_policies,
+            event_rules=event_rules,
+            actor=actor,
+            reason=reason,
+            idempotency_key=idempotency_key,
+        )
+    except RuleAssetEngineeringRevisionError as exc:
+        return {
+            "success": False,
+            "task_id": getattr(self.request, "id", None),
+            "bundle_id": bundle_id,
+            "error": str(exc),
+            "validation": exc.validation,
+        }
     return {
         "success": True,
         "task_id": getattr(self.request, "id", None),

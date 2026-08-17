@@ -26,6 +26,7 @@
     "@xyflow/react": "^12.10.2",
     "antd": "^5.12.0",
     "axios": "^1.6.0",
+    "dayjs": "^1.11.20",
     "harmonyos-sans-sc-webfont-splitted": "^1.1.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

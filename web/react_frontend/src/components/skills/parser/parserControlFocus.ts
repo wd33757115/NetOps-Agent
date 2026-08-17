@@ -8,7 +8,13 @@ export type ParserWorkspaceKey =
   | 'audit'
 
 export type ParserSubWorkspaceKey =
+  | 'asset-production-units'
   | 'source-jobs'
+  | 'catalog-management'
+  | 'assessment-policies'
+  | 'published-assets'
+  | 'coverage-backfill'
+  | 'audit-log'
   | 'work-items'
   | 'jobs'
   | 'templates'
@@ -52,46 +58,49 @@ export interface ParserControlFocus {
     | null
   fallbackMessage?: string | null
   focusHint?: string | null
+  legacyRedirect?: boolean
+  productAction?: 'parser' | 'rule-generation' | 'bundle-review' | 'backfill' | null
 }
 
 const focusMap: Record<ParserFocusKind, { workspace: ParserWorkspaceKey; subWorkspace: ParserSubWorkspaceKey }> = {
   'parser-template': {
     workspace: 'inventory',
-    subWorkspace: 'templates',
+    subWorkspace: 'published-assets',
   },
   snapshot: {
     workspace: 'inventory',
-    subWorkspace: 'templates',
+    subWorkspace: 'published-assets',
   },
   'observation-contract': {
     workspace: 'inventory',
-    subWorkspace: 'observation-contracts',
+    subWorkspace: 'published-assets',
   },
   'change-policy': {
     workspace: 'inventory',
-    subWorkspace: 'change-policies',
+    subWorkspace: 'published-assets',
   },
   'event-rule': {
     workspace: 'inventory',
-    subWorkspace: 'event-rules',
+    subWorkspace: 'published-assets',
   },
   change: {
     workspace: 'inventory',
-    subWorkspace: 'change-policies',
+    subWorkspace: 'published-assets',
   },
 }
 
 export const parserWorkspaceTabs: Record<ParserWorkspaceKey, ParserSubWorkspaceKey[]> = {
-  production: ['source-jobs'],
-  inbox: ['work-items', 'jobs', 'backfills'],
-  inventory: [
-    'templates', 'aliases', 'signatures', 'profiles', 'command-profiles',
-    'observation-contracts', 'change-policies', 'event-rules',
+  production: [
+    'asset-production-units',
+    'source-jobs',
+    'catalog-management',
   ],
+  inbox: ['work-items', 'jobs', 'backfills'],
+  inventory: ['published-assets'],
   generation: ['rule-gaps', 'rule-generation', 'agent-loop-attempts', 'datasets'],
   release: ['asset-bundles', 'replay-reports'],
-  runtime: ['asset-chain', 'runtime-assets'],
-  audit: ['approval-audit'],
+  runtime: ['coverage-backfill', 'rule-gaps'],
+  audit: ['audit-log'],
 }
 
 const isWorkspace = (value: string | null): value is ParserWorkspaceKey =>
@@ -127,8 +136,89 @@ const normalizeWorkspace = (
 export const isSubWorkspace = (workspace: ParserWorkspaceKey, value: string | null): value is ParserSubWorkspaceKey =>
   value !== null && parserWorkspaceTabs[workspace].includes(value as ParserSubWorkspaceKey)
 
+const legacySubWorkspaceAliases: Partial<Record<ParserWorkspaceKey, Record<string, ParserSubWorkspaceKey>>> = {
+  production: {
+    'assessment-policies': 'catalog-management',
+    'check-items': 'catalog-management',
+  },
+  inventory: {
+    templates: 'published-assets',
+    aliases: 'published-assets',
+    signatures: 'published-assets',
+    profiles: 'published-assets',
+    'command-profiles': 'published-assets',
+    'observation-contracts': 'published-assets',
+    'change-policies': 'published-assets',
+    'event-rules': 'published-assets',
+  },
+  runtime: {
+    'asset-chain': 'coverage-backfill',
+    'runtime-assets': 'coverage-backfill',
+  },
+  audit: {
+    'approval-audit': 'audit-log',
+  },
+}
+
 const normalizeSubWorkspace = (workspace: ParserWorkspaceKey, candidate: string | null): ParserSubWorkspaceKey | null =>
-  isSubWorkspace(workspace, candidate) ? (candidate as ParserSubWorkspaceKey) : null
+  isSubWorkspace(workspace, candidate)
+    ? (candidate as ParserSubWorkspaceKey)
+    : candidate
+      ? legacySubWorkspaceAliases[workspace]?.[candidate] || null
+      : null
+
+const legacyProductDestination = (
+  workspace: ParserWorkspaceKey | null,
+  subWorkspace: string | null,
+): {
+  workspace: ParserWorkspaceKey
+  subWorkspace: ParserSubWorkspaceKey
+  action: ParserControlFocus['productAction']
+} | null => {
+  if (workspace === 'generation') {
+    if (subWorkspace === 'rule-gaps') {
+      return {
+        workspace: 'runtime',
+        subWorkspace: 'rule-gaps',
+        action: null,
+      }
+    }
+    if (subWorkspace === 'datasets') {
+      return {
+        workspace: 'production',
+        subWorkspace: 'source-jobs',
+        action: null,
+      }
+    }
+    return {
+      workspace: 'production',
+      subWorkspace: 'asset-production-units',
+      action: 'rule-generation',
+    }
+  }
+  if (workspace === 'release') {
+    return {
+      workspace: 'production',
+      subWorkspace: 'asset-production-units',
+      action: 'bundle-review',
+    }
+  }
+  if (workspace === 'inbox') {
+    if (subWorkspace === 'backfills') {
+      return {
+        workspace: 'runtime',
+        subWorkspace: 'coverage-backfill',
+        action: 'backfill',
+      }
+    }
+    return {
+      workspace: 'production',
+      subWorkspace: 'asset-production-units',
+      action: 'parser',
+    }
+  }
+  return null
+}
 
 export const resolveParserControlFocus = (searchParams: URLSearchParams): ParserControlFocus => {
   const requestedFocus = searchParams.get('focus')
@@ -140,7 +230,17 @@ export const resolveParserControlFocus = (searchParams: URLSearchParams): Parser
   const rawWorkspace = normalizeWorkspace(requestedWorkspace, subWorkspace)
   const mappedFocus = focus ? focusMap[focus] : undefined
   const kind = mappedFocus ? focus : null
-  const fallbackWorkspace = rawWorkspace || 'inbox'
+  const legacyDestination = mappedFocus
+    ? null
+    : legacyProductDestination(rawWorkspace, subWorkspace)
+  const fallbackWorkspace = legacyDestination?.workspace || rawWorkspace || 'production'
+  const fallbackSubWorkspace = legacyDestination?.subWorkspace || subWorkspace
+  const normalizedFallbackSubWorkspace = normalizeSubWorkspace(fallbackWorkspace, fallbackSubWorkspace)
+  const aliasedSubWorkspace = Boolean(
+    subWorkspace
+    && normalizedFallbackSubWorkspace
+    && subWorkspace !== normalizedFallbackSubWorkspace,
+  )
   let fallbackReason: ParserControlFocus['fallbackReason'] = null
   let fallbackMessage: string | null = null
 
@@ -159,14 +259,16 @@ export const resolveParserControlFocus = (searchParams: URLSearchParams): Parser
     kind: null,
     id: id || null,
     workspace: fallbackWorkspace,
-    subWorkspace: normalizeSubWorkspace(fallbackWorkspace, subWorkspace),
+    subWorkspace: normalizedFallbackSubWorkspace,
     fallbackReason,
     fallbackMessage,
     focusHint: searchParams.get('command') || searchParams.get('q') || null,
+    legacyRedirect: Boolean(legacyDestination || aliasedSubWorkspace),
+    productAction: legacyDestination?.action || null,
   }
 
   if (!kind) {
-    if (!fallbackReason && subWorkspace && !fallback.subWorkspace) {
+    if (!fallbackReason && subWorkspace && !fallback.subWorkspace && !legacyDestination) {
       fallback.fallbackReason = 'invalid_subtab'
       fallback.fallbackMessage = `subtab=${subWorkspace} 不属于 ${fallbackWorkspace}，已打开默认视图。`
     }

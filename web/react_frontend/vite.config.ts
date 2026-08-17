@@ -9,6 +9,21 @@ import react from '@vitejs/plugin-react'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const harmonyFontDist = path.resolve(__dirname, 'node_modules/harmonyos-sans-sc-webfont-splitted/dist')
 
+const vendorChunk = (id: string) => {
+  const moduleId = id.replace(/\\/g, '/')
+  if (!moduleId.includes('/node_modules/')) return undefined
+  if (/\/node_modules\/(react|react-dom|scheduler|react-router|react-router-dom)\//.test(moduleId)) {
+    return 'vendor-react'
+  }
+  if (moduleId.includes('/node_modules/@tanstack/') || moduleId.includes('/node_modules/axios/')) {
+    return 'vendor-data'
+  }
+  if (moduleId.includes('/node_modules/echarts/') || moduleId.includes('/node_modules/zrender/')) {
+    return 'vendor-charts'
+  }
+  return undefined
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const djangoTarget = env.VITE_DJANGO_BACKEND_URL || 'http://localhost:8001'
@@ -32,6 +47,13 @@ export default defineConfig(({ mode }) => {
     },
     optimizeDeps: {
       needsInterop: ['react', 'react-dom', 'react-dom/client'],
+    },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: vendorChunk,
+        },
+      },
     },
     server: {
       port: 3000,

@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -10,6 +11,7 @@ from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
 from src.infrastructure.db.models import (
     PatrolBatchDeviceRecord,
     PatrolBatchRecord,
+    PatrolReportMaterializationRequestRecord,
     WorkflowRun,
 )
 
@@ -23,6 +25,7 @@ def _session_factory(monkeypatch):
     PatrolBatchRecord.__table__.create(engine)
     WorkflowRun.__table__.create(engine)
     PatrolBatchDeviceRecord.__table__.create(engine)
+    PatrolReportMaterializationRequestRecord.__table__.create(engine)
     session_factory = sessionmaker(bind=engine)
 
     @contextmanager
@@ -120,11 +123,47 @@ def test_manifest_supports_two_thousand_targets_with_server_pagination(monkeypat
     assert skipped_page is not None and skipped_page["total"] == 1
     assert skipped_page["items"][0]["connection_status"] == "not_attempted"
     assert batches[0]["target_label"] == "设备分组 core"
+    assert batches[0]["report_purpose"] == "shadow_validation"
     assert batches[0]["target_count"] == 2000
     assert batches[0]["completed_count"] == 1500
     assert batches[0]["running_count"] == 499
     assert detached_runs is not None and len(detached_runs) == 1999
     assert detached_runs[0].context["patrol_batch_id"] == "batch-2000"
+
+
+def test_batch_creation_rejects_current_purpose_for_offline_source(
+    monkeypatch,
+):
+    session_scope = _session_factory(monkeypatch)
+    repository = PatrolBatchManifestRepository()
+
+    with pytest.raises(
+        ValueError,
+        match="report purpose is inconsistent with the patrol source",
+    ):
+        repository.create_pending_batch(
+            patrol_batch_id="batch-invalid-current",
+            workflow_name="patrol-offline-current",
+            launch_mode="workflow",
+            patrol_mode="production",
+            report_purpose="production_current",
+            save_baseline=False,
+            ticket_id=None,
+            target_count=1,
+            planned_rows=[],
+            skipped_errors=[],
+            target_snapshot={
+                "target_type": "offline_import",
+                "target_label": "offline sample",
+                "selector": {"job_id": "offline-1"},
+            },
+        )
+
+    with session_scope() as db:
+        assert db.get(
+            PatrolBatchRecord,
+            "batch-invalid-current",
+        ) is None
 
 
 def test_batch_history_uses_stable_server_pagination_and_total(monkeypatch):
@@ -302,6 +341,157 @@ def test_final_report_is_requested_once_only_after_all_runs_are_terminal(monkeyp
 
     assert repository.request_terminal_report("batch-report") is True
     assert repository.request_terminal_report("batch-report") is False
+    with session_scope() as db:
+        batch = db.get(PatrolBatchRecord, "batch-report")
+        batch.report_status = "completed"
+        batch.report_completed_at = now
+
+    assert repository.request_terminal_report("batch-report") is False
+    assert repository.request_terminal_report(
+        "batch-report",
+        allow_regenerate=True,
+    ) is True
+    state = repository.report_generation_state("batch-report")
+    assert state is not None
+    assert state["status"] == "queued"
+    assert state["completed_at"] is None
+
+
+def test_report_request_ledger_replays_completed_key_and_fences_stale_worker(
+    monkeypatch,
+):
+    session_scope = _session_factory(monkeypatch)
+    now = datetime.now(timezone.utc)
+    with session_scope() as db:
+        db.add(
+            PatrolBatchRecord(
+                patrol_batch_id="batch-report-ledger",
+                workflow_name="patrol-change-event",
+                launch_mode="workflow",
+                patrol_mode="production",
+                target_type="device",
+                target_label="SW-1",
+                selector_json={},
+                target_count=1,
+                launched_count=1,
+                skipped_count=0,
+                dispatch_status="completed",
+                report_status="not_requested",
+                archived=False,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        db.add(
+            WorkflowRun(
+                id="report-ledger-run",
+                template_name="patrol-change-event",
+                source="device-management",
+                status="completed",
+                context={"patrol_batch_id": "batch-report-ledger"},
+                created_at=now,
+                completed_at=now,
+            )
+        )
+        db.add(
+            PatrolBatchDeviceRecord(
+                id="report-ledger-target",
+                patrol_batch_id="batch-report-ledger",
+                device_id="device-1",
+                selection_status="launched",
+                preflight_status="ready",
+                dispatch_status="dispatched",
+                workflow_run_id="report-ledger-run",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+    repository = PatrolBatchManifestRepository()
+    assert repository.request_terminal_report(
+        "batch-report-ledger",
+        allow_regenerate=True,
+        idempotency_key="report-key-1",
+        task_id="report-task-1",
+        requested_by="api:engineer",
+    ) is True
+    first_state = repository.report_generation_state(
+        "batch-report-ledger"
+    )
+    assert first_state is not None
+    first_request_id = first_state["request_id"]
+    assert first_state["task_id"] == "report-task-1"
+
+    assert repository.mark_report_status(
+        "batch-report-ledger",
+        "generating",
+        request_id=first_request_id,
+    ) is True
+    with session_scope() as db:
+        batch = db.get(PatrolBatchRecord, "batch-report-ledger")
+        batch.report_manifest_id = "report-1"
+        batch.report_manifest_digest = "a" * 64
+    assert repository.mark_report_status(
+        "batch-report-ledger",
+        "completed",
+        request_id=first_request_id,
+    ) is True
+
+    assert repository.request_terminal_report(
+        "batch-report-ledger",
+        allow_regenerate=True,
+        idempotency_key="report-key-1",
+        task_id="report-task-1",
+        requested_by="api:engineer",
+    ) is False
+    replay = repository.report_request_state(
+        "batch-report-ledger",
+        "report-key-1",
+    )
+    assert replay is not None
+    assert replay["status"] == "completed"
+    assert replay["report_manifest_id"] == "report-1"
+    assert repository.mark_report_status(
+        "batch-report-ledger",
+        "generating",
+        request_id=first_request_id,
+    ) is False
+    assert repository.report_generation_state(
+        "batch-report-ledger"
+    )["status"] == "completed"
+
+    assert repository.request_terminal_report(
+        "batch-report-ledger",
+        allow_regenerate=True,
+        idempotency_key="report-key-2",
+        task_id="report-task-2",
+        requested_by="api:engineer",
+    ) is True
+    second_state = repository.report_generation_state(
+        "batch-report-ledger"
+    )
+    assert second_state is not None
+    assert second_state["request_id"] != first_request_id
+    assert repository.mark_report_status(
+        "batch-report-ledger",
+        "completed",
+        request_id=first_request_id,
+    ) is False
+    assert repository.report_generation_state(
+        "batch-report-ledger"
+    )["status"] == "queued"
+    assert repository.mark_report_status(
+        "batch-report-ledger",
+        "failed",
+        request_id=second_state["request_id"],
+        error="storage unavailable",
+    ) is True
+    failed_state = repository.report_generation_state(
+        "batch-report-ledger"
+    )
+    assert failed_state["status"] == "failed"
+    assert failed_state["completed_at"] is not None
+    assert failed_state["error"] == "storage unavailable"
 
 
 def test_terminal_report_candidates_only_include_dispatched_workflow_batches(monkeypatch):

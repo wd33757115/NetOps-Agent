@@ -1,7 +1,7 @@
 ---
 name: textfsm-generator
-version: 1.3.0
-description: 从聊天 CLI、PostgreSQL 验证数据集或离线巡检文件目录生成并跨样本验证 TextFSM 模板，识别设备厂商和精确型号，发布共享 Parser 资产
+version: 2.1.0
+description: 根据 Parser 控制面的持久化任务生成、验证并登记待审批 TextFSM 候选资产
 category: network
 tags: [textfsm, parser, template, patrol, offline]
 author: wangdong
@@ -12,53 +12,17 @@ enabled_ratio: 100
 min_platform_version: "1.0.0"
 entry_script: scripts/run.py
 entry_output: none
-triggers:
-  - 生成 TextFSM
-  - TextFSM 模板
-  - 离线巡检模板
-  - 解析模板生成
-  - textfsm generator
+execution_timeout_seconds: 1650
+triggers: []
 inputs:
+  - name: operation
+    type: string
+    required: false
+    description: generate 或 suggest_spec；后者生成并自动采纳可由工程师修订的 ParserSpec 与记录方案
   - name: job_id
     type: string
-    required: false
-    description: Parser Control Plane任务ID；提供后进入job模式
-  - name: source_path
-    type: string
-    required: false
-    description: 离线巡检 txt/log 文件或目录；存在时启用 directory 模式
-  - name: recursive
-    type: boolean
-    required: false
-    description: 是否递归扫描 source_path，默认 true
-  - name: user_query
-    type: string
-    required: false
-    description: 聊天中粘贴的命令和 CLI 输出
-  - name: raw_output
-    type: string
-    required: false
-    description: 单条 CLI 原始输出
-  - name: command
-    type: string
-    required: false
-    description: 命令或目录模式命令过滤器
-  - name: vendor
-    type: string
-    required: false
-    description: 显式厂商；与 model 同时提供时覆盖自动识别
-  - name: model
-    type: string
-    required: false
-    description: 显式精确型号；与 vendor 同时提供时覆盖自动识别
-  - name: category
-    type: string
-    required: false
-    description: 单条输入模式的显式字段类别
-  - name: templates_dir
-    type: string
-    required: false
-    description: 共享模板目录，默认 src/skills/shared/textfsm-templates
+    required: true
+    description: Parser 控制面的持久化任务 ID；生产生成的唯一入口
   - name: reports_dir
     type: string
     required: false
@@ -66,53 +30,18 @@ inputs:
   - name: publish
     type: boolean
     required: false
-    description: 验证通过后是否发布模板，默认 true
+    description: 验证通过后是否登记待审批候选，默认 false；仅由受控任务调度器显式开启
   - name: dry_run
     type: boolean
     required: false
-    description: 仅发现、生成和验证，不写模板
-  - name: minimum_sample_pass_rate
-    type: number
-    required: false
-    description: 模板发布所需样本通过率，默认 1.0
-  - name: max_samples_per_prompt
-    type: integer
-    required: false
-    description: 提供给 LLM 的代表样本上限，默认 3；验证仍覆盖全部样本
-  - name: max_retries
-    type: integer
-    required: false
-    description: 跨样本验证失败后的最大修复次数，默认 3
-  - name: force_generate
-    type: boolean
-    required: false
-    description: 是否覆盖已存在的共享模板
-  - name: mapping_config
-    type: string
-    required: false
-    description: 命令白名单配置
-  - name: categories_config
-    type: string
-    required: false
-    description: 字段与实体契约配置
-  - name: device_signatures_config
-    type: string
-    required: false
-    description: 设备识别规则配置
-  - name: command_aliases_config
-    type: string
-    required: false
-    description: 命令别名配置
+    description: 仅生成和验证，不登记待审批候选
 outputs:
   - name: mode
     type: string
-    description: direct、database 或 directory
+    description: 固定为 job
   - name: generated_templates
     type: object
-    description: 已发布共享模板路径
-  - name: device_profiles
-    type: object
-    description: 自动识别的厂商、型号、设备族、置信度与证据
+    description: 已登记的不可变候选资产路径
   - name: reports
     type: object
     description: 每个型号和命令的全样本验证报告
@@ -120,6 +49,7 @@ outputs:
     type: string
     description: 批次汇总报告
 enabled: true
+hidden: true
 fallback_to_rag: false
 ---
 
@@ -129,89 +59,86 @@ fallback_to_rag: false
 
 ## 核心能力
 
-- 离线文件和目录扫描。
-- 厂商、精确型号和设备族识别。
-- 命令白名单、别名归一化和跨样本分组。
-- 证据 Contract、Parser IR、通用 Provider 与受限 Agent Loop。
-- TextFSM 生成、修复、12 项硬门禁、原子发布和 manifest 管理。
+- 消费控制面自动采纳或工程师修订的 `ParserSpec` 和不可变样本清单。
+- 生产默认进入 DeepSeek thinking 工具循环；三类确定性编译器仅保留为显式回退接口。
+- 每次明确生成运行最多三次模型调用；显式重试恢复本轮预算但保留全局调用历史。
+- 模型通过 `validate_textfsm_candidate` 提交完整模板；平台本地执行编译、解析和硬门禁并回传结构化诊断。
+- 本地门禁通过后使用全新模型会话独立复核最终记录、字段和主键。
+- 至少对一份 generation 样本执行硬门禁；存在 acceptance 和 negative 样本时一并验证。
+- 保存不可变候选、验证证据和尝试历史，等待人工审批。
 
 ## 工作流程
 
-1. 读取聊天 CLI、PostgreSQL `parser_validation` 数据集或离线 `.txt/.log` 文件。
-2. 复用巡检命令切分器，规范化命令别名。
-3. 优先从版本和库存命令识别厂商、精确型号及设备族。
-4. 只处理 Skill 共享配置 `src/skills/shared/parser-config/command_policy.yaml` 中启用的命令。
-5. 按 `vendor + model + command` 聚合全部样本。
-6. LLM 从脱敏样本提出带行级证据的 Contract，系统规范化字段、校验器和语义引用。
-7. Structure Profiler 将证据编译为 Parser IR，六个通用 Provider 优先生成 TextFSM。
-8. 通用候选失败时，Agent 才允许 LLM 按单一结构化诊断修复模板。
-9. 对训练、留出、回归和负样本执行 12 项硬门禁；通过后才可提交审批或原子发布。
+1. 只接受 Parser 控制面创建的 `job_id`，读取任务绑定的不可变 PostgreSQL 样本。
+2. 离线导入、聊天和生产缺口扫描只负责创建或补充 Job，不得调用本 Skill 绕过任务治理。
+3. LLM 自动形成并采纳 ParserSpec 与逐样本记录方案；工程师可在高级修订中定向调整。
+4. 生成阶段只读取 generation samples；acceptance samples 不进入 Prompt，也不参与修复。
+5. 模型最多进行三次“生成/修复 → 调用本地校验工具 → 接收结构化结果”的连续会话。
+6. 本地门禁通过后，由独立 LLM 会话复核最终解析结果；复核失败诊断返回生成会话。
+7. 候选写入平台管理的不可变资产目录，并登记为 `pending_approval`。
+8. 人工默认只确认原始 CLI 对应的最终解析结果和主键；TextFSM 与过程资产保留在次级页签。
+9. 审批激活后才进入生产 ParserRuntime，并独立触发后续规则资产生成。
 
 ## 核心原则
 
 - Parser 资产独立于生成 Skill，可被巡检、导入和回放流程共同消费。
 - 结构化字段首先服务于稳定实体比较和事件构建，不追求解析全部 CLI。
-- 同型号全部样本的验证结果决定模板是否发布。
+- 一份 generation 样本即可生成候选并进入人工审批；存在独立 acceptance 样本时必须全部通过。
 - 自动路径禁止按厂商、型号、命令或业务字段编写 Python 分支。
-- `LegacyBuiltinProvider` 只保留为显式手工兼容接口，不进入自动 Provider Registry。
-- TextFSM `List` 仅表达同一实体的重复值，State Normalizer 按 `value_index` 展开。
-- 报告的 `success` 只统计 `accepted=true` 的资产，不能用样本平均分绕过硬门禁。
+- 手工内置 Provider 只保留为显式兼容接口，不进入自动生成流程。
+- 报告的 `success` 只统计本地硬门禁与独立复核全部通过的资产，不能使用平均分绕过门禁。
 
 ## 输入参数说明
 
-- `job_id` 优先级最高；`source_path` 启用离线发现和验证模式。
-- `vendor/model` 必须同时提供才覆盖自动识别。
+- `job_id` 是唯一生产入口。
 - `publish=false` 或 `dry_run=true` 不写共享资产。
-- `minimum_sample_pass_rate` 默认 `1.0`。
 
 ## 输出格式
 
 ```json
 {
   "success": true,
-  "mode": "directory",
-  "files_scanned": 54,
-  "devices_detected": 54,
-  "candidate_groups": 80,
-  "success_count": 80,
-  "generated_templates": [],
+  "mode": "job",
+  "job_id": "parser-job-123",
+  "candidate_groups": 1,
+  "success_count": 1,
+  "published_count": 0,
   "validation_pass_rate": 1.0,
-  "shared_templates_dir": "src/skills/shared/textfsm-templates"
+  "asset_store": "postgresql"
 }
 ```
 
 ## 示例
 
-目录模式参数：
+受控任务参数：
 
 ```json
 {
-  "source_path": "C:\\patrol-data",
-  "recursive": true,
+  "job_id": "parser-job-123",
   "publish": false,
-  "minimum_sample_pass_rate": 1.0
+  "dry_run": true
 }
 ```
 
 ## 安全规范
 
 - 不连接或执行任何网络设备命令。
-- 不根据 `display/show` 猜测离线文件的厂商。
-- 未识别设备和未配置命令必须明确报告并跳过。
-- LLM 只能在验证模式提出数据契约或受限修复候选；字段、主键和校验器经过多样本确定性验证及人工审批后，固化到模板版本的 `validation_json`。
+- LLM 只接收 generation 角色的脱敏样本，不能读取 raw CLI 或 acceptance samples。
+- 工具白名单只包含 TextFSM 本地校验和工程师复核请求；模型不能执行本地代码、Shell、数据库或文件访问。
+- 工具调用后的连续请求必须回传完整 assistant 工具消息；`reasoning_content` 只用于当前会话续接，不持久化或展示。
+- 字段、主键和校验器来自自动采纳或工程师修订的 ParserSpec，并固化到模板版本的 `validation_json`。
 - 正式巡检只读取 PostgreSQL 中 active 模板及其已审批契约，不实时调用 LLM。
-- 唯一持续人工维护的配置是 `src/skills/shared/parser-config/command_policy.yaml` 命令白名单。
-- 默认要求全部样本通过后才发布。
-- 共享模板位于 `src/skills/shared/textfsm-templates/`。
+- 至少一份 generation 样本通过即可进入人工审批；没有独立 acceptance 时必须明确标记单样本验证风险。
+- 新候选模板正文和 SHA-256 摘要作为不可变资产保存在 PostgreSQL；Worker 不写本地模板文件。
+- 已激活的历史本地模板只保留运行时只读兼容，不能作为新候选的发布目标。
 - 目录和直接输入不能发布生产模板；发布必须来自 PostgreSQL `parser_validation` 快照创建的 Job。
 
 ## 实际执行说明
 
-平台通过 `scripts/run.py --params <json>` 执行。目录模式仅对命令白名单中的候选组调用 LLM
-推断 Contract，所有样本都会参与本地 TextFSM 验证；模板优先由 Parser IR 通用 Provider 编译。
+平台通过 `scripts/run.py --params <json>` 执行。Worker 只接受 `simple_v2` Job；历史 Agent Job
+保持只读审计，必须在控制面补齐 ParserSpec 和样本角色后才能升级并重新执行。
 
 ## 注意事项
 
 - 依赖 `textfsm` 和已配置的 LLM API。
-- 文件名识别仅为低置信度回退，报告中会保留识别来源。
-- 已有模板默认只验证不覆盖；使用 `force_generate=true` 才重新生成。
+- ParserSpec 或样本清单变化后必须产生新的摘要和候选版本，不能覆盖已审批资产。

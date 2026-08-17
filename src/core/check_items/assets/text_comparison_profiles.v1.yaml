@@ -1,0 +1,76 @@
+catalog_id: netops.text-comparison-profiles
+catalog_version: 1
+
+profiles:
+  - id: configuration.ordered_lines
+    version: 1
+    name: Running configuration ordered-line comparison
+    mode: ordered_lines
+    ignore_blank_lines: true
+    ignore_patterns:
+      - '^\s*!?Last configuration change'
+      - '^\s*!?NVRAM config last updated'
+      - '^\s*Current configuration\s*:'
+    normalize_patterns:
+      - pattern: '\r\n?'
+        replacement: "\n"
+      - pattern: '[ \t]+$'
+        replacement: ''
+    redact_patterns:
+      - pattern: '(?i)(password|secret|community)(\s+\S+)'
+        replacement: '\1 <redacted>'
+      - pattern: '(?i)(key-string\s+)\S+'
+        replacement: '\1<redacted>'
+    categories: [configuration]
+    status: active
+
+  - id: generic.unordered_lines
+    version: 1
+    name: Generic unordered-line comparison
+    mode: unordered_lines
+    ignore_blank_lines: true
+    ignore_patterns: []
+    normalize_patterns:
+      - pattern: '\r\n?'
+        replacement: "\n"
+      - pattern: '\s+'
+        replacement: ' '
+    redact_patterns:
+      - pattern: '(?i)(password|secret|community)(\s+\S+)'
+        replacement: '\1 <redacted>'
+    categories: [diagnostic]
+    status: active
+
+  - id: generic.hash_only
+    version: 1
+    name: Sensitive output hash comparison
+    mode: hash_only
+    ignore_blank_lines: true
+    ignore_patterns: []
+    normalize_patterns:
+      - pattern: '\r\n?'
+        replacement: "\n"
+      - pattern: '[ \t]+$'
+        replacement: ''
+    redact_patterns:
+      - pattern: '(?i)(password|secret|community|token)(\s+\S+)'
+        replacement: '\1 <redacted>'
+    categories: [sensitive]
+    status: active
+
+  - id: log_window.ordered_lines
+    version: 1
+    name: Critical log window ordered-line comparison
+    mode: ordered_lines
+    ignore_blank_lines: true
+    ignore_patterns: []
+    normalize_patterns:
+      - pattern: '\r\n?'
+        replacement: "\n"
+      - pattern: '[ \t]+$'
+        replacement: ''
+    redact_patterns:
+      - pattern: '(?i)(password|secret|community|token)(\s+\S+)'
+        replacement: '\1 <redacted>'
+    categories: [operations]
+    status: active

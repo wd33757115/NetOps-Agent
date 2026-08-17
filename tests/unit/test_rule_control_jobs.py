@@ -395,6 +395,10 @@ def test_rule_job_history_uses_transactional_database_projections(monkeypatch):
             offset=0,
         )
         assert audit["total"] == 1
+        assert audit["summary"]["total"] == 1
+        assert audit["summary"]["approved"] == 1
+        assert audit["summary"]["rejected"] == 0
+        assert audit["summary"]["deprecated"] == 0
         assert audit["items"][0]["job_id"] == first_job["id"]
         with get_db_session() as db:
             assert (
@@ -770,7 +774,18 @@ def test_rule_asset_approval_service_activates_event_rule_atomically():
         repo.transition_job(job["id"], status="validating")
         repo.transition_job(job["id"], status="pending_approval")
 
-        result = RuleAssetApprovalService().approve(job["id"], actor="pytest")
+        with pytest.raises(
+            RuleGenerationJobStateError,
+            match="approver different from the candidate creator",
+        ):
+            RuleAssetApprovalService().approve(
+                job["id"],
+                actor="api:pytest",
+            )
+        result = RuleAssetApprovalService().approve(
+            job["id"],
+            actor="rule-approver",
+        )
 
         assert result["job"]["status"] == "active"
         assert result["asset_activation"]["version_status"] == "active"
@@ -878,7 +893,10 @@ def test_rule_asset_approval_service_activates_change_policy_atomically():
         repo.transition_job(job["id"], status="validating")
         repo.transition_job(job["id"], status="pending_approval")
 
-        result = RuleAssetApprovalService().approve(job["id"], actor="pytest")
+        result = RuleAssetApprovalService().approve(
+            job["id"],
+            actor="rule-approver",
+        )
 
         assert result["job"]["status"] == "active"
         assert result["asset_activation"]["version_status"] == "active"

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
+from src.core.observation.semantic_projection import SemanticProjectionError
 from src.core.patrol.change_detector import (
     ExplicitBaselineNotReadyError,
     detect_changes_from_params,
@@ -72,6 +75,8 @@ def _install_analysis_runtime(monkeypatch):
         ("not_applicable", "skipped", "not_applicable", "not_applicable"),
         ("empty_unverified", "blocked", "blocked_by_output", "empty_unverified"),
         ("command_error", "blocked", "blocked_by_output", "command_error"),
+        ("truncated", "blocked", "blocked_by_output", "truncated"),
+        ("paged", "blocked", "blocked_by_output", "paged"),
         ("parse_empty", "empty", "empty", "legitimate_empty"),
     ],
 )
@@ -141,6 +146,169 @@ def test_raw_hash_diff_normalizes_only_the_digest():
         "profile": "configuration",
         "profile_version": 1,
     }
+
+
+def test_command_adapter_projects_named_record_set_to_canonical_observation(
+    monkeypatch,
+):
+    implementation = SimpleNamespace(
+        id="cisco.nxos.show_system_resources",
+        version_id="adapter-v1",
+        adapter_spec={
+            "schema_version": "command-adapter/v1",
+            "parser": {"template_id": "parser-system-resources-v1"},
+            "outputs": [
+                {
+                    "check_item_id": "system.cpu_usage",
+                    "source_record_set": "cpu_cores",
+                    "fields": {
+                        "scope": {"literal": "processor"},
+                        "scope_id": "cpu_id",
+                        "cpu_usage_percent": {
+                            "expression": "100 - cpu_idle_percent"
+                        },
+                    },
+                }
+            ],
+        },
+    )
+    check_item = SimpleNamespace(
+        id="system.cpu_usage",
+        version=8,
+        version_id="cpu-v8",
+        digest="a" * 64,
+        canonical_contract={
+            "entity_type": "cpu_scope",
+            "identity_dimensions": ["scope", "scope_id"],
+            "observations": [
+                {
+                    "canonical_field": "cpu_usage_percent",
+                    "observation_type": "device.cpu.utilization",
+                    "semantic_type": "gauge",
+                    "unit": "percent",
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        normalizer.CheckItemCatalogRepository,
+        "get_implementation_version_context",
+        lambda _self, _version_id: (implementation, (check_item,)),
+    )
+
+    observations = observations_from_snapshot(
+        {
+            "id": "snapshot-adapter",
+            "run_id": "run-1",
+            "device_id": "switch-1",
+            "inventory_device_id": "inventory-1",
+            "vendor": "Cisco",
+            "model": "N9K",
+            "canonical_command": "show system resources",
+            "observed_at": "2026-08-10T00:00:00+00:00",
+            "structured_json": {
+                "format": "netops.structured_record_sets/v1",
+                "record_sets": {
+                    "cpu_cores": [
+                        {"cpu_id": "0", "cpu_idle_percent": "92.5"}
+                    ]
+                },
+            },
+            "implementation_version_id": "adapter-v1",
+            "parser_template_id": "parser-system-resources-v1",
+            "parser_version": "1",
+            "raw_text_hash": "b" * 64,
+            "metadata_json": {},
+        },
+        mode="production",
+        source="test",
+        dataset_id="dataset-1",
+    )
+
+    assert len(observations) == 1
+    assert observations[0].field_name == "cpu_usage_percent"
+    assert observations[0].value == 7.5
+    assert observations[0].entity_key == '["processor","0"]'
+    assert observations[0].metadata["check_item_id"] == "system.cpu_usage"
+    assert observations[0].metadata["command_adapter_version_id"] == "adapter-v1"
+
+
+def test_device_level_projection_deduplicates_repeated_parser_records():
+    observations = observations_from_snapshot(
+        {
+            "id": "snapshot-version-repeated",
+            "run_id": "run-1",
+            "device_id": "router-1",
+            "vendor": "H3C",
+            "model": "MSR5620",
+            "canonical_command": "display version",
+            "observed_at": "2026-07-28T00:00:00+00:00",
+            "structured_json": [
+                {"software_version": "7.1.064", "slot": "0"},
+                {"software_version": "7.1.064", "slot": "1"},
+            ],
+            "parser_template_id": "parser-version",
+            "parser_version": "1",
+            "metadata_json": {},
+        },
+        mode="production",
+        source="test",
+        dataset_id=None,
+        _contract_override={
+            "entity_type": "device",
+            "primary_keys": [],
+            "ignore_fields": ["slot"],
+            "state_semantics": {
+                "software_version": {
+                    "observation_type": "device.software.version",
+                    "semantic_type": "state",
+                }
+            },
+        },
+    )
+
+    assert len(observations) == 1
+    assert observations[0].value == "7.1.064"
+    assert observations[0].entity_key == "__singleton__"
+
+
+def test_device_level_projection_blocks_conflicting_same_snapshot_values():
+    with pytest.raises(
+        SemanticProjectionError,
+        match="conflicting canonical values",
+    ):
+        observations_from_snapshot(
+            {
+                "id": "snapshot-version-conflict",
+                "run_id": "run-1",
+                "device_id": "router-1",
+                "vendor": "H3C",
+                "model": "MSR5620",
+                "canonical_command": "display version",
+                "observed_at": "2026-07-28T00:00:00+00:00",
+                "structured_json": [
+                    {"software_version": "7.1.064", "slot": "0"},
+                    {"software_version": "7.1.065", "slot": "1"},
+                ],
+                "parser_template_id": "parser-version",
+                "parser_version": "1",
+                "metadata_json": {},
+            },
+            mode="production",
+            source="test",
+            dataset_id=None,
+            _contract_override={
+                "entity_type": "device",
+                "primary_keys": [],
+                "ignore_fields": ["slot"],
+                "state_semantics": {
+                    "software_version": {
+                        "observation_type": "device.software.version",
+                        "semantic_type": "state",
+                    }
+                },
+            },
+        )
 
 
 def test_optical_observation_carries_authoritative_device_threshold_context(
@@ -284,6 +452,59 @@ def test_observations_from_snapshot_skip_blank_textfsm_fields(monkeypatch):
     assert [(item.field_name, item.value) for item in observations] == [
         ("rx_power_dbm", -5.34),
         ("transceiver_present", "absent"),
+    ]
+
+
+def test_contract_can_map_blank_parser_status_to_present(monkeypatch):
+    monkeypatch.setattr(
+        normalizer,
+        "_template_contract",
+        lambda *_args, **_kwargs: {
+            "entity_type": "interface_optical",
+            "primary_keys": ["interface"],
+            "contract_version": 1,
+            "state_semantics": {
+                "status": {
+                    "semantic_type": "state",
+                    "observation_type": "interface.optical.presence",
+                    "emit_when_empty": True,
+                    "value_mapping": {
+                        "": "present",
+                        "The transceiver is absent.": "absent",
+                    },
+                    "on_unmapped": "reject",
+                },
+            },
+        },
+    )
+
+    observations = observations_from_snapshot(
+        {
+            "id": "snapshot-optical-presence",
+            "run_id": "run-1",
+            "device_id": "SW1",
+            "vendor": "H3C",
+            "model": "S5130S-54S-HI-G",
+            "canonical_command": "display transceiver diagnosis interface",
+            "parser_template_id": "template-optical",
+            "parser_version": "1",
+            "observed_at": "2026-07-18T00:00:00+00:00",
+            "structured_json": [
+                {"interface": "Ten-GigabitEthernet1/0/49", "status": ""},
+                {
+                    "interface": "Ten-GigabitEthernet1/0/51",
+                    "status": "The transceiver is absent.",
+                },
+            ],
+        },
+        mode="parser_validation",
+        source="test",
+        dataset_id="dataset-optical",
+    )
+
+    assert [(item.entity_key, item.value) for item in observations] == [
+        ('["Ten-GigabitEthernet1/0/49"]', "present"),
+        ('["Ten-GigabitEthernet1/0/51"]', "absent"),
     ]
 
 
@@ -576,6 +797,71 @@ def test_observations_from_snapshot_can_pin_semantic_contract_for_replay(monkeyp
     assert observations[0].metadata["parser_contract_version"] == 3
 
 
+def test_observations_from_snapshot_uses_contract_frozen_by_runtime_bundle(
+    monkeypatch,
+):
+    class FrozenContract:
+        def to_validation_dict(self):
+            return {
+                "contract_id": "contract-frozen-v8",
+                "contract_sha256": "b" * 64,
+                "schema_id": "template-1",
+                "entity_type": "interface_l3",
+                "primary_keys": ["interface"],
+                "contract_version": 8,
+            }
+
+    class FakeContractRepository:
+        def get_by_id(self, contract_id):
+            assert contract_id == "contract-frozen-v8"
+            return FrozenContract()
+
+    monkeypatch.setattr(
+        normalizer,
+        "ObservationContractRepository",
+        FakeContractRepository,
+    )
+    monkeypatch.setattr(
+        normalizer,
+        "_template_contract",
+        lambda *_args, **_kwargs: pytest.fail(
+            "active contract lookup must not run for frozen production facts"
+        ),
+    )
+
+    observations = observations_from_snapshot(
+        {
+            "id": "snapshot-frozen-contract",
+            "run_id": "run-frozen-contract",
+            "device_id": "device-1",
+            "canonical_command": "show ip interface brief",
+            "parser_template_id": "template-1",
+            "contract_version": 3,
+            "observed_at": "2026-07-31T10:00:00+00:00",
+            "structured_json": {"interface": "Eth1/1", "status": "up"},
+            "metadata_json": {
+                "observation_contract_refs": [
+                    {
+                        "contract_id": "contract-frozen-v8",
+                        "schema_id": "template-1",
+                        "digest": "b" * 64,
+                    }
+                ]
+            },
+        },
+        mode="production",
+        source="test",
+        dataset_id=None,
+    )
+
+    assert observations[0].contract_version == 8
+    assert observations[0].metadata["parser_contract_version"] == 3
+    assert (
+        observations[0].metadata["observation_contract_id"]
+        == "contract-frozen-v8"
+    )
+
+
 def test_observations_from_snapshot_applies_validator_semantics(monkeypatch):
     monkeypatch.setattr(
         normalizer,
@@ -764,7 +1050,14 @@ def test_contract_context_fields_are_copied_for_dynamic_thresholds(monkeypatch):
                     "semantic_type": "gauge",
                     "observation_type": "generic.measurement",
                     "context_fields": ["low_reference"],
-                }
+                    "comparison_role": "observation",
+                    "monitor": True,
+                },
+                "low_reference": {
+                    "semantic_type": "gauge",
+                    "comparison_role": "threshold",
+                    "monitor": False,
+                },
             },
         },
     )
@@ -792,6 +1085,7 @@ def test_contract_context_fields_are_copied_for_dynamic_thresholds(monkeypatch):
 
     measurement = next(item for item in observations if item.field_name == "measurement")
     assert measurement.metadata["_observation_context"] == {"low_reference": -10.0}
+    assert [item.field_name for item in observations] == ["measurement"]
 
 
 def test_observations_from_snapshot_prefers_inventory_device_id(monkeypatch):
@@ -939,6 +1233,492 @@ def test_normalize_snapshot_rejects_validation_current_state(monkeypatch):
 
     with pytest.raises(ValueError, match="parser_validation"):
         normalize_snapshot("snapshot-1", update_current_state=True)
+
+
+def test_vendor_native_cpu_fields_share_canonical_state_identity(monkeypatch):
+    contracts = {
+        "template-h3c": {
+            "entity_type": "device",
+            "primary_keys": [],
+            "validators": {"cpu_5s": {"type": "percent"}},
+            "state_semantics": {
+                "cpu_5s": {
+                    "semantic_type": "percentage",
+                    "unit": "percent",
+                    "observation_type": "device.cpu.utilization",
+                    "dimensions": {"scope": "system", "window": "5s"},
+                }
+            },
+        },
+        "template-cisco": {
+            "entity_type": "device",
+            "primary_keys": [],
+            "validators": {"cpu_total_5_sec": {"type": "percent"}},
+            "state_semantics": {
+                "cpu_total_5_sec": {
+                    "semantic_type": "percentage",
+                    "unit": "percent",
+                    "observation_type": "device.cpu.utilization",
+                    "dimensions": {"scope": "system", "window": "5s"},
+                }
+            },
+        },
+    }
+    monkeypatch.setattr(
+        normalizer,
+        "_template_contract",
+        lambda template_id, **_kwargs: contracts[template_id],
+    )
+    common = {
+        "run_id": "run-1",
+        "device_id": "device-1",
+        "inventory_device_id": "inventory-device-1",
+        "observed_at": "2026-07-27T00:00:00+00:00",
+    }
+
+    h3c = observations_from_snapshot(
+        {
+            **common,
+            "id": "snapshot-h3c",
+            "vendor": "H3C",
+            "model": "S5130",
+            "canonical_command": "display cpu-usage",
+            "parser_template_id": "template-h3c",
+            "structured_json": [{"cpu_5s": "24"}],
+        },
+        mode="production",
+        source="test",
+        dataset_id=None,
+    )[0]
+    cisco = observations_from_snapshot(
+        {
+            **common,
+            "id": "snapshot-cisco",
+            "vendor": "Cisco",
+            "model": "NEXUS9000",
+            "canonical_command": "show processes cpu",
+            "parser_template_id": "template-cisco",
+            "structured_json": [{"cpu_total_5_sec": "18"}],
+        },
+        mode="production",
+        source="test",
+        dataset_id=None,
+    )[0]
+
+    assert h3c.field_name == "cpu_5s"
+    assert cisco.field_name == "cpu_total_5_sec"
+    assert h3c.observation_type == cisco.observation_type == "device.cpu.utilization"
+    assert h3c.dimensions == cisco.dimensions == {"scope": "system", "window": "5s"}
+    assert h3c.dimension_signature == cisco.dimension_signature
+    assert h3c.state_key == cisco.state_key
+
+
+def test_source_cpu_keys_project_to_governed_canonical_entity(monkeypatch):
+    monkeypatch.setattr(
+        normalizer,
+        "_template_contract",
+        lambda *_args, **_kwargs: {
+            "entity_type": "cpu_record",
+            "primary_keys": ["slot", "cpu"],
+            "canonical_entity_type": "cpu_scope",
+            "entity_identity_fields": ["scope", "scope_id"],
+            "entity_dimensions": {
+                "scope": {"literal": "processor"},
+                "scope_id": {
+                    "op": "concat",
+                    "args": [
+                        {"literal": "slot:"},
+                        {"field": "slot"},
+                        {"literal": "/cpu:"},
+                        {"field": "cpu"},
+                    ],
+                },
+            },
+            "validators": {"usage_5s": {"type": "percent"}},
+            "state_semantics": {
+                "usage_5s": {
+                    "semantic_type": "gauge",
+                    "unit": "percent",
+                    "observation_type": "device.cpu.utilization",
+                    "dimensions": {"window": "5s"},
+                }
+            },
+        },
+    )
+
+    observation = observations_from_snapshot(
+        {
+            "id": "snapshot-cpu-scope",
+            "run_id": "run-1",
+            "device_id": "device-1",
+            "inventory_device_id": "inventory-device-1",
+            "vendor": "H3C",
+            "model": "MSR5620",
+            "canonical_command": "display cpu",
+            "parser_template_id": "template-cpu",
+            "observed_at": "2026-07-29T00:00:00+00:00",
+            "structured_json": [
+                {"slot": "01", "cpu": "2", "usage_5s": "24"}
+            ],
+        },
+        mode="production",
+        source="test",
+        dataset_id=None,
+    )[0]
+
+    assert observation.entity_type == "cpu_scope"
+    assert observation.entity_key == '["processor","slot:01/cpu:2"]'
+    assert observation.metadata["source_entity_type"] == "cpu_record"
+    assert observation.metadata["source_entity_key"] == '["01","2"]'
+    assert observation.metadata["canonical_identity"]["values"] == {
+        "scope": "processor",
+        "scope_id": "slot:01/cpu:2",
+    }
+
+
+def test_device_entity_identity_comes_from_inventory_context(monkeypatch):
+    monkeypatch.setattr(
+        normalizer,
+        "_template_contract",
+        lambda *_args, **_kwargs: {
+            "entity_type": "device",
+            "primary_keys": [],
+            "canonical_entity_type": "device",
+            "entity_identity_fields": ["device_id"],
+            "entity_dimensions": {
+                "device_id": {"context": "device_id"},
+            },
+            "state_semantics": {
+                "software_version": {
+                    "semantic_type": "state",
+                    "observation_type": "device.software.version",
+                }
+            },
+        },
+    )
+
+    observation = observations_from_snapshot(
+        {
+            "id": "snapshot-device-context",
+            "run_id": "run-1",
+            "device_id": "external-device-1",
+            "inventory_device_id": "inventory-device-1",
+            "vendor": "H3C",
+            "model": "MSR5620",
+            "canonical_command": "display version",
+            "parser_template_id": "template-version",
+            "observed_at": "2026-07-29T00:00:00+00:00",
+            "structured_json": [{"software_version": "7.1.064"}],
+        },
+        mode="production",
+        source="test",
+        dataset_id=None,
+    )[0]
+
+    assert observation.device_id == "inventory-device-1"
+    assert observation.entity_type == "device"
+    assert observation.entity_key == '["inventory-device-1"]'
+    assert observation.metadata["canonical_identity"]["values"] == {
+        "device_id": "inventory-device-1",
+    }
+
+
+def test_state_normalizer_applies_governed_memory_formula(monkeypatch):
+    monkeypatch.setattr(
+        normalizer,
+        "_template_contract",
+        lambda *_args, **_kwargs: {
+            "entity_type": "device",
+            "primary_keys": [],
+            "validators": {"free_ratio": {"type": "percent"}},
+            "state_semantics": {
+                "free_ratio": {
+                    "semantic_type": "percentage",
+                    "unit": "percent",
+                    "observation_type": "device.memory.utilization",
+                    "dimensions": {"scope": "system"},
+                    "transform": {
+                        "op": "subtract",
+                        "args": [{"literal": 100}, {"field": "free_ratio"}],
+                    },
+                }
+            },
+        },
+    )
+
+    observation = observations_from_snapshot(
+        {
+            "id": "snapshot-memory",
+            "run_id": "run-1",
+            "device_id": "device-1",
+            "canonical_command": "display memory",
+            "parser_template_id": "template-memory",
+            "observed_at": "2026-07-27T00:00:00+00:00",
+            "structured_json": [{"free_ratio": "52.7%"}],
+        },
+        mode="production",
+        source="test",
+        dataset_id=None,
+    )[0]
+
+    assert observation.field_name == "free_ratio"
+    assert observation.observation_type == "device.memory.utilization"
+    assert observation.value_number == pytest.approx(47.3)
+    assert observation.metadata["source_value"] == pytest.approx(52.7)
+
+
+def test_state_normalizer_preserves_numeric_unavailability_without_converting_to_zero(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        normalizer,
+        "_template_contract",
+        lambda *_args, **_kwargs: {
+            "entity_type": "interface_optical_channel",
+            "primary_keys": ["interface", "channel"],
+            "validators": {
+                "rx_power_dbm": {
+                    "type": "number",
+                    "unavailable_tokens": ["N/A", "--"],
+                }
+            },
+            "state_semantics": {
+                "rx_power_dbm": {
+                    "semantic_type": "measurement",
+                    "unit": "dBm",
+                    "observation_type": "interface.optical.rx_power",
+                }
+            },
+        },
+    )
+
+    observation = observations_from_snapshot(
+        {
+            "id": "snapshot-optical-unavailable",
+            "run_id": "run-1",
+            "device_id": "device-1",
+            "canonical_command": "display transceiver diagnosis interface",
+            "parser_template_id": "template-optical",
+            "observed_at": "2026-08-02T00:00:00+00:00",
+            "structured_json": [
+                {
+                    "interface": "FortyGigE1/0/1",
+                    "channel": "1",
+                    "rx_power_dbm": "N/A",
+                }
+            ],
+        },
+        mode="production",
+        source="test",
+        dataset_id=None,
+    )[0]
+
+    assert observation.value is None
+    assert observation.value_number is None
+    assert observation.metadata["availability"] == "unavailable"
+    assert observation.metadata["unavailable_token"] == "N/A"
+
+
+def test_state_normalizer_handles_multiple_record_sets_from_one_command(monkeypatch):
+    monkeypatch.setattr(
+        normalizer,
+        "_template_contract",
+        lambda *_args, **_kwargs: {
+            "contract_id": "contract-version",
+            "contract_version": 2,
+            "record_sets": [
+                {
+                    "name": "device_version",
+                    "entity_type": "device",
+                    "primary_keys": [],
+                    "required_fields": ["software_version"],
+                    "optional_fields": ["software_release"],
+                    "state_semantics": {
+                        "software_version": {
+                            "semantic_type": "text",
+                            "observation_type": "device.software.version",
+                        },
+                        "software_release": {
+                            "semantic_type": "text",
+                            "observation_type": "device.software.release",
+                        },
+                    },
+                },
+                {
+                    "name": "slot_inventory",
+                    "entity_type": "device_slot",
+                    "primary_keys": ["slot"],
+                    "required_fields": ["slot", "board_type"],
+                    "optional_fields": [],
+                    "state_semantics": {
+                        "slot": {"semantic_type": "identity"},
+                        "board_type": {
+                            "semantic_type": "text",
+                            "observation_type": "device.slot.board_type",
+                        },
+                    },
+                },
+            ],
+        },
+    )
+
+    observations = observations_from_snapshot(
+        {
+            "id": "snapshot-version",
+            "run_id": "run-1",
+            "device_id": "device-1",
+            "canonical_command": "display version",
+            "parser_template_id": "template-version",
+            "observed_at": "2026-07-27T00:00:00+00:00",
+            "structured_json": {
+                "record_sets": {
+                    "device_version": [
+                        {
+                            "software_version": "7.1.064",
+                            "software_release": "0821P18",
+                        }
+                    ],
+                    "slot_inventory": [
+                        {"slot": "0", "board_type": "MPU-60"},
+                        {"slot": "1", "board_type": "MPU-60"},
+                    ],
+                }
+            },
+        },
+        mode="production",
+        source="test",
+        dataset_id=None,
+    )
+
+    assert len(observations) == 4
+    assert {item.entity_type for item in observations} == {"device", "device_slot"}
+    assert {
+        item.metadata["record_set_name"] for item in observations
+    } == {"device_version", "slot_inventory"}
+    board_facts = [
+        item
+        for item in observations
+        if item.observation_type == "device.slot.board_type"
+    ]
+    assert len(board_facts) == 2
+    assert board_facts[0].state_key != board_facts[1].state_key
+    assert board_facts[0].idempotency_key != board_facts[1].idempotency_key
+
+
+def test_state_normalizer_joins_cross_record_device_thresholds(monkeypatch):
+    monkeypatch.setattr(
+        normalizer,
+        "_template_contract",
+        lambda *_args, **_kwargs: {
+            "contract_id": "contract-optical-multi",
+            "contract_version": 1,
+            "record_sets": [
+                {
+                    "name": "measurements",
+                    "entity_type": "interface_optical",
+                    "primary_keys": ["interface", "channel"],
+                    "required_fields": ["interface", "channel", "rx_power"],
+                    "optional_fields": [],
+                    "validators": {"rx_power": {"type": "number"}},
+                    "state_semantics": {
+                        "interface": {"semantic_type": "identity"},
+                        "channel": {"semantic_type": "identity"},
+                        "rx_power": {
+                            "semantic_type": "gauge",
+                            "unit": "dbm",
+                            "observation_type": "interface.optical.rx_power",
+                            "threshold_references": {
+                                "critical_low": {
+                                    "field_name": "rx_power_low",
+                                    "context_key": "threshold.critical_low",
+                                    "source": "cross_record_set_reference",
+                                    "record_set_name": "thresholds",
+                                    "join_keys": {"interface": "interface"},
+                                    "relation_name": "measurement_thresholds",
+                                }
+                            },
+                        },
+                    },
+                },
+                {
+                    "name": "thresholds",
+                    "entity_type": "interface_threshold",
+                    "primary_keys": ["interface"],
+                    "required_fields": ["interface", "rx_power_low"],
+                    "optional_fields": [],
+                    "validators": {"rx_power_low": {"type": "number"}},
+                    "state_semantics": {
+                        "interface": {"semantic_type": "identity"},
+                        "rx_power_low": {
+                            "semantic_type": "gauge",
+                            "comparison_role": "threshold",
+                            "monitor": False,
+                        },
+                    },
+                },
+            ],
+            "record_set_relations": [
+                {
+                    "name": "measurement_thresholds",
+                    "source_record_set": "measurements",
+                    "target_record_set": "thresholds",
+                    "join_keys": {"interface": "interface"},
+                    "threshold_bindings": {
+                        "rx_power": {"critical_low": "rx_power_low"}
+                    },
+                    "match_policy": "partial",
+                }
+            ],
+        },
+    )
+
+    observations = observations_from_snapshot(
+        {
+            "id": "snapshot-optical-multi",
+            "run_id": "run-1",
+            "device_id": "device-1",
+            "canonical_command": "inspect optics",
+            "parser_template_id": "template-optical-multi",
+            "observed_at": "2026-07-27T00:00:00+00:00",
+            "structured_json": {
+                "record_sets": {
+                    "measurements": [
+                        {
+                            "interface": "Eth1/1",
+                            "channel": "1",
+                            "rx_power": "-13.5",
+                        },
+                        {
+                            "interface": "Eth1/2",
+                            "channel": "1",
+                            "rx_power": "-8.0",
+                        },
+                    ],
+                    "thresholds": [
+                        {"interface": "Eth1/1", "rx_power_low": "-12.0"}
+                    ],
+                }
+            },
+        },
+        mode="production",
+        source="test",
+        dataset_id=None,
+    )
+
+    assert len(observations) == 2
+    by_entity = {item.entity_key: item for item in observations}
+    matched = by_entity['["Eth1/1","1"]']
+    matched_context = matched.metadata[APPLICABILITY_CONTEXT_KEY]
+    assert matched_context["threshold.critical_low"] == -12.0
+    assert matched_context["threshold_source"] == "device_output"
+    assert matched_context["threshold_reference_sources"]["critical_low"] == {
+        "source": "cross_record_set_reference",
+        "record_set_name": "thresholds",
+        "relation_name": "measurement_thresholds",
+        "field_name": "rx_power_low",
+    }
+    unmatched = by_entity['["Eth1/2","1"]']
+    assert unmatched.metadata[APPLICABILITY_CONTEXT_KEY] == {}
 
 
 def test_normalize_run_can_limit_to_selected_devices(monkeypatch):
@@ -1222,6 +2002,37 @@ def test_observation_change_detector_rejects_unnormalized_explicit_baseline(monk
             current_run_id="run-current",
             previous_run_id="run-previous",
         )
+
+
+def test_observation_change_detector_allows_explicit_partial_normalization(monkeypatch):
+    class FakeStateRepository:
+        def list_run_observations(self, _run_id):
+            return []
+
+        def list_observations_for_runs(self, _run_ids, **_kwargs):
+            return []
+
+    class FakePatrolRepository(_AnalysisPatrolRepository):
+        def get_run(self, run_id):
+            return {
+                "id": run_id,
+                "mode": "production",
+                "analysis_status": "normalized_partial",
+                "run_purpose": "historical_compare",
+                "metadata_json": {"offline_job_id": "offline-job-1"},
+            }
+
+    monkeypatch.setattr("src.core.patrol.change_detector.StateRepository", FakeStateRepository)
+    monkeypatch.setattr("src.core.patrol.change_detector.PatrolRepository", FakePatrolRepository)
+
+    result = detect_observation_changes_against_history(
+        current_run_id="run-current",
+        previous_run_id="run-previous",
+        allow_partial_normalization=True,
+    )
+
+    assert result["success"] is True
+    assert result["change_count"] == 0
 
 
 def test_observation_change_detector_requires_explicit_longitudinal_offline_mode(

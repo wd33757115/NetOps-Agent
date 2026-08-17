@@ -2,12 +2,24 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any
 
+from src.common.governance import actor_matches_any
+from src.core.rule_control.asset_requirements import (
+    evaluate_requirement_replay_gate,
+    normalize_rule_asset_requirements,
+)
 from src.core.rule_control.repository import RuleGenerationJobRepository
-from src.core.skills.executor import execute_skill
+from src.core.rule_control.source_scope import (
+    require_current_rule_generation_context,
+)
+from src.core.skills.executor import SkillExecutionError, execute_skill
 from src.infrastructure.db.models import (
+    ChangePolicyVersionRecord,
+    EventRuleRecord,
+    EventRuleVersionRecord,
     ObservationContractRecord,
     RuleGenerationContextRecord,
     RuleGenerationJobRecord,
@@ -19,10 +31,276 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _skill_failure_detail(exc: SkillExecutionError) -> dict[str, Any]:
+    message = str(exc)
+    payload_start = message.find("{")
+    if payload_start >= 0:
+        try:
+            payload = json.loads(message[payload_start:])
+            if isinstance(payload, dict):
+                return payload
+        except json.JSONDecodeError:
+            pass
+    return {"success": False, "error": message}
+
+
 class RuleAssetEngineeringRevisionError(ValueError):
     def __init__(self, message: str, *, validation: dict[str, Any] | None = None) -> None:
         super().__init__(message)
         self.validation = validation or {}
+
+
+def _execute_revision_skill(
+    skill_name: str,
+    params: dict[str, Any],
+    *,
+    stage: str,
+) -> dict[str, Any]:
+    try:
+        return execute_skill(skill_name, params)
+    except SkillExecutionError as exc:
+        raise RuleAssetEngineeringRevisionError(
+            f"engineering revision {stage} validation failed",
+            validation={stage: _skill_failure_detail(exc)},
+        ) from exc
+
+
+def _active_asset_equivalence(
+    *,
+    change_policies: list[dict[str, Any]],
+    event_rules: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Prove that a revision introduces no ungrounded policy or rule behavior."""
+
+    if not change_policies or not event_rules:
+        return {
+            "success": False,
+            "change_policy_count": 0,
+            "event_rule_count": 0,
+        }
+    matched_policy_ids: list[str] = []
+    evidenced_policy_types: list[str] = []
+    matched_rule_ids: list[str] = []
+    adapted_rule_names: list[str] = []
+
+    def policy_behavior(value: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: item
+            for key, item in value.items()
+            if key not in {"confidence", "reason"}
+        }
+
+    def is_evidenced_threshold_policy(value: dict[str, Any]) -> bool:
+        references = dict(value.get("threshold_references") or {})
+        return (
+            str(value.get("source") or "") == "structured_threshold_reference"
+            and bool(references)
+            and not bool(value.get("allow_static_threshold_fallback"))
+            and not dict(value.get("thresholds") or {})
+            and all(
+                isinstance(reference, dict)
+                and str(reference.get("source") or "")
+                in {"structured_reference", "cross_record_set_reference"}
+                and bool(str(reference.get("source_field_name") or "").strip())
+                for reference in references.values()
+            )
+        )
+
+    def condition_is_contract_adaptation(
+        active: dict[str, Any],
+        candidate: dict[str, Any],
+    ) -> bool:
+        if str(active.get("kind") or "") != str(candidate.get("kind") or ""):
+            return False
+        for key in ("entity_types", "observation_types"):
+            if list(active.get(key) or []) != list(candidate.get(key) or []):
+                return False
+        kind = str(candidate.get("kind") or "")
+        if kind == "transition":
+            return all(
+                active.get(key) == candidate.get(key)
+                for key in ("from_group", "to_group", "allow_initial_target")
+            ) and len(active.get("fields") or []) == len(candidate.get("fields") or [])
+        if kind not in {"threshold_field_lte", "threshold_field_low_recovery"}:
+            return False
+        if str(active.get("reference_field") or "") != str(
+            candidate.get("reference_field") or ""
+        ):
+            if not (
+                kind == "threshold_field_low_recovery"
+                and str(active.get("threshold_role") or "") == "critical_low"
+                and str(candidate.get("threshold_role") or "") == "low"
+                and str(active.get("reference_field") or "")
+                in set(candidate.get("fallback_reference_fields") or [])
+            ):
+                return False
+        elif str(active.get("threshold_role") or "") != str(
+            candidate.get("threshold_role") or ""
+        ):
+            return False
+        if len(active.get("fields") or []) != len(candidate.get("fields") or []):
+            return False
+        if float(candidate.get("hysteresis") or 0) < float(
+            active.get("hysteresis") or 0
+        ):
+            return False
+        active_exclusions = {
+            str(item.get("code") or "")
+            for item in dict(active.get("applicability") or {}).get(
+                "exclude_when", []
+            )
+            if isinstance(item, dict)
+        }
+        candidate_exclusions = {
+            str(item.get("code") or "")
+            for item in dict(candidate.get("applicability") or {}).get(
+                "exclude_when", []
+            )
+            if isinstance(item, dict)
+        }
+        return active_exclusions.issubset(candidate_exclusions)
+
+    def rule_is_contract_adaptation(
+        root: EventRuleRecord,
+        active: EventRuleVersionRecord,
+        candidate: dict[str, Any],
+    ) -> bool:
+        if any(
+            (
+                str(root.name or "") != str(candidate.get("name") or ""),
+                str(active.event_type or "")
+                != str(candidate.get("event_type") or ""),
+                str(active.severity or "") != str(candidate.get("severity") or ""),
+                str(active.event_class or "")
+                != str(candidate.get("event_class") or ""),
+                str(active.evaluation_scope or "")
+                != str(candidate.get("evaluation_scope") or ""),
+                bool(active.exclusive) is not bool(candidate.get("exclusive")),
+                int(candidate.get("priority") or 0) < int(active.priority or 0),
+            )
+        ):
+            return False
+        active_recovery = dict(active.recovery_json or {})
+        candidate_recovery = dict(candidate.get("recovery") or {})
+        if not set(active_recovery.get("resolves") or []).issubset(
+            set(candidate_recovery.get("resolves") or [])
+        ):
+            return False
+        active_keys = set(active.correlation_key_json or [])
+        candidate_keys = set(candidate.get("correlation_keys") or [])
+        core_keys = {"device_id", "entity_type", "entity_key"}
+        if not core_keys.issubset(active_keys) or not core_keys.issubset(
+            candidate_keys
+        ):
+            return False
+        return condition_is_contract_adaptation(
+            dict(active.condition_json or {}),
+            dict(candidate.get("condition") or {}),
+        )
+
+    with get_db_session() as db:
+        active_policies = (
+            db.query(ChangePolicyVersionRecord)
+            .filter(ChangePolicyVersionRecord.status == "active")
+            .all()
+        )
+        for policy in change_policies:
+            match = next(
+                (
+                    version
+                    for version in active_policies
+                    if str(version.observation_type or "")
+                    == str(policy.get("observation_type") or "")
+                    and str(version.semantic_type or "")
+                    == str(policy.get("semantic_type") or "")
+                    and str(version.compare_mode or "")
+                    == str(policy.get("compare_mode") or "")
+                    and policy_behavior(dict(version.policy_json or {}))
+                    == policy_behavior(policy)
+                ),
+                None,
+            )
+            if match is None:
+                if is_evidenced_threshold_policy(policy):
+                    evidenced_policy_types.append(
+                        str(policy.get("observation_type") or "")
+                    )
+                    continue
+                return {
+                    "success": False,
+                    "change_policy_count": (
+                        len(matched_policy_ids) + len(evidenced_policy_types)
+                    ),
+                    "event_rule_count": 0,
+                    "unmatched_asset": "change_policy",
+                    "observation_type": policy.get("observation_type"),
+                }
+            matched_policy_ids.append(str(match.id))
+
+        active_rule_rows = (
+            db.query(EventRuleRecord, EventRuleVersionRecord)
+            .join(
+                EventRuleVersionRecord,
+                EventRuleVersionRecord.rule_id == EventRuleRecord.id,
+            )
+            .filter(EventRuleVersionRecord.status == "active")
+            .all()
+        )
+        for rule in event_rules:
+            match = next(
+                (
+                    version
+                    for root, version in active_rule_rows
+                    if str(root.name or "") == str(rule.get("name") or "")
+                    and str(version.event_type or "")
+                    == str(rule.get("event_type") or "")
+                    and str(version.severity or "")
+                    == str(rule.get("severity") or "")
+                    and dict(version.condition_json or {})
+                    == dict(rule.get("condition") or {})
+                    and int(version.priority or 0) == int(rule.get("priority") or 0)
+                    and bool(version.exclusive) is bool(rule.get("exclusive"))
+                    and str(version.event_class or "")
+                    == str(rule.get("event_class") or "")
+                    and str(version.evaluation_scope or "")
+                    == str(rule.get("evaluation_scope") or "")
+                    and dict(version.recovery_json or {})
+                    == dict(rule.get("recovery") or {})
+                    and list(version.correlation_key_json or [])
+                    == list(rule.get("correlation_keys") or [])
+                ),
+                None,
+            )
+            if match is None:
+                adapted_match = next(
+                    (
+                        version
+                        for root, version in active_rule_rows
+                        if rule_is_contract_adaptation(root, version, rule)
+                    ),
+                    None,
+                )
+                if adapted_match is not None:
+                    match = adapted_match
+                    adapted_rule_names.append(str(rule.get("name") or ""))
+            if match is None:
+                return {
+                    "success": False,
+                    "change_policy_count": len(matched_policy_ids),
+                    "event_rule_count": len(matched_rule_ids),
+                    "unmatched_asset": "event_rule",
+                    "rule_name": rule.get("name"),
+                }
+            matched_rule_ids.append(str(match.id))
+    return {
+        "success": True,
+        "change_policy_count": len(matched_policy_ids) + len(evidenced_policy_types),
+        "event_rule_count": len(matched_rule_ids),
+        "active_change_policy_version_ids": matched_policy_ids,
+        "evidenced_change_policy_observation_types": evidenced_policy_types,
+        "active_event_rule_version_ids": matched_rule_ids,
+        "contract_adapted_event_rule_names": adapted_rule_names,
+    }
 
 
 class RuleAssetEngineeringRevisionService:
@@ -93,13 +371,15 @@ class RuleAssetEngineeringRevisionService:
         *,
         decision: str,
         actor: str,
-        reason: str,
+        reason: str | None = None,
+        allow_same_actor: bool = False,
     ) -> dict[str, Any]:
         normalized = str(decision or "").strip().lower()
         if normalized not in {"accepted", "revision_requested"}:
             raise ValueError("engineering review decision must be accepted or revision_requested")
-        if len(str(reason or "").strip()) < 5:
-            raise ValueError("engineering review reason must contain at least 5 characters")
+        normalized_reason = str(reason or "").strip()
+        if normalized == "revision_requested" and len(normalized_reason) < 5:
+            raise ValueError("engineering revision request must contain at least 5 characters")
         with get_db_session() as db:
             bundle = (
                 db.query(RuleGenerationJobRecord)
@@ -114,14 +394,65 @@ class RuleAssetEngineeringRevisionService:
                 raise KeyError("rule asset bundle not found")
             if bundle.status != "pending_approval":
                 raise ValueError("only a pending approval bundle can be reviewed")
+            child_ids = [
+                str(item)
+                for item in dict(bundle.payload_json or {}).get("child_job_ids") or []
+                if str(item)
+            ]
+            child_creators = (
+                [
+                    row.created_by
+                    for row in (
+                        db.query(RuleGenerationJobRecord)
+                        .filter(RuleGenerationJobRecord.id.in_(child_ids))
+                        .all()
+                    )
+                ]
+                if child_ids
+                else []
+            )
+            same_as_creator = actor_matches_any(
+                actor,
+                [bundle.created_by, *child_creators],
+            )
+            if same_as_creator and not allow_same_actor:
+                raise ValueError(
+                    "engineering review requires a reviewer different from "
+                    "the candidate creator"
+                )
             report = dict(bundle.validation_report_json or {})
+            context_gate = dict(report.get("context_gate") or {})
+            if context_gate.get("mode") == "immutable_dataset_context":
+                context_id = str(context_gate.get("context_id") or "").strip()
+                context = (
+                    db.query(RuleGenerationContextRecord)
+                    .filter(RuleGenerationContextRecord.id == context_id)
+                    .with_for_update()
+                    .one_or_none()
+                )
+                if context is None:
+                    raise ValueError(
+                        "engineering review immutable context is unavailable"
+                    )
+                require_current_rule_generation_context(
+                    db,
+                    context,
+                    expected_context_digest=str(
+                        context_gate.get("context_digest")
+                        or (bundle.payload_json or {}).get("context_digest")
+                        or ""
+                    ),
+                )
             governance = dict(report.get("governance") or {})
             history = list(governance.get("engineering_review_history") or [])
             review = {
                 "decision": normalized,
                 "actor": actor,
-                "reason": str(reason).strip(),
+                "reason": normalized_reason,
                 "reviewed_at": _now_iso(),
+                "separation_of_duties_override": bool(
+                    same_as_creator and allow_same_actor
+                ),
                 "base_digest": bundle.asset_digest,
             }
             history.append(review)
@@ -150,10 +481,14 @@ class RuleAssetEngineeringRevisionService:
             raise ValueError("engineering revision idempotency_key is required")
         if not isinstance(contract, dict) or not contract:
             raise ValueError("engineering revision requires one ObservationContract")
-        if not change_policies or not all(isinstance(item, dict) for item in change_policies):
-            raise ValueError("engineering revision requires one or more ChangePolicies")
-        if not event_rules or not all(isinstance(item, dict) for item in event_rules):
-            raise ValueError("engineering revision requires one or more EventRules")
+        if not isinstance(change_policies, list) or not all(
+            isinstance(item, dict) for item in change_policies
+        ):
+            raise ValueError("engineering revision ChangePolicies must be a list")
+        if not isinstance(event_rules, list) or not all(
+            isinstance(item, dict) for item in event_rules
+        ):
+            raise ValueError("engineering revision EventRules must be a list")
 
         source_ref = f"engineering_revision:{bundle_id}:{str(idempotency_key).strip()}"
         existing = self.repository.find_job(job_type="RULE_ASSET_BUNDLE", source_ref=source_ref)
@@ -176,14 +511,17 @@ class RuleAssetEngineeringRevisionService:
             context = db.get(RuleGenerationContextRecord, context_id) if context_id else None
             if context is None:
                 raise ValueError("engineering revision requires the original immutable context")
-            privacy = dict(context.privacy_report_json or {})
-            if (
-                not context.offline_job_id
-                or privacy.get("scope_type") != "offline_period_authoritative_runs"
-                or privacy.get("success") is not True
-                or privacy.get("raw_cli_included") is not False
-            ):
-                raise ValueError("engineering revision immutable context privacy gate failed")
+            parent_report = dict(parent.validation_report_json or {})
+            parent_context_gate = dict(parent_report.get("context_gate") or {})
+            source_integrity = require_current_rule_generation_context(
+                db,
+                context,
+                expected_context_digest=str(
+                    parent_context_gate.get("context_digest")
+                    or payload.get("context_digest")
+                    or ""
+                ),
+            )
             child_ids = [str(item) for item in payload.get("child_job_ids") or []]
             contract_child = (
                 db.query(RuleGenerationJobRecord)
@@ -214,9 +552,21 @@ class RuleAssetEngineeringRevisionService:
                 "schema_id": contract_record.schema_id,
                 "schema_ref": contract_record.schema_ref,
                 "source_template_id": contract_record.source_template_id,
+                "source_integrity": source_integrity,
+                "observation_type": payload.get("observation_type"),
+                "rule_asset_requirements": normalize_rule_asset_requirements(
+                    context_payload.get("rule_asset_requirements")
+                    or payload.get("rule_asset_requirements")
+                ),
             }
 
-        contract_result = execute_skill(
+        requirements = detached["rule_asset_requirements"]
+        if requirements["requires_change_policy"] and not change_policies:
+            raise ValueError("engineering revision requires one or more ChangePolicies")
+        if requirements["requires_event_rule_assets"] and not event_rules:
+            raise ValueError("engineering revision requires one or more EventRules")
+
+        contract_result = _execute_revision_skill(
             "observation-contract-generator",
             {
                 "mode": "validate",
@@ -228,10 +578,13 @@ class RuleAssetEngineeringRevisionService:
                 "proposal": contract,
                 "generation_provider": "manual",
                 "agent_loop": False,
+                "require_policy_targets": requirements["requires_change_policy"],
+                "allow_semantic_overrides": True,
             },
+            stage="contract",
         )
         policy_results = [
-            execute_skill(
+            _execute_revision_skill(
                 "change-policy-generator",
                 {
                     "mode": "validate",
@@ -240,34 +593,89 @@ class RuleAssetEngineeringRevisionService:
                     "generation_provider": "manual",
                     "agent_loop": False,
                 },
+                stage=f"change_policy[{index}]",
             )
-            for policy in change_policies
+            for index, policy in enumerate(change_policies)
         ]
-        event_validation = execute_skill(
-            "event-rule-validator",
-            {"mode": "candidates", "candidate_rules": event_rules, "agent_loop": False},
+        event_validation = (
+            _execute_revision_skill(
+                "event-rule-validator",
+                {
+                    "mode": "candidates",
+                    "candidate_rules": event_rules,
+                    "agent_loop": False,
+                },
+                stage="event_rules",
+            )
+            if event_rules
+            else {
+                "success": True,
+                "rules": [],
+                "errors": [],
+                "skipped": True,
+                "reason": "asset_requirement_profile_does_not_require_event_rules",
+            }
         )
-        replay = execute_skill(
-            "event-rule-replay",
-            {
-                "candidate_rules": event_rules,
-                "limit": 1000,
-                "run_ids": detached["context"].get("replay_run_ids") or [],
-                "include_active_collisions": True,
-            },
+        replay = (
+            _execute_revision_skill(
+                "event-rule-replay",
+                {
+                    "candidate_rules": event_rules,
+                    "candidate_contract": (
+                        contract_result.get("proposal") or contract
+                    ),
+                    "limit": 1000,
+                    "run_ids": detached["context"].get("replay_run_ids") or [],
+                    "include_active_collisions": True,
+                },
+                stage="historical_replay",
+            )
+            if requirements["requires_historical_replay"]
+            else {
+                "success": True,
+                "changes": [],
+                "errors": [],
+                "skipped": True,
+                "reason": "asset_requirement_profile_does_not_require_historical_replay",
+            }
+        )
+        active_equivalence = _active_asset_equivalence(
+            change_policies=[
+                dict(result.get("policy") or policy)
+                for policy, result in zip(change_policies, policy_results)
+            ],
+            event_rules=event_rules,
+        )
+        if active_equivalence.get("success") is True:
+            replay = {
+                **replay,
+                "active_asset_equivalence": active_equivalence,
+            }
+        context_gate = {
+            "success": True,
+            "mode": "immutable_dataset_context",
+            "context_id": detached["context_id"],
+            "context_digest": detached["context_digest"],
+            "replay_run_ids": detached["context"].get("replay_run_ids") or [],
+            "source_integrity": detached["source_integrity"],
+        }
+        replay_gate = evaluate_requirement_replay_gate(
+            requirements=requirements,
+            replay=replay,
+            context_gate=context_gate,
         )
         validation = {
             "contract": contract_result,
             "change_policies": policy_results,
             "event_rules": event_validation,
             "historical_replay": replay,
+            "replay_gate": replay_gate,
         }
         validation_success = (
             contract_result.get("success") is True
             and all(item.get("success") is True for item in policy_results)
             and event_validation.get("success") is True
-            and replay.get("success") is True
-            and int(replay.get("collision_count") or 0) == 0
+            and replay_gate.get("success") is True
         )
         if not validation_success:
             raise RuleAssetEngineeringRevisionError(
@@ -275,7 +683,18 @@ class RuleAssetEngineeringRevisionService:
                 validation=validation,
             )
 
-        observation_type = str(change_policies[0].get("observation_type") or "")
+        contract_proposal = contract_result.get("proposal") or contract
+        contract_observation_types = [
+            str(semantic.get("observation_type") or "").strip()
+            for semantic in dict(contract_proposal.get("state_semantics") or {}).values()
+            if isinstance(semantic, dict)
+            and str(semantic.get("observation_type") or "").strip()
+        ]
+        observation_type = str(
+            (change_policies[0].get("observation_type") if change_policies else None)
+            or detached.get("observation_type")
+            or (contract_observation_types[0] if contract_observation_types else "")
+        )
         persisted = execute_skill(
             "rule-asset-persister",
             {

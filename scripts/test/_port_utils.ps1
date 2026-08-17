@@ -8,6 +8,8 @@ function Write-ColorOutput {
     Write-Host $Text -ForegroundColor $Color
 }
 
+. (Join-Path (Split-Path $PSScriptRoot -Parent) "_docker_utils.ps1")
+
 function Get-ListeningPidsOnPort {
     param([int]$Port)
     $pids = New-Object System.Collections.Generic.HashSet[int]
@@ -191,34 +193,52 @@ function Wait-ServicesReady {
 }
 
 function Stop-DockerAppContainers {
+    param(
+        [switch]$SkipAvailabilityCheck,
+        [int]$TimeoutSec = 10
+    )
+
+    if (-not $SkipAvailabilityCheck -and -not (Test-DockerAvailable -TimeoutSec ([Math]::Min($TimeoutSec, 6)) -Quiet)) {
+        Write-ColorOutput "  [WARN] Docker is unavailable; skipped Docker app-container cleanup" "Yellow"
+        return $false
+    }
+
     $appContainers = @("netops-react", "netops-django", "netops-fastapi")
     foreach ($name in $appContainers) {
-        docker stop $name 2>$null | Out-Null
-        docker rm $name 2>$null | Out-Null
-        if ($LASTEXITCODE -eq 0) {
+        $stopResult = Invoke-DockerCommand -Arguments @("stop", $name) -TimeoutSec $TimeoutSec -Quiet
+        if ($stopResult.TimedOut) {
+            Write-ColorOutput "  [WARN] Docker app-container cleanup timed out" "Yellow"
+            return $false
+        }
+        $removeResult = Invoke-DockerCommand -Arguments @("rm", $name) -TimeoutSec $TimeoutSec -Quiet
+        if ($removeResult.TimedOut) {
+            Write-ColorOutput "  [WARN] Docker app-container cleanup timed out" "Yellow"
+            return $false
+        }
+        if ($removeResult.Succeeded) {
             Write-ColorOutput "    Removed Docker app container: $name" "Gray"
         }
     }
     $fullCompose = Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) "deployment\docker-compose.yml"
     if (Test-Path $fullCompose) {
-        docker compose -f $fullCompose stop react django fastapi 2>$null | Out-Null
+        $composeResult = Invoke-DockerCommand -Arguments @("compose", "-f", $fullCompose, "stop", "react", "django", "fastapi") -TimeoutSec ([Math]::Max($TimeoutSec, 20)) -Quiet
+        if ($composeResult.TimedOut) {
+            Write-ColorOutput "  [WARN] Docker app-service cleanup timed out" "Yellow"
+            return $false
+        }
     }
+    return $true
 }
 
 function Ensure-DockerReady {
-    param([string]$ComposeFile)
-    $contexts = @("desktop-linux", "default")
-    foreach ($ctx in $contexts) {
-        docker context use $ctx 2>$null | Out-Null
-        docker info 2>$null | Out-Null
-        if ($LASTEXITCODE -eq 0) {
-            Write-ColorOutput "  [OK] Docker context: $ctx" "Green"
-            Stop-DockerAppContainers
-            docker compose -f $ComposeFile up -d --remove-orphans 2>&1 | ForEach-Object { Write-Host "  $_" }
-            return ($LASTEXITCODE -eq 0)
-        }
+    param(
+        [string]$ComposeFile,
+        [switch]$SkipAvailabilityCheck
+    )
+    if (-not $SkipAvailabilityCheck -and -not (Test-DockerAvailable -TimeoutSec 8)) {
+        return $false
     }
-    return $false
+    return (Invoke-DockerComposeUp -ComposeFile $ComposeFile -Label "middleware")
 }
 
 function Wait-HttpOk {
@@ -240,27 +260,19 @@ function Wait-HttpOk {
     return $false
 }
 
-function Test-DockerAvailable {
-    foreach ($ctx in @("desktop-linux", "default")) {
-        docker context use $ctx 2>$null | Out-Null
-        docker info 2>$null | Out-Null
-        if ($LASTEXITCODE -eq 0) { return $true }
-    }
-    return $false
-}
-
 function Invoke-DockerComposeUp {
     param(
         [string]$ComposeFile,
-        [string]$Label = "compose"
+        [string]$Label = "compose",
+        [int]$TimeoutSec = 120
     )
     if (-not (Test-Path $ComposeFile)) {
         Write-ColorOutput "  [SKIP] $Label compose not found: $ComposeFile" "Gray"
         return $false
     }
     Write-ColorOutput "  Starting $Label..." "Gray"
-    docker compose -f $ComposeFile up -d --remove-orphans 2>&1 | ForEach-Object { Write-Host "    $_" }
-    if ($LASTEXITCODE -ne 0) {
+    $result = Invoke-DockerCommand -Arguments @("compose", "-f", $ComposeFile, "up", "-d", "--remove-orphans") -TimeoutSec $TimeoutSec -ShowOutput -ProgressLabel "Starting $Label"
+    if (-not $result.Succeeded) {
         Write-ColorOutput "  [ERROR] $Label docker compose up failed" "Red"
         return $false
     }
@@ -270,15 +282,20 @@ function Invoke-DockerComposeUp {
 function Invoke-DockerComposeDown {
     param(
         [string]$ComposeFile,
-        [string]$Label = "compose"
+        [string]$Label = "compose",
+        [int]$TimeoutSec = 45
     )
     if (-not (Test-Path $ComposeFile)) {
         return $true
     }
-    docker compose -f $ComposeFile down 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) {
+    $result = Invoke-DockerCommand -Arguments @("compose", "-f", $ComposeFile, "down") -TimeoutSec $TimeoutSec -Quiet
+    if ($result.Succeeded) {
         Write-ColorOutput "  [OK] $Label stopped" "Green"
         return $true
+    }
+    if ($result.TimedOut) {
+        Write-ColorOutput "  [WARN] $Label stop timed out after ${TimeoutSec}s" "Yellow"
+        return $false
     }
     Write-ColorOutput "  [WARN] $Label docker compose down failed" "Yellow"
     return $false
@@ -307,8 +324,13 @@ function Get-DockerContainersRunning {
     param([string[]]$Names)
     $running = @()
     foreach ($name in $Names) {
-        $status = docker ps --filter "name=$name" --filter "status=running" --format "{{.Names}}" 2>$null
-        if ($status -eq $name) { $running += $name }
+        $result = Invoke-DockerCommand -Arguments @("ps", "--filter", "name=$name", "--filter", "status=running", "--format", "{{.Names}}") -TimeoutSec 6 -Quiet
+        if ($result.TimedOut) {
+            break
+        }
+        if ($result.Succeeded -and $result.StdOut.Trim() -eq $name) {
+            $running += $name
+        }
     }
     return $running
 }

@@ -1,0 +1,53 @@
+version: 2
+
+mappings:
+  - id: h3c-comware
+    priority: 200
+    match:
+      vendors: [H3C, HP]
+      families: [Comware, Comware5, Comware7]
+    platforms: [hp_comware]
+
+  - id: h3c-generic
+    priority: 100
+    match:
+      vendors: [H3C]
+    platforms: [hp_comware]
+
+  - id: huawei-vrp
+    priority: 100
+    match:
+      vendors: [Huawei]
+    platforms: [huawei_vrp]
+
+  - id: cisco-nxos
+    priority: 200
+    match:
+      vendors: [Cisco]
+      families: [NXOS, NXOS9K, Nexus]
+      family_patterns: ['^(?:NXOS|NEXUS)']
+      model_patterns: ['^(?:N[3579]K|NEXUS)']
+    platforms: [cisco_nxos]
+
+  - id: cisco-ios
+    priority: 200
+    match:
+      vendors: [Cisco]
+      families: [IOS, IOS-XE, IOSXE]
+      family_patterns: ['^IOS(?:-|$)']
+      model_patterns: ['^(?:WS-C|C(?:8|9)\d{3})']
+    platforms: [cisco_ios]
+
+  - id: cisco-ios-xr
+    priority: 200
+    match:
+      vendors: [Cisco]
+      families: [IOS-XR, IOSXR, XR]
+    platforms: [cisco_xr]
+
+  - id: cisco-asa
+    priority: 200
+    match:
+      vendors: [Cisco]
+      families: [ASA, FTD]
+    platforms: [cisco_asa]

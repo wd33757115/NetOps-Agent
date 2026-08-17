@@ -22,6 +22,8 @@ def main() -> int:
     result = compile_rule_targets(
         contract=dict(params.get("contract") or {}),
         records=list(params.get("records") or []),
+        record_groups=list(params.get("record_groups") or []) or None,
+        rule_asset_requirements=dict(params.get("rule_asset_requirements") or {}),
     )
     if not result["success"]:
         result["error"] = "; ".join(

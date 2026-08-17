@@ -3,7 +3,10 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from src.core.parser import tasks as parser_tasks
-from src.core.rule_control.template_activation import RuleAssetTemplateActivationService
+from src.core.rule_control.template_activation import (
+    RuleAssetTemplateActivationService,
+    build_contract_seed,
+)
 
 
 def _active_template():
@@ -148,6 +151,58 @@ def test_template_activation_seed_compiles_all_targets_after_records_arrive():
     assert result["missing_context"] == ["records"]
 
 
+def test_contract_seed_keeps_sanitized_parser_labels_without_raw_evidence():
+    template = SimpleNamespace(category="interface_optical")
+    validation = {
+        "entity_type": "multi_record",
+        "record_sets": [
+            {
+                "name": "thresholds",
+                "entity_type": "interface_threshold",
+                "primary_keys": ["interface"],
+                "required_fields": ["interface", "rx_power_low"],
+                "optional_fields": [],
+                "validators": {"rx_power_low": {"type": "number"}},
+            }
+        ],
+        "parser_spec": {
+            "version": "2",
+            "record_sets": [
+                {
+                    "name": "thresholds",
+                    "entity": "interface_threshold",
+                    "fields": {
+                        "interface": {
+                            "required": True,
+                            "type": "interface_name",
+                            "source_labels": ["parent interface header"],
+                            "evidence": ["Eth1/1 transceiver output"],
+                        },
+                        "rx_power_low": {
+                            "required": True,
+                            "type": "number",
+                            "source_labels": ["Alarm Low RX power(dBm)"],
+                            "role": "threshold",
+                            "operational_reason": "raw-derived prose is excluded",
+                            "evidence": ["Low -12.0"],
+                        },
+                    },
+                }
+            ],
+        },
+    }
+
+    seed = build_contract_seed(template, validation)
+
+    hints = seed["record_sets"][0]["source_field_hints"]
+    assert hints["rx_power_low"] == {
+        "source_labels": ["Alarm Low RX power(dBm)"],
+        "role": "threshold",
+    }
+    assert "evidence" not in str(hints).casefold()
+    assert "operational_reason" not in str(hints)
+
+
 def test_publish_parser_outbox_seeds_rule_asset_generation(monkeypatch):
     class FakeOutboxRow:
         id = "event-1"
@@ -175,15 +230,6 @@ def test_publish_parser_outbox_seeds_rule_asset_generation(monkeypatch):
             assert template_id == "template-1"
             return {"success": True, "created": True, "job": {"id": "job-1"}}
 
-        def auto_build_context(self, job_id):
-            assert job_id == "job-1"
-            return {
-                "success": True,
-                "context_id": "ctx-1",
-                "ready": True,
-                "quality": {"passed": True, "record_count": 20},
-            }
-
     monkeypatch.setattr(parser_tasks, "ParserTemplateRepository", FakeRepository)
     monkeypatch.setattr(parser_tasks, "ParserOutboxRepository", FakeOutboxRepository)
     monkeypatch.setattr(parser_tasks, "RuleAssetTemplateActivationService", FakeSeedService)
@@ -197,12 +243,7 @@ def test_publish_parser_outbox_seeds_rule_asset_generation(monkeypatch):
             "success": True,
             "created": True,
             "job": {"id": "job-1"},
-            "auto_context": {
-                "success": True,
-                "context_id": "ctx-1",
-                "ready": True,
-                "quality": {"passed": True, "record_count": 20},
-            },
+            "next_action": "attach_offline_asset_source_dataset",
         }
     ]
 
@@ -380,6 +421,9 @@ def test_start_generation_workflow_uses_prepared_context(monkeypatch):
     started = []
 
     class FakeJobRepository:
+        def __init__(self):
+            self.updated = []
+
         def get_job(self, _job_id):
             return {
                 "id": "job-1",
@@ -399,6 +443,10 @@ def test_start_generation_workflow_uses_prepared_context(monkeypatch):
                     },
                 },
             }
+
+        def update_job(self, job_id, **changes):
+            self.updated.append((job_id, changes))
+            return {"id": job_id, **changes}
 
     class FakeWorkflowEngine:
         @staticmethod
@@ -420,7 +468,8 @@ def test_start_generation_workflow_uses_prepared_context(monkeypatch):
             "privacy": {"success": True, "raw_cli_included": False},
         },
     )
-    service = RuleAssetTemplateActivationService(job_repository=FakeJobRepository())
+    job_repository = FakeJobRepository()
+    service = RuleAssetTemplateActivationService(job_repository=job_repository)
 
     result = service.start_generation_workflow(
         "job-1",
@@ -434,8 +483,21 @@ def test_start_generation_workflow_uses_prepared_context(monkeypatch):
     assert started[0][1]["source_ref"] == "parser_template:template-1"
     assert started[0][1]["schema_id"] == "template-1"
     assert started[0][1]["source_template_id"] == "template-1"
+    assert started[0][1]["rule_generation_seed_job_id"] == "job-1"
+    assert started[0][1]["rule_generation_actor"] == "operator"
     assert started[0][2]["source"] == "parser-control-plane"
     assert started[0][2]["user_id"] == "operator"
+    assert job_repository.updated[0][0] == "job-1"
+    persisted_payload = job_repository.updated[0][1]["payload_json"]
+    assert persisted_payload["latest_generation_run_id"] == "workflow-1"
+    assert persisted_payload["latest_generation_context_id"] == "context-1"
+    assert persisted_payload["generation_workflow_runs"] == [
+        {
+            "run_id": "workflow-1",
+            "context_id": "context-1",
+            "context_digest": "digest-1",
+        }
+    ]
 
 
 def test_start_generation_workflow_rejects_context_without_offline_evidence():
@@ -447,3 +509,20 @@ def test_start_generation_workflow_rejects_context_without_offline_evidence():
         assert "immutable offline patrol context_id" in str(exc)
     else:
         raise AssertionError("generation should require immutable offline evidence")
+
+
+def test_multi_entity_check_item_context_is_generation_ready():
+    from src.core.rule_control.template_activation import (
+        _generation_context_missing,
+    )
+
+    missing = _generation_context_missing(
+        {
+            "command": "show system resources",
+            "records": [{"cpu_idle_percent": 95, "memory_used_kb": 1024}],
+            "target_resolution": "resolved_multi_entity",
+        },
+        seed_missing=[],
+    )
+
+    assert missing == []

@@ -68,6 +68,7 @@ steps:
       previous_run_id: ${steps.baseline_ingest.result.run_id}
       current_run_id: ${steps.current_ingest.result.run_id}
       use_state_observations: true
+      allow_partial_normalization: true
       persist: true
 
   - name: event_building

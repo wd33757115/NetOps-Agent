@@ -21,6 +21,7 @@ ROLE_QUEUE_MAP: dict[str, str] = {
     "change-detector": "netops.patrol",
     "event-builder": "netops.patrol",
     "patrol-raw-ingestor": "netops.ai",
+    "patrol-attested-offline-replay": "netops.patrol",
     "report-generator": "netops.patrol",
     "textfsm-generator": "netops.ai",
     "observation-contract-generator": "netops.ai",

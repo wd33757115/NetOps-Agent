@@ -11,19 +11,19 @@ describe('resolveParserControlFocus', () => {
   it('maps every governed asset focus to its canonical workspace', () => {
     expect(resolve('focus=parser-template&id=tpl-1')).toMatchObject({
       workspace: 'inventory',
-      subWorkspace: 'templates',
+      subWorkspace: 'published-assets',
     })
     expect(resolve('focus=observation-contract&id=contract-1')).toMatchObject({
       workspace: 'inventory',
-      subWorkspace: 'observation-contracts',
+      subWorkspace: 'published-assets',
     })
     expect(resolve('focus=change-policy&id=policy-1')).toMatchObject({
       workspace: 'inventory',
-      subWorkspace: 'change-policies',
+      subWorkspace: 'published-assets',
     })
     expect(resolve('focus=event-rule&id=rule-1')).toMatchObject({
       workspace: 'inventory',
-      subWorkspace: 'event-rules',
+      subWorkspace: 'published-assets',
     })
   })
 
@@ -31,19 +31,19 @@ describe('resolveParserControlFocus', () => {
     expect(resolve('focus=event-rule&id=rule-1&workspace=runtime&subtab=runtime-assets'))
       .toMatchObject({
         workspace: 'inventory',
-        subWorkspace: 'event-rules',
+        subWorkspace: 'published-assets',
         fallbackReason: 'workspace_mismatch',
       })
   })
 
   it('reports unsupported focus, missing id and invalid subtab fallbacks', () => {
     expect(resolve('focus=unknown&id=x')).toMatchObject({
-      workspace: 'inbox',
+      workspace: 'production',
       fallbackReason: 'unsupported_focus',
     })
     expect(resolve('focus=parser-template')).toMatchObject({
       workspace: 'inventory',
-      subWorkspace: 'templates',
+      subWorkspace: 'published-assets',
       fallbackReason: 'missing_focus_id',
     })
     expect(resolve('workspace=audit&subtab=templates')).toMatchObject({
@@ -69,7 +69,16 @@ describe('hasFocusMatched', () => {
 
 describe('parser workspace navigation', () => {
   it('keeps offline evidence ingestion inside rule asset production', () => {
-    expect(parserWorkspaceTabs.production).toEqual(['source-jobs'])
+    expect(parserWorkspaceTabs.production).toEqual([
+      'asset-production-units',
+      'source-jobs',
+      'catalog-management',
+      'assessment-policies',
+    ])
+    expect(resolve('')).toMatchObject({
+      workspace: 'production',
+      subWorkspace: null,
+    })
     expect(resolve('workspace=production&subtab=source-jobs')).toMatchObject({
       workspace: 'production',
       subWorkspace: 'source-jobs',
@@ -80,6 +89,48 @@ describe('parser workspace navigation', () => {
     expect(parserWorkspaceTabs.generation).toContain('rule-gaps')
     expect(parserWorkspaceTabs.generation).toContain('agent-loop-attempts')
     expect(parserWorkspaceTabs.release).toContain('replay-reports')
-    expect(parserWorkspaceTabs.audit).toEqual(['approval-audit'])
+    expect(parserWorkspaceTabs.inventory).toEqual(['published-assets'])
+    expect(parserWorkspaceTabs.runtime).toEqual(['coverage-backfill', 'rule-gaps'])
+    expect(parserWorkspaceTabs.audit).toEqual(['audit-log'])
+  })
+
+  it('maps legacy technical tabs into the new product pages', () => {
+    expect(resolve('workspace=inventory&subtab=event-rules')).toMatchObject({
+      workspace: 'inventory',
+      subWorkspace: 'published-assets',
+    })
+    expect(resolve('workspace=runtime&subtab=asset-chain')).toMatchObject({
+      workspace: 'runtime',
+      subWorkspace: 'coverage-backfill',
+    })
+    expect(resolve('workspace=generation&subtab=rule-gaps')).toMatchObject({
+      workspace: 'runtime',
+      subWorkspace: 'rule-gaps',
+      legacyRedirect: true,
+    })
+    expect(resolve('workspace=audit&subtab=approval-audit')).toMatchObject({
+      workspace: 'audit',
+      subWorkspace: 'audit-log',
+    })
+    expect(resolve('workspace=generation&subtab=rule-generation&command=display+power'))
+      .toMatchObject({
+        workspace: 'production',
+        subWorkspace: 'asset-production-units',
+        legacyRedirect: true,
+        productAction: 'rule-generation',
+        focusHint: 'display power',
+      })
+    expect(resolve('workspace=release&subtab=asset-bundles')).toMatchObject({
+      workspace: 'production',
+      subWorkspace: 'asset-production-units',
+      legacyRedirect: true,
+      productAction: 'bundle-review',
+    })
+    expect(resolve('workspace=inbox&subtab=backfills')).toMatchObject({
+      workspace: 'runtime',
+      subWorkspace: 'coverage-backfill',
+      legacyRedirect: true,
+      productAction: 'backfill',
+    })
   })
 })

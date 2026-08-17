@@ -46,6 +46,11 @@ def test_event_rules_can_be_rebuilt_from_immutable_snapshot():
 
     assert rules[0].rule_id == "optical-rx-low-v7"
     assert rules[0].version == 7
+    assert rules[0].condition == {
+        "kind": "threshold_lte",
+        "fields": ["rx_power_dbm"],
+        "lte": -17,
+    }
     assert rules[0].match({"field": "rx_power_dbm", "new": -18.5}) is True
 
 
@@ -128,6 +133,52 @@ def test_threshold_condition_matches_cpu_high():
     )
 
 
+def test_event_rule_dimension_scope_is_part_of_matching_and_identity():
+    condition = {
+        "kind": "threshold",
+        "entity_types": ["device"],
+        "fields": ["cpu_usage"],
+        "gte": 90,
+        "dimensions": {"scope": "system", "window": "5s"},
+    }
+
+    assert condition_matches(
+        condition,
+        {
+            "entity_type": "device",
+            "field": "cpu_usage",
+            "new": 95,
+            "change_type": "initial",
+            "dimensions": {"scope": "system", "window": "5s"},
+        },
+    )
+    assert not condition_matches(
+        condition,
+        {
+            "entity_type": "device",
+            "field": "cpu_usage",
+            "new": 95,
+            "change_type": "initial",
+            "dimensions": {"scope": "system", "window": "5m"},
+        },
+    )
+
+    key_5s = event_rule_logical_key(
+        name="device-cpu.high",
+        event_type="CPUHigh",
+        condition=condition,
+    )
+    key_5m = event_rule_logical_key(
+        name="device-cpu.high",
+        event_type="CPUHigh",
+        condition={
+            **condition,
+            "dimensions": {"scope": "system", "window": "5m"},
+        },
+    )
+    assert key_5s != key_5m
+
+
 def test_dynamic_reference_threshold_and_recovery_conditions():
     base_change = {
         "entity_type": "generic_sensor",
@@ -191,6 +242,44 @@ def test_dynamic_recovery_uses_alarm_reference_when_warning_is_absent():
         )
     )
     assert report["success"] is True
+
+
+def test_field_change_condition_matches_only_real_non_initial_change():
+    condition = {
+        "kind": "field_change",
+        "entity_types": ["device"],
+        "fields": ["software_version"],
+        "allow_initial": False,
+    }
+    base = {
+        "entity_type": "device",
+        "entity_key": "device=one",
+        "field": "software_version",
+    }
+
+    assert condition_matches(
+        condition,
+        {**base, "old": "1.0", "new": "2.0", "change_type": "modified"},
+    )
+    assert not condition_matches(
+        condition,
+        {**base, "old": "1.0", "new": "1.0", "change_type": "modified"},
+    )
+    assert not condition_matches(
+        condition,
+        {**base, "old": None, "new": "2.0", "change_type": "initial"},
+    )
+
+    definition = EventRuleDefinition(
+        rule_id="device-software-version-change",
+        version=1,
+        event_type="DeviceSoftwareVersionChanged",
+        severity="warning",
+        condition=condition,
+    )
+    report = validate_event_rule_definition(definition)
+    assert report["success"] is True
+    assert report["passed_count"] == report["case_count"] == 3
 
 
 def test_threshold_condition_matches_memory_high():

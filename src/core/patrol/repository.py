@@ -19,6 +19,7 @@ from src.core.parser.output_classifier import OUTPUT_STATUSES
 from src.core.patrol.domain import SnapshotRecord
 from src.core.patrol.run_status_projector import PatrolRunStatusProjector
 from src.core.patrol.statuses import (
+    PARSE_STATUSES,
     PatrolCommandStatus,
     derive_command_status,
     validate_command_status,
@@ -29,6 +30,7 @@ from src.infrastructure.db.models import (
     OfflinePatrolJobRecord,
     OfflinePatrolPeriodRecord,
     ParserTemplate,
+    SnapshotParseResult,
     PatrolAnalysisAttemptRecord,
     PatrolCollectionResult,
     PatrolDataset,
@@ -855,6 +857,7 @@ class PatrolCollectionResultRepository(_PatrolRepositoryBase):
         failure_code: str | None = None,
         observed_at: str | datetime | None = None,
         execution_item_id: str | None = None,
+        collection_action_id: str | None = None,
         metadata: dict[str, Any] | None = None,
         owner_token: str | None = None,
     ) -> str:
@@ -921,6 +924,9 @@ class PatrolCollectionResultRepository(_PatrolRepositoryBase):
                 )
                 db.add(row)
             row.inventory_device_id = inventory_device_id or row.inventory_device_id
+            row.collection_action_id = (
+                collection_action_id or row.collection_action_id
+            )
             # Deprecated compatibility projection. New readers use the four dimensions.
             row.status = command_status.execution_status
             row.execution_status = command_status.execution_status
@@ -947,6 +953,8 @@ class PatrolCollectionResultRepository(_PatrolRepositoryBase):
         normalization_status: str,
         fact_status: str | None = None,
         failure_code: str | None = None,
+        authoritative_for_deletion: bool | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         if normalization_status not in {"normalized", "empty", "skipped", "blocked", "failed"}:
             raise ValueError(f"unsupported normalization_status: {normalization_status}")
@@ -971,6 +979,15 @@ class PatrolCollectionResultRepository(_PatrolRepositoryBase):
                 row.fact_status = fact_status
             if failure_code is not None:
                 row.failure_code = failure_code
+            if authoritative_for_deletion is not None:
+                row.authoritative_for_deletion = bool(authoritative_for_deletion)
+                if not authoritative_for_deletion:
+                    row.baseline_eligible = False
+            if metadata:
+                row.metadata_json = {
+                    **dict(row.metadata_json or {}),
+                    **dict(metadata),
+                }
             row.updated_at = _utcnow()
 
     def list_collection_results(self, run_id: str) -> list[dict[str, Any]]:
@@ -1092,6 +1109,9 @@ class PatrolSnapshotRepository(_PatrolRepositoryBase):
         metadata: dict[str, Any] | None = None,
         inventory_device_id: str | None = None,
         execution_item_id: str | None = None,
+        collection_action_id: str | None = None,
+        implementation_version_id: str | None = None,
+        check_item_ids: list[str] | tuple[str, ...] | None = None,
         owner_token: str | None = None,
     ) -> tuple[str, bool]:
         if output_status not in OUTPUT_STATUSES:
@@ -1155,6 +1175,15 @@ class PatrolSnapshotRepository(_PatrolRepositoryBase):
                     inventory_device_id=inventory.id if inventory else inventory_device_id,
                     device_id=device_id,
                     execution_item_id=execution_item_id,
+                    collection_action_id=collection_action_id,
+                    implementation_version_id=implementation_version_id,
+                    check_item_ids_json=sorted(
+                        {
+                            str(item)
+                            for item in check_item_ids or []
+                            if str(item)
+                        }
+                    ),
                     device_name=device_name,
                     management_ip=ip,
                     vendor=vendor,
@@ -1193,6 +1222,97 @@ class PatrolSnapshotRepository(_PatrolRepositoryBase):
                 )
                 RawEvidenceRepository().upsert_cli_command_evidence_row(db, existing)
                 return existing.id, False
+
+    def attach_parser_result(
+        self,
+        *,
+        snapshot_id: str,
+        expected_raw_text_hash: str,
+        parse_status: str,
+        structured_json: Any,
+        parser_name: str | None,
+        parser_version: str | None,
+        metadata: dict[str, Any] | None = None,
+        owner_token: str | None = None,
+    ) -> tuple[str, bool]:
+        """Attach one derived Parser result while keeping raw evidence immutable."""
+        status = str(parse_status or "").strip()
+        if status not in PARSE_STATUSES - {"not_attempted"}:
+            raise ValueError(f"unsupported Parser attachment status: {status}")
+        with get_db_session() as db:
+            row = (
+                db.query(CommandSnapshot)
+                .filter(CommandSnapshot.id == snapshot_id)
+                .with_for_update()
+                .one_or_none()
+            )
+            if row is None:
+                raise ValueError(f"command snapshot not found: {snapshot_id}")
+            self._require_collection_owner(db, str(row.run_id), owner_token)
+            if str(row.raw_text_hash) != str(expected_raw_text_hash):
+                raise ValueError("raw snapshot hash changed before Parser attachment")
+            if str(row.parse_status) != "not_attempted":
+                same_result = (
+                    str(row.parse_status) == status
+                    and row.structured_json == structured_json
+                    and str(row.parser_template_id or "")
+                    == str(parser_name or "")
+                    and str(row.parser_version or "")
+                    == str(parser_version or "")
+                )
+                if same_result:
+                    return str(row.id), False
+                raise ValueError(
+                    "command snapshot already has a different Parser result"
+                )
+            contract_version = None
+            if parser_name:
+                template = db.get(ParserTemplate, parser_name)
+                contract_version = (
+                    template.contract_version if template else None
+                )
+            row.parse_status = status
+            row.structured_json = structured_json
+            row.parser_template_id = parser_name
+            row.parser_version = parser_version
+            row.contract_version = contract_version
+            row.metadata_json = {
+                **dict(row.metadata_json or {}),
+                **dict(metadata or {}),
+                "parser_attached": True,
+            }
+            if parser_name:
+                parse_result_status = {
+                    "parsed": "success",
+                    "parse_empty": "empty",
+                }.get(status, "failed")
+                existing = (
+                    db.query(SnapshotParseResult)
+                    .filter(
+                        SnapshotParseResult.snapshot_id == row.id,
+                        SnapshotParseResult.template_id == parser_name,
+                    )
+                    .one_or_none()
+                )
+                if existing is None:
+                    db.add(
+                        SnapshotParseResult(
+                            id=str(uuid.uuid4()),
+                            snapshot_id=str(row.id),
+                            template_id=parser_name,
+                            template_version=str(parser_version or ""),
+                            parse_status=parse_result_status,
+                            structured_json=structured_json,
+                            failure_code=(
+                                None
+                                if parse_result_status in {"success", "empty"}
+                                else status
+                            ),
+                            parsed_at=_utcnow(),
+                        )
+                    )
+            db.flush()
+            return str(row.id), True
 
     def list_dataset_snapshots(
         self,

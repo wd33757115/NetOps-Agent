@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import io
 from collections import Counter
 from html import escape
 from pathlib import Path
 from typing import Any
-from zipfile import ZIP_DEFLATED, ZipFile
 
 from src.core.patrol.change_event_repository import ChangeEventRepository
 from src.core.patrol.handlers import DetectChangesHandler
+from src.core.patrol.observation_report import (
+    ReportTable,
+    build_observation_report_tables,
+)
 from src.core.patrol.repository import PatrolRepository
 from src.core.patrol.unstructured_diff import summarize_unstructured_changes
+from src.core.state.repository import StateRepository
 
 
 def build_run_quality_summary(run_id: str) -> dict[str, Any]:
@@ -194,11 +199,24 @@ def render_run_report(
             unstructured,
         )
     written_path = None
+    observations: list[dict[str, Any]] = []
     if output_path:
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         if output_format == "xlsx":
-            _write_xlsx(path, run_id, changes, events, quality, unstructured)
+            observations = StateRepository().list_run_observations(
+                run_id,
+                device_ids=[device_id] if device_id else None,
+            )
+            _write_xlsx(
+                path,
+                run_id,
+                changes,
+                events,
+                quality,
+                unstructured,
+                observations,
+            )
             rendered = ""
         elif output_format == "html":
             path.write_text(rendered, encoding="utf-8")
@@ -216,6 +234,7 @@ def render_run_report(
         "severities": dict(severity_counter),
         "quality": quality,
         "unstructured_comparison": unstructured,
+        "observation_count": len(observations),
         "markdown": markdown,
         "content": rendered,
         "output_path": written_path,
@@ -308,109 +327,427 @@ def _write_xlsx(
     events: list[dict[str, Any]],
     quality: dict[str, Any],
     unstructured: dict[str, Any],
+    observations: list[dict[str, Any]],
 ) -> None:
-    rows = [
-        ["Run ID", run_id],
-        ["Changes", str(len(changes))],
-        ["Events", str(len(events))],
-        ["Collection status", str(quality["collection_status"])],
-        ["Parser ready", f"{quality['parser_ready_rate']:.1%}"],
-        ["Fact ready", f"{quality['fact_ready_rate']:.1%}"],
-        ["Normalization ready", f"{quality['normalization_ready_rate']:.1%}"],
-        ["Missing templates", str(quality["template_missing_count"])],
-        ["Parser backlog", str(quality["parser_backlog_count"])],
-        ["Valid empty outputs", str(quality["valid_empty_count"])],
-        ["Unverified empty outputs", str(quality["empty_unverified_count"])],
-        ["Unsupported commands", str(quality["unsupported_command_count"])],
-        ["Raw hash comparisons", str(quality["raw_hash_diff_count"])],
-        ["Non-structured outputs changed", str(unstructured["changed_output_count"])],
-        ["Non-structured lines added", str(unstructured["added_line_count"])],
-        ["Non-structured lines removed", str(unstructured["removed_line_count"])],
-        [],
-        ["Time", "Severity", "Event Type", "Device", "Entity"],
+    workbook = _build_xlsx_workbook(
+        report_id=run_id,
+        changes=changes,
+        events=events,
+        quality=quality,
+        unstructured=unstructured,
+        observations=observations,
+    )
+    workbook.save(path)
+
+
+def render_patrol_batch_xlsx(
+    patrol_batch_id: str,
+    summary: dict[str, Any],
+) -> bytes:
+    """Render the batch technical appendix from canonical observations."""
+
+    snapshot_run_ids = sorted(
+        {
+            str(row.get("snapshot_run_id") or "").strip()
+            for row in summary.get("runs") or []
+            if str(row.get("snapshot_run_id") or "").strip()
+        }
+    )
+    observations = StateRepository().list_observations_for_runs(snapshot_run_ids)
+    workbook = _build_xlsx_workbook(
+        report_id=patrol_batch_id,
+        changes=list(summary.get("changes") or []),
+        events=list(summary.get("events") or []),
+        quality=dict(summary.get("quality") or {}),
+        unstructured=dict(summary.get("unstructured_comparison") or {}),
+        observations=observations,
+        current_findings=list(summary.get("current_findings") or []),
+        assessment=dict(summary.get("assessment") or {}),
+        device_count=int(summary.get("device_count") or 0),
+        current_state_rule_coverage=dict(
+            summary.get("current_state_rule_coverage") or {}
+        ),
+    )
+    output = io.BytesIO()
+    workbook.save(output)
+    return output.getvalue()
+
+
+def _build_xlsx_workbook(
+    *,
+    report_id: str,
+    changes: list[dict[str, Any]],
+    events: list[dict[str, Any]],
+    quality: dict[str, Any],
+    unstructured: dict[str, Any],
+    observations: list[dict[str, Any]],
+    current_findings: list[dict[str, Any]] | None = None,
+    assessment: dict[str, Any] | None = None,
+    device_count: int | None = None,
+    current_state_rule_coverage: dict[str, Any] | None = None,
+):
+    from openpyxl import Workbook
+    from openpyxl.formatting.rule import ColorScaleRule
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    current_findings = list(current_findings or [])
+    assessment = dict(assessment or {})
+    current_state_rule_coverage = dict(current_state_rule_coverage or {})
+    parser_ready_rate = float(quality.get("parser_ready_rate") or 0.0)
+    fact_ready_rate = float(quality.get("fact_ready_rate", parser_ready_rate) or 0.0)
+    normalization_ready_rate = float(
+        quality.get("normalization_ready_rate", parser_ready_rate) or 0.0
+    )
+    workbook = Workbook()
+    overview = workbook.active
+    overview.title = "总览"
+    title_fill = PatternFill("solid", fgColor="263238")
+    header_fill = PatternFill("solid", fgColor="365F4B")
+    soft_fill = PatternFill("solid", fgColor="E8F0EB")
+    white_font = Font(color="FFFFFF", bold=True)
+    overview["A1"] = "网络巡检结果"
+    overview["A1"].font = Font(color="FFFFFF", bold=True, size=16)
+    overview["A1"].fill = title_fill
+    overview["B1"] = report_id
+    overview["B1"].font = Font(color="FFFFFF")
+    overview["B1"].fill = title_fill
+    overview.column_dimensions["A"].width = 30
+    overview.column_dimensions["B"].width = 28
+    metrics: list[tuple[str, Any]] = [
+        ("巡检批次/运行ID", report_id),
     ]
-    rows.extend(
+    if assessment:
+        metrics.extend(
+            [
+                ("总体结论", assessment.get("status") or "未形成结论"),
+                ("结论可信度", assessment.get("trust") or "未知"),
+                ("判断依据", assessment.get("reason") or ""),
+            ]
+        )
+    if device_count is not None:
+        metrics.append(("设备数", device_count))
+    metrics.extend(
         [
-            str(event.get("occurred_at") or ""),
-            str(event.get("severity") or ""),
-            str(event.get("event_type") or ""),
-            str(event.get("device_id") or ""),
-            str(event.get("entity_key") or ""),
+        ("变化数", len(changes)),
+        ("事件数", len(events)),
+        ("当前异常项", len(current_findings)),
+        ("结构化观测数", len(observations)),
+        ("采集/质量状态", quality.get("collection_status") or quality.get("status") or "unknown"),
+        ("Parser就绪率", parser_ready_rate),
+        ("事实就绪率", fact_ready_rate),
+        ("结构化就绪率", normalization_ready_rate),
+        ("当前状态规则评估率", current_state_rule_coverage.get("evaluation_rate") or 0.0),
+        ("缺少模板", quality.get("template_missing_count") or 0),
+        ("Parser待治理", quality.get("parser_backlog_count") or 0),
+        ("合法空输出", quality.get("valid_empty_count") or 0),
+        ("未确认空输出", quality.get("empty_unverified_count") or 0),
+        ("不支持命令", quality.get("unsupported_command_count") or 0),
+        ("非结构化变更", unstructured.get("changed_output_count") or 0),
+        ("非结构化新增行", unstructured.get("added_line_count") or 0),
+        ("非结构化删除行", unstructured.get("removed_line_count") or 0),
         ]
-        for event in events
     )
-    rows.extend(
-        [
+    for row_index, (label, value) in enumerate(metrics, start=3):
+        overview.cell(row_index, 1, label)
+        overview.cell(row_index, 2, _safe_excel_value(value))
+        overview.cell(row_index, 1).font = Font(bold=True)
+        if row_index % 2:
+            overview.cell(row_index, 1).fill = soft_fill
+            overview.cell(row_index, 2).fill = soft_fill
+        if label.endswith("率"):
+            overview.cell(row_index, 2).number_format = "0.0%"
+    overview.freeze_panes = "A3"
+
+    tables: list[ReportTable] = [
+        ReportTable(
+            key="current_findings",
+            sheet_name="当前风险",
+            headers=(
+                "严重度",
+                "风险类型",
+                "设备ID",
+                "设备",
+                "实体类型",
+                "实体",
+                "字段",
+                "当前值",
+                "单位",
+                "规则ID",
+                "证据ID",
+            ),
+            rows=tuple(
+                (
+                    finding.get("severity"),
+                    finding.get("event_type"),
+                    finding.get("device_id"),
+                    finding.get("device_name"),
+                    finding.get("entity_type"),
+                    finding.get("entity_key"),
+                    finding.get("field"),
+                    finding.get("value"),
+                    finding.get("unit"),
+                    finding.get("rule_id"),
+                    finding.get("evidence_id"),
+                )
+                for finding in current_findings
+            ),
+        ),
+        ReportTable(
+            key="events",
+            sheet_name="事件",
+            headers=("时间", "严重度", "事件类型", "设备ID", "实体", "状态", "证据ID"),
+            rows=tuple(
+                (
+                    event.get("occurred_at"),
+                    event.get("severity"),
+                    event.get("event_type"),
+                    event.get("device_id"),
+                    event.get("entity_key"),
+                    event.get("lifecycle_action") or event.get("status"),
+                    event.get("evidence_id"),
+                )
+                for event in events
+            ),
+        ),
+        ReportTable(
+            key="changes",
+            sheet_name="变化",
+            headers=(
+                "时间",
+                "设备ID",
+                "实体类型",
+                "实体",
+                "标准观测类型",
+                "字段",
+                "原值",
+                "现值",
+                "判定",
+            ),
+            rows=tuple(
+                (
+                    change.get("detected_at") or change.get("observed_at"),
+                    change.get("device_id"),
+                    change.get("entity_type"),
+                    change.get("entity_key"),
+                    change.get("observation_type"),
+                    change.get("field_name") or change.get("field"),
+                    (
+                        change.get("previous_value")
+                        if "previous_value" in change
+                        else change.get("old_value")
+                    ),
+                    (
+                        change.get("current_value")
+                        if "current_value" in change
+                        else change.get("new_value")
+                    ),
+                    change.get("decision") or change.get("change_type"),
+                )
+                for change in changes
+            ),
+        ),
+        *[
+            _enrich_domain_table(
+                table,
+                events=events,
+                changes=changes,
+                current_findings=current_findings,
+                rule_coverage_available=bool(
+                    current_state_rule_coverage.get("available")
+                ),
+            )
+            for table in build_observation_report_tables(observations)
+        ],
+        ReportTable(
+            key="unstructured",
+            sheet_name="非结构化变更",
+            headers=("设备", "命令", "新增行", "删除行", "分类", "安全预览"),
+            rows=tuple(
+                (
+                    item.get("device_name"),
+                    item.get("command"),
+                    item.get("added_line_count") or 0,
+                    item.get("removed_line_count") or 0,
+                    _unstructured_categories(item),
+                    _unstructured_preview(item),
+                )
+                for item in unstructured.get("items") or []
+            ),
+        ),
+    ]
+    for table in tables:
+        _append_report_table(
+            workbook,
+            table,
+            header_fill=header_fill,
+            white_font=white_font,
+            alignment=Alignment(vertical="top", wrap_text=True),
+            get_column_letter=get_column_letter,
+            color_scale_rule=ColorScaleRule,
+        )
+    return workbook
+
+
+def _safe_excel_value(value: Any) -> Any:
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    text = str(value)
+    if len(text) > 32_767:
+        text = text[:32_764] + "..."
+    if text.startswith(("=", "+", "-", "@")):
+        return "'" + text
+    return text
+
+
+def _enrich_domain_table(
+    table: ReportTable,
+    *,
+    events: list[dict[str, Any]],
+    changes: list[dict[str, Any]],
+    current_findings: list[dict[str, Any]],
+    rule_coverage_available: bool,
+) -> ReportTable:
+    if table.key in {"evidence_index", "other_structured"}:
+        return table
+
+    def entity_key(value: Any) -> str:
+        text = str(value or "").strip()
+        return text or "__singleton__"
+
+    event_index: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for event in events:
+        event_index.setdefault(
+            (
+                str(event.get("device_id") or ""),
+                entity_key(event.get("entity_key")),
+            ),
             [],
-            ["Non-structured Output Changes"],
-            ["Device", "Command", "Added", "Removed", "Categories", "Safe Preview"],
+        ).append(event)
+    change_index: Counter[tuple[str, str]] = Counter(
+        (
+            str(change.get("device_id") or ""),
+            entity_key(change.get("entity_key")),
+        )
+        for change in changes
+    )
+    finding_index: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for finding in current_findings:
+        finding_index.setdefault(
+            (
+                str(finding.get("device_id") or ""),
+                entity_key(finding.get("entity_key")),
+            ),
+            [],
+        ).append(finding)
+
+    enriched_rows: list[tuple[Any, ...]] = []
+    for row in table.rows:
+        device_id = str(row[0] or "")
+        entity = entity_key(row[4])
+        related = event_index.get((device_id, entity), [])
+        related_findings = finding_index.get((device_id, entity), [])
+        if related_findings:
+            current_summary = "；".join(
+                f"{finding.get('severity') or '异常'}:"
+                f"{finding.get('event_type') or 'Unknown'}"
+                for finding in related_findings[:3]
+            )
+            if len(related_findings) > 3:
+                current_summary += f"；另{len(related_findings) - 3}项"
+        elif rule_coverage_available:
+            current_summary = "覆盖范围内未发现当前异常项"
+        else:
+            current_summary = "未判定（缺少活动规则覆盖）"
+        if related:
+            labels = []
+            for event in related[:3]:
+                action = str(
+                    event.get("lifecycle_action")
+                    or event.get("event_class")
+                    or ""
+                ).casefold()
+                prefix = "已恢复" if action in {"recovered", "recovery"} else str(
+                    event.get("severity") or "事件"
+                )
+                labels.append(f"{prefix}:{event.get('event_type') or 'Unknown'}")
+            event_summary = "；".join(labels)
+            if len(related) > 3:
+                event_summary += f"；另{len(related) - 3}项"
+        else:
+            event_summary = "未发现关联事件"
+        enriched_rows.append(
+            (
+                *row[:-1],
+                current_summary,
+                event_summary,
+                change_index[(device_id, entity)],
+                row[-1],
+            )
+        )
+    return ReportTable(
+        key=table.key,
+        sheet_name=table.sheet_name,
+        headers=(
+            *table.headers[:-1],
+            "当前判定",
+            "本次事件",
+            "变化数",
+            table.headers[-1],
+        ),
+        rows=tuple(enriched_rows),
+    )
+
+
+def _append_report_table(
+    workbook: Any,
+    table: ReportTable,
+    *,
+    header_fill: Any,
+    white_font: Any,
+    alignment: Any,
+    get_column_letter: Any,
+    color_scale_rule: Any,
+) -> None:
+    worksheet = workbook.create_sheet(table.sheet_name[:31])
+    worksheet.append(list(table.headers))
+    for cell in worksheet[1]:
+        cell.fill = header_fill
+        cell.font = white_font
+        cell.alignment = alignment
+    for row in table.rows:
+        worksheet.append([_safe_excel_value(value) for value in row])
+    worksheet.freeze_panes = "A2"
+    worksheet.auto_filter.ref = worksheet.dimensions
+    worksheet.sheet_view.showGridLines = False
+    for column_index, header in enumerate(table.headers, start=1):
+        values = [
+            str(worksheet.cell(row_index, column_index).value or "")
+            for row_index in range(1, min(worksheet.max_row, 300) + 1)
         ]
-    )
-    rows.extend(
-        [
-            str(item.get("device_name") or ""),
-            str(item.get("command") or ""),
-            str(item.get("added_line_count") or 0),
-            str(item.get("removed_line_count") or 0),
-            _unstructured_categories(item),
-            _unstructured_preview(item),
-        ]
-        for item in unstructured.get("items") or []
-    )
-    sheet_rows = []
-    for index, row in enumerate(rows, start=1):
-        cells = []
-        for col_index, value in enumerate(row, start=1):
-            ref = f"{_xlsx_col(col_index)}{index}"
-            cells.append(f'<c r="{ref}" t="inlineStr"><is><t>{escape(value)}</t></is></c>')
-        sheet_rows.append(f'<row r="{index}">{"".join(cells)}</row>')
-    sheet_xml = (
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-        f"<sheetData>{''.join(sheet_rows)}</sheetData></worksheet>"
-    )
-    with ZipFile(path, "w", ZIP_DEFLATED) as archive:
-        archive.writestr(
-            "[Content_Types].xml",
-            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-            '<Default Extension="rels" '
-            'ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
-            '<Default Extension="xml" ContentType="application/xml"/>'
-            '<Override PartName="/xl/workbook.xml" '
-            'ContentType="application/vnd.openxmlformats-officedocument.'
-            'spreadsheetml.sheet.main+xml"/>'
-            '<Override PartName="/xl/worksheets/sheet1.xml" '
-            'ContentType="application/vnd.openxmlformats-officedocument.'
-            'spreadsheetml.worksheet+xml"/>'
-            "</Types>",
-        )
-        archive.writestr(
-            "_rels/.rels",
-            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            '<Relationship Id="rId1" '
-            'Type="http://schemas.openxmlformats.org/officeDocument/2006/'
-            'relationships/officeDocument" Target="xl/workbook.xml"/>'
-            "</Relationships>",
-        )
-        archive.writestr(
-            "xl/workbook.xml",
-            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
-            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-            '<sheets><sheet name="Patrol Report" sheetId="1" r:id="rId1"/></sheets></workbook>',
-        )
-        archive.writestr(
-            "xl/_rels/workbook.xml.rels",
-            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            '<Relationship Id="rId1" '
-            'Type="http://schemas.openxmlformats.org/officeDocument/2006/'
-            'relationships/worksheet" Target="worksheets/sheet1.xml"/>'
-            "</Relationships>",
-        )
-        archive.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+        width = min(42, max(10, len(str(header)) + 2, *(len(value) + 2 for value in values)))
+        worksheet.column_dimensions[get_column_letter(column_index)].width = width
+        for row_index in range(2, worksheet.max_row + 1):
+            worksheet.cell(row_index, column_index).alignment = alignment
+    if table.key in {"cpu", "memory"} and worksheet.max_row > 1:
+        for column_index, header in enumerate(table.headers, start=1):
+            if "(%)" not in str(header):
+                continue
+            letter = get_column_letter(column_index)
+            worksheet.conditional_formatting.add(
+                f"{letter}2:{letter}{worksheet.max_row}",
+                color_scale_rule(
+                    start_type="num",
+                    start_value=0,
+                    start_color="DDEBDD",
+                    mid_type="num",
+                    mid_value=70,
+                    mid_color="F4E6A1",
+                    end_type="num",
+                    end_value=100,
+                    end_color="E6A19A",
+                ),
+            )
 
 
 def _unstructured_categories(item: dict[str, Any]) -> str:
@@ -426,11 +763,3 @@ def _unstructured_preview(item: dict[str, Any]) -> str:
         f"{row.get('text') or ''}"
         for row in item.get("preview") or []
     )
-
-
-def _xlsx_col(index: int) -> str:
-    result = ""
-    while index:
-        index, remainder = divmod(index - 1, 26)
-        result = chr(65 + remainder) + result
-    return result

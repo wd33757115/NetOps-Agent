@@ -1,12 +1,13 @@
 # SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
 # SPDX-License-Identifier: Apache-2.0
 
-# 单独启动 Celery Worker（Windows 必须 -P solo）
+# Start a standalone Celery worker. Windows requires the solo pool.
 param(
     [string]$ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
     [string]$LogLevel = "info",
     [string]$Queues = "netops.default,netops.firewall,netops.device,netops.health,netops.patrol,netops.ai",
     [string]$Pool = "solo",
+    [string]$NodeName = "netops-standalone@%h",
     [switch]$KeepExisting
 )
 
@@ -34,7 +35,10 @@ if (-not $KeepExisting) {
 Remove-Item Env:DJANGO_SETTINGS_MODULE -ErrorAction SilentlyContinue
 
 Write-Host "Starting Celery worker (pool=$Pool, queues=$Queues) ..." -ForegroundColor Cyan
+$concurrencyArgs = if ($Pool -eq "solo") { @("--concurrency=1") } else { @() }
 & $venvPython -m celery -A src.core.celery_tasks.celery_app worker `
     --loglevel=$LogLevel `
     -P $Pool `
+    @concurrencyArgs `
+    --hostname=$NodeName `
     -Q $Queues

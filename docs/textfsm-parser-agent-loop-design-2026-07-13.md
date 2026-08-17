@@ -1,5 +1,9 @@
 # TextFSM Parser Agent Loop 最佳实现方案
 
+<!-- document-status: superseded -->
+> **历史文档，已被取代。** 本文仅保留 Agent Loop 演进背景，不再作为当前 Parser 生产合同。
+> 当前 Parser 生成架构见 [Simple Parser Pipeline v2](simple-parser-pipeline-v2-2026-07-22.md)。
+
 日期：2026-07-13，实施记录更新于 2026-07-14
 
 ## 1. 结论
