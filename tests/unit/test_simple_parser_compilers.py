@@ -260,7 +260,7 @@ def test_table_compiler_keeps_adjacent_text_columns_semantically_aligned():
 --------------------------------------------------------------------------------
 mgmt0         --                 connected routed    full    1000    --
 Eth1/1        Connect_to_XA-FOTI connected 952       full    1000    1000base-T
-Eth1/11       To_XA-FOTIC-WAN-TA connected 1         full    1000    1000base-T
+Eth1/11       To_LAB-DEVICE-WAN-TA connected 1         full    1000    1000base-T
 Eth1/3        --                 xcvrAbsen routed    auto    auto    --
 --------------------------------------------------------------------------------
 """
@@ -297,7 +297,7 @@ Eth1/3        --                 xcvrAbsen routed    auto    auto    --
         },
         {
             "port": "Eth1/11",
-            "name": "To_XA-FOTIC-WAN-TA",
+            "name": "To_LAB-DEVICE-WAN-TA",
             "status": "connected",
             "vlan": "1",
             "duplex": "full",

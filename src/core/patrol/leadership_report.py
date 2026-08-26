@@ -12,6 +12,8 @@ import re
 import zipfile
 from collections import Counter
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
+from html import escape as html_escape
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -20,7 +22,7 @@ from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Cm, Pt
+from docx.shared import Cm, Pt, RGBColor
 
 from src.core.patrol.unstructured_diff import summarize_unstructured_changes
 from src.skills.official_document.docx_format import (
@@ -1095,11 +1097,50 @@ def _unstructured_evidence_text(
     return f"快照 {snapshot_id or '-'}；{text}"
 
 
-def _full_cli_evidence_items(
-    report: dict[str, Any],
-) -> list[tuple[str, dict[str, Any], dict[str, Any], dict[str, Any]]]:
-    result: list[tuple[str, dict[str, Any], dict[str, Any], dict[str, Any]]] = []
-    seen: set[tuple[str, str, str]] = set()
+def _cli_evidence_snapshot_identity(evidence: dict[str, Any]) -> str:
+    """Return a stable in-memory identity without exposing a digest in the report."""
+    for key in ("snapshot_id", "observation_id"):
+        value = evidence.get(key)
+        if value not in (None, ""):
+            return str(value)
+    raw_text = evidence.get("raw_text")
+    return str(raw_text) if raw_text is not None else ""
+
+
+def _cli_evidence_fact_label(item: dict[str, Any], group_label: str) -> str:
+    if group_label == "结构化变化":
+        event = dict(item.get("event") or {})
+        entity_key = str(item.get("entity_key") or "-")
+        field = str(item.get("field") or "-")
+        fact = f"{entity_key} / {field}"
+        if event.get("event_id"):
+            label = str(event.get("event_label") or event.get("event_type") or "Event")
+            return f"Event {event.get('event_id')}：{label} / {fact}"
+        return f"结构化变化：{fact}"
+
+    categories = "、".join(
+        str(row.get("label") or row.get("name") or "其他变化")
+        for row in item.get("categories") or []
+    )
+    return f"文本对比：{categories or item.get('profile_label') or '未分类'}"
+
+
+def _cli_evidence_related_facts_text(
+    evidence: dict[str, Any], *, limit: int = 5
+) -> str:
+    facts = [str(item) for item in evidence.get("related_facts") or []]
+    if not facts:
+        return ""
+    visible = "；".join(facts[:limit])
+    if len(facts) > limit:
+        return f"{visible}；其余 {len(facts) - limit} 项"
+    return visible
+
+
+def _full_cli_evidence_items(report: dict[str, Any]) -> list[dict[str, Any]]:
+    """Group raw CLI evidence by device, command, and baseline/current snapshot pair."""
+    result: list[dict[str, Any]] = []
+    evidence_by_key: dict[tuple[str, str, str, str], dict[str, Any]] = {}
     groups = (
         (
             "结构化变化",
@@ -1129,34 +1170,162 @@ def _full_cli_evidence_items(
                 and current.get("raw_text") is None
             ):
                 continue
-            key = (
-                str(baseline.get("snapshot_id") or ""),
-                str(current.get("snapshot_id") or ""),
-                str(item.get("command") or ""),
+            device_id = str(
+                item.get("device_id")
+                or baseline.get("device_id")
+                or current.get("device_id")
+                or ""
             )
-            if key in seen:
-                continue
-            seen.add(key)
-            result.append((group_label, item, baseline, current))
+            device_name = str(
+                item.get("device_name")
+                or baseline.get("device_name")
+                or current.get("device_name")
+                or ""
+            )
+            command = str(
+                item.get("command")
+                or baseline.get("command")
+                or current.get("command")
+                or ""
+            ).strip()
+            key = (
+                device_id or device_name,
+                " ".join(command.split()),
+                _cli_evidence_snapshot_identity(baseline),
+                _cli_evidence_snapshot_identity(current),
+            )
+            evidence = evidence_by_key.get(key)
+            if evidence is None:
+                evidence = {
+                    "evidence_id": f"CLI-{len(result) + 1:03d}",
+                    "group_labels": [group_label],
+                    "device_id": device_id,
+                    "device_name": device_name or device_id or "-",
+                    "command": command or "-",
+                    "baseline": baseline,
+                    "current": current,
+                    "related_facts": [],
+                    "parser_failure_text_comparison": bool(
+                        item.get("parser_failure_text_comparison")
+                    ),
+                }
+                evidence_by_key[key] = evidence
+                result.append(evidence)
+            else:
+                if group_label not in evidence["group_labels"]:
+                    evidence["group_labels"].append(group_label)
+                evidence["parser_failure_text_comparison"] = bool(
+                    evidence["parser_failure_text_comparison"]
+                    or item.get("parser_failure_text_comparison")
+                )
+
+            item["cli_evidence_id"] = evidence["evidence_id"]
+            fact_label = _cli_evidence_fact_label(item, group_label)
+            if fact_label not in evidence["related_facts"]:
+                evidence["related_facts"].append(fact_label)
     return result
 
 
-def _append_cli_evidence_markdown(
-    lines: list[str],
-    label: str,
-    evidence: dict[str, Any],
+def _cli_inline_diff_runs(
+    baseline_line: str, current_line: str
+) -> tuple[list[tuple[str, bool]], list[tuple[str, bool]]]:
+    baseline_runs: list[tuple[str, bool]] = []
+    current_runs: list[tuple[str, bool]] = []
+    matcher = SequenceMatcher(None, baseline_line, current_line, autojunk=False)
+    for tag, baseline_start, baseline_end, current_start, current_end in matcher.get_opcodes():
+        baseline_text = baseline_line[baseline_start:baseline_end]
+        current_text = current_line[current_start:current_end]
+        changed = tag != "equal"
+        if baseline_text:
+            baseline_runs.append((baseline_text, changed))
+        if current_text:
+            current_runs.append((current_text, changed))
+    return baseline_runs, current_runs
+
+
+def _cli_diff_rows(
+    baseline_text: Any, current_text: Any
+) -> list[tuple[list[tuple[str, bool]], list[tuple[str, bool]]]]:
+    baseline_lines = str(baseline_text or "").splitlines()
+    current_lines = str(current_text or "").splitlines()
+    baseline_compare = [line.rstrip() for line in baseline_lines]
+    current_compare = [line.rstrip() for line in current_lines]
+    matcher = SequenceMatcher(None, baseline_compare, current_compare, autojunk=False)
+    rows: list[tuple[list[tuple[str, bool]], list[tuple[str, bool]]]] = []
+
+    for tag, baseline_start, baseline_end, current_start, current_end in matcher.get_opcodes():
+        if tag == "equal":
+            for offset in range(baseline_end - baseline_start):
+                rows.append(
+                    (
+                        [(baseline_lines[baseline_start + offset], False)],
+                        [(current_lines[current_start + offset], False)],
+                    )
+                )
+            continue
+        if tag == "delete":
+            rows.extend(([(line, True)], []) for line in baseline_lines[baseline_start:baseline_end])
+            continue
+        if tag == "insert":
+            rows.extend(([], [(line, True)]) for line in current_lines[current_start:current_end])
+            continue
+
+        baseline_block = baseline_lines[baseline_start:baseline_end]
+        current_block = current_lines[current_start:current_end]
+        for offset in range(max(len(baseline_block), len(current_block))):
+            if offset >= len(baseline_block):
+                rows.append(([], [(current_block[offset], True)]))
+            elif offset >= len(current_block):
+                rows.append(([(baseline_block[offset], True)], []))
+            else:
+                rows.append(
+                    _cli_inline_diff_runs(
+                        baseline_block[offset], current_block[offset]
+                    )
+                )
+    return rows or [([], [])]
+
+
+def _cli_runs_as_html(runs: list[tuple[str, bool]]) -> str:
+    if not runs:
+        return "&nbsp;"
+    rendered: list[str] = []
+    for text, changed in runs:
+        escaped = html_escape(text)
+        if changed:
+            rendered.append(f'<span style="color:#c00000">{escaped}</span>')
+        else:
+            rendered.append(escaped)
+    return "".join(rendered) or "&nbsp;"
+
+
+def _append_cli_comparison_markdown(
+    lines: list[str], evidence: dict[str, Any]
 ) -> None:
-    raw_text = evidence.get("raw_text")
-    if raw_text is None:
-        return
+    baseline = dict(evidence.get("baseline") or {})
+    current = dict(evidence.get("current") or {})
     lines.extend(
         [
-            f"  - {label} CLI 原文（快照 {evidence.get('snapshot_id') or '-'}）：",
-            "~~~text",
-            str(raw_text),
-            "~~~",
+            "<table>",
+            "<thead><tr>"
+            f"<th>基线 CLI 原文<br>快照 {html_escape(str(baseline.get('snapshot_id') or '-'))}</th>"
+            f"<th>当前 CLI 原文<br>快照 {html_escape(str(current.get('snapshot_id') or '-'))}</th>"
+            "</tr></thead>",
+            "<tbody>",
         ]
     )
+    for baseline_runs, current_runs in _cli_diff_rows(
+        baseline.get("raw_text"), current.get("raw_text")
+    ):
+        lines.append(
+            "<tr>"
+            "<td><pre style=\"margin:0;white-space:pre-wrap\">"
+            f"{_cli_runs_as_html(baseline_runs)}</pre></td>"
+            "<td><pre style=\"margin:0;white-space:pre-wrap\">"
+            f"{_cli_runs_as_html(current_runs)}</pre></td>"
+            "</tr>"
+        )
+    lines.extend(["</tbody>", "</table>"])
 
 
 def build_leadership_report(
@@ -1562,6 +1731,7 @@ def render_leadership_markdown(report: dict[str, Any]) -> str:
         coverage_text = _domain_threshold_coverage_text(row)
         if coverage_text:
             lines.append(f"- {coverage_text}")
+    full_cli_evidence = _full_cli_evidence_items(report)
     structured = dict(report.get("structured_event_evidence") or {})
     lines.extend(["", "## 五、结构化变化与 Event 证据", ""])
     if not structured.get("items"):
@@ -1591,12 +1761,15 @@ def render_leadership_markdown(report: dict[str, Any]) -> str:
                 f"  - 当前数据：{_display_evidence_value(current.get('value'))}"
                 f"（快照 {current.get('snapshot_id') or '-'}）"
             )
+            if item.get("cli_evidence_id"):
+                lines.append(
+                    f"  - CLI 原文证据：{item.get('cli_evidence_id')}（详见附录）"
+                )
             if event.get("reason") and not event.get("event_id"):
                 lines.append(f"  - 未形成 Event 原因：{event.get('reason')}")
         if len(structured.get("items") or []) > 20:
             lines.append("- 其余结构化变化详见技术报告与事件数据附件。")
     unstructured = dict(report.get("unstructured_comparison") or {})
-    full_cli_evidence = _full_cli_evidence_items(report)
     lines.extend(["", "## 六、非结构化文本对比证据", ""])
     if not unstructured.get("collected_output_count"):
         lines.append("本批次未采集配置、日志等已启用非结构化对比的命令输出。")
@@ -1632,22 +1805,33 @@ def render_leadership_markdown(report: dict[str, Any]) -> str:
             )
             lines.append(f"  - 基线证据：{_unstructured_evidence_text(item, 'baseline')}")
             lines.append(f"  - 当前证据：{_unstructured_evidence_text(item, 'current')}")
+            if item.get("cli_evidence_id"):
+                lines.append(
+                    f"  - CLI 原文证据：{item.get('cli_evidence_id')}（详见附录）"
+                )
         if len(unstructured.get("items") or []) > 10:
             lines.append("- 其余变化详见技术报告和原始输出证据包。")
     if full_cli_evidence:
         lines.extend(["", "## 附录：完整 CLI 原文证据", ""])
-        for group_label, item, baseline, current in full_cli_evidence:
+        lines.append(
+            "同一设备、命令和基线/当前快照对仅保留一组原文；红色文本为差异，"
+            "空白单元格表示该行只存在于另一侧。"
+        )
+        for evidence in full_cli_evidence:
+            group_label = "、".join(evidence.get("group_labels") or [])
             lines.append(
-                f"### {group_label} / "
-                f"{item.get('device_name') or item.get('device_id') or '-'} / "
-                f"{item.get('command') or '-'}"
+                f"### {evidence.get('evidence_id')} / {group_label} / "
+                f"{evidence.get('device_name') or evidence.get('device_id') or '-'} / "
+                f"{evidence.get('command') or '-'}"
             )
-            if item.get("parser_failure_text_comparison"):
+            related_facts = _cli_evidence_related_facts_text(evidence)
+            if related_facts:
+                lines.append(f"- 关联事实：{related_facts}")
+            if evidence.get("parser_failure_text_comparison"):
                 lines.append(
                     "Parser 未成功，本项仅提供原文文本差异证据，不能替代结构化 Event 判定。"
                 )
-            _append_cli_evidence_markdown(lines, "基线", baseline)
-            _append_cli_evidence_markdown(lines, "当前", current)
+            _append_cli_comparison_markdown(lines, evidence)
     lines.extend(["", "## 七、处置建议", ""])
     for item in report["recommendations"]:
         lines.append(
@@ -1789,26 +1973,57 @@ def _normalize_docx_archive(content: bytes) -> bytes:
     return output_stream.getvalue()
 
 
-def _add_cli_evidence_docx(
-    doc: Any,
-    label: str,
-    evidence: dict[str, Any],
-) -> None:
-    raw_text = evidence.get("raw_text")
-    if raw_text is None:
+def _add_cli_diff_cell(cell: Any, runs: list[tuple[str, bool]]) -> None:
+    cell.text = ""
+    cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
+    paragraph = cell.paragraphs[0]
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+    paragraph.paragraph_format.line_spacing = Pt(9)
+    paragraph.paragraph_format.space_before = Pt(0)
+    paragraph.paragraph_format.space_after = Pt(0)
+    if not runs:
+        paragraph.add_run(" ")
         return
-    add_styled_paragraph(
-        doc,
-        f"{label} CLI 原文（快照 {evidence.get('snapshot_id') or '-'}）：",
-        first_line_indent=0.74,
-    )
-    paragraph = doc.add_paragraph()
-    apply_fixed_line_spacing(paragraph)
-    paragraph.paragraph_format.left_indent = Pt(18)
-    paragraph.paragraph_format.first_line_indent = Pt(0)
-    run = paragraph.add_run(str(raw_text))
-    run.font.name = "Consolas"
-    run.font.size = Pt(8)
+    for text, changed in runs:
+        run = paragraph.add_run(text)
+        run.font.name = "Consolas"
+        run.font.size = Pt(7.5)
+        if changed:
+            run.font.color.rgb = RGBColor(192, 0, 0)
+
+
+def _add_cli_comparison_docx(doc: Any, evidence: dict[str, Any]) -> None:
+    baseline = dict(evidence.get("baseline") or {})
+    current = dict(evidence.get("current") or {})
+    table = doc.add_table(rows=1, cols=2)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.style = "Table Grid"
+    table.autofit = False
+    headers = [
+        f"基线 CLI 原文\n快照 {baseline.get('snapshot_id') or '-'}",
+        f"当前 CLI 原文\n快照 {current.get('snapshot_id') or '-'}",
+    ]
+    for index, header in enumerate(headers):
+        cell = table.rows[0].cells[index]
+        _set_cell_text(cell, header, bold=True)
+        _shade_cell(cell, "D9E2F3")
+        cell.width = Cm(8.35)
+    header_properties = table.rows[0]._tr.get_or_add_trPr()
+    header_repeat = OxmlElement("w:tblHeader")
+    header_repeat.set(qn("w:val"), "true")
+    header_properties.append(header_repeat)
+
+    for baseline_runs, current_runs in _cli_diff_rows(
+        baseline.get("raw_text"), current.get("raw_text")
+    ):
+        row = table.add_row()
+        row._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
+        for index, runs in enumerate((baseline_runs, current_runs)):
+            cell = row.cells[index]
+            cell.width = Cm(8.35)
+            _add_cli_diff_cell(cell, runs)
+    doc.add_paragraph().paragraph_format.space_after = Pt(0)
 
 
 def render_leadership_docx(report: dict[str, Any]) -> bytes:
@@ -2054,6 +2269,7 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
     else:
         add_styled_paragraph(doc, "未形成可用的分域检查结果。", first_line_indent=0.74)
 
+    full_cli_evidence = _full_cli_evidence_items(report)
     structured = dict(report.get("structured_event_evidence") or {})
     _add_section(doc, "五、结构化变化与 Event 证据")
     if not structured.get("items"):
@@ -2062,7 +2278,8 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
         add_styled_paragraph(
             doc,
             f"共形成 {structured.get('structured_change_count')} 条结构化变化，"
-            f"其中 {structured.get('event_fact_count')} 条形成 Event；下表列出基线、当前数据和 Event 判定。",
+            f"其中 {structured.get('event_fact_count')} 条形成 Event；下表列出基线、当前数据、"
+            "Event 判定及 CLI 原文证据编号。",
             first_line_indent=0.74,
         )
         structured_rows = []
@@ -2083,13 +2300,22 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
                     item.get("field"),
                     _display_evidence_value(baseline.get("value"), limit=140),
                     _display_evidence_value(current.get("value"), limit=140),
+                    item.get("cli_evidence_id"),
                 ]
             )
         _add_table(
             doc,
-            ["Event 判定", "设备", "命令 / 对象", "字段", "基线数据", "当前数据"],
+            [
+                "Event 判定",
+                "设备",
+                "命令 / 对象",
+                "字段",
+                "基线数据",
+                "当前数据",
+                "CLI 证据",
+            ],
             structured_rows,
-            [2.4, 2.2, 3.1, 1.8, 3.6, 3.6],
+            [2.0, 1.8, 2.4, 1.4, 3.2, 3.2, 1.5],
             keep_rows_together=True,
         )
         if len(structured.get("items") or []) > 20:
@@ -2101,7 +2327,6 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
 
     _add_section(doc, "六、非结构化文本对比证据")
     unstructured = dict(report.get("unstructured_comparison") or {})
-    full_cli_evidence = _full_cli_evidence_items(report)
     if not unstructured.get("collected_output_count"):
         add_styled_paragraph(
             doc,
@@ -2145,13 +2370,14 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
                     item.get("command"),
                     f"+{item.get('added_line_count')} / -{item.get('removed_line_count')}",
                     categories or "其他变化",
+                    item.get("cli_evidence_id"),
                 ]
             )
         _add_table(
             doc,
-            ["类型", "设备", "命令", "增/删行", "变化分类"],
+            ["类型", "设备", "命令", "增/删行", "变化分类", "CLI 证据"],
             unstructured_rows,
-            [2.2, 2.8, 4.2, 2.0, 4.3],
+            [2.0, 2.2, 3.6, 1.7, 3.8, 1.7],
         )
         for item in list(unstructured.get("items") or [])[:8]:
             add_styled_paragraph(
@@ -2180,22 +2406,31 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
 
     if full_cli_evidence:
         _add_section(doc, "附录：完整 CLI 原文证据")
-        for group_label, item, baseline, current in full_cli_evidence:
+        add_styled_paragraph(
+            doc,
+            "同一设备、命令和基线/当前快照对仅保留一组原文；红色文本为差异，"
+            "空白单元格表示该行只存在于另一侧。",
+            first_line_indent=0.74,
+        )
+        for evidence in full_cli_evidence:
+            group_label = "、".join(evidence.get("group_labels") or [])
             add_styled_paragraph(
                 doc,
-                f"{group_label} / "
-                f"{item.get('device_name') or item.get('device_id') or '-'} / "
-                f"{item.get('command') or '-'}",
+                f"{evidence.get('evidence_id')} / {group_label} / "
+                f"{evidence.get('device_name') or evidence.get('device_id') or '-'} / "
+                f"{evidence.get('command') or '-'}",
                 first_line_indent=0.74,
             )
-            if item.get("parser_failure_text_comparison"):
+            related_facts = _cli_evidence_related_facts_text(evidence)
+            if related_facts:
+                _add_compact_paragraph(doc, f"关联事实：{related_facts}")
+            if evidence.get("parser_failure_text_comparison"):
                 add_styled_paragraph(
                     doc,
                     "Parser 未成功，本项仅提供原文文本差异证据，不能替代结构化 Event 判定。",
                     first_line_indent=0.74,
                 )
-            _add_cli_evidence_docx(doc, "基线", baseline)
-            _add_cli_evidence_docx(doc, "当前", current)
+            _add_cli_comparison_docx(doc, evidence)
 
     _add_section(doc, "七、处置建议")
     for index, item in enumerate(report["recommendations"], start=1):

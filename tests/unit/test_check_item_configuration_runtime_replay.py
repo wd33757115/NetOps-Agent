@@ -31,7 +31,7 @@ def test_observed_at_override_requires_timezone() -> None:
 
 
 def test_load_command_extracts_only_running_configuration(tmp_path: Path) -> None:
-    source = tmp_path / "SW1-10.34.2.11.txt"
+    source = tmp_path / "SW1-198.51.2.11.txt"
     source.write_text(
         "\n".join(
             [

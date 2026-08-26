@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import func, inspect, select
+from sqlalchemy import func, inspect, select, text
 
 from src.infrastructure.db.models import Base
 from src.infrastructure.db.postgres import get_db_session
@@ -73,9 +73,12 @@ def reset_business_data(
         for table in tables:
             table_counts[table.name] = int(db.execute(select(func.count()).select_from(table)).scalar() or 0)
 
-        if not dry_run:
-            for table in tables:
-                db.execute(table.delete())
+        if not dry_run and tables:
+            identifier_preparer = db.get_bind().dialect.identifier_preparer
+            table_names = ", ".join(
+                identifier_preparer.quote(table.name) for table in tables
+            )
+            db.execute(text(f"TRUNCATE TABLE {table_names} RESTART IDENTITY"))
 
     return DatabaseResetResult(
         success=True,

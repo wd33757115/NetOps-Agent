@@ -1312,11 +1312,11 @@ def _default_sources() -> tuple[SourcePair, ...]:
             baseline_file=ROOT
             / "lixian"
             / "Q2"
-            / "XA-FOTIC-RT5620-1-10.34.2.219.txt",
+            / "LAB-DEVICE-RT5620-1-198.51.2.219.txt",
             current_file=ROOT
             / "lixian"
             / "Q3"
-            / "XA-FOTIC-RT5620-1-10.34.2.219.txt",
+            / "LAB-DEVICE-RT5620-1-198.51.2.219.txt",
         ),
         SourcePair(
             key="h3c-secondary",
@@ -1330,11 +1330,11 @@ def _default_sources() -> tuple[SourcePair, ...]:
             baseline_file=ROOT
             / "lixian"
             / "Q2"
-            / "XA-FOTIC-RT5620-2-10.34.2.220.txt",
+            / "LAB-DEVICE-RT5620-2-198.51.2.220.txt",
             current_file=ROOT
             / "lixian"
             / "Q3"
-            / "XA-FOTIC-RT5620-2-10.34.2.220.txt",
+            / "LAB-DEVICE-RT5620-2-198.51.2.220.txt",
         ),
         SourcePair(
             key="cisco-primary",
@@ -1347,10 +1347,10 @@ def _default_sources() -> tuple[SourcePair, ...]:
             base_implementation_id="cisco-device-version",
             baseline_file=desktop_test
             / "Q1"
-            / "XA-FOTIC-Core-N9364C-1-10.34.2.2_2025-12-24_15-49-38.txt",
+            / "LAB-DEVICE-Core-N9364C-1-198.51.2.2_2025-12-24_15-49-38.txt",
             current_file=desktop_test
             / "Q2"
-            / "XA-FOTIC-Core-N9364C-1-10.34.2.2.txt",
+            / "LAB-DEVICE-Core-N9364C-1-198.51.2.2.txt",
         ),
         SourcePair(
             key="cisco-secondary",
@@ -1363,10 +1363,10 @@ def _default_sources() -> tuple[SourcePair, ...]:
             base_implementation_id="cisco-device-version",
             baseline_file=desktop_test
             / "Q1"
-            / "XA-FOTIC-Core-N9364C-2-10.34.2.3_2025-12-24_15-52-25.txt",
+            / "LAB-DEVICE-Core-N9364C-2-198.51.2.3_2025-12-24_15-52-25.txt",
             current_file=desktop_test
             / "Q2"
-            / "XA-FOTIC-Core-N9364C-2-10.34.2.3.txt",
+            / "LAB-DEVICE-Core-N9364C-2-198.51.2.3.txt",
         ),
     )
 

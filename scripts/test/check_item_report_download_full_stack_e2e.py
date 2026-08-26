@@ -1030,7 +1030,7 @@ def main() -> int:
     parser.add_argument(
         "--source-file",
         type=Path,
-        default=(ROOT / "lixian" / "Q2" / "XA-FOTIC-RT5620-1-10.34.2.219.txt"),
+        default=(ROOT / "lixian" / "Q2" / "LAB-DEVICE-RT5620-1-198.51.2.219.txt"),
     )
     parser.add_argument("--timeout-seconds", type=int, default=180)
     parser.add_argument(

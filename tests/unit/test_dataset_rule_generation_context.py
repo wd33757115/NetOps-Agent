@@ -33,7 +33,7 @@ def test_pure_structured_record_sanitizer_is_safe_for_local_agent_validation():
         [
             {
                 "interface": "GE1/0/1",
-                "ip_address": "10.34.2.11/24",
+                "ip_address": "198.51.2.11/24",
                 "description": "peer 192.0.2.10 token=secret-value",
                 "password": "top-secret",
                 "unapproved": "drop-me",
@@ -43,7 +43,7 @@ def test_pure_structured_record_sanitizer_is_safe_for_local_agent_validation():
     )
 
     serialized = json.dumps(result, ensure_ascii=False)
-    assert "10.34.2.11" not in serialized
+    assert "198.51.2.11" not in serialized
     assert "192.0.2.10" not in serialized
     assert "secret-value" not in serialized
     assert "top-secret" not in serialized
@@ -661,14 +661,14 @@ def test_sanitize_preserves_list_valued_ip_fields():
     removed = {}
     pseudonymized = {}
     result = _sanitize(
-        {"ip_address": ["10.34.2.13/27", "unassigned"]},
+        {"ip_address": ["198.51.2.13/27", "unassigned"]},
         removed=removed,
         pseudonymized=pseudonymized,
     )
 
     assert isinstance(result["ip_address"], list)
     assert len(result["ip_address"]) == 2
-    assert result["ip_address"][0] != "10.34.2.13/27"
+    assert result["ip_address"][0] != "198.51.2.13/27"
     assert "/27" in result["ip_address"][0]
     assert result["ip_address"][1] == "unassigned"
     assert pseudonymized == {"ip_address": 1}

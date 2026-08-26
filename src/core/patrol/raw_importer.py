@@ -365,7 +365,9 @@ def _project_parser_result(
         and parsed.parser_status == "not_required"
     ):
         parse_status = "raw_hashed"
-        structured = parsed.structured_data
+        # Text-comparison commands have no Parser records.  The snapshot's
+        # raw_text_hash column is the authoritative digest.
+        structured = None
     elif parsed.policy_status == "ignored":
         parse_status = "ignored"
     elif parsed.failure_code == "unsupported_command":

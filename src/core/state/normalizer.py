@@ -470,7 +470,6 @@ def observations_from_snapshot(
             },
         }
     else:
-    else:
         if _contract_override is None:
             adapter_projection = _adapter_projection(
                 snapshot,
@@ -1415,8 +1414,8 @@ def _normalize_run_impl(
     from src.core.patrol.repository import PatrolRepository
 
     results: list[dict[str, Any]] = []
-    valid_observations: list[StateObservation] = []
-    should_update_current = False
+    evidence_only_observations: list[StateObservation] = []
+    current_state_observations: list[StateObservation] = []
     patrol_repository = PatrolRepository()
     for index, snapshot_id in enumerate(snapshot_ids):
         if heartbeat is not None:
@@ -1454,9 +1453,10 @@ def _normalize_run_impl(
                 else None,
             )
         if observations:
-            valid_observations.extend(observations)
-        if snapshot_result["success"]:
-            should_update_current = should_update_current or update_current
+            if snapshot_result["success"] and update_current:
+                current_state_observations.extend(observations)
+            else:
+                evidence_only_observations.extend(observations)
         else:
             patrol_repository.mark_collection_analysis_failed(
                 run_id=run_id,
@@ -1466,11 +1466,17 @@ def _normalize_run_impl(
             )
     created = 0
     current_updates = 0
-    if valid_observations:
-        created, current_updates = repository.save_observations(
-            valid_observations,
-            update_current_state=should_update_current,
+    if evidence_only_observations:
+        created, _ = repository.save_observations(
+            evidence_only_observations,
+            update_current_state=False,
         )
+    if current_state_observations:
+        current_created, current_updates = repository.save_observations(
+            current_state_observations,
+            update_current_state=True,
+        )
+        created += current_created
         remaining_created = created
         remaining_updates = current_updates
         for snapshot_result in results:

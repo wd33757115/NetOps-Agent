@@ -151,7 +151,7 @@ def test_model_prompt_uses_bounded_structural_representatives_only():
 def test_validation_uses_sanitized_evidence_and_checks_raw_source_shape():
     sample = ParserSample(
         "generation-1",
-        "GE1/0/1 10.34.2.1 UP",
+        "GE1/0/1 198.51.2.1 UP",
         SampleRole.GENERATION,
         prompt_text="GE1/0/1 192.0.2.1 UP",
         validation_text_override="GE1/0/1 192.0.2.1 UP",
@@ -162,7 +162,7 @@ def test_validation_uses_sanitized_evidence_and_checks_raw_source_shape():
                 {"interface": "GE1/0/1", "address": "192.0.2.1", "status": "UP"}
             ],
             ("template", sample.raw_text): [
-                {"interface": "GE1/0/1", "address": "10.34.2.1", "status": "UP"}
+                {"interface": "GE1/0/1", "address": "198.51.2.1", "status": "UP"}
             ],
         }
     )
@@ -183,7 +183,7 @@ def test_validation_uses_sanitized_evidence_and_checks_raw_source_shape():
 def test_validation_rejects_raw_source_structure_drift_without_comparing_values():
     sample = ParserSample(
         "generation-1",
-        "GE1/0/1 10.34.2.1 UP\nGE1/0/2 10.34.2.2 UP",
+        "GE1/0/1 198.51.2.1 UP\nGE1/0/2 198.51.2.2 UP",
         SampleRole.GENERATION,
         prompt_text="GE1/0/1 192.0.2.1 UP",
         validation_text_override="GE1/0/1 192.0.2.1 UP",
@@ -194,8 +194,8 @@ def test_validation_rejects_raw_source_structure_drift_without_comparing_values(
                 {"interface": "GE1/0/1", "address": "192.0.2.1", "status": "UP"}
             ],
             ("template", sample.raw_text): [
-                {"interface": "GE1/0/1", "address": "10.34.2.1", "status": "UP"},
-                {"interface": "GE1/0/2", "address": "10.34.2.2", "status": "UP"},
+                {"interface": "GE1/0/1", "address": "198.51.2.1", "status": "UP"},
+                {"interface": "GE1/0/2", "address": "198.51.2.2", "status": "UP"},
             ],
         }
     )

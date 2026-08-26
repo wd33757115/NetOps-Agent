@@ -197,7 +197,7 @@ describe('ParserJobDetailDrawer', () => {
           },
           source_context: {
             device_name: 'XA-SW-01',
-            management_ip: '10.34.2.29',
+            management_ip: '198.51.2.29',
             model: 'S5130S-54S-HI-G',
             source_file_name: 'XA-SW-01.txt',
             observed_at: '2026-07-01T00:00:00+08:00',

@@ -2454,7 +2454,7 @@ Phase 5 已按以下顺序落地，后一步只消费前一步的不可变输出
 CP1 至 CP5 的工程证据如下：
 
 - 领域合同和报告事务相关回归共 `103 passed`；结论策略单独 `10 passed`。
-- 真实全栈脚本使用 `lixian/Q3/XA-FOTIC-RT5620-1-10.34.2.219.txt` 中的 CPU 输出，经过
+- 真实全栈脚本使用 `lixian/Q3/LAB-DEVICE-RT5620-1-198.51.2.219.txt` 中的 CPU 输出，经过
   Django BFF、FastAPI、PostgreSQL、Celery/RabbitMQ、Redis 和 MinIO 创建 11 个隔离批次、
   共 112 个目标对。
 - `95 healthy + 5 unable_to_determine` 只允许“已评估范围内未发现异常”；全部
@@ -2616,7 +2616,7 @@ Workflow 编排入口，后续运行状态、时间线、失败反馈和报告�
 
 ### 2.20 2026-07-30 真实 NTC 全栈复验后的最终校正
 
-本轮使用 `lixian/Q2/SW1-10.34.2.11_2025-12-24_15-24-35.txt` 中真实
+本轮使用 `lixian/Q2/SW1-198.51.2.11_2025-12-24_15-24-35.txt` 中真实
 `display device manuinfo` 输出完成了以下非 Mock 链路：
 
 ```text
@@ -6387,7 +6387,7 @@ venv\Scripts\python.exe scripts\test\textfsm_agent_lixian_benchmark.py `
 
 ```powershell
 venv\Scripts\python.exe scripts\test\check_item_lixian_runtime_e2e.py `
-  --source-file lixian\Q2\XA-FOTIC-RT5620-1-10.34.2.219.txt `
+  --source-file lixian\Q2\LAB-DEVICE-RT5620-1-198.51.2.219.txt `
   --output-dir .tmp\check-item-lixian-e2e\20260728-final
 ```
 
@@ -8460,7 +8460,7 @@ ReportReleaseRecord；签发记录冻结 ClaimLedger 摘要，不能通过重新
 拼包。下载响应同时返回 Manifest ID、报告版本、`raw_evidence_set_digest` 和文件数，便于签发页与
 自动审计对账。
 
-2026-07-31 已使用 `lixian/Q2/XA-FOTIC-RT5620-1-10.34.2.219.txt` 完成真实 BFF、FastAPI、
+2026-07-31 已使用 `lixian/Q2/LAB-DEVICE-RT5620-1-198.51.2.219.txt` 完成真实 BFF、FastAPI、
 PostgreSQL、Celery/Redis 与 MinIO 纵切：operator 原文下载为 `403`，admin 为 `200`；原始文件
 逐字节和 SHA-256 一致，归档只包含设备 `.txt` 与四份清单，内部 `.collection.json` 被排除；证据
 索引包不含 raw CLI 正文。证据为

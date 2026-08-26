@@ -1708,16 +1708,16 @@ def test_online_command_fingerprint_ignores_mutable_report_hash():
 
 
 def test_offline_import_prefers_asset_name_from_filename_over_prompt_alias(tmp_path: Path):
-    source = tmp_path / "XA-FOTIC-RT5620-1-10.34.2.219_2025-12-24_14-51-48.txt"
-    text = """<XA-FOTIC-DCHL-RT5620-1>display version
+    source = tmp_path / "LAB-DEVICE-RT5620-1-198.51.2.219_2025-12-24_14-51-48.txt"
+    text = """<LAB-DEVICE-DCHL-RT5620-1>display version
 H3C Comware Software
 """
 
     device_name, ip, inspected = _resolve_capture_device(path=source, text=text)
 
-    assert device_name == "XA-FOTIC-RT5620-1"
-    assert ip == "10.34.2.219"
-    assert inspected.device_name == "XA-FOTIC-DCHL-RT5620-1"
+    assert device_name == "LAB-DEVICE-RT5620-1"
+    assert ip == "198.51.2.219"
+    assert inspected.device_name == "LAB-DEVICE-DCHL-RT5620-1"
 
 
 def test_import_raw_path_batches_directory_into_one_run(tmp_path: Path):

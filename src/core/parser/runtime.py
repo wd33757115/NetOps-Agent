@@ -270,13 +270,10 @@ class ParserRuntime:
                     parser_status="not_required",
                     canonical_command=decision.canonical_command,
                     handling=decision.handling,
-                    structured_data=[
-                        {
-                            "raw_text_hash": hashlib.sha256(
-                                str(raw_text or "").encode("utf-8")
-                            ).hexdigest()
-                        }
-                    ],
+                    # Raw-hash commands are intentionally unstructured.  Their
+                    # digest is stored in CommandSnapshot.raw_text_hash rather
+                    # than masquerading as Parser output.
+                    structured_data=None,
                     identity_evidence=evidence,
                     output_status="data",
                     capability=decision.capability,

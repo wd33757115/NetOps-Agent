@@ -285,7 +285,7 @@ venv\Scripts\python.exe scripts\test\check_item_report_download_full_stack_e2e.p
 .tmp/check-item-report-download-full-stack-e2e/summary.json
 ```
 
-测试使用 `lixian/Q2/XA-FOTIC-RT5620-1-10.34.2.219.txt` 的真实 `display version` 输出，经现有
+测试使用 `lixian/Q2/LAB-DEVICE-RT5620-1-198.51.2.219.txt` 的真实 `display version` 输出，经现有
 Active Parser 形成 12 条解析记录和 2 条 canonical Observation，创建临时历史批次后通过真实
 Django BFF 调用 FastAPI，交由 Celery/RabbitMQ/Redis 物化并写入 MinIO。验收确认：
 
@@ -347,7 +347,7 @@ venv\Scripts\python.exe scripts\test\rule_asset_source_import_full_stack_e2e.py
 .tmp/rule-asset-source-import-full-stack-e2e/summary.json
 ```
 
-测试从真实 `lixian/Q2/XA-FOTIC-RT5620-1-10.34.2.219.txt` 精确提取
+测试从真实 `lixian/Q2/LAB-DEVICE-RT5620-1-198.51.2.219.txt` 精确提取
 `display version` 输出，经 Django BFF 创建 `rule_asset_source` 离线任务，使用预签名 URL
 将文件真实写入 MinIO，再由 Celery 完成预览并由 `parser-validation-ingest` Workflow 执行导入。
 验收确认：
@@ -382,7 +382,7 @@ venv\Scripts\python.exe scripts\test\parser_ntc_candidate_full_stack_e2e.py `
 .tmp/parser-ntc-candidate-full-stack-e2e/summary.json
 ```
 
-测试从真实 `lixian/Q2/SW1-10.34.2.11_2025-12-24_15-24-35.txt` 精确提取
+测试从真实 `lixian/Q2/SW1-198.51.2.11_2025-12-24_15-24-35.txt` 精确提取
 `display device manuinfo`，创建隔离型号作用域后完成真实 BFF、FastAPI、MinIO、Celery、
 `parser-validation-ingest` Workflow 和 PostgreSQL 链路。验收确认：
 
@@ -521,7 +521,7 @@ venv\Scripts\python.exe scripts\test\report_conclusion_permission_full_stack_e2e
 .tmp/report-conclusion-permission-full-stack-e2e/summary.json
 ```
 
-测试读取 `lixian/Q3/XA-FOTIC-RT5620-1-10.34.2.219.txt` 中真实 CPU 命令输出，通过真实 Django
+测试读取 `lixian/Q3/LAB-DEVICE-RT5620-1-198.51.2.219.txt` 中真实 CPU 命令输出，通过真实 Django
 BFF、FastAPI、PostgreSQL、Celery/RabbitMQ、Redis 和 MinIO 创建十一个隔离
 `production_current` 批次，共冻结 112 个设备检查项目标对。验收确认：
 
@@ -568,7 +568,7 @@ venv\Scripts\python.exe scripts\test\report_revision_release_full_stack_e2e.py
 .tmp/report-revision-release-full-stack-e2e/summary.json
 ```
 
-测试读取 `lixian/Q2/XA-FOTIC-RT5620-1-10.34.2.219.txt`，通过真实 Django BFF、FastAPI、
+测试读取 `lixian/Q2/LAB-DEVICE-RT5620-1-198.51.2.219.txt`，通过真实 Django BFF、FastAPI、
 Celery/RabbitMQ、Redis、PostgreSQL 和 MinIO 完成以下纵切：
 
 ```text
@@ -621,7 +621,7 @@ venv\Scripts\python.exe scripts\test\check_item_report_download_full_stack_e2e.p
 .tmp/check-item-report-download-full-stack-e2e/summary.json
 ```
 
-测试读取 `lixian/Q2/XA-FOTIC-RT5620-1-10.34.2.219.txt`，把原始文件及一个故意加入的
+测试读取 `lixian/Q2/LAB-DEVICE-RT5620-1-198.51.2.219.txt`，把原始文件及一个故意加入的
 `.collection.json` 内部 sidecar 写入 MinIO 采集归档，再经真实 Django BFF、FastAPI、
 PostgreSQL、Celery/RabbitMQ、Redis 和 MinIO 生成同一批次的 ReportManifest 与五类报告制品。
 
@@ -699,7 +699,7 @@ venv\Scripts\python.exe scripts\test\asset_gap_identity_control_full_stack_e2e.p
 
 验收确认：
 
-- 从真实 `lixian/Q2/XA-FOTIC-RT5620-1-10.34.2.219.txt` 提取 `display version`，经 BFF、
+- 从真实 `lixian/Q2/LAB-DEVICE-RT5620-1-198.51.2.219.txt` 提取 `display version`，经 BFF、
   MinIO、Celery 和 PostgreSQL 完成异步预览；夹具构造一个同管理 IP 候选和一个同设备名候选。
 - 绑定结果保留两个有序候选及匹配依据，分别为管理 IP `0.95` 和设备名 `0.85`；系统不按最高分
   静默认领资产，而是以 `ambiguous_device_binding` 阻断预览和执行。
@@ -839,7 +839,7 @@ venv\Scripts\python.exe scripts\test\parser_ntc_candidate_full_stack_e2e.py `
   --output .tmp\parser-spec-revision-full-stack-e2e\summary.json
 ```
 
-该纵切使用 `lixian/Q2/SW1-10.34.2.11_2025-12-24_15-24-35.txt` 中真实
+该纵切使用 `lixian/Q2/SW1-198.51.2.11_2025-12-24_15-24-35.txt` 中真实
 `display device manuinfo` 输出，通过真实 Django BFF、FastAPI、MinIO、Celery Worker、Workflow 和
 PostgreSQL 验证：
 

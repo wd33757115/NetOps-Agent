@@ -626,7 +626,7 @@ def main() -> int:
             ROOT
             / "lixian"
             / "Q2"
-            / "XA-FOTIC-RT5620-1-10.34.2.219.txt"
+            / "LAB-DEVICE-RT5620-1-198.51.2.219.txt"
         ),
     )
     parser.add_argument(
