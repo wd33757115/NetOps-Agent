@@ -172,7 +172,7 @@ export const buildRuleAssetChainRows = (
       activeContracts,
       activePolicies,
       activeRules,
-      status: !activeContracts.length || !activePolicies.length
+      status: !activePolicies.length
         ? 'blocked'
         : activeRules.length
           ? 'ready'

@@ -1877,7 +1877,7 @@ def test_llm_loop_cannot_replace_approved_parser_contract(monkeypatch):
     assert result["agent_loop"]["attempt_count"] == 1
 
 
-def test_llm_loop_requires_explicit_policy_target_decisions(monkeypatch):
+def test_legacy_contract_loop_does_not_create_projection_targets_before_cutover(monkeypatch):
     module = _load_skill_module()
 
     seed = {
@@ -1961,11 +1961,12 @@ def test_llm_loop_requires_explicit_policy_target_decisions(monkeypatch):
     )
 
     assert result["success"] is True
-    assert result["agent_loop"]["attempt_count"] == 2
-    assert result["proposal"]["state_semantics"]["link"]["observation_type"] == (
-        "interface.oper_status"
-    )
-    assert result["proposal"]["state_semantics"]["protocol"]["monitor"] is False
+    # Legacy Parser-contract tooling may validate source schemas, but it has no
+    # authority to invent a standard Observation target.  New mappings use
+    # projection_candidate with a selected CheckItem instead.
+    assert result["agent_loop"]["attempt_count"] == 1
+    assert result["proposal"]["state_semantics"]["link"]["semantic_type"] == "state"
+    assert "observation_type" not in result["proposal"]["state_semantics"]["link"]
 
 
 def test_llm_loop_inherits_approved_parser_schema_when_model_keeps_rewriting_it(monkeypatch):

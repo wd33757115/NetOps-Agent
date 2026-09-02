@@ -139,3 +139,4 @@ commands:
   show logging: {enabled: false, handling: raw_only}
   display clock: {enabled: false, handling: raw_only}
   show clock: {enabled: false, handling: raw_only}
+  screen-length disable: {enabled: false, handling: not_applicable}

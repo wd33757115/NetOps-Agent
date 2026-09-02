@@ -1396,6 +1396,7 @@ def _ntc_parser_spec_draft(
 def _field_naming_context(
     job: dict[str, Any],
     data_samples: list[dict[str, Any]],
+    check_item_id: str = "",
 ) -> dict[str, Any]:
     try:
         catalog = CheckItemCatalogRepository().load_active()
@@ -1414,6 +1415,7 @@ def _field_naming_context(
             for sample in data_samples
         ),
         catalog=catalog,
+        check_item_id=check_item_id or None,
     )
 
 
@@ -1555,6 +1557,13 @@ def suggest_parser_spec(params: dict[str, Any]) -> dict[str, Any]:
             ).get("revision_instruction")
             or ""
         ).strip()[:4000]
+        selected_check_item_id = str(
+            (
+                (job.get("agent_state_json") or {}).get("parser_spec_suggestion")
+                or {}
+            ).get("check_item_id")
+            or ""
+        ).strip()
         classified = [
             {
                 **sample,
@@ -1640,7 +1649,11 @@ def suggest_parser_spec(params: dict[str, Any]) -> dict[str, Any]:
                 }
         else:
             prompt_data_samples = _representative_data_samples(data_samples)
-            field_naming_context = _field_naming_context(job, prompt_data_samples)
+            field_naming_context = _field_naming_context(
+                job,
+                prompt_data_samples,
+                selected_check_item_id,
+            )
             ntc_evidence = _trusted_ntc_parser_evidence(job, data_samples)
             ntc_spec = _ntc_parser_spec_draft(
                 job=job,

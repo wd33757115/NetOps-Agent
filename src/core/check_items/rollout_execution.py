@@ -551,6 +551,10 @@ class RolloutProjectionEngine:
             runtime_assets,
             check_item,
         ) = self._load_assets(bundle)
+        uses_direct_projection = any(
+            str(item.get("asset_type") or "") == "command_adapter_projection"
+            for item in runtime_assets
+        )
         parsed: list[dict[str, Any]] = []
         observations_by_snapshot: dict[str, list[dict[str, Any]]] = {}
         for ordinal, snapshot in enumerate(
@@ -631,7 +635,7 @@ class RolloutProjectionEngine:
                 observations_by_snapshot[str(snapshot["id"])] = []
                 continue
             contract = contracts.get(str(result.template_id or ""))
-            if contract is None:
+            if not uses_direct_projection and contract is None:
                 raise RolloutStageExecutionError(
                     "observation_contract_missing",
                     "frozen RuntimeBundle has no ObservationContract for "
@@ -654,7 +658,12 @@ class RolloutProjectionEngine:
                 "structured_json": result.structured_data,
                 "parser_template_id": result.template_id,
                 "parser_version": result.template_version,
-                "contract_version": contract["contract_version"],
+                "implementation_version_id": str(
+                    bundle["implementation_version_id"]
+                ),
+                "contract_version": (
+                    contract["contract_version"] if contract is not None else None
+                ),
                 "execution_item_id": (
                     f"rollout:{execution_id}:{track}:{ordinal}"
                 ),
@@ -666,15 +675,22 @@ class RolloutProjectionEngine:
                     "historical_backfill": True,
                 },
             }
-            observations = observations_from_snapshot(
-                projected_snapshot,
-                mode="parser_validation",
-                source="rollout_snapshot_replay",
-                dataset_id=str(snapshot.get("dataset_id") or "") or None,
-                observation_contract_version=int(
-                    contract["contract_version"]
-                ),
-                _contract_override=contract,
+            observations = (
+                observations_from_snapshot(
+                    projected_snapshot,
+                    mode="parser_validation",
+                    source="rollout_snapshot_replay",
+                    dataset_id=str(snapshot.get("dataset_id") or "") or None,
+                )
+                if uses_direct_projection
+                else observations_from_snapshot(
+                    projected_snapshot,
+                    mode="parser_validation",
+                    source="rollout_snapshot_replay",
+                    dataset_id=str(snapshot.get("dataset_id") or "") or None,
+                    observation_contract_version=int(contract["contract_version"]),
+                    _contract_override=contract,
+                )
             )
             observations_by_snapshot[str(snapshot["id"])] = [
                 _observation_payload(item) for item in observations
@@ -793,6 +809,7 @@ class RolloutProjectionEngine:
                 rules=tuple(current_state_rules),
                 runtime_assets=tuple(runtime_assets),
                 assessment_policy_snapshot=assessment_policy_snapshot,
+                baseline_observations=tuple(prior_observations),
                 assessed_at=assessed_at,
             )
         )
@@ -1085,6 +1102,30 @@ class RolloutProjectionEngine:
             for item in assets
             if item["asset_type"] == "observation_contract"
         }
+        projection_assets = [
+            dict(item)
+            for item in assets
+            if str(item.get("asset_type") or "") == "command_adapter_projection"
+        ]
+        if projection_assets and contract_ids:
+            raise RolloutStageExecutionError(
+                "runtime_projection_ambiguous",
+                "a frozen RuntimeBundle cannot contain both CommandAdapter "
+                "projection and ObservationContract",
+            )
+        if len(projection_assets) > 1:
+            raise RolloutStageExecutionError(
+                "runtime_projection_ambiguous",
+                "a frozen RuntimeBundle must contain exactly one CommandAdapter projection",
+            )
+        if projection_assets and str(projection_assets[0].get("asset_version_id") or "") != str(
+            bundle.get("implementation_version_id") or ""
+        ):
+            raise RolloutStageExecutionError(
+                "runtime_projection_mismatch",
+                "the frozen CommandAdapter projection does not match the "
+                "bundle implementation version",
+            )
         policy_ids = {
             str(item["asset_version_id"])
             for item in assets

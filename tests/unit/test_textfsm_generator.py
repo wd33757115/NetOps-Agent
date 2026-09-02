@@ -173,6 +173,35 @@ def test_parser_spec_prompt_prefers_check_item_field_names_without_making_them_a
     assert "ObservationContract is the final" in prompt
 
 
+def test_parser_spec_prompt_receives_the_selected_canonical_contract():
+    context = build_parser_field_naming_context(
+        vendor="H3C",
+        model="S6000",
+        family=None,
+        profile="S6000",
+        command="display interface brief",
+        check_item_id="interface.oper_status",
+    )
+    prompt = _build_prompt(
+        {
+            "vendor": "H3C",
+            "model": "S6000",
+            "canonical_command": "display interface brief",
+        },
+        [{"id": "sample-1", "sanitized_text": "FGE1/0/25 down"}],
+        [],
+        [],
+        context,
+    )
+
+    assert [item["check_item_id"] for item in context["check_items"]] == [
+        "interface.oper_status"
+    ]
+    assert context["check_items"][0]["canonical_contract"]
+    assert '"canonical_contract"' in prompt
+    assert '"interface.oper_status"' in prompt
+
+
 def test_parser_spec_normalization_prefers_unambiguous_check_item_field_name():
     warnings: list[str] = []
     spec = _normalize_spec(

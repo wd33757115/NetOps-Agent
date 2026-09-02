@@ -1,7 +1,7 @@
 ---
 name: change-policy-generator
 version: 0.1.0
-description: 根据 ObservationContract 字段语义和历史统计生成候选 ChangePolicy。
+description: 根据 CheckItem 标准语义 B 生成并验证确定性 ChangePolicy 候选。
 category: network
 tags: [change-policy, observation, threshold, deadband, validation]
 author: NetOps Team
@@ -33,7 +33,7 @@ inputs:
   - name: historical_values
     type: array
     required: false
-    description: 脱敏历史值，用于确定性统计。
+    description: 可选的离线回放统计；不作为规则语义或阈值的权威来源。
   - name: proposal
     type: object
     required: false
@@ -52,7 +52,7 @@ fallback_to_rag: false
 
 # Change Policy Generator
 
-这个 Skill 用于离线生成候选 ChangePolicy。生产 Change Detector 只执行已激活策略，不调用 LLM。
+这个 Skill 从 CheckItem 版本提供的标准字段语义、维度和策略约束生成候选 ChangePolicy。生产 Change Detector 只执行已激活策略，不调用 LLM；样本只可用于回放验证。
 
 ## 示例
 

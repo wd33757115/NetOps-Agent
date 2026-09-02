@@ -2,15 +2,13 @@ import React from 'react'
 import { Button, Space } from 'antd'
 import {
   AppstoreOutlined,
-  DatabaseOutlined,
   UploadOutlined,
 } from '@ant-design/icons'
 
 import CheckItemCatalogWorkspace from './CheckItemCatalogWorkspace'
 import RuleAssetSourceJobsWorkspace from './RuleAssetSourceJobsWorkspace'
-import OfflineCommandAssetUnits from '../../devices/OfflineCommandAssetUnits'
-import FocusedRuleAssetGeneration from './FocusedRuleAssetGeneration'
 import RuleAssetBundleWorkspace from './RuleAssetBundleWorkspace'
+import OfflineCommandAssetUnits from '../../devices/OfflineCommandAssetUnits'
 
 export type RuleAssetWorkbenchView = 'commands' | 'sources' | 'catalog' | 'policies'
 
@@ -23,20 +21,34 @@ interface RuleAssetProductionWorkbenchProps {
   focusOfflineJobId?: string
   focusRuleSeedJobId?: string
   focusBundleId?: string
+  focusCheckItemVersionId?: string
   datasetIds?: string[]
 }
 
 const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> = ({
   view,
   onViewChange,
-  initialSearch,
   focusAction,
   focusOfflineJobId,
-  focusRuleSeedJobId,
   focusBundleId,
-  datasetIds = [],
+  focusCheckItemVersionId,
+  initialSearch,
 }) => {
-  const currentView = view === 'policies' ? 'catalog' : view
+  // `commands` used to be a second top-level page for the very same catalog.
+  // Keep accepting it in URLs/callers so old deep links still work, but always
+  // send sample commands to the unified check-item workspace.
+  const currentView = view === 'policies' || view === 'commands' ? 'catalog' : view
+  const catalogSourceScope = focusAction === 'classify_check_items'
+    || focusAction === 'open_check_item_catalog'
+  // Parser/TextFSM is command-evidence work. Keep it reachable from the
+  // unified catalog only for an explicitly selected sample action; it does
+  // not reintroduce a third top-level workspace.
+  const showSourceParserFlow = currentView === 'catalog'
+    && focusAction === 'parser'
+    && Boolean(focusOfflineJobId)
+  // The legacy release workspace is folded into this workbench.  It must
+  // still reach the bundle list when callers have no single bundle to focus.
+  const showBundleReview = focusAction === 'bundle-review' || focusAction === 'release'
 
   return (
     <Space className="parser-production-workspace" direction="vertical" size={16} style={{ width: '100%' }}>
@@ -51,45 +63,32 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
         </Button>
         <Button
           type="text"
-          className={currentView === 'commands' ? 'is-active' : ''}
-          icon={<DatabaseOutlined />}
-          onClick={() => onViewChange('commands')}
-        >
-          命令适配器
-        </Button>
-        <Button
-          type="text"
           className={currentView === 'sources' ? 'is-active' : ''}
           icon={<UploadOutlined />}
           onClick={() => onViewChange('sources')}
         >
-          样本任务
+          样本导入
         </Button>
       </nav>
 
-      {currentView === 'catalog' ? (
-        <CheckItemCatalogWorkspace mode="check_items" />
-      ) : currentView === 'sources' ? (
+      {currentView === 'sources' ? (
         <RuleAssetSourceJobsWorkspace />
-      ) : focusAction === 'release' && focusBundleId ? (
-        <RuleAssetBundleWorkspace
-          initialSearch={focusOfflineJobId}
-          initialBundleId={focusBundleId}
-        />
-      ) : focusOfflineJobId ? (
+      ) : showSourceParserFlow && focusOfflineJobId ? (
         <OfflineCommandAssetUnits
           jobId={focusOfflineJobId}
           initialSearch={initialSearch}
-          focusAction={focusAction}
-          generationContent={focusAction === 'rule-generation' ? (
-            <FocusedRuleAssetGeneration
-              seedJobId={focusRuleSeedJobId}
-              datasetIds={datasetIds}
-            />
-          ) : undefined}
+          focusAction="parser"
+        />
+      ) : showBundleReview ? (
+        <RuleAssetBundleWorkspace
+          initialSearch={focusCheckItemVersionId || focusOfflineJobId}
+          initialBundleId={focusBundleId}
+          initialCheckItemVersionId={focusCheckItemVersionId}
         />
       ) : (
-        <CheckItemCatalogWorkspace mode="command_adapters" />
+        <CheckItemCatalogWorkspace
+          initialOfflineJobId={catalogSourceScope ? focusOfflineJobId : undefined}
+        />
       )}
     </Space>
   )

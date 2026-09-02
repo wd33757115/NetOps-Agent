@@ -23,8 +23,8 @@ from src.core.check_items.resolver import CheckItemImplementationResolver
 from src.core.check_items.runtime_bundle_assembly import (
     RuntimeBundleAssemblyPlanner,
 )
-from src.core.parser.policy import DEFAULT_COMMAND_ALIASES, ParserPolicy
 from src.core.parser.output_classifier import classify_parser_generation_sample
+from src.core.parser.policy import DEFAULT_COMMAND_ALIASES, ParserPolicy
 from src.core.parser.repository import (
     ParserJobRepository,
     ParserMetadataRepository,
@@ -55,11 +55,14 @@ from src.infrastructure.db.models import (
 )
 from src.infrastructure.db.postgres import get_db_session
 
-PROJECTION_VERSION = 11
+PROJECTION_VERSION = 12
 logger = logging.getLogger(__name__)
 
 COMMAND_ASSET_DISPOSITION_KEY = "command_asset_dispositions"
+PREPRODUCTION_CHECK_ITEM_ASSOCIATION_KEY = "preproduction_check_item_associations"
 NOT_APPLICABLE_VALID_EMPTY = "not_applicable_valid_empty"
+DISMISSED_UNCLASSIFIED_COMMAND = "dismissed_unclassified_command"
+PENDING_CHECK_ITEM_ASSOCIATION = "pending_check_item_association"
 
 CHECK_ITEM_COMPONENT_ORDER = (
     "identity",
@@ -145,6 +148,78 @@ def _command_disposition_applies(
         str(item) for item in group.get("output_signatures") or [] if item
     }
     return bool(expected_signatures) and expected_signatures == actual_signatures
+
+
+def _command_disposition_hides_asset(
+    disposition: dict[str, Any],
+    asset_key: str,
+) -> bool:
+    """Return whether an operator removed this unclassified command from the inbox."""
+
+    return (
+        disposition.get("decision") == DISMISSED_UNCLASSIFIED_COMMAND
+        and str(disposition.get("asset_key") or "") == str(asset_key)
+    )
+
+
+def _preproduction_association_applies(
+    association: dict[str, Any],
+    group: dict[str, Any],
+    *,
+    asset_key: str | None = None,
+) -> bool:
+    """Match the lightweight sample-to-CheckItem association to one command.
+
+    This is deliberately source-job metadata, rather than a second production
+    mapping asset.  It gives Parser/Projection generation a selected B without
+    making the command resolvable in the runtime until an adapter is approved.
+    """
+
+    if association.get("decision") != PENDING_CHECK_ITEM_ASSOCIATION:
+        return False
+    stored_asset_key = str(association.get("asset_key") or "").strip()
+    if asset_key and stored_asset_key:
+        return stored_asset_key == str(asset_key)
+    if _norm(association.get("vendor")) != _norm(group.get("vendor")):
+        return False
+    if _canonical_command_key(association.get("canonical_command")) != _canonical_command_key(
+        group.get("command")
+    ):
+        return False
+    associated_models = {
+        _norm(item) for item in association.get("models") or [] if _norm(item)
+    }
+    group_models = {
+        _norm(item)
+        for item in ([group.get("model")] + list(group.get("models") or []))
+        if _norm(item)
+    }
+    return not associated_models or bool(associated_models & group_models)
+
+
+def _preproduction_association_for(
+    associations: list[dict[str, Any]],
+    group: dict[str, Any],
+    *,
+    asset_key: str | None = None,
+) -> dict[str, Any] | None:
+    """Return the newest matching association, without guessing an identity."""
+
+    matching = [
+        item
+        for item in associations
+        if _preproduction_association_applies(item, group, asset_key=asset_key)
+    ]
+    if not matching:
+        return None
+    return sorted(
+        matching,
+        key=lambda item: (
+            str(item.get("associated_at") or ""),
+            str(item.get("check_item_id") or ""),
+        ),
+        reverse=True,
+    )[0]
 
 
 STAGE_ORDER = (
@@ -457,6 +532,33 @@ def _child_stage_status(
     return "blocked", matching
 
 
+def _published_text_adapter_mappings(
+    mappings: list[dict[str, str]],
+    implementations_by_version: dict[str, Any],
+) -> list[dict[str, str]]:
+    """Return formal mappings for text/hash/evidence CheckItems.
+
+    These result modes have no Parser Projection. Their active CommandAdapter
+    is already the production mapping and must not be sent through the
+    structured pre-production path.
+    """
+
+    return [
+        mapping
+        for mapping in mappings
+        if str(
+            getattr(
+                implementations_by_version.get(
+                    str(mapping["implementation_version_id"])
+                ),
+                "parser_requirement",
+                "",
+            )
+        )
+        in {"normalized_diff", "hash_only", "evidence_only"}
+    ]
+
+
 class RuleAssetCommandUnitService:
     """Reconcile and query one governed production flow per Parser asset identity."""
 
@@ -477,7 +579,16 @@ class RuleAssetCommandUnitService:
         *,
         catalog: CheckItemCatalog,
     ) -> list[dict[str, str]]:
-        """Resolve catalog mappings without inferring business identity from command text."""
+        """Resolve catalog mappings for the imported physical command.
+
+        A CheckItem may legitimately own several CommandAdapters with the same
+        device selector (for example, one implementation per log-buffer
+        severity).  Resolving the CheckItem before looking at the command makes
+        those implementations look ambiguous even though the imported command
+        selects exactly one of them.  Narrow candidates by this command first,
+        then retain the normal fail-closed ambiguity check for genuinely
+        duplicate command mappings.
+        """
 
         resolver = CheckItemImplementationResolver(catalog)
         implementations = {
@@ -503,20 +614,44 @@ class RuleAssetCommandUnitService:
                 "platform": unit.get("profile"),
             }
             for check_item in catalog.check_items:
-                decision = resolver.resolve(
-                    device=device,
-                    check_item_id=check_item.id,
-                )
-                implementation = implementations.get(
-                    str(decision.implementation_version_id or "")
-                )
-                if decision.status != "resolved" or implementation is None:
+                candidates: list[tuple[Any, int]] = []
+                for implementation in catalog.implementations:
+                    if (
+                        implementation.status != "active"
+                        or check_item.id not in implementation.check_item_ids
+                    ):
+                        continue
+                    implementation_commands = {
+                        _canonical_command_key(item.command)
+                        for item in implementation.commands
+                    }
+                    if command_key not in implementation_commands:
+                        continue
+                    matched, score, _reasons = resolver._match(
+                        device,
+                        implementation.match,
+                    )
+                    if matched:
+                        candidates.append((implementation, score))
+                if not candidates:
                     continue
-                implementation_commands = {
-                    _canonical_command_key(item.command)
-                    for item in implementation.commands
-                }
-                if command_key not in implementation_commands:
+
+                candidates.sort(
+                    key=lambda item: (
+                        item[0].selection_priority,
+                        item[1],
+                        item[0].id,
+                    ),
+                    reverse=True,
+                )
+                implementation, score = candidates[0]
+                equally_specific = [
+                    item
+                    for item in candidates
+                    if item[0].selection_priority == implementation.selection_priority
+                    and item[1] == score
+                ]
+                if len(equally_specific) > 1:
                     continue
                 key = (check_item.id, implementation.version_id)
                 mappings[key] = {
@@ -539,8 +674,6 @@ class RuleAssetCommandUnitService:
     ) -> None:
         """Let approved check-item contracts override legacy command policy."""
 
-        if unit.get("handling") == "not_applicable" or unit.get("asset_mode") == "ignored":
-            return
         if not mappings or not unit.get("has_non_empty_output"):
             return
         check_items = {item.id: item for item in catalog.check_items}
@@ -570,7 +703,17 @@ class RuleAssetCommandUnitService:
         """
 
         with get_db_session() as db:
-            require_rule_asset_source_job(db, offline_job_id)
+            source_job = require_rule_asset_source_job(db, offline_job_id)
+            preproduction_associations = [
+                dict(item)
+                for item in (
+                    (source_job.preview_json or {}).get(
+                        PREPRODUCTION_CHECK_ITEM_ASSOCIATION_KEY
+                    )
+                    or []
+                )
+                if isinstance(item, dict)
+            ]
             run_ids = [
                 str(item.patrol_run_id)
                 for item in (
@@ -640,6 +783,7 @@ class RuleAssetCommandUnitService:
         implementations = {
             item.version_id: item for item in catalog.implementations
         }
+        check_items = {item.id: item for item in catalog.check_items}
         metadata_repository = ParserMetadataRepository()
         template_repository = ParserTemplateRepository()
         job_repository = ParserJobRepository()
@@ -656,6 +800,15 @@ class RuleAssetCommandUnitService:
                 "profile": provisional_profile,
                 "command": command,
             }
+            candidate_association = _preproduction_association_for(
+                preproduction_associations,
+                {"vendor": vendor, "model": model, "command": command},
+            )
+            candidate_check_item = (
+                check_items.get(str(candidate_association.get("check_item_id") or ""))
+                if candidate_association is not None
+                else None
+            )
             mappings = self._resolve_check_item_mappings(unit, catalog=catalog)
             mapped_implementations = [
                 implementations[item["implementation_version_id"]]
@@ -667,7 +820,11 @@ class RuleAssetCommandUnitService:
                 for item in mapped_implementations
                 if item.parser_requirement == "structured"
             ]
-            if not structured_implementations:
+            candidate_requires_parser = bool(
+                candidate_check_item is not None
+                and candidate_check_item.result_mode == "structured"
+            )
+            if not structured_implementations and not candidate_requires_parser:
                 continue
             eligible_groups += 1
             scopes = {
@@ -724,6 +881,11 @@ class RuleAssetCommandUnitService:
                     device_id=row["device_id"],
                     failure_code=failure_code,
                     dataset_id=row["dataset_id"],
+                    # A Parser candidate generated from imported evidence is
+                    # intentionally scoped to that import.  The resulting
+                    # approved template is still a normal shared asset; only
+                    # the generation/replay evidence is source-bound.
+                    evidence_scope=f"offline-rule-assets:{offline_job_id}",
                 )
                 created_or_updated += 1
         return {
@@ -747,7 +909,7 @@ class RuleAssetCommandUnitService:
             self.catalog_repository.load_active()
         )
         with get_db_session() as db:
-            require_rule_asset_source_job(db, offline_job_id)
+            source_job = require_rule_asset_source_job(db, offline_job_id)
             versions = (
                 db.query(RuleAssetCommandUnitRecord.projection_version)
                 .filter(RuleAssetCommandUnitRecord.offline_job_id == offline_job_id)
@@ -884,6 +1046,16 @@ class RuleAssetCommandUnitService:
                 for item in (
                     (source_job.preview_json or {}).get(
                         COMMAND_ASSET_DISPOSITION_KEY
+                    )
+                    or []
+                )
+                if isinstance(item, dict)
+            ]
+            preproduction_associations = [
+                dict(item)
+                for item in (
+                    (source_job.preview_json or {}).get(
+                        PREPRODUCTION_CHECK_ITEM_ASSOCIATION_KEY
                     )
                     or []
                 )
@@ -1081,11 +1253,36 @@ class RuleAssetCommandUnitService:
                     item
                 )
 
+            # A rule-asset parser task is valid only when its current evidence
+            # belongs entirely to this source job.  Older installations may
+            # contain a legacy shared task with samples from several imports;
+            # retaining it for audit is fine, but it must not drive this
+            # import's ParserSpec, TextFSM candidate, or replay conclusion.
+            foreign_current_sample = (
+                select(ParserJobSample.id)
+                .where(
+                    ParserJobSample.job_id == ParserTemplateJob.id,
+                    ParserJobSample.lifecycle_status == "current",
+                    ~ParserJobSample.snapshot_id.in_(target_snapshot_ids),
+                )
+                .exists()
+            )
+            current_source_sample = (
+                select(ParserJobSample.id)
+                .where(
+                    ParserJobSample.job_id == ParserTemplateJob.id,
+                    ParserJobSample.lifecycle_status == "current",
+                    ParserJobSample.snapshot_id.in_(target_snapshot_ids),
+                )
+                .exists()
+            )
             parser_jobs = (
                 db.query(ParserTemplateJob)
                 .filter(
                     ParserTemplateJob.canonical_command.in_(commands),
                     func.lower(ParserTemplateJob.vendor).in_({_norm(item) for item in vendors}),
+                    current_source_sample,
+                    ~foreign_current_sample,
                 )
                 .order_by(ParserTemplateJob.updated_at.desc(), ParserTemplateJob.id.desc())
                 .all()
@@ -1137,6 +1334,14 @@ class RuleAssetCommandUnitService:
                     profile=profile,
                     command=decision.canonical_command,
                 )
+                # Deleting a pending command only removes it from the generated
+                # inbox. The imported raw CLI remains available in its source job
+                # for evidence and can never become a runtime asset by accident.
+                if any(
+                    _command_disposition_hides_asset(item, asset_key)
+                    for item in command_dispositions
+                ):
+                    continue
                 unit = resolved_groups.setdefault(
                     asset_key,
                     {
@@ -1159,6 +1364,11 @@ class RuleAssetCommandUnitService:
                         "has_non_empty_output": False,
                         "template": template,
                         "parser_job": parser_job,
+                        "preproduction_association": _preproduction_association_for(
+                            preproduction_associations,
+                            group,
+                            asset_key=asset_key,
+                        ),
                     },
                 )
                 unit["models"].add(group["model"])
@@ -1178,6 +1388,12 @@ class RuleAssetCommandUnitService:
                     unit["template"] = template
                 if parser_job and unit["parser_job"] is None:
                     unit["parser_job"] = parser_job
+                if unit.get("preproduction_association") is None:
+                    unit["preproduction_association"] = _preproduction_association_for(
+                        preproduction_associations,
+                        group,
+                        asset_key=asset_key,
+                    )
 
             for unit in resolved_groups.values():
                 if unit.pop("all_not_applicable"):
@@ -1192,10 +1408,15 @@ class RuleAssetCommandUnitService:
                 unit.pop("default_handling", None)
                 unit.pop("default_asset_mode", None)
 
+            # A Parser activated for an associated sample command must not seed
+            # the legacy Contract/Policy/Event generation chain.  Those assets
+            # already belong to CheckItem B; only an approved CommandAdapter
+            # turns the preproduction association into a production mapping.
             active_template_ids = {
                 str(item["template"].id)
                 for item in resolved_groups.values()
                 if item["template"] is not None and item["template"].status == "active"
+                and self._resolve_check_item_mappings(item, catalog=catalog)
             }
             contract_by_template = {
                 str(item.source_template_id): item
@@ -1329,7 +1550,96 @@ class RuleAssetCommandUnitService:
                     mappings,
                     catalog=catalog,
                 )
+                preproduction_association = unit.get("preproduction_association")
+                preproduction_check_item = (
+                    next(
+                        (
+                            item
+                            for item in catalog.check_items
+                            if item.id
+                            == str(
+                                (preproduction_association or {}).get(
+                                    "check_item_id"
+                                )
+                                or ""
+                            )
+                        ),
+                        None,
+                    )
+                    if preproduction_association is not None
+                    else None
+                )
+                implementations_by_version = {
+                    str(item.version_id): item
+                    for item in catalog.implementations
+                }
+                direct_projection_mappings = [
+                    mapping
+                    for mapping in mappings
+                    if str(
+                        dict(
+                            getattr(
+                                implementations_by_version.get(
+                                    str(mapping["implementation_version_id"])
+                                ),
+                                "adapter_spec",
+                                {},
+                            )
+                            or {}
+                        ).get("schema_version")
+                        or ""
+                    )
+                    == "command-adapter/v2"
+                ]
+                published_text_adapter_mappings = _published_text_adapter_mappings(
+                    mappings,
+                    implementations_by_version,
+                )
+                direct_check_item_ids = {
+                    str(mapping["check_item_id"])
+                    for mapping in direct_projection_mappings
+                }
+                if preproduction_check_item is None and len(direct_check_item_ids) == 1:
+                    preproduction_check_item = next(
+                        (
+                            item
+                            for item in catalog.check_items
+                            if item.id in direct_check_item_ids
+                        ),
+                        None,
+                    )
+                if preproduction_check_item is not None and direct_projection_mappings:
+                    # A published V2 adapter is already the formal A→B mapping.
+                    # Keep its command-unit state on the same CheckItem-driven
+                    # path as a pre-production association, rather than falling
+                    # back to the retired Contract → Policy → Event command flow.
+                    unit["asset_mode"] = "check_item_mapping"
+                if (
+                    preproduction_check_item is not None
+                    and preproduction_check_item.result_mode == "structured"
+                    and not direct_projection_mappings
+                ):
+                    # This only unlocks the sample Parser workflow.  No
+                    # RuleAssetCommandUnitCheckItemRecord is written below
+                    # until a CommandAdapter is actually approved.
+                    unit["handling"] = "structured"
+                    # Parser/Projection preparation is deliberately not a
+                    # production CommandAdapter mapping.  A legacy catalog
+                    # implementation may still match the same CLI command,
+                    # but it must not make this explicitly associated sample
+                    # look like the retired Contract -> Policy -> Event flow.
+                    unit["asset_mode"] = "preproduction_mapping"
+                elif (
+                    preproduction_check_item is not None
+                    and not direct_projection_mappings
+                    and not published_text_adapter_mappings
+                ):
+                    # Text and evidence checks need an approved CommandAdapter,
+                    # but they deliberately do not enter TextFSM/Projection.
+                    unit["handling"] = "text_diff"
+                    unit["asset_mode"] = "preproduction_text"
                 runtime_states: list[bool] = []
+                direct_projection_route_states: list[bool] = []
                 for mapping in mappings:
                     try:
                         runtime_plan = runtime_planner.build(
@@ -1340,12 +1650,33 @@ class RuleAssetCommandUnitService:
                         )
                     except Exception:
                         runtime_states.append(False)
+                        if mapping in direct_projection_mappings:
+                            direct_projection_route_states.append(False)
                     else:
                         runtime_states.append(
                             bool(runtime_plan.get("active_bundle"))
                             and runtime_plan.get("operationally_ready") is True
                         )
+                        if mapping in direct_projection_mappings:
+                            route_blockers = {
+                                str(item.get("code") or "")
+                                for item in runtime_plan.get("blockers") or []
+                                if isinstance(item, dict)
+                            }
+                            direct_projection_route_states.append(
+                                not route_blockers.intersection(
+                                    {
+                                        "command_adapter_projection_invalid",
+                                        "command_adapter_parser_mismatch",
+                                        "command_adapter_projection_source_missing",
+                                        "no_executable_structured_command",
+                                    }
+                                )
+                            )
                 runtime_ready = bool(runtime_states) and all(runtime_states)
+                direct_projection_route_ready = bool(
+                    direct_projection_route_states
+                ) and all(direct_projection_route_states)
                 template = unit["template"]
                 parser_job = unit["parser_job"]
                 template_id = str(template.id) if template is not None else None
@@ -1375,6 +1706,9 @@ class RuleAssetCommandUnitService:
                     children=bundle_children,
                     output_signature_count=len(unit["output_signatures"]),
                     runtime_ready=runtime_ready,
+                    preproduction_check_item=preproduction_check_item,
+                    adapter_published=bool(direct_projection_mappings),
+                    adapter_route_ready=direct_projection_route_ready,
                 )
                 current_stage, overall_status, progress, next_action = self._rollup(stages)
                 # Expose one authoritative next action. Future-stage actions stay
@@ -1478,7 +1812,7 @@ class RuleAssetCommandUnitService:
         page_size = max(1, min(int(page_size), 100))
         self._ensure_projection_current(offline_job_id)
         with get_db_session() as db:
-            require_rule_asset_source_job(db, offline_job_id)
+            source_job = require_rule_asset_source_job(db, offline_job_id)
             query = db.query(RuleAssetCommandUnitRecord).filter(
                 RuleAssetCommandUnitRecord.offline_job_id == offline_job_id
             )
@@ -1517,7 +1851,16 @@ class RuleAssetCommandUnitService:
             )
             summary = self._summary(db, offline_job_id)
             return {
-                "items": [self._serialize_row(item) for item in rows],
+                "items": [
+                    self._serialize_row(
+                        item,
+                        preproduction_association=self._preproduction_association_for_row(
+                            item,
+                            source_job,
+                        ),
+                    )
+                    for item in rows
+                ],
                 "page": page,
                 "page_size": page_size,
                 "total": int(total),
@@ -1837,23 +2180,66 @@ class RuleAssetCommandUnitService:
         for link in link_rows:
             links_by_unit[link["command_unit_id"]].append(link)
 
+        def is_direct_projection_link(link: dict[str, str]) -> bool:
+            """Whether a catalog link is a published CommandAdapter V2 route.
+
+            Legacy implementation links are useful catalog history, but they do
+            not contain an executable A→B Projection.  Treating them as a
+            completed source-command association hides the command from the
+            pending-classification group and leaves no way to finish its new
+            production path.
+            """
+
+            implementation = implementations.get(
+                str(link.get("implementation_version_id") or "")
+            )
+            adapter_spec = dict(getattr(implementation, "adapter_spec", {}) or {})
+            return str(adapter_spec.get("schema_version") or "") == "command-adapter/v2"
+
         grouped: dict[str, dict[str, Any]] = {}
         for serialized in serialized_rows:
-            links = links_by_unit.get(str(serialized["id"]), [])
+            legacy_or_direct_links = links_by_unit.get(str(serialized["id"]), [])
+            # A raw hash/ignored command keeps its intentionally simple policy
+            # route. Structured production commands, however, must either have
+            # a V2 Projection or appear in the source inbox for one explicit
+            # CheckItem association.
+            if str(serialized.get("asset_mode") or "") in {
+                "raw_hash",
+                "ignored",
+            }:
+                links = legacy_or_direct_links
+            else:
+                links = [
+                    link
+                    for link in legacy_or_direct_links
+                    if is_direct_projection_link(link)
+                ]
             if not links:
                 links = [None]
             for link in links:
-                check_item_id = link["check_item_id"] if link is not None else ""
+                candidate_check_item_id = str(
+                    serialized.get("candidate_check_item_id") or ""
+                )
+                check_item_id = (
+                    link["check_item_id"]
+                    if link is not None
+                    else candidate_check_item_id
+                )
                 ignored_without_catalog = bool(
                     link is None
                     and str(serialized.get("asset_mode") or "") == "ignored"
                 )
+                # An unresolved command cannot be safely coalesced with other
+                # unresolved commands: those commands might describe entirely
+                # different checks.  Keep it at the physical implementation
+                # scope until an operator chooses its CheckItem.  Resolved
+                # implementations are still deliberately grouped by CheckItem.
                 group_key = (
                     check_item_id
                     or (
                         "__not_applicable__"
                         if ignored_without_catalog
-                        else "__unclassified__"
+                        else f"__unclassified__:{serialized['asset_key']}"
                     )
                 )
                 check_item = check_items.get(check_item_id)
@@ -1958,9 +2344,19 @@ class RuleAssetCommandUnitService:
                         if link is not None
                         else "not_required"
                         if ignored_without_catalog
+                        else "preproduction_associated"
+                        if serialized.get("candidate_check_item_id")
                         else "unclassified"
                     ),
                 }
+                candidate_check_item = check_items.get(
+                    str(serialized.get("candidate_check_item_id") or "")
+                )
+                if candidate_check_item is not None:
+                    child["candidate_check_item_name"] = check_item_display_name(
+                        candidate_check_item.id,
+                        candidate_check_item.name,
+                    )
                 group["implementations"].append(
                     self._project_check_item_implementation(
                         child,
@@ -2433,29 +2829,52 @@ class RuleAssetCommandUnitService:
         published_count = sum(
             child.get("governance_bucket") == "published" for child in children
         )
-        unclassified = group_key == "__unclassified__"
+        unclassified = group_key.startswith("__unclassified__:")
+        # A raw-hash command still represents collected business evidence and
+        # must be attached to a text/hash CheckItem before it can participate in
+        # a runtime bundle. Only commands explicitly confirmed as ignored are
+        # exempt from catalog classification.
         all_not_applicable = bool(children) and all(
-            child.get("governance_bucket") == "not_applicable"
+            child.get("asset_mode") == "ignored"
             for child in children
         )
         classification_required = unclassified and not all_not_applicable
+        preproduction_associated = classification_required and any(
+            child.get("candidate_check_item_id") for child in children
+        )
         governance_status = (
-            "blocked" if classification_required else lead["governance_status"]
+            lead["governance_status"]
+            if preproduction_associated
+            else "blocked"
+            if classification_required
+            else lead["governance_status"]
         )
         governance_bucket = (
-            "exception" if classification_required else lead["governance_bucket"]
+            lead["governance_bucket"]
+            if preproduction_associated
+            else "exception"
+            if classification_required
+            else lead["governance_bucket"]
         )
         current_stage = (
-            "identity_grouping" if classification_required else lead["current_stage"]
+            lead["current_stage"]
+            if preproduction_associated
+            else "identity_grouping"
+            if classification_required
+            else lead["current_stage"]
         )
         current_stage_label = (
-            "检查项归类" if classification_required else lead["current_stage_label"]
+            lead["current_stage_label"]
+            if preproduction_associated
+            else "检查项归类"
+            if classification_required
+            else lead["current_stage_label"]
         )
         blocker_count = sum(
             int(child.get("blocker_count") or 0) for child in children
-        ) + (1 if classification_required else 0)
+        ) + (1 if classification_required and not preproduction_associated else 0)
         next_action = None if all_not_applicable else lead.get("next_action")
-        if classification_required:
+        if classification_required and not preproduction_associated:
             first_child = children[0]
             next_action = _action(
                 "classify_check_item",
@@ -2471,6 +2890,7 @@ class RuleAssetCommandUnitService:
             "id": f"check-item:{group_key}",
             **{key: value for key, value in group.items() if key != "implementations"},
             "classification_required": classification_required,
+            "preproduction_associated": preproduction_associated,
             "governance_status": governance_status,
             "governance_bucket": governance_bucket,
             "current_stage": current_stage,
@@ -2611,7 +3031,7 @@ class RuleAssetCommandUnitService:
         evidence_page_size = max(1, min(int(evidence_page_size), 100))
         self._ensure_projection_current(offline_job_id)
         with get_db_session() as db:
-            require_rule_asset_source_job(db, offline_job_id)
+            source_job = require_rule_asset_source_job(db, offline_job_id)
             row = (
                 db.query(RuleAssetCommandUnitRecord)
                 .filter(
@@ -2695,7 +3115,14 @@ class RuleAssetCommandUnitService:
                 if child_ids
                 else []
             )
-            result = self._serialize_row(row, include_stages=True)
+            result = self._serialize_row(
+                row,
+                include_stages=True,
+                preproduction_association=self._preproduction_association_for_row(
+                    row,
+                    source_job,
+                ),
+            )
             result["not_applicable_confirmation"] = (
                 self._not_applicable_confirmation_state(db, row)
             )
@@ -2899,6 +3326,12 @@ class RuleAssetCommandUnitService:
                 and str(item.get("asset_key") or "") != str(row.asset_key)
             ]
             preview[COMMAND_ASSET_DISPOSITION_KEY] = [*existing, disposition]
+            preview[PREPRODUCTION_CHECK_ITEM_ASSOCIATION_KEY] = [
+                dict(item)
+                for item in preview.get(PREPRODUCTION_CHECK_ITEM_ASSOCIATION_KEY) or []
+                if isinstance(item, dict)
+                and str(item.get("asset_key") or "") != str(row.asset_key)
+            ]
             source_job.preview_json = preview
             db.flush()
 
@@ -2906,6 +3339,245 @@ class RuleAssetCommandUnitService:
         return {
             "success": True,
             "decision": disposition,
+            "projection": projection,
+        }
+
+    def associate_unclassified_unit_to_check_item(
+        self,
+        offline_job_id: str,
+        unit_id: str,
+        *,
+        check_item_id: str,
+        actor: str,
+    ) -> dict[str, Any]:
+        """Associate one imported command with B before any adapter exists.
+
+        The association is intentionally stored with the source-job preview.
+        It is enough to drive TextFSM and Projection creation, but it never
+        creates a ``RuleAssetCommandUnitCheckItemRecord`` or a runtime route.
+        """
+
+        normalized_check_item_id = str(check_item_id or "").strip()
+        if not normalized_check_item_id:
+            raise ValueError("check_item_id is required")
+        self._ensure_projection_current(offline_job_id)
+        catalog = self.catalog_repository.load_active()
+        target = next(
+            (
+                item
+                for item in catalog.check_items
+                if item.id == normalized_check_item_id
+            ),
+            None,
+        )
+        if target is None:
+            raise ValueError("selected CheckItem is not active")
+        if target.result_mode not in {
+            "structured",
+            "normalized_diff",
+            "hash_only",
+            "evidence_only",
+        }:
+            raise ValueError("selected CheckItem has an unsupported result mode")
+        implementations_by_version = {
+            str(item.version_id): item for item in catalog.implementations
+        }
+
+        with get_db_session() as db:
+            source_job = require_rule_asset_source_job(
+                db, offline_job_id, for_update=True
+            )
+            row = (
+                db.query(RuleAssetCommandUnitRecord)
+                .filter(
+                    RuleAssetCommandUnitRecord.id == unit_id,
+                    RuleAssetCommandUnitRecord.offline_job_id == offline_job_id,
+                )
+                .first()
+            )
+            if row is None:
+                raise KeyError("command asset unit not found")
+            existing_links = (
+                db.query(RuleAssetCommandUnitCheckItemRecord)
+                .filter(
+                    RuleAssetCommandUnitCheckItemRecord.command_unit_id == unit_id
+                )
+                .all()
+            )
+            has_published_v2_mapping = any(
+                str(
+                    dict(
+                        getattr(
+                            implementations_by_version.get(
+                                str(link.implementation_version_id)
+                            ),
+                            "adapter_spec",
+                            {},
+                        )
+                        or {}
+                    ).get("schema_version")
+                    or ""
+                )
+                == "command-adapter/v2"
+                for link in existing_links
+            )
+            if has_published_v2_mapping:
+                raise ValueError("command asset already has a published CheckItem mapping")
+
+            association = {
+                "decision": PENDING_CHECK_ITEM_ASSOCIATION,
+                "asset_key": str(row.asset_key),
+                "vendor": row.vendor,
+                "models": list(row.models_json or []),
+                "canonical_command": row.canonical_command,
+                "check_item_id": target.id,
+                "check_item_version_id": target.version_id,
+                "associated_by": str(actor or "unknown"),
+                "associated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            preview = dict(source_job.preview_json or {})
+            existing = [
+                dict(item)
+                for item in preview.get(PREPRODUCTION_CHECK_ITEM_ASSOCIATION_KEY) or []
+                if isinstance(item, dict)
+                and str(item.get("asset_key") or "") != str(row.asset_key)
+            ]
+            preview[PREPRODUCTION_CHECK_ITEM_ASSOCIATION_KEY] = [
+                *existing,
+                association,
+            ]
+            source_job.preview_json = preview
+            db.flush()
+
+        projection = self.reconcile(offline_job_id)
+        with get_db_session() as db:
+            refreshed = (
+                db.query(RuleAssetCommandUnitRecord)
+                .filter(
+                    RuleAssetCommandUnitRecord.id == unit_id,
+                    RuleAssetCommandUnitRecord.offline_job_id == offline_job_id,
+                )
+                .first()
+            )
+            parser_job_id = str(refreshed.parser_job_id) if refreshed and refreshed.parser_job_id else None
+        return {
+            "success": True,
+            "association": association,
+            "parser_job_id": parser_job_id,
+            "projection": projection,
+        }
+
+    def associate_parser_job_to_check_item(
+        self,
+        parser_job_id: str,
+        *,
+        check_item_id: str,
+        actor: str,
+    ) -> dict[str, Any] | None:
+        """Persist B selected by the Parser workflow on its source command.
+
+        The ParserSpec screen already asks the operator to choose a CheckItem.
+        Keeping that choice only in the Parser job makes the subsequent
+        Projection workflow lose its target B.  A source-scoped parser job has
+        one command-unit row, so reuse the existing lightweight association
+        rather than creating another mapping concept.
+
+        Parser jobs opened from the general control plane need not belong to an
+        imported source command; in that case this is deliberately a no-op.
+        """
+
+        normalized_job_id = str(parser_job_id or "").strip()
+        if not normalized_job_id:
+            return None
+        with get_db_session() as db:
+            rows = (
+                db.query(RuleAssetCommandUnitRecord)
+                .filter(RuleAssetCommandUnitRecord.parser_job_id == normalized_job_id)
+                .order_by(RuleAssetCommandUnitRecord.id)
+                .all()
+            )
+            if len(rows) != 1:
+                return None
+            row = rows[0]
+            offline_job_id = str(row.offline_job_id)
+            unit_id = str(row.id)
+        return self.associate_unclassified_unit_to_check_item(
+            offline_job_id,
+            unit_id,
+            check_item_id=check_item_id,
+            actor=actor,
+        )
+
+    def delete_unclassified_unit(
+        self,
+        offline_job_id: str,
+        unit_id: str,
+        *,
+        actor: str,
+    ) -> dict[str, Any]:
+        """Remove one pending command from the catalog inbox.
+
+        The source CLI is evidence, so it is deliberately retained. A compact
+        disposition in the source job makes the removal survive projection
+        refreshes without inventing another command-mapping table.
+        """
+
+        with get_db_session() as db:
+            source_job = require_rule_asset_source_job(
+                db, offline_job_id, for_update=True
+            )
+            row = (
+                db.query(RuleAssetCommandUnitRecord)
+                .filter(
+                    RuleAssetCommandUnitRecord.id == unit_id,
+                    RuleAssetCommandUnitRecord.offline_job_id == offline_job_id,
+                )
+                .first()
+            )
+            if row is None:
+                raise KeyError("command asset unit not found")
+            has_check_item_link = (
+                db.query(RuleAssetCommandUnitCheckItemRecord.id)
+                .filter(
+                    RuleAssetCommandUnitCheckItemRecord.command_unit_id == unit_id
+                )
+                .first()
+                is not None
+            )
+            if row.check_item_id or has_check_item_link:
+                raise ValueError("only unclassified command assets can be deleted")
+
+            disposition = {
+                "asset_key": str(row.asset_key),
+                "decision": DISMISSED_UNCLASSIFIED_COMMAND,
+                "vendor": row.vendor,
+                "models": list(row.models_json or []),
+                "canonical_command": row.canonical_command,
+                "deleted_by": str(actor or "unknown"),
+                "deleted_at": datetime.now(timezone.utc).isoformat(),
+            }
+            preview = dict(source_job.preview_json or {})
+            existing = [
+                dict(item)
+                for item in preview.get(COMMAND_ASSET_DISPOSITION_KEY) or []
+                if isinstance(item, dict)
+                and str(item.get("asset_key") or "") != str(row.asset_key)
+            ]
+            preview[COMMAND_ASSET_DISPOSITION_KEY] = [*existing, disposition]
+            preview[PREPRODUCTION_CHECK_ITEM_ASSOCIATION_KEY] = [
+                dict(item)
+                for item in preview.get(PREPRODUCTION_CHECK_ITEM_ASSOCIATION_KEY) or []
+                if isinstance(item, dict)
+                and str(item.get("asset_key") or "") != str(row.asset_key)
+            ]
+            source_job.preview_json = preview
+            db.flush()
+
+        projection = self.reconcile(offline_job_id)
+        return {
+            "success": True,
+            "unit_id": unit_id,
+            "asset_key": disposition["asset_key"],
             "projection": projection,
         }
 
@@ -2966,6 +3638,9 @@ class RuleAssetCommandUnitService:
         children: list[RuleGenerationJobRecord],
         output_signature_count: int,
         runtime_ready: bool = False,
+        preproduction_check_item: Any | None = None,
+        adapter_published: bool = False,
+        adapter_route_ready: bool = False,
     ) -> list[dict[str, Any]]:
         command = unit["command"]
         source_job_url = "/skills/parser?" + urlencode(
@@ -3008,7 +3683,7 @@ class RuleAssetCommandUnitService:
             asset_mode = str(unit.get("asset_mode") or "full_chain")
             explicit_requirements = {
                 "schema_version": "rule-asset-requirements/command-mode-v1",
-                "requires_observation_contract": True,
+                "requires_observation_contract": asset_mode != "preproduction_mapping",
                 "requires_change_policy": asset_mode in {"change_only", "full_chain"},
                 "requires_current_state_rule": False,
                 "requires_event_rule": asset_mode == "full_chain",
@@ -3071,7 +3746,72 @@ class RuleAssetCommandUnitService:
             )
         )
 
-        semantic = unit["asset_mode"] in {"full_chain", "observation_only", "change_only"}
+        if unit["asset_mode"] == "preproduction_text":
+            target_name = str(
+                getattr(preproduction_check_item, "name", "")
+                or getattr(preproduction_check_item, "id", "CheckItem")
+            )
+            catalog_url = "/skills/parser?" + urlencode(
+                {"workspace": "production", "subtab": "catalog-management"}
+            )
+            for key, label, detail in (
+                ("parser_generation", "TextFSM Parser", "文本/证据检查项不生成 TextFSM。"),
+                ("parser_validation", "Parser 验证", "文本/证据检查项不需要 Parser 验证。"),
+                ("structured_quality", "结构化数据质量", "文本/证据检查项不产生结构化观测。"),
+            ):
+                stage = _stage(key, "skipped", detail)
+                stage["label"] = label
+                stages.append(stage)
+            adapter_stage = _stage(
+                "observation_contract",
+                "ready",
+                (
+                    f"样本命令已预生产关联到 {target_name}。该检查项走文本/哈希证据路径，"
+                    "无需 TextFSM；请创建并验证对应的文本命令适配器。"
+                ),
+                next_action=_action(
+                    "open_catalog_adapter",
+                    "创建文本命令适配器",
+                    "在检查项目录中创建、回放验证并审批该文本命令适配器。",
+                    catalog_url,
+                ),
+            )
+            adapter_stage["label"] = "文本命令适配器"
+            stages.append(adapter_stage)
+            for key, label in (
+                ("change_policy", "变化策略（复用 CheckItem）"),
+                ("event_rule", "事件规则（复用 CheckItem）"),
+            ):
+                stage = _stage(
+                    key,
+                    "skipped",
+                    "由已关联 CheckItem 的既有标准语义与规则资产统一治理。",
+                )
+                stage["label"] = label
+                stages.append(stage)
+            stages.append(
+                _stage(
+                    "validation_review",
+                    "not_started",
+                    "文本命令适配器创建后，必须完成样本回放验证和工程复核。",
+                )
+            )
+            stages.append(
+                _stage(
+                    "release",
+                    "not_started",
+                    "文本命令适配器通过审批后才会成为正式生产映射。",
+                )
+            )
+            return stages
+
+        semantic = unit["asset_mode"] in {
+            "full_chain",
+            "observation_only",
+            "change_only",
+            "preproduction_mapping",
+            "check_item_mapping",
+        }
         if not semantic:
             reason = "命令按原始哈希比较" if unit["asset_mode"] == "raw_hash" else "命令策略为忽略"
             for key in STAGE_ORDER[2:]:
@@ -3175,13 +3915,17 @@ class RuleAssetCommandUnitService:
             int(parse_counts.get(key) or 0)
             for key in ("template_missing", "parse_failed", "identity_unknown")
         )
+        template_validation = dict(getattr(template, "validation_json", None) or {})
+        approved_valid_empty = bool(parse_counts) and set(parse_counts).issubset(
+            {"empty"}
+        ) and bool(template_validation.get("allow_empty"))
         if not template_active:
             quality_status = "not_started"
             quality_blockers = []
         elif gap_count:
             quality_status = "blocked"
             quality_blockers = [f"仍有 {gap_count} 个输出未形成可靠结构化结果"]
-        elif unit["structured_count"] <= 0:
+        elif unit["structured_count"] <= 0 and not approved_valid_empty:
             quality_status = "blocked"
             quality_blockers = ["没有可供规则生成使用的结构化记录"]
         else:
@@ -3191,11 +3935,17 @@ class RuleAssetCommandUnitService:
             _stage(
                 "structured_quality",
                 quality_status,
-                "确认历史快照已使用 Active Parser 回填，并显式暴露缺模板、解析失败或身份未知。",
+                (
+                    "确认历史快照已使用 Active Parser 回填，并显式暴露缺模板、解析失败或身份未知。"
+                    if not approved_valid_empty
+                    else "当前 Active Parser 已批准该命令返回合法空结果；该结果是有效覆盖，"
+                    "不会伪造结构化记录。"
+                ),
                 metrics={
                     "parse_counts": parse_counts,
                     "structured_record_count": unit["structured_count"],
                     "gap_count": gap_count,
+                    "approved_valid_empty": approved_valid_empty,
                 },
                 blockers=quality_blockers,
                 next_action=(
@@ -3210,6 +3960,111 @@ class RuleAssetCommandUnitService:
                 ),
             )
         )
+
+        if preproduction_check_item is not None:
+            target_name = str(
+                getattr(preproduction_check_item, "name", "")
+                or getattr(preproduction_check_item, "id", "CheckItem")
+            )
+            catalog_url = "/skills/parser?" + urlencode(
+                {"workspace": "production", "subtab": "catalog-management"}
+            )
+            if adapter_published:
+                projection_status = "passed" if adapter_route_ready else "blocked"
+                projection_detail = (
+                    f"已发布命令适配器，使用 {target_name} 的 CheckItem 标准语义完成 A→B Projection。"
+                    if adapter_route_ready
+                    else "已发布命令适配器与当前 Parser 路径不一致；请在检查项目录修订 Projection。"
+                )
+                projection_blockers = (
+                    []
+                    if adapter_route_ready
+                    else ["已发布 Projection 不能形成可执行 Parser 路径"]
+                )
+                projection_action = (
+                    None
+                    if adapter_route_ready
+                    else _action(
+                        "repair_command_adapter",
+                        "修订命令适配器",
+                        "在检查项目录修订 Projection，使 source_record_set 与当前 Parser 一致。",
+                        catalog_url,
+                    )
+                )
+            else:
+                projection_status = "ready" if quality_status == "passed" else "not_started"
+                projection_detail = (
+                    f"样本命令已关联到 {target_name}。使用该 CheckItem 的标准字段、"
+                    "主键与允许值生成并验证 A→B Projection；此操作不会创建生产映射。"
+                )
+                projection_blockers = []
+                projection_action = (
+                    _action(
+                        "open_catalog_adapter",
+                        "配置 Projection 并创建适配器",
+                        "Parser 验证通过后，在检查项目录创建、回放验证并审批命令适配器。",
+                        catalog_url,
+                    )
+                    if quality_status == "passed"
+                    else None
+                )
+            projection_stage = _stage(
+                "observation_contract",
+                projection_status,
+                projection_detail,
+                metrics={
+                    "check_item_id": str(getattr(preproduction_check_item, "id", "")),
+                    "check_item_version_id": str(
+                        getattr(preproduction_check_item, "version_id", "")
+                    ),
+                },
+                blockers=projection_blockers,
+                next_action=projection_action,
+            )
+            projection_stage["label"] = "A→B Projection 与命令适配器"
+            stages.append(projection_stage)
+            for key in ("change_policy", "event_rule"):
+                skipped_stage = _stage(
+                    key,
+                    "skipped",
+                    "由已关联 CheckItem 的既有标准语义与规则资产统一治理。",
+                )
+                if key == "change_policy":
+                    skipped_stage["label"] = "变化策略（复用 CheckItem）"
+                elif key == "event_rule":
+                    skipped_stage["label"] = "事件规则（复用 CheckItem）"
+                stages.append(skipped_stage)
+            stages.append(
+                _stage(
+                    "validation_review",
+                    (
+                        "passed"
+                        if adapter_published and adapter_route_ready
+                        else "blocked"
+                        if adapter_published
+                        else "not_started"
+                    ),
+                    (
+                        "已使用当前 Parser 验证并发布命令适配器。"
+                        if adapter_published and adapter_route_ready
+                        else "已发布适配器未通过当前 Parser 路径校验。"
+                        if adapter_published
+                        else "命令适配器草稿创建后，必须完成 Projection 回放验证与工程复核。"
+                    ),
+                )
+            )
+            stages.append(
+                _stage(
+                    "release",
+                    "passed" if adapter_published and adapter_route_ready else "not_started",
+                    (
+                        "命令适配器已通过目录审批，成为正式 A→B 生产映射。"
+                        if adapter_published and adapter_route_ready
+                        else "命令适配器通过目录审批发布后，才会成为正式 A→B 生产映射。"
+                    ),
+                )
+            )
+            return stages
 
         bundle_status = str(bundle.status) if bundle else None
         contract_status, contract_children = _child_stage_status(
@@ -3590,7 +4445,13 @@ class RuleAssetCommandUnitService:
         row: RuleAssetCommandUnitRecord,
         source_job: OfflinePatrolJobRecord,
     ) -> dict[str, Any]:
-        result = cls._serialize_row(row)
+        result = cls._serialize_row(
+            row,
+            preproduction_association=cls._preproduction_association_for_row(
+                row,
+                source_job,
+            ),
+        )
         result.update(cls._serialize_product_state(result))
         result["source_job"] = {
             "id": source_job.id,
@@ -3601,11 +4462,48 @@ class RuleAssetCommandUnitService:
         return result
 
     @staticmethod
+    def _preproduction_association_for_row(
+        row: RuleAssetCommandUnitRecord,
+        source_job: OfflinePatrolJobRecord,
+    ) -> dict[str, Any] | None:
+        associations = [
+            dict(item)
+            for item in (
+                (source_job.preview_json or {}).get(
+                    PREPRODUCTION_CHECK_ITEM_ASSOCIATION_KEY
+                )
+                or []
+            )
+            if isinstance(item, dict)
+        ]
+        return _preproduction_association_for(
+            associations,
+            {
+                "vendor": row.vendor,
+                "model": row.model,
+                "models": list(row.models_json or []),
+                "command": row.canonical_command,
+            },
+            asset_key=str(row.asset_key),
+        )
+
+    @staticmethod
     def _serialize_row(
         row: RuleAssetCommandUnitRecord,
         *,
         include_stages: bool = False,
+        preproduction_association: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        stage_states = [
+            dict(item)
+            for item in (row.stage_states_json or [])
+            if isinstance(item, dict)
+        ]
+        stage_labels = {
+            str(item.get("key")): str(item.get("label"))
+            for item in stage_states
+            if item.get("key") and item.get("label")
+        }
         result = {
             "id": row.id,
             "offline_job_id": row.offline_job_id,
@@ -3621,7 +4519,10 @@ class RuleAssetCommandUnitService:
             "asset_mode": row.asset_mode,
             "status": row.status,
             "current_stage": row.current_stage,
-            "current_stage_label": STAGE_LABELS.get(row.current_stage, row.current_stage),
+            "current_stage_label": stage_labels.get(
+                str(row.current_stage)
+            )
+            or STAGE_LABELS.get(row.current_stage, row.current_stage),
             "progress_percent": row.progress_percent,
             "sample_count": row.sample_count,
             "device_count": row.device_count,
@@ -3630,7 +4531,7 @@ class RuleAssetCommandUnitService:
             "parse_counts": dict(row.parse_counts_json or {}),
             "stage_statuses": {
                 str(item.get("key")): str(item.get("status"))
-                for item in (row.stage_states_json or [])
+                for item in stage_states
                 if item.get("key")
             },
             "next_action": dict(row.next_action_json or {}),
@@ -3642,6 +4543,18 @@ class RuleAssetCommandUnitService:
             "projection_version": row.projection_version,
             "updated_at": _iso(row.updated_at),
         }
+        if preproduction_association is not None:
+            result.update(
+                {
+                    "candidate_check_item_id": preproduction_association.get(
+                        "check_item_id"
+                    ),
+                    "candidate_check_item_version_id": preproduction_association.get(
+                        "check_item_version_id"
+                    ),
+                    "candidate_association_status": "preproduction",
+                }
+            )
         if include_stages:
             result["stages"] = list(row.stage_states_json or [])
         return result

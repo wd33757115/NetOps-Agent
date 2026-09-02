@@ -79,12 +79,12 @@ export const governanceAlertLabel = (code: string, fallback: string) => {
 export const queryErrorLabel = (error: unknown) => {
   const candidate = error as {
     message?: string
+    status?: number
     response?: { status?: number; data?: { detail?: string } }
   } | null
-  const status = candidate?.response?.status
+  const status = candidate?.response?.status ?? candidate?.status
   if (status === 401 || status === 403) return '权限不足'
   if (status === 404) return '接口不存在'
   if (status && status >= 500) return '服务暂不可用'
-  if (!status) return '网络连接失败'
-  return candidate?.response?.data?.detail || candidate?.message || '请求失败'
+  return candidate?.response?.data?.detail || candidate?.message || '网络连接失败'
 }

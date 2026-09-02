@@ -33,8 +33,8 @@ const RuleAssetChainWorkspace: React.FC<RuleAssetChainWorkspaceProps> = ({
     <Alert
       type="info"
       showIcon
-      message="按 Observation Type 检查 Contract → ChangePolicy → EventRule"
-      description="Contract 与 Policy 是结构化状态和变化检测的必需资产；EventRule 仅统计明确声明 observation type 或实体作用域匹配的 active 规则。"
+      message="按标准语义 B 检查 ChangePolicy → EventRule"
+      description="标准字段和值域来自 CheckItem；Command Adapter 负责 A→B。ObservationContract 只作为历史资产展示，不再是直接投影运行链路或规则生成的前置条件。"
     />
       <StandardTableShell<RuleAssetChainRow>
         rowKey="observationType"
@@ -66,11 +66,14 @@ const RuleAssetChainWorkspace: React.FC<RuleAssetChainWorkspaceProps> = ({
           },
         },
         {
-          title: 'ObservationContract',
+          title: '标准语义来源',
           width: 220,
-          render: (_: unknown, row) => row.activeContracts.length
-            ? <Tag color="green">Active {row.activeContracts.length} / 共 {row.contracts.length}</Tag>
-            : <Tag color="red">缺少 Active Contract</Tag>,
+          render: (_: unknown, row) => (
+            <Space wrap>
+              <Tag color="blue">CheckItem B</Tag>
+              {row.activeContracts.length > 0 && <Tag>历史 Contract {row.activeContracts.length}</Tag>}
+            </Space>
+          ),
         },
         {
           title: 'ChangePolicy',
@@ -91,7 +94,6 @@ const RuleAssetChainWorkspace: React.FC<RuleAssetChainWorkspaceProps> = ({
           render: (_: unknown, row) => (
             <Space wrap>
               {Array.from(new Set([
-                ...row.contracts.map((item) => item.source_job_id),
                 ...row.policies.map((item) => item.source_job_id),
                 ...row.rules.map((item) => item.source_job_id),
               ].filter(Boolean))).slice(0, 3).map((jobId) => (
@@ -124,8 +126,11 @@ const RuleAssetChainWorkspace: React.FC<RuleAssetChainWorkspaceProps> = ({
       expandable={{
         expandedRowRender: (row) => (
           <Descriptions bordered size="small" column={1}>
-            <Descriptions.Item label="Contract 版本">
-              {row.contracts.map((item) => `${item.id} v${item.version} (${item.status})`).join('；') || '-'}
+            <Descriptions.Item label="标准语义">
+              由 CheckItem 版本提供；与样本和 Parser 解耦
+            </Descriptions.Item>
+            <Descriptions.Item label="历史 Contract（仅审计）">
+              {row.contracts.map((item) => `${item.id} v${item.version} (${item.status})`).join('；') || '无'}
             </Descriptions.Item>
             <Descriptions.Item label="Policy 版本">
               {row.policies.map((item) => `${item.version_id} v${item.version} (${item.version_status})`).join('；') || '-'}

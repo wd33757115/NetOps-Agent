@@ -40,6 +40,7 @@ _ROLE_ALIASES = {
     "change": "change",
     "changed": "change",
     "lifecycle_change": "change",
+    "baseline_degradation": "baseline_degradation",
 }
 
 
@@ -103,6 +104,26 @@ def _target_fields(contract: dict[str, Any], observation_type: str) -> list[str]
         if isinstance(metadata, dict)
         and str(metadata.get("observation_type") or "") == observation_type
     ]
+
+
+def _state_values(
+    contract: dict[str, Any],
+    observation_type: str,
+) -> tuple[list[str], list[str]]:
+    """Return explicit canonical healthy/unhealthy values for one target."""
+
+    semantics = dict(contract.get("state_semantics") or {})
+    healthy: set[str] = set()
+    unhealthy: set[str] = set()
+    for metadata in semantics.values():
+        if not isinstance(metadata, dict):
+            continue
+        if str(metadata.get("observation_type") or "") != observation_type:
+            continue
+        groups = dict(metadata.get("state_groups") or {})
+        healthy.update(str(item) for item in groups.get("healthy") or [] if str(item))
+        unhealthy.update(str(item) for item in groups.get("unhealthy") or [] if str(item))
+    return sorted(healthy), sorted(unhealthy)
 
 
 def expected_rule_roles(
@@ -387,34 +408,61 @@ def expected_rule_roles(
                         tuple(low_fault_roles),
                     )
                 )
+        baseline = dict(change_policy.get("baseline_comparison") or {})
+        if baseline:
+            roles.append(
+                RuleRole(
+                    "baseline_degradation",
+                    "fault",
+                    {
+                        "kind": "linear_power_baseline_loss",
+                        **base,
+                        "max_loss_ratio": float(baseline["max_loss_ratio"]),
+                        "identity_fields": list(baseline["identity_fields"]),
+                    },
+                    "warning",
+                )
+            )
         if not roles:
             errors.append("numeric ChangePolicy does not define a usable high or low threshold")
         return roles, errors
 
     if compare_mode in {"state_transition", "enum_transition"}:
+        healthy_values, unhealthy_values = _state_values(contract, observation_type)
+        down_condition = {
+            "kind": "transition",
+            **base,
+            "from_group": "up",
+            "to_group": "down",
+            "allow_initial_target": False,
+        }
+        up_condition = {
+            "kind": "transition",
+            **base,
+            "from_group": "down",
+            "to_group": "up",
+            "allow_initial_target": False,
+        }
+        if healthy_values and unhealthy_values:
+            down_condition.update(
+                from_values=healthy_values,
+                to_values=unhealthy_values,
+            )
+            up_condition.update(
+                from_values=unhealthy_values,
+                to_values=healthy_values,
+            )
         return [
             RuleRole(
                 "down",
                 "fault",
-                {
-                    "kind": "transition",
-                    **base,
-                    "from_group": "up",
-                    "to_group": "down",
-                    "allow_initial_target": False,
-                },
+                down_condition,
                 "major",
             ),
             RuleRole(
                 "up",
                 "recovery",
-                {
-                    "kind": "transition",
-                    **base,
-                    "from_group": "down",
-                    "to_group": "up",
-                    "allow_initial_target": False,
-                },
+                up_condition,
                 "info",
                 ("down",),
             ),
@@ -479,6 +527,8 @@ def infer_event_rule_role(rule: dict[str, Any]) -> str | None:
         return "low"
     if kind == "threshold":
         return "high"
+    if kind == "linear_power_baseline_loss":
+        return "baseline_degradation"
     if kind in {"transition", "bgp_transition"}:
         target = str(condition.get("to_group") or "").casefold()
         if target in {"down", "up"}:
@@ -536,6 +586,7 @@ def _compile_current_state_roles(
                     f"current-state rule cannot compile transition role: {role.name}"
                 )
                 continue
+            explicit_values = list(condition.get("to_values") or [])
             condition = {
                 key: value
                 for key, value in condition.items()
@@ -548,6 +599,8 @@ def _compile_current_state_roles(
                 }
             }
             condition["kind"] = "entity_status_down"
+            if explicit_values:
+                condition["values"] = explicit_values
         elif kind in {"field_change", "raw_config_hash"}:
             errors.append(
                 f"current-state rule cannot compile history-only condition: {kind}"

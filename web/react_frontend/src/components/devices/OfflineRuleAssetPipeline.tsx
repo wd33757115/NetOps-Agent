@@ -1,11 +1,10 @@
 import React from 'react'
-import { Alert, Button, Divider, Progress, Space, Tooltip, Typography } from 'antd'
-import { ArrowRightOutlined, CheckOutlined, CloseOutlined, DatabaseOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Alert, Button, Progress, Space, Tooltip, Typography } from 'antd'
+import { ArrowRightOutlined, CheckOutlined, CloseOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useQuery } from 'react-query'
 import { useNavigate } from 'react-router-dom'
 import { ruleAssetSourceApi } from '../../services/api'
 import { useIsMobile } from '../../hooks/useBreakpoint'
-import OfflineCommandAssetUnits from './OfflineCommandAssetUnits'
 
 const statusLabel: Record<string, string> = {
   not_started: '未开始',
@@ -34,7 +33,7 @@ const OfflineRuleAssetPipeline: React.FC<{ jobId: string }> = ({ jobId }) => {
       <Alert
         type="error"
         showIcon
-        message="适配器生产进度加载失败"
+        message="样本导入进度加载失败"
         action={<Button icon={<ReloadOutlined />} onClick={() => query.refetch()}>重试</Button>}
       />
     )
@@ -51,17 +50,17 @@ const OfflineRuleAssetPipeline: React.FC<{ jobId: string }> = ({ jobId }) => {
             <div className="offline-asset-pipeline__notice">
               <Typography.Text strong>只使用已确认的离线样本</Typography.Text>
               <Typography.Text type="secondary">
-                历史未结构化数据可另行回填；回填必须先预演和审批，不会直接影响生产巡检。
+                导入完成后，命令会进入检查项目录；Parser、适配器和规则在各自的目录流程中处理。
               </Typography.Text>
             </div>
           )}
         />
       )}
-      <section className="offline-asset-pipeline" aria-label="样本任务生产进度">
+      <section className="offline-asset-pipeline" aria-label="样本导入进度">
         <header className={`offline-asset-pipeline__header${isMobile ? '' : ' is-compact'}`}>
           {isMobile && (
             <div className="offline-asset-pipeline__current">
-              <Typography.Text strong>样本任务生产进度</Typography.Text>
+              <Typography.Text strong>样本导入进度</Typography.Text>
               <Typography.Text type="secondary">
                 当前：{pipeline.next_action.label} · {pipeline.next_action.description}
               </Typography.Text>
@@ -69,7 +68,7 @@ const OfflineRuleAssetPipeline: React.FC<{ jobId: string }> = ({ jobId }) => {
           )}
           <div className="offline-asset-pipeline__progress">
             <div>
-              <Typography.Text type="secondary">{isMobile ? '总体进度' : '生产进度'}</Typography.Text>
+              <Typography.Text type="secondary">{isMobile ? '总体进度' : '导入进度'}</Typography.Text>
               <Typography.Text strong>{pipeline.progress_percent}%</Typography.Text>
             </div>
             <Progress percent={pipeline.progress_percent} showInfo={false} size="small" />
@@ -114,30 +113,15 @@ const OfflineRuleAssetPipeline: React.FC<{ jobId: string }> = ({ jobId }) => {
               {pipeline.next_action.label}
             </Button>
           )}
-          {pipeline.secondary_actions.map((action) => (
-            <Button
-              key={action.code}
-              icon={<DatabaseOutlined />}
-              onClick={() => navigate(action.target_url)}
-            >
-              {action.label}
-            </Button>
-          ))}
           <Button icon={<ReloadOutlined />} onClick={() => query.refetch()}>刷新进度</Button>
         </div>
       </section>
-      {isMobile && (
-        <>
-          <Divider style={{ marginBlock: 4 }} />
-          <Space direction="vertical" size={2}>
-            <Typography.Text strong>按命令处理样本资产</Typography.Text>
-            <Typography.Text type="secondary">
-              每条命令使用本任务的样本完成 Parser 生成与验证，再绑定检查项和命令适配器。
-            </Typography.Text>
-          </Space>
-        </>
-      )}
-      <OfflineCommandAssetUnits jobId={jobId} />
+      <Alert
+        showIcon
+        type="info"
+        message="导入职责到此结束"
+        description="样本导入只保存原始 CLI 证据、识别命令并创建待归类命令。请在检查项目录关联 CheckItem；结构化命令随后生成 TextFSM 与 Projection，文本命令创建文本命令适配器。"
+      />
     </Space>
   )
 }

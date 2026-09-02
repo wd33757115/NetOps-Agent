@@ -29,7 +29,7 @@ const RuleAssetSourceJobsWorkspace: React.FC = () => {
     ? searchParams.get('implementation_version_id')?.trim()
     : ''
   const initialJobName = focusedCommand
-    ? `${checkItemId || focusedCommand}${observationType ? ` · ${observationType}` : ''} 规则样本`
+    ? `${checkItemId || focusedCommand}${observationType ? ` · ${observationType}` : ''} CLI 样本`
     : undefined
 
   return (
@@ -38,7 +38,7 @@ const RuleAssetSourceJobsWorkspace: React.FC = () => {
         <Alert
           showIcon
           type="info"
-          message="从生产资产缺口导入规则样本"
+          message="从生产资产缺口导入 CLI 样本"
           description={(
             <Space size={[8, 4]} wrap>
               <Typography.Text>缺口</Typography.Text>
@@ -50,7 +50,7 @@ const RuleAssetSourceJobsWorkspace: React.FC = () => {
               <Typography.Text>命令</Typography.Text>
               <Typography.Text code>{focusedCommand || '未指定'}</Typography.Text>
               <Typography.Text type="secondary">
-                此入口只预填证据范围；上传、预览并确认样本后，才可进入资产生成。
+                此入口只预填证据范围；导入完成后，命令会进入检查项目录的待归类分组。
               </Typography.Text>
             </Space>
           )}

@@ -49,6 +49,9 @@ def test_rule_asset_source_and_offline_patrol_are_separate_first_class_apis():
     asset_output_confirm = (
         "/api/v1/parser/asset-source-jobs/{job_id}/output-dispositions/confirm"
     )
+    asset_unclassified_command_delete = (
+        "/api/v1/parser/asset-source-jobs/{job_id}/command-asset-units/{unit_id}"
+    )
     patrol_output_confirm = (
         "/api/v1/patrol/offline-jobs/{job_id}/output-dispositions/confirm"
     )
@@ -57,6 +60,7 @@ def test_rule_asset_source_and_offline_patrol_are_separate_first_class_apis():
     assert patrol_list in routes
     assert patrol_execute in routes
     assert asset_output_confirm in routes
+    assert asset_unclassified_command_delete in routes
     assert patrol_output_confirm in routes
     assert patrol_asset_endpoint not in routes
     assert patrol_command_assets_endpoint not in routes

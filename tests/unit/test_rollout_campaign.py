@@ -7,15 +7,15 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from src.core.check_items.assessment_policy import (
+    normalize_assessment_policy_contract,
+)
 from src.core.check_items.rollout import (
     COMPARISON_DOMAINS,
     ROLLOUT_STAGES,
     RolloutCampaignService,
     RolloutValidationError,
     _digest,
-)
-from src.core.check_items.assessment_policy import (
-    normalize_assessment_policy_contract,
 )
 from src.core.check_items.rollout_execution import (
     RolloutOutboxRepository,
@@ -1743,7 +1743,7 @@ def test_evaluator_ignores_parser_identity_but_counts_severe_event_drift():
     assert metrics["unexplained_p0_p1_count"] == 1
 
 
-def test_snapshot_selection_keeps_complete_multi_command_periods(tmp_path):
+def test_snapshot_selection_uses_single_command_periods_after_adapter_cutover(tmp_path):
     _session_factory, scope, _controller = _runtime(tmp_path)
     with scope() as db:
         implementation = db.get(
@@ -1810,8 +1810,8 @@ def test_snapshot_selection_keeps_complete_multi_command_periods(tmp_path):
         "selection_manifest_json"
     ]["targets"][0]
     assert len(target["periods"]) == 2
-    assert [len(item["snapshot_ids"]) for item in target["periods"]] == [
-        2,
-        2,
-    ]
-    assert len(target["snapshot_ids"]) == 4
+    # A V2 implementation owns exactly one CLI command.  It may project that
+    # command to multiple CheckItems, but it never composes facts across
+    # fallback commands.
+    assert [len(item["snapshot_ids"]) for item in target["periods"]] == [1, 1]
+    assert len(target["snapshot_ids"]) == 2

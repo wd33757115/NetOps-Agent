@@ -26,6 +26,7 @@ class CanonicalObservationDefinition:
     dimensions: tuple[str, ...]
     allowed_dimension_values: dict[str, tuple[str, ...]]
     allowed_values: tuple[Any, ...]
+    state_groups: dict[str, tuple[Any, ...]]
     assessment_roles: tuple[str, ...]
 
 
@@ -86,6 +87,31 @@ def load_canonical_catalog(
             raise ValueError(
                 f"{observation_type} declares values for unknown dimensions"
             )
+        allowed_values = tuple(raw.get("allowed_values") or ())
+        state_groups = {
+            str(name): tuple(values or ())
+            for name, values in dict(raw.get("state_groups") or {}).items()
+        }
+        grouped_values = [value for values in state_groups.values() for value in values]
+        if len(set(grouped_values)) != len(grouped_values):
+            raise ValueError(
+                f"{observation_type} state_groups must not overlap"
+            )
+        if allowed_values and set(grouped_values) - set(allowed_values):
+            raise ValueError(
+                f"{observation_type} state_groups contain values outside allowed_values"
+            )
+        if (
+            semantic_type in {"state", "enum", "boolean"}
+            and "current_state" in roles
+            and (
+                not state_groups.get("healthy")
+                or not state_groups.get("unhealthy")
+            )
+        ):
+            raise ValueError(
+                f"{observation_type} current-state semantics require healthy and unhealthy groups"
+            )
         observations.append(
             CanonicalObservationDefinition(
                 id=observation_type,
@@ -99,7 +125,8 @@ def load_canonical_catalog(
                 ),
                 dimensions=dimensions,
                 allowed_dimension_values=allowed,
-                allowed_values=tuple(raw.get("allowed_values") or ()),
+                allowed_values=allowed_values,
+                state_groups=state_groups,
                 assessment_roles=roles,
             )
         )
@@ -304,6 +331,50 @@ def _validate_event_constraints(
     return errors
 
 
+def _validate_required_when(
+    *,
+    check_item_id: str,
+    observation_type: str,
+    row: dict[str, Any],
+    canonical_fields: set[str],
+) -> list[str]:
+    """Validate the small, data-only conditional-requiredness contract.
+
+    A field can remain mandatory for normal records while being legitimately
+    absent for an explicitly reported state.  This is intentionally not a
+    general expression language: the condition compares one already-mapped
+    canonical field with one scalar canonical value.
+    """
+
+    raw = row.get("required_when")
+    if raw is None:
+        return []
+    prefix = f"{check_item_id}.{observation_type}.required_when"
+    if not isinstance(raw, dict):
+        return [f"{prefix} must be an object"]
+
+    errors: list[str] = []
+    unknown = sorted(set(raw) - {"field", "equals"})
+    if unknown:
+        errors.append(f"{prefix} has unsupported keys: " + ", ".join(unknown))
+    field = str(raw.get("field") or "").strip()
+    if not field:
+        errors.append(f"{prefix}.field is required")
+    elif field not in canonical_fields:
+        errors.append(f"{prefix}.field must reference a canonical field")
+    if "equals" not in raw:
+        errors.append(f"{prefix}.equals is required")
+    else:
+        expected = raw.get("equals")
+        if expected is None or isinstance(expected, (dict, list, tuple, set)):
+            errors.append(f"{prefix}.equals must be a non-null scalar")
+        elif isinstance(expected, str) and not expected.strip():
+            errors.append(f"{prefix}.equals cannot be an empty string")
+    if row.get("required", True) is not True:
+        errors.append(f"{prefix} requires required: true")
+    return errors
+
+
 def validate_check_item_contract(
     check_item: Any,
     *,
@@ -366,6 +437,11 @@ def validate_check_item_contract(
             )
     if not isinstance(rows, list):
         return (f"{check_item_id}.canonical_contract.observations must be a list",)
+    canonical_fields = {
+        str(row.get("canonical_field") or "").strip()
+        for row in rows
+        if isinstance(row, dict) and str(row.get("canonical_field") or "").strip()
+    }
     seen: set[str] = set()
     for index, row in enumerate(rows):
         if not isinstance(row, dict):
@@ -408,6 +484,14 @@ def validate_check_item_contract(
             errors.append(
                 f"{check_item_id}.{observation_type} required must be a boolean"
             )
+        errors.extend(
+            _validate_required_when(
+                check_item_id=check_item_id,
+                observation_type=observation_type,
+                row=row,
+                canonical_fields=canonical_fields,
+            )
+        )
         errors.extend(
             _validate_event_constraints(
                 prefix=f"{check_item_id}.{observation_type}",

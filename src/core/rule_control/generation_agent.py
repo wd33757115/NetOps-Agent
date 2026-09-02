@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -93,6 +93,27 @@ class ObservationContractCandidate(BaseModel):
     evidence: dict[str, Any] = Field(default_factory=dict)
     source: str = "llm_agent"
     confidence: float = 0.8
+
+
+class AdapterProjectionOutputCandidate(BaseModel):
+    """A candidate output that remains bounded by the control-plane context."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    check_item_id: str
+    check_item_version_id: str
+    source_record_set: str
+    projection: dict[str, Any]
+
+
+class AdapterProjectionCandidate(BaseModel):
+    """Candidate-only CommandAdapter V2 projection; never a semantic catalog."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["command-adapter/v2"] = "command-adapter/v2"
+    parser: dict[str, Any]
+    outputs: list[AdapterProjectionOutputCandidate]
 
 
 class ChangePolicyCandidate(BaseModel):
@@ -345,6 +366,40 @@ source_field_hints.source_labels and role as approved, sanitized source
 semantics: labels containing Alarm are alarm/critical limits, while labels
 containing Warning are warning limits. Raw evidence is deliberately absent."""
         )
+    if stage == "adapter_projection":
+        return (
+            common
+            + """
+
+Create only a CommandAdapter V2 projection candidate.  The selected_check_item
+is already authoritative: do not create, rename or suggest an observation type,
+entity type, canonical field, unit, or CheckItem version.  Return exactly one
+output for that selected CheckItem and copy its id, version_id, Parser template
+and source_record_set exactly as supplied.  Every projection.fields key must
+be one of allowed_target_fields and every source/transform field reference must
+be one of parser.source_fields.  Every required_target_field must be present.
+
+For an enum target with allowed_values, provide an explicit value_mapping from
+source-specific values to the allowed canonical values and set
+on_unmapped=reject.  Do not add a mapping when a source value has not been
+provided in the context; leave the candidate incomplete so deterministic
+validation can request a human edit.  Use only source, literal, expression and
+the approved transform/value_mapping/unit fields.  Dimensions belong inside the
+binding for their canonical field, for example
+{"cpu_usage_percent": {"source": "cpu_5m", "dimensions":
+{"window": {"literal": "5m"}}}}.  Never put dimensions beside fields or
+use a metric value as a dimension.  Source identity fields must not be mapped
+as a metric merely because their names are short or numerically shaped.  When a
+Parser record exposes interval-specific metrics (such as cpu_5s/cpu_1m/cpu_5m)
+but no standalone interval field, choose an evidence-supported metric and bind
+the matching canonical interval with a literal dimension.  If the observation
+target carries policy_constraints.applies_to_dimensions, bind only a listed
+dimension value; for example a window policy limited to ["5m"] must use the
+cpu_5m source value and a window literal of "5m", not cpu_5s/"5s".  Never
+return code, regex, raw CLI, credentials, approval decisions, a new standard
+meaning, or a runtime judgment.  This is a candidate for local validation and
+human confirmation only."""
+        )
     if stage == "change_policy":
         return (
             common
@@ -373,7 +428,8 @@ Create a small EventRule set for the supplied Contract and ChangePolicy. Allowed
 condition.kind values are: {kinds}. Conditions may reference only declared
 fields and entity types. When canonical_entity_type is present, all EventRule
 conditions must use it because StateObservation runtime identity has already
-been projected from the parser-native entity_type. Generate fault and recovery rules together when the
+been projected from the parser-native entity_type. Generate fault and recovery
+rules together when the
 policy has recovery semantics. Recovery rules must use event_class=recovery,
 declare recovery.resolves using fault event_type values (not rule names), and
 must use evaluation_scope=change. Fault rules must set evaluation_scope to
@@ -407,6 +463,8 @@ warning for fault rules."""
 def _response_model(stage: str) -> type[BaseModel]:
     if stage == "observation_contract":
         return ObservationContractCandidate
+    if stage == "adapter_projection":
+        return AdapterProjectionCandidate
     if stage == "change_policy":
         return ChangePolicyCandidate
     if stage == "event_rules":
@@ -676,6 +734,22 @@ def _candidate_summary(stage: str, candidate: dict[str, Any]) -> dict[str, Any]:
                 "thresholds",
                 "recovery_threshold",
             )
+        }
+    if stage == "adapter_projection":
+        outputs = candidate.get("outputs") or []
+        return {
+            "parser_template_id": (candidate.get("parser") or {}).get("template_id"),
+            "output_count": len(outputs),
+            "check_item_ids": [
+                str(item.get("check_item_id"))
+                for item in outputs
+                if isinstance(item, dict)
+            ],
+            "mapped_field_count": sum(
+                len((item.get("projection") or {}).get("fields") or {})
+                for item in outputs
+                if isinstance(item, dict)
+            ),
         }
     rules = candidate.get("rules") or []
     return {

@@ -9,7 +9,6 @@ from src.core.check_items.command_adapter import (
     validate_adapter_spec,
 )
 
-
 SPEC = {
     "schema_version": "command-adapter/v1",
     "parser": {"template_id": "parser-system-resources-v1"},
@@ -215,3 +214,36 @@ def test_adapter_rejects_a_value_that_violates_the_check_item_type() -> None:
 
     assert batches[0].quality_status == "unavailable"
     assert "source field is not numeric" in batches[0].errors[0]
+
+
+def test_legacy_adapter_remains_replayable_when_dimensions_lived_in_contract() -> None:
+    """V1 did not own semantic dimensions; preserve historical evidence replay."""
+
+    check_items = {
+        **CHECK_ITEMS,
+        "system.cpu_usage": {
+            **CHECK_ITEMS["system.cpu_usage"],
+            "canonical_contract": {
+                **CHECK_ITEMS["system.cpu_usage"]["canonical_contract"],
+                "observations": [
+                    {
+                        **CHECK_ITEMS["system.cpu_usage"]["canonical_contract"][
+                            "observations"
+                        ][0],
+                        "dimensions": ["window"],
+                    }
+                ],
+            },
+        },
+    }
+
+    batches = execute_adapter(
+        SPEC,
+        record_sets={"cpu_cores": [{"cpu_id": "0", "cpu_idle_percent": "90"}]},
+        check_items=check_items,
+        device_id="device-1",
+        adapter_version_id="adapter-v1",
+    )
+
+    assert batches[0].quality_status == "complete"
+    assert batches[0].records[0]["cpu_usage_percent"] == 10.0

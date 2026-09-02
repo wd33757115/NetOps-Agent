@@ -11,8 +11,11 @@ sys.path.insert(0, str(SCRIPTS))
 
 from llm_generator import (  # noqa: E402
     DeepSeekTextFSMToolSession,
+    ParserGenerationToolbox,
     PromptBundle,
 )
+
+from src.core.parser_generation import FieldSpec, ParserSample, ParserSpec, SampleRole  # noqa: E402
 
 
 class FakeUsage:
@@ -239,7 +242,7 @@ def test_tool_loop_accepts_named_multi_record_parser_bundle():
     )
 
 
-def test_tool_loop_rejects_multiple_tool_calls_in_one_turn():
+def test_tool_loop_rejects_conflicting_terminal_tools_in_one_turn():
     completions = FakeCompletions(
         [
             _response(
@@ -275,7 +278,124 @@ def test_tool_loop_rejects_multiple_tool_calls_in_one_turn():
     turn = session.next()
 
     assert turn.candidate_text is None
-    assert turn.protocol_error == "model requested multiple tools in one turn"
+    assert turn.protocol_error == "model requested conflicting terminal tools"
+
+
+def test_tool_loop_executes_multiple_evidence_tools_before_submission():
+    template = "Value item (\\S+)\n\nStart\n  ^OK\\s+${item} -> Record\n"
+
+    class Toolbox:
+        def __init__(self):
+            self.calls: list[tuple[str, dict]] = []
+
+        def execute(self, name, arguments):
+            self.calls.append((name, arguments))
+            return {"tool": name, "passed": True}
+
+    toolbox = Toolbox()
+    completions = FakeCompletions(
+        [
+            _response(
+                FakeMessage(
+                    content="",
+                    reasoning_content="inspect then test",
+                    tool_calls=[
+                        FakeToolCall(
+                            "read-1",
+                            "read_sample_fragment",
+                            {"sample_id": "generation-1", "start_line": 1, "end_line": 3},
+                        ),
+                        FakeToolCall(
+                            "compile-1",
+                            "compile_textfsm_candidate",
+                            {"candidate_text": template},
+                        ),
+                    ],
+                ),
+                tokens=7,
+            ),
+            _response(
+                FakeMessage(
+                    content="",
+                    reasoning_content="submit verified candidate",
+                    tool_calls=[
+                        FakeToolCall(
+                            "submit-1",
+                            "validate_textfsm_candidate",
+                            {"template_text": template},
+                        )
+                    ],
+                ),
+                tokens=9,
+            ),
+        ]
+    )
+    session = DeepSeekTextFSMToolSession(
+        bundle=_bundle(),
+        client=SimpleNamespace(chat=SimpleNamespace(completions=completions)),
+        model_name="deepseek-v4-pro",
+        toolbox=toolbox,
+    )
+
+    turn = session.next()
+
+    assert turn.candidate_text == template.strip()
+    assert [name for name, _arguments in toolbox.calls] == [
+        "read_sample_fragment",
+        "compile_textfsm_candidate",
+    ]
+    replayed = completions.calls[1]["messages"]
+    tool_results = [item for item in replayed if item.get("role") == "tool"]
+    assert [item["tool_call_id"] for item in tool_results] == ["read-1", "compile-1"]
+
+
+def test_toolbox_compiles_and_replays_frozen_samples_with_production_runtime():
+    spec = ParserSpec(
+        entity="item_state",
+        primary_keys=("item",),
+        fields=(FieldSpec("item", True),),
+    )
+    sample = ParserSample("sample-1", "OK xe0\n", SampleRole.GENERATION)
+    toolbox = ParserGenerationToolbox(
+        spec=spec,
+        samples=(sample,),
+        vendor="H3C",
+        command="display item",
+    )
+    candidate = "Value item (\\S+)\n\nStart\n  ^OK\\s+${item} -> Record\n"
+
+    compiled = toolbox.execute("compile_textfsm_candidate", {"candidate_text": candidate})
+    replayed = toolbox.execute("replay_textfsm_candidate", {"candidate_text": candidate})
+
+    assert compiled["compiled"] is True
+    assert replayed["passed"] is True
+    assert replayed["samples"][0]["record_count"] == 1
+
+
+def test_generic_provider_does_not_receive_deepseek_thinking_parameters():
+    template = "Value item (\\S+)\n\nStart\n  ^OK\\s+${item} -> Record\n"
+    completions = FakeCompletions(
+        [
+            _response(
+                FakeMessage(
+                    content=template,
+                    reasoning_content="",
+                    tool_calls=None,
+                ),
+                tokens=5,
+            )
+        ]
+    )
+    session = DeepSeekTextFSMToolSession(
+        bundle=_bundle(),
+        client=SimpleNamespace(chat=SimpleNamespace(completions=completions)),
+        model_name="gpt-test",
+        provider_name="openai",
+    )
+
+    assert session.next().candidate_text == template.strip()
+    assert "reasoning_effort" not in completions.calls[0]
+    assert "extra_body" not in completions.calls[0]
 
 
 def test_provider_error_is_returned_to_the_bounded_outer_loop():
@@ -306,9 +426,7 @@ def test_timeout_is_retryable_but_bad_request_is_not():
     timeout_session = DeepSeekTextFSMToolSession(
         bundle=_bundle(),
         client=SimpleNamespace(
-            chat=SimpleNamespace(
-                completions=FakeCompletions([FakeProviderError("timed out", 408)])
-            )
+            chat=SimpleNamespace(completions=FakeCompletions([FakeProviderError("timed out", 408)]))
         ),
         model_name="deepseek-v4-pro",
     )

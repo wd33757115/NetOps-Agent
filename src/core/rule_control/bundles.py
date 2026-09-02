@@ -352,7 +352,7 @@ class RuleAssetBundleService:
         )
         replay_ready = replay_gate["success"] is True
         context_mode = str(context_gate.get("mode") or "")
-        source_integrity_ready = context_mode == "legacy_manual" or (
+        source_integrity_ready = context_mode in {"legacy_manual", "check_item_semantics"} or (
             source_integrity.get("success") is True
             and context_row is not None
             and str(context_gate.get("context_digest") or "")
@@ -383,7 +383,7 @@ class RuleAssetBundleService:
         if children_complete and not children_release_ready and row.status == "pending_approval":
             add_blocker("one or more child assets are missing, mutated, invalid or not releasable")
         if context_gate.get("success") is not True:
-            add_blocker("immutable sanitized context gate failed")
+            add_blocker("rule generation context gate failed")
         if not source_integrity_ready:
             add_blocker("immutable source evidence is stale or unavailable")
         if not replay_ready:
@@ -394,7 +394,11 @@ class RuleAssetBundleService:
         steps = [
             {
                 "key": "context",
-                "label": "脱敏数据上下文",
+                "label": (
+                    "CheckItem 标准语义 B"
+                    if context_mode == "check_item_semantics"
+                    else "脱敏数据上下文"
+                ),
                 "status": "passed" if context_gate.get("success") is True else "blocked",
                 "detail": {
                     "context_id": context_gate.get("context_id"),
@@ -405,8 +409,17 @@ class RuleAssetBundleService:
                     "scope_type": context_privacy.get("scope_type"),
                 },
             },
-            RuleAssetBundleService._asset_step(
-                "contract", "Observation Contract", "OBSERVATION_CONTRACT", child_items
+            (
+                RuleAssetBundleService._asset_step(
+                    "contract", "Observation Contract", "OBSERVATION_CONTRACT", child_items
+                )
+                if requirements["requires_observation_contract"]
+                else {
+                    "key": "contract",
+                    "label": "Observation Contract",
+                    "status": "skipped",
+                    "detail": {"reason": "check_item_canonical_semantics"},
+                }
             ),
             (
                 RuleAssetBundleService._asset_step(

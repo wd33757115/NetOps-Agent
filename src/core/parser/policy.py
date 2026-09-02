@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +49,9 @@ class CategorySpec:
     empty_patterns: tuple[str, ...] = ()
     ignore_fields: tuple[str, ...] = ()
     presence: str = "required"
+    # Validation-only defaults for optional primary-key fields.  The Parser
+    # keeps the original source value in structured_data for Adapter Projection.
+    primary_key_defaults: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

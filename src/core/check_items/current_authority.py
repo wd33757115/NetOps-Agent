@@ -39,7 +39,6 @@ from src.infrastructure.db.models import (
 )
 from src.infrastructure.db.postgres import get_db_session
 
-
 CURRENT_AUTHORITY_REQUEST_SCHEMA = "patrol-current-authority-request/v1"
 CURRENT_AUTHORITY_PREPARE_SCOPE = "patrol-current-authority.prepare/v1"
 CURRENT_AUTHORITY_ATTEST_SCOPE = "patrol-current-authority.attest/v1"
@@ -1026,7 +1025,14 @@ class PatrolCurrentAuthorityService:
                     "attributes": attributes,
                 }
             )
-        inventory = build_inventory_snapshot(devices)
+        # ``scope_device_facts`` is an execution-oriented, derived view of the
+        # frozen inventory.  It deliberately lifts role/capability values into
+        # the resolver input, while the authority digest is defined over the
+        # immutable inventory snapshot captured at preparation time.  Rebuild
+        # that digest from its own frozen rows instead of the enriched planner
+        # rows; otherwise an attribute-only role becomes a root ``role`` and
+        # falsely invalidates a valid attestation.
+        inventory = build_inventory_snapshot(inventory_rows)
         expected_inventory_digest = str(
             dict(payload.get("inventory_snapshot") or {}).get("digest")
             or ""

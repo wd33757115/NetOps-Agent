@@ -10,6 +10,8 @@ from contextlib import AbstractContextManager
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import inspect
+
 from src.core.check_items.assessment_policy import (
     validate_assessment_basis,
     validate_assessment_policy_snapshot,
@@ -971,19 +973,30 @@ class ReportManifestService:
                     if str(snapshot_id)
                 }
             )
-            batch_run_ids = [
-                str(row[0])
-                for row in (
-                    db.query(PatrolRun.id)
-                    .filter(
-                        PatrolRun.metadata_json["patrol_batch_id"].as_string()
-                        == patrol_batch_id,
-                        PatrolRun.created_at <= fact_ingestion_high_watermark,
+            # A report can be assembled from its immutable execution evidence
+            # alone.  Some focused SQLite test scopes intentionally omit the
+            # optional patrol-run table; do not make that supplemental lookup
+            # a hard dependency of report generation.
+            patrol_runs_available = inspect(db.get_bind()).has_table(
+                PatrolRun.__tablename__
+            )
+            batch_run_ids = (
+                [
+                    str(row[0])
+                    for row in (
+                        db.query(PatrolRun.id)
+                        .filter(
+                            PatrolRun.metadata_json["patrol_batch_id"].as_string()
+                            == patrol_batch_id,
+                            PatrolRun.created_at <= fact_ingestion_high_watermark,
+                        )
+                        .order_by(PatrolRun.id)
+                        .all()
                     )
-                    .order_by(PatrolRun.id)
-                    .all()
-                )
-            ]
+                ]
+                if patrol_runs_available
+                else []
+            )
             snapshots_by_id: dict[str, CommandSnapshot] = {}
             referenced_snapshot_ids = sorted(
                 set(evidence_refs).union(baseline_snapshot_ids)
@@ -1118,8 +1131,11 @@ class ReportManifestService:
                     "evidence_role": (
                         "current" if str(item.run_id) in current_run_id_set else "baseline"
                     ),
+                    # The report manifest is a broadly consumable, immutable
+                    # evidence index.  It records hashes and source locations,
+                    # never raw CLI (which remains behind the raw-evidence
+                    # authorization boundary).
                     "structured_json": item.structured_json,
-                    "raw_text": str(item.raw_text or ""),
                     "raw_text_hash": str(item.raw_text_hash),
                     "parse_status": str(item.parse_status),
                     "output_status": str(item.output_status),

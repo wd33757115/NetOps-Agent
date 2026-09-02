@@ -22,7 +22,7 @@ describe('RuleAssetChainWorkspace', () => {
 
     expect(screen.getByText('interface.oper_status')).toBeVisible()
     expect(screen.getByText('阻塞')).toBeVisible()
-    expect(screen.getByText('缺少 Active Contract')).toBeVisible()
+    expect(screen.getByText('CheckItem B')).toBeVisible()
     expect(screen.getByText('缺少 Active Policy')).toBeVisible()
   })
 

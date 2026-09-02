@@ -7,31 +7,25 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ruleAssetSourceApi } from '../../services/api'
 import OfflineRuleAssetPipeline from './OfflineRuleAssetPipeline'
 
-vi.mock('./OfflineCommandAssetUnits', () => ({
-  default: ({ jobId }: { jobId: string }) => (
-    <div data-testid="command-asset-units">{jobId}</div>
-  ),
-}))
-
 describe('OfflineRuleAssetPipeline', () => {
   afterEach(() => vi.restoreAllMocks())
 
-  it('shows task progress and the command units scoped to this sample job', async () => {
+  it('shows import progress and sends command classification to the catalog', async () => {
     vi.spyOn(ruleAssetSourceApi, 'assetPipeline').mockResolvedValue({
       offline_job_id: 'offline-1',
-      status: 'ready',
-      progress_percent: 40,
+      status: 'completed',
+      progress_percent: 100,
       next_action: {
-        code: 'bind_check_item',
-        label: '绑定检查项',
-        description: '确认命令对应的巡检检查项。',
-        target_url: '/skills/parser?workspace=production&subtab=asset-production-units',
+        code: 'open_check_item_catalog',
+        label: '查看待归类命令',
+        description: '在检查项目录中关联 CheckItem。',
+        target_url: '/skills/parser?workspace=production&subtab=catalog-management&action=classify_check_items',
       },
       secondary_actions: [],
       steps: [
         {
-          key: 'samples',
-          label: '样本准备',
+          key: 'catalog',
+          label: '命令进入检查项目录',
           status: 'completed',
           detail: '样本已就绪。',
           counts: {},
@@ -55,10 +49,9 @@ describe('OfflineRuleAssetPipeline', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('样本任务生产进度')).toBeVisible()
-    expect(screen.getByText('绑定检查项')).toBeVisible()
-    expect(screen.getByText('按命令处理样本资产')).toBeVisible()
-    expect(screen.getByTestId('command-asset-units')).toHaveTextContent('offline-1')
+    expect(await screen.findByText('样本导入进度')).toBeVisible()
+    expect(screen.getByText('查看待归类命令')).toBeVisible()
+    expect(screen.getByText('导入职责到此结束')).toBeVisible()
     expect(screen.queryByText('Contract')).not.toBeInTheDocument()
   })
 })

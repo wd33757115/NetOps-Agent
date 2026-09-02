@@ -12,6 +12,7 @@ from typing import Any, Protocol
 import textfsm
 
 from src.core.parser.parser_bundle import ParserBundleError, parse_parser_bundle
+from src.core.parser.record_shape import RecordShapeError, expand_list_primary_records
 from src.core.parser.textfsm_input import prepare_textfsm_input
 from src.core.parser.value_types import is_unavailable_value, is_valid_ip_value
 
@@ -299,10 +300,13 @@ def execute_template_candidate(
     *,
     spec: ParserSpec | None = None,
 ) -> ValidationReport:
-    """Return only objective TextFSM compile and execution evidence.
+    """Return objective TextFSM compile and execution evidence.
 
-    Record counts, field usefulness, primary keys and business completeness are
-    intentionally not judged here. Those decisions belong to model/engineer review.
+    Semantic completeness remains a model/engineer decision, but a positive
+    sample cannot be treated as executable evidence when a required record set
+    yields no records at all.  Without this gate a template can compile and
+    consume every source line while never emitting ``-> Record`` (for example
+    an explicit EOF state), then incorrectly reach the human-approval step.
     """
 
     compile_errors = backend.compile(template_text)
@@ -310,6 +314,7 @@ def execute_template_candidate(
         "compiled": not compile_errors,
         "executed": not compile_errors,
         "field_inventory_aligned": not compile_errors,
+        "positive_samples_parsed": not compile_errors,
         "source_executed": not compile_errors,
         "source_shape_compatible": not compile_errors,
     }
@@ -341,6 +346,29 @@ def execute_template_candidate(
         if not source_compatible:
             gates["source_shape_compatible"] = False
         errors.extend(source_errors)
+        if (
+            spec is not None
+            and sample.role is not SampleRole.NEGATIVE
+            and not records
+        ):
+            legal_empty = bool(
+                sample.expectation
+                and sample.expectation.record_count == 0
+            ) or (
+                spec is not None
+                and spec.allow_empty
+                and any(
+                    re.search(
+                        pattern,
+                        sample.validation_text,
+                        re.IGNORECASE | re.MULTILINE,
+                    )
+                    for pattern in spec.empty_patterns
+                )
+            ) or (spec is not None and spec.presence == "optional")
+            if not legal_empty:
+                gates["positive_samples_parsed"] = False
+                errors.append("positive sample produced no records")
         diagnostics.extend(
             f"{sample.sample_id}: {error}" for error in errors
         )
@@ -563,6 +591,20 @@ def _field_value_valid(value: str, field: FieldSpec) -> bool:
     return True
 
 
+def _primary_key_value(record: dict[str, Any], field: FieldSpec) -> str:
+    """Return the audited identity component without changing Parser output.
+
+    Some vendor CLIs omit a source token for a stable aggregate record (for
+    example an unchannelized optic).  The Parser must retain that raw blank for
+    the Adapter Projection, which owns canonical normalization.  A declared
+    ``primary_key_default`` only gives the Parser validator a stable, explicit
+    identity value for uniqueness and expectation checks.
+    """
+
+    value = str(record.get(field.name, "") or "").strip()
+    return value or str(field.primary_key_default or "").strip()
+
+
 def _validate_single_template_candidate(
     template_text: str,
     spec: ParserSpec,
@@ -612,6 +654,13 @@ def _validate_single_template_candidate(
             records = []
             gates["executed"] = False
             add_error(f"parse_failed: {exc}")
+        else:
+            try:
+                records = expand_list_primary_records(records, spec.primary_keys)
+            except RecordShapeError as exc:
+                records = []
+                gates["executed"] = False
+                add_error(f"record_shape_invalid: {exc}")
         source_executed, source_compatible, source_errors = _source_compatibility(
             template_text=template_text,
             sample=sample,
@@ -653,14 +702,17 @@ def _validate_single_template_candidate(
                 missing = [
                     name
                     for name in spec.required_fields
-                    if name not in record or not str(record.get(name) or "").strip()
+                    if (
+                        (name not in record or not str(record.get(name) or "").strip())
+                        and spec.field_map[name].primary_key_default is None
+                    )
                 ]
                 if missing:
                     gates["required_fields_complete"] = False
                     add_error(f"missing required fields: {', '.join(missing)}")
                 if spec.primary_keys:
                     key = tuple(
-                        str(record.get(name, "")).strip()
+                        _primary_key_value(record, spec.field_map[name])
                         for name in spec.primary_keys
                     )
                     if any(not value for value in key) or key in seen_keys:

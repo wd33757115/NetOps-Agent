@@ -1,44 +1,52 @@
-# -*- coding: utf-8 -*-
 # SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
 # SPDX-License-Identifier: Apache-2.0
 
-"""直接测试公文写作技能"""
-import sys
+"""公文写作 Skill 的直接执行集成测试。
+
+该模块过去是一个手工脚本：pytest 收集模块时就会调用 ``asyncio.run``，
+并且仍依赖已移除的 ``src.skills.examples`` 注册入口。现在覆盖实际的
+SKILL.md -> FileBasedSkill -> 同步 handler 调用链，同时隔离 LLM、MinIO 等
+外部依赖，保证其可以作为正常的测试收集与执行。
+"""
+
 import asyncio
-from pathlib import Path
 
-# 添加项目根目录到 PATH
-root_dir = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(root_dir))
-sys.stdout.reconfigure(encoding='utf-8')
+from src.skills.registry import skill_registry
 
-async def test_doc():
-    # 导入技能
-    from src.skills.examples.official_document_writing_skill import register_skill
-    from src.skills.registry import skill_registry
 
-    # 注册技能
-    register_skill()
-    skill = skill_registry.get_skill("official_document_writing")
+def test_official_document_skill_executes_current_sync_handler(monkeypatch):
+    """文件化 Skill 应调用当前公文 handler，而不是已废弃 examples 注册器。"""
+    captured: dict[str, object] = {}
 
-    if skill:
-        print(f"✅ 技能已注册: {skill.name}")
+    async def fake_handler(params: dict[str, object]) -> dict[str, object]:
+        captured.update(params)
+        return {
+            "success": True,
+            "message": "公文撰写完成",
+            "data": {"document_content": "测试公文内容"},
+        }
 
-        # 执行技能
-        result = await skill.execute(
+    monkeypatch.setattr(
+        "src.skills.official_document.service.official_document_writing_handler",
+        fake_handler,
+    )
+    skill_registry.sync_skills_from_files(force_replace=True)
+    skill = skill_registry.get_skill("official-document-writing")
+
+    assert skill is not None
+    result = asyncio.run(
+        skill.execute(
             document_type="请示",
             action="write",
-            user_query="帮我写一份请示，向信息中心申请采购新的服务器"
+            user_query="向信息中心申请采购新的服务器",
         )
+    )
 
-        print(f"执行成功: {result.success}")
-        print(f"消息: {result.message}")
-        print(f"下载链接: {result.download_url}")
-
-        if result.data:
-            print(f"文档内容预览: {result.data.get('document_content', '')[:200]}...")
-
-    else:
-        print("❌ 技能未找到")
-
-asyncio.run(test_doc())
+    assert result.success is True
+    assert result.message == "公文撰写完成"
+    assert result.data == {"document_content": "测试公文内容"}
+    assert captured == {
+        "document_type": "请示",
+        "action": "write",
+        "user_query": "向信息中心申请采购新的服务器",
+    }

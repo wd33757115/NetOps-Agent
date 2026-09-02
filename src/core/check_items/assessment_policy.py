@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -1175,6 +1176,7 @@ def resolve_assessment_basis(
         ),
         "expected_state_binding": {"status": "not_required"},
         "threshold_binding": {"status": "not_required"},
+        "baseline_binding": {"status": "not_required"},
         "evidence_refs": evidence_refs,
     }
     if strict and not snapshot_valid:
@@ -1362,6 +1364,85 @@ def resolve_assessment_basis(
         )
         condition = effective
 
+    if kind == "linear_power_baseline_loss":
+        context = dict(observation.get("context") or {})
+        identity_fields = _strings(condition.get("identity_fields"))
+        baseline_context = dict(context.get("baseline_context") or {})
+        missing_identity = [
+            field
+            for field in identity_fields
+            if not str(context.get(field) or "").strip()
+            or not str(baseline_context.get(field) or "").strip()
+        ]
+        changed_identity = [
+            field
+            for field in identity_fields
+            if field not in missing_identity
+            and str(context.get(field)).strip() != str(baseline_context.get(field)).strip()
+        ]
+        baseline_value = _number(context.get("baseline_value"))
+        current_value = _number(basis.get("observed_value"))
+        if changed_identity:
+            blocker = "baseline_module_identity_changed"
+        elif missing_identity:
+            blocker = "baseline_module_identity_missing"
+        elif baseline_value is None or current_value is None:
+            blocker = "baseline_reference_missing"
+        else:
+            blocker = ""
+        if blocker:
+            basis["baseline_binding"] = {
+                "status": "missing",
+                "reason_code": blocker,
+                "identity_fields": identity_fields,
+                "missing_identity_fields": missing_identity,
+                "changed_identity_fields": changed_identity,
+                "baseline_observation_id": context.get("baseline_observation_id"),
+                "baseline_snapshot_id": context.get("baseline_snapshot_id"),
+            }
+            basis["policy_resolution"] = {
+                "status": "missing",
+                "reason_code": blocker,
+            }
+            basis["digest"] = canonical_digest(basis)
+            return AssessmentBasisResolution(
+                status="missing",
+                blocker_code=blocker,
+                effective_condition=condition,
+                should_evaluate=False,
+                basis=basis,
+            )
+        baseline_mw = math.pow(10.0, float(baseline_value) / 10.0)
+        current_mw = math.pow(10.0, float(current_value) / 10.0)
+        loss_ratio = (baseline_mw - current_mw) / baseline_mw
+        max_loss_ratio = float(condition.get("max_loss_ratio") or 0.10)
+        condition = {
+            **condition,
+            "kind": "linear_power_loss_ratio",
+            "loss_ratio": loss_ratio,
+            "gt": max_loss_ratio,
+        }
+        basis["baseline_binding"] = {
+            "status": "resolved",
+            "source_kind": "qualified_baseline_observation",
+            "value": baseline_value,
+            "unit": observation.get("unit"),
+            "loss_ratio": loss_ratio,
+            "max_loss_ratio": max_loss_ratio,
+            "identity": {
+                field: context.get(field) for field in identity_fields
+            },
+            "baseline_observation_id": context.get("baseline_observation_id"),
+            "baseline_snapshot_id": context.get("baseline_snapshot_id"),
+        }
+        basis["evidence_refs"] = _strings(
+            [
+                *basis["evidence_refs"],
+                context.get("baseline_observation_id"),
+                context.get("baseline_snapshot_id"),
+            ]
+        )
+
     if expected_requirement.get("required"):
         expected_candidates = _source_candidates(
             snapshot,
@@ -1468,7 +1549,11 @@ def build_assessment_basis(
     for item in rows:
         status = str(dict(item.get("policy_resolution") or {}).get("status") or "unknown")
         status_counts[status] = status_counts.get(status, 0) + 1
-        for binding_key in ("threshold_binding", "expected_state_binding"):
+        for binding_key in (
+            "threshold_binding",
+            "expected_state_binding",
+            "baseline_binding",
+        ):
             source = str(dict(item.get(binding_key) or {}).get("source_kind") or "")
             if source:
                 source_counts[source] = source_counts.get(source, 0) + 1

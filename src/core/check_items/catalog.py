@@ -16,6 +16,10 @@ from typing import Any
 
 import yaml
 
+from src.core.check_items.command_adapter import (
+    is_direct_projection_adapter,
+    validate_adapter_spec,
+)
 from src.infrastructure.db.models import (
     CheckItemImplementationLinkRecord,
     CheckItemRecord,
@@ -24,7 +28,6 @@ from src.infrastructure.db.models import (
     CollectionImplementationVersionRecord,
 )
 from src.infrastructure.db.postgres import get_db_session
-from src.core.check_items.command_adapter import validate_adapter_spec
 
 DEFAULT_CATALOG_PATH = Path(__file__).parent / "assets" / "catalog.v10.yaml"
 _ASSET_ID_RE = re.compile(r"^[a-z][a-z0-9_.-]+$")
@@ -298,6 +301,9 @@ def _load_implementation(
     adapter_spec = validate_adapter_spec(
         raw.get("adapter_spec"),
         check_item_ids=check_item_ids,
+        require_pinned_check_item_versions=is_direct_projection_adapter(
+            raw.get("adapter_spec")
+        ),
     )
     if adapter_spec and len(commands) != 1:
         raise ValueError(

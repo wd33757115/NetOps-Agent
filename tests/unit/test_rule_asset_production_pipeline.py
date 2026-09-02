@@ -68,17 +68,9 @@ def test_empty_offline_job_pipeline_points_to_source_upload():
             "source",
             "preview",
             "ingest",
-            "parser",
-            "backfill",
-            "context",
-            "generation",
-            "review",
-            "release",
-            "runtime_bundle",
+            "catalog",
         ]
-        assert (
-            next(item for item in result["steps"] if item["key"] == "backfill")["optional"] is True
-        )
+        assert all(item["optional"] is False for item in result["steps"])
     finally:
         with get_db_session() as db:
             db.query(OfflinePatrolPeriodRecord).filter(
@@ -120,7 +112,7 @@ def test_patrol_execution_job_cannot_enter_rule_asset_production():
             ).delete(synchronize_session=False)
 
 
-def test_pipeline_projects_rule_rows_before_database_session_closes():
+def test_pipeline_stops_at_sample_command_catalog_before_database_session_closes():
     suffix = uuid.uuid4().hex[:12]
     job_id = f"offline-pipeline-assets-{suffix}"
     dataset_id = f"dataset-pipeline-assets-{suffix}"
@@ -251,16 +243,21 @@ def test_pipeline_projects_rule_rows_before_database_session_closes():
     try:
         result = RuleAssetProductionPipelineService().get(job_id)
 
-        assert result["bundle_ids"] == [bundle_id]
-        assert next(step for step in result["steps"] if step["key"] == "context")[
+        assert result["context_ids"] == []
+        assert result["bundle_ids"] == []
+        assert result["runtime_targets"] == []
+        assert [step["key"] for step in result["steps"]] == [
+            "source", "preview", "ingest", "catalog",
+        ]
+        assert next(step for step in result["steps"] if step["key"] == "ingest")[
             "status"
         ] == "completed"
-        assert next(step for step in result["steps"] if step["key"] == "review")[
+        assert next(step for step in result["steps"] if step["key"] == "catalog")[
             "status"
         ] == "completed"
-        assert next(
-            step for step in result["steps"] if step["key"] == "runtime_bundle"
-        )["status"] == "not_started"
+        assert result["next_action"]["code"] in {
+            "open_check_item_catalog", "inspect_import_result",
+        }
     finally:
         with get_db_session() as db:
             db.query(RuleAssetCommandUnitRecord).filter(
@@ -353,11 +350,11 @@ def test_rule_asset_sample_identity_never_requires_inventory_confirmation():
         result = RuleAssetProductionPipelineService().get(job_id)
 
         preview_step = next(step for step in result["steps"] if step["key"] == "preview")
-        parser_step = next(step for step in result["steps"] if step["key"] == "parser")
+        catalog_step = next(step for step in result["steps"] if step["key"] == "catalog")
         assert preview_step["status"] == "completed"
-        assert preview_step["label"] == "预检与样本识别"
-        assert preview_step["counts"] == {"sample_devices": 1}
-        assert parser_step["status"] == "blocked"
+        assert preview_step["label"] == "预检与命令识别"
+        assert preview_step["counts"] == {"sample_devices": 1, "commands": 2}
+        assert catalog_step["status"] == "not_started"
         assert result["next_action"]["code"] != "confirm_devices"
     finally:
         with get_db_session() as db:

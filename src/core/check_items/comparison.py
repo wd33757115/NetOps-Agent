@@ -28,6 +28,7 @@ from src.infrastructure.db.models import (
     CheckItemRuntimeBundleVersionRecord,
     CheckItemRuntimeManifestRecord,
     CheckItemVersionRecord,
+    CollectionImplementationVersionRecord,
     CommandSnapshot,
     ComparisonContextRecord,
     EntityIdentityPolicyVersionRecord,
@@ -95,14 +96,23 @@ def build_comparison_fact_contract(
         ),
     }
     if mode == "structured":
+        projection_dependency = dict(
+            dependencies.get("command_adapter_projection") or {}
+        )
         semantic_contract.update(
             {
                 "canonical_catalog_version": canonical_catalog_version,
                 "canonical_catalog_digest": str(
                     canonical_catalog_digest or ""
                 ),
-                "observation_contract_digests": dict(
-                    dependencies.get("observation_contracts") or {}
+                **(
+                    {"command_adapter_projection": projection_dependency}
+                    if projection_dependency
+                    else {
+                        "observation_contract_digests": dict(
+                            dependencies.get("observation_contracts") or {}
+                        )
+                    }
                 ),
             }
         )
@@ -576,6 +586,10 @@ class ProductionBaselineCandidateRepository:
             requested[str(asset.asset_type)].add(str(asset.asset_version_id))
         model_by_type = {
             "parser_template": (ParserTemplate, "sha256"),
+            "command_adapter_projection": (
+                CollectionImplementationVersionRecord,
+                "digest",
+            ),
             "observation_contract": (
                 ObservationContractRecord,
                 "contract_sha256",

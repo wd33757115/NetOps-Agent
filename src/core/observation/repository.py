@@ -18,6 +18,22 @@ from src.infrastructure.db.models import ObservationContractRecord, ParserTempla
 from src.infrastructure.db.postgres import get_db_session
 
 
+class ObservationContractWriteFrozenError(RuntimeError):
+    """Raised once the all-at-once V2 cutover has retired contract writes."""
+
+
+def assert_observation_contract_writes_enabled() -> None:
+    """Protect legacy write paths while keeping historical reads available."""
+
+    from src.common.config import get_settings
+
+    if get_settings().ADAPTER_PROJECTION_CUTOVER_ENFORCED:
+        raise ObservationContractWriteFrozenError(
+            "ObservationContract writes are frozen after the CommandAdapter V2 "
+            "cutover; use a versioned CommandAdapter projection instead"
+        )
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -231,6 +247,7 @@ class ObservationContractRepository:
     ) -> ObservationContract:
         """Reuse an identical digest or allocate the next immutable version."""
 
+        assert_observation_contract_writes_enabled()
         probe = build_contract_payload(
             source_type=source_type,
             schema_id=schema_id,
@@ -316,6 +333,7 @@ class ObservationContractRepository:
         status: str = "active",
         compatibility: dict[str, Any] | None = None,
     ) -> ObservationContract:
+        assert_observation_contract_writes_enabled()
         payload = build_contract_payload(
             source_type=source_type,
             schema_id=schema_id,
@@ -429,6 +447,7 @@ class ObservationContractRepository:
     ) -> int:
         """Retire existing derived contracts without rebuilding immutable content."""
 
+        assert_observation_contract_writes_enabled()
         now = _utcnow()
         rows = (
             db.query(ObservationContractRecord)

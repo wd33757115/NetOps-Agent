@@ -33,7 +33,7 @@ def test_semantic_suffix_composition_is_field_name_driven():
     assert measurement["unit"] == "dbm"
     assert measurement["observation_type"] == "interface.optical.rx_power"
     assert "applicability" not in measurement
-    assert threshold["semantic_type"] == "gauge"
+    assert threshold["semantic_type"] == "threshold"
     assert threshold["unit"] == "dbm"
     assert "observation_type" not in threshold
     assert "voltage" in field_aliases("module_voltage_volts")
@@ -105,8 +105,12 @@ def test_multi_table_contract_rebuilds_column_evidence_and_optionalizes_sparse_f
     )
 
     assert valid, diagnostics
-    # 语义目录治理会把非主键的 state 规范化为 status；主键 name 保持稳定
-    assert proposal.required_fields == ("name", "status")
+    # Parser 合同保留 CLI 源字段；到标准 oper_status 的翻译由后续
+    # CommandAdapter Projection 负责。
+    assert proposal.required_fields == ("name", "state")
+    assert proposal.evidence["projection_field_candidates"]["mapping"] == {
+        "state": "oper_status"
+    }
     assert set(proposal.optional_fields) == {"metric", "speed"}
     metric = proposal.evidence["field_bindings"]["metric"]
     assert metric == [
@@ -328,8 +332,11 @@ def test_table_evidence_preserves_ip_semantics_when_missing_markers_exist():
         }""",
     )
 
-    # 非主键 address 会被语义目录规范化为 ip_address，同时保留 ip 语义修复
-    assert proposal.validators["ip_address"] == {"type": "ip_or_unassigned"}
+    # Parser 保留 Address 这一源字段；其值类型仍可由目录校验。
+    assert proposal.validators["address"] == {"type": "ip_or_unassigned"}
+    assert proposal.evidence["projection_field_candidates"]["mapping"][
+        "address"
+    ] == "ip_address"
 
 
 def test_table_evidence_aligns_punctuation_separated_header_fields():
@@ -818,11 +825,11 @@ def test_repeated_block_non_key_requirement_is_reclassified_without_domain_rules
         }""",
     )
 
-    # 非主键 state 先被语义目录规范化为 status，再因缺少逐实体证据被降级为可选
+    # 非主键 state 保持 Parser 源字段，并因缺少逐实体证据被降级为可选。
     assert proposal.required_fields == ("item",)
-    assert proposal.optional_fields == ("status",)
+    assert proposal.optional_fields == ("state",)
     assert proposal.evidence["capture_normalization"]["reclassified_fields"] == [
-        "status"
+        "state"
     ]
 
 

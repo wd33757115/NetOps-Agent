@@ -11,6 +11,7 @@ import pytest
 
 from src.core.check_items.catalog import CheckItemCatalogRepository
 from src.core.parser.policy import ParserPolicy
+from src.core.parser.repository import parser_job_asset_key
 from src.core.rule_control.command_asset_units import (
     RuleAssetCommandUnitService,
     _backfill_url,
@@ -21,6 +22,7 @@ from src.core.rule_control.command_asset_units import (
     _latest_bundle_by_context,
     _latest_context_by_seed_for_source,
     _parser_url,
+    _published_text_adapter_mappings,
 )
 from src.infrastructure.db.models import (
     CommandSnapshot,
@@ -67,6 +69,104 @@ def test_catalog_projection_version_changes_for_any_active_implementation_revisi
     assert _catalog_projection_version(revised_catalog) != _catalog_projection_version(
         catalog
     )
+
+
+def test_command_mapping_uses_the_imported_command_before_adapter_uniqueness():
+    """Several commands for one CheckItem must not mask each other as ambiguous."""
+
+    repository = CheckItemCatalogRepository()
+    repository.bootstrap(actor="pytest-command-aware-mapping")
+    catalog = repository.load_active()
+    source = next(
+        item
+        for item in catalog.implementations
+        if item.id == "cisco-device-version"
+    )
+    companion = replace(
+        source,
+        id="pytest-cisco-device-inventory",
+        version_id="pytest-cisco-device-inventory-v1",
+        commands=(replace(source.commands[0], command="show inventory"),),
+    )
+    command_catalog = replace(
+        catalog,
+        implementations=(source, companion),
+    )
+
+    mappings = RuleAssetCommandUnitService._resolve_check_item_mappings(
+        {
+            "vendor": "Cisco",
+            "models": ["C9300"],
+            "family": None,
+            "profile": "C9300",
+            "command": "show version",
+        },
+        catalog=command_catalog,
+    )
+
+    assert mappings == [
+        {
+            "check_item_id": "device.version",
+            "check_item_version_id": command_catalog.check_item("device.version").version_id,
+            "implementation_id": source.id,
+            "implementation_version_id": source.version_id,
+        }
+    ]
+
+
+def test_active_parser_approved_valid_empty_passes_structured_quality() -> None:
+    """An approved empty table is coverage, not a missing structured record."""
+
+    stages = RuleAssetCommandUnitService()._build_stages(
+        offline_job_id="offline-valid-empty",
+        dataset_ids=["dataset-valid-empty"],
+        unit={
+            "command": "display vrrp statistics",
+            "vendor": "H3C",
+            "profile": "S6850-56HF",
+            "models": {"S6850-56HF"},
+            "sample_count": 2,
+            "device_count": 1,
+            "asset_mode": "preproduction_mapping",
+            "parse_counts": {"empty": 2},
+            "structured_count": 0,
+        },
+        parser_job=None,
+        template=SimpleNamespace(
+            id="template-valid-empty",
+            status="active",
+            validation_json={"allow_empty": True},
+        ),
+        active_contract=None,
+        seed=None,
+        context=None,
+        bundle=None,
+        children=[],
+        output_signature_count=1,
+        preproduction_check_item=SimpleNamespace(
+            id="redundancy.vrrp",
+            name="VRRP 状态",
+            version_id="check-item-valid-empty",
+        ),
+    )
+
+    quality = next(item for item in stages if item["key"] == "structured_quality")
+    assert quality["status"] == "passed"
+    assert quality["metrics"]["approved_valid_empty"] is True
+    assert "不会伪造结构化记录" in quality["detail"]
+
+
+def test_published_text_adapter_is_not_downgraded_to_preproduction() -> None:
+    """Text CheckItems are formally mapped by their active adapter, not V2 Projection."""
+
+    mapping = {"implementation_version_id": "text-adapter-v1"}
+    implementations = {
+        "text-adapter-v1": SimpleNamespace(parser_requirement="normalized_diff")
+    }
+
+    published_text_mappings = _published_text_adapter_mappings([mapping], implementations)
+
+    assert published_text_mappings == [mapping]
 
 
 def test_command_unit_contexts_never_cross_offline_source_boundaries() -> None:
@@ -452,6 +552,8 @@ def test_mapped_confirmed_empty_output_does_not_require_runtime_assets() -> None
 def test_unclassified_ignored_commands_do_not_create_false_exceptions() -> None:
     child = {
         "id": "ignored-command",
+        "handling": "not_applicable",
+        "asset_mode": "ignored",
         "governance_status": "not_applicable",
         "governance_bucket": "not_applicable",
         "current_stage": "release",
@@ -481,7 +583,7 @@ def test_unclassified_ignored_commands_do_not_create_false_exceptions() -> None:
     }
 
     result = RuleAssetCommandUnitService._rollup_check_item_group(
-        "__unclassified__",
+        "__unclassified__:H3C/S5130/display vendor-special-state",
         {"check_item_id": None, "implementations": [child]},
     )
 
@@ -489,6 +591,51 @@ def test_unclassified_ignored_commands_do_not_create_false_exceptions() -> None:
     assert result["governance_bucket"] == "not_applicable"
     assert result["blocker_count"] == 0
     assert result["next_action"] is None
+
+
+def test_unclassified_raw_hash_commands_still_require_check_item_classification() -> None:
+    child = {
+        "id": "raw-hash-command",
+        "handling": "raw_hash_diff",
+        "asset_mode": "raw_hash",
+        "governance_status": "not_applicable",
+        "governance_bucket": "not_applicable",
+        "current_stage": "release",
+        "current_stage_label": "raw hash",
+        "progress_percent": 100,
+        "blocker_count": 0,
+        "sample_count": 2,
+        "device_count": 1,
+        "output_signature_count": 1,
+        "canonical_command": "show lldp neighbors",
+        "vendor": "Cisco",
+        "profile": "N9K-C9364C",
+        "component_statuses": {
+            component: "not_applicable"
+            for component in (
+                "identity",
+                "parser",
+                "contract",
+                "current_state",
+                "policy",
+                "event",
+                "comparison",
+                "runtime_bundle",
+            )
+        },
+        "next_action": None,
+    }
+
+    result = RuleAssetCommandUnitService._rollup_check_item_group(
+        "__unclassified__:H3C/S5130/display vendor-special-state",
+        {"check_item_id": None, "implementations": [child]},
+    )
+
+    assert result["classification_required"] is True
+    assert result["governance_status"] == "blocked"
+    assert result["governance_bucket"] == "exception"
+    assert result["current_stage_label"] == "检查项归类"
+    assert result["next_action"]["code"] == "classify_check_item"
 
 
 def _snapshot(
@@ -1119,6 +1266,21 @@ def test_parser_job_state_changes_refresh_linked_offline_command_units():
         with get_db_session() as db:
             parser_job = db.get(ParserTemplateJob, parser_job_id)
             assert parser_job is not None
+            assert parser_job.idempotency_key == parser_job_asset_key(
+                vendor="H3C",
+                profile="S6520",
+                command=command,
+                evidence_scope=f"offline-rule-assets:{offline_job_id}",
+            )
+            assert (
+                db.query(ParserJobSample)
+                .filter(
+                    ParserJobSample.job_id == parser_job_id,
+                    ParserJobSample.lifecycle_status == "current",
+                )
+                .count()
+                == 1
+            )
             parser_job.status = "failed"
             parser_job.parser_spec_status = "confirmed"
             parser_job.failure_code = "generation_validation_failed"
@@ -1528,6 +1690,7 @@ def test_check_item_workbench_groups_catalog_implementations_and_blocks_unclassi
     job_id = f"offline-check-item-production-{suffix}"
     memory_unit_id = f"command-memory-{suffix}"
     unknown_unit_id = f"command-unclassified-{suffix}"
+    second_unknown_unit_id = f"command-unclassified-second-{suffix}"
     ignored_unit_id = f"command-ignored-{suffix}"
     now = datetime.now(timezone.utc)
     catalog_repository = CheckItemCatalogRepository()
@@ -1608,6 +1771,11 @@ def test_check_item_workbench_groups_catalog_implementations_and_blocks_unclassi
                     command="display vendor-special-state",
                 ),
                 unit(
+                    unit_id=second_unknown_unit_id,
+                    asset_key=f"asset-unknown-second-{suffix}",
+                    command="display vendor-secondary-state",
+                ),
+                unit(
                     unit_id=ignored_unit_id,
                     asset_key=f"asset-ignored-{suffix}",
                     command="screen-length disable",
@@ -1638,38 +1806,31 @@ def test_check_item_workbench_groups_catalog_implementations_and_blocks_unclassi
             page=1,
             page_size=10,
         )
-        assert page["total"] == 3
-        memory_group = next(
+        assert page["total"] == 4
+        unclassified = [
             item
             for item in page["items"]
-            if item["check_item_id"] == "system.memory_usage"
+            if item["classification_required"] is True
+        ]
+        # A legacy CheckItemImplementation link does not carry a V2 A→B
+        # Projection. It remains auditable, but the imported command must be
+        # explicitly associated before it can leave the source inbox.
+        assert len(unclassified) == 3
+        assert {item["name"] for item in unclassified} == {"待归类检查项"}
+        assert {item["implementations"][0]["canonical_command"] for item in unclassified} == {
+            "display memory",
+            "display vendor-special-state",
+            "display vendor-secondary-state",
+        }
+        assert all(item["implementation_count"] == 1 for item in unclassified)
+        assert all(item["governance_status"] == "blocked" for item in unclassified)
+        assert all(item["governance_bucket"] == "exception" for item in unclassified)
+        assert all(item["current_stage"] == "identity_grouping" for item in unclassified)
+        assert all(
+            item["next_action"]["code"] == "classify_check_item"
+            for item in unclassified
         )
-        assert memory_group["implementation_count"] == 1
-        assert memory_group["name"] == "Memory utilization"
-        assert memory_group["display_name"] == "内存使用率"
-        assert memory_group["display_description"] == (
-            "评估设备或槽位的内存容量与使用率。"
-        )
-        assert memory_group["command_count"] == 1
-        assert memory_group["implementations"][0]["canonical_command"] == (
-            "display memory"
-        )
-        assert memory_group["implementations"][0]["mapping_status"] == (
-            "catalog_resolved"
-        )
-        assert memory_group["implementations"][0]["source_job"]["name"].startswith(
-            "Q3 检查项样本"
-        )
-
-        unclassified = next(
-            item for item in page["items"] if item["check_item_id"] is None
-        )
-        assert unclassified["name"] == "待归类检查项"
-        assert unclassified["governance_status"] == "blocked"
-        assert unclassified["governance_bucket"] == "exception"
-        assert unclassified["current_stage"] == "identity_grouping"
-        assert unclassified["next_action"]["code"] == "classify_check_item"
-        assert page["summary"]["unclassified"] == 1
+        assert page["summary"]["unclassified"] == 3
 
         ignored = next(
             item
@@ -1686,13 +1847,233 @@ def test_check_item_workbench_groups_catalog_implementations_and_blocks_unclassi
         with get_db_session() as db:
             db.query(RuleAssetCommandUnitCheckItemRecord).filter(
                 RuleAssetCommandUnitCheckItemRecord.command_unit_id.in_(
-                    [memory_unit_id, unknown_unit_id, ignored_unit_id]
+                    [
+                        memory_unit_id,
+                        unknown_unit_id,
+                        second_unknown_unit_id,
+                        ignored_unit_id,
+                    ]
                 )
             ).delete(synchronize_session=False)
             db.query(RuleAssetCommandUnitRecord).filter(
                 RuleAssetCommandUnitRecord.id.in_(
-                    [memory_unit_id, unknown_unit_id, ignored_unit_id]
+                    [
+                        memory_unit_id,
+                        unknown_unit_id,
+                        second_unknown_unit_id,
+                        ignored_unit_id,
+                    ]
                 )
+            ).delete(synchronize_session=False)
+            db.query(OfflinePatrolJobRecord).filter(
+                OfflinePatrolJobRecord.id == job_id
+            ).delete(synchronize_session=False)
+
+
+def test_delete_unclassified_command_hides_only_that_generated_catalog_unit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    suffix = uuid.uuid4().hex[:10]
+    job_id = f"offline-delete-unclassified-{suffix}"
+    unit_id = f"command-delete-unclassified-{suffix}"
+    asset_key = f"asset-delete-unclassified-{suffix}"
+    now = datetime.now(timezone.utc)
+    with get_db_session() as db:
+        db.add(
+            OfflinePatrolJobRecord(
+                id=job_id,
+                idempotency_key=f"idempotency-{job_id}",
+                purpose="rule_asset_source",
+                job_type="parser_validation",
+                name=f"待归类删除样本 {suffix}",
+                owner_id=f"user:{suffix}",
+                status="completed",
+                progress_json={},
+                preview_json={},
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        db.add(
+            RuleAssetCommandUnitRecord(
+                id=unit_id,
+                offline_job_id=job_id,
+                asset_key=asset_key,
+                vendor="H3C",
+                model="S5130S",
+                models_json=["S5130S"],
+                profile="S5130S",
+                canonical_command="display vendor-special-state",
+                handling="raw_hash_diff",
+                asset_mode="raw_hash",
+                status="blocked",
+                current_stage="identity_grouping",
+                progress_percent=0,
+                sample_count=2,
+                device_count=1,
+                output_signature_count=1,
+                blocker_count=1,
+                parse_counts_json={},
+                stage_states_json=[],
+                next_action_json={},
+                projection_version=1,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+    service = RuleAssetCommandUnitService()
+    monkeypatch.setattr(
+        service,
+        "reconcile",
+        lambda offline_job_id: {"offline_job_id": offline_job_id, "unit_count": 0},
+    )
+    try:
+        result = service.delete_unclassified_unit(
+            job_id,
+            unit_id,
+            actor="pytest-admin",
+        )
+        assert result["success"] is True
+        assert result["asset_key"] == asset_key
+        with get_db_session() as db:
+            source_job = db.get(OfflinePatrolJobRecord, job_id)
+            dispositions = source_job.preview_json["command_asset_dispositions"]
+            assert dispositions == [
+                {
+                    "asset_key": asset_key,
+                    "decision": "dismissed_unclassified_command",
+                    "vendor": "H3C",
+                    "models": ["S5130S"],
+                    "canonical_command": "display vendor-special-state",
+                    "deleted_by": "pytest-admin",
+                    "deleted_at": dispositions[0]["deleted_at"],
+                }
+            ]
+    finally:
+        with get_db_session() as db:
+            db.query(RuleAssetCommandUnitRecord).filter(
+                RuleAssetCommandUnitRecord.id == unit_id
+            ).delete(synchronize_session=False)
+            db.query(OfflinePatrolJobRecord).filter(
+                OfflinePatrolJobRecord.id == job_id
+            ).delete(synchronize_session=False)
+
+
+def test_associate_unclassified_command_keeps_a_preproduction_link_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    suffix = uuid.uuid4().hex[:10]
+    job_id = f"offline-preproduction-association-{suffix}"
+    unit_id = f"command-preproduction-association-{suffix}"
+    now = datetime.now(timezone.utc)
+    catalog_repository = CheckItemCatalogRepository()
+    catalog_repository.bootstrap(actor="pytest-preproduction-association")
+    catalog = catalog_repository.load_active()
+    target = catalog.check_item("system.memory_usage")
+    legacy_implementation = next(
+        item for item in catalog.implementations if item.id == "h3c-memory-usage"
+    )
+    assert target is not None
+    with get_db_session() as db:
+        db.add(
+            OfflinePatrolJobRecord(
+                id=job_id,
+                idempotency_key=f"idempotency-{job_id}",
+                purpose="rule_asset_source",
+                job_type="parser_validation",
+                name=f"待归类关联样本 {suffix}",
+                owner_id=f"user:{suffix}",
+                status="completed",
+                progress_json={},
+                preview_json={},
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        db.add(
+            RuleAssetCommandUnitRecord(
+                id=unit_id,
+                offline_job_id=job_id,
+                asset_key=f"asset-preproduction-{suffix}",
+                vendor="H3C",
+                model="S5130S",
+                models_json=["S5130S"],
+                profile="S5130S",
+                canonical_command="display memory",
+                handling="raw_hash_diff",
+                asset_mode="raw_hash",
+                status="blocked",
+                current_stage="identity_grouping",
+                progress_percent=0,
+                sample_count=2,
+                device_count=1,
+                output_signature_count=1,
+                blocker_count=1,
+                parse_counts_json={},
+                stage_states_json=[],
+                next_action_json={},
+                projection_version=1,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        db.flush()
+        # The old catalog link remains visible for audit but has no V2
+        # Projection, so it must not prevent the one explicit source
+        # association selected by the operator.
+        db.add(
+            RuleAssetCommandUnitCheckItemRecord(
+                id=f"legacy-preproduction-link-{suffix}",
+                command_unit_id=unit_id,
+                check_item_id=target.id,
+                check_item_version_id=target.version_id,
+                implementation_id=legacy_implementation.id,
+                implementation_version_id=legacy_implementation.version_id,
+                mapping_source="legacy_catalog_resolver",
+                created_at=now,
+            )
+        )
+
+    service = RuleAssetCommandUnitService(catalog_repository=catalog_repository)
+    monkeypatch.setattr(service, "_ensure_projection_current", lambda _job_id: None)
+    monkeypatch.setattr(
+        service,
+        "reconcile",
+        lambda offline_job_id: {"offline_job_id": offline_job_id, "unit_count": 1},
+    )
+    try:
+        result = service.associate_unclassified_unit_to_check_item(
+            job_id,
+            unit_id,
+            check_item_id=target.id,
+            actor="pytest-admin",
+        )
+        assert result["success"] is True
+        assert result["association"]["check_item_id"] == target.id
+        assert result["parser_job_id"] is None
+        with get_db_session() as db:
+            source_job = db.get(OfflinePatrolJobRecord, job_id)
+            assert source_job.preview_json["preproduction_check_item_associations"] == [
+                {
+                    **result["association"],
+                }
+            ]
+            unit = db.get(RuleAssetCommandUnitRecord, unit_id)
+            assert unit.check_item_id is None
+            assert (
+                db.query(RuleAssetCommandUnitCheckItemRecord)
+                .filter(RuleAssetCommandUnitCheckItemRecord.command_unit_id == unit_id)
+                .count()
+                == 1
+            )
+    finally:
+        with get_db_session() as db:
+            db.query(RuleAssetCommandUnitCheckItemRecord).filter(
+                RuleAssetCommandUnitCheckItemRecord.command_unit_id == unit_id
+            ).delete(synchronize_session=False)
+            db.query(RuleAssetCommandUnitRecord).filter(
+                RuleAssetCommandUnitRecord.id == unit_id
             ).delete(synchronize_session=False)
             db.query(OfflinePatrolJobRecord).filter(
                 OfflinePatrolJobRecord.id == job_id

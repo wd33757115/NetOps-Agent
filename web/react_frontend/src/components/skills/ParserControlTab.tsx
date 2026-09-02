@@ -1724,7 +1724,7 @@ const ParserControlTab: React.FC = () => {
   const activationSelectorReady = !activationSelectorExpertMode || Boolean(activationSelector.trim())
   const subWorkspaceLabels: Record<ParserSubWorkspaceKey, React.ReactNode> = {
     'asset-production-units': '命令适配器',
-    'source-jobs': '样本任务',
+    'source-jobs': '样本导入',
     'catalog-management': '检查项目录',
     'assessment-policies': '判断策略',
     'published-assets': '生产资产目录',
@@ -1768,7 +1768,7 @@ const ParserControlTab: React.FC = () => {
     next.set(
       'subtab',
       view === 'commands'
-        ? 'asset-production-units'
+        ? 'catalog-management'
         : view === 'sources'
           ? 'source-jobs'
           : view === 'catalog'
@@ -1950,6 +1950,7 @@ const ParserControlTab: React.FC = () => {
             focusOfflineJobId={linkedOfflineJobId || undefined}
             focusRuleSeedJobId={searchParams.get('rule_seed_job_id') || undefined}
             focusBundleId={searchParams.get('bundle_id') || undefined}
+            focusCheckItemVersionId={searchParams.get('check_item_version_id') || undefined}
             datasetIds={linkedDatasetIds}
           />
         ),
@@ -1971,6 +1972,8 @@ const ParserControlTab: React.FC = () => {
           <RuleAssetProductionWorkbench
             view="catalog"
             onViewChange={changeProductionView}
+            focusAction={searchParams.get('action') || focus.productAction || undefined}
+            focusOfflineJobId={linkedOfflineJobId || undefined}
           />
         ),
       },

@@ -69,6 +69,59 @@ def _normalized_observation(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _baseline_key(item: dict[str, Any]) -> tuple[str, str, str, str, str]:
+    dimensions = dict(item.get("dimensions") or {})
+    dimensions.pop(APPLICABILITY_CONTEXT_KEY, None)
+    return (
+        str(item.get("device_id") or ""),
+        str(item.get("entity_type") or ""),
+        str(item.get("entity_key") or ""),
+        str(item.get("field") or ""),
+        json.dumps(
+            dimensions,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ),
+    )
+
+
+def _attach_baselines(
+    current: list[dict[str, Any]],
+    baseline: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Attach matching immutable baseline evidence without inventing identity."""
+
+    latest: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
+    for item in baseline:
+        key = _baseline_key(item)
+        selected = latest.get(key)
+        if selected is None or str(item.get("observed_at") or "") >= str(
+            selected.get("observed_at") or ""
+        ):
+            latest[key] = item
+    enriched: list[dict[str, Any]] = []
+    for item in current:
+        context = dict(item.get("context") or {})
+        prior = latest.get(_baseline_key(item))
+        if prior is None:
+            context["baseline_status"] = "missing"
+        else:
+            prior_context = dict(prior.get("context") or {})
+            context.update(
+                {
+                    "baseline_status": "available",
+                    "baseline_value": prior.get("value"),
+                    "baseline_observation_id": prior.get("id"),
+                    "baseline_snapshot_id": prior.get("snapshot_id"),
+                    "baseline_context": prior_context,
+                }
+            )
+        enriched.append({**item, "context": context})
+    return enriched
+
+
 @dataclass(frozen=True, slots=True)
 class CurrentStateEvaluationInput:
     patrol_batch_id: str
@@ -84,6 +137,7 @@ class CurrentStateEvaluationInput:
     runtime_assets: tuple[dict[str, Any], ...]
     assessed_at: datetime
     assessment_policy_snapshot: dict[str, Any] = field(default_factory=dict)
+    baseline_observations: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +193,12 @@ class CurrentStateEvaluationService:
             for item in data.observations
             if str(item.get("device_id") or "") == data.device_id
         ]
+        baselines = [
+            _normalized_observation(item)
+            for item in data.baseline_observations
+            if str(item.get("device_id") or "") == data.device_id
+        ]
+        observations = _attach_baselines(observations, baselines)
         coverage = evaluate_current_state(
             observations,
             frozen_rules,

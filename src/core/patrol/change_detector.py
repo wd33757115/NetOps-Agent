@@ -1732,7 +1732,18 @@ def _detect_observation_changes_against_history_impl(
         )
     }
     selected_device_ids = {str(item) for item in device_ids or []}
-    for current_snapshot in patrol_repository.list_run_snapshots(current_run_id):
+    # This raw-text fallback is an optional supplement to canonical
+    # Observation comparison.  Lightweight repositories used by offline and
+    # unit-analysis callers predate the snapshot-list API, so lack of that
+    # optional capability must not turn a completed canonical comparison into
+    # an AttributeError.
+    list_run_snapshots = getattr(patrol_repository, "list_run_snapshots", None)
+    current_snapshots = (
+        list_run_snapshots(current_run_id)
+        if callable(list_run_snapshots)
+        else ()
+    )
+    for current_snapshot in current_snapshots:
         if (
             selected_device_ids
             and str(current_snapshot.device_id) not in selected_device_ids

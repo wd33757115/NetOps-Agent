@@ -27,7 +27,7 @@ describe('RuleAssetSourceJobsWorkspace', () => {
       </MemoryRouter>,
     )
 
-    expect(screen.getByText('从生产资产缺口导入规则样本')).toBeInTheDocument()
+    expect(screen.getByText('从生产资产缺口导入 CLI 样本')).toBeInTheDocument()
     expect(screen.getByText('gap-1')).toBeInTheDocument()
     expect(screen.getByText('system.cpu_usage')).toBeInTheDocument()
     expect(screen.getByText('impl-cpu-v1')).toBeInTheDocument()
@@ -35,7 +35,7 @@ describe('RuleAssetSourceJobsWorkspace', () => {
     expect(workbench).toHaveBeenCalledWith({
       purpose: 'rule_asset_source',
       initialJobType: 'parser_validation',
-      initialJobName: 'system.cpu_usage 规则样本',
+      initialJobName: 'system.cpu_usage CLI 样本',
     })
   })
 })

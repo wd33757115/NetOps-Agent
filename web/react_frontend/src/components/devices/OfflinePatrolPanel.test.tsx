@@ -248,7 +248,7 @@ describe('OfflinePatrolPanel', () => {
       job_type: 'history_compare',
     } as never
 
-    expect(offlineJobDisplayName(job)).toBe('Q2 → Q3 规则回放样本')
+    expect(offlineJobDisplayName(job)).toBe('Q2 → Q3 CLI 样本导入')
     expect(job.name).toBe('?????? Q2?Q3?????????')
   })
 
@@ -260,9 +260,9 @@ describe('OfflinePatrolPanel', () => {
     expect(screen.getByText(/共 10001 个任务/)).toBeInTheDocument()
     expect(list).toHaveBeenCalledWith(expect.objectContaining({ page: 1, page_size: 25 }))
 
-    fireEvent.click(screen.getByRole('button', { name: /导入单周期样本/ }))
-    expect(await screen.findByText('新建规则资产样本任务')).toBeInTheDocument()
-    expect(screen.getByText('单周期采集样本')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /导入单周期 CLI 样本/ }))
+    expect(await screen.findByText('新建 CLI 样本导入')).toBeInTheDocument()
+    expect(screen.getAllByText('单周期 CLI 样本').length).toBeGreaterThan(0)
     const createButton = screen.getByRole('button', { name: '创建并继续' })
     expect(createButton).toBeDisabled()
     const observedAt = screen.getByLabelText('样本采集时间')
@@ -274,11 +274,11 @@ describe('OfflinePatrolPanel', () => {
 
     fireEvent.click(observedAt)
     fireEvent.keyDown(observedAt, { key: 'Escape', code: 'Escape' })
-    expect(screen.getByText('新建规则资产样本任务')).toBeInTheDocument()
+    expect(screen.getByText('新建 CLI 样本导入')).toBeInTheDocument()
 
     fireEvent.click(screen.getByLabelText('Close'))
-    fireEvent.click(screen.getByRole('button', { name: /导入双周期样本/ }))
-    expect(await screen.findByText('双周期判断回放样本')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /导入双周期 CLI 样本/ }))
+    expect((await screen.findAllByText('双周期 CLI 样本')).length).toBeGreaterThan(0)
     expect(screen.getByText('数据用途')).toBeInTheDocument()
     expect(screen.queryByText('事件发布')).not.toBeInTheDocument()
   })
@@ -291,7 +291,7 @@ describe('OfflinePatrolPanel', () => {
     expect(screen.getByRole('button', { name: /发起单周期离线巡检/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /对比两个巡检周期/ })).toBeInTheDocument()
     expect(screen.getByText('2 个质量提醒')).toBeInTheDocument()
-    expect(screen.queryByText('规则资产样本任务')).not.toBeInTheDocument()
+    expect(screen.queryByText('CLI 样本导入')).not.toBeInTheDocument()
     expect(offlineList).toHaveBeenCalled()
   })
 
@@ -443,7 +443,7 @@ describe('OfflinePatrolPanel', () => {
 
     await user.click(await screen.findByRole('button', { name: /继续上传/ }))
 
-    expect(await screen.findByText('继续规则资产样本任务')).toBeInTheDocument()
+    expect(await screen.findByText('继续 CLI 样本导入')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /选择文件$/ })).toBeInTheDocument()
     expect(screen.getByText('0 个源文件')).toBeInTheDocument()
     expect(sourceGet).toHaveBeenCalledWith('offline-draft-1')
@@ -496,7 +496,7 @@ describe('OfflinePatrolPanel', () => {
     await user.click(await screen.findByRole('button', { name: /修复并继续/ }))
 
     expect(sourceRetry).toHaveBeenCalledWith('offline-failed-1')
-    expect(await screen.findByText('继续规则资产样本任务')).toBeInTheDocument()
+    expect(await screen.findByText('继续 CLI 样本导入')).toBeInTheDocument()
     expect(sourceCreate).not.toHaveBeenCalled()
   })
 
@@ -536,7 +536,7 @@ describe('OfflinePatrolPanel', () => {
       accessory: <SameJobTabSwitch jobId="offline-test-1" />,
     })
 
-    expect(await screen.findByRole('region', { name: '规则资产样本任务详情' })).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: 'CLI 样本导入任务详情' })).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     let tabs = await screen.findAllByRole('tab')
     expect(tabs[0]).toHaveAttribute('aria-selected', 'true')

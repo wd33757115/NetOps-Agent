@@ -486,6 +486,227 @@ def test_check_item_catalog_api_maps_unsafe_publication_to_409(monkeypatch):
     assert "unresolved blockers" in str(exc_info.value.detail)
 
 
+def test_adapter_projection_api_uses_only_server_selected_assets(monkeypatch):
+    calls: list[dict] = []
+    context = {
+        "selected_check_item": {
+            "id": "interface.oper_status",
+            "version_id": "check-item:interface.oper_status:v2",
+            "canonical_contract": {
+                "entity_type": "interface",
+                "identity_dimensions": ["interface"],
+                "observations": [
+                    {
+                        "canonical_field": "oper_status",
+                        "observation_type": "interface.oper_status",
+                        "semantic_type": "enum",
+                        "allowed_values": ["up", "down"],
+                    }
+                ],
+            },
+        },
+        "parser": {
+            "template_id": "parser-interface-v2",
+            "record_sets": {"interfaces": ["name", "link"]},
+            "field_contract": {"status": "aligned"},
+        },
+    }
+
+    monkeypatch.setattr(parser_api, "_adapter_projection_context", lambda **_: context)
+
+    def fake_generate(params):
+        calls.append(params)
+        return {
+            "success": True,
+            "mode": params["mode"],
+            "proposal": params.get("proposal") or {"schema_version": "command-adapter/v2"},
+            "validation": {"success": True, "errors": []},
+        }
+
+    monkeypatch.setattr(parser_api, "generate_projection_candidate", fake_generate)
+    candidate = parser_api.generate_adapter_projection_candidate(
+        parser_api.AdapterProjectionCandidateRequest(
+            check_item_id="interface.oper_status",
+            parser_template_id="parser-interface-v2",
+            source_record_set="interfaces",
+            generation_provider="llm",
+            max_agent_attempts=3,
+        )
+    )
+    proposal = {
+        "schema_version": "command-adapter/v2",
+        "parser": {"template_id": "parser-interface-v2"},
+        "outputs": [],
+    }
+    validated = parser_api.validate_adapter_projection_candidate(
+        parser_api.AdapterProjectionValidationRequest(
+            check_item_id="interface.oper_status",
+            parser_template_id="parser-interface-v2",
+            source_record_set="interfaces",
+            proposal=proposal,
+        )
+    )
+
+    assert candidate["success"] is True
+    assert validated["success"] is True
+    assert calls[0]["mode"] == "projection_candidate"
+    assert calls[0]["selected_check_item"] == context["selected_check_item"]
+    assert calls[0]["parser"] == {
+        "template_id": "parser-interface-v2",
+        "source_record_set": "interfaces",
+        "source_fields": ["name", "link"],
+    }
+    assert calls[0]["max_agent_attempts"] == 3
+    assert calls[1]["mode"] == "projection_validate"
+    assert calls[1]["proposal"] == proposal
+
+
+def test_adapter_projection_context_accepts_pending_parser_for_local_preview(monkeypatch):
+    check_item = SimpleNamespace(
+        id="interface.oper_status",
+        version_id="check-item:interface.oper_status:v6",
+        canonical_contract={
+            "entity_type": "interface",
+            "identity_dimensions": ["interface"],
+            "observations": [
+                {
+                    "canonical_field": "oper_status",
+                    "observation_type": "interface.oper_status",
+                }
+            ],
+        },
+    )
+    template = SimpleNamespace(
+        id="parser-interface-pending",
+        status="pending_approval",
+        validation_json={
+            "entity_type": "interface",
+            "source_parser_spec": {
+                "record_sets": [
+                    {"name": "interfaces", "entity": "interface"}
+                ]
+            },
+        },
+        template_text="Value interface (\\S+)\nValue oper_status (\\S+)\n\nStart\n  ^${interface}\\s+${oper_status} -> Record",
+    )
+
+    monkeypatch.setattr(
+        parser_api,
+        "CheckItemCatalogRepository",
+        lambda: SimpleNamespace(load_active=lambda: SimpleNamespace(check_items=[check_item])),
+    )
+    monkeypatch.setattr(
+        parser_api,
+        "ParserTemplateRepository",
+        lambda: SimpleNamespace(get_template=lambda _template_id: template),
+    )
+    monkeypatch.setattr(
+        parser_api,
+        "build_parser_field_contract",
+        lambda **_: {
+            "status": "aligned",
+            "template_record_sets": {"interfaces": ["interface", "oper_status"]},
+        },
+    )
+
+    context = parser_api._adapter_projection_context(
+        check_item_id="interface.oper_status",
+        parser_template_id="parser-interface-pending",
+    )
+
+    assert context["parser"]["template_id"] == "parser-interface-pending"
+    assert context["parser"]["record_sets"]["interfaces"] == [
+        "interface",
+        "oper_status",
+    ]
+    assert context["parser"]["record_sets"]["interface"] == [
+        "interface",
+        "oper_status",
+    ]
+
+
+def test_adapter_projection_cutover_api_forwards_sanitized_proof_and_authorization(
+    monkeypatch,
+):
+    calls: list[tuple[str, dict]] = []
+
+    class FakeService:
+        def readiness(self, **payload):
+            calls.append(("readiness", payload))
+            return {"digest": "d" * 64, "production_cutover_permitted": True}
+
+        def record_replay_attestations(self, **payload):
+            calls.append(("record", payload))
+            return {"digest": "d" * 64, "routes": []}
+
+        def authorize_cutover(self, **payload):
+            calls.append(("authorize", payload))
+            return {"success": True, "status": "authorized"}
+
+    monkeypatch.setattr(parser_api, "AdapterProjectionCutoverInventoryService", FakeService)
+    attestation = parser_api.AdapterProjectionReplayAttestation(
+        success=True,
+        status="passed",
+        collected_sample_count=3,
+        sample_count=3,
+        standard_records_verified=True,
+        primary_keys_verified=True,
+        quality_status_verified=True,
+        rule_results_verified=True,
+        evidence_summary_verified=True,
+        evidence_digest="a" * 64,
+    )
+    payload = parser_api.AdapterProjectionCutoverReadinessRequest(
+        replay_by_implementation_version={"implementation:interface:v2": attestation}
+    )
+
+    verified = parser_api.verify_adapter_projection_cutover_readiness(payload)
+    recorded = parser_api.record_adapter_projection_replay_attestations(
+        payload,
+        _admin_request("replay-engineer"),
+        "adapter-projection-replay-1",
+    )
+    authorized = parser_api.authorize_adapter_projection_cutover(
+        parser_api.AdapterProjectionCutoverAuthorizationRequest(
+            expected_readiness_digest="d" * 64,
+            reason="all active routes replayed",
+        ),
+        _admin_request("cutover-admin"),
+        "adapter-projection-authorize-1",
+    )
+
+    assert verified["digest"] == "d" * 64
+    assert recorded["digest"] == "d" * 64
+    assert authorized["status"] == "authorized"
+    assert calls[0] == (
+        "readiness",
+        {
+            "replay_by_implementation_version": {
+                "implementation:interface:v2": attestation.model_dump()
+            }
+        },
+    )
+    assert calls[1] == (
+        "record",
+        {
+            "replay_by_implementation_version": {
+                "implementation:interface:v2": attestation.model_dump()
+            },
+            "actor": "replay-engineer",
+            "idempotency_key": "adapter-projection-replay-1",
+        },
+    )
+    assert calls[2] == (
+        "authorize",
+        {
+            "actor": "cutover-admin",
+            "reason": "all active routes replayed",
+            "expected_readiness_digest": "d" * 64,
+            "idempotency_key": "adapter-projection-authorize-1",
+        },
+    )
+
+
 def test_parser_spec_and_sample_roles_are_engineer_confirmed_and_audited(monkeypatch):
     calls: list[tuple[str, dict]] = []
 
@@ -694,12 +915,15 @@ def test_parser_spec_suggestion_is_queued_without_starting_generation_lifecycle(
     result = parser_api.suggest_parser_spec(
         "job-1",
         _admin_request("engineer"),
-        parser_api.ParserSpecSuggestionRequest(),
+        parser_api.ParserSpecSuggestionRequest(
+            check_item_id="interface.oper_status",
+        ),
     )
 
     assert result["status"] == "queued"
     assert calls[0][0] == "queue"
     assert calls[0][1]["actor"] == "engineer"
+    assert calls[0][1]["check_item_id"] == "interface.oper_status"
     assert calls[1][0] == "execute_skill_task"
     assert calls[1][1]["kwargs"]["operation"] == "suggest_spec"
 
@@ -902,14 +1126,14 @@ def test_parser_template_comparison_returns_complete_human_approval_evidence(
             "status": "success",
             "records": [{"interface": "GE1/0/1", "status": "UP"}],
             "record_sets": [{
-                "name": "interface",
+                "name": "default",
                 "entity_type": "interface",
                 "primary_keys": [],
                 "required_fields": [],
                 "records": [{"interface": "GE1/0/1", "status": "UP"}],
             }],
             "primary_keys": [[]],
-            "record_set_primary_keys": {"interface": [[]]},
+            "record_set_primary_keys": {"default": [[]]},
         }],
     }]
 
@@ -1004,6 +1228,28 @@ def test_comparison_projects_parser_bundle_into_independent_record_sets():
     assert len(result[1]["records"]) == 2
 
 
+def test_comparison_uses_default_record_set_for_plain_textfsm_output():
+    result = parser_api._comparison_record_sets(
+        {"status": "success", "records": [{"slot": "1", "cpu_5m": "3"}]},
+        {
+            "entity_type": "cpu_scope",
+            "primary_keys": ["slot"],
+            "required_fields": ["slot", "cpu_5m"],
+        },
+        fallback_name="cpu_scope",
+    )
+
+    assert result == [
+        {
+            "name": "default",
+            "entity_type": "cpu_scope",
+            "primary_keys": ["slot"],
+            "required_fields": ["slot", "cpu_5m"],
+            "records": [{"slot": "1", "cpu_5m": "3"}],
+        }
+    ]
+
+
 def test_candidate_comparison_parses_template_without_production_policy_entry():
     template_text = (
         "Value switch_id (\\d+)\n"
@@ -1078,17 +1324,6 @@ def test_parser_template_comparison_scopes_evidence_to_source_job(
         raw_text="Eth1/1 uplink connected trunk full 100G QSFP\n",
         raw_text_hash=None,
     )
-    historical_snapshot = SimpleNamespace(
-        snapshot_id="snapshot-historical",
-        dataset_id="historical",
-        device_id="switch-old",
-        vendor="Cisco",
-        model="N9K-C9364C",
-        command_canonical="show interface status",
-        raw_text="Eth1/2 old notconnect 1 auto auto --\n",
-        raw_text_hash=None,
-    )
-
     class FakeTemplateRepository:
         def get_template(self, template_id):
             assert template_id == candidate.id

@@ -106,6 +106,31 @@ def test_event_rule_logical_identity_distinguishes_warning_and_alarm_roles():
     assert any(":critical_low:" in key for key in keys)
 
 
+def test_event_rule_logical_identity_uses_dynamic_threshold_role():
+    shared = {
+        "kind": "threshold_field_gte",
+        "entity_types": ["cpu_scope"],
+        "fields": ["cpu_usage_percent"],
+        "dimensions": {"window": "5m"},
+    }
+    high = event_rule_logical_key(
+        name="system.cpu_usage.CpuUtilizationHigh",
+        event_type="CpuUtilizationHigh",
+        event_class="fault",
+        condition={**shared, "threshold_role": "high"},
+    )
+    critical = event_rule_logical_key(
+        name="system.cpu_usage.CpuUtilizationCritical",
+        event_type="CpuUtilizationCritical",
+        event_class="fault",
+        condition={**shared, "threshold_role": "critical_high"},
+    )
+
+    assert high != critical
+    assert ":high:" in high
+    assert ":critical_high:" in critical
+
+
 def test_threshold_condition_matches_cpu_high():
     assert condition_matches(
         {

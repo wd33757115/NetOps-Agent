@@ -189,7 +189,7 @@ def test_parser_field_naming_guidance_comes_from_resolved_check_item_contract():
         for item in optical["preferred_observation_fields"]
     }
     assert optical_fields["interface.optical.rx_power"]["preferred_pattern"] == (
-        "rx_power_dbm"
+        "rx_power_dbm_{channel}"
     )
 
 
@@ -209,7 +209,7 @@ def test_top_catalog_uses_only_approved_canonical_observations():
     cpu_check = catalog.check_item("system.cpu_usage")
     assert cpu_check is not None
     cpu_target = cpu_check.canonical_contract["observations"][0]
-    assert cpu_check.version == 8
+    assert cpu_check.version == 9
     assert cpu_target["canonical_field"] == "cpu_usage_percent"
     assert "must never be labelled 5m" in cpu_target["mapping_guidance"]
     assert cpu_target["projection_recipes"][0]["id"] == (
@@ -218,22 +218,19 @@ def test_top_catalog_uses_only_approved_canonical_observations():
     assert "cpu_usage_percent" in cpu_check.canonical_contract[
         "parser_field_vocabulary"
     ]
-    assert cpu_target["policy_constraints"] == {
-        "allowed_compare_modes": ["threshold_and_deadband"],
-        "applies_to_dimensions": {"window": ["5m"]},
-        "required_thresholds": {"high": 80},
-        "required_recovery_threshold": 75,
-        "required_deadband": 5,
-        "allowed_minimum_durations": [None, "0s"],
-        "evidence_only_reason": True,
+    assert "required_thresholds" not in cpu_target["policy_constraints"]
+    assert cpu_target["threshold_references"] == {
+        "high": {"field_name": "cpu_high_warning_percent"},
+        "critical_high": {"field_name": "cpu_high_alarm_percent"},
     }
     assert cpu_target["event_constraints"]["role_event_types"] == {
         "high": "CpuUtilizationHigh",
+        "critical_high": "CpuUtilizationCritical",
         "high_recovery": "CpuUtilizationRecovered",
     }
     memory_check = catalog.check_item("system.memory_usage")
     assert memory_check is not None
-    assert memory_check.version == 6
+    assert memory_check.version == 7
     memory_utilization = next(
         item
         for item in memory_check.canonical_contract["observations"]
@@ -286,29 +283,20 @@ def test_top_catalog_uses_only_approved_canonical_observations():
         for item in optical.canonical_contract["observations"]
         if item["observation_type"] == "interface.optical.rx_power"
     )
-    assert rx_target["policy_constraints"] == {
-        "allowed_compare_modes": ["threshold_low_and_deadband"],
-        "require_structured_threshold_references": True,
-        "required_threshold_reference_any": ["low", "critical_low"],
-        "recovery_direction": "above",
-        "minimum_hysteresis": 2,
-        "deadband_bounds": {"min": 2, "max": 6},
+    assert rx_target["policy_constraints"]["allowed_compare_modes"] == [
+        "threshold_and_deadband"
+    ]
+    assert set(rx_target["threshold_references"]) == {
+        "low", "critical_low", "high", "critical_high"
     }
-    assert rx_target["event_constraints"]["role_event_types"] == {
-        "low": "OpticalRxPowerLow",
-        "critical_low": "OpticalRxPowerCritical",
-        "low_recovery": "OpticalRxPowerRecovered",
+    assert rx_target["baseline_comparison"] == {
+        "kind": "linear_power_loss_ratio",
+        "max_loss_ratio": 0.1,
+        "identity_fields": ["part_number", "serial_number"],
     }
-    assert rx_target["event_constraints"]["required_event_classes"] == {
-        "OpticalRxPowerLow": "fault",
-        "OpticalRxPowerCritical": "fault",
-        "OpticalRxPowerRecovered": "recovery",
-    }
-    assert rx_target["event_constraints"]["required_severities"] == {
-        "OpticalRxPowerLow": "warning",
-        "OpticalRxPowerCritical": "critical",
-        "OpticalRxPowerRecovered": "info",
-    }
+    assert rx_target["event_constraints"]["role_event_types"][
+        "baseline_degradation"
+    ] == "OpticalRxPowerDegraded"
     assert rx_target["event_constraints"]["required_exclusive_event_types"] == [
         "OpticalRxPowerCritical"
     ]
@@ -328,6 +316,14 @@ def test_top_catalog_uses_only_approved_canonical_observations():
         {
             "fault": "OpticalRxPowerCritical",
             "recovery": "OpticalRxPowerRecovered",
+        },
+        {
+            "fault": "OpticalRxPowerHigh",
+            "recovery": "OpticalRxPowerRecoveredFromHigh",
+        },
+        {
+            "fault": "OpticalRxPowerHighCritical",
+            "recovery": "OpticalRxPowerRecoveredFromHigh",
         },
     ]
 
@@ -527,8 +523,10 @@ def test_latest_catalog_transactionally_replaces_v1_without_mutating_history(
     repository.bootstrap(current, actor="test:latest")
     active = repository.load_active()
 
-    assert active.catalog_version == 9
-    assert {item.version for item in active.check_items} == {1, 2, 3, 6, 8, 9}
+    assert active.catalog_version == 11
+    assert {item.version for item in active.check_items} == {
+        1, 2, 3, 6, 7, 9, 11
+    }
     assert {
         implementation.version
         for implementation in active.implementations

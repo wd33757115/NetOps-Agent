@@ -9,6 +9,10 @@ import uuid
 from dataclasses import replace
 from typing import Any
 
+from src.common.config import get_settings
+from src.core.check_items.adapter_projection import (
+    project_adapter_batches_to_observations,
+)
 from src.core.check_items.catalog import (
     CheckItemCatalogRepository,
     CheckItemDefinition,
@@ -17,6 +21,7 @@ from src.core.check_items.command_adapter import (
     CommandAdapterError,
     ObservationBatch,
     execute_adapter,
+    is_direct_projection_adapter,
 )
 from src.core.observation import ObservationContractRepository
 from src.core.observation.record_set_relations import (
@@ -45,6 +50,19 @@ PLACEHOLDER_NORMALIZED_FIELDS = {"description"}
 
 class ObservationContractVersionError(ValueError):
     """Raised when replay cannot resolve the immutable contract version."""
+
+
+class LegacyObservationRuntimeRetiredError(ValueError):
+    """Raised when production attempts to use the retired V1 semantic bridge."""
+
+
+def _legacy_contract_runtime_retired(mode: str) -> bool:
+    """Keep legacy contracts readable for replay, never as post-cutover runtime."""
+
+    return bool(
+        str(mode).strip().casefold() == "production"
+        and get_settings().ADAPTER_PROJECTION_CUTOVER_ENFORCED
+    )
 
 
 def _adapter_record_sets(structured: Any) -> dict[str, list[dict[str, Any]]]:
@@ -159,6 +177,12 @@ def _adapter_projection(
         )
 
     items_by_id = {item.id: item for item in check_items}
+    direct_projection = is_direct_projection_adapter(implementation.adapter_spec)
+    if not direct_projection and _legacy_contract_runtime_retired(mode):
+        raise LegacyObservationRuntimeRetiredError(
+            "legacy CommandAdapter/ObservationContract projection is retired "
+            "for production; use a pinned command-adapter/v2 projection"
+        )
     batches = execute_adapter(
         implementation.adapter_spec,
         record_sets=_adapter_record_sets(snapshot.get("structured_json")),
@@ -178,7 +202,23 @@ def _adapter_projection(
             "canonical_command": snapshot.get("canonical_command"),
         },
         observed_at=snapshot.get("observed_at"),
+        require_pinned_check_item_versions=direct_projection,
     )
+    if direct_projection:
+        observations = project_adapter_batches_to_observations(
+            batches,
+            check_items=items_by_id,
+            snapshot=snapshot,
+            mode=mode,
+            source=source,
+            dataset_id=dataset_id,
+            command_adapter_id=implementation.id,
+            command_adapter_version_id=implementation.version_id,
+        )
+        return _reconcile_snapshot_observations(observations), batches
+
+    # Historical v1 adapters retain the legacy contract bridge only for replay.
+    # New production adapters are always handled by the direct branch above.
     observations: list[StateObservation] = []
     for batch in batches:
         if not batch.records:
@@ -310,7 +350,10 @@ def _template_contract(
                 f"ObservationContract not found: cli:{template_id} v{contract_version}"
             )
         return {}
-    if template.status == "active":
+    if (
+        template.status == "active"
+        and not get_settings().ADAPTER_PROJECTION_CUTOVER_ENFORCED
+    ):
         synced = ObservationContractRepository().upsert_from_parser_template(
             template_id,
             status="active",
@@ -479,6 +522,11 @@ def observations_from_snapshot(
             )
             if adapter_projection is not None:
                 return adapter_projection[0]
+            if _legacy_contract_runtime_retired(mode):
+                raise LegacyObservationRuntimeRetiredError(
+                    "ObservationContract runtime projection is retired for "
+                    "production; use a pinned command-adapter/v2 projection"
+                )
         frozen_contract_version = (
             int(observation_contract_version)
             if observation_contract_version is not None
@@ -563,6 +611,9 @@ def observations_from_snapshot(
         contract.get("canonical_entity_type") or source_entity_type
     )
     primary_keys = [str(key) for key in contract.get("primary_keys") or []]
+    primary_key_names = {
+        key.strip().casefold() for key in primary_keys if key.strip()
+    }
     entity_identity_fields = [
         str(key)
         for key in contract.get("entity_identity_fields") or []
@@ -971,7 +1022,7 @@ def observations_from_snapshot(
             normalized_field_name = str(field_name).strip().lower()
             if (
                 normalized_field_name in ignore_fields
-                or field_name in primary_keys
+                or normalized_field_name in primary_key_names
                 or not emits_state_observation(str(field_name))
             ):
                 continue
@@ -1028,6 +1079,7 @@ def _build_snapshot_normalization(
     if mode == "parser_validation" and should_update_current:
         raise ValueError("parser_validation snapshots cannot update CurrentState")
     snapshot = context["snapshot"]
+    metadata_json = dict(snapshot.get("metadata_json") or {})
     parse_status = str(
         snapshot.get("parse_status")
         or ("parsed" if snapshot.get("structured_json") is not None else "parse_failed")
@@ -1075,7 +1127,11 @@ def _build_snapshot_normalization(
         )
         return (
             {
-                "success": False,
+                # The normalizer successfully classified this as a data-quality
+                # result.  It is not an observation success and must not update
+                # CurrentState, but callers must be able to distinguish that
+                # controlled outcome from a normalization crash.
+                "success": True,
                 "snapshot_id": snapshot_id,
                 "mode": mode,
                 "parse_status": parse_status,
@@ -1118,7 +1174,17 @@ def _build_snapshot_normalization(
             [],
             should_update_current,
         )
-    if snapshot.get("structured_json") is None:
+    # ``raw_hashed`` snapshots intentionally have no Parser payload.  Their
+    # immutable CommandSnapshot digest is projected into the text-diff
+    # observation below; requiring structured JSON here would discard the
+    # configured non-structured path.
+    if (
+        snapshot.get("structured_json") is None
+        and not (
+            metadata_json.get("handling") == "raw_hash_diff"
+            or parse_status == "raw_hashed"
+        )
+    ):
         return (
             {
                 "success": False,
@@ -1157,10 +1223,14 @@ def _build_snapshot_normalization(
     except (
         CommandAdapterError,
         EntityKeyError,
+        LegacyObservationRuntimeRetiredError,
         ObservationContractVersionError,
         SemanticProjectionError,
     ) as exc:
         failure_code = (
+            "legacy_runtime_retired"
+            if isinstance(exc, LegacyObservationRuntimeRetiredError)
+            else
             "contract_version_unavailable"
             if isinstance(exc, ObservationContractVersionError)
             else "adapter_mapping_invalid"
@@ -1247,7 +1317,9 @@ def _build_snapshot_normalization(
             "partial": bool(
                 batches
                 and any(
-                    batch.quality_status != "complete" for batch in batches
+                    batch.quality_status
+                    not in {"complete", "valid_empty", "not_applicable"}
+                    for batch in batches
                 )
             ),
             "authoritative_for_deletion": bool(

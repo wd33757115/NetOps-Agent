@@ -50,6 +50,7 @@ interface AiReview {
 }
 
 interface CandidateProvenance {
+  source?: string
   provider?: string
   package_version?: string
   source_template?: string
@@ -375,6 +376,7 @@ const ParserTemplateApprovalDrawer: React.FC<ParserTemplateApprovalDrawerProps> 
   const aiReview = candidateContract.ai_review as AiReview | undefined
   const candidateProvenance = (candidateContract.candidate_provenance || {}) as CandidateProvenance
   const isNtcCandidate = candidateProvenance.provider === 'ntc_templates'
+  const isEngineerCandidate = candidateProvenance.source === 'engineer'
   const humanDirectReviewRequired = candidateContract.human_direct_review_required === true
   const checkItemCapabilities = comparison?.check_item_capabilities || []
   const parserFieldContract = comparison?.parser_field_contract
@@ -481,7 +483,7 @@ const ParserTemplateApprovalDrawer: React.FC<ParserTemplateApprovalDrawerProps> 
               <Typography.Text type="secondary">
                 {recordSetContracts.length || 1} 个记录集
               </Typography.Text>
-              {isNtcCandidate ? <Tag color="green">NTC 公共模板</Tag> : <Tag>平台生成</Tag>}
+              {isNtcCandidate ? <Tag color="green">NTC 公共模板</Tag> : isEngineerCandidate ? <Tag color="blue">工程师修订</Tag> : <Tag>平台生成</Tag>}
             </Space>
           </section>
 

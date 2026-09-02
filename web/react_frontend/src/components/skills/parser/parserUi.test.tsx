@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { governanceAlertLabel } from './parserUi'
+import { governanceAlertLabel, queryErrorLabel } from './parserUi'
 
 describe('governanceAlertLabel', () => {
   it('translates known governance alerts for the operator control plane', () => {
@@ -11,5 +11,14 @@ describe('governanceAlertLabel', () => {
 
   it('keeps an unknown backend message for forward compatibility', () => {
     expect(governanceAlertLabel('new_alert', 'New alert')).toBe('New alert')
+  })
+})
+
+describe('queryErrorLabel', () => {
+  it('keeps the API error returned after a BFF response is normalized', () => {
+    expect(queryErrorLabel({
+      status: 409,
+      message: 'bundle contains duplicate EventRule logical slot',
+    })).toBe('bundle contains duplicate EventRule logical slot')
   })
 })

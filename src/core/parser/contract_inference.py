@@ -899,6 +899,18 @@ def _normalize_table_column_bindings(
     )
 
 
+def _source_field_identifier(label: str) -> str | None:
+    """Derive a stable Parser-source identifier from literal CLI text."""
+
+    tokens = re.findall(r"[A-Za-z0-9]+", str(label or "").casefold())
+    if not tokens:
+        return None
+    candidate = "_".join(tokens)
+    if candidate[0].isdigit():
+        candidate = f"value_{candidate}"
+    return candidate
+
+
 def _normalize_semantic_field_aliases(
     proposal: ContractProposal,
     *,
@@ -907,11 +919,14 @@ def _normalize_semantic_field_aliases(
     model: str | None = None,
     command: str | None = None,
 ) -> ContractProposal:
-    """Rename fields through governed evidence and schema-name semantics.
+    """Keep Parser fields source-shaped and retain semantic matches as hints.
 
-    Literal source labels remain authoritative. A qualified machine field name is
-    used only when no direct label resolves, which lets weaker models describe
-    contextual measurements without making the runtime schema model-dependent.
+    Parser contracts describe only TextFSM record fields.  They must not rename
+    source fields into CheckItem/Observation vocabulary: that A→B translation is
+    an immutable CommandAdapter V2 projection.  Literal evidence can still fix a
+    plainly wrong *source* identifier (for example ``status`` bound to an
+    ``RX power (dBm)`` label), while semantic-catalog matches are exposed only as
+    non-authoritative projection candidates for the later mapping workflow.
     """
 
     evidence = json.loads(json.dumps(dict(proposal.evidence or {})))
@@ -926,62 +941,103 @@ def _normalize_semantic_field_aliases(
         evidence["value_mapping_scope"] = resolved_scope
     field_bindings = dict(evidence.get("field_bindings") or {})
     declared = [*proposal.required_fields, *proposal.optional_fields]
-    declared_set = set(declared)
     primary = set(proposal.primary_keys)
-    candidates: dict[str, str] = {}
-    resolution_sources: dict[str, str] = {}
+    source_renames: dict[str, str] = {}
+    source_rename_sources: dict[str, str] = {}
+    semantic_candidates: dict[str, str] = {}
+    semantic_candidate_sources: dict[str, str] = {}
     for field in declared:
-        # Primary keys are the public entity identity; renaming them through a
-        # generic label alias (e.g. a "Name" column matching description's
-        # aliases) would silently change identity semantics. Keys stay stable.
+        # Primary keys are public entity identity.  Keep them stable unless a
+        # human explicitly edits the Parser contract.
         if field in primary:
             continue
-        scoped_canonical = canonical_schema_field(field, **resolved_scope)
-        if scoped_canonical and scoped_canonical != field:
-            candidates[field] = scoped_canonical
-            resolution_sources[field] = "scoped_value_mapping"
+        raw = field_bindings.get(field) or []
+        bindings = raw if isinstance(raw, list) else [raw]
+        source_identifiers = {
+            identifier
+            for item in bindings
+            if isinstance(item, dict)
+            and str(item.get("capture_kind") or "") not in {"derived", "record_anchor"}
+            and str(item.get("source_label") or "").strip()
+            != str(item.get("source_value") or "").strip()
+            and (
+                identifier := _source_field_identifier(
+                    str(item.get("source_label") or "")
+                )
+            )
+        }
+        source_identifier = (
+            next(iter(source_identifiers))
+            if len(source_identifiers) == 1
+            else None
+        )
+        if source_identifier and source_identifier != field:
+            source_semantics = catalog_field_semantics(field)
+            label_semantics = catalog_field_semantics(source_identifier)
+            if label_semantics != source_semantics:
+                source_renames[field] = source_identifier
+                source_rename_sources[field] = "literal_source_label"
+
+    def resolve_source(field: str) -> str:
+        return source_renames.get(str(field), str(field))
+
+    resolved_declared = [resolve_source(field) for field in declared]
+    resolved_declared_set = set(resolved_declared)
+    for field in declared:
+        if field in primary:
             continue
+        source_field = resolve_source(field)
         raw = field_bindings.get(field) or []
         bindings = raw if isinstance(raw, list) else [raw]
         canonical_fields = {
             canonical
             for item in bindings
             if isinstance(item, dict)
-            and str(item.get("capture_kind") or "") not in {"derived", "record_anchor"}
-            and (canonical := canonical_field_for_label(str(item.get("source_label") or "")))
+            and str(item.get("capture_kind") or "")
+            not in {"derived", "record_anchor"}
+            and str(item.get("source_label") or "").strip()
+            != str(item.get("source_value") or "").strip()
+            and (
+                canonical := canonical_field_for_label(
+                    str(item.get("source_label") or "")
+                )
+            )
         }
-        if len(canonical_fields) > 1:
-            continue
-        if canonical_fields:
-            canonical = next(iter(canonical_fields))
-            source = "literal_label"
-        else:
-            canonical = canonical_schema_field(field)
-            source = "qualified_field_name"
-        if not canonical:
-            continue
-        if canonical != field:
-            candidates[field] = canonical
-            resolution_sources[field] = source
+        scoped_canonical = canonical_schema_field(source_field, **resolved_scope)
+        canonical = (
+            next(iter(canonical_fields))
+            if len(canonical_fields) == 1
+            else scoped_canonical or canonical_schema_field(source_field)
+        )
+        if canonical and canonical != source_field:
+            semantic_candidates[source_field] = canonical
+            semantic_candidate_sources[source_field] = (
+                "literal_label"
+                if canonical_fields
+                else "scoped_value_mapping"
+                if scoped_canonical
+                else "qualified_field_name"
+            )
 
     target_counts: dict[str, int] = {}
-    for target in candidates.values():
+    for target in semantic_candidates.values():
         target_counts[target] = target_counts.get(target, 0) + 1
-    collisions = {
+    candidate_collisions = {
         source: target
-        for source, target in candidates.items()
-        if target_counts[target] > 1 or target in declared_set - {source}
+        for source, target in semantic_candidates.items()
+        if target_counts[target] > 1
+        or target in resolved_declared_set - {source}
     }
-    mapping = {
+    projection_candidates = {
         source: target
-        for source, target in candidates.items()
-        if source not in collisions
+        for source, target in semantic_candidates.items()
+        if source not in candidate_collisions
     }
-    if not mapping and not collisions:
+    if not source_renames and not projection_candidates and not candidate_collisions:
         return proposal
 
     def resolve(field: str) -> str:
-        return mapping.get(str(field), str(field))
+        return resolve_source(field)
 
     def unique_fields(fields: tuple[str, ...]) -> tuple[str, ...]:
         return tuple(dict.fromkeys(resolve(field) for field in fields))
@@ -1022,12 +1078,21 @@ def _normalize_semantic_field_aliases(
     }
     evidence = remap_references(evidence)
     evidence["semantic_field_normalization"] = {
-        "strategy": "evidence_first_semantic_catalog",
-        "mapping": mapping,
-        "skipped_collisions": collisions,
+        "strategy": "literal_source_label_identifier",
+        "mapping": source_renames,
+        "skipped_collisions": {},
         "resolution_sources": {
-            source: resolution_sources[source]
-            for source in (*mapping, *collisions)
+            source: source_rename_sources[source]
+            for source in source_renames
+        },
+    }
+    evidence["projection_field_candidates"] = {
+        "strategy": "semantic_catalog_non_authoritative",
+        "mapping": projection_candidates,
+        "skipped_collisions": candidate_collisions,
+        "resolution_sources": {
+            source: semantic_candidate_sources[source]
+            for source in (*projection_candidates, *candidate_collisions)
         },
     }
     return replace(

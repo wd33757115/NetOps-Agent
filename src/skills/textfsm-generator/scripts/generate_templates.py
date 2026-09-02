@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from parser_model import TextFSMParserModel
+from parser_model import TextFSMGenerationAgent
 from report_generator import GenerationReport, save_report, save_summary
 from result_reviewer import IndependentParserResultReviewer
 
@@ -29,6 +29,7 @@ from src.core.parser_generation import (
     SampleSet,
     SimpleParserGenerationService,
     TableCompiler,
+    TemplateCandidate,
     TextFSMValidationBackend,
     latest_reusable_candidate,
     outcome_records,
@@ -158,10 +159,11 @@ def _process_simple_job(
         # Production generation is LLM-led. Deterministic compilers remain available
         # as explicit fallback/test providers, but cannot define the acceptance truth.
         compilers=compilers,
-        model=TextFSMParserModel(
+        model=TextFSMGenerationAgent(
             vendor=str(job["vendor"]),
             model=str(job.get("model") or job["profile"]),
             command=str(job["canonical_command"]),
+            validation_samples=sample_set.samples,
         ),
         backend=TextFSMValidationBackend(),
         reviewer=IndependentParserResultReviewer(),

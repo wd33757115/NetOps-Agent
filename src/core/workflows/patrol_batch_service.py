@@ -425,6 +425,7 @@ def _condition_applies_to_observation(
         "threshold_lte",
         "threshold_field_gte",
         "threshold_field_lte",
+        "linear_power_baseline_loss",
         "transition",
         "bgp_transition",
         "entity_status_down",
@@ -529,6 +530,7 @@ def evaluate_current_state(
             basis = dict(resolution.basis)
             assessment_basis_entries.append(basis)
             threshold_binding = dict(basis.get("threshold_binding") or {})
+            baseline_binding = dict(basis.get("baseline_binding") or {})
             if threshold_binding.get("status") == "resolved":
                 threshold_binding_resolved = True
             elif threshold_binding.get("status") in {"missing", "conflict"}:
@@ -539,6 +541,15 @@ def evaluate_current_state(
                         condition.get("reference_field"),
                         *(condition.get("fallback_reference_fields") or []),
                     ]
+                    if str(field or "").strip()
+                )
+            if baseline_binding.get("status") == "resolved":
+                threshold_binding_resolved = True
+            elif baseline_binding.get("status") in {"missing", "conflict"}:
+                threshold_binding_blocked = True
+                missing_reference_fields.update(
+                    str(field)
+                    for field in condition.get("identity_fields") or []
                     if str(field or "").strip()
                 )
             if resolution.status != "resolved":
@@ -614,6 +625,8 @@ def evaluate_current_state(
             reference_binding = (
                 threshold_binding
                 if threshold_binding.get("status") == "resolved"
+                else dict(basis.get("baseline_binding") or {})
+                if dict(basis.get("baseline_binding") or {}).get("status") == "resolved"
                 else expected_state_binding
                 if expected_state_binding.get("status") == "resolved"
                 else {}

@@ -63,7 +63,7 @@ const jobTypeLabel = (
   purpose: 'offline_patrol' | 'rule_asset_source',
 ) => {
   if (purpose === 'rule_asset_source') {
-    return jobType === 'parser_validation' ? '单周期资产样本' : '双周期规则回放样本'
+    return jobType === 'parser_validation' ? '单周期 CLI 样本' : '双周期 CLI 样本'
   }
   return jobType === 'history_compare' ? '双周期变化分析' : '单周期离线巡检'
 }
@@ -187,10 +187,10 @@ export const offlineJobDisplayName = (
   if (!corrupted) return value
   if (job.job_type === 'history_compare') {
     const quarters = Array.from(new Set((value.match(/Q[1-4]/gi) || []).map((item) => item.toUpperCase())))
-    const suffix = job.purpose === 'offline_patrol' ? '离线巡检对比' : '规则回放样本'
+    const suffix = job.purpose === 'offline_patrol' ? '离线巡检对比' : 'CLI 样本导入'
     return quarters.length >= 2 ? `${quarters[0]} → ${quarters[1]} ${suffix}` : `双周期${suffix}`
   }
-  return job.purpose === 'offline_patrol' ? '单周期离线巡检' : '规则资产样本导入'
+  return job.purpose === 'offline_patrol' ? '单周期离线巡检' : 'CLI 样本导入'
 }
 
 interface OfflineJobDetailSurfaceProps {
@@ -234,11 +234,11 @@ const OfflineJobDetailSurface: React.FC<OfflineJobDetailSurfaceProps> = ({
   }
 
   return (
-    <section className="offline-job-detail-page" aria-label="规则资产样本任务详情">
+    <section className="offline-job-detail-page" aria-label="CLI 样本导入任务详情">
       <header className="offline-job-detail-page__header">
         <div className="offline-job-detail-page__heading">
           <Button type="text" icon={<ArrowLeftOutlined />} onClick={onClose}>
-            返回样本任务
+            返回样本导入
           </Button>
           <div className="offline-job-detail-page__title-group">
             <Typography.Title level={3}>{detailTitle}</Typography.Title>
@@ -302,7 +302,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
     initialJobType || (isAssetSource ? 'parser_validation' : 'single_patrol'),
   )
   const [jobName, setJobName] = useState(
-    initialJobName || (isAssetSource ? '规则资产样本导入' : '单周期离线巡检'),
+    initialJobName || (isAssetSource ? 'CLI 样本导入' : '单周期离线巡检'),
   )
   const [sampleAt, setSampleAt] = useState('')
   const [baselineAt, setBaselineAt] = useState('')
@@ -425,12 +425,12 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
   }, {
     onSuccess: (job) => {
       setDraftJob(job)
-      message.success(isAssetSource ? '规则资产样本任务已创建，请上传原始输出' : '离线巡检任务已创建，请上传原始输出')
+      message.success(isAssetSource ? 'CLI 样本导入任务已创建，请上传原始输出' : '离线巡检任务已创建，请上传原始输出')
       refresh(job.id)
     },
     onError: (error: any) => message.error(errorText(
       error,
-      isAssetSource ? '创建规则资产样本任务失败' : '创建离线巡检任务失败',
+      isAssetSource ? '创建 CLI 样本导入任务失败' : '创建离线巡检任务失败',
     )),
   })
 
@@ -443,7 +443,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
   })
   const executeJob = useMutation((id: string) => jobApi.execute(id, crypto.randomUUID()), {
     onSuccess: (_result, id) => {
-      message.success(isAssetSource ? '规则资产样本处理 Workflow 已启动' : '离线巡检 Workflow 已启动')
+      message.success(isAssetSource ? 'CLI 样本导入已启动' : '离线巡检 Workflow 已启动')
       setWizardOpen(false)
       setDetailJobId(id)
       refresh(id)
@@ -551,7 +551,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
       message.success(`已上传 ${selected.length} 个文件`)
       await refresh(draftJob.id)
     } catch (error: any) {
-      message.error(errorText(error, isAssetSource ? '上传规则资产样本失败' : '上传离线巡检文件失败'))
+      message.error(errorText(error, isAssetSource ? '上传 CLI 样本失败' : '上传离线巡检文件失败'))
     } finally {
       setUploading(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
@@ -676,7 +676,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
     setJobType(type)
     setJobName(
       isAssetSource
-        ? type === 'parser_validation' ? '规则资产样本导入' : '双周期规则回放样本'
+        ? type === 'parser_validation' ? 'CLI 样本导入' : '双周期 CLI 样本导入'
         : type === 'single_patrol' ? '单周期离线巡检' : '双周期离线巡检对比',
     )
     setDraftJob(null)
@@ -785,10 +785,10 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
       {!isDetailPage && <>
       <div className="patrol-history__header">
         <Space direction="vertical" size={0}>
-          <Typography.Text strong>{isAssetSource ? '规则资产样本任务' : '离线巡检任务'}</Typography.Text>
+          <Typography.Text strong>{isAssetSource ? 'CLI 样本导入' : '离线巡检任务'}</Typography.Text>
           <Typography.Text type="secondary">
             {isAssetSource
-              ? '导入离线巡检文件作为生产证据，生成或修复 Parser 与命令适配器，并回放检查项判断结果。'
+              ? '导入 CLI 原始输出并保留命令证据；完成后在检查项目录关联检查项，再处理 Parser、命令适配器和规则。'
               : '导入设备巡检原始输出，使用当前已激活规则生成状态、变化、事件和巡检报告。'}
           </Typography.Text>
         </Space>
@@ -798,10 +798,10 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
             type="primary"
             onClick={() => resetWizard(isAssetSource ? 'parser_validation' : 'single_patrol')}
           >
-            {isAssetSource ? '导入单周期样本' : '发起单周期离线巡检'}
+            {isAssetSource ? '导入单周期 CLI 样本' : '发起单周期离线巡检'}
           </Button>
           <Button icon={<ReloadOutlined />} onClick={() => resetWizard('history_compare')}>
-            {isAssetSource ? '导入双周期样本' : '对比两个巡检周期'}
+            {isAssetSource ? '导入双周期 CLI 样本' : '对比两个巡检周期'}
           </Button>
         </Space>
       </div>
@@ -809,8 +809,8 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
       <div className="patrol-history__filters">
         <Input.Search allowClear placeholder="任务名称或任务 ID" className="patrol-history__search" onSearch={(value) => { setSearch(value.trim()); setPage(1) }} />
         <Select allowClear placeholder="任务用途" value={jobTypeFilter} style={{ width: 170 }} onChange={(value) => { setJobTypeFilter(value); setPage(1) }} options={isAssetSource ? [
-          { value: 'parser_validation', label: '单周期资产样本' },
-          { value: 'history_compare', label: '双周期规则回放样本' },
+          { value: 'parser_validation', label: '单周期 CLI 样本' },
+          { value: 'history_compare', label: '双周期 CLI 样本' },
         ] : [
           { value: 'single_patrol', label: '单周期离线巡检' },
           { value: 'history_compare', label: '双周期变化分析' },
@@ -827,7 +827,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
           <List<OfflinePatrolJob>
             loading={listQuery.isLoading}
             dataSource={listQuery.data?.items || []}
-            locale={{ emptyText: isAssetSource ? '暂无规则资产样本任务' : '暂无离线巡检任务' }}
+            locale={{ emptyText: isAssetSource ? '暂无 CLI 样本导入任务' : '暂无离线巡检任务' }}
             renderItem={(row) => (
               <List.Item key={row.id}>
                 <div className="offline-patrol-mobile-list__item">
@@ -928,8 +928,8 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
 
       <Drawer
         title={draftJob
-          ? isAssetSource ? '继续规则资产样本任务' : '继续离线巡检任务'
-          : isAssetSource ? '新建规则资产样本任务' : '新建离线巡检任务'}
+          ? isAssetSource ? '继续 CLI 样本导入' : '继续离线巡检任务'
+          : isAssetSource ? '新建 CLI 样本导入' : '新建离线巡检任务'}
         open={wizardOpen}
         width={isMobile ? '100vw' : 860}
         destroyOnClose
@@ -945,8 +945,8 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
           <Steps current={wizardStep} size="small" items={[{ title: '任务信息' }, { title: '上传数据' }, { title: '预检与执行' }]} />
           {!draftJob ? <>
             <Segmented block value={jobType} onChange={(value) => setJobType(value as OfflinePatrolJobType)} options={isAssetSource ? [
-              { value: 'parser_validation', label: '单周期采集样本' },
-              { value: 'history_compare', label: '双周期判断回放样本' },
+              { value: 'parser_validation', label: '单周期 CLI 样本' },
+              { value: 'history_compare', label: '双周期 CLI 样本' },
             ] : [
               { value: 'single_patrol', label: '单周期离线巡检' },
               { value: 'history_compare', label: '双周期变化分析' },
@@ -976,7 +976,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
                   </Typography.Text>
                 </Space>
               </Descriptions.Item>}
-              <Descriptions.Item label="数据用途"><Typography.Text type="secondary">{isAssetSource ? '用于生成或修复 Parser 与命令适配器，并回放检查项判断；不写入正式巡检事件流' : '使用当前 active 规则执行离线巡检，不创建或修改规则资产'}</Typography.Text></Descriptions.Item>
+              <Descriptions.Item label="数据用途"><Typography.Text type="secondary">{isAssetSource ? '只导入原始 CLI 证据并识别命令；后续在检查项目录关联检查项，再配置 Parser、命令适配器和规则' : '使用当前 active 规则执行离线巡检，不创建或修改规则资产'}</Typography.Text></Descriptions.Item>
               {!isAssetSource && <Descriptions.Item label="事件发布"><Space><Switch checked={publishEvents} onChange={setPublishEvents} /><Typography.Text type="secondary">默认仅保留本任务结果；明确开启后才发布到正式事件流</Typography.Text></Space></Descriptions.Item>}
             </Descriptions>
             <Button type="primary" onClick={() => createJob.mutate()} loading={createJob.isLoading}
@@ -1009,14 +1009,14 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
                 message={formatOfflineBlockerMessage(item)}
               />
             ))}
-            {draftJob.blocker_count > 0 && <Button icon={<SafetyCertificateOutlined />} onClick={() => navigate(isAssetSource ? buildOfflineAssetControlUrl(draftJob) : '/skills/parser?workspace=production&subtab=source-jobs')}>前往命令适配器</Button>}
+            {draftJob.blocker_count > 0 && <Button icon={<SafetyCertificateOutlined />} onClick={() => navigate(isAssetSource ? buildOfflineAssetControlUrl(draftJob) : '/skills/parser?workspace=production&subtab=source-jobs')}>查看导入进度</Button>}
           </>}
         </Space>
       </Drawer>
 
       <OfflineJobDetailSurface
-        drawerTitle={isAssetSource ? '规则资产样本任务详情' : '离线巡检任务详情'}
-        detailTitle={detail ? offlineJobDisplayName(detail) : '规则资产样本任务'}
+        drawerTitle={isAssetSource ? 'CLI 样本导入详情' : '离线巡检任务详情'}
+        detailTitle={detail ? offlineJobDisplayName(detail) : 'CLI 样本导入'}
         subtitle={detailJobId || undefined}
         open={Boolean(detailJobId)}
         page={isDetailPage}
@@ -1094,7 +1094,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
                   />
                 )}
                 action={isAssetSource ? (
-                  <Button size="small" onClick={() => changeDetailTab('assets')}>处理资产缺口</Button>
+                  <Button size="small" onClick={() => changeDetailTab('assets')}>查看导入进度</Button>
                 ) : undefined}
               />
             ) : (detail.blockers || []).map((item, index) => (
@@ -1112,8 +1112,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
             <Space wrap>
               {isAssetSource && (
                 <>
-                  <Button icon={<SafetyCertificateOutlined />} onClick={() => changeDetailTab('assets')}>适配器生产进度</Button>
-                  <Button icon={<SafetyCertificateOutlined />} onClick={() => navigate(buildOfflineRuleBundleUrl(detail))}>运行发布结果</Button>
+                  <Button icon={<SafetyCertificateOutlined />} onClick={() => changeDetailTab('assets')}>样本导入进度</Button>
                 </>
               )}
               <Dropdown
@@ -1183,7 +1182,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
               </Typography.Title>
               <Typography.Text type="secondary">
                 {detail.purpose === 'rule_asset_source'
-                  ? '设备名称与管理地址仅作为规则生成上下文，不关联正式设备资产。'
+                  ? '设备名称与管理地址仅用于识别样本来源，不关联正式设备资产。'
                   : '核对每个周期识别出的设备身份及其与正式设备资产的关联状态。'}
               </Typography.Text>
             </div>
@@ -1477,7 +1476,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
           },
           {
             key: 'workflow',
-            label: isAssetSource ? '样本处理流程' : '巡检执行流程',
+            label: isAssetSource ? '样本导入流程' : '巡检执行流程',
             children: detail.workflow_run_id
               ? <WorkflowRunMonitor runId={detail.workflow_run_id} plain />
               : ACTIVE.has(detail.status) || executeJob.isLoading
@@ -1491,7 +1490,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
                 )
                 : <Alert type="info" showIcon message="尚未启动 Workflow" description="通过预检并确认设备身份后即可开始处理。" />,
           },
-          ...(isAssetSource ? [{ key: 'assets', label: '适配器生产', children: <OfflineRuleAssetPipeline jobId={detail.id} /> }] : []),
+          ...(isAssetSource ? [{ key: 'assets', label: '导入进度', children: <OfflineRuleAssetPipeline jobId={detail.id} /> }] : []),
           ...(!isAssetSource && detail.report_intent === 'current_attestation'
             ? [{
                 key: 'current-authority',
@@ -1516,7 +1515,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
                 ),
               }]
             : []),
-          { key: 'result', label: isAssetSource ? '验证与回放' : '巡检结果', children: detail.job_type === 'parser_validation'
+          { key: 'result', label: isAssetSource ? '导入结果' : '巡检结果', children: detail.job_type === 'parser_validation'
             ? <Descriptions bordered size="small" column={isMobile ? 1 : 3}><Descriptions.Item label="Snapshot">{String(detail.result?.snapshot_count ?? '-')}</Descriptions.Item><Descriptions.Item label="新增">{String(detail.result?.new_snapshot_count ?? '-')}</Descriptions.Item><Descriptions.Item label="重复">{String(detail.result?.duplicate_snapshot_count ?? '-')}</Descriptions.Item></Descriptions>
             : <OfflinePatrolResultPanel
                 report={analysisQuery.data}

@@ -384,8 +384,33 @@ describe('ParserTemplateApprovalDrawer', () => {
     expect(screen.getAllByText(/\^\. -> Error/)).not.toHaveLength(0)
   })
 
+  it('identifies an engineer-submitted candidate instead of calling it platform-generated', async () => {
+    render(
+      <ParserTemplateApprovalDrawer
+        open
+        onClose={vi.fn()}
+        isMobile={false}
+        loading={false}
+        comparison={{
+          ...comparison,
+          candidate_contract: {
+            ...comparison.candidate_contract,
+            candidate_provenance: {
+              source: 'engineer',
+              submitted_by: 'network-engineer',
+            },
+          },
+        }}
+        onReview={vi.fn()}
+        onApprove={vi.fn()}
+      />,
+    )
+
+    expect(await screen.findByText('工程师修订')).toBeVisible()
+    expect(screen.queryByText('平台生成')).not.toBeInTheDocument()
+  })
+
   it('lets the reviewer inspect every record set in a ParserBundle', async () => {
-    const user = userEvent.setup()
     const bundleComparison: ParserTemplateComparison = {
       ...comparison,
       candidate_template: {
@@ -474,4 +499,3 @@ describe('ParserTemplateApprovalDrawer', () => {
     expect(screen.getByText(/Value channel_number/)).toBeVisible()
   })
 })
-

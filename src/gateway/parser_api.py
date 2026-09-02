@@ -16,7 +16,7 @@ from typing import Any, Literal
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.auth.dependencies import get_current_user, require_role
 from src.auth.models import CurrentUser
@@ -27,6 +27,7 @@ from src.core.check_items import (
     AssessmentPolicyMigrationService,
     AssetGapRepository,
     CatalogGovernanceConflictError,
+    CanonicalRuleContextService,
     CheckItemCatalogGovernanceService,
     CheckItemCatalogRepository,
     CheckItemEffectivePlanService,
@@ -41,6 +42,10 @@ from src.core.check_items import (
     check_item_display_description,
     check_item_display_name,
     load_canonical_catalog,
+)
+from src.core.check_items.adapter_projection_migration import (
+    AdapterProjectionCutoverInventoryService,
+    generate_projection_candidate,
 )
 from src.core.check_items.parser_capability import (
     build_parser_check_item_capability,
@@ -250,6 +255,7 @@ class ParserSpecUpdateRequest(BaseModel):
 class ParserSpecSuggestionRequest(BaseModel):
     reason: str | None = None
     revision_instruction: str | None = Field(default=None, max_length=4000)
+    check_item_id: str | None = Field(default=None, max_length=128)
 
 
 class ParserValueMappingUpdateRequest(BaseModel):
@@ -450,10 +456,68 @@ class CollectionImplementationDeleteRequest(BaseModel):
 
 
 class CommandAdapterPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     adapter_spec: dict[str, Any]
     record_sets: dict[str, list[dict[str, Any]]]
     device_id: str = "preview-device"
     adapter_version_id: str = "preview"
+
+
+class AdapterProjectionCandidateRequest(BaseModel):
+    """Bounded candidate generation for exactly one CheckItem/Parser output."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    check_item_id: str = Field(..., min_length=1, max_length=128)
+    parser_template_id: str = Field(..., min_length=1, max_length=128)
+    source_record_set: str = Field(..., min_length=1, max_length=128)
+    generation_provider: Literal["deterministic", "llm"] = "deterministic"
+    max_agent_attempts: int = Field(default=3, ge=1, le=3)
+    proposal: dict[str, Any] | None = None
+
+
+class AdapterProjectionValidationRequest(BaseModel):
+    """Validate an edited Projection against the selected immutable context."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    check_item_id: str = Field(..., min_length=1, max_length=128)
+    parser_template_id: str = Field(..., min_length=1, max_length=128)
+    source_record_set: str = Field(..., min_length=1, max_length=128)
+    proposal: dict[str, Any]
+
+
+class AdapterProjectionReplayAttestation(BaseModel):
+    """Sanitized pre-release proof; raw CLI stays in the evidence store."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    success: bool = False
+    status: Literal["passed", "complete", "ready", "failed", "blocked", "pending"] = "pending"
+    collected_sample_count: int = Field(default=0, ge=0)
+    sample_count: int = Field(default=0, ge=0)
+    standard_records_verified: bool = False
+    primary_keys_verified: bool = False
+    quality_status_verified: bool = False
+    rule_results_verified: bool = False
+    evidence_summary_verified: bool = False
+    evidence_digest: str | None = Field(default=None, min_length=64, max_length=64)
+
+
+class AdapterProjectionCutoverReadinessRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    replay_by_implementation_version: dict[
+        str, AdapterProjectionReplayAttestation
+    ] = Field(default_factory=dict)
+
+
+class AdapterProjectionCutoverAuthorizationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_readiness_digest: str = Field(..., min_length=64, max_length=64)
+    reason: str = Field(..., min_length=1, max_length=2000)
 
 
 class CheckItemDraftRequest(BaseModel):
@@ -674,6 +738,104 @@ def _raise_catalog_governance_error(exc: ValueError) -> None:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     status_code = 404 if "not found" in str(exc).casefold() else 422
     raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
+def _raise_adapter_projection_error(exc: ValueError) -> None:
+    message = str(exc)
+    status_code = 404 if any(
+        marker in message.casefold()
+        for marker in ("not found", "unknown check item", "parser template")
+    ) else 422
+    raise HTTPException(status_code=status_code, detail=message) from exc
+
+
+def _adapter_projection_context(
+    *,
+    check_item_id: str,
+    parser_template_id: str,
+) -> dict[str, Any]:
+    """Load only the frozen fields a Projection candidate may use."""
+
+    normalized_check_item_id = str(check_item_id or "").strip()
+    normalized_template_id = str(parser_template_id or "").strip()
+    if not normalized_check_item_id:
+        raise ValueError("selected CheckItem id is required")
+    if not normalized_template_id:
+        raise ValueError("Parser template_id is required")
+
+    catalog = CheckItemCatalogRepository().load_active()
+    check_item = next(
+        (
+            item
+            for item in catalog.check_items
+            if str(item.id) == normalized_check_item_id
+        ),
+        None,
+    )
+    if check_item is None:
+        raise ValueError(
+            f"unknown active CheckItem: {normalized_check_item_id}"
+        )
+    template = ParserTemplateRepository().get_template(normalized_template_id)
+    if template is None:
+        raise ValueError(f"Parser template not found: {normalized_template_id}")
+    template_status = str(template.status or "").strip().casefold()
+    if template_status not in {"active", "pending_approval"}:
+        raise ValueError(
+            "Adapter Projection requires an active or pending-approval Parser template: "
+            f"{normalized_template_id}"
+        )
+    field_contract = build_parser_field_contract(
+        validation=dict(template.validation_json or {}),
+        template_text=str(template.template_text or ""),
+    )
+    if field_contract.get("status") != "aligned":
+        raise ValueError(
+            "Parser field contract must be aligned before Projection generation: "
+            + "; ".join(
+                str(item) for item in field_contract.get("errors") or []
+            )
+        )
+    record_sets = {
+        str(name): [str(field) for field in fields or []]
+        for name, fields in dict(
+            field_contract.get("template_record_sets") or {}
+        ).items()
+        if str(name).strip()
+    }
+    if len(record_sets) == 1:
+        fields = next(iter(record_sets.values()))
+        validation = dict(template.validation_json or {})
+        parser_spec = dict(validation.get("parser_spec") or {})
+        source_parser_spec = dict(validation.get("source_parser_spec") or {})
+        source_record_sets = source_parser_spec.get("record_sets") or []
+        aliases = {
+            str(validation.get("entity_type") or "").strip(),
+            str(parser_spec.get("entity") or "").strip(),
+        }
+        if len(source_record_sets) == 1 and isinstance(source_record_sets[0], dict):
+            aliases.update(
+                {
+                    str(source_record_sets[0].get("name") or "").strip(),
+                    str(source_record_sets[0].get("entity") or "").strip(),
+                }
+            )
+        for alias in aliases - {""}:
+            record_sets.setdefault(alias, fields)
+    if not record_sets:
+        raise ValueError("Parser field contract has no executable record set")
+    return {
+        "selected_check_item": {
+            "id": str(check_item.id),
+            "version_id": str(check_item.version_id),
+            "canonical_contract": dict(check_item.canonical_contract or {}),
+        },
+        "parser": {
+            "template_id": normalized_template_id,
+            "record_sets": record_sets,
+            "field_contract": field_contract,
+        },
+    }
 
 
 @router.get("/value-mappings")
@@ -1111,9 +1273,14 @@ def _comparison_record_sets(
         if isinstance(structured, list)
         else []
     )
+    # A plain TextFSM template produces one unnamed list at runtime.  Its
+    # executable record-set key is therefore always ``default``; ``category``
+    # and ParserSpec entity names describe the records but are not runtime
+    # keys.  Returning a semantic alias here let the Projection editor publish
+    # an Adapter that replayed locally but could never be selected in runtime.
     return [
         {
-            "name": str(fallback_name or "records"),
+            "name": "default",
             "entity_type": contract.get("entity_type") or fallback_name,
             "primary_keys": list(contract.get("primary_keys") or []),
             "required_fields": list(contract.get("required_fields") or []),
@@ -1515,13 +1682,24 @@ def suggest_parser_spec(
     task_id = str(uuid.uuid4())
     repository = ParserJobRepository()
     revision_instruction = str(payload.revision_instruction or "").strip()
+    check_item_id = str(payload.check_item_id or "").strip()
     try:
+        if check_item_id:
+            # Selecting B in the source Parser workflow is the one and only
+            # pre-production association.  Persist it on the imported command
+            # as well, so the later Projection/adapter step sees the same B.
+            RuleAssetCommandUnitService().associate_parser_job_to_check_item(
+                job_id,
+                check_item_id=check_item_id,
+                actor=_authenticated_actor(request),
+            )
         repository.queue_parser_spec_suggestion(
             job_id,
             task_id=task_id,
             actor=_authenticated_actor(request),
             reason=str(payload.reason or "Generate an engineer-reviewable ParserSpec draft"),
             revision_instruction=revision_instruction,
+            check_item_id=check_item_id,
         )
         celery.send_task(
             "execute_skill_task",
@@ -2480,6 +2658,159 @@ def list_observation_contracts(
         limit=limit,
         offset=offset,
     )
+
+
+@router.get("/catalog/adapter-projections/cutover-readiness")
+def get_adapter_projection_cutover_readiness(
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Read-only hard-gate report for the all-at-once V2 cutover."""
+
+    return AdapterProjectionCutoverInventoryService().readiness()
+
+
+@router.post("/catalog/adapter-projections/candidates")
+def generate_adapter_projection_candidate(
+    payload: AdapterProjectionCandidateRequest,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Return a bounded V2 candidate; it is never published automatically."""
+
+    try:
+        context = _adapter_projection_context(
+            check_item_id=payload.check_item_id,
+            parser_template_id=payload.parser_template_id,
+        )
+        record_sets = dict(context["parser"]["record_sets"])
+        source_fields = record_sets.get(payload.source_record_set)
+        if source_fields is None:
+            raise ValueError(
+                "selected Parser has no record set: "
+                f"{payload.source_record_set}"
+            )
+        return generate_projection_candidate(
+            {
+                "mode": "projection_candidate",
+                "selected_check_item": context["selected_check_item"],
+                "parser": {
+                    "template_id": payload.parser_template_id,
+                    "source_record_set": payload.source_record_set,
+                    "source_fields": source_fields,
+                },
+                "proposal": payload.proposal,
+                "generation_provider": payload.generation_provider,
+                "max_agent_attempts": payload.max_agent_attempts,
+            }
+        )
+    except ValueError as exc:
+        _raise_adapter_projection_error(exc)
+
+
+@router.post("/catalog/adapter-projections/validate")
+def validate_adapter_projection_candidate(
+    payload: AdapterProjectionValidationRequest,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Validate an edited V2 Projection against server-side immutable assets."""
+
+    try:
+        context = _adapter_projection_context(
+            check_item_id=payload.check_item_id,
+            parser_template_id=payload.parser_template_id,
+        )
+        record_sets = dict(context["parser"]["record_sets"])
+        source_fields = record_sets.get(payload.source_record_set)
+        if source_fields is None:
+            raise ValueError(
+                "selected Parser has no record set: "
+                f"{payload.source_record_set}"
+            )
+        return generate_projection_candidate(
+            {
+                "mode": "projection_validate",
+                "selected_check_item": context["selected_check_item"],
+                "parser": {
+                    "template_id": payload.parser_template_id,
+                    "source_record_set": payload.source_record_set,
+                    "source_fields": source_fields,
+                },
+                "proposal": payload.proposal,
+            }
+        )
+    except ValueError as exc:
+        _raise_adapter_projection_error(exc)
+
+
+@router.post("/catalog/adapter-projections/cutover-readiness")
+def verify_adapter_projection_cutover_readiness(
+    payload: AdapterProjectionCutoverReadinessRequest,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Evaluate a complete replay attestation without persisting a mapping asset."""
+
+    return AdapterProjectionCutoverInventoryService().readiness(
+        replay_by_implementation_version={
+            implementation_version_id: attestation.model_dump()
+            for implementation_version_id, attestation in (
+                payload.replay_by_implementation_version.items()
+            )
+        }
+    )
+
+
+@router.post("/catalog/adapter-projections/replay-attestations")
+def record_adapter_projection_replay_attestations(
+    payload: AdapterProjectionCutoverReadinessRequest,
+    request: Request,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+):
+    """Persist sanitized all-route replay proof in the existing audit chain."""
+
+    try:
+        return AdapterProjectionCutoverInventoryService().record_replay_attestations(
+            replay_by_implementation_version={
+                implementation_version_id: attestation.model_dump()
+                for implementation_version_id, attestation in (
+                    payload.replay_by_implementation_version.items()
+                )
+            },
+            actor=_authenticated_actor(request),
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        _raise_adapter_projection_error(exc)
+
+
+@router.post(
+    "/catalog/adapter-projections/cutover-authorization",
+    dependencies=[Depends(require_role(["admin"]))],
+)
+def authorize_adapter_projection_cutover(
+    payload: AdapterProjectionCutoverAuthorizationRequest,
+    request: Request,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+    ),
+):
+    """Record the final human authorization after every route passes."""
+
+    try:
+        return AdapterProjectionCutoverInventoryService().authorize_cutover(
+            actor=_authenticated_actor(request),
+            reason=payload.reason,
+            expected_readiness_digest=payload.expected_readiness_digest,
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        _raise_adapter_projection_error(exc)
 
 
 @router.get("/change-policies")
@@ -4076,6 +4407,10 @@ def list_canonical_observations():
                     for key, values in item.allowed_dimension_values.items()
                 },
                 "allowed_values": list(item.allowed_values),
+                "state_groups": {
+                    key: list(values)
+                    for key, values in item.state_groups.items()
+                },
                 "assessment_roles": list(item.assessment_roles),
             }
             for item in catalog.observations
@@ -4384,9 +4719,59 @@ def list_check_items(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+@router.get("/catalog/check-item-versions/{check_item_version_id}/rule-context")
+def get_check_item_rule_context(check_item_version_id: str):
+    """Preview the sample-free semantic input used to generate rule assets."""
+
+    try:
+        return CanonicalRuleContextService().get(check_item_version_id)
+    except ValueError as exc:
+        status_code = 404 if "not found" in str(exc).casefold() else 422
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
+@router.post("/catalog/check-item-versions/{check_item_version_id}/rule-candidates")
+def generate_check_item_rule_candidates(check_item_version_id: str):
+    """Generate deterministic candidates without Parser or sample inputs."""
+
+    try:
+        return CanonicalRuleContextService().generate_candidates(
+            check_item_version_id
+        )
+    except ValueError as exc:
+        status_code = 404 if "not found" in str(exc).casefold() else 422
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
+@router.post(
+    "/catalog/check-item-versions/{check_item_version_id}/rule-candidates/drafts"
+)
+def create_check_item_rule_candidate_drafts(
+    request: Request,
+    check_item_version_id: str,
+):
+    try:
+        return CanonicalRuleContextService().create_drafts(
+            check_item_version_id,
+            actor=_authenticated_actor(request),
+        )
+    except ValueError as exc:
+        status_code = 404 if "not found" in str(exc).casefold() else 422
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
 @router.post("/catalog/command-adapters/preview")
-def preview_command_adapter(payload: CommandAdapterPreviewRequest):
-    from src.core.check_items.command_adapter import execute_adapter
+def preview_command_adapter(
+    payload: CommandAdapterPreviewRequest,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    from src.core.check_items.adapter_projection import (
+        project_adapter_batches_to_observations,
+    )
+    from src.core.check_items.command_adapter import (
+        execute_adapter,
+        is_direct_projection_adapter,
+    )
 
     catalog = CheckItemCatalogRepository().load_active()
     referenced = {
@@ -4415,8 +4800,41 @@ def preview_command_adapter(payload: CommandAdapterPreviewRequest):
             check_items=check_items,
             device_id=payload.device_id,
             adapter_version_id=payload.adapter_version_id,
+            require_pinned_check_item_versions=is_direct_projection_adapter(
+                payload.adapter_spec
+            ),
         )
-    except ValueError as exc:
+        observations = (
+            project_adapter_batches_to_observations(
+                batches,
+                check_items={
+                    item.id: item
+                    for item in catalog.check_items
+                    if item.id in referenced
+                },
+                snapshot={
+                    "id": f"adapter-preview:{payload.adapter_version_id}",
+                    "device_id": payload.device_id,
+                    "source_type": "cli",
+                    "canonical_command": "adapter-preview",
+                    "parser_template_id": str(
+                        (payload.adapter_spec.get("parser") or {}).get(
+                            "template_id"
+                        )
+                        or ""
+                    ),
+                    "observed_at": datetime.now(timezone.utc).isoformat(),
+                },
+                mode="parser_validation",
+                source="adapter_projection_preview",
+                dataset_id=None,
+                command_adapter_id="preview",
+                command_adapter_version_id=payload.adapter_version_id,
+            )
+            if is_direct_projection_adapter(payload.adapter_spec)
+            else []
+        )
+    except (ValueError, KeyError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
         "success": all(
@@ -4424,6 +4842,7 @@ def preview_command_adapter(payload: CommandAdapterPreviewRequest):
             for item in batches
         ),
         "batches": [item.to_dict() for item in batches],
+        "observations": [item.to_dict() for item in observations],
     }
 
 

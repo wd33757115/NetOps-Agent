@@ -18,6 +18,12 @@ from src.core.check_items.catalog import (
     CollectionCommand,
     primary_collection_commands,
 )
+from src.core.check_items.command_adapter import (
+    CommandAdapterError,
+    direct_projection_manifest,
+    direct_projection_source_field_errors,
+    is_direct_projection_adapter,
+)
 from src.core.check_items.presentation import check_item_display_name
 from src.core.observation.semantic_projection import (
     SemanticProjectionError,
@@ -604,6 +610,7 @@ def event_rule_observation_types(rule: EventRuleVersionRecord) -> tuple[str, ...
 
 _ASSET_REQUIREMENT_ORDER = (
     "parser_template",
+    "command_adapter_projection",
     "observation_contract",
     "current_state_rule",
     "change_policy",
@@ -690,6 +697,7 @@ def derive_asset_requirement_profile(
     assessment_mode: str,
     canonical_rows: Iterable[Mapping[str, Any]],
     canonical_catalog: Any,
+    direct_projection: bool = False,
 ) -> dict[str, Any]:
     """Derive the immutable asset contract for one check-item version."""
 
@@ -709,13 +717,22 @@ def derive_asset_requirement_profile(
         for item in rows
         if item.get("required", True) is False
     }
+    declared_roles = {
+        str(item["observation_type"]).strip(): {
+            str(role) for role in item.get("assessment_roles") or [] if str(role)
+        }
+        for item in rows
+        if "assessment_roles" in item
+    }
 
     def types_with_role(values: set[str], role: str) -> set[str]:
         return {
             observation_type
             for observation_type in values
             if (
-                (
+                role in declared_roles[observation_type]
+                if observation_type in declared_roles
+                else (
                     definition := canonical_catalog.get(
                         observation_type
                     )
@@ -800,12 +817,26 @@ def derive_asset_requirement_profile(
                 else "result_mode_does_not_use_parser"
             ),
         },
-        "observation_contract": {
-            "required": structured,
+        "command_adapter_projection": {
+            "required": structured and direct_projection,
             "reason_code": (
-                "structured_output_requires_canonical_projection"
-                if structured
-                else "result_mode_does_not_emit_observations"
+                "structured_output_uses_command_adapter_projection"
+                if structured and direct_projection
+                else "legacy_or_non_structured_route_does_not_use_direct_projection"
+            ),
+            "required_observation_types": sorted(required_types),
+            "conditional_observation_types": sorted(optional_types),
+        },
+        "observation_contract": {
+            "required": structured and not direct_projection,
+            "reason_code": (
+                "structured_output_uses_legacy_observation_contract"
+                if structured and not direct_projection
+                else (
+                    "command_adapter_projection_owns_canonical_mapping"
+                    if structured and direct_projection
+                    else "result_mode_does_not_emit_observations"
+                )
             ),
             "required_observation_types": sorted(required_types),
             "conditional_observation_types": sorted(optional_types),
@@ -1197,12 +1228,23 @@ def _remediation_profile(code: str) -> tuple[str, str, str, str | None]:
     normalized = str(code or "runtime_bundle_invalid").strip().casefold()
     source_required_assets = {
         "observation_contract_missing": "observation_contract",
+        "command_adapter_projection_invalid": "command_adapter_projection",
+        "command_adapter_projection_source_missing": "command_adapter_projection",
+        "command_adapter_parser_mismatch": "command_adapter_projection",
         "change_policy_missing": "change_policy",
         "current_state_event_rule_missing": "event_rule",
         "required_event_rule_missing": "event_rule",
         "comparison_profile_missing": "comparison_profile",
     }
     if normalized in source_required_assets:
+        if normalized.startswith("command_adapter_projection"):
+            return (
+                "在现有 Command Adapter 编辑页修订 V2 Projection，确认目标检查项、"
+                "Parser 源字段和标准字段映射后重新验证。",
+                "repair_command_adapter_projection",
+                "处理 Adapter Projection",
+                source_required_assets[normalized],
+            )
         return (
             "先导入包含该检查项命令的离线原始输出；平台将建立生产单元并生成、验证和审批缺失资产。",
             "import_rule_samples",
@@ -1228,6 +1270,14 @@ def _remediation_profile(code: str) -> tuple[str, str, str, str | None]:
             "repair_parser_asset",
             "处理 Parser",
             "parser_template",
+        )
+    if "command_adapter_projection" in normalized:
+        return (
+            "在现有 Command Adapter 编辑页修订 V2 Projection，确认目标检查项、"
+            "Parser 源字段和标准字段映射后重新验证。",
+            "repair_command_adapter_projection",
+            "处理 Adapter Projection",
+            "command_adapter_projection",
         )
     if (
         "contract" in normalized
@@ -1321,6 +1371,7 @@ def _actionable_issues(
             if action_code == "repair_parser_asset":
                 params["action"] = "parser"
             elif action_code in {
+                "repair_command_adapter_projection",
                 "repair_observation_contract",
                 "repair_change_policy",
                 "repair_event_rule",
@@ -1485,11 +1536,44 @@ class RuntimeBundleAssemblyPlanner:
         output_quality_policy = dict(
             implementation_version.output_quality_policy_json or {}
         )
+        adapter_spec = dict(implementation_version.adapter_spec_json or {})
+        direct_projection = bool(
+            result_mode == "structured"
+            and is_direct_projection_adapter(adapter_spec)
+        )
+        projection_manifest: dict[str, Any] | None = None
+        if direct_projection and check_item is not None:
+            try:
+                projection_manifest = direct_projection_manifest(
+                    adapter_spec,
+                    check_item_id=str(check_item.id),
+                    check_item={
+                        "version_id": str(check_version.id),
+                        "canonical_contract": canonical_contract,
+                    },
+                    require_pinned_check_item_version=True,
+                )
+            except CommandAdapterError as exc:
+                blockers.append(
+                    _issue(
+                        "command_adapter_projection_invalid",
+                        "CommandAdapter V2 投影不满足检查项标准契约。",
+                        error=str(exc),
+                    )
+                )
+        elif direct_projection:
+            blockers.append(
+                _issue(
+                    "command_adapter_projection_invalid",
+                    "CommandAdapter V2 投影缺少对应的检查项根记录。",
+                )
+            )
         asset_requirement_profile = derive_asset_requirement_profile(
             result_mode=result_mode,
             assessment_mode=assessment_mode,
             canonical_rows=canonical_rows,
             canonical_catalog=canonical_catalog,
+            direct_projection=direct_projection,
         )
         asset_requirement_profile_digest = canonical_digest(
             asset_requirement_profile
@@ -1576,6 +1660,12 @@ class RuntimeBundleAssemblyPlanner:
             for item in parser_rows
             if normalize_command(item.canonical_command) in command_names
         ]
+        if direct_projection and projection_manifest is not None:
+            parser_rows = [
+                item
+                for item in parser_rows
+                if str(item.id) == str(projection_manifest["parser_template_id"])
+            ]
         parser_by_id = {str(item.id): item for item in parser_rows}
         unknown_requested_parsers = sorted(requested_parser_ids - set(parser_by_id))
         if unknown_requested_parsers:
@@ -1587,6 +1677,14 @@ class RuntimeBundleAssemblyPlanner:
                 )
             )
 
+        if direct_projection and requested_contract_ids:
+            blockers.append(
+                _issue(
+                    "observation_contract_not_allowed",
+                    "CommandAdapter V2 运行包不得再选择 ObservationContract。",
+                    observation_contract_ids=sorted(requested_contract_ids),
+                )
+            )
         contract_rows = (
             db.query(ObservationContractRecord)
             .filter(ObservationContractRecord.status == "active")
@@ -1597,14 +1695,14 @@ class RuntimeBundleAssemblyPlanner:
                 ObservationContractRecord.id,
             )
             .all()
-            if result_mode == "structured"
+            if result_mode == "structured" and not direct_projection
             else []
         )
         contract_by_id = {str(item.id): item for item in contract_rows}
         unknown_requested_contracts = sorted(
             requested_contract_ids - set(contract_by_id)
         )
-        if unknown_requested_contracts:
+        if unknown_requested_contracts and not direct_projection:
             blockers.append(
                 _issue(
                     "selected_contract_unavailable",
@@ -1626,48 +1724,58 @@ class RuntimeBundleAssemblyPlanner:
                 validation=dict(parser.validation_json or {}),
                 template_text=parser.template_text,
             )
-            adapter_bindings = adapter_observation_bindings(
-                implementation_version,
-                check_item_id=str(check_item.id),
-                canonical_rows=canonical_rows,
-                parser_template_id=parser_id,
-            )
-            available_contracts = [
-                item
-                for item in contracts_by_parser.get(parser_id, [])
-                if not requested_contract_ids or str(item.id) in requested_contract_ids
-            ]
-            contract_types: dict[str, set[str]] = {}
-            contract_adapter_sets: dict[str, set[str]] = {}
-            for item in available_contracts:
-                mapped_types, mapped_sets = adapter_contract_observation_types(
-                    item,
-                    parser_field_contract=parser_field_contract,
-                    bindings=adapter_bindings,
+            if direct_projection:
+                available_contracts: list[ObservationContractRecord] = []
+                contract_types: dict[str, set[str]] = {}
+                contract_adapter_sets: dict[str, set[str]] = {}
+                relevant_contracts: list[ObservationContractRecord] = []
+                duplicate_types: list[str] = []
+                produced_types = set(
+                    projection_manifest.get("observation_types") or []
+                ) if projection_manifest is not None else set()
+            else:
+                adapter_bindings = adapter_observation_bindings(
+                    implementation_version,
+                    check_item_id=str(check_item.id) if check_item is not None else "",
+                    canonical_rows=canonical_rows,
+                    parser_template_id=parser_id,
                 )
-                contract_types[str(item.id)] = (
-                    contract_observation_types(item) | mapped_types
+                available_contracts = [
+                    item
+                    for item in contracts_by_parser.get(parser_id, [])
+                    if not requested_contract_ids or str(item.id) in requested_contract_ids
+                ]
+                contract_types = {}
+                contract_adapter_sets = {}
+                for item in available_contracts:
+                    mapped_types, mapped_sets = adapter_contract_observation_types(
+                        item,
+                        parser_field_contract=parser_field_contract,
+                        bindings=adapter_bindings,
+                    )
+                    contract_types[str(item.id)] = (
+                        contract_observation_types(item) | mapped_types
+                    )
+                    contract_adapter_sets[str(item.id)] = mapped_sets
+                relevant_contracts = [
+                    item
+                    for item in available_contracts
+                    if contract_types[str(item.id)] & expected_types
+                ]
+                produced_counts = Counter(
+                    observation_type
+                    for contract in relevant_contracts
+                    for observation_type in contract_types[str(contract.id)]
+                    if observation_type in expected_types
                 )
-                contract_adapter_sets[str(item.id)] = mapped_sets
-            relevant_contracts = [
-                item
-                for item in available_contracts
-                if contract_types[str(item.id)] & expected_types
-            ]
-            produced_counts = Counter(
-                observation_type
-                for contract in relevant_contracts
-                for observation_type in contract_types[str(contract.id)]
-                if observation_type in expected_types
-            )
-            duplicate_types = sorted(
-                key for key, count in produced_counts.items() if count > 1
-            )
-            produced_types = {
-                observation_type
-                for contract in relevant_contracts
-                for observation_type in contract_types[str(contract.id)]
-            }
+                duplicate_types = sorted(
+                    key for key, count in produced_counts.items() if count > 1
+                )
+                produced_types = {
+                    observation_type
+                    for contract in relevant_contracts
+                    for observation_type in contract_types[str(contract.id)]
+                }
             missing_types = sorted(required_types - produced_types)
             unapproved_types = sorted(produced_types - approved_types)
             route_blockers = list(compatibility["blockers"])
@@ -1689,41 +1797,72 @@ class RuntimeBundleAssemblyPlanner:
                         "errors": parser_field_contract.get("errors") or [],
                     }
                 )
-            for contract in relevant_contracts:
-                route_blockers.extend(
-                    contract_identity_blockers(
-                        contract,
-                        expected_entity_type=expected_entity_type,
-                        expected_identity_fields=expected_identity_fields,
-                        expected_observation_types=expected_types,
+            if direct_projection:
+                if projection_manifest is None:
+                    route_blockers.append(
+                        {
+                            "code": "command_adapter_projection_invalid",
+                            "message": "CommandAdapter V2 投影无法形成可执行路径。",
+                        }
                     )
-                )
-                if parser_field_contract["status"] == "aligned":
-                    mapped_sets = contract_adapter_sets[str(contract.id)]
+                elif str(projection_manifest["parser_template_id"]) != parser_id:
+                    route_blockers.append(
+                        {
+                            "code": "command_adapter_parser_mismatch",
+                            "message": "CommandAdapter V2 绑定的 Parser 与当前路由不一致。",
+                        }
+                    )
+                elif parser_field_contract["status"] == "aligned":
+                    for error in direct_projection_source_field_errors(
+                        projection_manifest,
+                        parser_field_contract=parser_field_contract,
+                    ):
+                        route_blockers.append(
+                            {
+                                "code": "command_adapter_projection_source_missing",
+                                "message": error,
+                            }
+                        )
+            else:
+                for contract in relevant_contracts:
                     route_blockers.extend(
-                        contract_source_field_blockers(
+                        contract_identity_blockers(
                             contract,
-                            parser_field_contract=parser_field_contract,
-                            fallback_record_set=(
-                                next(iter(mapped_sets))
-                                if not contract.record_sets_json
-                                and len(mapped_sets) == 1
-                                else "default"
-                            ),
+                            expected_entity_type=expected_entity_type,
+                            expected_identity_fields=expected_identity_fields,
+                            expected_observation_types=expected_types,
                         )
                     )
-            if not relevant_contracts:
-                route_blockers.append(
-                    {
-                        "code": "observation_contract_missing",
-                        "message": "Parser 没有产生本检查项标准语义的 Active Contract。",
-                    }
-                )
+                    if parser_field_contract["status"] == "aligned":
+                        mapped_sets = contract_adapter_sets[str(contract.id)]
+                        route_blockers.extend(
+                            contract_source_field_blockers(
+                                contract,
+                                parser_field_contract=parser_field_contract,
+                                fallback_record_set=(
+                                    next(iter(mapped_sets))
+                                    if not contract.record_sets_json
+                                    and len(mapped_sets) == 1
+                                    else "default"
+                                ),
+                            )
+                        )
+                if not relevant_contracts:
+                    route_blockers.append(
+                        {
+                            "code": "observation_contract_missing",
+                            "message": "Parser 没有产生本检查项标准语义的 Active Contract。",
+                        }
+                    )
             if missing_types:
                 route_blockers.append(
                     {
                         "code": "canonical_observation_missing",
-                        "message": "Contract 未覆盖检查项全部必需标准语义。",
+                        "message": (
+                            "CommandAdapter 投影未覆盖检查项全部必需标准语义。"
+                            if direct_projection
+                            else "Contract 未覆盖检查项全部必需标准语义。"
+                        ),
                         "observation_types": missing_types,
                     }
                 )
@@ -1731,7 +1870,11 @@ class RuntimeBundleAssemblyPlanner:
                 route_blockers.append(
                     {
                         "code": "unapproved_observation_type",
-                        "message": "Contract 产生了 Canonical Catalog 之外的临时语义。",
+                        "message": (
+                            "CommandAdapter 投影产生了 Canonical Catalog 之外的临时语义。"
+                            if direct_projection
+                            else "Contract 产生了 Canonical Catalog 之外的临时语义。"
+                        ),
                         "observation_types": unapproved_types,
                     }
                 )
@@ -1755,6 +1898,7 @@ class RuntimeBundleAssemblyPlanner:
                 "compatibility": compatibility,
                 "field_contract": parser_field_contract,
                 "contract_ids": [str(item.id) for item in relevant_contracts],
+                "projection": projection_manifest if direct_projection else None,
                 "produced_observation_types": sorted(produced_types),
                 "missing_observation_types": missing_types,
                 "route_blockers": route_blockers,
@@ -1862,7 +2006,7 @@ class RuntimeBundleAssemblyPlanner:
                     ),
                 )
             )
-        if requested_contract_ids - selected_contract_ids:
+        if not direct_projection and requested_contract_ids - selected_contract_ids:
             blockers.append(
                 _issue(
                     "selected_contract_not_executable",
@@ -1912,7 +2056,11 @@ class RuntimeBundleAssemblyPlanner:
                 _issue(
                     "no_executable_structured_command",
                     "当前采集实现没有任何完整的结构化命令路径。",
-                    remediation="修复至少一条 Parser + Contract 路径后重新装配。",
+                    remediation=(
+                        "修复至少一条 Parser + CommandAdapter Projection 路径后重新装配。"
+                        if direct_projection
+                        else "修复至少一条 Parser + Contract 路径后重新装配。"
+                    ),
                 )
             )
 
@@ -1957,7 +2105,7 @@ class RuntimeBundleAssemblyPlanner:
                     ),
                 )
             )
-        policy_rows = (
+        policy_rows_all = (
             db.query(ChangePolicyVersionRecord)
             .filter(
                 ChangePolicyVersionRecord.status == "active",
@@ -1973,6 +2121,22 @@ class RuntimeBundleAssemblyPlanner:
             )
             .all()
         )
+        scoped_policy_types = {
+            str(item.observation_type)
+            for item in policy_rows_all
+            if str(getattr(item, "check_item_version_id", None) or "")
+            == str(check_version.id)
+        }
+        policy_rows = [
+            item
+            for item in policy_rows_all
+            if str(getattr(item, "check_item_version_id", None) or "")
+            == str(check_version.id)
+            or (
+                getattr(item, "check_item_version_id", None) is None
+                and str(item.observation_type) not in scoped_policy_types
+            )
+        ]
         if requested_policy_ids:
             selected_policy_pool = [
                 item for item in policy_rows if str(item.id) in requested_policy_ids
@@ -2191,7 +2355,7 @@ class RuntimeBundleAssemblyPlanner:
                     ),
                 )
             )
-        rule_rows = (
+        rule_rows_all = (
             db.query(EventRuleVersionRecord, EventRuleRecord)
             .join(EventRuleRecord, EventRuleRecord.id == EventRuleVersionRecord.rule_id)
             .filter(EventRuleVersionRecord.status == "active")
@@ -2205,6 +2369,26 @@ class RuntimeBundleAssemblyPlanner:
             if allowed_rule_observation_types or requested_rule_ids
             else []
         )
+        scoped_rule_types = {
+            observation_type
+            for version, _root in rule_rows_all
+            if str(getattr(version, "check_item_version_id", None) or "")
+            == str(check_version.id)
+            for observation_type in event_rule_observation_types(version)
+        }
+        rule_rows = [
+            (version, root)
+            for version, root in rule_rows_all
+            if str(getattr(version, "check_item_version_id", None) or "")
+            == str(check_version.id)
+            or (
+                getattr(version, "check_item_version_id", None) is None
+                and not (
+                    set(event_rule_observation_types(version))
+                    & scoped_rule_types
+                )
+            )
+        ]
         rule_candidates: list[dict[str, Any]] = []
         selected_rule_bindings: dict[str, tuple[str, ...]] = {}
         selected_rule_rows: list[tuple[EventRuleVersionRecord, EventRuleRecord]] = []
@@ -2666,6 +2850,9 @@ class RuntimeBundleAssemblyPlanner:
 
         selected = {
             "parser_template_ids": sorted(selected_parser_ids),
+            "command_adapter_projection": (
+                dict(projection_manifest or {}) if direct_projection else None
+            ),
             "observation_contract_ids": sorted(selected_contract_ids),
             "change_policy_version_ids": sorted(selected_policy_ids),
             "event_rule_version_ids": sorted(selected_rule_bindings),
@@ -2699,6 +2886,9 @@ class RuntimeBundleAssemblyPlanner:
                 asset_requirement_profile_digest
             ),
             "implementation_selector": dict(implementation_version.match_json or {}),
+            "command_adapter_projection": (
+                dict(projection_manifest or {}) if direct_projection else None
+            ),
             "expected_observation_types": sorted(expected_types),
             "required_observation_types": sorted(required_types),
             "produced_observation_types": sorted(produced_types),
@@ -3004,6 +3194,7 @@ class RuntimeBundleAssemblyPlanner:
             "implementation": {"version_id": implementation_version_id},
             "selected": {
                 "parser_template_ids": [],
+                "command_adapter_projection": None,
                 "observation_contract_ids": [],
                 "change_policy_version_ids": [],
                 "event_rule_version_ids": [],

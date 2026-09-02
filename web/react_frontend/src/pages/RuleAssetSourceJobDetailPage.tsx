@@ -18,7 +18,7 @@ const RuleAssetSourceJobDetailPage: React.FC = () => {
   return (
     <GrokShellLayout
       title="巡检规则资产"
-      subtitle="查看样本证据、处理过程、命令适配器生产进度与回放结果"
+      subtitle="查看 CLI 样本证据、处理过程和进入检查项目录的待归类命令"
     >
       <div className="parser-detail-shell">
         <OfflineFileJobWorkbench purpose="rule_asset_source" detailPageJobId={jobId} />

@@ -1424,12 +1424,18 @@ def run_event_rule_generation(params: dict[str, Any]) -> dict[str, Any]:
         change_policy=change_policy,
         intent=params.get("intent"),
     )
-    if event_constraints:
+    if event_constraints or params.get("rule_asset_requirements"):
         governed = _validate_llm_rules(
             {"rules": list(result.get("rules") or [])},
             contract=contract,
             change_policy=change_policy,
             event_constraints=event_constraints,
+            reserved_fault_event_types=dict(
+                params.get("reserved_fault_event_types") or {}
+            ),
+            rule_asset_requirements=dict(
+                params.get("rule_asset_requirements") or {}
+            ),
         )
         result["success"] = (
             result.get("success") is True

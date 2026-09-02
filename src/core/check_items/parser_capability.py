@@ -136,21 +136,28 @@ def build_parser_field_naming_context(
     command: str,
     sample_text: str = "",
     catalog: CheckItemCatalog | None = None,
+    check_item_id: str | None = None,
 ) -> dict[str, Any]:
     """Build check-item-owned naming guidance for ParserSpec generation.
 
     The guidance is advisory. A source-faithful Parser may use another field
-    name, while the approved ObservationContract remains the mapping layer.
+    name, while the approved CommandAdapter Projection remains the mapping
+    layer.
     """
 
     catalog = catalog or load_catalog()
-    check_item_ids = resolve_parser_check_item_ids(
-        vendor=vendor,
-        model=model,
-        family=family,
-        profile=profile,
-        command=command,
-        catalog=catalog,
+    selected_check_item_id = str(check_item_id or "").strip()
+    check_item_ids = (
+        (selected_check_item_id,)
+        if selected_check_item_id
+        else resolve_parser_check_item_ids(
+            vendor=vendor,
+            model=model,
+            family=family,
+            profile=profile,
+            command=command,
+            catalog=catalog,
+        )
     )
     semantic_profile_id, semantic_vocabulary = _semantic_profile_vocabulary(
         command=command,
@@ -253,8 +260,10 @@ def build_parser_field_naming_context(
         items.append(
             {
                 "check_item_id": check_item.id,
+                "check_item_version_id": check_item.version_id,
                 "check_item_name": check_item.name,
                 "entity_type": str(contract.get("entity_type") or "").strip(),
+                "canonical_contract": contract,
                 "preferred_identity_fields": identity_fields,
                 "preferred_observation_fields": observations,
                 "configured_vocabulary": configured_vocabulary,

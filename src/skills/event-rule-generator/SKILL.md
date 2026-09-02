@@ -1,7 +1,7 @@
 ---
 name: event-rule-generator
 version: 0.1.0
-description: 根据 ObservationContract 与 ChangePolicy 生成候选 EventRule DSL 并执行确定性验证。
+description: 根据 CheckItem 标准语义 B 与 ChangePolicy 生成候选 EventRule DSL 并执行确定性验证。
 category: network
 tags: [event-rule, generator, rule-dsl, validation, patrol]
 author: NetOps Team
@@ -20,7 +20,7 @@ inputs:
   - name: contract
     type: object
     required: true
-    description: ObservationContract 或 validation dict。
+    description: 由 CheckItem 版本编译的 canonical-rule-contract/v1，不包含 Parser 或样本字段。
   - name: change_policy
     type: object
     required: true
@@ -32,7 +32,7 @@ inputs:
   - name: historical_changes
     type: array
     required: false
-    description: 脱敏历史 Change 摘要，后续 Agent Loop 用于减少误报/漏报。
+    description: 可选回放数据，只用于验证，不参与生成事件业务语义。
   - name: existing_rule_pack
     type: object
     required: false

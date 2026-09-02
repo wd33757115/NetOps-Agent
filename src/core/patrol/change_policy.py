@@ -18,6 +18,7 @@ class ChangePolicyProposal:
     deadband: float | None = None
     thresholds: dict[str, float] | None = None
     threshold_references: dict[str, dict[str, Any]] | None = None
+    baseline_comparison: dict[str, Any] | None = None
     allow_static_threshold_fallback: bool = False
     recovery_threshold: float | None = None
     minimum_duration: str | None = None
@@ -290,13 +291,14 @@ def infer_change_policy(
                 compare_mode = "numeric_delta"
                 reason_parts.append("threshold_status=threshold_unknown")
         elif unit == "percent" or any(token in lowered for token in ("cpu", "memory", "usage")):
-            p99 = stats.get("p99")
-            high = max(90.0, float(p99 or 0))
-            high = min(100.0, round(high, 2))
-            recovery_threshold = max(0.0, round(high - 5.0, 2))
-            thresholds["high"] = high
             deadband = 5.0
             compare_mode = "threshold_and_deadband"
+            if not threshold_references:
+                p99 = stats.get("p99")
+                high = max(90.0, float(p99 or 0))
+                high = min(100.0, round(high, 2))
+                recovery_threshold = max(0.0, round(high - 5.0, 2))
+                thresholds["high"] = high
         else:
             compare_mode = "numeric_delta"
         return ChangePolicyProposal(
@@ -376,6 +378,11 @@ def policy_from_dict(payload: dict[str, Any]) -> ChangePolicyProposal:
             for key, value in dict(payload.get("threshold_references") or {}).items()
             if isinstance(value, dict)
         },
+        baseline_comparison=(
+            dict(payload["baseline_comparison"])
+            if isinstance(payload.get("baseline_comparison"), dict)
+            else None
+        ),
         allow_static_threshold_fallback=bool(
             payload.get("allow_static_threshold_fallback", False)
         ),
@@ -416,6 +423,40 @@ def validate_change_policy(policy: ChangePolicyProposal) -> dict[str, Any]:
     }
     if policy.compare_mode not in allowed_modes:
         errors.append(f"unsupported compare_mode: {policy.compare_mode}")
+    compatible_modes = {
+        "boolean": {"exact", "state_transition", "enum_transition"},
+        "counter": {"counter_delta"},
+        "enum": {"enum_transition", "state_transition", "exact"},
+        "gauge": {
+            "numeric_delta",
+            "threshold_and_deadband",
+            "threshold_low_and_deadband",
+        },
+        "percentage": {
+            "numeric_delta",
+            "threshold_and_deadband",
+            "threshold_low_and_deadband",
+        },
+        "raw_hash": {"hash_diff"},
+        "state": {"state_transition", "enum_transition", "exact"},
+        "text": {"exact", "hash_diff"},
+    }
+    semantic_type = str(policy.semantic_type or "").strip().casefold()
+    if (
+        semantic_type in compatible_modes
+        and policy.compare_mode not in compatible_modes[semantic_type]
+        and policy.compare_mode != "dimension_dispatch"
+    ):
+        errors.append(
+            f"compare_mode {policy.compare_mode} is incompatible with "
+            f"semantic_type {semantic_type}"
+        )
+    if policy.deadband is not None and float(policy.deadband) < 0:
+        errors.append("deadband must be greater than or equal to zero")
+    if policy.minimum_duration not in {None, "", "0s"}:
+        errors.append(
+            "minimum_duration is not executable; only null or 0s is supported"
+        )
     try:
         normalize_dimension_selector(policy.dimension_selector)
     except ValueError as exc:
@@ -507,6 +548,18 @@ def validate_change_policy(policy: ChangePolicyProposal) -> dict[str, Any]:
             reference.get("field_name") or ""
         ).strip():
             errors.append(f"threshold_references.{role}.field_name is required")
+    if policy.baseline_comparison:
+        baseline = dict(policy.baseline_comparison)
+        if baseline.get("kind") != "linear_power_loss_ratio":
+            errors.append("unsupported baseline_comparison.kind")
+        ratio = _number(baseline.get("max_loss_ratio"))
+        if ratio is None or not 0 < ratio < 1:
+            errors.append("baseline_comparison.max_loss_ratio must be between 0 and 1")
+        identity_fields = baseline.get("identity_fields") or []
+        if not isinstance(identity_fields, list) or not all(
+            str(item).strip() for item in identity_fields
+        ):
+            errors.append("baseline_comparison.identity_fields is required")
     return {
         "success": not errors,
         "errors": errors,

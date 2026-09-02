@@ -88,6 +88,7 @@ const RuleAssetEngineeringReviewDrawer: React.FC<Props> = ({ bundle, open, onClo
   const [rules, setRules] = useState('[]')
   const [asyncTaskId, setAsyncTaskId] = useState<string | null>(null)
   const requirements = bundle?.asset_requirements
+  const checkItemSemanticBundle = bundle?.context_gate?.mode === 'check_item_semantics'
   const requiresChangePolicy = requirements?.requires_change_policy === true
   const requiresCurrentStateRule = requirements?.requires_current_state_rule === true
   const requiresEventRuleAssets = requirements?.requires_event_rule_assets === true
@@ -249,7 +250,7 @@ const RuleAssetEngineeringReviewDrawer: React.FC<Props> = ({ bundle, open, onClo
           >
             接受候选
           </Button>
-          <Button
+          {!checkItemSemanticBundle && <Button
             type="primary"
             icon={<ExperimentOutlined />}
             disabled={!revisionReasonReady || !draft.editable || Boolean(asyncTaskId)}
@@ -257,7 +258,7 @@ const RuleAssetEngineeringReviewDrawer: React.FC<Props> = ({ bundle, open, onClo
             onClick={() => revise.mutate()}
           >
             保存为新版本并重新验证
-          </Button>
+          </Button>}
         </Space>
       )}
     >
@@ -278,6 +279,14 @@ const RuleAssetEngineeringReviewDrawer: React.FC<Props> = ({ bundle, open, onClo
       )}
       {draft && (
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          {checkItemSemanticBundle && (
+            <Alert
+              type="info"
+              showIcon
+              message="本规则包由 CheckItem 标准语义 B 生成"
+              description="如需调整字段语义、阈值关系或规则逻辑，请修订并发布新的 CheckItem 版本后重新生成规则；这里仅负责复核和审批。"
+            />
+          )}
           {replayBlocked && (
             <Alert
               type="error"
@@ -286,14 +295,14 @@ const RuleAssetEngineeringReviewDrawer: React.FC<Props> = ({ bundle, open, onClo
               description={(bundle?.replay_gate?.errors || bundle?.blockers || []).join('；') || '请导入至少两个可比较周期并完成 State/Change 回放后再复核。'}
             />
           )}
-          <Alert
+          {!checkItemSemanticBundle && <Alert
             type="info"
             showIcon
             message="修订不会覆盖 LLM 候选或生产资产"
             description={replayRequired
               ? '平台会创建新的候选 Bundle，重新执行所需资产的确定性校验和原离线 Run 历史回放；只有新版本通过复核与审批后才会生效。'
               : noReplayDescription}
-          />
+          />}
           <Descriptions bordered size="small" column={2}>
             <Descriptions.Item label="基线 Bundle"><Typography.Text copyable>{draft.bundle_id}</Typography.Text></Descriptions.Item>
             <Descriptions.Item label="基线摘要">{shortDigest(draft.base_digest)}</Descriptions.Item>
@@ -345,9 +354,17 @@ const RuleAssetEngineeringReviewDrawer: React.FC<Props> = ({ bundle, open, onClo
             },
             {
               key: 'contract',
-              label: 'Observation Contract',
+              label: checkItemSemanticBundle ? '标准语义 B（检查项目录维护）' : 'Observation Contract',
               children: (
                 <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                  {checkItemSemanticBundle && (
+                    <Alert
+                      type="info"
+                      showIcon
+                      message="此规则包不创建独立 Observation Contract"
+                      description="实体、主键和标准字段由关联的 CheckItem 版本统一维护。"
+                    />
+                  )}
                   <Table
                     rowKey="key"
                     size="small"
@@ -368,7 +385,7 @@ const RuleAssetEngineeringReviewDrawer: React.FC<Props> = ({ bundle, open, onClo
                   <Collapse items={[{
                     key: 'contract-json',
                     label: '高级 JSON 修订',
-                    children: <Input.TextArea rows={18} value={contract} onChange={(event) => setContract(event.target.value)} style={{ fontFamily: 'Consolas, Monaco, monospace' }} />,
+                    children: <Input.TextArea disabled={checkItemSemanticBundle} rows={18} value={contract} onChange={(event) => setContract(event.target.value)} style={{ fontFamily: 'Consolas, Monaco, monospace' }} />,
                   }]} />
                 </Space>
               ),
@@ -398,7 +415,7 @@ const RuleAssetEngineeringReviewDrawer: React.FC<Props> = ({ bundle, open, onClo
                   <Collapse items={[{
                     key: 'policy-json',
                     label: '高级 JSON 修订',
-                    children: <Input.TextArea rows={18} value={policies} onChange={(event) => setPolicies(event.target.value)} style={{ fontFamily: 'Consolas, Monaco, monospace' }} />,
+                    children: <Input.TextArea disabled={checkItemSemanticBundle} rows={18} value={policies} onChange={(event) => setPolicies(event.target.value)} style={{ fontFamily: 'Consolas, Monaco, monospace' }} />,
                   }]} />
                 </Space>
               ),
@@ -428,17 +445,17 @@ const RuleAssetEngineeringReviewDrawer: React.FC<Props> = ({ bundle, open, onClo
                   <Collapse items={[{
                     key: 'rule-json',
                     label: '高级 JSON 修订',
-                    children: <Input.TextArea rows={18} value={rules} onChange={(event) => setRules(event.target.value)} style={{ fontFamily: 'Consolas, Monaco, monospace' }} />,
+                    children: <Input.TextArea disabled={checkItemSemanticBundle} rows={18} value={rules} onChange={(event) => setRules(event.target.value)} style={{ fontFamily: 'Consolas, Monaco, monospace' }} />,
                   }]} />
                 </Space>
               ),
             },
           ]} />
-          <Typography.Text type="secondary">
+          {!checkItemSemanticBundle && <Typography.Text type="secondary">
             {replayRequired
               ? '这里是规则工程师高级编辑入口。保存前执行 JSON Schema 和领域校验；服务端仍以不可变离线上下文及历史回放结果作为发布门禁。'
               : '这里是规则工程师高级编辑入口。保存前执行 JSON Schema 和领域校验；服务端以不可变离线上下文和确定性校验结果作为发布门禁。'}
-          </Typography.Text>
+          </Typography.Text>}
         </Space>
       )}
     </Drawer>

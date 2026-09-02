@@ -18,6 +18,7 @@ from src.core.parser.repository import (
     _normalize_parser_spec_payload,
     _parser_spec_digest,
     _simple_parser_readiness,
+    _validated_sample_expectation,
     generated_template_activation_errors,
 )
 from src.core.patrol.repository import PatrolRepository
@@ -53,6 +54,16 @@ def _digest(payload: object) -> str:
         separators=(",", ":"),
     )
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def test_sample_expectation_allows_record_count_without_explicit_primary_keys():
+    expectation = _validated_sample_expectation(
+        role="generation",
+        expectation={"record_count": 63, "primary_keys": []},
+        primary_key_count=1,
+    )
+
+    assert expectation == {"record_count": 63, "primary_keys": []}
 
 
 def test_simple_parser_readiness_supports_v2_record_set_specs():

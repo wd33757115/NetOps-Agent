@@ -30,7 +30,6 @@ from src.infrastructure.db.models import (
 )
 from src.infrastructure.db.postgres import get_db_session
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -668,6 +667,12 @@ class ParserBackfillService:
         snapshot_dict.update(
             {
                 "structured_json": structured,
+                # The source snapshot is selected precisely because its old
+                # Parser status is stale.  Once the approved backfill Parser
+                # succeeds, normalize the newly extracted record set as
+                # structured data rather than retaining the old
+                # ``template_missing``/``parse_failed`` raw-hash path.
+                "parse_status": "parsed" if structured else "parse_empty",
                 "parser_template_id": template.id,
                 "parser_version": template.version,
                 "contract_version": template.contract_version,

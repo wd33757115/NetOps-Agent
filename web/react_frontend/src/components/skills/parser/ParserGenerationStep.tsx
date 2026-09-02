@@ -35,6 +35,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   parserApi,
   ruleAssetSourceApi,
+  type AdapterProjectionPreviewResult,
   type ParserGenerationAttempt,
   type ParserGenerationProgress,
   type ParserJobItem,
@@ -69,6 +70,7 @@ interface SuggestionState {
   deadline_at?: string
   elapsed_ms?: number
   cancellable?: boolean
+  check_item_id?: string | null
   error?: string
   result?: {
     classification?: string
@@ -103,6 +105,33 @@ const classificationLabel: Record<string, string> = {
   command_error: '命令执行错误',
   header_only_unverified: '仅有表头，待补样本',
   empty_unverified: '空输出待判定',
+}
+
+const periodRoleLabel: Record<string, string> = {
+  sample: '样本周期',
+  baseline: '基线周期',
+  current: '当前周期',
+}
+
+const sampleIdentity = (sample: ParserJobSample) => {
+  const source = sample.source_context
+  return {
+    device: source?.device_name || sample.device_id,
+    file: source?.source_file_name || sample.dataset_id || sample.id,
+    period: source?.period_role
+      ? periodRoleLabel[source.period_role] || source.period_role
+      : undefined,
+    observedAt: source?.observed_at,
+  }
+}
+
+const sampleProvenanceText = (sample: ParserJobSample) => {
+  const identity = sampleIdentity(sample)
+  const details = [
+    identity.period,
+    identity.observedAt ? `采集：${identity.observedAt}` : undefined,
+  ].filter(Boolean)
+  return details.join(' · ')
 }
 
 const jobStatusLabel: Record<string, string> = {
@@ -412,6 +441,7 @@ interface SemanticPlanRecordSet {
     required: boolean
     source: string
     example: string
+    primaryKeyDefault?: string
   }>
 }
 
@@ -446,6 +476,9 @@ const semanticPlanRecordSets = (
           required: field.required === true,
           source: String(field.source_column || field.source || field.cli_field || '待生成验证'),
           example: String(field.example ?? examples[0] ?? '待生成验证'),
+          primaryKeyDefault: field.primary_key_default === undefined || field.primary_key_default === null
+            ? undefined
+            : String(field.primary_key_default),
         }
       }),
     }
@@ -499,6 +532,7 @@ const SemanticPlanOverview: React.FC<{
                   <Space size={4} wrap>
                     {recordSet.primaryKeys.includes(field.name) && <Tag>主键</Tag>}
                     {field.required && <Tag>必填</Tag>}
+                    {field.primaryKeyDefault && <Tag color="blue">空值键默认 {field.primaryKeyDefault}</Tag>}
                     {!recordSet.primaryKeys.includes(field.name) && !field.required && <Typography.Text type="secondary">可选</Typography.Text>}
                   </Space>
                 ),
@@ -618,7 +652,18 @@ const refreshParserState = async (
   ])
 }
 
-const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) => {
+export interface ParserProjectionAdapterDraft {
+  checkItemId: string
+  parserTemplateId: string
+  sourceRecordSet: string
+  adapterSpec: Record<string, unknown>
+}
+
+const ParserGenerationStep: React.FC<{
+  jobId?: string | null
+  lockedCheckItemId?: string | null
+  onCreateAdapter?: (draft: ParserProjectionAdapterDraft) => void
+}> = ({ jobId, lockedCheckItemId, onCreateAdapter }) => {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const isMobile = typeof window !== 'undefined'
@@ -638,6 +683,11 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
   const [advancedKeys, setAdvancedKeys] = useState<string[]>([])
   const [manualTemplateText, setManualTemplateText] = useState('')
   const [manualTemplateReason, setManualTemplateReason] = useState('')
+  const [selectedCheckItemId, setSelectedCheckItemId] = useState('')
+  const [projectionRecordSet, setProjectionRecordSet] = useState('')
+  const [projectionText, setProjectionText] = useState('')
+  const [projectionSampleIndex, setProjectionSampleIndex] = useState(0)
+  const [projectionPreview, setProjectionPreview] = useState<AdapterProjectionPreviewResult>()
 
   const jobQuery = useQuery(
     ['parser-job-inline', jobId],
@@ -654,6 +704,11 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
     },
   )
   const job = jobQuery.data
+  const checkItemsQuery = useQuery(
+    ['parser-check-items-for-generation'],
+    () => parserApi.checkItems({ limit: 200 }),
+    { enabled: Boolean(jobId) },
+  )
   const attemptsQuery = useQuery(
     ['parser-job-attempts-inline', jobId],
     () => parserApi.jobAttempts(jobId || '', true),
@@ -723,7 +778,7 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
   const comparisonQuery = useQuery(
     ['parser-template-comparison-inline', evidenceTemplate?.id],
     () => parserApi.comparison(evidenceTemplate?.id || ''),
-    { enabled: Boolean(approvalOpen && evidenceTemplate?.id) },
+    { enabled: Boolean(evidenceTemplate?.id) },
   )
 
   useEffect(() => {
@@ -739,10 +794,67 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
     setManualTemplateReason('')
     setParserRevisionInstruction('')
     setRevisionMode(false)
-  }, [jobId])
+    setSelectedCheckItemId(lockedCheckItemId || '')
+    setProjectionRecordSet('')
+    setProjectionText('')
+    setProjectionSampleIndex(0)
+    setProjectionPreview(undefined)
+  }, [jobId, lockedCheckItemId])
+
+  const structuredCheckItems = useMemo(
+    () => (checkItemsQuery.data?.items || []).filter((item) => item.result_mode === 'structured'),
+    [checkItemsQuery.data?.items],
+  )
+  const selectedCheckItem = structuredCheckItems.find(
+    (item) => item.check_item_id === selectedCheckItemId,
+  )
+
+  useEffect(() => {
+    if (lockedCheckItemId) {
+      if (structuredCheckItems.some((item) => item.check_item_id === lockedCheckItemId)
+        && selectedCheckItemId !== lockedCheckItemId) {
+        setSelectedCheckItemId(lockedCheckItemId)
+      }
+      return
+    }
+    if (selectedCheckItemId || !job || !structuredCheckItems.length) return
+    const suggestedId = String(suggestion.check_item_id || '')
+    const command = job.canonical_command.trim().toLowerCase()
+    const matched = structuredCheckItems.find((item) => item.check_item_id === suggestedId)
+      || structuredCheckItems.find((item) => item.implementations.some((implementation) => (
+        implementation.commands.some((candidate) => candidate.command.trim().toLowerCase() === command)
+      )))
+    if (matched) setSelectedCheckItemId(matched.check_item_id)
+  }, [job, lockedCheckItemId, selectedCheckItemId, structuredCheckItems, suggestion.check_item_id])
+
+  const parserRecordSetNames = useMemo(
+    () => {
+      const executedNames = Array.from(new Set(
+        (comparisonQuery.data?.rows || []).flatMap((row) => (
+          (row.proposed.record_sets || []).map((recordSet) => recordSet.name)
+        )),
+      )).filter(Boolean)
+      return executedNames.length
+        ? executedNames
+        : semanticPlanRecordSets(job?.parser_spec_json).map((item) => item.name)
+    },
+    [comparisonQuery.data?.rows, job?.parser_spec_json],
+  )
+
+  useEffect(() => {
+    if (parserRecordSetNames.length && !parserRecordSetNames.includes(projectionRecordSet)) {
+      setProjectionRecordSet(parserRecordSetNames[0])
+      setProjectionText('')
+      setProjectionPreview(undefined)
+    }
+  }, [parserRecordSetNames, projectionRecordSet])
 
   const suggestSpec = useMutation(
-    () => parserApi.suggestJobSpec(jobId || '', parserRevisionInstruction.trim()),
+    () => parserApi.suggestJobSpec(
+      jobId || '',
+      parserRevisionInstruction.trim(),
+      selectedCheckItemId,
+    ),
     {
       onSuccess: async () => {
         await refreshParserState(queryClient, jobId || '')
@@ -752,6 +864,94 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
   )
   const requestSpecSuggestion = suggestSpec.mutate
   const specSuggestionLoading = suggestSpec.isLoading
+
+  const comparisonRows = comparisonQuery.data?.rows || []
+  const selectedComparisonRow = comparisonRows[Math.min(
+    projectionSampleIndex,
+    Math.max(0, comparisonRows.length - 1),
+  )]
+
+  const generateProjection = useMutation(
+    async () => {
+      if (!selectedCheckItemId) throw new Error('请先选择目标 CheckItem')
+      if (!evidenceTemplate?.id) throw new Error('请先生成可执行的 TextFSM 候选')
+      if (!projectionRecordSet) throw new Error('请选择 Parser record set')
+      return parserApi.generateAdapterProjectionCandidate({
+        check_item_id: selectedCheckItemId,
+        parser_template_id: evidenceTemplate.id,
+        source_record_set: projectionRecordSet,
+        generation_provider: 'llm',
+        // Projection follows the same bounded repair loop as TextFSM.  A
+        // first draft frequently needs the deterministic validator to point
+        // out a missing dimension or an invalid source field.
+        max_agent_attempts: 3,
+      })
+    },
+    {
+      onSuccess: (result) => {
+        const proposal = result.proposal || result.validation.adapter_spec
+        if (!proposal) {
+          message.error(result.validation.errors.join('；') || 'LLM 未返回 Projection')
+          return
+        }
+        setProjectionText(JSON.stringify(proposal, null, 2))
+        setProjectionPreview(undefined)
+        if (result.validation.success) message.success('Projection 已生成，可执行本地预览')
+        else message.warning(result.validation.errors.join('；') || 'Projection 已生成，请人工调整')
+      },
+      onError: (error: Error) => message.error(error.message || 'Projection 生成失败'),
+    },
+  )
+
+  const previewProjection = useMutation(
+    async () => {
+      if (!selectedComparisonRow) throw new Error('没有可预览的 Parser 执行结果')
+      let adapterSpec: Record<string, unknown>
+      try {
+        const parsed = JSON.parse(projectionText)
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error()
+        adapterSpec = parsed as Record<string, unknown>
+      } catch {
+        throw new Error('Projection 必须是 JSON 对象')
+      }
+      const recordSets = Object.fromEntries(
+        (selectedComparisonRow.proposed.record_sets || []).map((recordSet) => [
+          recordSet.name,
+          recordSet.records,
+        ]),
+      )
+      return parserApi.previewCommandAdapter({
+        adapter_spec: adapterSpec,
+        record_sets: recordSets,
+        device_id: selectedComparisonRow.device_id || 'preview-device',
+        adapter_version_id: 'parser-workflow-preview',
+      })
+    },
+    {
+      onSuccess: (result) => {
+        setProjectionPreview(result)
+        if (result.success) message.success('标准 Observation 预览完成')
+        else message.warning('预览完成，但存在 Projection 错误')
+      },
+      onError: (error: Error) => message.error(error.message || '本地 Projection 预览失败'),
+    },
+  )
+
+  const createAdapterFromProjection = () => {
+    if (!onCreateAdapter || !selectedCheckItemId || !evidenceTemplate?.id || !projectionRecordSet) return
+    try {
+      const parsed = JSON.parse(projectionText)
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error()
+      onCreateAdapter({
+        checkItemId: selectedCheckItemId,
+        parserTemplateId: evidenceTemplate.id,
+        sourceRecordSet: projectionRecordSet,
+        adapterSpec: parsed as Record<string, unknown>,
+      })
+    } catch {
+      message.error('请先生成有效的 Projection JSON')
+    }
+  }
 
   const dispatch = useMutation(
     () => parserApi.dispatchJob(jobId || ''),
@@ -819,9 +1019,20 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
       if (!sampleReason.trim()) throw new Error('请填写修订原因')
       let primaryKeys: string[][] = []
       try {
-        primaryKeys = JSON.parse(sampleKeysText) as string[][]
+        const parsed = JSON.parse(sampleKeysText) as unknown
+        if (!Array.isArray(parsed) || parsed.some(
+          (key) => !Array.isArray(key) || key.some((value) => !String(value).trim()),
+        )) {
+          throw new Error('invalid primary key baseline')
+        }
+        primaryKeys = parsed.map((key) => key.map((value) => String(value).trim()))
       } catch {
-        throw new Error('主键基准不是有效 JSON')
+        throw new Error('主键基准必须是由非空字段值数组组成的 JSON 列表')
+      }
+      if (primaryKeys.length > 0 && primaryKeys.length !== sampleRecordCount) {
+        throw new Error(
+          `主键基准数量（${primaryKeys.length}）必须与记录数基准（${sampleRecordCount}）一致；仅校验记录数时请保留 []。`,
+        )
       }
       await parserApi.updateJobSampleRole(jobId, editingSampleId, {
         role: sampleRole,
@@ -1038,16 +1249,17 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
     {
       title: '样本',
       width: 240,
-      render: (_, sample) => (
-        <Space direction="vertical" size={0}>
-          <Typography.Text strong>
-            {sample.source_context?.device_name || sample.device_id}
-          </Typography.Text>
-          <Typography.Text type="secondary">
-            {sample.source_context?.source_file_name || sample.dataset_id || sample.id}
-          </Typography.Text>
-        </Space>
-      ),
+      render: (_, sample) => {
+        const identity = sampleIdentity(sample)
+        const provenance = sampleProvenanceText(sample)
+        return (
+          <Space direction="vertical" size={0}>
+            <Typography.Text strong>{identity.device}</Typography.Text>
+            <Typography.Text type="secondary">{identity.file}</Typography.Text>
+            {provenance && <Typography.Text type="secondary">{provenance}</Typography.Text>}
+          </Space>
+        )
+      },
     },
     {
       title: '内容判定',
@@ -1188,6 +1400,9 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
                     autoSize={{ minRows: 4, maxRows: 10 }}
                     style={{ fontFamily: 'Consolas, Monaco, monospace' }}
                   />
+                  <Typography.Text type="secondary">
+                    记录数可单独作为验收基准；如填写主键，JSON 中的主键条目数必须与记录数一致。
+                  </Typography.Text>
                 </>
               )}
               <Input
@@ -1286,15 +1501,18 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
           defaultActiveKey={(job.samples || []).slice(0, 1).map((sample) => sample.id)}
           items={(job.samples || []).map((sample) => ({
             key: sample.id,
-            label: (
-              <Space wrap>
-                <Typography.Text strong>{sample.source_context?.device_name || sample.device_id}</Typography.Text>
-                <Typography.Text type="secondary">
-                  {sample.source_context?.source_file_name || sample.dataset_id || sample.id}
-                </Typography.Text>
-                <Tag>{roleLabel[sample.sample_role || 'unassigned']}</Tag>
-              </Space>
-            ),
+            label: (() => {
+              const identity = sampleIdentity(sample)
+              const provenance = sampleProvenanceText(sample)
+              return (
+                <Space wrap>
+                  <Typography.Text strong>{identity.device}</Typography.Text>
+                  <Typography.Text type="secondary">{identity.file}</Typography.Text>
+                  {provenance && <Typography.Text type="secondary">{provenance}</Typography.Text>}
+                  <Tag>{roleLabel[sample.sample_role || 'unassigned']}</Tag>
+                </Space>
+              )
+            })(),
             children: (
               <pre style={{ ...codePanelStyle, maxHeight: 420, whiteSpace: 'pre-wrap' }}>
                 {sample.sanitized_text || sample.sanitized_preview || '无可展示的脱敏样本内容'}
@@ -1355,12 +1573,17 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
               defaultActiveKey={(job.samples || []).slice(0, 1).map((sample) => sample.id)}
               items={(job.samples || []).map((sample) => ({
                 key: sample.id,
-                label: (
-                  <Space wrap>
-                    <Typography.Text strong>{sample.source_context?.device_name || sample.device_id}</Typography.Text>
-                    <Tag>{classificationLabel[sample.content_classification?.status || ''] || '待判定'}</Tag>
-                  </Space>
-                ),
+                label: (() => {
+                  const identity = sampleIdentity(sample)
+                  const provenance = sampleProvenanceText(sample)
+                  return (
+                    <Space wrap>
+                      <Typography.Text strong>{identity.device}</Typography.Text>
+                      {provenance && <Typography.Text type="secondary">{provenance}</Typography.Text>}
+                      <Tag>{classificationLabel[sample.content_classification?.status || ''] || '待判定'}</Tag>
+                    </Space>
+                  )
+                })(),
                 children: (
                   <pre style={{ ...codePanelStyle, maxHeight: 560, whiteSpace: 'pre-wrap' }}>
                     {sample.sanitized_text || sample.sanitized_preview || '无可展示的脱敏样本内容'}
@@ -1370,7 +1593,39 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
             />
           </section>
           <section className="parser-generation-step">
-            <Typography.Text strong>2. 结构化语义方案</Typography.Text>
+            <Typography.Text strong>2. 目标标准语义 B</Typography.Text>
+            <Typography.Paragraph type="secondary" style={{ margin: '4px 0 12px' }}>
+              {lockedCheckItemId
+                ? '该样本命令已在检查项目录关联 CheckItem；此处固定使用同一个 B 指导 TextFSM 与 Projection。'
+                : '选择本命令要产出的 CheckItem；其 Canonical Contract 会与 CLI 样本一起发送给 LLM。'}
+            </Typography.Paragraph>
+            <Select
+              aria-label="目标 CheckItem"
+              value={selectedCheckItemId || undefined}
+              disabled={Boolean(lockedCheckItemId)}
+              onChange={(value) => {
+                setSelectedCheckItemId(value)
+                setProjectionText('')
+                setProjectionPreview(undefined)
+              }}
+              placeholder="选择 CheckItem"
+              loading={checkItemsQuery.isLoading}
+              showSearch
+              optionFilterProp="label"
+              options={structuredCheckItems.map((item) => ({
+                value: item.check_item_id,
+                label: `${item.display_name || item.name} (${item.check_item_id})`,
+              }))}
+              style={{ width: '100%' }}
+            />
+            {selectedCheckItem && (
+              <pre style={{ ...codePanelStyle, maxHeight: 320, marginTop: 12, whiteSpace: 'pre-wrap' }}>
+                {JSON.stringify(selectedCheckItem.canonical_contract, null, 2)}
+              </pre>
+            )}
+          </section>
+          <section className="parser-generation-step">
+            <Typography.Text strong>3. 结构化语义方案</Typography.Text>
             <Typography.Paragraph type="secondary" style={{ margin: '4px 0 12px' }}>
               LLM 只负责提出方案；最终是否进入生成由你确认。
             </Typography.Paragraph>
@@ -1394,7 +1649,11 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
               <Button
                 icon={<RobotOutlined />}
                 loading={specSuggestionLoading}
-                disabled={semanticAnalysisActive || (semanticReady && !parserRevisionInstruction.trim())}
+                disabled={
+                  semanticAnalysisActive
+                  || !selectedCheckItemId
+                  || (semanticReady && !parserRevisionInstruction.trim())
+                }
                 onClick={() => requestSpecSuggestion()}
                 style={{ marginTop: 10 }}
               >
@@ -1492,9 +1751,9 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
           <Alert
             type="info"
             showIcon
-            message="候选版本正在等待发布确认"
-            description="当前语义方案只读；如需修改，请先在发布确认阶段驳回候选。"
-            action={<Button onClick={() => setSelectedPipelineStep(3)}>前往发布确认</Button>}
+            message="候选版本正在等待人工确认"
+            description="当前语义方案只读；如需修改，请先在人工确认阶段驳回候选。"
+            action={<Button onClick={() => setSelectedPipelineStep(3)}>前往人工确认</Button>}
           />
         )}
         {semanticReady && !semanticReadOnly && (
@@ -1518,9 +1777,13 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
               }
               loading={dispatchLoading || retryAndDispatch.isLoading}
               onClick={() => (
-                parserSpecRevised || !['collecting', 'pending'].includes(job.status)
-                  ? retryAndDispatch.mutate()
-                  : dispatchGeneration()
+                // A confirmed/revised ParserSpec leaves a new job in
+                // ``collecting``.  That state is directly dispatchable; it
+                // is not a failed run and must never be sent through Retry.
+                // Retry is only for a terminal/non-dispatchable prior run.
+                ['collecting', 'pending'].includes(job.status)
+                  ? dispatchGeneration()
+                  : retryAndDispatch.mutate()
               )}
             >
               {activeTemplate ? '确认修订方案并生成新版本' : '确认语义方案并生成 Parser'}
@@ -1539,7 +1802,7 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
               先核对 CLI 原始输出，再逐轮查看模板、实际解析结果和诊断；LLM 异议会进入下一轮，最多三轮。
             </Typography.Text>
           </div>
-          {!jobActive && readiness?.ready && (
+          {!jobActive && readiness?.ready && !candidateTemplate && (
             <Button
               icon={<PlayCircleOutlined />}
               loading={retryAndDispatch.isLoading}
@@ -1560,7 +1823,11 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
               defaultActiveKey={(job.samples || []).slice(0, 1).map((sample) => sample.id)}
               items={(job.samples || []).map((sample) => ({
                 key: sample.id,
-                label: sample.source_context?.device_name || sample.device_id,
+                label: (() => {
+                  const identity = sampleIdentity(sample)
+                  const provenance = sampleProvenanceText(sample)
+                  return provenance ? `${identity.device} · ${provenance}` : identity.device
+                })(),
                 children: (
                   <pre style={{ ...codePanelStyle, maxHeight: 560, whiteSpace: 'pre-wrap' }}>
                     {sample.sanitized_text || sample.sanitized_preview || '无可展示的脱敏样本内容'}
@@ -1587,6 +1854,145 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
             />
           </section>
         </div>
+        <section className="parser-generation-step">
+          <div className="parser-generation-step__heading">
+            <div>
+              <Typography.Text strong>3. A→B Projection 与标准 Observation</Typography.Text>
+              <br />
+              <Typography.Text type="secondary">
+                使用同一个 CheckItem B 生成 Projection，并用当前 Parser 的实际记录做本地预览。
+              </Typography.Text>
+            </div>
+            <Space wrap>
+              <Button
+                icon={<RobotOutlined />}
+                disabled={!selectedCheckItemId || !evidenceTemplate || !projectionRecordSet}
+                loading={generateProjection.isLoading}
+                onClick={() => generateProjection.mutate()}
+              >
+                LLM 生成 Projection
+              </Button>
+              <Button
+                icon={<PlayCircleOutlined />}
+                disabled={!projectionText.trim() || !selectedComparisonRow}
+                loading={previewProjection.isLoading}
+                onClick={() => previewProjection.mutate()}
+              >
+                本地执行
+              </Button>
+            </Space>
+          </div>
+          {!evidenceTemplate ? (
+            <Alert type="info" showIcon message="TextFSM 候选生成后即可继续 A→B 预览" />
+          ) : (
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Space wrap style={{ width: '100%' }}>
+                <Select
+                  aria-label="Projection 目标 CheckItem"
+                  value={selectedCheckItemId || undefined}
+                  disabled={Boolean(lockedCheckItemId)}
+                  onChange={(value) => {
+                    setSelectedCheckItemId(value)
+                    setProjectionText('')
+                    setProjectionPreview(undefined)
+                  }}
+                  placeholder="选择 CheckItem"
+                  options={structuredCheckItems.map((item) => ({
+                    value: item.check_item_id,
+                    label: `${item.display_name || item.name} (${item.check_item_id})`,
+                  }))}
+                  style={{ minWidth: 320 }}
+                />
+                <Select
+                  aria-label="Parser record set"
+                  value={projectionRecordSet || undefined}
+                  onChange={(value) => {
+                    setProjectionRecordSet(value)
+                    setProjectionText('')
+                    setProjectionPreview(undefined)
+                  }}
+                  placeholder="选择 record set"
+                  options={parserRecordSetNames.map((name) => ({ value: name, label: name }))}
+                  style={{ minWidth: 220 }}
+                />
+                <Select
+                  aria-label="Projection 预览样本"
+                  value={projectionSampleIndex}
+                  onChange={(value) => {
+                    setProjectionSampleIndex(value)
+                    setProjectionPreview(undefined)
+                  }}
+                  loading={comparisonQuery.isLoading}
+                  options={comparisonRows.map((row, index) => ({
+                    value: index,
+                    label: `${row.device_id} · ${row.dataset_id || `样本 ${index + 1}`}`,
+                  }))}
+                  style={{ minWidth: 280 }}
+                />
+              </Space>
+              <Input.TextArea
+                aria-label="Adapter Projection JSON"
+                value={projectionText}
+                onChange={(event) => {
+                  setProjectionText(event.target.value)
+                  setProjectionPreview(undefined)
+                }}
+                placeholder="点击“LLM 生成 Projection”，或粘贴已有 AdapterSpecV2 JSON"
+                autoSize={{ minRows: 8, maxRows: 20 }}
+                style={{ fontFamily: 'Consolas, Monaco, monospace' }}
+              />
+              {onCreateAdapter && (
+                <Alert
+                  type={projectionPreview?.success ? 'success' : 'info'}
+                  showIcon
+                  message="完成本地预览后创建命令适配器"
+                  description="这会带着当前 Parser 和 Projection 打开命令适配器草稿；适配器仍需按正常流程验证和审批，未审批前不会进入生产。"
+                  action={(
+                    <Button
+                      type="primary"
+                      disabled={!projectionPreview?.success}
+                      onClick={createAdapterFromProjection}
+                    >
+                      使用 Projection 创建适配器
+                    </Button>
+                  )}
+                />
+              )}
+              <div style={{
+                display: 'grid',
+                gap: 12,
+                gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))',
+              }}>
+                <div>
+                  <Typography.Text strong>CLI 原文</Typography.Text>
+                  <pre style={{ ...codePanelStyle, maxHeight: 420, whiteSpace: 'pre-wrap' }}>
+                    {selectedComparisonRow?.raw_text || '请选择样本'}
+                  </pre>
+                </div>
+                <div>
+                  <Typography.Text strong>Vendor Record</Typography.Text>
+                  <pre style={{ ...codePanelStyle, maxHeight: 420, whiteSpace: 'pre-wrap' }}>
+                    {selectedComparisonRow
+                      ? JSON.stringify(selectedComparisonRow.proposed.record_sets || [], null, 2)
+                      : '等待 Parser 执行结果'}
+                  </pre>
+                </div>
+                <div>
+                  <Typography.Text strong>Canonical Observation</Typography.Text>
+                  <pre style={{ ...codePanelStyle, maxHeight: 420, whiteSpace: 'pre-wrap' }}>
+                    {projectionPreview
+                      ? JSON.stringify({
+                        success: projectionPreview.success,
+                        batches: projectionPreview.batches,
+                        observations: projectionPreview.observations,
+                      }, null, 2)
+                      : '生成 Projection 后点击“本地执行”'}
+                  </pre>
+                </div>
+              </div>
+            </Space>
+          )}
+        </section>
         <Collapse
           ghost
           items={[{
@@ -1875,7 +2281,7 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
           showIcon
           message="候选正在等待人工确认"
           description="当前正在回看生成过程；请返回人工确认步骤核对原始输出、解析结果、主键和模板。"
-          action={<Button onClick={() => setSelectedPipelineStep(3)}>前往发布确认</Button>}
+          action={<Button onClick={() => setSelectedPipelineStep(3)}>前往人工确认</Button>}
         />
       )}
 
@@ -1928,6 +2334,7 @@ const ParserGenerationStep: React.FC<{ jobId?: string | null }> = ({ jobId }) =>
           description="上一候选已被驳回或撤回。可直接重新生成，也可先在高级修订中定向调整。"
           action={(
             <Button
+              aria-label="重新生成"
               icon={<PlayCircleOutlined />}
               disabled={!readiness?.ready}
               loading={retryAndDispatch.isLoading}

@@ -44,6 +44,44 @@ SPEC = ParserSpec(
 )
 
 
+def test_validation_accepts_an_explicit_default_for_a_sparse_primary_key():
+    class SparseKeyBackend:
+        def compile(self, template_text: str) -> tuple[str, ...]:
+            return ()
+
+        def field_names(self, template_text: str) -> tuple[str, ...]:
+            return ("interface", "channel_token")
+
+        def parse(self, template_text: str, raw_text: str) -> list[dict[str, str]]:
+            return [{"interface": "Ten-GigabitEthernet1/0/1", "channel_token": ""}]
+
+    spec = ParserSpec(
+        entity="interface_optical",
+        primary_keys=("interface", "channel_token"),
+        fields=(
+            FieldSpec("interface", True, "interface_name"),
+            FieldSpec("channel_token", False, "text", primary_key_default="aggregate"),
+        ),
+    )
+    samples = (
+        ParserSample(
+            sample_id="aggregate",
+            role=SampleRole.GENERATION,
+            raw_text="Ten-GigabitEthernet1/0/1\n",
+            expectation=SampleExpectation(record_count=1),
+        ),
+    )
+    report = validate_template_candidate(
+        "sparse-channel-candidate",
+        spec,
+        samples,
+        SparseKeyBackend(),
+    )
+
+    assert report.passed is True
+    assert report.samples[0].actual_primary_keys == (("Ten-GigabitEthernet1/0/1", "aggregate"),)
+
+
 def _source_spec_document() -> dict:
     return ParserSpecDocument(
         business_purpose="Inspect interface operational status.",
@@ -1216,7 +1254,7 @@ def test_parser_spec_review_failure_is_returned_for_all_three_repair_rounds():
     assert session[0].review_report.diagnostics[0]["target"] == "parser_spec"
 
 
-def test_execution_only_generation_sends_zero_record_result_to_llm_reviewer():
+def test_execution_only_generation_repairs_zero_record_result_before_review():
     backend = FakeBackend(
         {
             ("repaired", "GEN RAW"): _records("GE1/0/1"),
@@ -1231,20 +1269,6 @@ def test_execution_only_generation_sends_zero_record_result_to_llm_reviewer():
             self.calls += 1
             validation = kwargs["validation"]
             assert validation.passed is True
-            if self.calls == 1:
-                assert validation.samples[0].record_count == 0
-                return ParserReviewReport(
-                    passed=False,
-                    summary="Visible records were not captured.",
-                    diagnostics=(
-                        {
-                            "code": "missing_records",
-                            "sample_id": "generation-1",
-                            "target": "record_boundary",
-                            "message": "Capture the visible interface row.",
-                        },
-                    ),
-                )
             return ParserReviewReport(
                 passed=True,
                 summary="The final records match the evidence.",
@@ -1266,10 +1290,12 @@ def test_execution_only_generation_sends_zero_record_result_to_llm_reviewer():
 
     assert result.passed is True
     assert result.model_calls == 2
-    assert reviewer.calls == 2
+    assert reviewer.calls == 1
     assert model.session is not None
-    assert model.session.feedback[1]["primary_diagnostic"]["code"] == "missing_records"
+    assert model.session.feedback[1]["primary_diagnostic"]["code"] == "zero_records"
     assert model.session.feedback[1]["parsed_results"][0]["record_count"] == 0
+    assert result.attempts[0].generation_validation.passed is False
+    assert "positive sample produced no records" in result.attempts[0].generation_validation.primary_diagnostic
 
 
 def test_single_sample_candidate_is_persisted_with_explicit_validation_mode():

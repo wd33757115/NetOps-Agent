@@ -139,17 +139,33 @@ def output_signature(raw_text: str) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24]
 
 
-def parser_job_asset_key(*, vendor: str, profile: str, command: str) -> str:
-    """Return the stable identity of one target TextFSM template asset."""
+def parser_job_asset_key(
+    *,
+    vendor: str,
+    profile: str,
+    command: str,
+    evidence_scope: str | None = None,
+) -> str:
+    """Return the stable identity of one target TextFSM template asset.
 
-    normalized = "|".join(
-        (
-            "parser-template-asset-v2",
-            " ".join(str(vendor or "").strip().casefold().split()),
-            " ".join(str(profile or "").strip().casefold().split()),
-            " ".join(str(command or "").strip().casefold().split()),
-        )
+    ``evidence_scope`` is used only while an offline rule-asset import is
+    being prepared.  A generation task must replay exactly the samples the
+    engineer imported, rather than silently accumulating samples from another
+    import that happens to use the same vendor/model/command tuple.
+    """
+
+    parts = [
+        "parser-template-asset-v2",
+        " ".join(str(vendor or "").strip().casefold().split()),
+        " ".join(str(profile or "").strip().casefold().split()),
+        " ".join(str(command or "").strip().casefold().split()),
+    ]
+    normalized_scope = " ".join(
+        str(evidence_scope or "").strip().casefold().split()
     )
+    if normalized_scope:
+        parts.append(normalized_scope)
+    normalized = "|".join(parts)
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
@@ -274,7 +290,9 @@ def _validated_sample_expectation(
         if key in keys:
             raise ParserJobStateError("expected primary keys must be unique")
         keys.append(key)
-    if len(keys) != record_count:
+    # A record-count baseline is useful on its own.  Explicit primary keys are
+    # optional and, when supplied, add a stricter exact-key-set gate.
+    if keys and len(keys) != record_count:
         raise ParserJobStateError("sample expectation primary key count must equal record_count")
     return {"record_count": record_count, "primary_keys": keys}
 
@@ -1482,6 +1500,7 @@ class ParserRepository:
         profile: str | None = None,
         failure_code: str | None = None,
         dataset_id: str | None = None,
+        evidence_scope: str | None = None,
     ) -> str:
         context = PatrolRepository().get_snapshot_context(snapshot_id)
         if context is None:
@@ -1504,7 +1523,12 @@ class ParserRepository:
         allowed_profiles = {str(item) for item in (model, family, "Generic") if item}
         if profile not in allowed_profiles:
             raise ValueError("parser candidate profile must match the device model or family")
-        key = parser_job_asset_key(vendor=vendor, profile=profile, command=command)
+        key = parser_job_asset_key(
+            vendor=vendor,
+            profile=profile,
+            command=command,
+            evidence_scope=evidence_scope,
+        )
         with get_db_session() as db:
             job_created = False
             job_reopened = False
@@ -3431,10 +3455,12 @@ class ParserRepository:
         actor: str,
         reason: str,
         revision_instruction: str = "",
+        check_item_id: str = "",
     ) -> dict[str, Any]:
         normalized_actor = str(actor or "").strip()
         normalized_reason = str(reason or "").strip()
         normalized_instruction = str(revision_instruction or "").strip()[:4000]
+        normalized_check_item_id = str(check_item_id or "").strip()[:128]
         if not normalized_actor or not normalized_reason:
             raise ParserJobStateError("ParserSpec suggestion requires actor and reason")
         with get_db_session() as db:
@@ -3478,6 +3504,7 @@ class ParserRepository:
                 "task_id": task_id,
                 "requested_by": normalized_actor,
                 "revision_instruction": normalized_instruction,
+                "check_item_id": normalized_check_item_id or None,
                 "requested_at": now.isoformat(),
                 "heartbeat_at": now.isoformat(),
                 "deadline_at": (
@@ -3499,6 +3526,7 @@ class ParserRepository:
                     detail={
                         "reason": normalized_reason,
                         "revision_instruction": normalized_instruction,
+                        "check_item_id": normalized_check_item_id or None,
                         "task_id": task_id,
                     },
                     status="success",

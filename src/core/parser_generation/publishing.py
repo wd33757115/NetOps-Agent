@@ -402,6 +402,7 @@ def _validation_payload(
                 "cardinality": item.cardinality,
                 "presence": item.presence,
                 "primary_keys": list(item.primary_keys),
+                "primary_key_defaults": item.primary_key_defaults,
                 "required_fields": list(item.required_fields),
                 "optional_fields": list(item.optional_fields),
                 "validators": item.validators,
@@ -413,6 +414,7 @@ def _validation_payload(
         ]
         entity_type = "multi_record"
         primary_keys: list[str] = []
+        primary_key_defaults: dict[str, str] = {}
         required_fields: list[str] = []
         optional_fields: list[str] = []
         validators: dict[str, Any] = {}
@@ -422,6 +424,7 @@ def _validation_payload(
         record_sets = []
         entity_type = spec.entity
         primary_keys = list(spec.primary_keys)
+        primary_key_defaults = spec.primary_key_defaults
         required_fields = list(spec.required_fields)
         optional_fields = list(spec.optional_fields)
         validators = spec.validators
@@ -444,6 +447,7 @@ def _validation_payload(
         "candidate_sample_evidence_version": 1,
         "entity_type": entity_type,
         "primary_keys": primary_keys,
+        "primary_key_defaults": primary_key_defaults,
         "required_fields": required_fields,
         "optional_fields": optional_fields,
         "validators": validators,

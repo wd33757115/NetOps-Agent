@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_ignore_empty=True, extra="ignore")
 
     LLM_PROVIDER: str = "deepseek"
+    # Parser generation uses an OpenAI-compatible provider boundary.  Keep the
+    # legacy DeepSeek settings as the default so existing deployments do not
+    # need to migrate configuration in lock-step.
+    LLM_API_KEY: str = ""
+    LLM_BASE_URL: str = ""
+    OPENAI_API_KEY: str = ""
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     DEEPSEEK_API_KEY: str = ""
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
     LLM_MODEL: str = "deepseek-v4-pro"
@@ -28,6 +35,9 @@ class Settings(BaseSettings):
     PARSER_GENERATION_TOTAL_TIMEOUT_SECONDS: int = 1500
     PARSER_MODEL_CALL_HEARTBEAT_SECONDS: int = 15
     PARSER_LLM_MAX_COMPLETION_TOKENS: int = 32768
+    # A single agent turn may inspect local evidence and run several local
+    # tools before it submits one immutable candidate to the outer validator.
+    PARSER_AGENT_MAX_TOOL_ROUNDS: int = 6
     PARSER_LLM_REVIEW_MAX_COMPLETION_TOKENS: int = 8192
     # Optional HMAC key for stable Parser-sample pseudonyms. Empty reuses JWT.
     PARSER_SANITIZATION_SECRET: str = ""
@@ -183,6 +193,10 @@ class Settings(BaseSettings):
     # immutable context is ready. Default off for safe gray release.
     RULE_ASSET_AUTO_GENERATE_ENABLED: bool = False
     PARSER_BACKFILL_ENABLED: bool = False
+    # Set only after the all-active-route V2 cutover report is fully ready.
+    # It makes ObservationContract assets read-only audit history and prevents
+    # legacy generation paths from recreating the retired semantic bridge.
+    ADAPTER_PROJECTION_CUTOVER_ENFORCED: bool = False
     PARSER_BOOTSTRAP_SHARED_TEMPLATES_ON_STARTUP: bool = False
     PARSER_BACKLOG_ALERT_THRESHOLD: int = 20
     PARSER_CANDIDATE_STALE_MINUTES: int = 60

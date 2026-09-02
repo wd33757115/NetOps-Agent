@@ -363,6 +363,62 @@ def test_bundle_read_model_accepts_contract_only_evidence_profile():
     ] == "skipped"
 
 
+def test_bundle_read_model_accepts_check_item_semantics_without_contract():
+    requirements = {
+        "schema_version": "rule-asset-requirements/v1",
+        "requires_observation_contract": False,
+        "requires_change_policy": True,
+        "requires_current_state_rule": True,
+        "requires_event_rule": True,
+        "requires_event_rule_assets": True,
+        "requires_historical_replay": False,
+        "change_policy_observation_types": ["device.cpu.utilization"],
+        "current_state_observation_types": ["device.cpu.utilization"],
+    }
+    children = {
+        "policy": _child("policy", "CHANGE_POLICY"),
+        "rule": _child("rule", "EVENT_RULE"),
+    }
+    children["policy"].payload_json = {
+        "policy": {"observation_type": "device.cpu.utilization"}
+    }
+    row = _bundle_row(list(children))
+    row.payload_json.update(
+        asset_requirements=requirements,
+        observation_type="device.cpu.utilization",
+        check_item_version_id="check-item-cpu-v1",
+    )
+    row.validation_report_json.update(
+        context_gate={
+            "success": True,
+            "mode": "check_item_semantics",
+            "context_digest": "check-item-semantic-digest",
+        },
+        historical_replay={"success": True, "skipped": True},
+    )
+    row.validation_report_json["bundle_gate"].update(
+        asset_requirements=requirements,
+        asset_counts={"CHANGE_POLICY": 1, "EVENT_RULE": 1},
+    )
+    states = _asset_states(children)
+    states["rule"].update(
+        evaluation_scope="both",
+        event_class="fault",
+        event_type="CpuHigh",
+        observation_types=["device.cpu.utilization"],
+    )
+
+    result = RuleAssetBundleService._serialize(row, children, states, {})
+
+    assert result["release_ready"] is True
+    assert result["asset_counts"] == {"CHANGE_POLICY": 1, "EVENT_RULE": 1}
+    assert result["context_gate"]["mode"] == "check_item_semantics"
+    assert result["replay_gate"]["skipped"] is True
+    assert next(step for step in result["steps"] if step["key"] == "contract")[
+        "status"
+    ] == "skipped"
+
+
 def test_bundle_read_model_requires_current_state_coverage_per_observation():
     requirements = {
         "schema_version": "rule-asset-requirements/v1",

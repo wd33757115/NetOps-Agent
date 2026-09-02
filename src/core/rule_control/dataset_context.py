@@ -15,6 +15,7 @@ from typing import Any
 from sqlalchemy import and_, func, or_
 
 from src.core.check_items.canonical import load_canonical_catalog
+from src.core.check_items.command_adapter import is_direct_projection_adapter
 from src.core.check_items.runtime_bundle_assembly import (
     derive_asset_requirement_profile,
 )
@@ -26,6 +27,7 @@ from src.core.rule_control.source_scope import (
 )
 from src.infrastructure.db.models import (
     CheckItemVersionRecord,
+    CollectionImplementationVersionRecord,
     CommandSnapshot,
     ParserTemplate,
     RuleAssetCommandUnitCheckItemRecord,
@@ -483,11 +485,17 @@ def _check_item_generation_governance(
         db.query(
             RuleAssetCommandUnitCheckItemRecord,
             CheckItemVersionRecord,
+            CollectionImplementationVersionRecord,
         )
         .join(
             CheckItemVersionRecord,
             CheckItemVersionRecord.id
             == RuleAssetCommandUnitCheckItemRecord.check_item_version_id,
+        )
+        .outerjoin(
+            CollectionImplementationVersionRecord,
+            CollectionImplementationVersionRecord.id
+            == RuleAssetCommandUnitCheckItemRecord.implementation_version_id,
         )
         .filter(
             RuleAssetCommandUnitCheckItemRecord.command_unit_id.in_(unit_ids),
@@ -502,7 +510,7 @@ def _check_item_generation_governance(
     canonical_catalog = load_canonical_catalog()
     targets: list[dict[str, Any]] = []
     seen_links: set[tuple[str, str]] = set()
-    for link, version in rows:
+    for link, version, implementation_version in rows:
         key = (
             str(link.check_item_version_id),
             str(link.implementation_version_id),
@@ -520,6 +528,12 @@ def _check_item_generation_governance(
                 if isinstance(item, dict)
             ],
             canonical_catalog=canonical_catalog,
+            direct_projection=bool(
+                implementation_version is not None
+                and is_direct_projection_adapter(
+                    dict(implementation_version.adapter_spec_json or {})
+                )
+            ),
         )
         targets.append(
             {

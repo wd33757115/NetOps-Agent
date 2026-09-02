@@ -137,7 +137,7 @@ def test_leadership_report_includes_safe_non_structured_change_summary():
     assert report["metrics"]["unstructured_collected_count"] == 2
     assert report["metrics"]["unstructured_changed_count"] == 1
     assert any("非结构化输出变化" in item["action"] for item in report["recommendations"])
-    assert "## 五、非结构化输出变化" in markdown
+    assert "## 六、非结构化文本对比证据" in markdown
     assert "<redacted>" in markdown
     assert "非结构化输出变化" in document_text
     assert "即使巡检流程执行完成" in document_text
@@ -146,7 +146,7 @@ def test_leadership_report_includes_safe_non_structured_change_summary():
         table
         for table in document.tables
         if [cell.text for cell in table.rows[0].cells]
-        == ["类型", "设备", "命令", "增/删行", "变化分类"]
+        == ["类型", "设备", "命令", "增/删行", "变化分类", "CLI 证据"]
     )
     assert len(unstructured_table.rows) == 2
     assert all(len(cell.text) < 120 for row in unstructured_table.rows for cell in row.cells)

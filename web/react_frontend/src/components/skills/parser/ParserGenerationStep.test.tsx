@@ -50,6 +50,51 @@ describe('ParserGenerationStep', () => {
       limit: 100,
       offset: 0,
     })
+    vi.spyOn(parserApi, 'checkItems').mockResolvedValue({
+      items: [{
+        check_item_id: 'interface.oper_status',
+        check_item_version_id: 'check-interface-v1',
+        version: 1,
+        name: 'Interface operational status',
+        display_name: '接口运行状态',
+        category: 'interface',
+        description: 'Interface state',
+        result_mode: 'structured',
+        assessment_mode: 'health',
+        canonical_contract: {
+          entity_type: 'interface',
+          identity_dimensions: ['interface'],
+          observations: [{ observation_type: 'interface.oper_status' }],
+        },
+        report_projection: 'interface_status',
+        applicability: {},
+        freshness_policy: {},
+        empty_result_policy: {},
+        coverage_policy: {},
+        status: 'active',
+        digest: 'catalog-digest',
+        implementation_count: 1,
+        implementations: [{
+          implementation_id: 'h3c-interface',
+          implementation_version_id: 'h3c-interface-v1',
+          name: 'H3C interface status',
+          description: '',
+          match: { vendor: 'H3C' },
+          commands: [
+            { command: 'show vpc', priority: 100 },
+            { command: 'display interface brief', priority: 100 },
+          ],
+          collector: 'cli',
+          parser_requirement: 'structured',
+          output_quality_policy: {},
+          selection_priority: 100,
+          status: 'active',
+        }],
+      }],
+      total: 1,
+      limit: 200,
+      offset: 0,
+    })
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
       writable: true,
@@ -109,8 +154,82 @@ describe('ParserGenerationStep', () => {
     await userEvent.click(screen.getByRole('button', { name: /样本已确认，进入语义设计/ }))
     expect(await screen.findByText('设计并确认语义方案')).toBeVisible()
     await userEvent.click(screen.getByText('让 LLM 提出语义方案'))
-    await waitFor(() => expect(suggest).toHaveBeenCalledWith(collectingJob.id, ''))
+    await waitFor(() => expect(suggest).toHaveBeenCalledWith(
+      collectingJob.id,
+      '',
+      'interface.oper_status',
+    ))
+    expect(screen.getByText(/"entity_type": "interface"/)).toBeVisible()
     expect(screen.getByText('高级修订')).toBeVisible()
+  })
+
+  it('identifies same-named offline samples by period and collection time', async () => {
+    const periodAwareJob: ParserJobItem = {
+      ...failedReadyJob,
+      id: 'parser-job-period-aware',
+      status: 'collecting',
+      parser_spec_status: 'missing',
+      parser_spec_json: undefined,
+      generation_readiness: {
+        ready: false,
+        blockers: ['parser_spec_missing', 'sample_roles_unassigned'],
+        role_counts: { unassigned: 2 },
+      },
+      samples: [
+        {
+          id: 'sample-baseline',
+          snapshot_id: 'snapshot-baseline',
+          snapshot_source: 'postgresql',
+          dataset_id: 'offline-baseline',
+          device_id: 'sw1',
+          output_signature: 'baseline-signature',
+          sample_role: 'unassigned',
+          sanitization_status: 'sanitized',
+          sanitized_preview: 'baseline interface output',
+          source_context: {
+            device_name: 'SW1-H3CS6000',
+            source_file_name: 'SW1-H3CS6000-192.168.1.1.txt',
+            period_role: 'baseline',
+            observed_at: '2026-08-04T00:00:00Z',
+          },
+          created_at: '2026-08-04T00:00:00Z',
+        },
+        {
+          id: 'sample-current',
+          snapshot_id: 'snapshot-current',
+          snapshot_source: 'postgresql',
+          dataset_id: 'offline-current',
+          device_id: 'sw1',
+          output_signature: 'current-signature',
+          sample_role: 'unassigned',
+          sanitization_status: 'sanitized',
+          sanitized_preview: 'current interface output',
+          source_context: {
+            device_name: 'SW1-H3CS6000',
+            source_file_name: 'SW1-H3CS6000-192.168.1.1.txt',
+            period_role: 'current',
+            observed_at: '2026-08-26T21:17:00Z',
+          },
+          created_at: '2026-08-26T21:17:00Z',
+        },
+      ],
+    }
+    vi.spyOn(parserApi, 'job').mockResolvedValue(periodAwareJob)
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          <ParserGenerationStep jobId={periodAwareJob.id} />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    )
+
+    expect((await screen.findAllByText('基线周期 · 采集：2026-08-04T00:00:00Z')).length)
+      .toBeGreaterThan(0)
+    expect(screen.getAllByText('当前周期 · 采集：2026-08-26T21:17:00Z').length)
+      .toBeGreaterThan(0)
   })
 
   it('requires explicit semantic confirmation before generation starts', async () => {
@@ -147,6 +266,47 @@ describe('ParserGenerationStep', () => {
     expect(dispatch).not.toHaveBeenCalled()
     await userEvent.click(screen.getByText('确认语义方案并生成 Parser'))
     await waitFor(() => expect(dispatch).toHaveBeenCalledWith(readyJob.id))
+  })
+
+  it('dispatches a collecting job after its ParserSpec is revised instead of retrying it', async () => {
+    const revisedJob: ParserJobItem = {
+      ...failedReadyJob,
+      id: 'parser-job-revised-collecting',
+      status: 'collecting',
+      failure_code: 'parser_spec_revised',
+      last_error: undefined,
+      agent_state_json: {
+        parser_spec_suggestion: {
+          status: 'ready',
+          result: { parser_spec: failedReadyJob.parser_spec_json, sample_suggestions: [] },
+        },
+      },
+    }
+    vi.spyOn(parserApi, 'job').mockResolvedValue(revisedJob)
+    const dispatch = vi.spyOn(parserApi, 'dispatchJob').mockResolvedValue({
+      success: true,
+      dispatched: [revisedJob.id],
+      failed: [],
+    })
+    const retry = vi.spyOn(parserApi, 'retryAndDispatchJob').mockResolvedValue({
+      success: true,
+      dispatched: [revisedJob.id],
+      failed: [],
+    })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          <ParserGenerationStep jobId={revisedJob.id} />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    )
+
+    await userEvent.click(await screen.findByText('确认语义方案并生成 Parser'))
+    await waitFor(() => expect(dispatch).toHaveBeenCalledWith(revisedJob.id))
+    expect(retry).not.toHaveBeenCalled()
   })
 
   it('shows governed TextFSM value names as guidance without turning them into a gate', async () => {
@@ -346,7 +506,11 @@ describe('ParserGenerationStep', () => {
     const reanalyze = screen.getByRole('button', { name: /重新分析/ })
     expect(reanalyze).toBeEnabled()
     await userEvent.click(reanalyze)
-    await waitFor(() => expect(suggestSpec).toHaveBeenCalledWith(succeededJob.id, ''))
+    await waitFor(() => expect(suggestSpec).toHaveBeenCalledWith(
+      succeededJob.id,
+      '',
+      'interface.oper_status',
+    ))
     const editor = screen.getByLabelText('ParserSpec JSON')
     expect(editor).toBeEnabled()
     fireEvent.change(editor, {
@@ -423,6 +587,153 @@ describe('ParserGenerationStep', () => {
     expect(screen.getByText('候选正在等待人工确认')).toBeVisible()
     expect(screen.getByRole('button', { name: '前往人工确认' })).toBeEnabled()
     expect(screen.queryByRole('button', { name: '审查并确认' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '从当前方案重新生成' })).not.toBeInTheDocument()
+  })
+
+  it('generates and previews A-to-B projection from the Parser result', async () => {
+    const succeededJob: ParserJobItem = {
+      ...failedReadyJob,
+      id: 'parser-job-projection-preview',
+      status: 'succeeded',
+      last_error: undefined,
+    }
+    const candidate: ParserTemplateItem = {
+      id: 'template-projection-preview',
+      vendor: succeededJob.vendor,
+      model: succeededJob.model,
+      profile: succeededJob.profile,
+      canonical_command: succeededJob.canonical_command,
+      category: 'vpc',
+      version: 'candidate-1',
+      status: 'pending_approval',
+      source_job_id: succeededJob.id,
+      created_at: '2026-08-08T10:00:00Z',
+    }
+    vi.spyOn(parserApi, 'job').mockResolvedValue(succeededJob)
+    vi.spyOn(parserApi, 'templates').mockResolvedValue({
+      items: [candidate],
+      total: 1,
+      limit: 100,
+      offset: 0,
+    })
+    vi.spyOn(parserApi, 'comparison').mockResolvedValue({
+      template_id: candidate.id,
+      sample_count: 1,
+      passed_samples: 1,
+      contract_changed: false,
+      candidate_template: {
+        ...candidate,
+        sha256: 'candidate-sha',
+        hash_valid: true,
+        content: 'Value peer_link (\\S+)\n\nStart\n  ^${peer_link} -> Record',
+        validation: {},
+      },
+      candidate_contract: {},
+      active_contract: {},
+      approval_readiness: { can_approve: false, blockers: [] },
+      rows: [{
+        snapshot_id: 'snapshot-1',
+        dataset_id: 'baseline',
+        device_id: 'device-1',
+        command: succeededJob.canonical_command,
+        raw_text: 'peer-link1 up',
+        raw_text_sha256: 'raw-sha',
+        changed: true,
+        proposed: {
+          status: 'success',
+          record_count: 1,
+          record_sets: [{
+            name: 'executed_vpc_peer',
+            primary_keys: ['peer_link'],
+            records: [{ peer_link: 'peer-link1' }],
+          }],
+        },
+      }],
+    })
+    const adapterSpec = {
+      schema_version: 'command-adapter/v2',
+      parser: { template_id: candidate.id },
+      outputs: [{
+        check_item_id: 'interface.oper_status',
+        check_item_version_id: 'check-interface-v1',
+        source_record_set: 'executed_vpc_peer',
+        projection: { fields: { interface: { source: 'peer_link' } } },
+      }],
+    }
+    const generateProjection = vi.spyOn(
+      parserApi,
+      'generateAdapterProjectionCandidate',
+    ).mockResolvedValue({
+      success: true,
+      mode: 'projection_candidate',
+      proposal: adapterSpec,
+      validation: { success: true, errors: [] },
+      generation_provider: 'llm',
+      generation_context: {
+        schema_version: 'adapter-projection-generation/v1',
+        selected_check_item: {
+          id: 'interface.oper_status',
+          version_id: 'check-interface-v1',
+          entity_type: 'interface',
+          identity_fields: ['interface'],
+        },
+        parser: {
+          template_id: candidate.id,
+          source_record_set: 'executed_vpc_peer',
+          source_fields: ['peer_link'],
+        },
+        allowed_target_fields: ['interface'],
+        required_target_fields: ['interface'],
+        observation_targets: [],
+      },
+    })
+    const previewProjection = vi.spyOn(parserApi, 'previewCommandAdapter').mockResolvedValue({
+      success: true,
+      batches: [{
+        check_item_id: 'interface.oper_status',
+        quality_status: 'complete',
+        records: [{ interface: 'peer-link1' }],
+        errors: [],
+      }],
+      observations: [{ observation_type: 'interface.oper_status', value: 'up' }],
+    })
+    const createAdapter = vi.fn()
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          <ParserGenerationStep
+            jobId={succeededJob.id}
+            lockedCheckItemId="interface.oper_status"
+            onCreateAdapter={createAdapter}
+          />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    )
+
+    await screen.findByText('人工最终确认')
+    await userEvent.click(screen.getByText('生成与验证'))
+    expect(await screen.findByText('正在查看：生成与验证')).toBeVisible()
+    const generateButton = await screen.findByRole('button', { name: /LLM 生成 Projection/ })
+    await waitFor(() => expect(generateButton).toBeEnabled())
+    await userEvent.click(generateButton)
+    await waitFor(() => expect(generateProjection).toHaveBeenCalledWith({
+      check_item_id: 'interface.oper_status',
+      parser_template_id: candidate.id,
+      source_record_set: 'executed_vpc_peer',
+      generation_provider: 'llm',
+      max_agent_attempts: 3,
+    }))
+    await userEvent.click(screen.getByRole('button', { name: /本地执行$/ }))
+    await waitFor(() => expect(previewProjection).toHaveBeenCalled())
+    expect(screen.getByText(/"observation_type": "interface.oper_status"/)).toBeVisible()
+    await userEvent.click(screen.getByRole('button', { name: '使用 Projection 创建适配器' }))
+    expect(createAdapter).toHaveBeenCalledWith(expect.objectContaining({
+      checkItemId: 'interface.oper_status',
+      parserTemplateId: candidate.id,
+      sourceRecordSet: 'executed_vpc_peer',
+      adapterSpec,
+    }))
   })
 
   it('keeps a new candidate visible when an older active template exists', async () => {
@@ -636,7 +947,7 @@ describe('ParserGenerationStep', () => {
 
     expect(await screen.findByText('没有可确认的候选结果')).toBeVisible()
     expect(screen.queryByText('自动生成条件已满足')).not.toBeInTheDocument()
-    const button = screen.getByRole('button', { name: /重新生成/ })
+    const button = screen.getByRole('button', { name: '重新生成', exact: true })
     expect(button).toBeEnabled()
     await userEvent.click(button)
 

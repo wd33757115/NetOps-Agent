@@ -6,6 +6,7 @@
 from unittest.mock import MagicMock, patch
 
 import jwt
+import pytest
 
 from src.auth import token_store
 from src.common.config import get_settings
@@ -15,6 +16,19 @@ def _reset_redis_cache():
     token_store._redis_client = None
     token_store._redis_checked = False
     token_store._redis_next_retry_at = 0.0
+
+
+@pytest.fixture(autouse=True)
+def _isolate_redis_client_cache():
+    """Do not leave a mocked Redis client in the process-wide auth cache.
+
+    The production client is intentionally cached.  These tests patch the
+    Redis constructor, so both setup and teardown must clear that cache before
+    an integration test asks for the real server.
+    """
+    _reset_redis_cache()
+    yield
+    _reset_redis_cache()
 
 
 def test_is_auth_token_revoked_blacklisted_jti():

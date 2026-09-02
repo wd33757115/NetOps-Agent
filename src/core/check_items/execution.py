@@ -53,6 +53,7 @@ from src.infrastructure.db.models import (
     NetworkEventOccurrenceRecord,
     NetworkEventRecord,
     RiskCaseRecord,
+    StateObservationRecord,
 )
 from src.infrastructure.db.postgres import get_db_session
 
@@ -802,6 +803,21 @@ class CheckItemExecutionService:
                 )
                 for item in data.observations
             )
+            baseline_observations = tuple(
+                row.to_dict()
+                for row in (
+                    db.query(StateObservationRecord)
+                    .filter(
+                        StateObservationRecord.snapshot_id.in_(
+                            [str(item) for item in context.baseline_snapshot_ids_json or []]
+                        ),
+                        StateObservationRecord.device_id == execution.device_id,
+                    )
+                    .all()
+                    if context is not None and context.baseline_snapshot_ids_json
+                    else []
+                )
+            )
             rules = self._load_current_state_rules(db, assets)
             check_item_id = str(check_version.check_item_id)
             evidence_policy_snapshot = self._evidence_policy_snapshot(bundle)
@@ -842,6 +858,7 @@ class CheckItemExecutionService:
                         assessment_policy_snapshot=(
                             assessment_policy_snapshot
                         ),
+                        baseline_observations=baseline_observations,
                     )
                 )
                 if observations

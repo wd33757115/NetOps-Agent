@@ -71,14 +71,25 @@ def reset_business_data(
         ]
         table_counts: dict[str, int] = {}
         for table in tables:
-            table_counts[table.name] = int(db.execute(select(func.count()).select_from(table)).scalar() or 0)
+            count_statement = select(func.count()).select_from(table)
+            table_counts[table.name] = int(
+                db.execute(count_statement).scalar() or 0
+            )
 
         if not dry_run and tables:
-            identifier_preparer = db.get_bind().dialect.identifier_preparer
-            table_names = ", ".join(
-                identifier_preparer.quote(table.name) for table in tables
-            )
-            db.execute(text(f"TRUNCATE TABLE {table_names} RESTART IDENTITY"))
+            dialect_name = str(db.get_bind().dialect.name or "").casefold()
+            if dialect_name == "postgresql":
+                identifier_preparer = db.get_bind().dialect.identifier_preparer
+                table_names = ", ".join(
+                    identifier_preparer.quote(table.name) for table in tables
+                )
+                db.execute(text(f"TRUNCATE TABLE {table_names} RESTART IDENTITY"))
+            else:
+                # SQLite is used by focused repository tests and has no
+                # PostgreSQL TRUNCATE syntax.  Deleting in reverse dependency
+                # order preserves the same business-data reset semantics.
+                for table in tables:
+                    db.execute(table.delete())
 
     return DatabaseResetResult(
         success=True,

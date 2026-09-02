@@ -15,6 +15,28 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.common.config import get_settings  # noqa: E402
+from src.core.check_items.adapter_projection_migration import (  # noqa: E402
+    generate_projection_candidate,
+    migrate_legacy_adapter_to_v2,
+)
+from src.core.observation.record_set_relations import (  # noqa: E402
+    apply_record_set_relations,
+    required_threshold_reference_errors,
+)
+from src.core.observation.semantic_projection import (  # noqa: E402
+    SemanticProjectionError,
+    apply_value_mapping,
+    dimension_field_references,
+    dimension_schema_signature,
+    normalize_dimensions,
+    project_value,
+    resolve_dimensions,
+    transform_field_references,
+    validate_transform,
+    validate_unit_conversion,
+    validate_value_mapping,
+)
 from src.core.parser.contract_inference import infer_contract  # noqa: E402
 from src.core.parser.contract_validation import (  # noqa: E402
     infer_and_validate_contract,
@@ -31,23 +53,6 @@ from src.core.parser.semantic_catalog import (
 from src.core.parser.value_types import (  # noqa: E402
     is_unassigned_ip,
     is_valid_ip_value,
-)
-from src.core.observation.semantic_projection import (  # noqa: E402
-    SemanticProjectionError,
-    apply_value_mapping,
-    dimension_field_references,
-    dimension_schema_signature,
-    normalize_dimensions,
-    project_value,
-    resolve_dimensions,
-    transform_field_references,
-    validate_transform,
-    validate_unit_conversion,
-    validate_value_mapping,
-)
-from src.core.observation.record_set_relations import (  # noqa: E402
-    apply_record_set_relations,
-    required_threshold_reference_errors,
 )
 from src.core.rule_control.generation_agent import (  # noqa: E402
     DEFAULT_RULE_GENERATION_PROVIDERS,
@@ -149,7 +154,10 @@ def _reconcile_contract_seed_with_records(
                     "field": str(field),
                     "from": "ip",
                     "to": "ip_or_unassigned",
-                    "reason": "structured records contain only valid IP values or approved unassigned tokens",
+                    "reason": (
+                        "structured records contain only valid IP values or "
+                        "approved unassigned tokens"
+                    ),
                     "observed_unassigned_tokens": sorted(
                         {
                             str(value).strip()
@@ -2598,6 +2606,27 @@ def _run_multi_record_llm_generation(
 
 def run_contract_generation(params: dict[str, Any]) -> dict[str, Any]:
     mode = str(params.get("mode") or "infer_and_validate").strip().lower()
+    if mode in {
+        "projection_candidate",
+        "projection_validate",
+        "validate_projection",
+    }:
+        return generate_projection_candidate(params)
+    if mode in {"migrate_adapter", "adapter_migration"}:
+        return migrate_legacy_adapter_to_v2(
+            params.get("adapter_spec") or params.get("proposal"),
+            check_items=dict(params.get("check_items") or {}),
+            observation_contracts_by_check_item=dict(
+                params.get("observation_contracts_by_check_item") or {}
+            ),
+            parser_field_contract=dict(params.get("parser_field_contract") or {}),
+            sample_replay=dict(params.get("sample_replay") or {}),
+        )
+    if get_settings().ADAPTER_PROJECTION_CUTOVER_ENFORCED:
+        raise ValueError(
+            "ObservationContract generation is frozen after the CommandAdapter "
+            "V2 cutover; use projection_candidate or migrate_adapter"
+        )
     command = str(params.get("command") or "").strip()
     if not command:
         raise ValueError("command is required")

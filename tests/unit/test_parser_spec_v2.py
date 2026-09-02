@@ -217,3 +217,52 @@ def test_parser_spec_v2_treats_single_unavailable_token_as_one_value():
     assert document.record_sets[0].field_map["rx_power_dbm"].unavailable_tokens == (
         "N/A",
     )
+
+
+def test_parser_spec_allows_an_explicit_default_for_a_sparse_primary_key():
+    payload = {
+        "version": 2,
+        "business_purpose": "Inspect optical records whose aggregate channel is implicit.",
+        "record_sets": [
+            {
+                "name": "optics",
+                "entity": "interface_optical",
+                "cardinality": "repeated",
+                "primary_keys": ["interface", "channel_token"],
+                "fields": {
+                    "interface": {"required": True, "type": "interface_name"},
+                    "channel_token": {
+                        "required": False,
+                        "type": "text",
+                        "primary_key_default": "aggregate",
+                    },
+                },
+            }
+        ],
+    }
+
+    document = ParserSpecDocument.from_dict(payload)
+
+    assert document.to_dict()["record_sets"][0]["fields"]["channel_token"] == {
+        "required": False,
+        "type": "text",
+        "primary_key_default": "aggregate",
+    }
+
+
+def test_parser_spec_rejects_a_primary_key_default_outside_the_primary_key():
+    with pytest.raises(ValueError, match="allowed only for primary keys"):
+        ParserSpec.from_dict(
+            {
+                "entity": "interface",
+                "primary_keys": ["interface"],
+                "fields": {
+                    "interface": {"required": True, "type": "interface_name"},
+                    "label": {
+                        "required": False,
+                        "type": "text",
+                        "primary_key_default": "unknown",
+                    },
+                },
+            }
+        )

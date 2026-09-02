@@ -57,6 +57,7 @@ class FieldSpec:
     canonical_candidate: str | None = None
     evidence: tuple[str, ...] = ()
     unavailable_tokens: tuple[str, ...] = ()
+    primary_key_default: str | None = None
 
     def __post_init__(self) -> None:
         if not _FIELD_NAME_RE.fullmatch(self.name):
@@ -85,6 +86,12 @@ class FieldSpec:
             )
         if any(not str(item).strip() for item in self.unavailable_tokens):
             raise ValueError("ParserSpec unavailable_tokens cannot contain blank values")
+        if self.primary_key_default is not None:
+            default = str(self.primary_key_default)
+            if not default.strip() or default != default.strip():
+                raise ValueError(
+                    "ParserSpec primary_key_default must be a non-blank trimmed value"
+                )
 
     def validator(self) -> dict[str, Any]:
         if self.value_type == "enum":
@@ -132,10 +139,26 @@ class ParserSpec:
         missing_keys = sorted(set(self.primary_keys) - set(names))
         if missing_keys:
             raise ValueError(f"ParserSpec primary keys are not fields: {', '.join(missing_keys)}")
-        optional_keys = [key for key in self.primary_keys if not self.field_map[key].required]
+        optional_keys = [
+            key
+            for key in self.primary_keys
+            if not self.field_map[key].required
+            and self.field_map[key].primary_key_default is None
+        ]
         if optional_keys:
             raise ValueError(
-                f"ParserSpec primary keys must be required: {', '.join(optional_keys)}"
+                "ParserSpec primary keys must be required or declare a "
+                f"primary_key_default: {', '.join(optional_keys)}"
+            )
+        defaulted_non_keys = [
+            field.name
+            for field in self.fields
+            if field.primary_key_default is not None and field.name not in self.primary_keys
+        ]
+        if defaulted_non_keys:
+            raise ValueError(
+                "ParserSpec primary_key_default is allowed only for primary keys: "
+                + ", ".join(defaulted_non_keys)
             )
         if self.allow_empty and not self.empty_patterns:
             raise ValueError("allow_empty requires at least one explicit empty pattern")
@@ -151,6 +174,17 @@ class ParserSpec:
     @property
     def optional_fields(self) -> tuple[str, ...]:
         return tuple(field.name for field in self.fields if not field.required)
+
+    @property
+    def primary_key_defaults(self) -> dict[str, str]:
+        """Return validation-only defaults declared for primary-key fields."""
+
+        keys = set(self.primary_keys)
+        return {
+            field.name: str(field.primary_key_default)
+            for field in self.fields
+            if field.name in keys and field.primary_key_default is not None
+        }
 
     @property
     def validators(self) -> dict[str, dict[str, Any]]:
@@ -195,6 +229,11 @@ class ParserSpec:
                     **(
                         {"unavailable_tokens": list(field.unavailable_tokens)}
                         if field.unavailable_tokens
+                        else {}
+                    ),
+                    **(
+                        {"primary_key_default": field.primary_key_default}
+                        if field.primary_key_default is not None
                         else {}
                     ),
                 }
@@ -246,6 +285,11 @@ class ParserSpec:
                     evidence=tuple(str(item) for item in raw_config.get("evidence") or ()),
                     unavailable_tokens=_string_tuple(
                         raw_config.get("unavailable_tokens")
+                    ),
+                    primary_key_default=(
+                        str(raw_config.get("primary_key_default"))
+                        if raw_config.get("primary_key_default") is not None
+                        else None
                     ),
                 )
             )

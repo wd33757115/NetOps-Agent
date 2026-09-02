@@ -10,7 +10,7 @@ import sys
 import asyncio
 from pathlib import Path
 
-BASE_DIR = Path(__file__).parent.parent.parent
+BASE_DIR = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(BASE_DIR))
 
 from src.skills.registry import skill_registry

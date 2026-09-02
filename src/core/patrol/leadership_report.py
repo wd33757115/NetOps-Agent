@@ -1264,7 +1264,10 @@ def _cli_diff_rows(
                 )
             continue
         if tag == "delete":
-            rows.extend(([(line, True)], []) for line in baseline_lines[baseline_start:baseline_end])
+            rows.extend(
+                ([(line, True)], [])
+                for line in baseline_lines[baseline_start:baseline_end]
+            )
             continue
         if tag == "insert":
             rows.extend(([], [(line, True)]) for line in current_lines[current_start:current_end])
@@ -1337,9 +1340,6 @@ def build_leadership_report(
     recipient: str = "项目建设单位",
 ) -> dict[str, Any]:
     summary = dict(summary)
-    analysis_summary = dict(summary.get("analysis") or {})
-    analysis_summary.pop("rule_bundle_digest", None)
-    summary["analysis"] = analysis_summary
     if generated_at is None:
         generated_at = _report_datetime(
             (summary.get("analysis") or {}).get("completed_at")
@@ -1747,7 +1747,12 @@ def render_leadership_markdown(report: dict[str, Any]) -> str:
             current = dict(item.get("current") or {})
             outcome = event.get("event_label") or "未触发 Event"
             if event.get("severity"):
-                outcome = f"{outcome}（{SEVERITY_LABEL.get(_severity(event.get('severity')), event.get('severity'))}）"
+                severity = event.get("severity")
+                severity_label = SEVERITY_LABEL.get(
+                    _severity(severity),
+                    severity,
+                )
+                outcome = f"{outcome}（{severity_label}）"
             lines.append(
                 f"- [{outcome}] {item.get('device_name') or '-'} / "
                 f"`{item.get('command') or '-'}` / {item.get('entity_key') or '-'} / "
@@ -2289,7 +2294,12 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
             current = dict(item.get("current") or {})
             outcome = event.get("event_label") or "未触发 Event"
             if event.get("severity"):
-                outcome = f"{outcome} / {SEVERITY_LABEL.get(_severity(event.get('severity')), event.get('severity'))}"
+                severity = event.get("severity")
+                severity_label = SEVERITY_LABEL.get(
+                    _severity(severity),
+                    severity,
+                )
+                outcome = f"{outcome} / {severity_label}"
             if not event.get("event_id") and event.get("reason"):
                 outcome = f"{outcome}\n{event.get('reason')}"
             structured_rows.append(
@@ -2321,7 +2331,10 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
         if len(structured.get("items") or []) > 20:
             add_styled_paragraph(
                 doc,
-                f"其余 {len(structured.get('items') or []) - 20} 条结构化变化详见技术报告与事件数据附件。",
+                (
+                    f"其余 {len(structured.get('items') or []) - 20} 条结构化变化"
+                    "详见技术报告与事件数据附件。"
+                ),
                 first_line_indent=0.74,
             )
 

@@ -36,6 +36,11 @@ from src.core.check_items.catalog import (
     load_catalog_defaults,
     validate_check_item_definition,
 )
+from src.core.check_items.canonical_rule_context import (
+    CanonicalRuleContextService,
+    build_canonical_rule_context,
+    generate_canonical_rule_candidates,
+)
 from src.core.check_items.catalog_governance import (
     CatalogGovernanceConflictError,
     CheckItemCatalogGovernanceService,
@@ -178,6 +183,7 @@ from src.core.check_items.text_comparison import (
 )
 
 __all__ = [
+    "CanonicalRuleContextService",
     "AssetGapRepository",
     "BaselineCandidate",
     "DEFAULT_CATALOG_PATH",
@@ -270,6 +276,8 @@ __all__ = [
     "compare_text",
     "build_inventory_snapshot",
     "build_check_item_definition",
+    "build_canonical_rule_context",
+    "generate_canonical_rule_candidates",
     "validate_check_item_definition",
     "build_collection_implementation",
     "build_comparison_fact_contract",

@@ -27,6 +27,22 @@ observation_types:
       window: [instant, 5s, 1m, 5m, 15m]
     assessment_roles: [current_state, change]
 
+  - id: device.cpu.high_warning
+    description: Device-output or approved device-profile CPU warning threshold.
+    semantic_type: threshold
+    value_types: [number]
+    canonical_unit: percent
+    dimensions: [window]
+    assessment_roles: [reference]
+
+  - id: device.cpu.high_alarm
+    description: Device-output or approved device-profile CPU alarm threshold.
+    semantic_type: threshold
+    value_types: [number]
+    canonical_unit: percent
+    dimensions: [window]
+    assessment_roles: [reference]
+
   - id: device.memory.utilization
     description: Used memory as a percentage of total memory for one memory scope.
     semantic_type: gauge
@@ -34,6 +50,22 @@ observation_types:
     canonical_unit: percent
     dimensions: []
     assessment_roles: [current_state, change]
+
+  - id: device.memory.high_warning
+    description: Device-output or approved device-profile memory warning threshold.
+    semantic_type: threshold
+    value_types: [number]
+    canonical_unit: percent
+    dimensions: []
+    assessment_roles: [reference]
+
+  - id: device.memory.high_alarm
+    description: Device-output or approved device-profile memory alarm threshold.
+    semantic_type: threshold
+    value_types: [number]
+    canonical_unit: percent
+    dimensions: []
+    assessment_roles: [reference]
 
   - id: device.memory.used
     description: Used memory capacity for one memory scope.
@@ -57,6 +89,11 @@ observation_types:
     value_types: [text]
     allowed_values:
       [up, down, admin_down, absent, error_disabled, unavailable, unknown]
+    state_groups:
+      healthy: [up]
+      unhealthy: [down, error_disabled, unavailable]
+      suppressed: [admin_down, absent]
+      unknown: [unknown]
     dimensions: []
     assessment_roles: [current_state, change]
 
@@ -73,6 +110,10 @@ observation_types:
     semantic_type: state
     value_types: [boolean, text]
     allowed_values: [present, absent, unknown]
+    state_groups:
+      healthy: [present]
+      unhealthy: [absent]
+      unknown: [unknown]
     dimensions: [channel]
     assessment_roles: [current_state, change]
 
@@ -100,6 +141,30 @@ observation_types:
     dimensions: [channel]
     assessment_roles: [reference]
 
+  - id: interface.optical.rx_low_alarm
+    description: Device-reported low receive-power alarm threshold for one interface channel.
+    semantic_type: threshold
+    value_types: [number]
+    canonical_unit: dbm
+    dimensions: [channel]
+    assessment_roles: [reference]
+
+  - id: interface.optical.rx_high_warning
+    description: Device-reported high receive-power warning threshold for one interface channel.
+    semantic_type: threshold
+    value_types: [number]
+    canonical_unit: dbm
+    dimensions: [channel]
+    assessment_roles: [reference]
+
+  - id: interface.optical.rx_high_alarm
+    description: Device-reported high receive-power alarm threshold for one interface channel.
+    semantic_type: threshold
+    value_types: [number]
+    canonical_unit: dbm
+    dimensions: [channel]
+    assessment_roles: [reference]
+
   - id: interface.optical.tx_low_warning
     description: Device-reported low transmit-power warning threshold for one interface channel.
     semantic_type: threshold
@@ -108,10 +173,53 @@ observation_types:
     dimensions: [channel]
     assessment_roles: [reference]
 
+  - id: interface.optical.tx_low_alarm
+    description: Device-reported low transmit-power alarm threshold for one interface channel.
+    semantic_type: threshold
+    value_types: [number]
+    canonical_unit: dbm
+    dimensions: [channel]
+    assessment_roles: [reference]
+
+  - id: interface.optical.tx_high_warning
+    description: Device-reported high transmit-power warning threshold for one interface channel.
+    semantic_type: threshold
+    value_types: [number]
+    canonical_unit: dbm
+    dimensions: [channel]
+    assessment_roles: [reference]
+
+  - id: interface.optical.tx_high_alarm
+    description: Device-reported high transmit-power alarm threshold for one interface channel.
+    semantic_type: threshold
+    value_types: [number]
+    canonical_unit: dbm
+    dimensions: [channel]
+    assessment_roles: [reference]
+
+  - id: interface.optical.part_number
+    description: Optical transceiver manufacturer part number used to bind baselines.
+    semantic_type: state
+    value_types: [text]
+    dimensions: [channel]
+    assessment_roles: [evidence]
+
+  - id: interface.optical.serial_number
+    description: Optical transceiver serial number used to bind baselines.
+    semantic_type: state
+    value_types: [text]
+    dimensions: [channel]
+    assessment_roles: [evidence]
+
   - id: environment.fan.state
     description: Current presence and operating health state of one fan.
     semantic_type: state
     value_types: [text]
+    allowed_values: [normal, up, down, failed, absent, unknown]
+    state_groups:
+      healthy: [normal, up]
+      unhealthy: [down, failed, absent]
+      unknown: [unknown]
     dimensions: []
     assessment_roles: [current_state, change]
 
@@ -119,6 +227,11 @@ observation_types:
     description: Current presence and operating health state of one power supply.
     semantic_type: state
     value_types: [text]
+    allowed_values: [normal, up, down, failed, absent, unknown]
+    state_groups:
+      healthy: [normal, up]
+      unhealthy: [down, failed, absent]
+      unknown: [unknown]
     dimensions: []
     assessment_roles: [current_state, change]
 
@@ -141,6 +254,10 @@ observation_types:
     semantic_type: state
     value_types: [text]
     allowed_values: [up, down, degraded, absent, unknown]
+    state_groups:
+      healthy: [up]
+      unhealthy: [down, degraded, absent]
+      unknown: [unknown]
     dimensions: []
     assessment_roles: [current_state, change]
 
@@ -198,6 +315,11 @@ observation_types:
     semantic_type: state
     value_types: [text]
     allowed_values: [master, backup, initialize, inactive, unknown]
+    state_groups:
+      healthy: [master, backup]
+      transitional: [initialize]
+      unhealthy: [inactive]
+      unknown: [unknown]
     dimensions: []
     assessment_roles: [current_state, change]
 
@@ -205,6 +327,11 @@ observation_types:
     description: Current membership and operating state of one stack or IRF member.
     semantic_type: state
     value_types: [text]
+    allowed_values: [active, ready, normal, standby, down, failed, absent, unknown]
+    state_groups:
+      healthy: [active, ready, normal, standby]
+      unhealthy: [down, failed, absent]
+      unknown: [unknown]
     dimensions: []
     assessment_roles: [current_state, change]
 
@@ -212,6 +339,11 @@ observation_types:
     description: Current operating state of one multi-chassis link aggregation domain.
     semantic_type: state
     value_types: [text]
+    allowed_values: [active, up, normal, down, degraded, failed, unknown]
+    state_groups:
+      healthy: [active, up, normal]
+      unhealthy: [down, degraded, failed]
+      unknown: [unknown]
     dimensions: []
     assessment_roles: [current_state, change]
 

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   Alert,
   Button,
@@ -9,16 +9,19 @@ import {
   Select,
   Space,
   Switch,
+  Tag,
   Typography,
   message,
 } from 'antd'
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 
 import type {
+  CanonicalRuleCandidates,
   CanonicalObservationCatalog,
   CheckItemCatalogCheckItemDraftInput,
   ParserCheckItem,
 } from '../../../services/api'
+import { parserApi } from '../../../services/api'
 
 interface CheckItemEditorDrawerProps {
   open: boolean
@@ -30,6 +33,7 @@ interface CheckItemEditorDrawerProps {
   loading?: boolean
   onClose: () => void
   onSubmit: (payload: CheckItemCatalogCheckItemDraftInput) => void
+  onOpenRuleBundle?: (bundleId: string, checkItemVersionId: string) => void
 }
 
 interface CheckItemFormValues {
@@ -48,9 +52,6 @@ interface CheckItemFormValues {
     unit?: string
     required: boolean
   }>
-  tracked_fields: string[]
-  evaluation_json: string
-  events_json: string
   report_projection: string
   max_observation_age?: string
   max_collection_span?: string
@@ -71,18 +72,6 @@ const jsonObject = (value: string | undefined, label: string): Record<string, un
     return parsed
   } catch {
     throw new Error(`${label}不是有效 JSON 对象`)
-  }
-}
-
-const jsonArray = (value: string | undefined, label: string): Array<Record<string, unknown>> => {
-  try {
-    const parsed = JSON.parse(value || '[]')
-    if (!Array.isArray(parsed) || parsed.some((item) => !item || Array.isArray(item) || typeof item !== 'object')) {
-      throw new Error()
-    }
-    return parsed as Array<Record<string, unknown>>
-  } catch {
-    throw new Error(`${label}不是有效 JSON 数组`)
   }
 }
 
@@ -109,11 +98,6 @@ const initialValues = (checkItem?: ParserCheckItem): CheckItemFormValues => {
       unit: String(item.unit || ''),
       required: item.required !== false,
     })),
-    tracked_fields: Array.isArray((contract.change as Record<string, unknown> | undefined)?.tracked_fields)
-      ? ((contract.change as Record<string, unknown>).tracked_fields as unknown[]).map(String)
-      : observations.map((item) => String(item.canonical_field || '')).filter(Boolean),
-    evaluation_json: JSON.stringify(Array.isArray(contract.evaluation) ? contract.evaluation : [], null, 2),
-    events_json: JSON.stringify(Array.isArray(contract.events) ? contract.events : [], null, 2),
     report_projection: checkItem?.report_projection || 'auto',
     max_observation_age: String(checkItem?.freshness_policy?.max_observation_age || '24h'),
     max_collection_span: String(checkItem?.freshness_policy?.max_collection_span || '8h'),
@@ -140,18 +124,33 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
   loading,
   onClose,
   onSubmit,
+  onOpenRuleBundle,
 }) => {
   const [form] = Form.useForm<CheckItemFormValues>()
   const resultMode = Form.useWatch('result_mode', form)
   const assessmentMode = Form.useWatch('assessment_mode', form)
   const coverageModel = Form.useWatch('coverage_model', form)
+  const canonicalFields = Form.useWatch('canonical_fields', form) || []
+  const [ruleCandidates, setRuleCandidates] = useState<CanonicalRuleCandidates | null>(null)
+  const [rulePreviewLoading, setRulePreviewLoading] = useState(false)
+  const [ruleDraftLoading, setRuleDraftLoading] = useState(false)
+  const publishedRows = Array.isArray(checkItem?.canonical_contract?.observations)
+    ? checkItem.canonical_contract.observations as Array<Record<string, unknown>>
+    : []
 
   useEffect(() => {
-    if (open) form.setFieldsValue(initialValues(checkItem))
+    if (open) {
+      form.setFieldsValue(initialValues(checkItem))
+      setRuleCandidates(null)
+    }
   }, [checkItem, form, open])
 
   const buildCanonicalContract = (values: CheckItemFormValues) => {
     const contract = jsonObject(values.canonical_contract_json, '标准输出契约')
+    const canonicalBase = { ...contract }
+    delete canonicalBase.change
+    delete canonicalBase.evaluation
+    delete canonicalBase.events
     const existingRows = new Map(
       (Array.isArray(contract.observations)
         ? contract.observations as Array<Record<string, unknown>>
@@ -209,17 +208,49 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
       }
     }
     return {
-      ...contract,
+      ...canonicalBase,
       entity_type: values.entity_type,
       identity_dimensions: values.identity_dimensions || [],
       observations,
       parser_field_vocabulary: vocabulary,
-      change: {
-        ...(typeof contract.change === 'object' && contract.change ? contract.change : {}),
-        tracked_fields: values.tracked_fields || [],
-      },
-      evaluation: jsonArray(values.evaluation_json, '当前值判断规则'),
-      events: jsonArray(values.events_json, '事件规则'),
+    }
+  }
+
+  const previewPublishedRules = async () => {
+    if (!checkItem?.check_item_version_id) return
+    setRulePreviewLoading(true)
+    try {
+      const result = await parserApi.generateCheckItemRuleCandidates(
+        checkItem.check_item_version_id,
+      )
+      setRuleCandidates(result)
+      if (result.success) message.success('规则候选已按标准语义生成')
+      else message.warning('标准语义仍有缺项，请按阻塞提示补充')
+    } catch (error: any) {
+      message.error(error?.response?.data?.detail || '规则候选生成失败')
+    } finally {
+      setRulePreviewLoading(false)
+    }
+  }
+
+  const createRuleDrafts = async () => {
+    if (!checkItem?.check_item_version_id) return
+    setRuleDraftLoading(true)
+    try {
+      const result = await parserApi.createCheckItemRuleCandidateDrafts(
+        checkItem.check_item_version_id,
+      )
+      setRuleCandidates(result)
+      if (result.bundle_id) {
+        message.success('规则草稿已创建，正在打开工程复核与审批')
+        onOpenRuleBundle?.(result.bundle_id, checkItem.check_item_version_id)
+      } else {
+        message.success('该检查项不需要变化策略或事件规则草稿')
+      }
+    } catch (error: any) {
+      message.error(error?.response?.data?.detail || '规则草稿创建失败')
+    } finally {
+      setRuleDraftLoading(false)
     }
   }
 
@@ -481,37 +512,134 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
 
         {resultMode === 'structured' && (
           <>
-            <Typography.Title level={5}>变化、当前值与事件</Typography.Title>
+            <Typography.Title level={5}>规则生成依据</Typography.Title>
             <Alert
               type="info"
               showIcon
-              message="这些规则属于检查项，所有厂商命令适配器共同复用"
-              description="没有历史基线时仍执行当前值判断；事件只消费已发布的确定性规则。空数组表示该检查项暂不产生对应结论。"
+              message="变化策略和事件规则只读取这里的标准语义"
+              description="厂商样本与 TextFSM 只负责把原始输出投影为标准观测，不参与规则生成。状态值域、阈值、恢复条件与事件名称由检查项版本统一定义。"
               style={{ marginBottom: 16 }}
             />
-            <Form.Item
-              label="变化跟踪字段"
-              name="tracked_fields"
-              extra="只比较这些标准列。CPU 等瞬时指标可以不加入，避免产生无意义变化。"
-            >
-              <Select mode="tags" tokenSeparators={[',']} placeholder="例如 oper_status, description" />
-            </Form.Item>
-            <Form.Item
-              label="当前值判断规则"
-              name="evaluation_json"
-              rules={[{ required: true }]}
-              extra={'示例：[ {"id":"cpu_high","field":"cpu_usage_percent","operator":">=","value":80,"severity":"warning"} ]'}
-            >
-              <Input.TextArea rows={6} />
-            </Form.Item>
-            <Form.Item
-              label="事件规则"
-              name="events_json"
-              rules={[{ required: true }]}
-              extra={'示例：[ {"id":"InterfaceDown","when":{"from":"up","to":"down"}}, {"id":"InterfaceUp","recovery_of":"InterfaceDown","when":{"to":"up"}} ]'}
-            >
-              <Input.TextArea rows={6} />
-            </Form.Item>
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              {canonicalFields.map((field) => {
+                const definition = canonicalCatalog?.items.find(
+                  (item) => item.id === field.observation_type,
+                )
+                if (!definition) return null
+                const published = publishedRows.find((row) => (
+                  String(row.observation_type || '') === field.observation_type
+                  && String(row.canonical_field || '') === field.name
+                )) || {}
+                const thresholdReferences = (
+                  published.threshold_references
+                  && typeof published.threshold_references === 'object'
+                  && !Array.isArray(published.threshold_references)
+                ) ? published.threshold_references as Record<string, Record<string, unknown>> : {}
+                const baseline = (
+                  published.baseline_comparison
+                  && typeof published.baseline_comparison === 'object'
+                  && !Array.isArray(published.baseline_comparison)
+                ) ? published.baseline_comparison as Record<string, unknown> : {}
+                const identityFields = Array.isArray(baseline.identity_fields)
+                  ? baseline.identity_fields.map(String)
+                  : []
+                return (
+                  <div className="check-item-adapter-output" key={`${field.name}-${field.observation_type}`}>
+                    <Space wrap>
+                      <Typography.Text strong>{field.name || field.observation_type}</Typography.Text>
+                      <Tag>{definition.semantic_type}</Tag>
+                      {definition.assessment_roles.map((role) => <Tag key={role} color="blue">{role}</Tag>)}
+                      {Object.keys(thresholdReferences).length > 0 && (
+                        <Tag color="cyan">动态阈值</Tag>
+                      )}
+                      {baseline.kind === 'linear_power_loss_ratio' && (
+                        <Tag color="purple">线性功率基线</Tag>
+                      )}
+                    </Space>
+                    {Object.keys(definition.state_groups || {}).length > 0 && (
+                      <Typography.Paragraph type="secondary" style={{ margin: '8px 0 0' }}>
+                        状态分组：{Object.entries(definition.state_groups).map(([group, values]) => (
+                          `${group}=${values.map(String).join('/')}`
+                        )).join('；')}
+                      </Typography.Paragraph>
+                    )}
+                    {Object.keys(thresholdReferences).length > 0 && (
+                      <Typography.Paragraph type="secondary" style={{ margin: '8px 0 0' }}>
+                        阈值来源：设备输出优先，其次为设备/型号策略；不使用全局固定值。字段关系：{
+                          Object.entries(thresholdReferences).map(([role, reference]) => (
+                            `${role}→${String(reference.field_name || '未配置')}`
+                          )).join('；')
+                        }
+                      </Typography.Paragraph>
+                    )}
+                    {baseline.kind === 'linear_power_loss_ratio' && (
+                      <Typography.Paragraph type="secondary" style={{ margin: '8px 0 0' }}>
+                        基线：先将 dBm 转换为线性功率，允许衰减 {
+                          Number(baseline.max_loss_ratio || 0) * 100
+                        }%；模块身份字段：{identityFields.join(' + ') || '未配置'}。身份缺失或变化时结果为 Unknown。
+                      </Typography.Paragraph>
+                    )}
+                  </div>
+                )
+              })}
+              {checkItem && (
+                <Button loading={rulePreviewLoading} onClick={() => void previewPublishedRules()}>
+                  按当前已发布语义预览规则
+                </Button>
+              )}
+              {ruleCandidates && (
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Alert
+                    type={ruleCandidates.success ? 'success' : 'warning'}
+                    showIcon
+                    message={ruleCandidates.success
+                      ? `已生成 ${ruleCandidates.change_policies.length} 个变化策略、${ruleCandidates.event_rules.length} 条事件规则`
+                      : '标准语义还不足以生成完整规则'}
+                    description={ruleCandidates.success
+                      ? '输入中包含 0 条样本、0 个 Parser 模板。'
+                      : ruleCandidates.blockers.map((item) => (
+                        `${item.observation_type}：${item.message}`
+                      )).join('；')}
+                  />
+                  {ruleCandidates.success && !ruleCandidates.drafts_created && (
+                    <Button
+                      type="primary"
+                      loading={ruleDraftLoading}
+                      onClick={() => void createRuleDrafts()}
+                    >
+                      创建规则草稿
+                    </Button>
+                  )}
+                  {ruleCandidates.success && ruleCandidates.change_policies.map((policy, index) => {
+                    const references = policy.threshold_references as Record<string, Record<string, unknown>> | undefined
+                    const baseline = policy.baseline_comparison as Record<string, unknown> | undefined
+                    if (!references && !baseline) return null
+                    return (
+                      <div className="check-item-adapter-output" key={`${String(policy.observation_type)}-${index}`}>
+                        <Typography.Text strong>{String(policy.observation_type)}</Typography.Text>
+                        {references && (
+                          <Typography.Paragraph type="secondary" style={{ margin: '6px 0 0' }}>
+                            动态阈值：{Object.entries(references).map(([role, value]) => `${role}→${String(value.field_name || '')}`).join('；')}
+                          </Typography.Paragraph>
+                        )}
+                        {baseline && (
+                          <Typography.Paragraph type="secondary" style={{ margin: '6px 0 0' }}>
+                            基线衰减上限：{Number(baseline.max_loss_ratio || 0) * 100}%（线性功率）
+                          </Typography.Paragraph>
+                        )}
+                      </div>
+                    )
+                  })}
+                  {ruleCandidates.drafts_created && (
+                    <Typography.Text type="success">
+                      {ruleCandidates.bundle_id
+                        ? '规则草稿已进入工程复核与审批发布链。'
+                        : '该检查项没有需要发布的变化策略或事件规则。'}
+                    </Typography.Text>
+                  )}
+                </Space>
+              )}
+            </Space>
           </>
         )}
 

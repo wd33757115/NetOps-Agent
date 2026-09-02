@@ -7,6 +7,8 @@ from src.core.check_items.assessment_policy import (
     canonical_digest,
     resolve_assessment_basis,
 )
+from src.core.check_items.catalog import load_catalog
+import pytest
 
 CPU_CONTRACT = {
     "entity_type": "cpu_scope",
@@ -187,6 +189,65 @@ def test_inventory_profile_beats_scope_override_and_catalog_default() -> None:
 
     assert result.effective_condition["gte"] == 90
     assert result.basis["threshold_binding"]["source_kind"] == "inventory_profile"
+
+
+@pytest.mark.parametrize(
+    ("check_item_id", "observation_type", "field", "reference_field"),
+    [
+        ("system.cpu_usage", "device.cpu.utilization", "cpu_usage_percent", "cpu_high_warning_percent"),
+        ("system.memory_usage", "device.memory.utilization", "memory_usage_percent", "memory_high_warning_percent"),
+    ],
+)
+def test_device_profiles_resolve_different_cpu_and_memory_thresholds(
+    check_item_id: str,
+    observation_type: str,
+    field: str,
+    reference_field: str,
+) -> None:
+    item = load_catalog().check_item(check_item_id)
+    assert item is not None
+    resolved_values = []
+    for device_id, threshold in (("model-a", 80), ("model-b", 95)):
+        source = _approved_source(f"{device_id}-threshold", value=threshold)
+        source["check_item_id"] = check_item_id
+        source["observation_type"] = observation_type
+        _resign(source)
+        snapshot = build_target_assessment_policy_snapshot(
+            check_item_id=check_item_id,
+            check_item_version_id=item.version_id,
+            canonical_contract=item.canonical_contract,
+            device={
+                "id": device_id,
+                "attributes": {"assessment_policy_bindings": [source]},
+            },
+        )
+        observation = {
+            **_cpu_observation(),
+            "device_id": device_id,
+            "observation_type": observation_type,
+            "field": field,
+            "context": {},
+        }
+        rule = {
+            **_cpu_rule(),
+            "condition": {
+                "kind": "threshold_field_gte",
+                "threshold_role": "high",
+                "fields": [field],
+                "reference_field": reference_field,
+            },
+        }
+        result = resolve_assessment_basis(
+            rule=rule,
+            observation=observation,
+            policy_snapshot=snapshot,
+            runtime_bundle_version_id="bundle-v1",
+            runtime_bundle_digest="b" * 64,
+        )
+        resolved_values.append(result.effective_condition["gte"])
+        assert result.basis["threshold_binding"]["source_kind"] == "inventory_profile"
+
+    assert resolved_values == [80.0, 95.0]
 
 
 def test_scope_override_beats_explicit_catalog_default() -> None:

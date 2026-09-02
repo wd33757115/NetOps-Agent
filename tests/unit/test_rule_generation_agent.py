@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from src.core.rule_control.generation_agent import (
+    AdapterProjectionCandidate,
     ProviderResult,
     RuleGenerationAgent,
+    _system_prompt,
     assert_sanitized_generation_context,
 )
 
@@ -80,3 +82,43 @@ def test_rule_generation_context_rejects_raw_or_secret_fields():
         assert "nested.raw_text" in str(exc)
     else:
         raise AssertionError("raw context should be rejected")
+
+
+def test_adapter_projection_candidate_accepts_llm_source_field_context():
+    candidate = AdapterProjectionCandidate.model_validate(
+        {
+            "schema_version": "command-adapter/v2",
+            "parser": {
+                "template_id": "parser-fan-v1",
+                "source_record_set": "environment_fan",
+                "source_fields": ["slot", "fan", "fan_status"],
+            },
+            "outputs": [
+                {
+                    "check_item_id": "environment.fan",
+                    "check_item_version_id": "environment-fan-v1",
+                    "source_record_set": "environment_fan",
+                    "projection": {
+                        "identity_fields": ["slot", "fan"],
+                        "required_target_fields": ["slot", "fan", "fan_status"],
+                        "fields": {
+                            "slot": {"source": "slot"},
+                            "fan": {"source": "fan"},
+                            "fan_status": {"source": "fan_status"},
+                        }
+                    },
+                }
+            ],
+        }
+    )
+
+    assert candidate.parser["source_fields"] == ["slot", "fan", "fan_status"]
+
+
+def test_adapter_projection_prompt_requires_field_level_dimension_bindings():
+    prompt = _system_prompt("adapter_projection")
+
+    assert "Dimensions belong inside the\nbinding for their canonical field" in prompt
+    assert '"window": {"literal": "5m"}' in prompt
+    assert "policy_constraints.applies_to_dimensions" in prompt
+    assert "use a metric value as a dimension" in prompt

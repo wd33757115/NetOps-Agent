@@ -704,6 +704,8 @@ export interface ParserRuleAssetEngineeringDraft {
   event_rules: Array<Record<string, unknown>>
   review: Record<string, unknown>
   editable: boolean
+  context_mode?: string | null
+  asset_requirements?: ParserRuleAssetBundle['asset_requirements']
   completeness: {
     contract_count: number
     change_policy_count: number
@@ -964,6 +966,10 @@ export interface OfflineCommandAssetUnit {
   id: string
   offline_job_id: string
   check_item_id?: string | null
+  candidate_check_item_id?: string | null
+  candidate_check_item_version_id?: string | null
+  candidate_check_item_name?: string | null
+  candidate_association_status?: 'preproduction' | null
   asset_key: string
   vendor: string
   model?: string | null
@@ -972,7 +978,7 @@ export interface OfflineCommandAssetUnit {
   profile: string
   canonical_command: string
   handling: string
-  asset_mode: 'full_chain' | 'observation_only' | 'change_only' | 'raw_hash' | 'ignored'
+  asset_mode: 'full_chain' | 'observation_only' | 'change_only' | 'raw_hash' | 'ignored' | 'preproduction_mapping' | 'preproduction_text'
   status: OfflineCommandAssetUnitStatus
   current_stage: string
   current_stage_label: string
@@ -1032,6 +1038,57 @@ export interface OfflineCommandAssetUnitPage {
   total: number
   page_count: number
   summary: OfflineCommandAssetUnitSummary
+}
+
+export interface CheckItemProductionGroup {
+  id: string
+  check_item_id?: string | null
+  check_item_version_id?: string | null
+  name: string
+  display_name: string
+  category: string
+  description: string
+  display_description: string
+  classification_required: boolean
+  preproduction_associated?: boolean
+  governance_status: string
+  governance_bucket: string
+  current_stage: string
+  current_stage_label: string
+  progress_percent: number
+  sample_count: number
+  evidence_device_count: number
+  implementation_count: number
+  command_count: number
+  blocker_count: number
+  vendors: string[]
+  next_action?: OfflineRuleAssetPipelineAction | null
+  implementations: Array<OfflineCommandAssetUnit & {
+    mapping_status: 'catalog_resolved' | 'preproduction_associated' | 'unclassified' | 'not_required'
+    implementation_id?: string | null
+    implementation_version_id?: string | null
+    implementation_name?: string | null
+  }>
+}
+
+export interface CheckItemProductionGroupPage {
+  items: CheckItemProductionGroup[]
+  page: number
+  page_size: number
+  total: number
+  page_count: number
+  summary: {
+    total: number
+    action_required: number
+    in_progress: number
+    awaiting_approval: number
+    published: number
+    not_applicable: number
+    exception: number
+    unclassified: number
+    by_bucket: Record<string, number>
+    by_status: Record<string, number>
+  }
 }
 
 export interface OfflinePatrolReportRisk {
@@ -1399,6 +1456,7 @@ export interface ParserChangePolicy {
   version_status: string
   status: string
   source_job_id?: string | null
+  check_item_version_id?: string | null
   digest: string
   activated_at?: string | null
   deprecated_at?: string | null
@@ -1915,6 +1973,7 @@ export interface ParserEventRule {
   condition: Record<string, unknown>
   version_status: string
   source_job_id?: string | null
+  check_item_version_id?: string | null
   validation_report?: Record<string, unknown> | null
   digest?: string | null
   created_by?: string | null
@@ -2195,6 +2254,7 @@ export interface CanonicalObservationDefinition {
   dimensions: string[]
   allowed_dimension_values: Record<string, string[]>
   allowed_values: unknown[]
+  state_groups: Record<string, unknown[]>
   assessment_roles: string[]
 }
 
@@ -2204,6 +2264,71 @@ export interface CanonicalObservationCatalog {
   status: string
   digest: string
   items: CanonicalObservationDefinition[]
+}
+
+export interface CanonicalRuleTarget {
+  observation_type: string
+  canonical_field: string
+  required: boolean
+  semantic_type: string
+  value_types: string[]
+  unit?: string | null
+  dimensions: string[]
+  allowed_values: unknown[]
+  state_groups: Record<string, unknown[]>
+  assessment_roles: string[]
+  policy_constraints: Record<string, unknown>
+  event_constraints: Record<string, unknown>
+  threshold_references: Record<string, { field_name?: string; [key: string]: unknown }>
+  baseline_comparison: Record<string, unknown>
+  context_fields: string[]
+}
+
+export interface CanonicalRuleContext {
+  schema_version: 'canonical-rule-context/v1'
+  check_item_id: string
+  check_item_version_id: string
+  result_mode: string
+  assessment_mode: string
+  contract: Record<string, unknown>
+  targets: CanonicalRuleTarget[]
+  asset_requirement_profile: Record<string, unknown>
+  rule_asset_requirements: {
+    requires_observation_contract: boolean
+    requires_change_policy: boolean
+    requires_current_state_rule: boolean
+    requires_event_rule: boolean
+    requires_event_rule_assets: boolean
+    requires_historical_replay: boolean
+    current_state_observation_types: string[]
+    change_policy_observation_types: string[]
+    required_event_types_by_observation: Record<string, string[]>
+  }
+  digest: string
+  check_item?: Record<string, unknown>
+}
+
+export interface CanonicalRuleCandidates {
+  schema_version: 'canonical-rule-candidates/v1'
+  check_item_id: string
+  check_item_version_id: string
+  context_digest: string
+  success: boolean
+  change_policies: Array<Record<string, unknown>>
+  event_rules: Array<Record<string, unknown>>
+  blockers: Array<{ code: string; observation_type: string; message: string }>
+  input_summary: {
+    source: 'canonical_semantics_only'
+    sample_count: 0
+    parser_template_count: 0
+  }
+  digest: string
+  drafts_created?: boolean
+  change_policy_assets?: Array<Record<string, unknown>>
+  event_rule_version_ids?: string[]
+  bundle_id?: string | null
+  bundle_status?: string | null
+  rule_job_ids?: string[]
 }
 
 export interface CheckItemCatalogCheckItemDeleteResult {
@@ -2220,6 +2345,118 @@ export interface CheckItemCatalogImplementationDeleteResult {
   status: 'deprecated'
   cancelled_change_count: number
   idempotent_replay: boolean
+}
+
+export interface AdapterProjectionCandidateInput {
+  check_item_id: string
+  parser_template_id: string
+  source_record_set: string
+  generation_provider?: 'deterministic' | 'llm'
+  max_agent_attempts?: number
+  proposal?: Record<string, unknown>
+}
+
+export interface AdapterProjectionCandidateResult {
+  success: boolean
+  mode: 'projection_candidate' | 'projection_validate'
+  proposal?: Record<string, unknown>
+  validation: {
+    success: boolean
+    errors: string[]
+    adapter_spec?: Record<string, unknown>
+    projection_manifest?: Record<string, unknown>
+  }
+  generation_provider?: 'deterministic' | 'llm'
+  agent_loop?: Record<string, unknown>
+  generation_context: {
+    schema_version: string
+    selected_check_item: {
+      id: string
+      version_id: string
+      entity_type: string
+      identity_fields: string[]
+    }
+    parser: {
+      template_id: string
+      source_record_set: string
+      source_fields: string[]
+    }
+    allowed_target_fields: string[]
+    required_target_fields: string[]
+    observation_targets: Array<Record<string, unknown>>
+  }
+}
+
+export interface AdapterProjectionPreviewResult {
+  success: boolean
+  batches: Array<{
+    check_item_id: string
+    check_item_version_id?: string
+    quality_status: string
+    records: Array<Record<string, unknown>>
+    errors: string[]
+    evidence?: Record<string, unknown>
+  }>
+  observations: Array<Record<string, unknown>>
+}
+
+export interface AdapterProjectionReplayAttestation {
+  success: boolean
+  status: 'passed' | 'complete' | 'ready' | 'failed' | 'blocked' | 'pending'
+  collected_sample_count: number
+  sample_count: number
+  standard_records_verified: boolean
+  primary_keys_verified: boolean
+  quality_status_verified: boolean
+  rule_results_verified: boolean
+  evidence_summary_verified: boolean
+  evidence_digest?: string
+}
+
+export interface AdapterProjectionCutoverRoute {
+  route_id: string
+  implementation_version_id: string
+  check_item_version_ids: string[]
+  status: 'ready' | 'blocked'
+  success: boolean
+  adapter_spec?: Record<string, unknown> | null
+  blockers: Array<{ code: string; message: string; [key: string]: unknown }>
+  warnings: Array<{ code: string; message: string; [key: string]: unknown }>
+  replay_attestation: Partial<AdapterProjectionReplayAttestation>
+}
+
+export interface AdapterProjectionCutoverReadiness {
+  schema_version: 'adapter-projection-cutover/v1'
+  route_count: number
+  ready_route_count: number
+  blocked_route_count: number
+  production_cutover_permitted: boolean
+  hard_gate: string
+  routes: AdapterProjectionCutoverRoute[]
+  blockers: Array<{
+    route_id: string
+    blockers: Array<{ code: string; message: string; [key: string]: unknown }>
+  }>
+  digest: string
+  inventory_scope?: Record<string, unknown>
+  replay_attestation_sources?: Record<string, 'audit' | 'request'>
+  recorded_implementation_version_ids?: string[]
+  cutover_authorization?: {
+    authorization_id: string
+    actor: string
+    authorized_at?: string
+    readiness_digest: string
+    matches_current_readiness: boolean
+    reason?: string
+    [key: string]: unknown
+  } | null
+}
+
+export interface AdapterProjectionCutoverAuthorizationResult {
+  success: boolean
+  status: 'authorized'
+  authorization: Record<string, unknown>
+  readiness: AdapterProjectionCutoverReadiness
 }
 
 export interface ParserCommandProfileBinding {
@@ -3668,12 +3905,13 @@ export const parserApi = {
     id: string,
     data: { parser_spec: Record<string, unknown>; confirmed: boolean; reason: string },
   ) => (await api.put(`/parser/jobs/${id}/spec/`, data)).data,
-  suggestJobSpec: async (id: string, revisionInstruction = '') => (
+  suggestJobSpec: async (id: string, revisionInstruction = '', checkItemId = '') => (
     await api.post(`/parser/jobs/${id}/suggest-spec/`, {
       reason: revisionInstruction.trim()
         ? 'Engineer requested a natural-language ParserSpec revision'
         : 'Generate ParserSpec draft from sanitized samples',
       revision_instruction: revisionInstruction.trim() || undefined,
+      check_item_id: checkItemId.trim() || undefined,
     })
   ).data,
   updateJobSampleRole: async (
@@ -3827,6 +4065,25 @@ export const parserApi = {
   canonicalObservations: async (): Promise<CanonicalObservationCatalog> => (
     await api.get<CanonicalObservationCatalog>('/parser/catalog/canonical-observations/')
   ).data,
+  checkItemRuleContext: async (checkItemVersionId: string): Promise<CanonicalRuleContext> => (
+    await api.get<CanonicalRuleContext>(
+      `/parser/catalog/check-item-versions/${checkItemVersionId}/rule-context/`,
+    )
+  ).data,
+  generateCheckItemRuleCandidates: async (
+    checkItemVersionId: string,
+  ): Promise<CanonicalRuleCandidates> => (
+    await api.post<CanonicalRuleCandidates>(
+      `/parser/catalog/check-item-versions/${checkItemVersionId}/rule-candidates/`,
+    )
+  ).data,
+  createCheckItemRuleCandidateDrafts: async (
+    checkItemVersionId: string,
+  ): Promise<CanonicalRuleCandidates> => (
+    await api.post<CanonicalRuleCandidates>(
+      `/parser/catalog/check-item-versions/${checkItemVersionId}/rule-candidates/drafts/`,
+    )
+  ).data,
   createCheckItemDraft: async (
     data: CheckItemCatalogCheckItemDraftInput,
     idempotencyKey: string,
@@ -3861,16 +4118,59 @@ export const parserApi = {
     record_sets: Record<string, Array<Record<string, unknown>>>
     device_id?: string
     adapter_version_id?: string
-  }): Promise<{
-    success: boolean
-    batches: Array<{
-      check_item_id: string
-      quality_status: string
-      records: Array<Record<string, unknown>>
-      errors: string[]
-    }>
-  }> => (
-    await api.post('/parser/catalog/command-adapters/preview/', data)
+  }): Promise<AdapterProjectionPreviewResult> => (
+    await api.post<AdapterProjectionPreviewResult>('/parser/catalog/command-adapters/preview/', data)
+  ).data,
+  generateAdapterProjectionCandidate: async (
+    data: AdapterProjectionCandidateInput,
+  ): Promise<AdapterProjectionCandidateResult> => (
+    await api.post<AdapterProjectionCandidateResult>(
+      '/parser/catalog/adapter-projections/candidates/',
+      data,
+    )
+  ).data,
+  validateAdapterProjection: async (
+    data: Omit<AdapterProjectionCandidateInput, 'generation_provider' | 'max_agent_attempts'> & {
+      proposal: Record<string, unknown>
+    },
+  ): Promise<AdapterProjectionCandidateResult> => (
+    await api.post<AdapterProjectionCandidateResult>(
+      '/parser/catalog/adapter-projections/validate/',
+      data,
+    )
+  ).data,
+  adapterProjectionCutoverReadiness: async (): Promise<AdapterProjectionCutoverReadiness> => (
+    await api.get<AdapterProjectionCutoverReadiness>(
+      '/parser/catalog/adapter-projections/cutover-readiness/',
+    )
+  ).data,
+  verifyAdapterProjectionCutoverReadiness: async (
+    replayByImplementationVersion: Record<string, AdapterProjectionReplayAttestation>,
+  ): Promise<AdapterProjectionCutoverReadiness> => (
+    await api.post<AdapterProjectionCutoverReadiness>(
+      '/parser/catalog/adapter-projections/cutover-readiness/',
+      { replay_by_implementation_version: replayByImplementationVersion },
+    )
+  ).data,
+  recordAdapterProjectionReplayAttestations: async (
+    replayByImplementationVersion: Record<string, AdapterProjectionReplayAttestation>,
+    idempotencyKey: string,
+  ): Promise<AdapterProjectionCutoverReadiness> => (
+    await api.post<AdapterProjectionCutoverReadiness>(
+      '/parser/catalog/adapter-projections/replay-attestations/',
+      { replay_by_implementation_version: replayByImplementationVersion },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
+  ).data,
+  authorizeAdapterProjectionCutover: async (
+    data: { expected_readiness_digest: string; reason: string },
+    idempotencyKey: string,
+  ): Promise<AdapterProjectionCutoverAuthorizationResult> => (
+    await api.post<AdapterProjectionCutoverAuthorizationResult>(
+      '/parser/catalog/adapter-projections/cutover-authorization/',
+      data,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    )
   ).data,
   deleteCollectionImplementation: async (
     implementationId: string,
@@ -4093,6 +4393,23 @@ export const ruleAssetSourceApi = {
       { params },
     )
   ).data,
+  checkItemProductionGroups: async (params: {
+    page?: number
+    page_size?: number
+    search?: string
+    bucket?: string
+    governance_status?: string
+    stage?: string
+    vendor?: string
+    model?: string
+    asset_mode?: string
+    offline_job_id?: string
+  } = {}): Promise<CheckItemProductionGroupPage> => (
+    await api.get<CheckItemProductionGroupPage>(
+      '/parser/asset-production/check-items/',
+      { params },
+    )
+  ).data,
   commandAssetUnit: async (id: string, unitId: string, params: {
     evidence_page?: number
     evidence_page_size?: number
@@ -4110,6 +4427,31 @@ export const ruleAssetSourceApi = {
     await api.post(
       `${RULE_ASSET_SOURCE_JOBS_BASE}/${id}/command-asset-units/${unitId}/confirm-not-applicable/`,
       payload,
+    )
+  ).data,
+  associateUnclassifiedCommandAsset: async (
+    id: string,
+    unitId: string,
+    payload: { check_item_id: string },
+  ): Promise<{
+    success: boolean
+    association: {
+      check_item_id: string
+      check_item_version_id: string
+    }
+    parser_job_id?: string | null
+  }> => (
+    await api.post(
+      `${RULE_ASSET_SOURCE_JOBS_BASE}/${id}/command-asset-units/${unitId}/check-item-association/`,
+      payload,
+    )
+  ).data,
+  deleteUnclassifiedCommandAsset: async (
+    id: string,
+    unitId: string,
+  ): Promise<{ success: boolean; unit_id: string; asset_key: string }> => (
+    await api.delete(
+      `${RULE_ASSET_SOURCE_JOBS_BASE}/${id}/command-asset-units/${unitId}/`,
     )
   ).data,
 }

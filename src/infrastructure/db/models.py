@@ -1958,6 +1958,12 @@ class EventRuleVersionRecord(Base):
         nullable=False,
         index=True,
     )
+    check_item_version_id = Column(
+        String(64),
+        ForeignKey("netops_check_item_versions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     version = Column(Integer, nullable=False)
     event_type = Column(String(128), nullable=False, index=True)
     severity = Column(String(32), nullable=False, index=True)
@@ -4681,7 +4687,8 @@ class RuntimeBundleAssetRecord(Base):
     __table_args__ = (
         CheckConstraint(
             "asset_type IN ("
-            "'parser_template', 'observation_contract', 'current_state_rule', "
+            "'parser_template', 'command_adapter_projection', "
+            "'observation_contract', 'current_state_rule', "
             "'change_policy', 'event_rule', 'comparison_profile', 'identity_policy')",
             name="ck_runtime_bundle_asset_type",
         ),
@@ -5526,7 +5533,13 @@ class RiskRemediationRecord(Base):
         index=True,
     )
     risk_episode_id = Column(String(64), nullable=False, index=True)
-    status = Column(String(32), nullable=False, default="planned", server_default="planned", index=True)
+    status = Column(
+        String(32),
+        nullable=False,
+        default="planned",
+        server_default="planned",
+        index=True,
+    )
     owner = Column(String(128), nullable=True, index=True)
     action_text = Column(Text, nullable=False)
     due_at = Column(DateTime(timezone=True), nullable=True, index=True)
@@ -5757,6 +5770,12 @@ class ChangePolicyVersionRecord(Base):
         nullable=False,
         index=True,
     )
+    check_item_version_id = Column(
+        String(64),
+        ForeignKey("netops_check_item_versions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     version = Column(Integer, nullable=False)
     observation_type = Column(String(256), nullable=False, index=True)
     semantic_type = Column(String(64), nullable=False, index=True)
@@ -5781,9 +5800,20 @@ class ChangePolicyVersionRecord(Base):
         ),
         Index(
             "uq_change_policy_active_observation_type",
+            "check_item_version_id",
             "observation_type",
             unique=True,
-            postgresql_where=text("status = 'active'"),
+            postgresql_where=text(
+                "status = 'active' AND check_item_version_id IS NOT NULL"
+            ),
+        ),
+        Index(
+            "uq_change_policy_active_observation_type_legacy",
+            "observation_type",
+            unique=True,
+            postgresql_where=text(
+                "status = 'active' AND check_item_version_id IS NULL"
+            ),
         ),
         Index(
             "uq_change_policy_version_digest",
@@ -5957,7 +5987,11 @@ class ParserSpecRevisionRecord(Base):
     actor = Column(String(128), nullable=False)
     reason = Column(Text, nullable=False)
     invalidated_template_ids_json = Column(JSON, nullable=False, default=list)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
 
     __table_args__ = (
         Index(

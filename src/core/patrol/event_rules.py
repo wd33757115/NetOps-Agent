@@ -111,6 +111,17 @@ def _logical_role(
 ) -> str:
     kind = str(condition.get("kind") or "").strip().casefold()
     role = _KNOWN_EVENT_RULE_ROLES.get(kind)
+    threshold_role = norm_field(condition.get("threshold_role"))
+    # Dynamic-threshold rules carry their alert tier in ``threshold_role``.
+    # The generated event name is presentation text and may only contain
+    # "Critical", so it cannot reliably distinguish warning from alarm.
+    if role in {"high", "low"} and threshold_role in {
+        "high",
+        "critical_high",
+        "low",
+        "critical_low",
+    }:
+        return threshold_role
     if kind == "transition":
         role = _logical_token(condition.get("to_group")) or "transition"
     elif kind == "bgp_transition":
@@ -450,7 +461,11 @@ def condition_matches(condition: dict[str, Any], change: dict[str, Any]) -> bool
         if not _entity_type_allowed(condition, change):
             return False
         fields = {norm_field(item) for item in condition.get("fields") or []}
-        threshold = to_float(condition.get("lt"))
+        threshold = to_float(
+            condition.get("lte")
+            if condition.get("lte") is not None
+            else condition.get("lt")
+        )
         if threshold is None:
             return False
         old_value = to_float(change.get("old"))
@@ -460,7 +475,7 @@ def condition_matches(condition: dict[str, Any], change: dict[str, Any]) -> bool
             and old_value is not None
             and new_value is not None
             and float(old_value) >= threshold
-            and float(new_value) < threshold
+            and float(new_value) <= threshold
         )
     if kind == "threshold_lte":
         if not _entity_type_allowed(condition, change):
@@ -543,19 +558,31 @@ def condition_matches(condition: dict[str, Any], change: dict[str, Any]) -> bool
         entity_types = {norm(item) for item in condition.get("entity_types") or []}
         if entity_types and norm(change.get("entity_type")) not in entity_types:
             return False
+        from_values = {norm(item) for item in condition.get("from_values") or []}
+        to_values = {norm(item) for item in condition.get("to_values") or []}
         new_group = _state_group(change.get("new"))
+        new_matches = (
+            norm(change.get("new")) in to_values
+            if to_values
+            else new_group == str(condition.get("to_group"))
+        )
         if change.get("change_type") == "initial":
             if is_suppressed_interface_state(change.get("new")):
                 return False
             return bool(condition.get("allow_initial_target")) and (
                 norm_field(change.get("field")) in fields
-                and new_group == str(condition.get("to_group"))
+                and new_matches
             )
         old_group = _state_group(change.get("old"))
+        old_matches = (
+            norm(change.get("old")) in from_values
+            if from_values
+            else old_group == str(condition.get("from_group"))
+        )
         return (
             norm_field(change.get("field")) in fields
-            and old_group == str(condition.get("from_group"))
-            and new_group == str(condition.get("to_group"))
+            and old_matches
+            and new_matches
         )
     if kind == "bgp_transition":
         fields = {norm_field(item) for item in condition.get("fields") or []}
@@ -596,10 +623,15 @@ def condition_matches(condition: dict[str, Any], change: dict[str, Any]) -> bool
     if kind == "entity_status_down":
         entity_types = {norm(item) for item in condition.get("entity_types") or []}
         fields = {norm_field(item) for item in condition.get("fields") or []}
+        explicit_values = {norm(item) for item in condition.get("values") or []}
         return (
             norm(change.get("entity_type")) in entity_types
             and norm_field(change.get("field")) in fields
-            and is_down(change.get("new"))
+            and (
+                norm(change.get("new")) in explicit_values
+                if explicit_values
+                else is_down(change.get("new"))
+            )
         )
     return False
 
@@ -646,11 +678,25 @@ def current_state_condition_matches(
         if reference is None or current is None:
             return False
         return current >= reference if kind == "threshold_field_gte" else current <= reference
+    if kind == "linear_power_loss_ratio":
+        loss_ratio = to_float(condition.get("loss_ratio"))
+        maximum = to_float(condition.get("gt"))
+        return (
+            loss_ratio is not None
+            and maximum is not None
+            and loss_ratio > maximum
+        )
     if kind == "transition":
         if is_suppressed_interface_state(value):
             return False
         allow_current = explicit_current_scope or bool(condition.get("allow_initial_target"))
-        return allow_current and _state_group(value) == str(condition.get("to_group") or "")
+        to_values = {norm(item) for item in condition.get("to_values") or []}
+        target_matches = (
+            norm(value) in to_values
+            if to_values
+            else _state_group(value) == str(condition.get("to_group") or "")
+        )
+        return allow_current and target_matches
     if kind == "bgp_transition":
         allow_current = explicit_current_scope or bool(condition.get("allow_initial_target"))
         return (
@@ -659,7 +705,8 @@ def current_state_condition_matches(
             and (norm(value) == "established") is bool(condition.get("to_established"))
         )
     if kind == "entity_status_down":
-        return is_down(value)
+        explicit_values = {norm(item) for item in condition.get("values") or []}
+        return norm(value) in explicit_values if explicit_values else is_down(value)
     return False
 
 
@@ -718,6 +765,7 @@ class EventRuleRepository:
                     "condition": version.condition_json,
                     "version_status": version.status,
                     "source_job_id": version.source_job_id,
+                    "check_item_version_id": version.check_item_version_id,
                     "validation_report": version.validation_report_json,
                     "digest": version.digest,
                     "priority": version.priority,
@@ -817,6 +865,7 @@ class EventRuleRepository:
             "condition": version.condition_json,
             "version_status": version.status,
             "source_job_id": version.source_job_id,
+            "check_item_version_id": version.check_item_version_id,
             "validation_report": version.validation_report_json,
             "digest": version.digest,
             "priority": version.priority,
@@ -1097,6 +1146,7 @@ class EventRuleRepository:
         description: str | None = None,
         created_by: str | None = None,
         source_job_id: str | None = None,
+        check_item_version_id: str | None = None,
         validation_report: dict[str, Any] | None = None,
         digest: str | None = None,
         status: str = "draft",
@@ -1149,6 +1199,7 @@ class EventRuleRepository:
                 status=status,
                 created_by=created_by,
                 source_job_id=source_job_id,
+                check_item_version_id=check_item_version_id,
                 validation_report_json=validation_report,
                 digest=digest
                 or event_rule_digest(

@@ -5,7 +5,8 @@ from __future__ import annotations
 import re
 
 from llm_generator import (
-    DeepSeekTextFSMToolSession,
+    ParserGenerationToolbox,
+    ProviderTextFSMToolSession,
     build_parser_bundle_prompt_bundle,
     build_prompt_bundle,
     create_textfsm_tool_session,
@@ -14,6 +15,7 @@ from llm_generator import (
 from src.core.parser.parser_bundle import build_parser_bundle, parse_parser_bundle
 from src.core.parser.structure_profiler import profile_sample_set
 from src.core.parser_generation import ParserSpec, ParserSpecDocument, TemplateCandidate
+from src.core.parser_generation.samples import ParserSample, SampleRole
 from src.core.parser_generation.service import (
     PARSER_TOOL_PROTOCOL_VERSION,
     ParserModelTurn,
@@ -103,13 +105,21 @@ def _render_samples(samples: tuple[str, ...]) -> str:
     )
 
 
-class TextFSMParserModel:
-    """Opens a bounded DeepSeek tool session for one frozen ParserSpec."""
+class TextFSMGenerationAgent:
+    """Opens a provider-neutral evidence agent for one frozen ParserSpec."""
 
-    def __init__(self, *, vendor: str, model: str, command: str) -> None:
+    def __init__(
+        self,
+        *,
+        vendor: str,
+        model: str,
+        command: str,
+        validation_samples: tuple[ParserSample, ...] = (),
+    ) -> None:
         self.vendor = vendor
         self.model = model
         self.command = command
+        self.validation_samples = validation_samples
 
     @staticmethod
     def _field_bindings(spec: ParserSpec) -> dict[str, list[dict[str, str]]]:
@@ -138,7 +148,16 @@ class TextFSMParserModel:
                 parse_plan=parse_plan,
             )
             return TextFSMParserModelSession(
-                session=create_textfsm_tool_session(bundle, bundle_mode=True),
+                session=create_textfsm_tool_session(
+                    bundle,
+                    bundle_mode=True,
+                    toolbox=ParserGenerationToolbox(
+                        spec=spec,
+                        samples=self._validation_samples(samples),
+                        vendor=self.vendor,
+                        command=self.command,
+                    ),
+                ),
                 record_set_fields={
                     record_set.record_set_name: (
                         *record_set.required_fields,
@@ -162,8 +181,29 @@ class TextFSMParserModel:
             empty_patterns=list(spec.empty_patterns),
         )
         return TextFSMParserModelSession(
-            session=create_textfsm_tool_session(bundle),
+            session=create_textfsm_tool_session(
+                bundle,
+                toolbox=ParserGenerationToolbox(
+                    spec=spec,
+                    samples=self._validation_samples(samples),
+                    vendor=self.vendor,
+                    command=self.command,
+                ),
+            ),
             contract_fields=(*spec.required_fields, *spec.optional_fields),
+        )
+
+    def _validation_samples(self, prompt_samples: tuple[str, ...]) -> tuple[ParserSample, ...]:
+        if self.validation_samples:
+            return self.validation_samples
+        return tuple(
+            ParserSample(
+                sample_id=f"generation-{index}",
+                raw_text=text,
+                validation_text_override=text,
+                role=SampleRole.GENERATION,
+            )
+            for index, text in enumerate(prompt_samples, start=1)
         )
 
 
@@ -171,7 +211,7 @@ class TextFSMParserModelSession:
     def __init__(
         self,
         *,
-        session: DeepSeekTextFSMToolSession,
+        session: ProviderTextFSMToolSession,
         contract_fields: tuple[str, ...] = (),
         record_set_fields: dict[str, tuple[str, ...]] | None = None,
     ) -> None:
@@ -219,9 +259,7 @@ class TextFSMParserModelSession:
                 return ParserModelTurn(
                     candidate=None,
                     submission_mode="tool_protocol_error",
-                    protocol_error=(
-                        "Parser bundle record sets do not match the frozen ParserSpec"
-                    ),
+                    protocol_error=("Parser bundle record sets do not match the frozen ParserSpec"),
                     model_name=turn.model_name,
                     token_usage=turn.token_usage or None,
                     latency_ms=turn.latency_ms,
@@ -250,3 +288,8 @@ class TextFSMParserModelSession:
             protocol_version=PARSER_TOOL_PROTOCOL_VERSION,
             retryable=turn.retryable,
         )
+
+
+# Existing script entry points import this name.  Preserve it until all callers
+# have moved, while the implementation itself is provider-neutral.
+TextFSMParserModel = TextFSMGenerationAgent

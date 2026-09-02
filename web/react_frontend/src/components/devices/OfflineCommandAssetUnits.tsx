@@ -31,12 +31,15 @@ import { useMutation, useQuery, useQueryClient } from 'react-query'
 import { useNavigate } from 'react-router-dom'
 import {
   ruleAssetSourceApi,
+  type CheckItemProductionGroup,
   type OfflineCommandAssetStageStatus,
   type OfflineCommandAssetUnit,
   type OfflineCommandAssetUnitDetail,
   type OfflineCommandAssetUnitStage,
 } from '../../services/api'
-import ParserGenerationStep from '../skills/parser/ParserGenerationStep'
+import ParserGenerationStep, {
+  type ParserProjectionAdapterDraft,
+} from '../skills/parser/ParserGenerationStep'
 import RuleAssetProductionStep from '../skills/parser/RuleAssetProductionStep'
 
 const stageOptions = [
@@ -45,7 +48,7 @@ const stageOptions = [
   ['parser_generation', 'Parser 生成'],
   ['parser_validation', 'Parser 全样本验证'],
   ['structured_quality', '结构化数据质量'],
-  ['observation_contract', 'Observation Contract'],
+  ['observation_contract', 'A→B Projection / 命令适配器'],
   ['change_policy', 'Change Policy'],
   ['event_rule', 'Event Rule'],
   ['validation_review', '验证、回放与工程复核'],
@@ -85,6 +88,8 @@ const statusColor: Record<string, string> = {
 
 const modeLabel: Record<string, string> = {
   full_chain: '完整规则链',
+  preproduction_mapping: '预生产映射',
+  check_item_mapping: '检查项映射',
   observation_only: '仅状态观测',
   change_only: '仅变化检测',
   raw_hash: '原始哈希比较',
@@ -125,7 +130,7 @@ const AssetFlowStatus: React.FC<{ unit: OfflineCommandAssetUnit }> = ({ unit }) 
   <div className="command-asset-unit__asset-states">
     {[
       ['parser_generation', 'Parser'],
-      ['observation_contract', 'Contract'],
+      ['observation_contract', (unit.candidate_check_item_id || unit.check_item_id) ? 'Projection' : 'Contract'],
       ['change_policy', 'Policy'],
       ['event_rule', 'Event'],
     ].map(([key, label]) => (
@@ -148,6 +153,10 @@ export const CommandAssetDetail: React.FC<{
   onEvidencePageChange: (page: number, pageSize: number) => void
   onConfirmNotApplicable?: () => void
   notApplicableLoading?: boolean
+  onCreateAdapter?: (
+    draft: ParserProjectionAdapterDraft,
+    detail: OfflineCommandAssetUnitDetail,
+  ) => void
   onClose: () => void
 }> = ({
   detail,
@@ -160,6 +169,7 @@ export const CommandAssetDetail: React.FC<{
   onEvidencePageChange,
   onConfirmNotApplicable,
   notApplicableLoading = false,
+  onCreateAdapter,
   onClose,
 }) => {
   const screens = Grid.useBreakpoint()
@@ -287,6 +297,12 @@ export const CommandAssetDetail: React.FC<{
             <Descriptions.Item label="生产模式">
               {modeLabel[detail.asset_mode] || detail.asset_mode}
             </Descriptions.Item>
+            {detail.candidate_check_item_id && (
+              <Descriptions.Item label="预生产 CheckItem" span={isMobile ? 1 : 2}>
+                <Tag color="blue">仅用于 Parser / Projection</Tag>
+                {' '}{detail.candidate_check_item_name || detail.candidate_check_item_id}
+              </Descriptions.Item>
+            )}
             <Descriptions.Item label="证据规模">
               {detail.sample_count} 输出 / {detail.device_count} 设备
             </Descriptions.Item>
@@ -345,10 +361,25 @@ export const CommandAssetDetail: React.FC<{
                               ))}
                             </Space>
                           )}
-                          {stage.key === detail.current_stage && detail.next_action?.description && (
-                            <Typography.Text type="secondary">
-                              当前下一步：{detail.next_action.description}
-                            </Typography.Text>
+                          {stage.key === detail.current_stage && detail.next_action?.target_url && (
+                            <Alert
+                              type={stage.status === 'blocked' || stage.status === 'failed' ? 'error' : 'info'}
+                              showIcon
+                              message={detail.next_action.description || `下一步：${detail.next_action.label}`}
+                              description={stage.key === 'structured_quality'
+                                ? '先对当前命令单元的历史输出进行重新解析预演；全部通过后，再由你确认写入结果。'
+                                : undefined}
+                              action={(
+                                <Button
+                                  type="primary"
+                                  size="small"
+                                  icon={<ArrowRightOutlined />}
+                                  onClick={() => handleStageAction(detail.next_action?.target_url || '')}
+                                >
+                                  {detail.next_action.label}
+                                </Button>
+                              )}
+                            />
                           )}
                         </Space>
                       ),
@@ -359,9 +390,21 @@ export const CommandAssetDetail: React.FC<{
               ...(detail.parser_job_id ? [{
                 key: 'parser',
                 label: 'Parser 生成',
-                children: <ParserGenerationStep jobId={detail.parser_job_id} />,
+                children: (
+                  <ParserGenerationStep
+                    jobId={detail.parser_job_id}
+                    // A manually associated command and a uniquely resolved
+                    // catalog CommandAdapter both identify the same standard
+                    // semantic target B.  Parser generation must not ask the
+                    // engineer to choose it a second time.
+                    lockedCheckItemId={detail.candidate_check_item_id || detail.check_item_id}
+                    onCreateAdapter={onCreateAdapter
+                      ? (draft) => onCreateAdapter(draft, detail)
+                      : undefined}
+                  />
+                ),
               }] : []),
-              ...([{
+              ...(detail.candidate_check_item_id || detail.check_item_id ? [] : [{
                 key: 'generation',
                 label: '规则资产生产',
                 children: (
@@ -516,6 +559,15 @@ const OfflineCommandAssetUnits: React.FC<OfflineCommandAssetUnitsProps> = ({
     }),
     { keepPreviousData: true },
   )
+  const checkItemGroupsQuery = useQuery(
+    ['offline-command-asset-check-item-groups', jobId],
+    () => ruleAssetSourceApi.checkItemProductionGroups({
+      page: 1,
+      page_size: 100,
+      offline_job_id: jobId,
+    }),
+    { keepPreviousData: true },
+  )
   const detailQuery = useQuery(
     [
       'offline-command-asset-unit',
@@ -541,13 +593,50 @@ const OfflineCommandAssetUnits: React.FC<OfflineCommandAssetUnitsProps> = ({
       }
     }
   }
+  const openClassification = (unit: OfflineCommandAssetUnit) => {
+    const params = new URLSearchParams({
+      workspace: 'production',
+      subtab: 'catalog-management',
+      source_job_id: jobId,
+      offline_job_id: jobId,
+      command: unit.canonical_command,
+    })
+    navigate(`/skills/parser?${params.toString()}`)
+  }
+  const openAdapterDraft = (
+    draft: ParserProjectionAdapterDraft,
+    detail: OfflineCommandAssetUnitDetail,
+  ) => {
+    const params = new URLSearchParams({
+      workspace: 'production',
+      subtab: 'catalog-management',
+    })
+    navigate(`/skills/parser?${params.toString()}`, {
+      state: {
+        commandAdapterDraft: {
+          checkItemId: draft.checkItemId,
+          parserTemplateId: draft.parserTemplateId,
+          sourceRecordSet: draft.sourceRecordSet,
+          adapterSpec: draft.adapterSpec,
+          sourceJobId: detail.offline_job_id,
+          command: detail.canonical_command,
+          vendor: detail.vendor,
+          family: detail.family,
+          model: detail.model,
+          profile: detail.profile,
+        },
+      },
+    })
+  }
   const refreshMutation = useMutation(
     () => ruleAssetSourceApi.refreshCommandAssetUnits(jobId),
     {
       onSuccess: async () => {
         await Promise.all([
           queryClient.invalidateQueries(['offline-command-asset-units', jobId]),
+          queryClient.invalidateQueries(['offline-command-asset-check-item-groups', jobId]),
           queryClient.invalidateQueries(['offline-rule-asset-pipeline', jobId]),
+          queryClient.invalidateQueries(['offline-command-asset-unit', jobId, selectedUnitId]),
         ])
       },
       onError: (error: Error) => message.error(error.message || '命令资产状态刷新失败'),
@@ -564,6 +653,7 @@ const OfflineCommandAssetUnits: React.FC<OfflineCommandAssetUnitsProps> = ({
         message.success('已确认为设备不适用，命令资产无需生成规则')
         await Promise.all([
           queryClient.invalidateQueries(['offline-command-asset-units', jobId]),
+          queryClient.invalidateQueries(['offline-command-asset-check-item-groups', jobId]),
           queryClient.invalidateQueries(['offline-command-asset-unit', jobId, selectedUnitId]),
           queryClient.invalidateQueries(['offline-rule-asset-pipeline', jobId]),
         ])
@@ -688,6 +778,91 @@ const OfflineCommandAssetUnits: React.FC<OfflineCommandAssetUnitsProps> = ({
       ),
     },
   ]
+  const checkItemGroupColumns: ColumnsType<CheckItemProductionGroup> = [
+    {
+      title: '检查项分组',
+      key: 'check_item',
+      render: (_, group) => {
+        const candidate = group.implementations[0]?.candidate_check_item_name
+          || group.implementations[0]?.candidate_check_item_id
+        return (
+          <Space direction="vertical" size={1}>
+            <Space size={6} wrap>
+              <Typography.Text strong>{group.display_name}</Typography.Text>
+              {group.classification_required && (
+                <Tag color={group.preproduction_associated ? 'blue' : 'red'}>
+                  {group.preproduction_associated ? '待生产映射' : '待归类'}
+                </Tag>
+              )}
+              {!group.check_item_id && !group.classification_required
+                && group.category !== 'not_applicable' && <Tag color="orange">未关联检查项</Tag>}
+              {group.category === 'not_applicable' && <Tag>无需规则</Tag>}
+            </Space>
+            <Typography.Text type="secondary">
+              {group.check_item_id || (candidate
+                ? `预生产 CheckItem：${candidate}`
+                : '尚未绑定标准检查项')}
+            </Typography.Text>
+          </Space>
+        )
+      },
+    },
+    {
+      title: '命令',
+      key: 'commands',
+      render: (_, group) => (
+        <Space size={[4, 4]} wrap>
+          {Array.from(new Set(
+            group.implementations.map((item) => item.canonical_command),
+          )).map((command) => <Tag key={command}>{command}</Tag>)}
+        </Space>
+      ),
+    },
+    {
+      title: '状态',
+      key: 'status',
+      width: 170,
+      render: (_, group) => (
+        <Space direction="vertical" size={1}>
+          <Tag color={group.classification_required
+            ? (group.preproduction_associated ? 'blue' : 'red')
+            : 'green'}>
+            {group.current_stage_label}
+          </Tag>
+          <Typography.Text type="secondary">
+            {group.sample_count} 输出 · {group.evidence_device_count} 设备
+          </Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 310,
+      render: (_, group) => (
+        <Space>
+          {group.implementations[0] && (
+            <Button
+              onClick={() => openUnitDetail(
+                group.implementations[0].id,
+                group.implementations[0].canonical_command,
+              )}
+            >
+              查看命令
+            </Button>
+          )}
+          {group.classification_required && (
+            <Button
+              type="primary"
+              onClick={() => openClassification(group.implementations[0])}
+            >
+              {group.preproduction_associated ? '继续 Parser / Projection' : '在检查项目录归类'}
+            </Button>
+          )}
+        </Space>
+      ),
+    },
+  ]
 
   if (listQuery.isError) {
     return (
@@ -717,6 +892,43 @@ const OfflineCommandAssetUnits: React.FC<OfflineCommandAssetUnitsProps> = ({
           </div>
         ))}
       </div>
+      <section aria-label="按检查项归类">
+        <Space direction="vertical" size={10} style={{ width: '100%' }}>
+          <div>
+            <Typography.Title level={4} style={{ marginBottom: 2 }}>按检查项归类</Typography.Title>
+            <Typography.Text type="secondary">
+              样本命令通过厂商、型号和 Command Adapter 自动归入标准检查项。
+            </Typography.Text>
+          </div>
+          {(checkItemGroupsQuery.data?.summary.unclassified || 0) > 0 && (
+            <Alert
+              showIcon
+              type="warning"
+              message={`待归类检查项（${checkItemGroupsQuery.data?.summary.unclassified || 0}）`}
+              description="每条命令只需一次“关联检查项”：它保存预生产业务目标，随后在同一流程完成 Parser、Projection 与命令适配器审批；审批前不会进入生产运行包。"
+            />
+          )}
+          {checkItemGroupsQuery.isError ? (
+            <Alert
+              showIcon
+              type="error"
+              message="检查项分组加载失败"
+              action={<Button onClick={() => checkItemGroupsQuery.refetch()}>重试</Button>}
+            />
+          ) : (
+            <Table<CheckItemProductionGroup>
+              rowKey="id"
+              size="small"
+              loading={checkItemGroupsQuery.isLoading || checkItemGroupsQuery.isFetching}
+              dataSource={checkItemGroupsQuery.data?.items || []}
+              columns={checkItemGroupColumns}
+              pagination={false}
+              locale={{ emptyText: <Empty description="当前样本任务尚无检查项分组" /> }}
+              scroll={{ x: 900 }}
+            />
+          )}
+        </Space>
+      </section>
       <div className="command-asset-unit__toolbar">
         <Input.Search
           allowClear
@@ -857,6 +1069,7 @@ const OfflineCommandAssetUnits: React.FC<OfflineCommandAssetUnitsProps> = ({
         loading={detailQuery.isLoading}
         notApplicableLoading={notApplicableMutation.isLoading}
         onConfirmNotApplicable={() => notApplicableMutation.mutate()}
+        onCreateAdapter={openAdapterDraft}
         onEvidencePageChange={(nextPage, nextSize) => {
           setEvidencePage(nextSize === evidencePageSize ? nextPage : 1)
           setEvidencePageSize(nextSize)

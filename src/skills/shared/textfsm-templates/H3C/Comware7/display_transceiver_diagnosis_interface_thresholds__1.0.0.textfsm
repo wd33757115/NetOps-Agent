@@ -1,0 +1,12 @@
+Value Filldown interface (\S+)
+Value rx_high_alarm_dbm (-?\d+(?:\.\d+)?)
+Value tx_high_alarm_dbm (-?\d+(?:\.\d+)?)
+Value rx_low_alarm_dbm (-?\d+(?:\.\d+)?)
+Value tx_low_alarm_dbm (-?\d+(?:\.\d+)?)
+
+Start
+  ^${interface}\s+transceiver\s+diagnostic\s+information:\s*$$
+  ^\s+High\s+\S+\s+\S+\s+\S+\s+${rx_high_alarm_dbm}\s+${tx_high_alarm_dbm}\s*$$
+  ^\s+Low\s+\S+\s+\S+\s+\S+\s+${rx_low_alarm_dbm}\s+${tx_low_alarm_dbm}\s*$$ -> Record
+
+EOF

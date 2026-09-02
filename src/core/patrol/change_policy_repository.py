@@ -40,6 +40,7 @@ class ChangePolicyRepository:
         description: str | None = None,
         status: str = "draft",
         source_job_id: str | None = None,
+        check_item_version_id: str | None = None,
         validation_report: dict[str, Any] | None = None,
         created_by: str | None = None,
         version: int | None = None,
@@ -102,6 +103,7 @@ class ChangePolicyRepository:
                 policy_id=record.id,
                 version=int(version),
                 observation_type=proposal.observation_type,
+                check_item_version_id=check_item_version_id,
                 semantic_type=proposal.semantic_type,
                 compare_mode=proposal.compare_mode,
                 policy_json=policy_json,
@@ -137,19 +139,16 @@ class ChangePolicyRepository:
                     ChangePolicyVersionRecord.observation_type
                     == version.observation_type
                 )
+                .filter(
+                    ChangePolicyVersionRecord.check_item_version_id
+                    == version.check_item_version_id
+                    if version.check_item_version_id is not None
+                    else ChangePolicyVersionRecord.check_item_version_id.is_(None)
+                )
                 .filter(ChangePolicyVersionRecord.status == "active")
                 .filter(ChangePolicyVersionRecord.id != version.id)
                 .update(
                     {"status": "deprecated", "deprecated_at": now},
-                    synchronize_session=False,
-                )
-            )
-            (
-                db.query(ChangePolicyRecord)
-                .filter(ChangePolicyRecord.observation_type == version.observation_type)
-                .filter(ChangePolicyRecord.id != policy.id)
-                .update(
-                    {"status": "deprecated", "updated_at": now},
                     synchronize_session=False,
                 )
             )
@@ -180,7 +179,12 @@ class ChangePolicyRepository:
             db.flush()
             return self._to_payload(policy, version)
 
-    def get_active_policy(self, observation_type: str) -> dict[str, Any] | None:
+    def get_active_policy(
+        self,
+        observation_type: str,
+        *,
+        check_item_version_id: str | None = None,
+    ) -> dict[str, Any] | None:
         with get_db_session() as db:
             row = (
                 db.query(ChangePolicyRecord, ChangePolicyVersionRecord)
@@ -190,6 +194,12 @@ class ChangePolicyRepository:
                 )
                 .filter(ChangePolicyVersionRecord.status == "active")
                 .filter(ChangePolicyVersionRecord.observation_type == observation_type)
+                .filter(
+                    ChangePolicyVersionRecord.check_item_version_id
+                    == check_item_version_id
+                    if check_item_version_id is not None
+                    else ChangePolicyVersionRecord.check_item_version_id.is_(None)
+                )
                 .order_by(ChangePolicyVersionRecord.activated_at.desc())
                 .first()
             )
@@ -290,15 +300,19 @@ class ChangePolicyRepository:
                 )
                 .all()
             )
-            seen: set[str] = set()
+            seen: set[tuple[str | None, str]] = set()
             payloads: list[dict[str, Any]] = []
             for policy, version in rows:
-                if version.observation_type in seen:
+                scope_key = (
+                    version.check_item_version_id,
+                    version.observation_type,
+                )
+                if scope_key in seen:
                     raise RuntimeError(
                         "multiple active ChangePolicies for observation_type "
                         f"{version.observation_type}"
                     )
-                seen.add(version.observation_type)
+                seen.add(scope_key)
                 payloads.append(self._to_payload(policy, version))
             return payloads
 
@@ -320,6 +334,7 @@ class ChangePolicyRepository:
             "validation_report": version.validation_report_json,
             "version_status": version.status,
             "source_job_id": version.source_job_id,
+            "check_item_version_id": version.check_item_version_id,
             "digest": version.digest,
             "activated_at": version.activated_at,
             "deprecated_at": version.deprecated_at,

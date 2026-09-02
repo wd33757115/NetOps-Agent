@@ -89,6 +89,10 @@ class CommandAssetNotApplicableConfirmRequest(BaseModel):
     reason: str = Field(min_length=5, max_length=1000)
 
 
+class CommandAssetCheckItemAssociationRequest(BaseModel):
+    check_item_id: str = Field(min_length=1, max_length=128)
+
+
 class OfflinePatrolExecuteRequest(BaseModel):
     idempotency_key: str = Field(
         default_factory=lambda: uuid.uuid4().hex, min_length=8, max_length=128
@@ -541,6 +545,74 @@ def confirm_rule_asset_source_command_unit_not_applicable(
             "unit_id": unit_id,
             "decision": result.get("decision"),
         },
+    )
+    return result
+
+
+@asset_source_routes.post(
+    "/{job_id}/command-asset-units/{unit_id}/check-item-association"
+)
+def associate_rule_asset_source_command_unit_check_item(
+    job_id: str,
+    unit_id: str,
+    payload: CommandAssetCheckItemAssociationRequest,
+    request: Request,
+    user: CurrentUser = Depends(require_role(["admin", "operator"])),
+):
+    """Bind a sample command to B without creating a production adapter."""
+
+    _detail_or_http(job_id, user)
+    try:
+        result = RuleAssetCommandUnitService().associate_unclassified_unit_to_check_item(
+            job_id,
+            unit_id,
+            check_item_id=payload.check_item_id,
+            actor=user.username,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _audit(
+        request,
+        user,
+        "rule_asset_sample_command_check_item_associated",
+        job_id,
+        {
+            "unit_id": unit_id,
+            "check_item_id": payload.check_item_id,
+            "parser_job_id": result.get("parser_job_id"),
+        },
+    )
+    return result
+
+
+@asset_source_routes.delete("/{job_id}/command-asset-units/{unit_id}")
+def delete_rule_asset_source_unclassified_command_unit(
+    job_id: str,
+    unit_id: str,
+    request: Request,
+    user: CurrentUser = Depends(require_role(["admin", "operator"])),
+):
+    """Remove one sample-generated, still-unclassified command from the inbox."""
+
+    _detail_or_http(job_id, user)
+    try:
+        result = RuleAssetCommandUnitService().delete_unclassified_unit(
+            job_id,
+            unit_id,
+            actor=user.username,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _audit(
+        request,
+        user,
+        "rule_asset_unclassified_command_deleted",
+        job_id,
+        {"unit_id": unit_id, "asset_key": result.get("asset_key")},
     )
     return result
 

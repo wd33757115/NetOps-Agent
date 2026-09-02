@@ -26,6 +26,10 @@ from src.core.check_items.catalog import (
     primary_collection_commands,
     validate_check_item_definition,
 )
+from src.core.check_items.command_adapter import (
+    is_direct_projection_adapter,
+    validate_adapter_spec,
+)
 from src.core.check_items.resolver import CheckItemImplementationResolver
 from src.core.check_items.rollout import (
     RolloutCampaignService,
@@ -434,9 +438,27 @@ class CheckItemCatalogGovernanceService:
                     "status": "draft",
                 }
             )
+            if is_direct_projection_adapter(raw.get("adapter_spec")):
+                active_targets = {
+                    str(item.check_item_id): {
+                        "version_id": str(item.id),
+                        "canonical_contract": dict(
+                            item.canonical_contract_json or {}
+                        ),
+                    }
+                    for item in active_items
+                    if str(item.check_item_id) in requested_check_item_ids
+                }
+                raw["adapter_spec"] = validate_adapter_spec(
+                    raw.get("adapter_spec"),
+                    check_item_ids=tuple(requested_check_item_ids),
+                    check_items=active_targets,
+                    require_pinned_check_item_versions=True,
+                )
             if len(raw.get("commands") or []) != 1:
                 raise ValueError(
-                    "a command adapter must declare exactly one command; fallback commands are not supported"
+                    "a command adapter must declare exactly one command; "
+                    "fallback commands are not supported"
                 )
             candidate = build_collection_implementation(
                 raw,
@@ -1161,7 +1183,9 @@ class CheckItemCatalogGovernanceService:
             warnings.append(
                 {
                     "code": "check_item_runtime_assets_require_reassembly",
-                    "message": "检查项语义发生变化，关联 Parser、规则资产和运行包需要按新版本复核。",
+                    "message": (
+                        "检查项语义发生变化，关联 Parser、规则资产和运行包需要按新版本复核。"
+                    ),
                     "next_action": "prepare_runtime_bundle",
                 }
             )
@@ -1584,7 +1608,12 @@ class CheckItemCatalogGovernanceService:
                     .first()
                 )
             actual_baseline = str(active.id) if active is not None else None
-            if actual_baseline != (str(change.baseline_version_id) if change.baseline_version_id else None):
+            expected_baseline = (
+                str(change.baseline_version_id)
+                if change.baseline_version_id
+                else None
+            )
+            if actual_baseline != expected_baseline:
                 raise CatalogGovernanceConflictError(
                     "active catalog asset changed after this revision was created"
                 )
@@ -1617,7 +1646,8 @@ class CheckItemCatalogGovernanceService:
                         for item in bundle_rows
                     ):
                         raise CatalogGovernanceConflictError(
-                            "catalog cutover approver must differ from every candidate RuntimeBundle creator"
+                            "catalog cutover approver must differ from every "
+                            "candidate RuntimeBundle creator"
                         )
                     for bundle_id in bundle_ids:
                         try:

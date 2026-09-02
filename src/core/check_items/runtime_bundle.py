@@ -16,6 +16,7 @@ from src.core.check_items.assessment_policy import (
 )
 from src.core.check_items.canonical import load_canonical_catalog
 from src.core.check_items.catalog import CheckItemCatalogRepository
+from src.core.check_items.command_adapter import is_direct_projection_adapter
 from src.core.check_items.identity import EntityIdentityPolicyRepository
 from src.core.check_items.presentation import check_item_display_name
 from src.core.check_items.runtime_bundle_assembly import (
@@ -350,9 +351,33 @@ class CheckItemRuntimeBundleService:
                 blockers.append("one or more EventRule versions do not exist")
 
             result_mode = str(check_version.result_mode)
+            direct_projection = bool(
+                result_mode == "structured"
+                and is_direct_projection_adapter(
+                    dict(implementation_version.adapter_spec_json or {})
+                )
+            )
+            projection_manifest = dict(
+                dict(assembly_plan.get("selected") or {}).get(
+                    "command_adapter_projection"
+                )
+                or {}
+            )
             if result_mode == "structured" and not parser_rows:
                 blockers.append("structured implementation requires a Parser template")
-            if result_mode == "structured" and not contract_rows:
+            if result_mode == "structured" and direct_projection and not projection_manifest:
+                blockers.append(
+                    "structured CommandAdapter V2 implementation requires a projection"
+                )
+            if result_mode == "structured" and direct_projection and contract_rows:
+                blockers.append(
+                    "structured CommandAdapter V2 implementation cannot bind ObservationContracts"
+                )
+            if (
+                result_mode == "structured"
+                and not direct_projection
+                and not contract_rows
+            ):
                 blockers.append("structured implementation requires an ObservationContract")
             if result_mode != "structured" and parser_rows:
                 blockers.append("non-structured implementation cannot bind Parser templates")
@@ -423,12 +448,12 @@ class CheckItemRuntimeBundleService:
             unknown_types = sorted(produced_types - approved_types)
             if result_mode == "structured" and missing_types:
                 blockers.append(
-                    "Contract does not produce required canonical observations: "
+                    "Adapter projection does not produce required canonical observations: "
                     + ", ".join(missing_types)
                 )
             if unknown_types:
                 blockers.append(
-                    "Contract produces observations outside the Canonical Catalog: "
+                    "Adapter projection produces observations outside the Canonical Catalog: "
                     + ", ".join(unknown_types)
                 )
 
@@ -555,6 +580,17 @@ class CheckItemRuntimeBundleService:
                 "parser_templates": {
                     str(item.id): str(item.sha256) for item in parser_rows
                 },
+                "command_adapter_projection": (
+                    {
+                        "implementation_version_id": str(implementation_version.id),
+                        "implementation_digest": str(implementation_version.digest),
+                        "projection_digest": str(
+                            projection_manifest.get("digest") or ""
+                        ),
+                    }
+                    if direct_projection
+                    else {}
+                ),
                 "observation_contracts": {
                     str(item.id): str(item.contract_sha256) for item in contract_rows
                 },
@@ -689,6 +725,23 @@ class CheckItemRuntimeBundleService:
                             "compatibility_digest": parser_snapshot.get(
                                 "validation_digest"
                             ),
+                        },
+                    )
+                )
+            if direct_projection:
+                assets.append(
+                    self._asset(
+                        version_id,
+                        "command_adapter_projection",
+                        str(implementation.id),
+                        str(implementation_version.id),
+                        str(implementation_version.digest),
+                        metadata={
+                            "schema_version": "command-adapter/v2",
+                            "projection_digest": str(
+                                projection_manifest.get("digest") or ""
+                            ),
+                            "projection": projection_manifest,
                         },
                     )
                 )
@@ -1402,6 +1455,9 @@ class CheckItemRuntimeBundleService:
                     ),
                     canonical_rows=canonical_rows,
                     canonical_catalog=canonical_catalog,
+                    direct_projection=is_direct_projection_adapter(
+                        dict(implementation_version.adapter_spec_json or {})
+                    ),
                 )
             )
             current_requirement_digest = _digest(
@@ -1460,6 +1516,10 @@ class CheckItemRuntimeBundleService:
         for asset in assets:
             model, digest_field = {
                 "parser_template": (ParserTemplate, "sha256"),
+                "command_adapter_projection": (
+                    CollectionImplementationVersionRecord,
+                    "digest",
+                ),
                 "observation_contract": (
                     ObservationContractRecord,
                     "contract_sha256",

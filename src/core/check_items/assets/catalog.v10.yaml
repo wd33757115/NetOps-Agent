@@ -97,7 +97,7 @@ check_items:
     status: active
 
   - id: system.cpu_usage
-    version: 8
+    version: 9
     name: CPU utilization
     category: system
     description: Evaluate system, slot or processor CPU utilization.
@@ -136,27 +136,51 @@ check_items:
             allowed_compare_modes: [threshold_and_deadband]
             applies_to_dimensions:
               window: [5m]
-            required_thresholds:
-              high: 80
-            required_recovery_threshold: 75
+            require_structured_threshold_references: true
+            required_threshold_reference_any: [high, critical_high]
             required_deadband: 5
             allowed_minimum_durations: [null, 0s]
             evidence_only_reason: true
           event_constraints:
             role_event_types:
               high: CpuUtilizationHigh
+              critical_high: CpuUtilizationCritical
               high_recovery: CpuUtilizationRecovered
-            required_event_types: [CpuUtilizationHigh, CpuUtilizationRecovered]
+            required_event_types: [CpuUtilizationHigh, CpuUtilizationCritical, CpuUtilizationRecovered]
             required_event_classes:
               CpuUtilizationHigh: fault
+              CpuUtilizationCritical: fault
               CpuUtilizationRecovered: recovery
             required_severities:
               CpuUtilizationHigh: warning
+              CpuUtilizationCritical: critical
               CpuUtilizationRecovered: info
+            allow_critical: true
             required_recovery_pairs:
               - fault: CpuUtilizationHigh
                 recovery: CpuUtilizationRecovered
-            max_rule_count: 2
+              - fault: CpuUtilizationCritical
+                recovery: CpuUtilizationRecovered
+            max_rule_count: 3
+          threshold_references:
+            high:
+              field_name: cpu_high_warning_percent
+            critical_high:
+              field_name: cpu_high_alarm_percent
+        - observation_type: device.cpu.high_warning
+          semantic_type: threshold
+          unit: percent
+          canonical_field: cpu_high_warning_percent
+          dimensions: [window]
+          required: false
+          assessment_roles: [reference]
+        - observation_type: device.cpu.high_alarm
+          semantic_type: threshold
+          unit: percent
+          canonical_field: cpu_high_alarm_percent
+          dimensions: [window]
+          required: false
+          assessment_roles: [reference]
       parser_field_vocabulary:
         cpu_usage_percent:
           aliases: [cpu_usage, cpu_percent, total_cpu_percent]
@@ -165,6 +189,14 @@ check_items:
         cpu_idle_percent:
           aliases: [idle_percent, aggregate_cpu_idle_percent]
           role: metric
+        cpu_high_warning_percent:
+          aliases: [cpu_warning_threshold, cpu_high_warning]
+          observation_type: device.cpu.high_warning
+          role: threshold
+        cpu_high_alarm_percent:
+          aliases: [cpu_alarm_threshold, cpu_high_alarm]
+          observation_type: device.cpu.high_alarm
+          role: threshold
         cpu_5s:
           aliases: [cpu_usage_5_sec, total_cpu_pct_5s]
           observation_type: device.cpu.utilization
@@ -216,7 +248,7 @@ check_items:
     status: active
 
   - id: system.memory_usage
-    version: 6
+    version: 7
     name: Memory utilization
     category: system
     description: Evaluate system or slot memory capacity and utilization.
@@ -255,16 +287,62 @@ check_items:
                     args:
                       - binding: used
                       - binding: total
+          policy_constraints:
+            allowed_compare_modes: [threshold_and_deadband]
+            require_structured_threshold_references: true
+            required_threshold_reference_any: [high, critical_high]
+            required_deadband: 5
+            allowed_minimum_durations: [null, 0s]
+          event_constraints:
+            role_event_types:
+              high: MemoryUtilizationHigh
+              critical_high: MemoryUtilizationCritical
+              high_recovery: MemoryUtilizationRecovered
+            required_event_types: [MemoryUtilizationHigh, MemoryUtilizationCritical, MemoryUtilizationRecovered]
+            required_event_classes:
+              MemoryUtilizationHigh: fault
+              MemoryUtilizationCritical: fault
+              MemoryUtilizationRecovered: recovery
+            required_severities:
+              MemoryUtilizationHigh: warning
+              MemoryUtilizationCritical: critical
+              MemoryUtilizationRecovered: info
+            allow_critical: true
+            required_recovery_pairs:
+              - fault: MemoryUtilizationHigh
+                recovery: MemoryUtilizationRecovered
+              - fault: MemoryUtilizationCritical
+                recovery: MemoryUtilizationRecovered
+            max_rule_count: 3
+          threshold_references:
+            high:
+              field_name: memory_high_warning_percent
+            critical_high:
+              field_name: memory_high_alarm_percent
         - observation_type: device.memory.used
           semantic_type: gauge
           unit: bytes
           canonical_field: memory_used_bytes
+          assessment_roles: [evidence]
           mapping_guidance: Map the measured used-memory capacity and normalize its declared source unit to bytes.
         - observation_type: device.memory.total
           semantic_type: gauge
           unit: bytes
           canonical_field: memory_total_bytes
+          assessment_roles: [evidence]
           mapping_guidance: Map the measured total-memory capacity and normalize its declared source unit to bytes.
+        - observation_type: device.memory.high_warning
+          semantic_type: threshold
+          unit: percent
+          canonical_field: memory_high_warning_percent
+          required: false
+          assessment_roles: [reference]
+        - observation_type: device.memory.high_alarm
+          semantic_type: threshold
+          unit: percent
+          canonical_field: memory_high_alarm_percent
+          required: false
+          assessment_roles: [reference]
       parser_field_vocabulary:
         memory_pool:
           aliases: [pool]
@@ -284,6 +362,14 @@ check_items:
           aliases: [usage, usage_percent, memory_usage]
           observation_type: device.memory.utilization
           role: metric
+        memory_high_warning_percent:
+          aliases: [memory_warning_threshold, memory_high_warning]
+          observation_type: device.memory.high_warning
+          role: threshold
+        memory_high_alarm_percent:
+          aliases: [memory_alarm_threshold, memory_high_alarm]
+          observation_type: device.memory.high_alarm
+          role: threshold
         process_id:
           aliases: [process_pid, pid]
           role: identity
@@ -398,7 +484,7 @@ check_items:
     status: active
 
   - id: interface.optical_power
-    version: 9
+    version: 11
     name: Interface optical power
     category: interface
     description: Evaluate transceiver presence and measured receive/transmit optical power.
@@ -411,6 +497,7 @@ check_items:
         - observation_type: interface.optical.presence
           semantic_type: state
           canonical_field: transceiver_present
+          dimensions: [channel]
           required: true
           mapping_guidance: Map explicit presence/absence evidence; an empty source status may mean present only when samples prove that convention.
           policy_constraints:
@@ -434,13 +521,27 @@ check_items:
           semantic_type: gauge
           unit: dbm
           canonical_field: rx_power_dbm
+          dimensions: [channel]
+          value_type: number
           required: true
+          required_when:
+            field: transceiver_present
+            equals: present
           mapping_guidance: Map only the current receive optical-power measurement, not alarm or warning thresholds.
+          context_fields: [part_number, serial_number]
+          threshold_references:
+            high: {field_name: rx_high_warning_dbm}
+            critical_high: {field_name: rx_high_alarm_dbm}
+            low: {field_name: rx_low_warning_dbm}
+            critical_low: {field_name: rx_low_alarm_dbm}
+          baseline_comparison:
+            kind: linear_power_loss_ratio
+            max_loss_ratio: 0.10
+            identity_fields: [part_number, serial_number]
           policy_constraints:
-            allowed_compare_modes: [threshold_low_and_deadband]
+            allowed_compare_modes: [threshold_and_deadband]
             require_structured_threshold_references: true
-            required_threshold_reference_any: [low, critical_low]
-            recovery_direction: above
+            required_threshold_reference_any: [high, critical_high, low, critical_low]
             minimum_hysteresis: 2
             deadband_bounds: {min: 2, max: 6}
           event_constraints:
@@ -449,19 +550,35 @@ check_items:
             role_event_types:
               low: OpticalRxPowerLow
               critical_low: OpticalRxPowerCritical
+              high: OpticalRxPowerHigh
+              critical_high: OpticalRxPowerHighCritical
               low_recovery: OpticalRxPowerRecovered
+              high_recovery: OpticalRxPowerRecoveredFromHigh
+              baseline_degradation: OpticalRxPowerDegraded
             required_event_types:
               - OpticalRxPowerLow
               - OpticalRxPowerCritical
+              - OpticalRxPowerHigh
+              - OpticalRxPowerHighCritical
+              - OpticalRxPowerDegraded
               - OpticalRxPowerRecovered
+              - OpticalRxPowerRecoveredFromHigh
             required_event_classes:
               OpticalRxPowerLow: fault
               OpticalRxPowerCritical: fault
+              OpticalRxPowerHigh: fault
+              OpticalRxPowerHighCritical: fault
+              OpticalRxPowerDegraded: fault
               OpticalRxPowerRecovered: recovery
+              OpticalRxPowerRecoveredFromHigh: recovery
             required_severities:
               OpticalRxPowerLow: warning
               OpticalRxPowerCritical: critical
+              OpticalRxPowerHigh: warning
+              OpticalRxPowerHighCritical: critical
+              OpticalRxPowerDegraded: warning
               OpticalRxPowerRecovered: info
+              OpticalRxPowerRecoveredFromHigh: info
             required_exclusive_event_types:
               - OpticalRxPowerCritical
             priority_order:
@@ -472,18 +589,36 @@ check_items:
                 recovery: OpticalRxPowerRecovered
               - fault: OpticalRxPowerCritical
                 recovery: OpticalRxPowerRecovered
-            max_rule_count: 3
+              - fault: OpticalRxPowerHigh
+                recovery: OpticalRxPowerRecoveredFromHigh
+              - fault: OpticalRxPowerHighCritical
+                recovery: OpticalRxPowerRecoveredFromHigh
+            max_rule_count: 7
         - observation_type: interface.optical.tx_power
           semantic_type: gauge
           unit: dbm
           canonical_field: tx_power_dbm
+          dimensions: [channel]
+          value_type: number
           required: true
+          required_when:
+            field: transceiver_present
+            equals: present
           mapping_guidance: Map only the current transmit optical-power measurement, not alarm or warning thresholds.
+          context_fields: [part_number, serial_number]
+          threshold_references:
+            high: {field_name: tx_high_warning_dbm}
+            critical_high: {field_name: tx_high_alarm_dbm}
+            low: {field_name: tx_low_warning_dbm}
+            critical_low: {field_name: tx_low_alarm_dbm}
+          baseline_comparison:
+            kind: linear_power_loss_ratio
+            max_loss_ratio: 0.10
+            identity_fields: [part_number, serial_number]
           policy_constraints:
-            allowed_compare_modes: [threshold_low_and_deadband]
+            allowed_compare_modes: [threshold_and_deadband]
             require_structured_threshold_references: true
-            required_threshold_reference_any: [low, critical_low]
-            recovery_direction: above
+            required_threshold_reference_any: [high, critical_high, low, critical_low]
             minimum_hysteresis: 2
             deadband_bounds: {min: 2, max: 6}
           event_constraints:
@@ -492,19 +627,35 @@ check_items:
             role_event_types:
               low: OpticalTxPowerLow
               critical_low: OpticalTxPowerCritical
+              high: OpticalTxPowerHigh
+              critical_high: OpticalTxPowerHighCritical
               low_recovery: OpticalTxPowerRecovered
+              high_recovery: OpticalTxPowerRecoveredFromHigh
+              baseline_degradation: OpticalTxPowerDegraded
             required_event_types:
               - OpticalTxPowerLow
               - OpticalTxPowerCritical
+              - OpticalTxPowerHigh
+              - OpticalTxPowerHighCritical
+              - OpticalTxPowerDegraded
               - OpticalTxPowerRecovered
+              - OpticalTxPowerRecoveredFromHigh
             required_event_classes:
               OpticalTxPowerLow: fault
               OpticalTxPowerCritical: fault
+              OpticalTxPowerHigh: fault
+              OpticalTxPowerHighCritical: fault
+              OpticalTxPowerDegraded: fault
               OpticalTxPowerRecovered: recovery
+              OpticalTxPowerRecoveredFromHigh: recovery
             required_severities:
               OpticalTxPowerLow: warning
               OpticalTxPowerCritical: critical
+              OpticalTxPowerHigh: warning
+              OpticalTxPowerHighCritical: critical
+              OpticalTxPowerDegraded: warning
               OpticalTxPowerRecovered: info
+              OpticalTxPowerRecoveredFromHigh: info
             required_exclusive_event_types:
               - OpticalTxPowerCritical
             priority_order:
@@ -515,7 +666,21 @@ check_items:
                 recovery: OpticalTxPowerRecovered
               - fault: OpticalTxPowerCritical
                 recovery: OpticalTxPowerRecovered
-            max_rule_count: 3
+              - fault: OpticalTxPowerHigh
+                recovery: OpticalTxPowerRecoveredFromHigh
+              - fault: OpticalTxPowerHighCritical
+                recovery: OpticalTxPowerRecoveredFromHigh
+            max_rule_count: 7
+        - {observation_type: interface.optical.rx_high_alarm, semantic_type: threshold, unit: dbm, canonical_field: rx_high_alarm_dbm, dimensions: [channel], required: false, assessment_roles: [reference]}
+        - {observation_type: interface.optical.rx_high_warning, semantic_type: threshold, unit: dbm, canonical_field: rx_high_warning_dbm, dimensions: [channel], required: false, assessment_roles: [reference]}
+        - {observation_type: interface.optical.rx_low_warning, semantic_type: threshold, unit: dbm, canonical_field: rx_low_warning_dbm, dimensions: [channel], required: false, assessment_roles: [reference]}
+        - {observation_type: interface.optical.rx_low_alarm, semantic_type: threshold, unit: dbm, canonical_field: rx_low_alarm_dbm, dimensions: [channel], required: false, assessment_roles: [reference]}
+        - {observation_type: interface.optical.tx_high_alarm, semantic_type: threshold, unit: dbm, canonical_field: tx_high_alarm_dbm, dimensions: [channel], required: false, assessment_roles: [reference]}
+        - {observation_type: interface.optical.tx_high_warning, semantic_type: threshold, unit: dbm, canonical_field: tx_high_warning_dbm, dimensions: [channel], required: false, assessment_roles: [reference]}
+        - {observation_type: interface.optical.tx_low_warning, semantic_type: threshold, unit: dbm, canonical_field: tx_low_warning_dbm, dimensions: [channel], required: false, assessment_roles: [reference]}
+        - {observation_type: interface.optical.tx_low_alarm, semantic_type: threshold, unit: dbm, canonical_field: tx_low_alarm_dbm, dimensions: [channel], required: false, assessment_roles: [reference]}
+        - {observation_type: interface.optical.part_number, semantic_type: state, canonical_field: part_number, dimensions: [channel], required: false, assessment_roles: [evidence]}
+        - {observation_type: interface.optical.serial_number, semantic_type: state, canonical_field: serial_number, dimensions: [channel], required: false, assessment_roles: [evidence]}
       parser_field_vocabulary:
         interface:
           aliases: [port, interface_id, interface_name]
@@ -569,6 +734,14 @@ check_items:
         bias_ma:
           aliases: [bias, current_ma]
           role: metric
+        part_number:
+          aliases: [vendor_part_number, transceiver_part_number]
+          observation_type: interface.optical.part_number
+          role: context
+        serial_number:
+          aliases: [vendor_serial_number, transceiver_serial_number]
+          observation_type: interface.optical.serial_number
+          role: context
     report_projection: optical_power
     applicability:
       capability: optical_diagnostics

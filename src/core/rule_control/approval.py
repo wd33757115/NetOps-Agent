@@ -433,7 +433,7 @@ class RuleAssetApprovalService:
                 raise RuleGenerationJobStateError(
                     f"rule asset bundle source evidence is no longer releasable: {exc}"
                 ) from exc
-        elif context_mode != "legacy_manual":
+        elif context_mode not in {"legacy_manual", "check_item_semantics"}:
             raise RuleGenerationJobStateError(
                 "rule asset bundle has no governed release context"
             )
@@ -536,73 +536,78 @@ class RuleAssetApprovalService:
         }
         replaced_source_job_ids: set[str] = set()
         contract_jobs = by_type.get("OBSERVATION_CONTRACT") or []
-        if not contract_jobs:
-            raise RuleGenerationJobStateError(
-                "rule asset bundle cannot activate without an ObservationContract"
+        if requirements["requires_observation_contract"]:
+            if len(contract_jobs) != 1:
+                raise RuleGenerationJobStateError(
+                    "rule asset bundle requires exactly one ObservationContract"
+                )
+            contract_job = contract_jobs[0]
+            contract = (
+                db.query(ObservationContractRecord)
+                .filter(ObservationContractRecord.id == contract_job.asset_version_id)
+                .with_for_update()
+                .first()
             )
-        contract_job = contract_jobs[0]
-        contract = (
-            db.query(ObservationContractRecord)
-            .filter(ObservationContractRecord.id == contract_job.asset_version_id)
-            .with_for_update()
-            .first()
-        )
-        if contract is None:
-            raise ValueError("observation contract not found")
-        if str(contract.contract_sha256 or "") != str(contract_job.asset_digest or ""):
-            raise RuleGenerationJobStateError(
-                "observation contract digest no longer matches the approved candidate"
+            if contract is None:
+                raise ValueError("observation contract not found")
+            if str(contract.contract_sha256 or "") != str(contract_job.asset_digest or ""):
+                raise RuleGenerationJobStateError(
+                    "observation contract digest no longer matches the approved candidate"
+                )
+            if contract.status not in {"draft", "pending_approval", "active"}:
+                raise RuleGenerationJobStateError(
+                    f"observation contract is not releasable from status {contract.status}"
+                )
+            previous_contracts = (
+                db.query(ObservationContractRecord)
+                .filter(
+                    ObservationContractRecord.source_type == contract.source_type,
+                    ObservationContractRecord.schema_id == contract.schema_id,
+                    ObservationContractRecord.status == "active",
+                    ObservationContractRecord.id != contract.id,
+                )
+                .order_by(ObservationContractRecord.version)
+                .with_for_update()
+                .all()
             )
-        if contract.status not in {"draft", "pending_approval", "active"}:
-            raise RuleGenerationJobStateError(
-                f"observation contract is not releasable from status {contract.status}"
+            activation_snapshot["assets"].append(
+                {
+                    "asset_type": "OBSERVATION_CONTRACT",
+                    "candidate_version_id": contract.id,
+                    "candidate_status_before": contract.status,
+                    "logical_key": f"{contract.source_type}:{contract.schema_id}",
+                    "previous_active_version_ids": [item.id for item in previous_contracts],
+                }
             )
-        previous_contracts = (
-            db.query(ObservationContractRecord)
-            .filter(
-                ObservationContractRecord.source_type == contract.source_type,
-                ObservationContractRecord.schema_id == contract.schema_id,
-                ObservationContractRecord.status == "active",
-                ObservationContractRecord.id != contract.id,
-            )
-            .order_by(ObservationContractRecord.version)
-            .with_for_update()
-            .all()
-        )
-        activation_snapshot["assets"].append(
-            {
-                "asset_type": "OBSERVATION_CONTRACT",
-                "candidate_version_id": contract.id,
-                "candidate_status_before": contract.status,
-                "logical_key": f"{contract.source_type}:{contract.schema_id}",
-                "previous_active_version_ids": [item.id for item in previous_contracts],
+            for previous in previous_contracts:
+                if previous.source_job_id:
+                    replaced_source_job_ids.add(str(previous.source_job_id))
+                previous.status = "deprecated"
+                previous.deprecated_at = now
+                previous.updated_at = now
+            if previous_contracts:
+                db.flush()
+            contract.status = "active"
+            contract.activated_at = now
+            contract.deprecated_at = None
+            contract.updated_at = now
+            contract.approval_json = {
+                **dict(contract.approval_json or {}),
+                "approved_by": actor,
+                "approved_at": now.isoformat(),
+                "bundle_id": bundle.id,
             }
-        )
-        for previous in previous_contracts:
-            if previous.source_job_id:
-                replaced_source_job_ids.add(str(previous.source_job_id))
-            previous.status = "deprecated"
-            previous.deprecated_at = now
-            previous.updated_at = now
-        if previous_contracts:
-            db.flush()
-        contract.status = "active"
-        contract.activated_at = now
-        contract.deprecated_at = None
-        contract.updated_at = now
-        contract.approval_json = {
-            **dict(contract.approval_json or {}),
-            "approved_by": actor,
-            "approved_at": now.isoformat(),
-            "bundle_id": bundle.id,
-        }
-        activations.append(
-            {
-                "asset_type": "OBSERVATION_CONTRACT",
-                "asset_id": contract.id,
-                "version": contract.version,
-            }
-        )
+            activations.append(
+                {
+                    "asset_type": "OBSERVATION_CONTRACT",
+                    "asset_id": contract.id,
+                    "version": contract.version,
+                }
+            )
+        elif contract_jobs:
+            raise RuleGenerationJobStateError(
+                "rule asset bundle contains an ObservationContract that CheckItem does not require"
+            )
 
         for policy_job in by_type.get("CHANGE_POLICY") or []:
             policy_version = (

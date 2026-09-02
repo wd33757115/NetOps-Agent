@@ -50,6 +50,7 @@ from src.core.check_items import (
     load_text_comparison_profiles,
 )
 from src.core.check_items.assessment_policy import (
+    assessment_policy_source_digest,
     build_assessment_basis,
     build_target_assessment_policy_snapshot,
 )
@@ -500,6 +501,43 @@ def _seed_cpu_assets(session_factory, catalog_repository):
                     activated_at=now,
                 ),
                 EventRuleRecord(
+                    id="rule-cpu-critical",
+                    name="system.cpu_usage.critical",
+                    status="active",
+                    current_version=1,
+                    created_at=now,
+                    updated_at=now,
+                ),
+                EventRuleVersionRecord(
+                    id="rule-cpu-critical-v1",
+                    rule_id="rule-cpu-critical",
+                    version=1,
+                    event_type="CpuUtilizationCritical",
+                    severity="critical",
+                    condition_json={
+                        "kind": "threshold",
+                        "threshold_role": "critical_high",
+                        "observation_types": ["device.cpu.utilization"],
+                        "entity_types": ["cpu_scope"],
+                        "fields": ["cpu_usage"],
+                        "gte": 90,
+                    },
+                    priority=110,
+                    exclusive=True,
+                    event_class="fault",
+                    evaluation_scope="both",
+                    recovery_json={},
+                    correlation_key_json=[
+                        "device_id", "entity_type", "entity_key"
+                    ],
+                    status="active",
+                    validation_report_json={"passed": True},
+                    digest="f" * 64,
+                    created_by="test",
+                    created_at=now,
+                    activated_at=now,
+                ),
+                EventRuleRecord(
                     id="rule-cpu-recovered",
                     name="system.cpu_usage.recovered",
                     status="active",
@@ -527,7 +565,10 @@ def _seed_cpu_assets(session_factory, catalog_repository):
                     event_class="recovery",
                     evaluation_scope="change",
                     recovery_json={
-                        "resolves": ["CpuUtilizationHigh"]
+                        "resolves": [
+                            "CpuUtilizationHigh",
+                            "CpuUtilizationCritical",
+                        ]
                     },
                     correlation_key_json=[
                         "device_id",
@@ -546,21 +587,56 @@ def _seed_cpu_assets(session_factory, catalog_repository):
     return check_item, implementation
 
 
-def _create_cpu_bundle(tmp_path):
+def _create_cpu_bundle(tmp_path, *, direct_projection: bool = False):
     session_factory, scope, catalog_repository = _runtime(tmp_path)
     check_item, implementation = _seed_cpu_assets(
         session_factory,
         catalog_repository,
     )
+    if direct_projection:
+        with _session_scope(session_factory) as db:
+            implementation_version = db.get(
+                CollectionImplementationVersionRecord,
+                implementation.version_id,
+            )
+            assert implementation_version is not None
+            implementation_version.adapter_spec_json = {
+                "schema_version": "command-adapter/v2",
+                "parser": {"template_id": "parser-cpu-v1"},
+                "outputs": [
+                    {
+                        "check_item_id": "system.cpu_usage",
+                        "check_item_version_id": check_item.version_id,
+                        "source_record_set": "default",
+                        "projection": {
+                            "fields": {
+                                "scope": {"source": "scope"},
+                                "scope_id": {"source": "scope_id"},
+                                "cpu_usage_percent": {
+                                    "source": "cpu_usage",
+                                    "dimensions": {"window": "instant"},
+                                },
+                            }
+                        },
+                    }
+                ],
+            }
+            implementation_version.digest = _stable_digest(
+                {
+                    "previous": implementation_version.digest,
+                    "adapter_spec": implementation_version.adapter_spec_json,
+                }
+            )
     service = CheckItemRuntimeBundleService(scope)
     bundle = service.create_version(
         check_item_version_id=check_item.version_id,
         implementation_version_id=implementation.version_id,
         parser_template_ids=["parser-cpu-v1"],
-        observation_contract_ids=["contract-cpu-v1"],
+        observation_contract_ids=([] if direct_projection else ["contract-cpu-v1"]),
         change_policy_version_ids=["policy-cpu-v1"],
         event_rule_bindings={
             "rule-cpu-high-v1": "device.cpu.utilization",
+            "rule-cpu-critical-v1": "device.cpu.utilization",
             "rule-cpu-recovered-v1": "device.cpu.utilization",
         },
         actor="test",
@@ -581,12 +657,56 @@ def _create_cpu_bundle(tmp_path):
     )
 
 
+def test_v2_runtime_bundle_freezes_projection_without_observation_contract(tmp_path):
+    (
+        _session_factory,
+        _scope,
+        _catalog_repository,
+        _check_item,
+        _implementation,
+        _service,
+        bundle,
+    ) = _create_cpu_bundle(tmp_path, direct_projection=True)
+
+    asset_types = {item["asset_type"] for item in bundle["assets"]}
+    assert "command_adapter_projection" in asset_types
+    assert "observation_contract" not in asset_types
+    assert bundle["asset_requirement_profile"]["requirements"][
+        "command_adapter_projection"
+    ]["required"] is True
+    assert bundle["asset_requirement_profile"]["requirements"][
+        "observation_contract"
+    ]["required"] is False
+    assert bundle["compatibility"]["command_adapter_projection"][
+        "check_item_version_id"
+    ]
+
+
 def _target_policy_snapshot(check_item, device_id: str) -> dict:
+    source = {
+        "policy_id": f"{device_id}-cpu-thresholds",
+        "version": "1",
+        "status": "approved",
+        "approved_by": "test",
+        "approved_at": "2026-01-01T00:00:00+00:00",
+        "check_item_id": check_item.id,
+        "observation_type": "device.cpu.utilization",
+        "scope": {"device_ids": [device_id]},
+        "thresholds": {
+            "high": {"value": 80, "unit": "percent", "hysteresis": 5},
+            "critical_high": {"value": 90, "unit": "percent", "hysteresis": 5},
+        },
+        "evidence_refs": [f"profile:{device_id}:cpu"],
+    }
+    source["digest"] = assessment_policy_source_digest(source)
     return build_target_assessment_policy_snapshot(
         check_item_id=check_item.id,
         check_item_version_id=check_item.version_id,
         canonical_contract=check_item.canonical_contract,
-        device={"id": device_id},
+        device={
+            "id": device_id,
+            "attributes": {"assessment_policy_bindings": [source]},
+        },
     )
 
 
@@ -913,6 +1033,14 @@ def _complete_cpu_production_fact(
                     "value": 35,
                     "unit": "percent",
                     "dimensions": {"window": "instant"},
+                    "context": {
+                        "cpu_high_warning_percent": 80,
+                        "cpu_high_alarm_percent": 90,
+                        "threshold_reference_sources": {
+                            "high": {"field_name": "cpu_high_warning_percent"},
+                            "critical_high": {"field_name": "cpu_high_alarm_percent"},
+                        },
+                    },
                     "command": str(action["canonical_command"]),
                     "snapshot_id": snapshot_id,
                     "observed_at": observed_at,
@@ -1798,6 +1926,7 @@ def test_runtime_bundle_preview_is_read_only_and_assembly_is_idempotent(tmp_path
     assert preview["fallback_resilience"] == "not_applicable"
     assert preview["selected"]["parser_template_ids"] == ["parser-cpu-v1"]
     assert preview["selected"]["event_rule_bindings"] == {
+        "rule-cpu-critical-v1": ["device.cpu.utilization"],
         "rule-cpu-high-v1": ["device.cpu.utilization"],
         "rule-cpu-recovered-v1": ["device.cpu.utilization"],
     }
@@ -1815,6 +1944,7 @@ def test_runtime_bundle_preview_is_read_only_and_assembly_is_idempotent(tmp_path
         "event_rule"
     ]["required_event_types_by_observation"] == {
         "device.cpu.utilization": [
+            "CpuUtilizationCritical",
             "CpuUtilizationHigh",
             "CpuUtilizationRecovered",
         ]
@@ -1822,6 +1952,7 @@ def test_runtime_bundle_preview_is_read_only_and_assembly_is_idempotent(tmp_path
     assert preview["asset_requirement_profile"]["requirements"][
         "event_rule"
     ]["required_event_severities"] == {
+        "CpuUtilizationCritical": "critical",
         "CpuUtilizationHigh": "warning",
         "CpuUtilizationRecovered": "info",
     }
@@ -1829,6 +1960,10 @@ def test_runtime_bundle_preview_is_read_only_and_assembly_is_idempotent(tmp_path
         "event_rule"
     ]["required_recovery_pairs_by_observation"] == {
         "device.cpu.utilization": [
+            {
+                "fault": "CpuUtilizationCritical",
+                "recovery": "CpuUtilizationRecovered",
+            },
             {
                 "fault": "CpuUtilizationHigh",
                 "recovery": "CpuUtilizationRecovered",
@@ -1998,6 +2133,7 @@ def test_runtime_bundle_does_not_block_on_missing_optional_observation(tmp_path)
         change_policy_version_ids=["policy-cpu-v1"],
         event_rule_bindings={
             "rule-cpu-high-v1": "device.cpu.utilization",
+            "rule-cpu-critical-v1": "device.cpu.utilization",
             "rule-cpu-recovered-v1": "device.cpu.utilization",
         },
         actor="test",
@@ -4439,16 +4575,11 @@ def test_effective_plan_freezes_every_device_check_and_asset_gap(tmp_path):
     assert len(plan.collection_actions) == 1
     assert plan.collection_actions[0]["canonical_command"] == "display cpu"
     assert plan.collection_actions[0]["command"] == "display cpu-usage"
-    assert cpu["unavailable_commands"] == [
-        {
-            "command": "display cpu",
-            "canonical_command": "display cpu",
-            "fallback_rank": 1,
-            "reason_code": "asset_unavailable_at_plan_time",
-        }
-    ]
-    assert cpu["fallback_resilience"] == "reduced"
-    assert cpu["declared_command_count"] == 2
+    # CommandAdapter V2 owns one CLI command per implementation; it may emit
+    # multiple CheckItems but cannot use a second command as a fallback.
+    assert cpu["unavailable_commands"] == []
+    assert cpu["fallback_resilience"] == "not_applicable"
+    assert cpu["declared_command_count"] == 1
     assert cpu["executable_command_count"] == 1
     assert len(plan.executions) == 2
     assert len(plan.terminal_assessments) == 1
@@ -6031,6 +6162,14 @@ def test_mixed_device_outcomes_and_report_terminal_semantics(
                     "unit": "percent",
                     "dimensions": {"window": "instant"},
                     "command": "display cpu",
+                    "context": {
+                        "cpu_high_warning_percent": 80,
+                        "cpu_high_alarm_percent": 90,
+                        "threshold_reference_sources": {
+                            "high": {"field_name": "cpu_high_warning_percent"},
+                            "critical_high": {"field_name": "cpu_high_alarm_percent"},
+                        },
+                    },
                     "observed_at": now,
                     "parser_template_id": "parser-cpu-v1",
                     "observation_contract_id": "contract-cpu-v1",

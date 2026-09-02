@@ -1,13 +1,16 @@
 import React from 'react'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from 'react-query'
+import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AuthProvider } from '../../../context/AuthContext'
 import {
   authApi,
   parserApi,
+  ruleAssetSourceApi,
+  type AdapterProjectionCutoverReadiness,
   type CheckItemCatalogChange,
   type CheckItemCatalogImpact,
   type ParserCheckItem,
@@ -108,16 +111,44 @@ const catalogImpact: CheckItemCatalogImpact = {
   impact_digest: 'c'.repeat(64),
 }
 
+const cutoverReadiness: AdapterProjectionCutoverReadiness = {
+  schema_version: 'adapter-projection-cutover/v1',
+  route_count: 1,
+  ready_route_count: 0,
+  blocked_route_count: 1,
+  production_cutover_permitted: false,
+  hard_gate: 'all_active_structured_routes_parser_projection_and_raw_cli_replay',
+  digest: 'e'.repeat(64),
+  routes: [{
+    route_id: 'h3c-interface-status',
+    implementation_version_id: 'implementation:h3c-interface-status:v2',
+    check_item_version_ids: ['check-item:interface.oper_status:v2'],
+    status: 'blocked',
+    success: false,
+    blockers: [{ code: 'sample_replay_missing', message: '缺少完整原始 CLI 回放证明。' }],
+    warnings: [],
+    replay_attestation: {},
+  }],
+  blockers: [{
+    route_id: 'h3c-interface-status',
+    blockers: [{ code: 'sample_replay_missing', message: '缺少完整原始 CLI 回放证明。' }],
+  }],
+  replay_attestation_sources: {},
+  cutover_authorization: null,
+}
+
 const renderWorkspace = (props: React.ComponentProps<typeof CheckItemCatalogWorkspace> = {}) => {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
-    <AuthProvider>
-      <QueryClientProvider client={client}>
-        <CheckItemCatalogWorkspace {...props} />
-      </QueryClientProvider>
-    </AuthProvider>,
+    <MemoryRouter>
+      <AuthProvider>
+        <QueryClientProvider client={client}>
+          <CheckItemCatalogWorkspace {...props} />
+        </QueryClientProvider>
+      </AuthProvider>
+    </MemoryRouter>,
   )
 }
 
@@ -165,6 +196,26 @@ describe('CheckItemCatalogWorkspace', () => {
       limit: 200,
       offset: 0,
     })
+    vi.spyOn(parserApi, 'adapterProjectionCutoverReadiness').mockResolvedValue(cutoverReadiness)
+    vi.spyOn(ruleAssetSourceApi, 'checkItemProductionGroups').mockResolvedValue({
+      items: [],
+      page: 1,
+      page_size: 100,
+      total: 0,
+      page_count: 0,
+      summary: {
+        total: 0,
+        action_required: 0,
+        in_progress: 0,
+        awaiting_approval: 0,
+        published: 0,
+        not_applicable: 0,
+        exception: 0,
+        unclassified: 0,
+        by_bucket: {},
+        by_status: {},
+      },
+    })
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
       writable: true,
@@ -184,13 +235,15 @@ describe('CheckItemCatalogWorkspace', () => {
   afterEach(() => vi.restoreAllMocks())
 
   it('maintains device compatibility and command adapters in one flow', async () => {
-    renderWorkspace({ mode: 'command_adapters' })
+    renderWorkspace()
 
     expect(await screen.findByText('CPU 使用率')).toBeInTheDocument()
     expect(screen.getByText('system.cpu_usage')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('搜索检查项、厂商、型号或命令')).toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('button', { name: /^plus 新增命令适配器$/ }))
+    await userEvent.click(screen.getByRole('button', {
+      name: '为 system.cpu_usage 新增命令适配器',
+    }))
 
     expect(await screen.findByRole('dialog', { name: '新增命令适配器' })).toBeVisible()
     expect(screen.getByLabelText('关联检查项')).toBeInTheDocument()
@@ -205,6 +258,19 @@ describe('CheckItemCatalogWorkspace', () => {
     expect(screen.getByText(/Active 版本不会被覆盖/)).toBeInTheDocument()
   })
 
+  it('keeps replay proof and guarded cutover in the command-adapter workspace', async () => {
+    renderWorkspace()
+
+    await userEvent.click(await screen.findByRole('tab', { name: '回放与切换' }))
+
+    expect(await screen.findByText('全量一次切换门禁')).toBeInTheDocument()
+    expect(screen.getByText('implementation:h3c-interface-status:v2')).toBeInTheDocument()
+    expect(screen.getByText('缺少完整原始 CLI 回放证明。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '验证全量回放证明' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '写入审计链' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '签发部署授权' })).toBeDisabled()
+  })
+
   it('creates and revises the top-level check item from the catalog', async () => {
     renderWorkspace()
 
@@ -215,7 +281,8 @@ describe('CheckItemCatalogWorkspace', () => {
     expect(screen.getByLabelText('稳定检查项 ID')).toBeEnabled()
     expect(screen.getByText('按标准字段自动生成')).toBeInTheDocument()
     expect(screen.getByText('标准输出')).toBeInTheDocument()
-    expect(screen.getByText('变化、当前值与事件')).toBeInTheDocument()
+    expect(screen.getByText('规则生成依据')).toBeInTheDocument()
+    expect(screen.getByText('变化策略和事件规则只读取这里的标准语义')).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('稳定检查项 ID'), {
       target: { value: 'routing.test_neighbor' },
@@ -235,8 +302,187 @@ describe('CheckItemCatalogWorkspace', () => {
     expect(within(editDialog).getAllByDisplayValue('CPU utilization').length).toBeGreaterThan(0)
   })
 
+  it('shows sample-generated unclassified commands in the check-item catalog', async () => {
+    vi.spyOn(ruleAssetSourceApi, 'checkItemProductionGroups').mockResolvedValue({
+      items: [{
+        id: 'check-item:__unclassified__:asset-1',
+        name: '待归类检查项',
+        display_name: '待归类检查项',
+        category: 'unclassified',
+        description: '尚未关联检查项',
+        display_description: '尚未关联检查项',
+        classification_required: true,
+        governance_status: 'blocked',
+        governance_bucket: 'exception',
+        current_stage: 'identity_grouping',
+        current_stage_label: '检查项归类',
+        progress_percent: 0,
+        sample_count: 2,
+        evidence_device_count: 1,
+        implementation_count: 1,
+        command_count: 1,
+        blocker_count: 1,
+        vendors: ['H3C'],
+        implementations: [{
+          id: 'unit-1',
+          offline_job_id: 'offline-1',
+          asset_key: 'asset-1',
+          vendor: 'H3C',
+          model: 'S5130',
+          models: ['S5130'],
+          family: 'Comware7',
+          profile: 'Comware7',
+          canonical_command: 'display counters inbound interface',
+          handling: 'raw_hash_diff',
+          asset_mode: 'raw_hash',
+          status: 'blocked',
+          current_stage: 'identity_grouping',
+          current_stage_label: '检查项归类',
+          progress_percent: 0,
+          sample_count: 2,
+          device_count: 1,
+          output_signature_count: 1,
+          blocker_count: 1,
+          parse_counts: {},
+          stage_statuses: {},
+          projection_version: 1,
+          mapping_status: 'unclassified',
+        }],
+      }],
+      page: 1,
+      page_size: 100,
+      total: 1,
+      page_count: 1,
+      summary: {
+        total: 1,
+        action_required: 0,
+        in_progress: 0,
+        awaiting_approval: 0,
+        published: 0,
+        not_applicable: 0,
+        exception: 1,
+        unclassified: 1,
+        by_bucket: { exception: 1 },
+        by_status: { blocked: 1 },
+      },
+    } as never)
+
+    renderWorkspace()
+
+    expect(await screen.findByText('待归类检查项')).toBeVisible()
+    expect(screen.queryByRole('region', { name: '待归类检查项' })).not.toBeInTheDocument()
+    await userEvent.click(screen.getAllByRole('button', { name: 'Expand row' })[0])
+    const command = screen.getByText('display counters inbound interface')
+    fireEvent.contextMenu(command)
+    expect((await screen.findAllByText('关联检查项')).length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: '关联检查项' })).toBeVisible()
+    expect(screen.getByRole('button', { name: '删除命令' })).toBeVisible()
+    expect(screen.queryByRole('button', { name: '删除检查项 __pending_classification__' })).not.toBeInTheDocument()
+  })
+
+  it('scopes a sample-import deep link to that import’s pending commands', async () => {
+    renderWorkspace({ initialOfflineJobId: 'offline-scoped-import' })
+
+    expect(await screen.findByText('本次样本导入的待归类命令')).toBeVisible()
+    await waitFor(() => expect(ruleAssetSourceApi.checkItemProductionGroups).toHaveBeenCalledWith(
+      expect.objectContaining({ offline_job_id: 'offline-scoped-import' }),
+    ))
+    expect(screen.queryByText('CPU 使用率')).not.toBeInTheDocument()
+  })
+
+  it('allows removing one unclassified command without deleting the pending group', async () => {
+    localStorage.setItem('access_token', 'test-token')
+    localStorage.setItem('auth_user', JSON.stringify({
+      id: 1,
+      username: 'admin',
+      email: 'admin@example.com',
+      role: 'admin',
+    }))
+    vi.spyOn(ruleAssetSourceApi, 'checkItemProductionGroups').mockResolvedValue({
+      items: [{
+        id: 'check-item:__unclassified__:asset-1',
+        name: '待归类检查项',
+        display_name: '待归类检查项',
+        category: 'unclassified',
+        description: '尚未关联检查项',
+        display_description: '尚未关联检查项',
+        classification_required: true,
+        governance_status: 'blocked',
+        governance_bucket: 'exception',
+        current_stage: 'identity_grouping',
+        current_stage_label: '检查项归类',
+        progress_percent: 0,
+        sample_count: 2,
+        evidence_device_count: 1,
+        implementation_count: 1,
+        command_count: 1,
+        blocker_count: 1,
+        vendors: ['H3C'],
+        implementations: [{
+          id: 'unit-1',
+          offline_job_id: 'offline-1',
+          asset_key: 'asset-1',
+          vendor: 'H3C',
+          model: 'S5130',
+          models: ['S5130'],
+          family: 'Comware7',
+          profile: 'Comware7',
+          canonical_command: 'display counters inbound interface',
+          handling: 'raw_hash_diff',
+          asset_mode: 'raw_hash',
+          status: 'blocked',
+          current_stage: 'identity_grouping',
+          current_stage_label: '检查项归类',
+          progress_percent: 0,
+          sample_count: 2,
+          device_count: 1,
+          output_signature_count: 1,
+          blocker_count: 1,
+          parse_counts: {},
+          stage_statuses: {},
+          projection_version: 1,
+          mapping_status: 'unclassified',
+        }],
+      }],
+      page: 1,
+      page_size: 100,
+      total: 1,
+      page_count: 1,
+      summary: {
+        total: 1,
+        action_required: 0,
+        in_progress: 0,
+        awaiting_approval: 0,
+        published: 0,
+        not_applicable: 0,
+        exception: 1,
+        unclassified: 1,
+        by_bucket: { exception: 1 },
+        by_status: { blocked: 1 },
+      },
+    } as never)
+    const deleteSpy = vi.spyOn(ruleAssetSourceApi, 'deleteUnclassifiedCommandAsset').mockResolvedValue({
+      success: true,
+      unit_id: 'unit-1',
+      asset_key: 'asset-1',
+    })
+
+    renderWorkspace()
+
+    await screen.findByText('待归类检查项')
+    await userEvent.click(screen.getAllByRole('button', { name: 'Expand row' })[0])
+    await userEvent.click(screen.getByRole('button', { name: '删除命令' }))
+    await screen.findByText('删除待归类命令？')
+    const confirmation = screen.getAllByRole('tooltip', { hidden: true })
+      .find((node) => node.textContent?.includes('删除待归类命令？'))
+    expect(confirmation).toBeDefined()
+    await userEvent.click(within(confirmation!).getByRole('button', { name: /删\s*除/ }))
+
+    expect(deleteSpy).toHaveBeenCalledWith('offline-1', 'unit-1')
+  })
+
   it('edits an implementation as a new immutable version', async () => {
-    renderWorkspace({ mode: 'command_adapters' })
+    renderWorkspace()
 
     await screen.findByText('CPU 使用率')
     await userEvent.click(screen.getByRole('button', { name: 'Expand row' }))
@@ -263,7 +509,7 @@ describe('CheckItemCatalogWorkspace', () => {
       cancelled_change_count: 0,
       idempotent_replay: false,
     })
-    renderWorkspace({ mode: 'command_adapters' })
+    renderWorkspace()
 
     await screen.findByText('CPU 使用率')
     await userEvent.click(screen.getByRole('button', { name: 'Expand row' }))

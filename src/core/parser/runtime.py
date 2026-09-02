@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -14,6 +15,7 @@ from .key_contract import validate_entity_keys
 from .output_classifier import OutputClassifier
 from .parser_bundle import parse_parser_bundle
 from .policy import CategorySpec, ParserPolicy
+from .record_shape import RecordShapeError, expand_list_primary_records
 from .textfsm_input import prepare_textfsm_input
 from .value_types import is_unavailable_value, is_valid_ip_value
 
@@ -44,6 +46,122 @@ class ParserRuntimeResult:
     template_profile: str | None = None
     comparison_profile: str | None = None
     comparison_profile_version: int | None = None
+
+
+def _field_value(record: Mapping[str, Any], field_name: str) -> Any:
+    """Read a Parser field with the key-contract's case-insensitive behavior."""
+
+    if field_name in record:
+        return record[field_name]
+    expected = field_name.casefold()
+    for key, value in record.items():
+        if str(key).casefold() == expected:
+            return value
+    return None
+
+
+def _record_set_fields(
+    payload: Mapping[str, Any], *, record_set_name: str | None
+) -> Mapping[str, Any]:
+    """Find fields for one record set in either ParserSpec persistence shape."""
+
+    record_sets = payload.get("record_sets")
+    candidates: list[Mapping[str, Any]] = []
+    if isinstance(record_sets, list):
+        candidates = [item for item in record_sets if isinstance(item, Mapping)]
+    elif isinstance(record_sets, Mapping):
+        candidates = [
+            {"name": name, **dict(item)}
+            for name, item in record_sets.items()
+            if isinstance(item, Mapping)
+        ]
+    if candidates:
+        if record_set_name:
+            expected = record_set_name.casefold()
+            for item in candidates:
+                if str(item.get("name") or "").casefold() == expected:
+                    fields = item.get("fields")
+                    return fields if isinstance(fields, Mapping) else {}
+        if len(candidates) == 1:
+            fields = candidates[0].get("fields")
+            return fields if isinstance(fields, Mapping) else {}
+        return {}
+    fields = payload.get("fields")
+    return fields if isinstance(fields, Mapping) else {}
+
+
+def _primary_key_defaults_from_validation(
+    validation: Mapping[str, Any],
+    *,
+    primary_keys: tuple[str, ...],
+    record_set_name: str | None = None,
+) -> dict[str, str]:
+    """Read validation-only key defaults from immutable ParserSpec evidence.
+
+    Older candidates only carry this information under ``parser_spec`` while
+    newer persisted contracts also expose ``primary_key_defaults`` directly.
+    Supporting both lets an already-created candidate be replayed correctly
+    without rewriting its immutable evidence.
+    """
+
+    if not primary_keys:
+        return {}
+    payloads: list[Mapping[str, Any]] = [validation]
+    for name in ("parser_spec", "source_parser_spec"):
+        payload = validation.get(name)
+        if isinstance(payload, Mapping):
+            payloads.append(payload)
+    defaults: dict[str, str] = {}
+    for field_name in primary_keys:
+        expected = field_name.casefold()
+        for payload in payloads:
+            explicit = payload.get("primary_key_defaults")
+            value = None
+            if isinstance(explicit, Mapping):
+                for key, candidate in explicit.items():
+                    if str(key).casefold() == expected:
+                        value = candidate
+                        break
+            if value is None:
+                fields = _record_set_fields(
+                    payload,
+                    record_set_name=record_set_name,
+                )
+                for key, definition in fields.items():
+                    if str(key).casefold() == expected and isinstance(definition, Mapping):
+                        value = definition.get("primary_key_default")
+                        break
+            normalized = str(value).strip() if value is not None else ""
+            if normalized:
+                defaults[field_name] = normalized
+                break
+    return defaults
+
+
+def _records_for_key_validation(
+    records: list[dict[str, Any]],
+    spec: CategorySpec,
+) -> list[dict[str, Any]]:
+    """Return validation copies with declared sparse-key defaults applied.
+
+    These copies exist only for entity-key validation.  The original parser
+    records remain untouched so the Adapter Projection is still the sole owner
+    of canonical normalization (for example ``""`` -> ``"aggregate"``).
+    """
+
+    if not spec.primary_key_defaults:
+        return records
+    normalized_records: list[dict[str, Any]] = []
+    for record in records:
+        normalized = record
+        for field_name, default in spec.primary_key_defaults.items():
+            value = _field_value(record, field_name)
+            if value is None or (isinstance(value, str) and not value.strip()):
+                if normalized is record:
+                    normalized = dict(record)
+                normalized[field_name] = default
+        normalized_records.append(normalized)
+    return normalized_records
 
 
 class ParserRuntime:
@@ -270,10 +388,18 @@ class ParserRuntime:
                     parser_status="not_required",
                     canonical_command=decision.canonical_command,
                     handling=decision.handling,
-                    # Raw-hash commands are intentionally unstructured.  Their
-                    # digest is stored in CommandSnapshot.raw_text_hash rather
-                    # than masquerading as Parser output.
-                    structured_data=None,
+                    # This is evidence metadata rather than a Parser record.
+                    # Keeping the digest in the result lets offline callers
+                    # preview the deterministic text-diff input without
+                    # exposing raw CLI; persistence still treats
+                    # ``CommandSnapshot.raw_text_hash`` as authoritative.
+                    structured_data=[
+                        {
+                            "raw_text_hash": hashlib.sha256(
+                                raw_text.encode("utf-8")
+                            ).hexdigest()
+                        }
+                    ],
                     identity_evidence=evidence,
                     output_status="data",
                     capability=decision.capability,
@@ -435,7 +561,10 @@ class ParserRuntime:
         ):
             return self._failed(decision, identity, template, "required_fields_missing", evidence)
         if spec:
-            key_result = validate_entity_keys(records, spec.primary_keys)
+            key_result = validate_entity_keys(
+                _records_for_key_validation(records, spec),
+                spec.primary_keys,
+            )
             if not key_result.valid:
                 failure_code = (
                     "primary_key_duplicate" if key_result.duplicate_keys else "primary_key_invalid"
@@ -485,11 +614,28 @@ class ParserRuntime:
             for item in validation.get("record_sets") or ()
             if isinstance(item, dict)
         ]
-        specs = {
-            str(item.get("name") or ""): self._category_spec_from_validation(item)
-            for item in raw_specs
-            if str(item.get("name") or "").strip()
-        }
+        specs: dict[str, CategorySpec] = {}
+        for item in raw_specs:
+            record_set_name = str(item.get("name") or "").strip()
+            if not record_set_name:
+                continue
+            primary_keys = tuple(item.get("primary_keys") or ())
+            specs[record_set_name] = self._category_spec_from_validation(
+                {
+                    **item,
+                    "primary_key_defaults": {
+                        **_primary_key_defaults_from_validation(
+                            validation,
+                            record_set_name=record_set_name,
+                            primary_keys=primary_keys,
+                        ),
+                        **_primary_key_defaults_from_validation(
+                            item,
+                            primary_keys=primary_keys,
+                        ),
+                    },
+                }
+            )
         bundle_names = {item.name for item in bundle.record_sets}
         if specs and set(specs) != bundle_names:
             return self._failed(
@@ -510,6 +656,17 @@ class ParserRuntime:
                 for row in rows
             ]
             spec = specs.get(record_set.name)
+            if spec:
+                try:
+                    records = expand_list_primary_records(records, spec.primary_keys)
+                except RecordShapeError:
+                    return self._failed(
+                        decision,
+                        identity,
+                        template,
+                        f"record_shape_invalid:{record_set.name}",
+                        evidence,
+                    )
             failure = self._validate_records(records, spec, raw_text=raw_text)
             if failure:
                 return self._failed(
@@ -602,6 +759,10 @@ class ParserRuntime:
             empty_patterns=tuple(validation.get("empty_patterns") or ()),
             ignore_fields=tuple(validation.get("ignore_fields") or ()),
             presence=str(validation.get("presence") or "required").strip().casefold(),
+            primary_key_defaults=_primary_key_defaults_from_validation(
+                validation,
+                primary_keys=tuple(validation.get("primary_keys") or ()),
+            ),
         )
 
     @staticmethod
@@ -629,7 +790,10 @@ class ParserRuntime:
         ):
             return "required_fields_missing"
         if spec.primary_keys:
-            key_result = validate_entity_keys(records, spec.primary_keys)
+            key_result = validate_entity_keys(
+                _records_for_key_validation(records, spec),
+                spec.primary_keys,
+            )
             if not key_result.valid:
                 return (
                     "primary_key_duplicate"

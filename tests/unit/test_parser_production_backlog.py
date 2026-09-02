@@ -38,6 +38,29 @@ def test_parser_job_asset_key_ignores_sample_and_failure_dimensions():
     assert first == second
 
 
+def test_parser_job_asset_key_keeps_imported_rule_asset_evidence_isolated():
+    shared = parser_job_asset_key(
+        vendor="H3C",
+        profile="S6850-56HF",
+        command="display cpu",
+    )
+    first_import = parser_job_asset_key(
+        vendor="H3C",
+        profile="S6850-56HF",
+        command="display cpu",
+        evidence_scope="offline-rule-assets:offline-a",
+    )
+    second_import = parser_job_asset_key(
+        vendor="H3C",
+        profile="S6850-56HF",
+        command="display cpu",
+        evidence_scope="offline-rule-assets:offline-b",
+    )
+
+    assert first_import != shared
+    assert first_import != second_import
+
+
 def test_parser_job_asset_key_separates_models_for_the_same_command():
     first = parser_job_asset_key(
         vendor="H3C",
@@ -129,8 +152,8 @@ def test_simple_parser_job_dispatch_accepts_one_confirmed_generation_sample():
         job = parser.get_job(job_id)
         assert job is not None
         assert job["generation_readiness"] == {
-            "ready": True,
-            "blockers": [],
+            "ready": False,
+            "blockers": ["rule_asset_source_dataset_missing"],
             "warnings": ["independent_acceptance_missing"],
             "validation_mode": "generation_sample_only",
             "role_counts": {
@@ -140,9 +163,9 @@ def test_simple_parser_job_dispatch_accepts_one_confirmed_generation_sample():
                 "unassigned": 0,
             },
         }
-        assert [item["id"] for item in parser.list_dispatchable_jobs(job_id=job_id)] == [
-            job_id
-        ]
+        # Parser generation cannot be dispatched from an unqualified sample:
+        # the immutable offline dataset/source chain is a hard release gate.
+        assert parser.list_dispatchable_jobs(job_id=job_id) == []
 
         with get_db_session() as db:
             db.query(ParserTemplateJob).filter_by(id=job_id).update(

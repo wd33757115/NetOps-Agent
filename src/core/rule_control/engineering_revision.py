@@ -345,23 +345,38 @@ class RuleAssetEngineeringRevisionService:
             context = db.get(RuleGenerationContextRecord, context_id) if context_id else None
             report = dict(bundle.validation_report_json or {})
             review = dict((report.get("governance") or {}).get("engineering_review") or {})
+            context_gate = dict(report.get("context_gate") or {})
+            requirements = dict(
+                report.get("asset_requirements")
+                or (bundle.payload_json or {}).get("asset_requirements")
+                or {}
+            )
             return {
                 "bundle_id": bundle.id,
                 "bundle_status": bundle.status,
                 "base_digest": bundle.asset_digest,
                 "context_id": context_id or None,
-                "context_digest": context.context_digest if context else None,
+                "context_digest": (
+                    context.context_digest
+                    if context else context_gate.get("context_digest")
+                ),
                 "offline_job_id": context.offline_job_id if context else None,
                 "contract": contracts[0] if len(contracts) == 1 else None,
                 "change_policies": policies,
                 "event_rules": rules,
                 "review": review,
                 "editable": bundle.status in {"pending_approval", "rejected"},
+                "context_mode": context_gate.get("mode"),
+                "asset_requirements": requirements,
                 "completeness": {
                     "contract_count": len(contracts),
                     "change_policy_count": len(policies),
                     "event_rule_count": len(rules),
-                    "complete": len(contracts) == 1 and bool(policies) and bool(rules),
+                    "complete": (
+                        (len(contracts) == 1 if requirements.get("requires_observation_contract") is True else not contracts)
+                        and (bool(policies) if requirements.get("requires_change_policy") is True else not policies)
+                        and (bool(rules) if requirements.get("requires_event_rule_assets") is True else not rules)
+                    ),
                 },
             }
 

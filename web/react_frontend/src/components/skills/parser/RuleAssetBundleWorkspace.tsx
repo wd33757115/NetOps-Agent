@@ -33,6 +33,7 @@ interface RuleAssetBundleWorkspaceProps {
   onInspectAssetChain?: () => void
   initialSearch?: string
   initialBundleId?: string
+  initialCheckItemVersionId?: string
 }
 
 const statusColor = (status: string) => {
@@ -134,6 +135,7 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
   onInspectAssetChain,
   initialSearch = '',
   initialBundleId,
+  initialCheckItemVersionId,
 }) => {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState(initialSearch)
@@ -235,8 +237,10 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
         <Alert
           type="info"
           showIcon
-          message="当前样本任务没有待治理的候选资产包"
-          description="没有候选包不代表运行时资产缺失。请先检查 Contract、Policy 与 EventRule 资产链；只有存在缺口时才需要生成或补齐。"
+          message={initialCheckItemVersionId ? '当前 CheckItem 版本没有待治理的规则资产包' : '当前样本任务没有待治理的候选资产包'}
+          description={initialCheckItemVersionId
+            ? '该检查项可能不需要规则资产，或尚未从其标准语义 B 创建规则草稿。'
+            : '没有候选包不代表运行时资产缺失。请先检查 Contract、Policy 与 EventRule 资产链；只有存在缺口时才需要生成或补齐。'}
           action={onInspectAssetChain && (
             <Button size="small" onClick={onInspectAssetChain}>检查资产链</Button>
           )}
@@ -246,14 +250,18 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
         type="info"
         showIcon
         message="候选资产按 Bundle 整体验证、审批和发布"
-        description="每套 Bundle 只包含检查项声明需要的资产，并通过脱敏上下文、确定性校验以及必要时的历史回放。子资产不能绕过 Bundle 单独激活。"
+        description="每套 Bundle 只包含检查项声明需要的资产，并通过受控生成上下文、确定性校验以及必要时的历史回放。子资产不能绕过 Bundle 单独激活。"
       />
       {initialSearch && (
         <Alert
           type="info"
           showIcon
-          message={`正在查看样本任务 ${initialSearch} 的规则资产包`}
-          description="列表通过不可变生成上下文关联样本任务，不依赖资产名称或命令文本猜测。"
+          message={initialCheckItemVersionId
+            ? `正在查看 CheckItem 版本 ${initialCheckItemVersionId} 的规则资产包`
+            : `正在查看样本任务 ${initialSearch} 的规则资产包`}
+          description={initialCheckItemVersionId
+            ? '规则候选仅由该版本的标准语义 B 编译，不读取样本或 Parser。'
+            : '列表通过不可变生成上下文关联样本任务，不依赖资产名称或命令文本猜测。'}
         />
       )}
       <Space wrap>
@@ -354,7 +362,7 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
             width: 170,
             render: (_: unknown, row) => (
               <Space direction="vertical" size={0}>
-                <Typography.Text>{row.context_id || '手工兼容模式'}</Typography.Text>
+                <Typography.Text>{row.context_gate?.mode === 'check_item_semantics' ? 'CheckItem 标准语义 B' : row.context_id || '手工兼容模式'}</Typography.Text>
                 <Typography.Text type="secondary">{shortDigest(row.context_digest)}</Typography.Text>
               </Space>
             ),
@@ -382,7 +390,10 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
                 responsive
                 size="small"
                 items={row.steps.map((step) => ({
-                  title: stepLabel[step.key] || step.label,
+                  title:
+                    step.key === 'context'
+                      ? step.label
+                      : stepLabel[step.key] || step.label,
                   status: stepStatus(step),
                   description: step.key === 'replay'
                     ? requiresHistoricalReplay(row)
@@ -393,9 +404,11 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
               />
               <Space direction="vertical" size={4} style={{ width: '100%' }}>
                 <Space wrap size={[8, 4]}>
-                  <Typography.Text strong>LLM 数据边界</Typography.Text>
+                  <Typography.Text strong>{row.context_gate?.mode === 'check_item_semantics' ? '规则生成依据' : 'LLM 数据边界'}</Typography.Text>
                   <Tag color={row.context_gate?.success ? 'green' : 'red'}>
-                    {row.context_gate?.success ? '隐私门禁已通过' : '隐私门禁未通过'}
+                    {row.context_gate?.mode === 'check_item_semantics'
+                      ? (row.context_gate?.success ? '标准语义校验已通过' : '标准语义校验未通过')
+                      : (row.context_gate?.success ? '隐私门禁已通过' : '隐私门禁未通过')}
                   </Tag>
                   <Tag color={row.context_gate?.privacy?.raw_cli_included ? 'red' : 'green'}>
                     原始 CLI {row.context_gate?.privacy?.raw_cli_included ? '已包含' : '0'}
@@ -413,8 +426,9 @@ const RuleAssetBundleWorkspace: React.FC<RuleAssetBundleWorkspaceProps> = ({
                   />
                 )}
                 <Typography.Text type="secondary">
-                  生成输入仅包含白名单结构化字段；上下文摘要 {shortDigest(row.context_gate?.context_digest || row.context_digest)}，
-                  绑定 {row.context_gate?.replay_run_id_count ?? '-'} 个巡检 Run。
+                  {row.context_gate?.mode === 'check_item_semantics'
+                    ? `仅使用 CheckItem 标准语义 B；上下文摘要 ${shortDigest(row.context_gate?.context_digest || row.context_digest)}。`
+                    : `生成输入仅包含白名单结构化字段；上下文摘要 ${shortDigest(row.context_gate?.context_digest || row.context_digest)}，绑定 ${row.context_gate?.replay_run_id_count ?? '-'} 个巡检 Run。`}
                 </Typography.Text>
               </Space>
               <Space wrap size={[8, 4]}>

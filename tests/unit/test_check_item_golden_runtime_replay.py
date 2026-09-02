@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "test" / "check_item_golden_runtime_replay.py"
 SPEC = importlib.util.spec_from_file_location(
@@ -77,7 +76,10 @@ def test_external_regression_samples_are_split_sanitized_and_pseudonymous(
     assert all(item["device_id"].startswith("device-") for item in samples)
     assert len({item["device_id"] for item in samples}) == 1
     assert all(item["source_evidence_id"].startswith("sha256:") for item in samples)
-    assert all(item["observed_at_source"] == "filesystem_mtime_non_authoritative" for item in samples)
+    assert all(
+        item["observed_at_source"] == "frozen_period_order_non_authoritative"
+        for item in samples
+    )
     assert all("field-secret" not in item["sanitized_text"] for item in samples)
     assert all("10.10.10.10" not in item["sanitized_text"] for item in samples)
     assert str(tmp_path) not in json.dumps(samples, default=str)

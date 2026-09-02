@@ -17,6 +17,9 @@ from .validation import ValidationBackend, ValidationReport, validate_template_c
 
 MAX_PARSER_MODEL_CALLS = 3
 MAX_PARSER_PROVIDER_RETRIES = 1
+# Persisted Parser jobs already reference this protocol label.  Provider
+# selection is now generic inside the implementation, so keep the durable
+# value stable for historical attempts and approvals.
 PARSER_TOOL_PROTOCOL_VERSION = "deepseek-thinking-tools-v1"
 
 

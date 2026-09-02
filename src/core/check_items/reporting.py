@@ -4376,13 +4376,16 @@ def _render_audit_check_item_xlsx(report: Mapping[str, Any]) -> bytes:
 
 
 def render_check_item_xlsx(report: Mapping[str, Any]) -> bytes:
-    """Render the operator workbook grouped by check item and unmatched command."""
+    """Render the immutable technical annex used by report delivery.
 
-    from src.core.check_items.inspection_workbook import (
-        render_inspection_workbook,
-    )
+    The compact inspection workbook is useful for ad-hoc command browsing, but
+    it omits frozen claims, coverage, authority, risk and evidence ledgers.
+    Delivered patrol artifacts must retain those governed report surfaces, so
+    use the audit renderer here and keep the compact renderer as an explicit
+    UI-only view.
+    """
 
-    return _normalize_zip_archive(render_inspection_workbook(report))
+    return _render_audit_check_item_xlsx(report)
 
 
 def _csv_bytes(

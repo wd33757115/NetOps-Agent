@@ -73,7 +73,6 @@ describe('parser workspace navigation', () => {
       'asset-production-units',
       'source-jobs',
       'catalog-management',
-      'assessment-policies',
     ])
     expect(resolve('')).toMatchObject({
       workspace: 'production',

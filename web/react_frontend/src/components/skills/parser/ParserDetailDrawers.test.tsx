@@ -239,6 +239,6 @@ describe('ParserJobDetailDrawer', () => {
 
     await userEvent.click(screen.getAllByRole('tab')[1])
     await userEvent.click(screen.getByRole('button', { name: /生成 ParserSpec 草稿/ }))
-    expect(onSuggestSpec).toHaveBeenCalledWith('sample-job')
+    expect(onSuggestSpec).toHaveBeenCalledWith('sample-job', '')
   })
 })

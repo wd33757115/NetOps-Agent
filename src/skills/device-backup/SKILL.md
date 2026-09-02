@@ -13,6 +13,7 @@ enabled_ratio: 100
 min_platform_version: "1.0.0"
 triggers:
   - "备份设备配置"
+  - "备份配置"
   - "配置备份"
   - "保存配置"
   - "device backup"
