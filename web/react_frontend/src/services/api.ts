@@ -4357,7 +4357,7 @@ const createOfflineJobApi = (base: string) => ({
   retry: async (id: string) => (await api.post(`${base}/${id}/retry/`, {})).data,
   archive: async (id: string) => (await api.post(`${base}/${id}/archive/`, {})).data,
   restore: async (id: string) => (await api.post(`${base}/${id}/restore/`, {})).data,
-  artifact: async (id: string, kind: 'raw' | 'changes' | 'events' | 'report'): Promise<Blob> => (
+  artifact: async (id: string, kind: 'raw' | 'changes' | 'events' | 'report' | 'excel'): Promise<Blob> => (
     await api.get(`${base}/${id}/artifacts/${kind}/`, {
       responseType: 'blob',
       timeout: 300000,
@@ -6310,7 +6310,7 @@ export const workflowApi = {
       blob: response.data,
       filename: responseFilename(
         response.headers['content-disposition'],
-        `${batchId}-leadership-report.docx`,
+        `${batchId}-patrol-report.docx`,
       ),
       status: response.headers['x-netops-report-status'],
     }

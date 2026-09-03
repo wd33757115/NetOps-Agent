@@ -56,7 +56,7 @@ def test_released_report_download_uses_attached_artifact(monkeypatch):
         "load_attached_report_artifact",
         lambda _manifest, name: ReportArtifact(
             name=name,
-            filename="batch-1-leadership-report.docx",
+            filename="batch-1-patrol-report.docx",
             content_type="application/docx",
             content=b"signed bytes",
         ),

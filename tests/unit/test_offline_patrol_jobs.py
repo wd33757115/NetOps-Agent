@@ -134,6 +134,42 @@ def test_empty_event_export_is_self_describing(monkeypatch):
     assert "observed_at" in header
 
 
+def test_offline_excel_export_uses_the_same_standard_observation_report(monkeypatch):
+    service = OfflinePatrolJobService()
+    monkeypatch.setattr(
+        service,
+        "get_job",
+        lambda _job_id: {
+            "periods": [{"role": "current", "patrol_run_id": "run-excel"}],
+        },
+    )
+    summary = {
+        "runs": [{"snapshot_run_id": "run-excel"}],
+        "quality": {"status": "ready"},
+        "changes": [],
+        "events": [],
+        "current_findings": [],
+    }
+    monkeypatch.setattr(
+        service,
+        "_build_offline_leadership_summary",
+        lambda _detail, _run_id: summary,
+    )
+    monkeypatch.setattr(
+        "src.core.patrol.offline_jobs.render_patrol_batch_xlsx",
+        lambda report_id, source: b"PK\x03\x04xlsx",
+    )
+
+    filename, media_type, content = service.build_result_export(
+        "offline-excel",
+        "excel",
+    )
+
+    assert filename == "offline-excel-patrol-report.xlsx"
+    assert media_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    assert content.startswith(b"PK")
+
+
 def test_offline_job_is_idempotent_paginated_and_owner_scoped():
     service = OfflinePatrolJobService()
     suffix = uuid.uuid4().hex

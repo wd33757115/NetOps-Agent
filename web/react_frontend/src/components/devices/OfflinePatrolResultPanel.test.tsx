@@ -123,13 +123,16 @@ const report: OfflinePatrolAnalysisSummary = {
 describe('OfflinePatrolResultPanel', () => {
   it('shows current risks, recovery facts, quality limits and evidence', async () => {
     const user = userEvent.setup()
+    const downloadReport = vi.fn()
+    const downloadWorkbook = vi.fn()
     render(
       <OfflinePatrolResultPanel
         report={report}
         loading={false}
         isMobile={false}
         onRetry={vi.fn()}
-        onDownloadReport={vi.fn()}
+        onDownloadReport={downloadReport}
+        onDownloadWorkbook={downloadWorkbook}
         onOpenRuleAssets={vi.fn()}
       />,
     )
@@ -144,6 +147,10 @@ describe('OfflinePatrolResultPanel', () => {
     expect(screen.getByText('状态改善')).toBeVisible()
     expect(screen.getByText('goal-acceptance:q2-q3')).toBeVisible()
     expect(screen.getByText(/未覆盖领域不能据此判定健康/)).toBeVisible()
+    await user.click(screen.getByText('下载巡检报告'))
+    await user.click(screen.getByText('下载巡检明细 Excel'))
+    expect(downloadReport).toHaveBeenCalledOnce()
+    expect(downloadWorkbook).toHaveBeenCalledOnce()
 
     const expanders = screen.getAllByRole('button', { name: 'Expand row' })
     await user.click(expanders[0])

@@ -11,6 +11,9 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from src.core.check_items.catalog import CheckItemCatalogRepository
+from src.core.check_items.command_adapter import is_direct_projection_adapter
+from src.core.check_items.resolver import CheckItemImplementationResolver
 from src.core.parser.identity import DeviceIdentityResolver
 from src.core.parser.runtime import ParserRuntime, ParserRuntimeResult
 from src.core.patrol.command_splitter import (
@@ -320,6 +323,107 @@ def _check_item_binding_metadata(
         "all_bindings": all_bindings,
         "selected_bindings": selected_bindings,
     }
+
+
+def _resolve_offline_direct_projection_bindings(
+    *,
+    identity: Any,
+    device_id: str,
+    commands: list[str],
+) -> list[dict[str, Any]]:
+    """Attach unambiguous active V2 routes to an imported offline capture.
+
+    Offline captures have no inventory execution plan, so they previously
+    arrived without an implementation version and the normalizer fell back to
+    the retired ObservationContract bridge.  Resolve only the already-active,
+    direct A→B routes from the identified vendor/model.  An unknown identity,
+    ambiguous command, missing implementation, or legacy adapter deliberately
+    remains unbound instead of being guessed.
+    """
+
+    vendor = str(getattr(identity, "vendor", "") or "").strip()
+    model = str(getattr(identity, "model", "") or "").strip()
+    if not vendor or not model:
+        return []
+    try:
+        catalog = CheckItemCatalogRepository().load_active()
+        resolver = CheckItemImplementationResolver(catalog)
+        projected = resolver.project_legacy_commands(
+            device={
+                "device_id": device_id,
+                "vendor": vendor,
+                "model": model,
+                "family": str(getattr(identity, "family", "") or "").strip(),
+            },
+            commands=commands,
+        )
+    except Exception:
+        # A capture import must retain its raw evidence even if the catalog is
+        # temporarily unavailable.  The normal quality gate reports asset
+        # readiness before a production workflow starts.
+        return []
+
+    decisions = {
+        str(item.get("check_item_id") or ""): item
+        for item in projected.get("decisions") or []
+        if isinstance(item, dict)
+        and item.get("projection_status") == "mapped"
+        and item.get("implementation_version_id")
+    }
+    implementations = {
+        item.version_id: item for item in catalog.implementations
+    }
+    bindings: list[dict[str, Any]] = []
+    for action in projected.get("collection_actions") or []:
+        if not isinstance(action, dict):
+            continue
+        implementation_ids = []
+        for item in action.get("implementation_version_ids") or []:
+            implementation_version_id = str(item)
+            implementation = implementations.get(implementation_version_id)
+            if implementation is None:
+                continue
+            if is_direct_projection_adapter(dict(implementation.adapter_spec or {})):
+                implementation_ids.append(implementation_version_id)
+        # A snapshot has one implementation-version identity.  Do not choose
+        # between multiple direct routes for a shared command.
+        if len(implementation_ids) != 1:
+            continue
+        implementation_version_id = implementation_ids[0]
+        action_bindings = [
+            {
+                "check_item_id": check_item_id,
+                "check_item_version_id": str(
+                    decisions[check_item_id].get("check_item_version_id") or ""
+                ),
+                "implementation_version_id": implementation_version_id,
+            }
+            for check_item_id in action.get("check_item_ids") or []
+            if check_item_id in decisions
+            and str(decisions[check_item_id].get("implementation_version_id") or "")
+            == implementation_version_id
+        ]
+        if not action_bindings:
+            continue
+        action_key = "{}:{}".format(
+            implementation_version_id,
+            str(action.get("canonical_command") or "").strip(),
+        )
+        action_uuid = uuid.uuid5(uuid.NAMESPACE_URL, action_key)
+        action_id = f"offline-direct:{action_uuid}"
+        bindings.append(
+            {
+                # Keep the original capture spelling because status queues are
+                # keyed by the command block, not by a parser-policy alias.
+                "command": str(action.get("command") or "").strip(),
+                # The persistence column is VARCHAR(64); keep the provenance
+                # deterministic without embedding an arbitrary-length CLI.
+                "collection_item_id": action_id,
+                "check_item_bindings": action_bindings,
+                "selected_for_bindings": action_bindings,
+            }
+        )
+    return bindings
 
 
 def _parse_capture_blocks(
@@ -645,6 +749,12 @@ def import_raw_capture(
     collection_repository = PatrolCollectionResultRepository()
     snapshot_repository = PatrolSnapshotRepository()
     dataset_id = _dataset_id(path, metadata)
+    if command_collection_statuses is None:
+        command_collection_statuses = _resolve_offline_direct_projection_bindings(
+            identity=identity,
+            device_id=device_id,
+            commands=[block.command for block in blocks],
+        )
     if isinstance(command_collection_statuses, dict):
         status_items = [
             {"command": command, **dict(result or {})}
@@ -1384,8 +1494,6 @@ def import_raw_capture(
             )
         parse_status = str(stored_snapshot.parse_status)
         structured = stored_snapshot.structured_json
-        parser_name = stored_snapshot.parser_name
-        parser_version = stored_snapshot.parser_version
         snapshot_ids.append(snapshot_id)
         if not snapshot_created:
             duplicate_snapshot_ids.append(snapshot_id)

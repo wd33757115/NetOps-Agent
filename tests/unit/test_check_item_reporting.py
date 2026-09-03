@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
+from docx import Document
 from openpyxl import load_workbook
 
 from src.core.check_items.report_claims import (
@@ -1225,7 +1226,7 @@ def test_approved_cross_check_item_association_changes_only_leadership_problem_c
     assert report["risk_issues"][0]["claim_id"]
     artifacts = render_check_item_artifacts(manifest)
     markdown = artifacts["markdown"].content.decode("utf-8")
-    assert "领导问题数按经批准关联后的 RiskEpisode 主问题统计" in markdown
+    assert "巡检主问题数按经批准关联后的 RiskEpisode 主问题统计" in markdown
     workbook = load_workbook(io.BytesIO(artifacts["excel"].content))
     overview_values = {
         str(label): value
@@ -1239,7 +1240,7 @@ def test_approved_cross_check_item_association_changes_only_leadership_problem_c
     assert overview_values["当前风险"] == 1
     assert overview_values["风险Episode"] == 2
     assert overview_values["关联症状"] == 1
-    assert workbook["领导问题"].max_row == 2
+    assert workbook["巡检主问题"].max_row == 2
     assert workbook["当前风险"].max_row == 3
 
 
@@ -1326,7 +1327,7 @@ def test_all_report_artifacts_are_deterministic_and_share_one_fact_source():
     assert workbook.sheetnames == [
         "总览",
         "检查项结论",
-        "领导问题",
+        "巡检主问题",
         "当前风险",
         "历史风险待复核",
         "恢复待确认",
@@ -1414,6 +1415,55 @@ def test_excel_uses_the_projection_profile_frozen_in_the_manifest():
     assert sheet.cell(2, headers["CPU即时使用率(%)"]).value == 35
     assert sheet.cell(2, headers["评估结论"]).value == "正常"
     assert sheet.cell(2, headers["快照ID"]).value == "snapshot-1"
+
+
+def test_check_item_docx_uses_formal_patrol_chapter_structure():
+    manifest = _manifest()
+    facts = manifest["source_facts_json"]
+    snapshot = build_report_projection_snapshot(facts["check_items"])
+    facts["report_projection_snapshot"] = snapshot
+    facts["report_projection_digest"] = snapshot["digest"]
+    _freeze_v5(manifest)
+
+    artifacts = render_check_item_artifacts(manifest)
+    document = Document(io.BytesIO(artifacts["docx"].content))
+    document_text = "\n".join(item.text for item in document.paragraphs)
+    headings = [
+        "第一章 概述",
+        "1.1 巡检概述",
+        "1.2 巡检说明",
+        "1.3 巡检范围",
+        "1.3.1 设备清单",
+        "第二章 巡检内容",
+        "2.1 网络设备巡检项",
+        "2.2 巡检设备配置备份",
+        "第三章 巡检结果",
+        "3.1 网络设备",
+        "3.1.1 设备基本运行状况",
+        "设备 CPU 利用率状态",
+        "第四章 巡检总结",
+        "第五章 后续工作计划",
+    ]
+
+    assert all(item in document_text for item in headings)
+    assert [document_text.index(item) for item in headings] == sorted(
+        document_text.index(item) for item in headings
+    )
+    header_rows = {
+        tuple(cell.text for cell in table.rows[0].cells)
+        for table in document.tables
+        if table.rows
+    }
+    assert any(
+        headers[:3]
+        == (
+            "设备",
+            "CPU即时使用率(%)（cpu_instant_pct）",
+            "CPU 5秒使用率(%)（cpu_5s_pct）",
+        )
+        for headers in header_rows
+    )
+    assert all("采集时间" not in headers for headers in header_rows)
 
 
 def test_report_projects_coverage_gap_entities_into_all_review_views():
@@ -1667,12 +1717,12 @@ def test_leadership_artifacts_include_change_event_and_data_limit_details():
     assert "CpuUtilizationHigh" in markdown
     assert "cpu_usage >= 90 percent（事件规则静态阈值）" in markdown
     assert "cpu-high@3" in markdown
-    assert "九、数据完整性与限制" in markdown
-    assert "七、变化与事件".encode() in document_xml
+    assert "4.1 数据可信度与结论边界" in markdown
+    assert "3.1.6 变化与事件".encode() in document_xml
     assert b"CpuUtilizationHigh" in document_xml
     assert b"cpu_usage" in document_xml
     assert "事件规则静态阈值".encode() in document_xml
-    assert "九、数据完整性与限制".encode() in document_xml
+    assert "4.1 数据可信度与结论边界".encode() in document_xml
 
     workbook = load_workbook(io.BytesIO(artifacts["excel"].content))
     event_sheet = workbook["事件"]

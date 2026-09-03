@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Export an immutable leadership report bundle for an offline patrol job."""
+"""Export an immutable patrol-report bundle for an offline patrol job."""
 
 from __future__ import annotations
 
@@ -37,9 +37,9 @@ def export_report_bundle(
         analysis_attempt_id=analysis_attempt_id,
     )
     artifacts = {
-        "network-patrol-leadership-report.docx": render_leadership_docx(report),
-        "network-patrol-leadership-report.json": render_leadership_json(report),
-        "network-patrol-leadership-report.md": render_leadership_markdown(report).encode(
+        "network-patrol-report.docx": render_leadership_docx(report),
+        "network-patrol-report.json": render_leadership_json(report),
+        "network-patrol-report.md": render_leadership_markdown(report).encode(
             "utf-8"
         ),
     }
@@ -58,7 +58,7 @@ def export_report_bundle(
 
     evidence = dict(report.get("evidence") or {})
     manifest = {
-        "schema_version": "offline-patrol-leadership-delivery/v1",
+        "schema_version": "offline-patrol-delivery/v1",
         "job_id": job_id,
         "report_generated_at": report.get("generated_at"),
         "analysis": evidence.get("analysis"),
@@ -96,7 +96,7 @@ def export_report_bundle(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Export a traceable leadership report for an offline patrol job"
+        description="Export a traceable patrol report for an offline patrol job"
     )
     parser.add_argument("--job-id", required=True)
     parser.add_argument("--analysis-attempt-id")

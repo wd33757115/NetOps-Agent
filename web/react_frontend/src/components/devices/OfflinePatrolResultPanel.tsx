@@ -21,8 +21,10 @@ interface OfflinePatrolResultPanelProps {
   error?: unknown
   isMobile: boolean
   reportDownloading?: boolean
+  workbookDownloading?: boolean
   onRetry: () => void
   onDownloadReport: () => void
+  onDownloadWorkbook: () => void
   onLoadComparisonEvidence: (
     changeId: string,
   ) => Promise<OfflinePatrolComparisonEvidence>
@@ -204,8 +206,10 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
   error,
   isMobile,
   reportDownloading,
+  workbookDownloading,
   onRetry,
   onDownloadReport,
+  onDownloadWorkbook,
   onLoadComparisonEvidence,
   onOpenRuleAssets,
 }) => {
@@ -592,7 +596,8 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
 
       <Space wrap>
         <Button icon={<SafetyCertificateOutlined />} onClick={onOpenRuleAssets}>查看规则资产包</Button>
-        <Button icon={<DownloadOutlined />} loading={reportDownloading} onClick={onDownloadReport}>下载领导版报告</Button>
+        <Button icon={<DownloadOutlined />} loading={reportDownloading} onClick={onDownloadReport}>下载巡检报告</Button>
+        <Button icon={<DownloadOutlined />} loading={workbookDownloading} onClick={onDownloadWorkbook}>下载巡检明细 Excel</Button>
       </Space>
     </Space>
   )

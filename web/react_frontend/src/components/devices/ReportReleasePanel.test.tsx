@@ -300,7 +300,7 @@ describe('ReportReleasePanel', () => {
     expect(screen.getByText('2')).toBeInTheDocument()
     expect(screen.getAllByText('1').length).toBeGreaterThan(0)
     expect(screen.getByText('parser_missing：50')).toBeInTheDocument()
-    expect(screen.getByText('领导版报告')).toBeInTheDocument()
+    expect(screen.getByText('巡检报告')).toBeInTheDocument()
     expect(screen.getByText('已确认风险')).toBeInTheDocument()
     expect(screen.getByText('部分完整')).toBeInTheDocument()
     expect(screen.getByText('部分可比较')).toBeInTheDocument()

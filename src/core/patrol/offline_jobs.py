@@ -21,7 +21,9 @@ from typing import Any
 
 from sqlalchemy import or_
 
+from src.core.check_items.command_adapter import is_direct_projection_adapter
 from src.core.check_items.report_contract import OFFLINE_HISTORICAL
+from src.core.check_items.runtime_bundle_assembly import RuntimeBundleAssemblyPlanner
 from src.core.patrol.change_event_repository import ChangeEventRepository
 from src.core.patrol.event_rules import EventRuleRepository
 from src.core.patrol.leadership_report import (
@@ -29,6 +31,7 @@ from src.core.patrol.leadership_report import (
     render_leadership_docx,
 )
 from src.core.patrol.raw_importer import import_raw_path, preview_raw_path
+from src.core.patrol.reporting import render_patrol_batch_xlsx
 from src.core.patrol.repository import PatrolRepository
 from src.core.state.observation_applicability import APPLICABILITY_CONTEXT_KEY
 from src.core.workflows.patrol_batch_service import (
@@ -39,6 +42,9 @@ from src.core.workflows.patrol_batch_service import (
 )
 from src.infrastructure.db.models import (
     ChangePolicyVersionRecord,
+    CheckItemImplementationLinkRecord,
+    CollectionImplementationParserBindingRecord,
+    CollectionImplementationVersionRecord,
     EventRuleVersionRecord,
     FileMetadata,
     NetworkDevice,
@@ -78,6 +84,9 @@ PATROL_RUNTIME_BLOCKER_CODES = INGESTION_BLOCKER_CODES | {
     "observation_contract_missing",
     "change_policy_missing",
     "event_rule_missing",
+    "command_adapter_projection_missing",
+    "runtime_bundle_missing",
+    "runtime_bundle_not_ready",
 }
 HISTORICAL_DEGRADATION_WARNING_CODES = {
     "parser_template_inactive",
@@ -86,6 +95,9 @@ HISTORICAL_DEGRADATION_WARNING_CODES = {
     "observation_contract_missing",
     "change_policy_missing",
     "event_rule_missing",
+    "command_adapter_projection_missing",
+    "runtime_bundle_missing",
+    "runtime_bundle_not_ready",
 }
 PERIOD_ROLES = {
     "parser_validation": ("sample",),
@@ -1547,6 +1559,13 @@ class OfflinePatrolJobService:
         run_id = str((current or {}).get("patrol_run_id") or "")
         if not run_id:
             raise ValueError("offline patrol job has not produced a patrol run")
+        if kind == "excel":
+            summary = self._build_offline_leadership_summary(detail, run_id)
+            return (
+                f"{job_id}-patrol-report.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                render_patrol_batch_xlsx(job_id, summary),
+            )
         if kind == "report":
             report = self.build_leadership_report_data(
                 job_id,
@@ -1555,7 +1574,7 @@ class OfflinePatrolJobService:
                 include_raw_evidence=True,
             )
             return (
-                f"{job_id}-leadership-report.docx",
+                f"{job_id}-patrol-report.docx",
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 render_leadership_docx(report),
             )
@@ -1881,6 +1900,8 @@ class OfflinePatrolJobService:
                         "snapshot_id": row.snapshot_id,
                         "evidence_id": row.evidence_id,
                         "device_id": row.device_id,
+                        "vendor": row.vendor,
+                        "model": row.model,
                         "command": row.canonical_command,
                         "entity_type": row.entity_type,
                         "entity_key": row.entity_key,
@@ -2313,6 +2334,7 @@ class OfflinePatrolJobService:
             "event_lifecycle": event_lifecycle,
             "changes": changes,
             "events": events,
+            "observations": observations,
             "current_findings": current_assessment["findings"],
             "current_finding_count": current_assessment["finding_count"],
             "current_state_rule_coverage": {
@@ -2712,16 +2734,147 @@ class OfflinePatrolJobService:
                             "message": f"Parser template {template_id} is no longer active",
                         }
                     )
+                # A CommandAdapter V2 owns the Parser A -> CheckItem B mapping.
+                # It must therefore be checked through the same CheckItem Runtime
+                # Bundle planner used by collection, rather than through the
+                # retired Parser -> ObservationContract quality gate.
+                parser_bindings = (
+                    db.query(
+                        CollectionImplementationParserBindingRecord,
+                        CollectionImplementationVersionRecord,
+                    )
+                    .join(
+                        CollectionImplementationVersionRecord,
+                        CollectionImplementationVersionRecord.id
+                        == CollectionImplementationParserBindingRecord.implementation_version_id,
+                    )
+                    .filter(
+                        CollectionImplementationParserBindingRecord.parser_template_id.in_(
+                            active_template_ids
+                        ),
+                        CollectionImplementationParserBindingRecord.status == "active",
+                        CollectionImplementationVersionRecord.status == "active",
+                    )
+                    .all()
+                    if active_template_ids
+                    else []
+                )
+                direct_bindings = [
+                    (binding, implementation)
+                    for binding, implementation in parser_bindings
+                    if is_direct_projection_adapter(
+                        dict(implementation.adapter_spec_json or {})
+                    )
+                ]
+                direct_template_ids = {
+                    str(binding.parser_template_id)
+                    for binding, _implementation in direct_bindings
+                    if binding.parser_template_id
+                }
+                links_by_implementation: dict[str, list[str]] = {}
+                if direct_bindings:
+                    implementation_ids = {
+                        str(implementation.id)
+                        for _binding, implementation in direct_bindings
+                    }
+                    for link in (
+                        db.query(CheckItemImplementationLinkRecord)
+                        .filter(
+                            CheckItemImplementationLinkRecord.implementation_version_id.in_(
+                                implementation_ids
+                            )
+                        )
+                        .all()
+                    ):
+                        links_by_implementation.setdefault(
+                            str(link.implementation_version_id),
+                            [],
+                        ).append(str(link.check_item_version_id))
+                planner = RuntimeBundleAssemblyPlanner(db)
+                checked_routes: set[tuple[str, str, str]] = set()
+                for binding, implementation in direct_bindings:
+                    template_id = str(binding.parser_template_id)
+                    implementation_id = str(implementation.id)
+                    check_item_versions = links_by_implementation.get(
+                        implementation_id, []
+                    )
+                    if not check_item_versions:
+                        blockers.append(
+                            {
+                                "code": "command_adapter_projection_missing",
+                                "template_id": template_id,
+                                "implementation_version_id": implementation_id,
+                                "message": (
+                                    "CommandAdapter Projection 未关联任何 CheckItem 版本。"
+                                ),
+                            }
+                        )
+                        continue
+                    for check_item_version_id in check_item_versions:
+                        route_key = (
+                            template_id,
+                            implementation_id,
+                            check_item_version_id,
+                        )
+                        if route_key in checked_routes:
+                            continue
+                        checked_routes.add(route_key)
+                        plan = planner.build(
+                            check_item_version_id=check_item_version_id,
+                            implementation_version_id=implementation_id,
+                        )
+                        route_blockers = [
+                            dict(item)
+                            for item in plan.get("blockers") or []
+                            if isinstance(item, dict)
+                        ]
+                        if route_blockers:
+                            blockers.append(
+                                {
+                                    "code": "runtime_bundle_not_ready",
+                                    "template_id": template_id,
+                                    "implementation_version_id": implementation_id,
+                                    "check_item_version_id": check_item_version_id,
+                                    "message": (
+                                        "CommandAdapter Projection 对应的 CheckItem "
+                                        "运行包尚未就绪。"
+                                    ),
+                                    "runtime_bundle_blockers": route_blockers,
+                                }
+                            )
+                        elif not plan.get("active_bundle"):
+                            blockers.append(
+                                {
+                                    "code": "runtime_bundle_missing",
+                                    "template_id": template_id,
+                                    "implementation_version_id": implementation_id,
+                                    "check_item_version_id": check_item_version_id,
+                                    "message": (
+                                        "CommandAdapter Projection 已验证，但尚未激活 "
+                                        "CheckItem Runtime Bundle。"
+                                    ),
+                                }
+                            )
+
+                # Keep the old Contract route only for templates which have not
+                # been migrated to CommandAdapter V2.  This makes the quality
+                # gate compatible during the repository's incremental cutover
+                # without requiring a production dual-run path.
+                legacy_template_ids = active_template_ids - direct_template_ids
                 contracts = (
                     db.query(ObservationContractRecord)
                     .filter(
-                        ObservationContractRecord.source_template_id.in_(template_ids),
+                        ObservationContractRecord.source_template_id.in_(
+                            legacy_template_ids
+                        ),
                         ObservationContractRecord.status == "active",
                     )
                     .all()
+                    if legacy_template_ids
+                    else []
                 )
                 contract_templates = {str(item.source_template_id) for item in contracts}
-                missing_contracts = sorted(template_ids - contract_templates)
+                missing_contracts = sorted(legacy_template_ids - contract_templates)
                 for template_id in missing_contracts:
                     blockers.append(
                         {

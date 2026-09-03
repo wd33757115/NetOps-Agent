@@ -866,7 +866,7 @@ def restore_offline_patrol_job(
 @routes.get("/{job_id}/artifacts/{kind}")
 def download_offline_patrol_artifact(
     job_id: str,
-    kind: Literal["raw", "changes", "events", "report"],
+    kind: Literal["raw", "changes", "events", "report", "excel"],
     user: CurrentUser = Depends(get_current_user),
 ):
     _detail_or_http(job_id, user)

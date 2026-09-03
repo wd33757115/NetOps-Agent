@@ -406,7 +406,7 @@ def _build_xlsx_workbook(
     header_fill = PatternFill("solid", fgColor="365F4B")
     soft_fill = PatternFill("solid", fgColor="E8F0EB")
     white_font = Font(color="FFFFFF", bold=True)
-    overview["A1"] = "网络巡检结果"
+    overview["A1"] = "巡检报告摘要"
     overview["A1"].font = Font(color="FFFFFF", bold=True, size=16)
     overview["A1"].fill = title_fill
     overview["B1"] = report_id
@@ -471,7 +471,7 @@ def _build_xlsx_workbook(
                 "实体类型",
                 "实体",
                 "字段",
-                "当前值",
+                "当前值（B）",
                 "单位",
                 "规则ID",
                 "证据ID",
@@ -485,7 +485,7 @@ def _build_xlsx_workbook(
                     finding.get("entity_type"),
                     finding.get("entity_key"),
                     finding.get("field"),
-                    finding.get("value"),
+                    finding.get("value", finding.get("current_value")),
                     finding.get("unit"),
                     finding.get("rule_id"),
                     finding.get("evidence_id"),
@@ -512,7 +512,7 @@ def _build_xlsx_workbook(
         ),
         ReportTable(
             key="changes",
-            sheet_name="变化",
+            sheet_name="变化与基线对比",
             headers=(
                 "时间",
                 "设备ID",
@@ -520,9 +520,9 @@ def _build_xlsx_workbook(
                 "实体",
                 "标准观测类型",
                 "字段",
-                "原值",
-                "现值",
-                "判定",
+                "基线值",
+                "当前值",
+                "比较结果",
             ),
             rows=tuple(
                 (
@@ -575,6 +575,15 @@ def _build_xlsx_workbook(
                 for item in unstructured.get("items") or []
             ),
         ),
+        ReportTable(
+            key="data_quality",
+            sheet_name="数据质量与待确认",
+            headers=("项目", "值", "说明"),
+            rows=_data_quality_rows(
+                quality=quality,
+                rule_coverage=current_state_rule_coverage,
+            ),
+        ),
     ]
     for table in tables:
         _append_report_table(
@@ -587,6 +596,53 @@ def _build_xlsx_workbook(
             color_scale_rule=ColorScaleRule,
         )
     return workbook
+
+
+def _data_quality_rows(
+    *,
+    quality: dict[str, Any],
+    rule_coverage: dict[str, Any],
+) -> tuple[tuple[Any, ...], ...]:
+    """Keep incomplete evidence visible instead of implying a healthy result."""
+
+    rows = [
+        (
+            "数据质量状态",
+            quality.get("collection_status") or quality.get("status") or "unknown",
+            "采集、解析与标准化结果的总体状态。",
+        ),
+        (
+            "缺少 Parser 模板",
+            int(quality.get("template_missing_count") or 0),
+            "缺少模板的命令不能形成结构化 B 观测。",
+        ),
+        (
+            "Parser 解析失败",
+            int(quality.get("parse_failed_count") or 0),
+            "解析失败的命令仅保留原始证据，不能用于结构化健康判断。",
+        ),
+        (
+            "未确认空输出",
+            int(quality.get("empty_unverified_count") or 0),
+            "空输出尚未确认是否为不适用，不能据此判断设备健康。",
+        ),
+        (
+            "阈值待确认观测",
+            int(rule_coverage.get("threshold_unknown_observation_count") or 0),
+            "未取得设备或模块阈值的观测不使用统一固定阈值。",
+        ),
+        (
+            "基线/健康策略待确认观测",
+            int(rule_coverage.get("assessment_policy_missing_observation_count") or 0),
+            "缺少可用基线或健康策略时，结果保留为待确认。",
+        ),
+        (
+            "规则评估观测数",
+            int(rule_coverage.get("evaluated_observation_count") or 0),
+            "已按本次冻结或当前活动规则完成健康评估的标准观测数。",
+        ),
+    ]
+    return tuple(rows)
 
 
 def _safe_excel_value(value: Any) -> Any:
@@ -608,7 +664,11 @@ def _enrich_domain_table(
     current_findings: list[dict[str, Any]],
     rule_coverage_available: bool,
 ) -> ReportTable:
-    if table.key in {"evidence_index", "other_structured"}:
+    if table.key in {
+        "evidence_index",
+        "other_structured",
+        "canonical_field_dictionary",
+    }:
         return table
 
     def entity_key(value: Any) -> str:

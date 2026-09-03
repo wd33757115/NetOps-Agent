@@ -75,8 +75,13 @@ def resolve_unstructured_diff_profile(
 ) -> dict[str, Any] | None:
     """Resolve an immutable comparison profile for one canonical command."""
 
-    root = policy or load_yaml(
-        policy_path or SHARED_PARSER_CONFIG_ROOT / "command_policy.yaml"
+    # This resolver is also called while summarising every structured
+    # observation.  Re-parsing the same YAML policy for each call turns a
+    # normal offline patrol result into an O(observations) file-I/O path.
+    # Keep caller-supplied policy objects intact, and otherwise reuse the
+    # immutable cached policy already used by ``load_unstructured_diff_config``.
+    root = policy or _load_policy(
+        str(Path(policy_path or SHARED_PARSER_CONFIG_ROOT / "command_policy.yaml").resolve())
     )
     comparison = dict(root.get("unstructured_comparison") or {})
     profiles = dict(comparison.get("profiles") or {})

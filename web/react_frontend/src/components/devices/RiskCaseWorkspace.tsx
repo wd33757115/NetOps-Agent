@@ -940,7 +940,7 @@ const RiskCaseWorkspace: React.FC<RiskCaseWorkspaceProps> = ({
                     问题关联治理
                   </Typography.Title>
                   <Typography.Text type="secondary">
-                    技术风险与事件全部保留；仅批准且仍有效的关联会合并领导报告中的问题数。
+                    技术风险与事件全部保留；仅批准且仍有效的关联会合并巡检报告中的问题数。
                   </Typography.Text>
                 </Space>
                 {['open', 'acknowledged', 'recovering'].includes(selected.status) && (
@@ -1374,7 +1374,7 @@ const RiskCaseWorkspace: React.FC<RiskCaseWorkspaceProps> = ({
               <Alert
                 type="info"
                 showIcon
-                message="当前风险将作为领导报告中的主问题"
+                message="当前风险将作为巡检报告中的主问题"
                 description="请选择由同一根因或同一事件引起的关联症状。提交后不会立即改变报告，必须由另一位工程师独立复核。"
                 style={{ marginBottom: 16 }}
               />
@@ -1434,7 +1434,7 @@ const RiskCaseWorkspace: React.FC<RiskCaseWorkspaceProps> = ({
                   associationAction === 'revoke'
                     ? '撤销只影响后续报告版本'
                     : associationDecision === 'approved'
-                      ? '批准后将改变领导报告的问题计数'
+                      ? '批准后将改变巡检报告的问题计数'
                       : '拒绝后两项技术风险继续独立计数'
                 }
                 description="原始风险、事件和证据始终保留，已经签发的报告不会被改写。"

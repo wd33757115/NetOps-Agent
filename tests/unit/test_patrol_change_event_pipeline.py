@@ -7,6 +7,7 @@ import hashlib
 import uuid
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -36,6 +37,7 @@ from src.core.patrol.event_rules import EventRule, default_event_rule_definition
 from src.core.patrol.raw_importer import (
     _import_fingerprint,
     _resolve_capture_device,
+    _resolve_offline_direct_projection_bindings,
     build_output_review_item_id,
     import_raw_capture,
     import_raw_path,
@@ -63,6 +65,73 @@ from src.infrastructure.db.models import (
 from src.infrastructure.db.postgres import get_db_session
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_offline_import_binds_only_unambiguous_direct_projection_routes(monkeypatch):
+    """Offline captures must carry V2 implementation identity into normalization."""
+
+    implementation = SimpleNamespace(
+        version_id="implementation-v2",
+        adapter_spec={"schema_version": "command-adapter/v2"},
+    )
+    catalog = SimpleNamespace(implementations=(implementation,))
+    projected = {
+        "decisions": [
+            {
+                "check_item_id": "interface.oper_status",
+                "check_item_version_id": "check-item-v6",
+                "implementation_version_id": "implementation-v2",
+                "projection_status": "mapped",
+            }
+        ],
+        "collection_actions": [
+            {
+                "command": "display interface brief",
+                "canonical_command": "display interface brief",
+                "check_item_ids": ["interface.oper_status"],
+                "implementation_version_ids": ["implementation-v2"],
+            }
+        ],
+    }
+
+    class FakeCatalogRepository:
+        def load_active(self):
+            return catalog
+
+    class FakeResolver:
+        def __init__(self, _catalog):
+            pass
+
+        def project_legacy_commands(self, **_kwargs):
+            return projected
+
+    monkeypatch.setattr(
+        "src.core.patrol.raw_importer.CheckItemCatalogRepository",
+        FakeCatalogRepository,
+    )
+    monkeypatch.setattr(
+        "src.core.patrol.raw_importer.CheckItemImplementationResolver",
+        FakeResolver,
+    )
+
+    bindings = _resolve_offline_direct_projection_bindings(
+        identity=SimpleNamespace(vendor="H3C", model="S6850", family="Comware"),
+        device_id="test-device",
+        commands=["display interface brief"],
+    )
+
+    assert len(bindings) == 1
+    assert bindings[0]["command"] == "display interface brief"
+    assert bindings[0]["collection_item_id"].startswith("offline-direct:")
+    assert len(bindings[0]["collection_item_id"]) <= 64
+    assert bindings[0]["check_item_bindings"] == [
+        {
+            "check_item_id": "interface.oper_status",
+            "check_item_version_id": "check-item-v6",
+            "implementation_version_id": "implementation-v2",
+        }
+    ]
+    assert bindings[0]["selected_for_bindings"] == bindings[0]["check_item_bindings"]
 
 
 def test_observation_change_preserves_runtime_dimensions():

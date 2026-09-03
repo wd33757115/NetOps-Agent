@@ -56,7 +56,7 @@ const contentConfirmationLabels: Record<string, string> = {
   critical_unknown_and_lifecycle_reviewed: '已复核高风险、无法判断、排除项、恢复与关闭事实',
   sampled_facts_reviewed: '已完成按检查项、兼容范围和结论状态冻结的普通事实抽样',
   traceability_verified: '每个检查项至少抽查一条从结论到原始证据的完整链路',
-  narrative_readability_accepted: '领导版结论表述准确、易懂，且未删除限制条件',
+  narrative_readability_accepted: '巡检报告结论表述准确、易懂，且未删除限制条件',
   actions_actionable: '整改建议包含责任、优先级或可执行的下一步动作',
 }
 
@@ -98,7 +98,7 @@ const contentMachineCheckLabels: Record<string, string> = {
 
 const artifactLabels: Record<string, string> = {
   markdown: 'Markdown 报告',
-  docx: '领导版报告',
+  docx: '巡检报告',
   excel: '巡检明细 Excel',
   json: '机器可读报告',
   evidence: '证据包',
@@ -574,11 +574,11 @@ const ReportReleasePanel: React.FC<ReportReleasePanelProps> = ({
             ? '报告后台生成失败'
             : (missingManifest ? '尚未生成报告事实清单' : '报告交付状态读取失败'))}
         description={reportWorkerActive
-          ? '系统正在冻结事实并生成领导版报告、巡检明细 Excel 和证据包，完成后本区域会自动更新。'
+          ? '系统正在冻结事实并生成巡检报告、巡检明细 Excel 和证据包，完成后本区域会自动更新。'
           : (workerFailed
             ? (materializationStatus?.error || '请检查 Worker 与对象存储状态后重试。')
             : (missingManifest
-              ? '批次结束后可生成冻结事实、领导版报告、巡检明细 Excel 和证据包。'
+              ? '批次结束后可生成冻结事实、巡检报告、巡检明细 Excel 和证据包。'
               : errorMessage(reportQuery.error, '无法读取报告交付状态')))}
         action={(
           <Button
@@ -970,7 +970,7 @@ const ReportReleasePanel: React.FC<ReportReleasePanelProps> = ({
                       items: [
                         {
                           key: 'docx',
-                          label: '领导报告',
+                          label: '巡检报告',
                           disabled: !item.artifact_sha256.docx,
                         },
                         {
@@ -1543,7 +1543,7 @@ const ReportReleasePanel: React.FC<ReportReleasePanelProps> = ({
             type="info"
             showIcon
             message="报告中的事实结论只能来自本账本"
-            description="声明编号贯穿领导报告、巡检明细 Excel、机器事实和证据包；限制条件不能在公文润色时删除。"
+            description="声明编号贯穿巡检报告、巡检明细 Excel、机器事实和证据包；限制条件不能在公文润色时删除。"
           />
           <Space wrap>
             <Input.Search

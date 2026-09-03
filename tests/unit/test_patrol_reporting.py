@@ -3,6 +3,7 @@ from __future__ import annotations
 from io import BytesIO
 
 from openpyxl import load_workbook
+
 from src.core.patrol import reporting
 from src.core.patrol.reporting import render_patrol_batch_xlsx, render_run_report
 
@@ -210,6 +211,66 @@ def test_render_patrol_batch_xlsx_unifies_cross_vendor_facts(monkeypatch):
                     "field_name": "cpu_total_5_sec",
                     "observed_at": "2026-07-27T10:00:00+08:00",
                 },
+                {
+                    "id": "h3c-cpu-warning",
+                    "device_id": "H3C-1",
+                    "vendor": "H3C",
+                    "model": "S5590",
+                    "entity_type": "device",
+                    "entity_key": "__singleton__",
+                    "observation_type": "device.cpu.high_warning",
+                    "dimensions_json": {"scope": "system"},
+                    "value_number": 80,
+                    "unit": "percent",
+                    "canonical_command": "display cpu-usage",
+                    "field_name": "cpu_high_warning_percent",
+                    "observed_at": "2026-07-27T10:00:00+08:00",
+                },
+                {
+                    "id": "h3c-cpu-alarm",
+                    "device_id": "H3C-1",
+                    "vendor": "H3C",
+                    "model": "S5590",
+                    "entity_type": "device",
+                    "entity_key": "__singleton__",
+                    "observation_type": "device.cpu.high_alarm",
+                    "dimensions_json": {"scope": "system"},
+                    "value_number": 90,
+                    "unit": "percent",
+                    "canonical_command": "display cpu-usage",
+                    "field_name": "cpu_high_alarm_percent",
+                    "observed_at": "2026-07-27T10:00:00+08:00",
+                },
+                {
+                    "id": "h3c-optical-rx",
+                    "device_id": "H3C-1",
+                    "vendor": "H3C",
+                    "model": "S5590",
+                    "entity_type": "interface_optical",
+                    "entity_key": '["XGE1/0/1"]',
+                    "observation_type": "interface.optical.rx_power",
+                    "dimensions_json": {"channel": "1"},
+                    "value_number": -3.1,
+                    "unit": "dbm",
+                    "canonical_command": "display transceiver diagnosis interface",
+                    "field_name": "rx_power_dbm",
+                    "observed_at": "2026-07-27T10:00:00+08:00",
+                },
+                {
+                    "id": "h3c-optical-rx-low-alarm",
+                    "device_id": "H3C-1",
+                    "vendor": "H3C",
+                    "model": "S5590",
+                    "entity_type": "interface_optical",
+                    "entity_key": '["XGE1/0/1"]',
+                    "observation_type": "interface.optical.rx_low_alarm",
+                    "dimensions_json": {"channel": "1"},
+                    "value_number": -12.0,
+                    "unit": "dbm",
+                    "canonical_command": "display transceiver diagnosis interface",
+                    "field_name": "rx_low_alarm_dbm",
+                    "observed_at": "2026-07-27T10:00:00+08:00",
+                },
             ]
 
     monkeypatch.setattr(reporting, "StateRepository", FakeStateRepository)
@@ -247,13 +308,32 @@ def test_render_patrol_batch_xlsx_unifies_cross_vendor_facts(monkeypatch):
         "总览",
         "当前风险",
         "事件",
-        "变化",
+        "变化与基线对比",
         "CPU",
+        "光模块健康",
+        "数据质量与待确认",
+        "B字段字典",
         "证据索引",
     }.issubset(set(workbook.sheetnames))
     cpu_rows = list(workbook["CPU"].iter_rows(values_only=True))
     assert cpu_rows[0][5] == "CPU 5秒(%)"
     assert {row[5] for row in cpu_rows[1:]} == {18, 24}
+    assert "CPU预警阈值(%)" in cpu_rows[0]
+    assert "CPU严重阈值(%)" in cpu_rows[0]
+    h3c_cpu = next(row for row in cpu_rows[1:] if row[0] == "H3C-1")
+    assert h3c_cpu[cpu_rows[0].index("CPU预警阈值(%)")] == 80
+    assert h3c_cpu[cpu_rows[0].index("CPU严重阈值(%)")] == 90
     assert {row[-4] for row in cpu_rows[1:]} == {
         "覆盖范围内未发现当前异常项"
     }
+    optical_rows = list(workbook["光模块健康"].iter_rows(values_only=True))
+    assert "接收低严重阈值(dBm)" in optical_rows[0]
+    assert optical_rows[1][optical_rows[0].index("接收低严重阈值(dBm)")] == -12
+    dictionary_rows = list(workbook["B字段字典"].iter_rows(values_only=True))
+    assert (
+        "CPU",
+        "CPU预警阈值(%)",
+        "cpu_high_warning_percent",
+        "device.cpu.high_warning",
+        "无",
+    ) in dictionary_rows

@@ -24,12 +24,12 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 
+from src.core.patrol.observation_report import REPORT_VIEWS, build_observation_report_tables
 from src.core.patrol.unstructured_diff import summarize_unstructured_changes
 from src.skills.official_document.docx_format import (
     add_styled_paragraph,
     apply_fixed_line_spacing,
     setup_a4_margins,
-    style_run,
 )
 
 SEVERITY_RANK = {
@@ -1331,6 +1331,109 @@ def _append_cli_comparison_markdown(
     lines.extend(["</tbody>", "</table>"])
 
 
+_BASIC_OBSERVATION_TABLES = (
+    ("device_version", "设备启动信息与版本状态", None),
+    ("power", "设备电源状态", "电源"),
+    ("fan", "设备风扇状态", "风扇"),
+    ("temperature", "设备环境温度状态", "温度传感器"),
+    ("cpu", "设备 CPU 利用率状态", None),
+    ("memory", "设备内存利用率状态", None),
+)
+
+
+def _build_device_inventory_rows(summary: dict[str, Any]) -> list[list[str]]:
+    """Build the report's device list from the same immutable observations."""
+
+    devices: dict[str, dict[str, str]] = {}
+    for observation in list(summary.get("observations") or []):
+        device_id = str(observation.get("device_id") or "").strip()
+        device_name = str(observation.get("device_name") or device_id).strip()
+        if not device_id and not device_name:
+            continue
+        key = device_id or device_name
+        row = devices.setdefault(
+            key,
+            {
+                "device_name": device_name or key,
+                "vendor": "",
+                "model": "",
+            },
+        )
+        row["device_name"] = device_name or row["device_name"]
+        row["vendor"] = str(observation.get("vendor") or row["vendor"])
+        row["model"] = str(observation.get("model") or row["model"])
+    return [
+        [str(index), item["device_name"], item["model"] or "-", item["vendor"] or "-"]
+        for index, item in enumerate(
+            sorted(devices.values(), key=lambda row: row["device_name"]),
+            start=1,
+        )
+    ]
+
+
+def _build_basic_observation_tables(summary: dict[str, Any]) -> list[dict[str, Any]]:
+    """Project customer-readable core B facts without technical timestamps or IDs."""
+
+    observations = list(summary.get("observations") or [])
+    if not observations:
+        return []
+    device_names = {
+        str(item.get("device_id") or ""): str(item.get("device_name") or "")
+        for item in observations
+        if item.get("device_id") and item.get("device_name")
+    }
+    views = {view.key: view for view in REPORT_VIEWS}
+    source_tables = {
+        table.key: table for table in build_observation_report_tables(observations)
+    }
+    result: list[dict[str, Any]] = []
+    for key, title, component_label in _BASIC_OBSERVATION_TABLES:
+        source = source_tables.get(key)
+        view = views.get(key)
+        if source is None or view is None or not source.rows:
+            continue
+        data_headers = [
+            f"{column.label}（{column.key}）" for column in view.columns
+        ]
+        if key == "device_version":
+            headers = ["设备", "厂商", *data_headers]
+            rows = [
+                [
+                    device_names.get(str(row[0]) or "") or row[0],
+                    row[1],
+                    *row[5:-1],
+                ]
+                for row in source.rows
+            ]
+        else:
+            headers = ["设备", "厂商", "型号"]
+            if component_label:
+                headers.append(component_label)
+            headers.extend(data_headers)
+            rows = []
+            for row in source.rows:
+                values = [
+                    device_names.get(str(row[0]) or "") or row[0],
+                    row[1],
+                    row[2],
+                ]
+                if component_label:
+                    values.append(_display_entity_key(row[4]))
+                values.extend(row[5:-1])
+                rows.append(values)
+        result.append({"key": key, "title": title, "headers": headers, "rows": rows})
+    return result
+
+
+def _basic_table_widths(column_count: int) -> list[float]:
+    """Fit appendix tables into an A4 portrait content width without fixed heights."""
+
+    usable_width_cm = 16.7
+    if column_count <= 0:
+        return []
+    return [round(usable_width_cm / column_count, 2)] * column_count
+
+
 def build_leadership_report(
     patrol_batch_id: str,
     summary: dict[str, Any],
@@ -1435,7 +1538,7 @@ def build_leadership_report(
         limitations.append("当前状态未被活动故障规则有效覆盖，未产生事件不等同于设备健康。")
     if correlated_evidence:
         limitations.append(
-            "已批准的风险关联只调整领导问题计数，不删除技术风险、事件或证据；关联失效后必须在新报告版本中恢复独立计数。"
+            "已批准的风险关联只调整巡检主问题计数，不删除技术风险、事件或证据；关联失效后必须在新报告版本中恢复独立计数。"
         )
     incomplete_domain_labels = [
         str(item.get("label") or item.get("domain") or "")
@@ -1486,7 +1589,7 @@ def build_leadership_report(
         "title": (
             "规则资产样本验证与回放报告"
             if is_asset_evidence_report
-            else "网络设备巡检情况报告"
+            else "网络设备巡检报告"
         ),
         "issuer": issuer,
         "recipient": recipient,
@@ -1557,7 +1660,9 @@ def build_leadership_report(
         "correlated_evidence": correlated_evidence,
         "correlated_evidence_groups": _aggregate_risk_groups(correlated_evidence),
         "trend": trend,
+        "device_inventory_rows": _build_device_inventory_rows(summary),
         "domains": domains,
+        "basic_observation_tables": _build_basic_observation_tables(summary),
         "data_quality": quality,
         "rule_coverage": coverage,
         "structured_event_evidence": structured_event_evidence,
@@ -1616,6 +1721,9 @@ def _unstructured_preview_text(item: dict[str, Any], *, limit: int = 2) -> str:
 def render_leadership_markdown(report: dict[str, Any]) -> str:
     assessment = report["assessment"]
     metrics = report["metrics"]
+    scope_label = (report.get("scope") or {}).get("target_label") or "本批次目标设备"
+    device_inventory_rows = list(report.get("device_inventory_rows") or [])
+    basic_observation_tables = list(report.get("basic_observation_tables") or [])
     lines = [
         f"# {report['title']}",
         "",
@@ -1623,13 +1731,19 @@ def render_leadership_markdown(report: dict[str, Any]) -> str:
         f"批次：{report['patrol_batch_id']}",
         f"统计时间：{_format_cn_datetime(report['generated_at'])}",
         "",
-        "## 一、总体结论",
+        "## 第一章 概述",
         "",
-        f"**{assessment['status']}**（可信度：{assessment['trust']}）。",
+        "### 1.1 巡检概述",
         "",
-        assessment["basis"],
+        f"本报告面向{report['recipient']}，对“{scope_label}”开展网络设备巡检，"
+        "依据本批次已采集的设备事实和已启用的巡检规则形成。",
         "",
-        "## 二、巡检范围与完成情况",
+        "### 1.2 巡检说明",
+        "",
+        "本次巡检仅采集和核验设备运行信息，不对设备配置作变更。健康结论以标准观测、"
+        "设备或模块上报阈值、有效基线和已发布规则为依据；数据不足时明确标记为无法判断。",
+        "",
+        "### 1.3 巡检范围",
         "",
         f"- 目标设备：{metrics['target_device_count']} 台",
         f"- 完成设备：{metrics['completed_device_count']} 台",
@@ -1650,13 +1764,57 @@ def render_leadership_markdown(report: dict[str, Any]) -> str:
         (
             f"- 风险归并：当前状态规则命中 {metrics['current_state_finding_count']} 条，"
             f"尚未恢复故障事件 {metrics['unresolved_fault_event_count']} 条；按对象去重并"
-            f"按已批准的 RiskEpisode 关联投影后，形成领导问题 {metrics['current_risk_count']} 项、"
+                "按已批准的 RiskEpisode 关联投影后，"
+                f"形成巡检主问题 {metrics['current_risk_count']} 项、"
             f"关联症状 {report['risk_summary']['correlated_evidence_count']} 项"
         ),
         "",
-        "## 三、主要风险",
+        "#### 1.3.1 设备清单",
+        "",
+        "## 第二章 巡检内容",
+        "",
+        "### 2.1 网络设备巡检项",
+        "",
+        "本次巡检按已启用检查项和实际采集命令执行，具体健康判断以检查项绑定的"
+        "标准语义 B 和规则资产为准。",
+        "",
+        "### 2.2 巡检设备配置备份",
+        "",
+        "由于设备数量较多，配置备份文件较大，不适宜粘贴到 Word 文档内，"
+        "因此将以电子版的形式单独提交，特此说明。",
+        "",
+        "## 第三章 巡检结果",
+        "",
+        "### 3.1 网络设备",
+        "",
+        f"**{assessment['status']}**（可信度：{assessment['trust']}）。{assessment['basis']}",
+        "",
+        "#### 3.1.1 设备基本运行状况",
         "",
     ]
+    if device_inventory_rows:
+        lines.extend(
+            f"- {row[0]}. {row[1]}（型号：{row[2]}；厂商：{row[3]}）"
+            for row in device_inventory_rows
+        )
+    else:
+        lines.append("本批次未形成可列示的标准观测设备清单，设备范围以巡检任务清单为准。")
+    if basic_observation_tables:
+        lines.append("以下展示本次已采集并映射为标准字段的基础运行数据；表中不展示采集时间。")
+        for index, table in enumerate(basic_observation_tables, start=1):
+            lines.extend(["", f"##### 3.1.1.{index} {table['title']}", ""])
+            lines.append("字段：" + "、".join(str(item) for item in table["headers"]))
+            for row in table["rows"]:
+                lines.append(
+                    "- "
+                    + "；".join(
+                        str(item if item not in (None, "") else "-")
+                        for item in row
+                    )
+                )
+    else:
+        lines.append("本批次未形成可用于报告的设备版本、CPU、内存、电源、风扇或温度标准观测数据。")
+    lines.extend(["", "#### 3.1.2 主要风险与趋势", ""])
     if report["risk_groups"]:
         for index, risk in enumerate(report["risk_groups"], start=1):
             lines.append(
@@ -1669,7 +1827,7 @@ def render_leadership_markdown(report: dict[str, Any]) -> str:
     if report.get("correlated_evidence"):
         lines.append(
             f"另有 {len(report['correlated_evidence'])} 项症状已通过独立复核归入主问题，"
-            "技术风险与事件证据完整保留，不重复计入领导问题数。"
+            "技术风险与事件证据完整保留，不重复计入巡检主问题数。"
         )
         for item in report.get("correlated_evidence_groups") or []:
             lines.append(
@@ -1692,7 +1850,7 @@ def render_leadership_markdown(report: dict[str, Any]) -> str:
         lines.extend(
             [
                 "",
-                "### 三期趋势",
+                "##### 3.1.2.1 三期趋势",
                 "",
                 f"相邻周期已通过设备身份与采集清单连续性校验，串联 {trend['period_count']} 个"
                 f"采集周期（{period_labels}）。当前新增异常证据 {trend['new_evidence_count']} 项、"
@@ -1719,11 +1877,11 @@ def render_leadership_markdown(report: dict[str, Any]) -> str:
                 f"增加到 {comparisons[-1].get('command_count')} 条，Change 数量不可直接作为"
                 "网络劣化幅度横向比较。"
             )
-    lines.extend(["", "## 四、分域检查结果", ""])
+    lines.extend(["", "#### 3.1.3 分域检查结果", ""])
     for row in report["domains"]:
         lines.append(
             f"- {row['label']}：{row['status']}，Observation {row['observation_count']}，"
-            f"领导问题 {row['independent_risk_count']}，关联症状 "
+            f"巡检主问题 {row['independent_risk_count']}，关联症状 "
             f"{row['correlated_evidence_count']}，Change {row['change_count']}，"
             f"Event {row['event_count']}。"
         )
@@ -1733,7 +1891,7 @@ def render_leadership_markdown(report: dict[str, Any]) -> str:
             lines.append(f"- {coverage_text}")
     full_cli_evidence = _full_cli_evidence_items(report)
     structured = dict(report.get("structured_event_evidence") or {})
-    lines.extend(["", "## 五、结构化变化与 Event 证据", ""])
+    lines.extend(["", "#### 3.1.4 结构化变化与 Event 证据", ""])
     if not structured.get("items"):
         lines.append("本批次没有形成可比较的结构化状态变化。")
     else:
@@ -1775,7 +1933,7 @@ def render_leadership_markdown(report: dict[str, Any]) -> str:
         if len(structured.get("items") or []) > 20:
             lines.append("- 其余结构化变化详见技术报告与事件数据附件。")
     unstructured = dict(report.get("unstructured_comparison") or {})
-    lines.extend(["", "## 六、非结构化文本对比证据", ""])
+    lines.extend(["", "#### 3.1.5 非结构化文本对比证据", ""])
     if not unstructured.get("collected_output_count"):
         lines.append("本批次未采集配置、日志等已启用非结构化对比的命令输出。")
     elif not unstructured.get("changed_output_count"):
@@ -1816,41 +1974,50 @@ def render_leadership_markdown(report: dict[str, Any]) -> str:
                 )
         if len(unstructured.get("items") or []) > 10:
             lines.append("- 其余变化详见技术报告和原始输出证据包。")
+    appendix_lines: list[str] = []
     if full_cli_evidence:
-        lines.extend(["", "## 附录：完整 CLI 原文证据", ""])
-        lines.append(
+        appendix_lines.extend(["", "## 附录 A：完整 CLI 原文证据", ""])
+        appendix_lines.append(
             "同一设备、命令和基线/当前快照对仅保留一组原文；红色文本为差异，"
             "空白单元格表示该行只存在于另一侧。"
         )
         for evidence in full_cli_evidence:
             group_label = "、".join(evidence.get("group_labels") or [])
-            lines.append(
+            appendix_lines.append(
                 f"### {evidence.get('evidence_id')} / {group_label} / "
                 f"{evidence.get('device_name') or evidence.get('device_id') or '-'} / "
                 f"{evidence.get('command') or '-'}"
             )
             related_facts = _cli_evidence_related_facts_text(evidence)
             if related_facts:
-                lines.append(f"- 关联事实：{related_facts}")
+                appendix_lines.append(f"- 关联事实：{related_facts}")
             if evidence.get("parser_failure_text_comparison"):
-                lines.append(
+                appendix_lines.append(
                     "Parser 未成功，本项仅提供原文文本差异证据，不能替代结构化 Event 判定。"
                 )
-            _append_cli_comparison_markdown(lines, evidence)
-    lines.extend(["", "## 七、处置建议", ""])
+            _append_cli_comparison_markdown(appendix_lines, evidence)
+
+    lines.extend(["", "## 第四章 巡检总结", "", "### 4.1 数据可信度与结论边界", ""])
+    lines.append(
+        f"**{assessment['status']}**（可信度：{assessment['trust']}）。"
+        "本章结论仅适用于本批次实际完成并形成有效证据的巡检范围。"
+    )
+    lines.extend(f"- {item}" for item in report["limitations"])
+
+    lines.extend(["", "## 第五章 后续工作计划", "", "### 5.1 后续工作计划", ""])
     for item in report["recommendations"]:
         lines.append(
             f"- {item['priority']}：{item['action']}"
             f"（责任：{item['owner']}；时限：{item['deadline']}）"
         )
-    lines.extend(["", "## 八、结论边界", ""])
-    lines.extend(f"- {item}" for item in report["limitations"])
+
+    lines.extend(appendix_lines)
     evidence = report["evidence"]
     analysis = evidence.get("analysis") or {}
     lines.extend(
         [
             "",
-            "## 九、证据索引",
+            "## 附录 B：证据与附件",
             "",
             f"- Workflow Run：{evidence.get('workflow_run_id') or '-'}",
             f"- 分析尝试：{analysis.get('attempt_id') or '-'}",
@@ -1924,12 +2091,19 @@ def _add_table(
     return table
 
 
-def _add_section(doc: Any, title: str) -> None:
+def _add_section(doc: Any, title: str, *, level: int = 1) -> None:
+    """Add a readable chapter heading without relying on Word theme styles."""
+
     paragraph = doc.add_paragraph()
     apply_fixed_line_spacing(paragraph)
     paragraph.paragraph_format.keep_with_next = True
+    paragraph.paragraph_format.space_before = Pt({1: 16, 2: 12, 3: 8}.get(level, 5))
+    paragraph.paragraph_format.space_after = Pt(4)
     run = paragraph.add_run(title)
-    style_run(run, bold=True)
+    run.font.name = "黑体"
+    run.font.size = Pt({1: 16, 2: 15, 3: 14}.get(level, 12))
+    run.font.bold = True
+    run._element.rPr.rFonts.set(qn("w:eastAsia"), "黑体")
 
 
 def _add_compact_paragraph(doc: Any, text: str, *, bold: bool = False) -> Any:
@@ -2071,22 +2245,27 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
     )
     meta.rows[0].height = Cm(0.8)
 
-    _add_section(doc, "一、总体结论")
-    add_styled_paragraph(
-        doc,
-        f"{report['assessment']['status']}。{report['assessment']['basis']}。",
-        first_line_indent=0.74,
-        bold=True,
-    )
-    add_styled_paragraph(
-        doc,
-        "说明：即使巡检流程执行完成，或未产生状态变化与事件，也不能单独证明设备健康；"
-        "本报告结论同时受执行覆盖、结构化质量和当前状态规则覆盖约束。",
-        first_line_indent=0.74,
-    )
-
-    _add_section(doc, "二、巡检范围与完成情况")
     metrics = report["metrics"]
+    scope_label = (report.get("scope") or {}).get("target_label") or "本批次目标设备"
+    device_inventory_rows = list(report.get("device_inventory_rows") or [])
+    basic_observation_tables = list(report.get("basic_observation_tables") or [])
+
+    _add_section(doc, "第一章 概述", level=1)
+    _add_section(doc, "1.1 巡检概述", level=2)
+    add_styled_paragraph(
+        doc,
+        f"本报告面向{report['recipient']}，对“{scope_label}”开展网络设备巡检，"
+        f"报告依据本批次已采集的设备事实和已启用的巡检规则形成。",
+        first_line_indent=0.74,
+    )
+    _add_section(doc, "1.2 巡检说明", level=2)
+    add_styled_paragraph(
+        doc,
+        "本次巡检仅采集和核验设备运行信息，不对设备配置作变更。健康结论以标准观测、"
+        "设备或模块上报阈值、有效基线和已发布规则为依据；数据不足时明确标记为无法判断。",
+        first_line_indent=0.74,
+    )
+    _add_section(doc, "1.3 巡检范围", level=2)
     _add_table(
         doc,
         ["目标设备", "完成设备", "失败", "跳过", "命令", "结构化率", "结构化观测"],
@@ -2103,6 +2282,36 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
         ],
         [2.1, 2.1, 1.6, 1.6, 1.8, 2.7, 2.8],
     )
+    _add_section(doc, "1.3.1 设备清单", level=3)
+    if device_inventory_rows:
+        _add_table(
+            doc,
+            ["序号", "设备名称", "设备型号", "厂商"],
+            device_inventory_rows,
+            [1.2, 5.6, 5.6, 4.3],
+            keep_rows_together=True,
+        )
+    else:
+        add_styled_paragraph(
+            doc,
+            "本批次未形成可列示的标准观测设备清单，设备范围以巡检任务清单为准。",
+            first_line_indent=0.74,
+        )
+
+    _add_section(doc, "第二章 巡检内容", level=1)
+    _add_section(doc, "2.1 网络设备巡检项", level=2)
+    domain_labels = "、".join(
+        str(item.get("label") or item.get("domain") or "")
+        for item in report.get("domains") or []
+        if item.get("label") or item.get("domain")
+    )
+    add_styled_paragraph(
+        doc,
+        "本次巡检按已启用检查项和实际采集命令执行，涵盖"
+        f"{domain_labels or '设备基础信息、硬件环境、接口状态、配置与日志'}等内容。"
+        "具体健康判断以检查项绑定的标准语义 B 和规则资产为准。",
+        first_line_indent=0.74,
+    )
     add_styled_paragraph(
         doc,
         (
@@ -2113,14 +2322,59 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
             f"其中恢复类 {metrics['recovery_event_count']} 条。当前状态规则命中 "
             f"{metrics['current_state_finding_count']} 条，尚未恢复故障事件 "
             f"{metrics['unresolved_fault_event_count']} 条；按已批准的 RiskEpisode 关联投影后，"
-            f"形成领导问题 {metrics['current_risk_count']} 项、关联症状 "
+            f"形成巡检主问题 {metrics['current_risk_count']} 项、关联症状 "
             f"{report['risk_summary']['correlated_evidence_count']} 条。"
         ),
         first_line_indent=0.74,
     )
+    _add_section(doc, "2.2 巡检设备配置备份", level=2)
+    add_styled_paragraph(
+        doc,
+        "由于设备数量较多，配置备份文件较大，不适宜粘贴到 Word 文档内，"
+        "因此将以电子版的形式单独提交，特此说明。",
+        first_line_indent=0.74,
+    )
 
     doc.add_page_break()
-    _add_section(doc, "三、主要风险")
+    _add_section(doc, "第三章 巡检结果", level=1)
+    _add_section(doc, "3.1 网络设备", level=2)
+    add_styled_paragraph(
+        doc,
+        f"{report['assessment']['status']}。{report['assessment']['basis']}。",
+        first_line_indent=0.74,
+        bold=True,
+    )
+    add_styled_paragraph(
+        doc,
+        "说明：即使巡检流程执行完成，或未产生状态变化与事件，也不能单独证明设备健康；"
+        "本报告结论同时受执行覆盖、结构化质量和当前状态规则覆盖约束。",
+        first_line_indent=0.74,
+    )
+    _add_section(doc, "3.1.1 设备基本运行状况", level=3)
+    if not basic_observation_tables:
+        add_styled_paragraph(
+            doc,
+            "本批次未形成可用于报告的设备版本、CPU、内存、电源、风扇或温度标准观测数据。",
+            first_line_indent=0.74,
+        )
+    else:
+        add_styled_paragraph(
+            doc,
+            "以下表格展示本次已采集并映射为标准字段的设备基础运行数据；"
+            "表中不展示采集时间，缺失字段保留为空。",
+            first_line_indent=0.74,
+        )
+        for index, table in enumerate(basic_observation_tables, start=1):
+            _add_section(doc, f"3.1.1.{index} {table['title']}", level=4)
+            _add_table(
+                doc,
+                list(table["headers"]),
+                list(table["rows"]),
+                _basic_table_widths(len(table["headers"])),
+                keep_rows_together=True,
+            )
+
+    _add_section(doc, "3.1.2 主要风险与趋势", level=3)
     risk_groups = report["risk_groups"]
     if risk_groups:
         rows = [
@@ -2154,7 +2408,7 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
             doc,
             f"另有 {len(report['correlated_evidence'])} 项症状已通过独立复核归入主问题，"
             f"涉及设备 {'、'.join(devices)}。技术风险与事件证据完整保留，"
-            "不重复计入领导问题数，具体对象和值如下。",
+            "不重复计入巡检主问题数，具体对象和值如下。",
             first_line_indent=0.74,
         )
         correlated_rows = [
@@ -2242,7 +2496,7 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
                 first_line_indent=0.74,
             )
 
-    _add_section(doc, "四、分域检查结果")
+    _add_section(doc, "3.1.3 分域检查结果", level=3)
     domain_rows = [
         [
             row["label"],
@@ -2276,7 +2530,7 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
 
     full_cli_evidence = _full_cli_evidence_items(report)
     structured = dict(report.get("structured_event_evidence") or {})
-    _add_section(doc, "五、结构化变化与 Event 证据")
+    _add_section(doc, "3.1.4 结构化变化与 Event 证据", level=3)
     if not structured.get("items"):
         add_styled_paragraph(doc, "本批次没有形成可比较的结构化状态变化。", first_line_indent=0.74)
     else:
@@ -2338,7 +2592,7 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
                 first_line_indent=0.74,
             )
 
-    _add_section(doc, "六、非结构化文本对比证据")
+    _add_section(doc, "3.1.5 非结构化文本对比证据", level=3)
     unstructured = dict(report.get("unstructured_comparison") or {})
     if not unstructured.get("collected_output_count"):
         add_styled_paragraph(
@@ -2413,48 +2667,19 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
             add_styled_paragraph(
                 doc,
                 f"其余 {len(unstructured.get('items') or []) - 8} 项变化详见技术报告；"
-                "领导报告不展开长日志正文，避免将滚动日志记录误读为独立故障。",
+                "巡检报告不展开长日志正文，避免将滚动日志记录误读为独立故障。",
                 first_line_indent=0.74,
             )
 
-    if full_cli_evidence:
-        _add_section(doc, "附录：完整 CLI 原文证据")
-        add_styled_paragraph(
-            doc,
-            "同一设备、命令和基线/当前快照对仅保留一组原文；红色文本为差异，"
-            "空白单元格表示该行只存在于另一侧。",
-            first_line_indent=0.74,
-        )
-        for evidence in full_cli_evidence:
-            group_label = "、".join(evidence.get("group_labels") or [])
-            add_styled_paragraph(
-                doc,
-                f"{evidence.get('evidence_id')} / {group_label} / "
-                f"{evidence.get('device_name') or evidence.get('device_id') or '-'} / "
-                f"{evidence.get('command') or '-'}",
-                first_line_indent=0.74,
-            )
-            related_facts = _cli_evidence_related_facts_text(evidence)
-            if related_facts:
-                _add_compact_paragraph(doc, f"关联事实：{related_facts}")
-            if evidence.get("parser_failure_text_comparison"):
-                add_styled_paragraph(
-                    doc,
-                    "Parser 未成功，本项仅提供原文文本差异证据，不能替代结构化 Event 判定。",
-                    first_line_indent=0.74,
-                )
-            _add_cli_comparison_docx(doc, evidence)
-
-    _add_section(doc, "七、处置建议")
-    for index, item in enumerate(report["recommendations"], start=1):
-        add_styled_paragraph(
-            doc,
-            f"{index}. [{item['priority']}] {item['action']}。责任单位：{item['owner']}；"
-            f"完成时限：{item['deadline']}。",
-            first_line_indent=0.74,
-        )
-
-    _add_section(doc, "八、数据可信度与结论边界")
+    _add_section(doc, "第四章 巡检总结", level=1)
+    add_styled_paragraph(
+        doc,
+        f"{report['assessment']['status']}。{report['assessment']['basis']}。"
+        "本章结论仅适用于本批次实际完成并形成有效证据的巡检范围。",
+        first_line_indent=0.74,
+        bold=True,
+    )
+    _add_section(doc, "4.1 数据可信度与结论边界", level=2)
     coverage = report["rule_coverage"]
     digests = [str(item) for item in coverage.get("bundle_digests") or []]
     digest_summary = "、".join(f"{item[:12]}…" for item in digests) or "未形成"
@@ -2482,7 +2707,45 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
         ordinal = chinese_ordinals[index] if index < len(chinese_ordinals) else str(index + 1)
         add_styled_paragraph(doc, f"（{ordinal}）{item}", first_line_indent=0.74)
 
-    _add_section(doc, "九、证据与附件")
+    _add_section(doc, "第五章 后续工作计划", level=1)
+    _add_section(doc, "5.1 后续工作计划", level=2)
+    for index, item in enumerate(report["recommendations"], start=1):
+        add_styled_paragraph(
+            doc,
+            f"{index}. [{item['priority']}] {item['action']}。责任单位：{item['owner']}；"
+            f"完成时限：{item['deadline']}。",
+            first_line_indent=0.74,
+        )
+
+    if full_cli_evidence:
+        _add_section(doc, "附录 A：完整 CLI 原文证据", level=1)
+        add_styled_paragraph(
+            doc,
+            "同一设备、命令和基线/当前快照对仅保留一组原文；红色文本为差异，"
+            "空白单元格表示该行只存在于另一侧。",
+            first_line_indent=0.74,
+        )
+        for evidence in full_cli_evidence:
+            group_label = "、".join(evidence.get("group_labels") or [])
+            add_styled_paragraph(
+                doc,
+                f"{evidence.get('evidence_id')} / {group_label} / "
+                f"{evidence.get('device_name') or evidence.get('device_id') or '-'} / "
+                f"{evidence.get('command') or '-'}",
+                first_line_indent=0.74,
+            )
+            related_facts = _cli_evidence_related_facts_text(evidence)
+            if related_facts:
+                _add_compact_paragraph(doc, f"关联事实：{related_facts}")
+            if evidence.get("parser_failure_text_comparison"):
+                add_styled_paragraph(
+                    doc,
+                    "Parser 未成功，本项仅提供原文文本差异证据，不能替代结构化 Event 判定。",
+                    first_line_indent=0.74,
+                )
+            _add_cli_comparison_docx(doc, evidence)
+
+    _add_section(doc, "附录 B：证据与附件", level=1)
     evidence = report["evidence"]
     analysis = dict(evidence.get("analysis") or {})
     attempt_id = str(analysis.get("attempt_id") or "-")
@@ -2505,7 +2768,7 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
     risk_chains = list(evidence.get("risk_chains") or [])
     if risk_chains:
         doc.add_page_break()
-        _add_section(doc, "附件：风险证据索引")
+        _add_section(doc, "附录 C：风险证据索引")
         _add_compact_paragraph(
             doc,
             "以下标识均为平台持久化事实的完整 ID，可在离线巡检详情、变化清单和事件清单中交叉复核。",
@@ -2536,7 +2799,7 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
 
         for index, item in enumerate(ordered_chains, start=1):
             chain = dict(item.get("chain") or {})
-            kind = "领导问题" if item.get("kind") == "independent_risk" else "关联症状"
+            kind = "巡检主问题" if item.get("kind") == "independent_risk" else "关联症状"
             item_heading = _add_compact_paragraph(
                 doc,
                 (

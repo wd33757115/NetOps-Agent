@@ -2042,7 +2042,7 @@ async def export_patrol_batch_leadership_report(
         ),
         headers={
             "Content-Disposition": (
-                f'attachment; filename="{patrol_batch_id}-leadership-report.docx"'
+                f'attachment; filename="{patrol_batch_id}-patrol-report.docx"'
             )
         },
     )
@@ -2101,7 +2101,7 @@ async def export_patrol_batch_leadership_report_json(
         media_type="application/json; charset=utf-8",
         headers={
             "Content-Disposition": (
-                f'attachment; filename="{patrol_batch_id}-leadership-report.json"'
+                f'attachment; filename="{patrol_batch_id}-patrol-report.json"'
             )
         },
     )

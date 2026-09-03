@@ -172,6 +172,16 @@ REPORT_VIEWS = (
                 "CPU空闲率(%)",
                 ("device.cpu.idle",),
             ),
+            ReportColumn(
+                "cpu_high_warning_percent",
+                "CPU预警阈值(%)",
+                ("device.cpu.high_warning",),
+            ),
+            ReportColumn(
+                "cpu_high_alarm_percent",
+                "CPU严重阈值(%)",
+                ("device.cpu.high_alarm",),
+            ),
         ),
     ),
     ReportView(
@@ -205,6 +215,62 @@ REPORT_VIEWS = (
                 "free_ratio",
                 "内存空闲率(%)",
                 ("device.memory.free_ratio",),
+            ),
+            ReportColumn(
+                "memory_high_warning_percent",
+                "内存预警阈值(%)",
+                ("device.memory.high_warning",),
+            ),
+            ReportColumn(
+                "memory_high_alarm_percent",
+                "内存严重阈值(%)",
+                ("device.memory.high_alarm",),
+            ),
+        ),
+    ),
+    ReportView(
+        key="fan",
+        sheet_name="风扇",
+        entity_prefixes=("environment_fan",),
+        columns=(
+            ReportColumn(
+                "fan_state",
+                "风扇状态",
+                ("environment.fan.state",),
+            ),
+        ),
+    ),
+    ReportView(
+        key="power",
+        sheet_name="电源",
+        entity_prefixes=("environment_power",),
+        columns=(
+            ReportColumn(
+                "power_state",
+                "电源状态",
+                ("environment.power.state",),
+            ),
+        ),
+    ),
+    ReportView(
+        key="temperature",
+        sheet_name="温度",
+        entity_prefixes=("environment_sensor", "temperature_sensor"),
+        columns=(
+            ReportColumn(
+                "temperature_current_c",
+                "当前温度(°C)",
+                ("environment.temperature.current",),
+            ),
+            ReportColumn(
+                "temperature_warning_c",
+                "预警阈值(°C)",
+                ("environment.temperature.warning",),
+            ),
+            ReportColumn(
+                "temperature_alarm_c",
+                "严重阈值(°C)",
+                ("environment.temperature.alarm",),
             ),
         ),
     ),
@@ -247,9 +313,19 @@ REPORT_VIEWS = (
     ),
     ReportView(
         key="optical",
-        sheet_name="接口光衰",
+        sheet_name="光模块健康",
         entity_prefixes=("interface_optical", "interface"),
         columns=(
+            ReportColumn(
+                "part_number",
+                "模块料号",
+                ("interface.optical.part_number",),
+            ),
+            ReportColumn(
+                "serial_number",
+                "模块序列号",
+                ("interface.optical.serial_number",),
+            ),
             ReportColumn(
                 "presence",
                 "光模块状态",
@@ -279,6 +355,36 @@ REPORT_VIEWS = (
                 "tx_low_warning",
                 "发送低告警阈值(dBm)",
                 ("interface.optical.tx_low_warning",),
+            ),
+            ReportColumn(
+                "rx_low_alarm",
+                "接收低严重阈值(dBm)",
+                ("interface.optical.rx_low_alarm",),
+            ),
+            ReportColumn(
+                "rx_high_warning",
+                "接收高告警阈值(dBm)",
+                ("interface.optical.rx_high_warning",),
+            ),
+            ReportColumn(
+                "rx_high_alarm",
+                "接收高严重阈值(dBm)",
+                ("interface.optical.rx_high_alarm",),
+            ),
+            ReportColumn(
+                "tx_low_alarm",
+                "发送低严重阈值(dBm)",
+                ("interface.optical.tx_low_alarm",),
+            ),
+            ReportColumn(
+                "tx_high_warning",
+                "发送高告警阈值(dBm)",
+                ("interface.optical.tx_high_warning",),
+            ),
+            ReportColumn(
+                "tx_high_alarm",
+                "发送高严重阈值(dBm)",
+                ("interface.optical.tx_high_alarm",),
             ),
         ),
     ),
@@ -432,9 +538,11 @@ def build_observation_report_tables(
     consumed: set[str] = set()
     for view in REPORT_VIEWS:
         table, view_consumed = project_observation_view(observations, view)
-        if table.rows:
-            tables.append(table)
-            consumed.update(view_consumed)
+        # A commercial appendix needs a stable table of contents: an empty
+        # domain means "not collected or not applicable", not a silently
+        # omitted check.  The data-quality sheet explains the distinction.
+        tables.append(table)
+        consumed.update(view_consumed)
 
     other_rows: list[tuple[Any, ...]] = []
     evidence_rows: list[tuple[Any, ...]] = []
@@ -500,6 +608,28 @@ def build_observation_report_tables(
             sheet_name="证据索引",
             headers=detail_headers,
             rows=tuple(evidence_rows),
+        )
+    )
+    field_rows = tuple(
+        (
+            view.sheet_name,
+            column.label,
+            column.key,
+            ", ".join(column.observation_types),
+            ", ".join(
+                f"{name}={value}" for name, value in column.dimensions
+            )
+            or "无",
+        )
+        for view in REPORT_VIEWS
+        for column in view.columns
+    )
+    tables.append(
+        ReportTable(
+            key="canonical_field_dictionary",
+            sheet_name="B字段字典",
+            headers=("工作表", "报告列名", "B字段标识", "标准观测类型", "维度条件"),
+            rows=field_rows,
         )
     )
     return tuple(tables)

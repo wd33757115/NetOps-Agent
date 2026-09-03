@@ -564,11 +564,17 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
     ;(folder ? folderInputRef.current : fileInputRef.current)?.click()
   }
 
-  const downloadArtifact = async (job: OfflinePatrolJob, kind: 'raw' | 'changes' | 'events' | 'report') => {
+  const downloadArtifact = async (job: OfflinePatrolJob, kind: 'raw' | 'changes' | 'events' | 'report' | 'excel') => {
     setArtifactLoading(kind)
     try {
       const blob = await jobApi.artifact(job.id, kind)
-      const suffix = kind === 'raw' ? 'raw-output.zip' : kind === 'report' ? 'leadership-report.docx' : `${kind}.csv`
+      const suffix = kind === 'raw'
+        ? 'raw-output.zip'
+        : kind === 'report'
+          ? 'patrol-report.docx'
+          : kind === 'excel'
+            ? 'patrol-report.xlsx'
+            : `${kind}.csv`
       downloadBlob(blob, `${job.id}-${suffix}`)
       message.success('交付物已生成并开始下载')
     } catch (error: any) {
@@ -580,12 +586,12 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
 
   const onArtifactMenuClick = (detail: OfflinePatrolJob | undefined, key: string) => {
     if (!detail) return
-    if (!['raw', 'changes', 'events', 'report'].includes(key)) return
+    if (!['raw', 'changes', 'events', 'report', 'excel'].includes(key)) return
     if (key !== 'raw' && detail.status !== 'completed') {
       message.info('该产物仅在任务完成后可下载')
       return
     }
-    void downloadArtifact(detail, key as 'raw' | 'changes' | 'events' | 'report')
+    void downloadArtifact(detail, key as 'raw' | 'changes' | 'events' | 'report' | 'excel')
   }
 
   const openDetail = useCallback((jobId: string) => {
@@ -1139,6 +1145,11 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
                       label: isAssetSource ? '判断回放报告' : '巡检报告',
                       disabled: detail.status !== 'completed',
                     },
+                    ...(!isAssetSource ? [{
+                      key: 'excel',
+                      label: '巡检报告明细 Excel',
+                      disabled: detail.status !== 'completed',
+                    }] : []),
                   ],
                   onClick: ({ key }) => onArtifactMenuClick(detail, key),
                 }}
@@ -1523,8 +1534,10 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
                 error={analysisQuery.error}
                 isMobile={isMobile}
                 reportDownloading={artifactLoading === 'report'}
+                workbookDownloading={artifactLoading === 'excel'}
                 onRetry={() => analysisQuery.refetch()}
                 onDownloadReport={() => downloadArtifact(detail, 'report')}
+                onDownloadWorkbook={() => downloadArtifact(detail, 'excel')}
                 onLoadComparisonEvidence={(changeId) => jobApi.comparisonEvidence(
                   detail.id,
                   changeId,

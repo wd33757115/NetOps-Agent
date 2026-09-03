@@ -99,6 +99,152 @@ def _unstructured_change():
     }
 
 
+def _basic_observations():
+    return [
+        {
+            "id": "version-1",
+            "device_id": "sw-1",
+            "device_name": "核心交换机 SW1",
+            "vendor": "H3C",
+            "model": "S6850",
+            "entity_type": "device",
+            "entity_key": "__singleton__",
+            "observation_type": "device.software.version",
+            "value": "Version 7.1.070",
+        },
+        {
+            "id": "uptime-1",
+            "device_id": "sw-1",
+            "device_name": "核心交换机 SW1",
+            "vendor": "H3C",
+            "model": "S6850",
+            "entity_type": "device",
+            "entity_key": "__singleton__",
+            "observation_type": "device.uptime",
+            "value": "218 days",
+        },
+        {
+            "id": "cpu-1",
+            "device_id": "sw-1",
+            "device_name": "核心交换机 SW1",
+            "vendor": "H3C",
+            "model": "S6850",
+            "entity_type": "device",
+            "entity_key": "__singleton__",
+            "observation_type": "device.cpu.utilization",
+            "dimensions": {"window": "5s"},
+            "value_number": 35,
+        },
+        {
+            "id": "memory-1",
+            "device_id": "sw-1",
+            "device_name": "核心交换机 SW1",
+            "vendor": "H3C",
+            "model": "S6850",
+            "entity_type": "device",
+            "entity_key": "__singleton__",
+            "observation_type": "device.memory.utilization",
+            "value_number": 51.3,
+        },
+        {
+            "id": "fan-1",
+            "device_id": "sw-1",
+            "device_name": "核心交换机 SW1",
+            "vendor": "H3C",
+            "model": "S6850",
+            "entity_type": "environment_fan",
+            "entity_key": '["Slot 1", "Fan 1"]',
+            "observation_type": "environment.fan.state",
+            "value": "Normal",
+        },
+        {
+            "id": "power-1",
+            "device_id": "sw-1",
+            "device_name": "核心交换机 SW1",
+            "vendor": "H3C",
+            "model": "S6850",
+            "entity_type": "environment_power",
+            "entity_key": '["Slot 1", "Power 1"]',
+            "observation_type": "environment.power.state",
+            "value": "Normal",
+        },
+        {
+            "id": "temperature-1",
+            "device_id": "sw-1",
+            "device_name": "核心交换机 SW1",
+            "vendor": "H3C",
+            "model": "S6850",
+            "entity_type": "environment_sensor",
+            "entity_key": '["Slot 1", "Temp 1"]',
+            "observation_type": "environment.temperature.current",
+            "value_number": 27.5,
+        },
+    ]
+
+
+def test_customer_docx_includes_basic_b_data_without_collection_times():
+    summary = _summary()
+    summary["observations"] = _basic_observations()
+
+    report = build_leadership_report("batch-basic-data", summary)
+    document = Document(io.BytesIO(render_leadership_docx(report)))
+    document_text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+    header_rows = {
+        tuple(cell.text for cell in table.rows[0].cells)
+        for table in document.tables
+        if table.rows
+    }
+
+    chapter_headings = [
+        "第一章 概述",
+        "1.1 巡检概述",
+        "1.2 巡检说明",
+        "1.3 巡检范围",
+        "1.3.1 设备清单",
+        "第二章 巡检内容",
+        "2.1 网络设备巡检项",
+        "2.2 巡检设备配置备份",
+        "第三章 巡检结果",
+        "3.1 网络设备",
+        "3.1.1 设备基本运行状况",
+        "3.1.1.1 设备启动信息与版本状态",
+        "3.1.1.2 设备电源状态",
+        "3.1.1.3 设备风扇状态",
+        "3.1.1.4 设备环境温度状态",
+        "3.1.1.5 设备 CPU 利用率状态",
+        "3.1.1.6 设备内存利用率状态",
+        "第四章 巡检总结",
+        "第五章 后续工作计划",
+    ]
+    assert all(heading in document_text for heading in chapter_headings)
+    assert [document_text.index(heading) for heading in chapter_headings] == sorted(
+        document_text.index(heading) for heading in chapter_headings
+    )
+    assert (
+        "设备",
+        "厂商",
+        "型号",
+        "CPU 5秒(%)（cpu_5s）",
+        "CPU 1分钟(%)（cpu_1m）",
+        "CPU 5分钟(%)（cpu_5m）",
+        "CPU利用率(%)（cpu_current）",
+        "CPU空闲率(%)（cpu_idle）",
+        "CPU预警阈值(%)（cpu_high_warning_percent）",
+        "CPU严重阈值(%)（cpu_high_alarm_percent）",
+    ) in header_rows
+    assert ("设备", "厂商", "型号", "风扇", "风扇状态（fan_state）") in header_rows
+    assert (
+        "设备",
+        "厂商",
+        "型号",
+        "温度传感器",
+        "当前温度(°C)（temperature_current_c）",
+        "预警阈值(°C)（temperature_warning_c）",
+        "严重阈值(°C)（temperature_alarm_c）",
+    ) in header_rows
+    assert all("采集时间" not in headers for headers in header_rows)
+
+
 def test_non_structured_domain_reports_change_without_requiring_state_rule():
     change = _unstructured_change()
     checks = domain_checks(
@@ -137,7 +283,7 @@ def test_leadership_report_includes_safe_non_structured_change_summary():
     assert report["metrics"]["unstructured_collected_count"] == 2
     assert report["metrics"]["unstructured_changed_count"] == 1
     assert any("非结构化输出变化" in item["action"] for item in report["recommendations"])
-    assert "## 六、非结构化文本对比证据" in markdown
+    assert "#### 3.1.5 非结构化文本对比证据" in markdown
     assert "<redacted>" in markdown
     assert "非结构化输出变化" in document_text
     assert "即使巡检流程执行完成" in document_text

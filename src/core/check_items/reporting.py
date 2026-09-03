@@ -2265,6 +2265,24 @@ def render_check_item_markdown(report: Mapping[str, Any]) -> str:
     risk_heading = (
         "当前风险" if report.get("current_state_authoritative") else "风险结果（非当前状态）"
     )
+    basic_operational_tables = _basic_operational_report_tables(report)
+    device_inventory_rows = _report_device_inventory_rows(
+        report,
+        basic_operational_tables,
+    )
+    basic_sections: list[str] = []
+    for index, operational_table in enumerate(basic_operational_tables, start=1):
+        basic_sections.extend(
+            [
+                "",
+                f"##### 3.1.1.{index} {operational_table['title']}",
+                "",
+                *_markdown_table(
+                    tuple(operational_table["headers"]),
+                    operational_table["rows"],
+                ),
+            ]
+        )
     lines = [
         f"# 网络设备巡检报告（{purpose_label}）",
         "",
@@ -2279,7 +2297,9 @@ def render_check_item_markdown(report: Mapping[str, Any]) -> str:
         (f"- 原始证据集合指纹：`{report.get('raw_evidence_set_digest') or '-'}`"),
         f"- 用途声明：{purpose_disclosure}",
         "",
-        "## 一、总体结论",
+        "## 第一章 概述",
+        "",
+        "### 1.1 巡检概述",
         "",
         f"**{conclusion.get('text')}。**",
         f"声明编号：`{conclusion.get('claim_id') or '-'}`",
@@ -2305,7 +2325,13 @@ def render_check_item_markdown(report: Mapping[str, Any]) -> str:
             ],
         ),
         "",
-        "## 二、巡检范围与完成情况",
+        "### 1.2 巡检说明",
+        "",
+        "本次巡检仅采集和核验设备运行信息，不对设备配置作变更。健康结论以检查项"
+        "绑定的标准语义 B、设备或模块上报阈值、有效基线和已发布规则为依据；"
+        "数据不足时明确标记为无法判断。",
+        "",
+        "### 1.3 巡检范围",
         "",
         *_markdown_table(
             ("目标设备", "计划检查", "已执行", "已评估", "完整", "部分", "证据不足"),
@@ -2322,7 +2348,22 @@ def render_check_item_markdown(report: Mapping[str, Any]) -> str:
             ],
         ),
         "",
-        "### 采集路径韧性",
+        "#### 1.3.1 设备清单",
+        "",
+        *_markdown_table(
+            ("序号", "设备名称", "设备型号", "管理 IP"),
+            device_inventory_rows,
+        ),
+        "",
+        "## 第二章 巡检内容",
+        "",
+        "### 2.1 网络设备巡检项",
+        "",
+        "本次巡检按已启用检查项和实际采集命令执行，涵盖设备基础信息、硬件环境、"
+        "性能、接口状态、配置与日志等内容。具体健康判断以检查项绑定的标准语义 B 和"
+        "规则资产为准。",
+        "",
+        "#### 2.1.1 采集路径韧性",
         "",
         (
             "可用路径少于检查项声明路径时，巡检仍可执行，但设备兼容性或命令故障时的"
@@ -2346,16 +2387,35 @@ def render_check_item_markdown(report: Mapping[str, Any]) -> str:
             ],
         ),
         "",
-        f"## 三、{risk_heading}",
+        "### 2.2 巡检设备配置备份",
+        "",
+        "由于设备数量较多，配置备份文件较大，不适宜粘贴到 Word 文档内，因此将以"
+        "电子版的形式单独提交，特此说明。",
+        "",
+        "## 第三章 巡检结果",
+        "",
+        "### 3.1 网络设备",
+        "",
+        f"**{conclusion.get('text')}。** {conclusion.get('basis') or ''}",
+        "",
+        "#### 3.1.1 设备基本运行状况",
+        "",
+        "以下表格展示本次已采集并映射为标准字段的设备基础运行数据；"
+        "表中不展示采集时间。"
+        if basic_sections
+        else "本批次未形成可用于报告的设备版本、CPU、内存、电源、风扇或温度标准观测数据。",
+        *basic_sections,
+        "",
+        f"#### 3.1.2 {risk_heading}",
         "",
         (
-            "领导问题数按经批准关联后的 RiskEpisode 主问题统计；技术风险、关联症状、"
+            "巡检主问题数按经批准关联后的 RiskEpisode 主问题统计；技术风险、关联症状、"
             "影响实体和事件发生次数分别列示。未审批关联不会改变问题数。"
         ),
         "",
         *_markdown_table(
             (
-                "领导问题",
+                "巡检主问题",
                 "风险Episode",
                 "技术风险",
                 "关联症状",
@@ -2378,7 +2438,7 @@ def render_check_item_markdown(report: Mapping[str, Any]) -> str:
             ],
         ),
         "",
-        "### 领导问题清单",
+        "### 巡检主问题清单",
         "",
         *_markdown_table(
             (
@@ -2452,7 +2512,7 @@ def render_check_item_markdown(report: Mapping[str, Any]) -> str:
             ],
         ),
         "",
-        "## 四、历史风险待复核",
+        "#### 3.1.3 历史风险待复核",
         "",
         (
             "以下风险来自历史批次，但本批次没有形成足以确认其"
@@ -2482,7 +2542,7 @@ def render_check_item_markdown(report: Mapping[str, Any]) -> str:
             ],
         ),
         "",
-        "## 五、恢复待确认",
+        "#### 3.1.4 恢复待确认",
         "",
         ("以下风险在本批次未再次出现，但仍需恢复规则或后续合格巡检证据完成闭环。"),
         "",
@@ -2508,7 +2568,7 @@ def render_check_item_markdown(report: Mapping[str, Any]) -> str:
             ],
         ),
         "",
-        "### 技术恢复与正式关闭",
+        "##### 3.1.4.1 技术恢复与正式关闭",
         "",
         (
             "技术恢复、整改验收和正式关闭分别列示；技术恢复不代表整改已验收，"
@@ -2552,7 +2612,7 @@ def render_check_item_markdown(report: Mapping[str, Any]) -> str:
             ],
         ),
         "",
-        "## 六、检查项结论",
+        "#### 3.1.5 检查项结论",
         "",
         *_markdown_table(
             (
@@ -2600,7 +2660,7 @@ def render_check_item_markdown(report: Mapping[str, Any]) -> str:
             ],
         ),
         "",
-        "## 七、变化与事件",
+        "#### 3.1.6 变化与事件",
         "",
         f"- 标准化变化：{len(changes)} 条。",
         f"- 网络事件：{len(events)} 条。",
@@ -2665,9 +2725,9 @@ def render_check_item_markdown(report: Mapping[str, Any]) -> str:
             ],
         ),
         "",
-        ("- 领导报告最多展示 20 条变化和 20 条事件；完整明细见技术附表。"),
+        ("- 巡检报告最多展示 20 条变化和 20 条事件；完整明细见技术附表。"),
         "",
-        "## 八、整改跟踪",
+        "#### 3.1.7 已登记整改情况",
         "",
         *_markdown_table(
             ("设备", "风险", "整改状态", "责任人", "期限", "整改动作", "声明编号"),
@@ -2688,7 +2748,9 @@ def render_check_item_markdown(report: Mapping[str, Any]) -> str:
             ],
         ),
         "",
-        "## 九、数据完整性与限制",
+        "## 第四章 巡检总结",
+        "",
+        "### 4.1 数据可信度与结论边界",
         "",
     ]
     if blockers:
@@ -2705,7 +2767,25 @@ def render_check_item_markdown(report: Mapping[str, Any]) -> str:
     lines.extend(
         [
             "",
-            "## 十、证据与复核说明",
+            "## 第五章 后续工作计划",
+            "",
+            "### 5.1 后续工作计划",
+            "",
+        ]
+    )
+    if remediations:
+        lines.extend(
+            f"- {item.get('device_name') or '-'}：{item.get('action_text') or '按整改台账持续跟踪'}"
+            f"（责任：{item.get('owner') or '-'}；期限：{item.get('due_at') or '-'}）。"
+            for item in remediations
+        )
+    else:
+        lines.append("本批次暂无已登记整改事项；后续应按第三章风险和数据质量结论持续复核。")
+
+    lines.extend(
+        [
+            "",
+            "## 附录 A：证据与复核说明",
             "",
             f"- 目标清单指纹：`{report.get('target_manifest_digest')}`",
             f"- 运行资产清单指纹：`{report.get('runtime_manifest_digest')}`",
@@ -2786,8 +2866,143 @@ def _report_datetime(value: Any) -> datetime:
     return parsed
 
 
+_BASIC_OPERATIONAL_REPORT_TABLES = (
+    ("device.version", "设备启动信息与版本状态", False),
+    ("environment.power", "设备电源状态", True),
+    ("environment.fan", "设备风扇状态", True),
+    ("environment.temperature", "设备环境温度状态", True),
+    ("system.cpu_usage", "设备 CPU 利用率状态", False),
+    ("system.memory_usage", "设备内存利用率状态", False),
+)
+_REPORT_PROJECTION_BASE_COLUMNS = {
+    "device_name",
+    "management_ip",
+    "entity_type",
+    "entity_key",
+}
+_REPORT_PROJECTION_AUXILIARY_COLUMNS = {
+    "execution_status",
+    "assessment_status",
+    "completeness_status",
+    "comparison_status",
+    "threshold_unknown_count",
+    "risk_verification_status",
+    "blocking_reason_codes",
+    "execution_id",
+    "snapshot_id",
+    "previous_snapshot_id",
+    "current_snapshot_id",
+    "parser_template_id",
+    "runtime_bundle_digest",
+    "observed_at",
+}
+
+
+def _basic_operational_report_tables(
+    report: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Return customer-readable B tables for the main Word report.
+
+    The report projection snapshot is already frozen with the report facts.  This
+    only removes IDs, timestamps and runtime bookkeeping columns; it does not
+    reinterpret vendor A fields or apply any new health logic.
+    """
+
+    projected = {
+        table.check_item_id: table for table in project_report_tables(report)
+    }
+    result: list[dict[str, Any]] = []
+    for check_item_id, title, include_component in _BASIC_OPERATIONAL_REPORT_TABLES:
+        source = projected.get(check_item_id)
+        if source is None or not source.rows:
+            continue
+        positions = {
+            column_id: index for index, column_id in enumerate(source.column_ids)
+        }
+        canonical_ids = [
+            column_id
+            for column_id in source.column_ids
+            if column_id not in _REPORT_PROJECTION_BASE_COLUMNS
+            and column_id not in _REPORT_PROJECTION_AUXILIARY_COLUMNS
+        ]
+        selected_ids = ["device_name"]
+        if include_component:
+            selected_ids.append("entity_key")
+        selected_ids.extend(canonical_ids)
+        selected = [column_id for column_id in selected_ids if column_id in positions]
+        if not selected:
+            continue
+
+        headers: list[str] = []
+        for column_id in selected:
+            if column_id == "device_name":
+                headers.append("设备")
+            elif column_id == "entity_key":
+                headers.append("部件")
+            else:
+                headers.append(
+                    f"{source.headers[positions[column_id]]}（{column_id}）"
+                )
+        rows = [
+            [
+                row[positions[column_id]]
+                if row[positions[column_id]] not in (None, "")
+                else "-"
+                for column_id in selected
+            ]
+            for row in source.rows
+        ]
+        result.append(
+            {
+                "check_item_id": check_item_id,
+                "title": title,
+                "headers": headers,
+                "rows": rows,
+            }
+        )
+    return result
+
+
+def _report_device_inventory_rows(
+    report: Mapping[str, Any],
+    basic_tables: Sequence[Mapping[str, Any]],
+) -> list[tuple[str, str, str, str]]:
+    """Build the overview device list without depending on mutable inventory."""
+
+    models: dict[str, str] = {}
+    for table in basic_tables:
+        if table.get("check_item_id") != "device.version":
+            continue
+        headers = list(table.get("headers") or [])
+        model_index = next(
+            (index for index, value in enumerate(headers) if "hardware_model" in str(value)),
+            None,
+        )
+        for row in list(table.get("rows") or []):
+            if row and model_index is not None and len(row) > model_index:
+                models[str(row[0])] = str(row[model_index] or "-")
+
+    devices: dict[str, tuple[str, str, str]] = {}
+    for target in _as_rows(report.get("targets")):
+        name = str(target.get("device_name") or target.get("device_id") or "-")
+        devices[name] = (
+            name,
+            models.get(name, "-"),
+            str(target.get("management_ip") or "-"),
+        )
+    for name, model in models.items():
+        devices.setdefault(name, (name, model, "-"))
+    return [
+        (str(index), name, model, management_ip)
+        for index, (name, model, management_ip) in enumerate(
+            sorted(devices.values(), key=lambda item: item[0]),
+            start=1,
+        )
+    ]
+
+
 def render_check_item_docx(report: Mapping[str, Any]) -> bytes:
-    """Render a concise leadership document from the same report view."""
+    """Render a formal customer patrol report from the frozen report view."""
 
     from docx import Document
     from docx.enum.table import (
@@ -2861,15 +3076,15 @@ def render_check_item_docx(report: Mapping[str, Any]) -> bytes:
         "方正小标宋简体",
     )
 
-    def heading(text: str) -> None:
+    def heading(text: str, *, level: int = 1) -> None:
         paragraph = doc.add_paragraph()
-        paragraph.paragraph_format.space_before = Pt(8)
+        paragraph.paragraph_format.space_before = Pt({1: 16, 2: 12, 3: 8}.get(level, 5))
         paragraph.paragraph_format.space_after = Pt(4)
         paragraph.paragraph_format.keep_with_next = True
         run = paragraph.add_run(text)
         run.bold = True
         run.font.name = "黑体"
-        run.font.size = Pt(14)
+        run.font.size = Pt({1: 16, 2: 15, 3: 14}.get(level, 12))
         run._element.rPr.rFonts.set(qn("w:eastAsia"), "黑体")
 
     def paragraph(text: str, *, bold: bool = False) -> None:
@@ -2946,7 +3161,15 @@ def render_check_item_docx(report: Mapping[str, Any]) -> bytes:
         ],
     )
     conclusion = _as_dict(report.get("conclusion"))
-    heading("一、总体结论")
+    coverage = _as_dict(report.get("coverage"))
+    basic_operational_tables = _basic_operational_report_tables(report)
+    device_inventory_rows = _report_device_inventory_rows(
+        report,
+        basic_operational_tables,
+    )
+
+    heading("第一章 概述", level=1)
+    heading("1.1 巡检概述", level=2)
     paragraph(
         f"{conclusion.get('text')}。{conclusion.get('basis')}",
         bold=True,
@@ -2974,8 +3197,14 @@ def render_check_item_docx(report: Mapping[str, Any]) -> bytes:
         ],
     )
 
-    heading("二、巡检范围与完成情况")
-    coverage = _as_dict(report.get("coverage"))
+    heading("1.2 巡检说明", level=2)
+    paragraph(
+        "本次巡检仅采集和核验设备运行信息，不对设备配置作变更。健康结论以检查项"
+        "绑定的标准语义 B、设备或模块上报阈值、有效基线和已发布规则为依据；"
+        "数据不足时明确标记为无法判断。"
+    )
+
+    heading("1.3 巡检范围", level=2)
     table(
         ("目标设备", "计划检查", "已执行", "已评估", "完整", "部分", "证据不足"),
         [
@@ -2989,6 +3218,21 @@ def render_check_item_docx(report: Mapping[str, Any]) -> bytes:
                 coverage.get("insufficient_check_count"),
             )
         ],
+    )
+
+    heading("1.3.1 设备清单", level=3)
+    table(
+        ("序号", "设备名称", "设备型号", "管理 IP"),
+        device_inventory_rows,
+        empty_text="本批次未形成可列示的设备清单，设备范围以巡检任务清单为准。",
+    )
+
+    heading("第二章 巡检内容", level=1)
+    heading("2.1 网络设备巡检项", level=2)
+    paragraph(
+        "本次巡检按已启用检查项和实际采集命令执行，涵盖设备基础信息、硬件环境、"
+        "性能、接口状态、配置与日志等内容。具体健康判断以检查项绑定的标准语义 B 和"
+        "规则资产为准。"
     )
     paragraph(
         "采集路径韧性表示冻结运行资产中可执行命令相对于检查项声明命令的覆盖情况；"
@@ -3012,16 +3256,45 @@ def render_check_item_docx(report: Mapping[str, Any]) -> bytes:
         empty_text="本批次没有可列示的采集路径信息。",
     )
 
-    heading(f"三、{risk_heading}")
+    heading("2.2 巡检设备配置备份", level=2)
+    paragraph(
+        "由于设备数量较多，配置备份文件较大，不适宜粘贴到 Word 文档内，因此将以"
+        "电子版的形式单独提交，特此说明。"
+    )
+
+    heading("第三章 巡检结果", level=1)
+    heading("3.1 网络设备", level=2)
+    paragraph(
+        f"{conclusion.get('text')}。{conclusion.get('basis')}",
+        bold=True,
+    )
+    heading("3.1.1 设备基本运行状况", level=3)
+    if not basic_operational_tables:
+        paragraph(
+            "本批次未形成可用于报告的设备版本、CPU、内存、电源、风扇或温度标准观测数据。"
+        )
+    else:
+        paragraph(
+            "以下表格展示本次已采集并映射为标准字段的设备基础运行数据；"
+            "表中不展示采集时间，缺失字段保留为空。"
+        )
+        for index, operational_table in enumerate(basic_operational_tables, start=1):
+            heading(f"3.1.1.{index} {operational_table['title']}", level=4)
+            table(
+                tuple(operational_table["headers"]),
+                operational_table["rows"],
+            )
+
+    heading(f"3.1.2 {risk_heading}", level=3)
     risk_issue_summary = _as_dict(report.get("risk_issue_summary"))
     risk_issues = _as_rows(report.get("risk_issues"))
     paragraph(
-        "领导问题数按经批准关联后的 RiskEpisode 主问题统计；技术风险、关联症状、"
+        "巡检主问题数按经批准关联后的 RiskEpisode 主问题统计；技术风险、关联症状、"
         "影响实体和事件发生次数分别列示，未审批关联不参与去重。"
     )
     table(
         (
-            "领导问题",
+            "巡检主问题",
             "风险Episode",
             "技术风险",
             "关联症状",
@@ -3064,7 +3337,7 @@ def render_check_item_docx(report: Mapping[str, Any]) -> bytes:
             )
             for item in risk_issues
         ],
-        empty_text="本报告未形成可列示的领导问题。",
+        empty_text="本报告未形成可列示的巡检主问题。",
     )
     paragraph("以下为全部技术风险 Episode，关联后仍完整保留。")
     table(
@@ -3098,7 +3371,7 @@ def render_check_item_docx(report: Mapping[str, Any]) -> bytes:
         empty_text="本报告未形成可列示的风险结果。",
     )
 
-    heading("四、历史风险待复核")
+    heading("3.1.3 历史风险待复核", level=3)
     paragraph(
         "以下风险来自历史批次，本批次未形成足以确认其当前状态的合格证据，不计入本次确认风险。"
     )
@@ -3125,7 +3398,7 @@ def render_check_item_docx(report: Mapping[str, Any]) -> bytes:
         empty_text="本批次没有需要列示的历史待复核风险。",
     )
 
-    heading("五、恢复待确认")
+    heading("3.1.4 恢复待确认", level=3)
     paragraph("以下风险在本批次未再次出现，但尚未满足恢复闭环条件。")
     table(
         ("等级", "设备", "检查项", "风险", "对象", "状态", "声明"),
@@ -3180,7 +3453,7 @@ def render_check_item_docx(report: Mapping[str, Any]) -> bytes:
         empty_text="本批次没有需要列示的技术恢复或正式关闭事项。",
     )
 
-    heading("六、检查项结论")
+    heading("3.1.5 检查项结论", level=3)
     table(
         (
             "设备",
@@ -3223,7 +3496,7 @@ def render_check_item_docx(report: Mapping[str, Any]) -> bytes:
         ],
     )
 
-    heading("七、变化与事件")
+    heading("3.1.6 变化与事件", level=3)
     changes = _as_rows(report.get("changes"))
     events = _as_rows(report.get("events"))
     paragraph(
@@ -3281,9 +3554,26 @@ def render_check_item_docx(report: Mapping[str, Any]) -> bytes:
                 for item in events[:20]
             ],
         )
-    paragraph("领导版最多展示 20 条变化和 20 条事件；完整明细见技术附表。")
+    paragraph("巡检报告最多展示 20 条变化和 20 条事件；完整明细见技术附表。")
 
-    heading("八、整改跟踪")
+    heading("第四章 巡检总结", level=1)
+    heading("4.1 数据可信度与结论边界", level=2)
+    blockers = _as_dict(report.get("blocking_reason_counts"))
+    if blockers:
+        for code, count in sorted(blockers.items()):
+            paragraph(
+                f"{_reason_code_label(code, include_code=False)}："
+                f"{count} 项。"
+            )
+    else:
+        paragraph(
+            "未发现影响本次当前结论的数据阻断项。"
+            if report.get("current_state_authoritative")
+            else ("未发现影响本报告用途内结论的数据阻断项；这不提升其当前网络状态结论权限。")
+        )
+
+    heading("第五章 后续工作计划", level=1)
+    heading("5.1 后续工作计划", level=2)
     table(
         ("设备", "风险", "状态", "责任人", "期限", "整改动作", "声明"),
         [
@@ -3304,22 +3594,7 @@ def render_check_item_docx(report: Mapping[str, Any]) -> bytes:
         empty_text="本批次暂无已登记的整改事项。",
     )
 
-    heading("九、数据完整性与限制")
-    blockers = _as_dict(report.get("blocking_reason_counts"))
-    if blockers:
-        for code, count in sorted(blockers.items()):
-            paragraph(
-                f"{_reason_code_label(code, include_code=False)}："
-                f"{count} 项。"
-            )
-    else:
-        paragraph(
-            "未发现影响本次当前结论的数据阻断项。"
-            if report.get("current_state_authoritative")
-            else ("未发现影响本报告用途内结论的数据阻断项；这不提升其当前网络状态结论权限。")
-        )
-
-    heading("十、证据与复核说明")
+    heading("附录 A：证据与复核说明", level=1)
     table(
         ("复核对象", "标识摘要"),
         (
@@ -3822,7 +4097,7 @@ def _render_audit_check_item_xlsx(report: Mapping[str, Any]) -> bytes:
         )
     _append_sheet(
         workbook,
-        name="领导问题",
+        name="巡检主问题",
         headers=(
             "等级",
             "主问题类型",
