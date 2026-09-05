@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "templates": [
+    {"id": "application", "doc_type": "申请书", "name": "申请书", "aliases": [], "sections": ["申请事由", "申请事项", "个人说明"], "closing": "恳请批准。", "recipient_required": true, "headings_required": false},
+    {"id": "party-application", "doc_type": "入党申请书", "name": "入党申请书", "aliases": ["入党申请"], "sections": ["入党意愿", "认识与动机", "个人表现", "努力方向与决心"], "closing": "请党组织在实践中考验我。", "recipient_required": true, "headings_required": false},
+    {"id": "notice", "doc_type": "通知", "name": "通知", "aliases": [], "sections": ["事项安排", "有关要求"], "closing": "请遵照执行。", "recipient_required": true},
+    {"id": "letter", "doc_type": "函", "name": "函件", "aliases": ["函件", "邀请函"], "sections": ["事由", "具体事项"], "closing": "特此函达。", "recipient_required": true},
+    {"id": "request", "doc_type": "请示", "name": "请示", "aliases": [], "sections": ["请示事由", "请示事项"], "closing": "妥否，请批示。", "recipient_required": true},
+    {"id": "report", "doc_type": "报告", "name": "报告", "aliases": [], "sections": ["基本情况", "主要工作", "下一步安排"], "closing": "特此报告。", "recipient_required": true},
+    {"id": "summary", "doc_type": "工作总结", "name": "工作总结", "aliases": ["总结"], "sections": ["工作情况", "存在问题", "下一步计划"], "closing": "", "recipient_required": false},
+    {"id": "minutes", "doc_type": "会议纪要", "name": "会议纪要", "aliases": ["纪要"], "sections": ["会议情况", "议定事项", "落实要求"], "closing": "", "recipient_required": false}
+  ]
+}

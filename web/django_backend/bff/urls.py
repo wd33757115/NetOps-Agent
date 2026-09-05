@@ -4,6 +4,8 @@
 from django.urls import path
 
 from . import auth, user_admin
+from .views.desktop import desktop_layout
+from .views.official_documents import proxy_documents
 from .views import (
     artifacts,
     chat,
@@ -26,6 +28,9 @@ from .views import (
 )
 
 urlpatterns = [
+    path("official-documents/", proxy_documents, name="bff_official_documents"),
+    path("official-documents/<path:path>/", proxy_documents, name="bff_official_document_path"),
+    path("auth/me/desktop-layout/", desktop_layout, name="desktop_layout"),
     path("auth/login/", auth.bff_login, name="bff_login"),
     path("auth/refresh/", auth.bff_refresh, name="bff_refresh"),
     path("auth/logout/", auth.bff_logout, name="bff_logout"),

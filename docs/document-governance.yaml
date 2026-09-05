@@ -2,6 +2,30 @@ schema_version: 1
 review_interval_days: 120
 
 documents:
+  - path: official-document-workspace-guide-2026-09-05.md
+    topic: official-document-workspace-implementation
+    status: active
+    owner: NetOps Platform
+    last_verified: 2026-09-05
+
+  - path: official-document-workspace-plan-2026-09-05.md
+    topic: official-document-workspace
+    status: proposed
+    owner: NetOps Platform
+    last_verified: 2026-09-05
+
+  - path: workbench-apps-guide-2026-09-05.md
+    topic: workbench-apps
+    status: active
+    owner: NetOps Platform
+    last_verified: 2026-09-05
+
+  - path: workbench-patrol-app-migration-plan-2026-09-05.md
+    topic: workbench-patrol-app-migration
+    status: proposed
+    owner: NetOps Platform
+    last_verified: 2026-09-05
+
   - path: README.md
     topic: documentation-index
     status: active

@@ -21,7 +21,6 @@ import { useMutation, useQuery } from 'react-query'
 import {
   parserApi,
   type OfflineCommandAssetUnitDetail,
-  type ParserRuleAssetBundle,
 } from '../../../services/api'
 
 type Props = {
@@ -34,11 +33,6 @@ const valueText = (value: unknown) => {
   if (value == null || value === '') return '-'
   if (Array.isArray(value)) return value.map(String).join(', ') || '-'
   return String(value)
-}
-
-const countAsset = (bundle: ParserRuleAssetBundle | undefined, type: string) => {
-  const counts = bundle?.asset_counts || {}
-  return Number(counts[type] ?? counts[type.toUpperCase()] ?? 0)
 }
 
 const ContractSummary: React.FC<{ value: Record<string, unknown> | null }> = ({ value }) => {

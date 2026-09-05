@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { useDesktopStore } from '../store/useDesktopStore'
 import { authApi, AuthUser } from '../services/api'
 import {
   REFRESH_TOKEN_KEY,
@@ -31,6 +32,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const refreshProfile = useCallback(async () => {
     const token = getAccessToken()
     if (!token) {
+      useDesktopStore.getState().reset()
       setUser(null)
       return
     }
@@ -40,6 +42,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem(USER_KEY, JSON.stringify(me))
     } catch {
       clearAuthStorage()
+      useDesktopStore.getState().reset()
       setUser(null)
     }
   }, [])
@@ -63,6 +66,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [])
 
   const logout = useCallback(async () => {
+    useDesktopStore.getState().reset()
     try {
       await authApi.logout()
     } catch {

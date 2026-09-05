@@ -151,6 +151,13 @@ async function installAuthenticatedApi(page: Page) {
     const path = url.pathname
 
     if (path.endsWith('/auth/me/')) return route.fulfill({ json: admin })
+    if (path.endsWith('/auth/me/desktop-layout/')) return route.fulfill({ json: {
+      schemaVersion: 1, revision: 1,
+      nodes: [
+        { id: 'patrol', kind: 'app', appId: 'patrol', containerId: 'desktop:0', col: 0, row: 0 },
+        { id: 'patrol-rules', kind: 'app', appId: 'patrol-rules', containerId: 'desktop:0', col: 1, row: 0 },
+      ], dockAppIds: ['patrol', 'patrol-rules'],
+    } })
     if (path.endsWith('/health/')) {
       return route.fulfill({
         json: {
@@ -380,7 +387,7 @@ test('devices visual baseline', async ({ page }) => {
 test('parser control plane visual baseline', async ({ page }) => {
   await installAuthenticatedApi(page)
   await page.goto('/skills/parser')
-  await expect(page.getByText('巡检规则资产', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('巡检规则生成', { exact: true }).first()).toBeVisible()
   await expect(page.getByRole('button', { name: '生产工作台', exact: true }))
     .toHaveAttribute('aria-current', 'page')
   await settle(page)
@@ -408,4 +415,14 @@ test('status visual baseline', async ({ page }) => {
   await expect(page.getByText('Skill 总数')).toBeVisible()
   await settle(page)
   await expect(page).toHaveScreenshot('status.png')
+})
+
+
+test('workbench visual baseline', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-09-05T02:08:00Z'))
+  await installAuthenticatedApi(page)
+  await page.goto('/workbench')
+  await expect(page.getByRole('button', { name: '网络巡检', exact: true })).toBeVisible()
+  await settle(page)
+  await expect(page).toHaveScreenshot('workbench.png')
 })

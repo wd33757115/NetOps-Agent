@@ -1,3 +1,4 @@
+import { businessHref } from '../../../apps/appRoutes'
 import React from 'react'
 import { Alert, Button, Col, Descriptions, Input, Row, Space, Tag, Tabs, Typography } from 'antd'
 import { EyeOutlined } from '@ant-design/icons'
@@ -231,7 +232,7 @@ const ParserGovernancePanel: React.FC<ParserGovernancePanelProps> = ({
             showIcon
             message="离线样本统一从 Parser 控制面的资产生产工作区导入"
             description="本页只查看数据集质量；上传、预检、命令级资产生产和进度追踪均在资产生产工作区完成。"
-            action={<Button onClick={() => { window.location.href = '/skills/parser?workspace=production&subtab=source-jobs' }}>打开资产生产</Button>}
+            action={<Button onClick={() => { window.location.href = businessHref('/skills/parser?workspace=production&subtab=source-jobs') }}>打开资产生产</Button>}
           />
           <Typography.Text type="secondary">管理员兼容入口：从 FastAPI 所在服务器的本地绝对路径导入。</Typography.Text>
           <Row gutter={[12, 12]}>

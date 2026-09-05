@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from 'react-query'
 import { describe, expect, it, vi } from 'vitest'
@@ -183,6 +183,7 @@ describe('RuleAssetBundleWorkspace', () => {
     expect(screen.getByRole('button', { name: /审批发布/ })).toBeEnabled()
     expect(screen.getByText('限定 3 个巡检 Run')).toBeVisible()
 
+    await waitFor(() => expect(document.querySelector('.ant-spin-spinning')).toBeNull())
     await user.click(screen.getAllByRole('button', { name: 'Expand row' })[0])
     expect(await screen.findByText('回放摘要')).toBeVisible()
     expect(screen.getByText('LLM 数据边界')).toBeVisible()

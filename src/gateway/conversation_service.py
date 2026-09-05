@@ -54,6 +54,7 @@ class ConversationService:
         with get_db_session() as session:
             conversation = session.query(Conversation).filter(
                 Conversation.id == conversation_id,
+                Conversation.status != "document",
                 Conversation.is_deleted == False
             ).first()
             if not conversation:
@@ -95,7 +96,7 @@ class ConversationService:
                          offset: int = 0) -> List[dict]:
         """获取对话列表"""
         with get_db_session() as session:
-            query = session.query(Conversation).filter(Conversation.is_deleted == False)
+            query = session.query(Conversation).filter(Conversation.is_deleted == False, Conversation.status != "document")
             if user_id:
                 query = query.filter(Conversation.user_id == user_id)
             query = query.order_by(desc(Conversation.updated_at)).limit(limit).offset(offset)

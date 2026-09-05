@@ -1,3 +1,4 @@
+import { businessHref } from '../../../apps/appRoutes'
 import React, { useEffect, useMemo, useState } from 'react'
 import {
   Alert, Button, Descriptions, Drawer, Empty, Grid, Input, InputNumber, List, Modal,
@@ -96,7 +97,7 @@ const CoverageBackfillWorkspace: React.FC = () => {
     next.delete('open_backfill')
     if (nextView === 'backfill') next.set('action', 'backfill')
     if (nextView === 'rollout') next.set('action', 'rollout')
-    navigate(`/skills/parser?${next.toString()}`, { replace: true })
+    navigate(businessHref(`/skills/parser?${next.toString()}`), { replace: true })
   }
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
@@ -304,7 +305,7 @@ const CoverageBackfillWorkspace: React.FC = () => {
     + Number(runtimeBundleSummary?.invalid_count || 0)
 
   const backfillRows = backfillsQuery.data?.items || []
-  const openProduction = () => navigate('/skills/parser?workspace=production&subtab=asset-production-units')
+  const openProduction = () => navigate(businessHref('/skills/parser?workspace=production&subtab=asset-production-units'))
   const openAssembly = (row: CheckItemRuntimeBundleHealthItem) => {
     setAssemblyTarget(row)
     setAssemblySelection({})
@@ -883,7 +884,7 @@ const CoverageBackfillWorkspace: React.FC = () => {
               icon={<ArrowRightOutlined />}
               onClick={() => navigate(
                 primaryRemediationAction?.target_url
-                || '/skills/parser?workspace=production&subtab=asset-production-units',
+                || businessHref('/skills/parser?workspace=production&subtab=asset-production-units'),
               )}
             >
               {primaryRemediationAction?.label || '修复规则资产'}

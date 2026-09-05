@@ -48,6 +48,9 @@ def get_document_llm():
     return ChatDeepSeek(
         model=model,
         api_key=api_key,
+        base_url=settings.DEEPSEEK_BASE_URL,
+        # Structured tool calls require non-thinking mode on DeepSeek v4.
+        extra_body={"thinking": {"type": "disabled"}},
         temperature=0.3,  # 较低温度，保持准确性
         max_tokens=4000   # 足够的 token 生成完整公文
     )
@@ -585,8 +588,8 @@ async def review_document(
     except Exception as e:
         print(f"   [Document Review] LLM Error: {e}")
         return {
-            "success": True,
-            "message": "已收到您的公文内容，正在进行质量检查...",
+            "success": False,
+            "message": "公文审核失败，请重试。以下仅为通用检查提示，并非本次审核结果。",
             "data": {
                 "document_type": document_type,
                 "action": "review",

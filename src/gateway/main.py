@@ -77,6 +77,7 @@ def _human_message(content: str):
 
 
 from src.gateway.artifacts_api import router as artifacts_router
+from src.gateway.official_documents_api import router as official_documents_router
 from src.gateway.bff_security import (
     is_bff_bypass_path,
     is_trusted_bff_request,
@@ -307,6 +308,7 @@ app.include_router(skills_router)
 app.include_router(knowledge_router)
 app.include_router(storage_router)
 app.include_router(artifacts_router)
+app.include_router(official_documents_router)
 app.include_router(workflow_router)
 app.include_router(notification_router)
 app.include_router(events_router)

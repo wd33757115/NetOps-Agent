@@ -150,8 +150,8 @@ async function authenticatedParserPage(
   })
 
   await page.goto('/skills/parser')
-  await expect(page).toHaveURL(/\/skills\/parser$/)
-  await expect(page.getByText('巡检规则资产', { exact: true }).first()).toBeVisible()
+  await expect(page).toHaveURL(/\/apps\/patrol-rules$/)
+  await expect(page.getByText('巡检规则生成', { exact: true }).first()).toBeVisible()
   await expect(page.getByRole('button', { name: '生产工作台' }))
     .toHaveAttribute('aria-current', 'page')
   return requests
@@ -163,7 +163,8 @@ test('loads product workspaces on demand without page overflow', async ({ page }
   await expect.poll(
     () => requests.some((path) => path.endsWith('/parser/check-items/')),
   ).toBe(true)
-  expect(requests.some((path) => path.includes('/parser/asset-production/'))).toBe(false)
+  // The unified catalog now loads its check-item projection; other production work remains lazy.
+  expect(requests.some((path) => path.includes('/parser/asset-production/') && !path.endsWith('/parser/asset-production/check-items/'))).toBe(false)
   expect(requests.some((path) => path.endsWith('/parser/approval-audit/'))).toBe(false)
 
   await page.getByRole('button', { name: '已发布资产' }).click()
@@ -356,7 +357,7 @@ test('navigates between Devices and the canonical Parser control plane', async (
   await expect(page).toHaveURL(/\/skills$/)
 
   await page.goto('/skills/parser')
-  await expect(page).toHaveURL(/\/skills\/parser$/)
+  await expect(page).toHaveURL(/\/apps\/patrol-rules$/)
   await expect(page.getByRole('button', { name: '生产工作台' }))
     .toHaveAttribute('aria-current', 'page')
 })

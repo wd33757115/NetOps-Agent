@@ -1,3 +1,4 @@
+import { businessHref } from '../../../apps/appRoutes'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
@@ -1177,7 +1178,7 @@ const ParserGenerationStep: React.FC<{
       command: job?.canonical_command || '',
       action: 'supplement-samples',
     })
-    navigate(`/skills/parser?${params.toString()}`)
+    navigate(businessHref(`/skills/parser?${params.toString()}`))
   }
 
   if (!jobId) return <Empty description="尚未创建 Parser 任务" />
@@ -2316,7 +2317,7 @@ const ParserGenerationStep: React.FC<{
                   params.set('offline_job_id', sourceOfflineJobId)
                 }
                 if (datasets.length) params.set('dataset_ids', datasets.join(','))
-                navigate(`/skills/parser?${params.toString()}`)
+                navigate(businessHref(`/skills/parser?${params.toString()}`))
                 }}
               >
                 回填历史样本

@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react'
+import { businessHref } from '../../apps/appRoutes'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Alert,
   Button,
@@ -158,6 +159,7 @@ export const CommandAssetDetail: React.FC<{
     detail: OfflineCommandAssetUnitDetail,
   ) => void
   onClose: () => void
+  onChanged?: () => void
 }> = ({
   detail,
   evidencePage,
@@ -171,6 +173,7 @@ export const CommandAssetDetail: React.FC<{
   notApplicableLoading = false,
   onCreateAdapter,
   onClose,
+  onChanged,
 }) => {
   const screens = Grid.useBreakpoint()
   const navigate = useNavigate()
@@ -247,7 +250,7 @@ export const CommandAssetDetail: React.FC<{
       setActiveTab('assets')
       return
     }
-    navigate(targetUrl)
+    navigate(businessHref(targetUrl))
   }
   return (
     <Drawer
@@ -410,7 +413,7 @@ export const CommandAssetDetail: React.FC<{
                 children: (
                   <RuleAssetProductionStep
                     unit={detail}
-                    onChanged={() => detailQuery.refetch()}
+                    onChanged={onChanged}
                     onOpenEvidence={() => setActiveTab('evidence')}
                   />
                 ),
@@ -582,7 +585,7 @@ const OfflineCommandAssetUnits: React.FC<OfflineCommandAssetUnitsProps> = ({
     }),
     { enabled: Boolean(selectedUnitId), keepPreviousData: false },
   )
-  const openUnitDetail = (unitId: string, canonicalCommand?: string) => {
+  const openUnitDetail = useCallback((unitId: string, canonicalCommand?: string) => {
     setEvidencePage(1)
     setSelectedUnitId(unitId)
     if (canonicalCommand) {
@@ -592,7 +595,7 @@ const OfflineCommandAssetUnits: React.FC<OfflineCommandAssetUnitsProps> = ({
         navigate(`${window.location.pathname}?${next.toString()}`, { replace: true })
       }
     }
-  }
+  }, [navigate])
   const openClassification = (unit: OfflineCommandAssetUnit) => {
     const params = new URLSearchParams({
       workspace: 'production',
@@ -601,7 +604,7 @@ const OfflineCommandAssetUnits: React.FC<OfflineCommandAssetUnitsProps> = ({
       offline_job_id: jobId,
       command: unit.canonical_command,
     })
-    navigate(`/skills/parser?${params.toString()}`)
+    navigate(businessHref(`/skills/parser?${params.toString()}`))
   }
   const openAdapterDraft = (
     draft: ParserProjectionAdapterDraft,
@@ -611,7 +614,7 @@ const OfflineCommandAssetUnits: React.FC<OfflineCommandAssetUnitsProps> = ({
       workspace: 'production',
       subtab: 'catalog-management',
     })
-    navigate(`/skills/parser?${params.toString()}`, {
+    navigate(businessHref(`/skills/parser?${params.toString()}`), {
       state: {
         commandAdapterDraft: {
           checkItemId: draft.checkItemId,
@@ -686,7 +689,7 @@ const OfflineCommandAssetUnits: React.FC<OfflineCommandAssetUnitsProps> = ({
     )
     initialFocusOpened.current = true
     if (exactMatch) openUnitDetail(exactMatch.id, exactMatch.canonical_command)
-  }, [initialSearch, listQuery.data, listQuery.isFetching])
+  }, [initialSearch, listQuery.data, listQuery.isFetching, openUnitDetail])
 
   const data = listQuery.data
   const summary = data?.summary
@@ -771,7 +774,7 @@ const OfflineCommandAssetUnits: React.FC<OfflineCommandAssetUnitsProps> = ({
               type="text"
               icon={<ArrowRightOutlined />}
               aria-label={unit.next_action.label}
-              onClick={() => navigate(unit.next_action?.target_url || '')}
+              onClick={() => navigate(businessHref(unit.next_action?.target_url || ''))}
             />
           )}
         </Space>
@@ -1000,7 +1003,7 @@ const OfflineCommandAssetUnits: React.FC<OfflineCommandAssetUnitsProps> = ({
                       {unit.next_action?.target_url && (
                         <Button
                           icon={<ArrowRightOutlined />}
-                          onClick={() => navigate(unit.next_action?.target_url || '')}
+                          onClick={() => navigate(businessHref(unit.next_action?.target_url || ''))}
                         >
                           {unit.next_action.label}
                         </Button>
@@ -1057,6 +1060,7 @@ const OfflineCommandAssetUnits: React.FC<OfflineCommandAssetUnitsProps> = ({
       )}
       <CommandAssetDetail
         open={Boolean(selectedUnitId)}
+        onChanged={() => { void detailQuery.refetch() }}
         detail={detailQuery.data}
         generationContent={generationContent}
         initialTab={focusAction === 'parser'

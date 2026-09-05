@@ -23,6 +23,12 @@
   },
   "dependencies": {
     "@ant-design/icons": "^5.2.0",
+    "@dnd-kit/core": "6.3.1",
+    "@dnd-kit/sortable": "10.0.0",
+    "@tiptap/core": "3.31.3",
+    "@tiptap/pm": "3.31.3",
+    "@tiptap/react": "3.31.3",
+    "@tiptap/starter-kit": "3.31.3",
     "@xyflow/react": "^12.10.2",
     "antd": "^5.12.0",
     "axios": "^1.6.0",

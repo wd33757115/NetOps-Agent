@@ -1,3 +1,4 @@
+import { useSearchParams } from 'react-router-dom'
 import React, { useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Descriptions, Drawer, Form, Input, Modal, Pagination, Progress, Select, Space, Switch, Table, Tabs, Tag, Typography, message, type TableProps } from 'antd'
 import { DownloadOutlined, FileExcelOutlined, LeftOutlined, ReloadOutlined, RightOutlined, SafetyCertificateOutlined, SearchOutlined, StopOutlined } from '@ant-design/icons'
@@ -1102,7 +1103,8 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
     )}
   </Space>
   )
-  const patrolView = new URLSearchParams(window.location.search).get('patrol_view')
+  const [patrolParams, setPatrolParams] = useSearchParams()
+  const patrolView = patrolParams.get('patrol_view')
   const checkResultDetail = checkResultDetailQuery.data
   const assessmentBasis = checkResultDetail?.assessment_basis || {}
   const policySnapshot = checkResultDetail?.assessment_policy_snapshot || {}
@@ -1121,14 +1123,11 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
   return (
     <>
       <Tabs
-        defaultActiveKey={['offline', 'risks', 'feedback'].includes(String(patrolView)) ? String(patrolView) : 'online'}
+        activeKey={['offline', 'risks', 'feedback'].includes(String(patrolView)) ? String(patrolView) : 'online'}
         onChange={(value) => {
-          const url = new URL(window.location.href)
-          if (value === 'offline' || value === 'risks' || value === 'feedback') {
-            url.searchParams.set('patrol_view', value)
-          }
-          else url.searchParams.delete('patrol_view')
-          window.history.replaceState({}, '', url)
+          const next = new URLSearchParams(patrolParams)
+          next.set('patrol_view', value)
+          setPatrolParams(next)
         }}
         items={[
           { key: 'online', label: '在线巡检', children: onlineContent },

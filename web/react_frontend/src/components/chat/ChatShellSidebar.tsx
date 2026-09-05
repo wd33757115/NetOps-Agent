@@ -19,11 +19,13 @@ import {
   DownOutlined,
   RightOutlined,
 } from '@ant-design/icons'
+import { workbenchEnabled } from '../../apps/appRoutes'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useChatStore, Conversation } from '../../store/useChatStore'
 
 interface ChatShellSidebarProps {
+  workbench?: boolean
   /** Drawer 内嵌模式：隐藏折叠按钮、始终展开 */
   embedded?: boolean
   onNavigate?: () => void
@@ -59,13 +61,18 @@ function userInitials(username: string): string {
   return username.slice(0, 2).toUpperCase()
 }
 
-const ChatShellSidebar: React.FC<ChatShellSidebarProps> = ({ embedded = false, onNavigate }) => {
+const ChatShellSidebar: React.FC<ChatShellSidebarProps> = ({ embedded = false, onNavigate, workbench = false }) => {
   const navigate = useNavigate()
   const location = useLocation()
   const { user, logout } = useAuth()
   const footerRef = useRef<HTMLDivElement>(null)
-  const [collapsed, setCollapsed] = useState(false)
-  const isCollapsed = embedded ? false : collapsed
+  const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem(`netops-sidebar:${user?.id}`) === 'true' } catch { return false } })
+  const [desktopExpanded, setDesktopExpanded] = useState(false)
+  const isCollapsed = embedded ? false : workbench ? !desktopExpanded : collapsed
+  const toggleCollapsed = () => {
+    if (workbench) setDesktopExpanded(value => !value)
+    else { setCollapsed(value => !value); try { localStorage.setItem(`netops-sidebar:${user?.id}`, String(!collapsed)) } catch { /* optional preference */ } }
+  }
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(true)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -85,6 +92,7 @@ const ChatShellSidebar: React.FC<ChatShellSidebarProps> = ({ embedded = false, o
     () => [
       { key: 'search', icon: <SearchOutlined />, label: '搜索', action: 'search' as const },
       { key: 'new-chat', icon: <EditOutlined />, label: '新建聊天', action: 'new-chat' as const },
+      ...(workbenchEnabled ? [{ key: '/workbench', icon: <AppstoreOutlined />, label: '工作台', action: 'route' as const }] : []),
       { key: '/skills', icon: <AppstoreOutlined />, label: 'Skills', action: 'route' as const },
       { key: '/devices', icon: <ClusterOutlined />, label: 'Devices', action: 'route' as const },
       { key: '/knowledge', icon: <BookOutlined />, label: '知识库', action: 'route' as const },
@@ -200,7 +208,7 @@ const ChatShellSidebar: React.FC<ChatShellSidebarProps> = ({ embedded = false, o
           <button
             type="button"
             className="grok-collapse-btn"
-            onClick={() => setCollapsed((v) => !v)}
+            onClick={toggleCollapsed}
             aria-label={isCollapsed ? '展开侧栏' : '收起侧栏'}
           >
             {isCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
@@ -228,7 +236,7 @@ const ChatShellSidebar: React.FC<ChatShellSidebarProps> = ({ embedded = false, o
         })}
       </nav>
 
-      {!isCollapsed && (
+      {!isCollapsed && !workbench && (
         <div className="grok-history-section">
           <button
             type="button"

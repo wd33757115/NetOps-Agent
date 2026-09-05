@@ -1,3 +1,4 @@
+import { businessHref } from '../../apps/appRoutes'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert, Button, Checkbox, DatePicker, Descriptions, Drawer, Dropdown, Input, List, Pagination,
@@ -154,7 +155,7 @@ export const buildOfflineAssetControlUrl = (job: OfflinePatrolJob) => {
     params.set('dataset_id', datasetIds[0])
     params.set('dataset_ids', datasetIds.join(','))
   }
-  return `/skills/parser?${params.toString()}`
+  return businessHref(`/skills/parser?${params.toString()}`)
 }
 
 export const buildOfflineRuleBundleUrl = (job: OfflinePatrolJob) => {
@@ -169,11 +170,11 @@ export const buildOfflineRuleBundleUrl = (job: OfflinePatrolJob) => {
     .map((period) => period.dataset_id)
     .filter((datasetId): datasetId is string => Boolean(datasetId))
   if (datasetIds.length > 0) params.set('dataset_ids', datasetIds.join(','))
-  return `/skills/parser?${params.toString()}`
+  return businessHref(`/skills/parser?${params.toString()}`)
 }
 
 export const buildRuleAssetSourceJobDetailUrl = (jobId: string, tab = 'overview') => (
-  `/skills/parser/source-jobs/${encodeURIComponent(jobId)}?tab=${encodeURIComponent(tab)}`
+  businessHref(`/skills/parser/source-jobs/${encodeURIComponent(jobId)}?tab=${encodeURIComponent(tab)}`)
 )
 
 export const offlineJobDisplayName = (
@@ -609,7 +610,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
 
   const closeDetail = () => {
     if (isDetailPage) {
-      navigate('/skills/parser?workspace=production&subtab=source-jobs')
+      navigate(businessHref('/skills/parser?workspace=production&subtab=source-jobs'))
       return
     }
     setDetailJobId(null)
@@ -1015,7 +1016,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
                 message={formatOfflineBlockerMessage(item)}
               />
             ))}
-            {draftJob.blocker_count > 0 && <Button icon={<SafetyCertificateOutlined />} onClick={() => navigate(isAssetSource ? buildOfflineAssetControlUrl(draftJob) : '/skills/parser?workspace=production&subtab=source-jobs')}>查看导入进度</Button>}
+            {draftJob.blocker_count > 0 && <Button icon={<SafetyCertificateOutlined />} onClick={() => navigate(isAssetSource ? buildOfflineAssetControlUrl(draftJob) : businessHref('/skills/parser?workspace=production&subtab=source-jobs'))}>查看导入进度</Button>}
           </>}
         </Space>
       </Drawer>
@@ -1545,7 +1546,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
                 onOpenRuleAssets={() => navigate(
                   isAssetSource
                     ? buildOfflineRuleBundleUrl(detail)
-                    : '/skills/parser?workspace=production&subtab=asset-production-units&action=bundle-review',
+                    : businessHref('/skills/parser?workspace=production&subtab=asset-production-units&action=bundle-review'),
                 )}
               /> },
         ]} />}

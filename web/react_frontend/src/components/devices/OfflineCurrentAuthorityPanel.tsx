@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useRef, useEffect, useMemo, useState } from 'react'
 import {
   Alert,
   Button,
@@ -127,13 +127,16 @@ const OfflineCurrentAuthorityPanel: React.FC<{
   const platformReadiness = readinessQuery.data
   const platformReady = Boolean(platformReadiness?.can_launch)
 
+  const initializedProof = useRef<string>()
   useEffect(() => {
+    if (initializedProof.current === authority?.request_id) return
     const proof = authority?.proof
     if (!proof) return
+    initializedProof.current = authority?.request_id
     if (proof.completeness_statement) setStatement(proof.completeness_statement)
     if (proof.collection_tool) setCollectionTool(proof.collection_tool)
     if (proof.collector_identity) setCollectorIdentity(proof.collector_identity)
-  }, [authority?.request_id])
+  }, [authority?.request_id, authority?.proof])
 
   const refresh = async () => {
     await queryClient.invalidateQueries(['offline-current-authority', job.id])

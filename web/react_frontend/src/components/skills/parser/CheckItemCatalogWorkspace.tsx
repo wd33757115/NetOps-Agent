@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { businessHref } from '../../../apps/appRoutes'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Button,
@@ -670,7 +671,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
           command: variables.command,
           action: 'parser',
         })
-        navigate(`/skills/parser?${params.toString()}`)
+        navigate(businessHref(`/skills/parser?${params.toString()}`))
       },
       onError: (error) => message.error(queryErrorLabel(error)),
     },
@@ -818,7 +819,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
     },
   )
 
-  const openNewDraft = (
+  const openNewDraft = useCallback((
     checkItemId?: string,
     sourceContext?: CommandAdapterDraftContext,
   ) => {
@@ -881,7 +882,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
       reason: '',
     })
     setDraftOpen(true)
-  }
+  }, [allCheckItemsQuery.data, form])
 
   useEffect(() => {
     const state = location.state as { commandAdapterDraft?: CommandAdapterDraftContext & {
@@ -891,7 +892,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
     if (!incoming?.checkItemId || !incoming.adapterSpec) return
     openNewDraft(incoming.checkItemId, incoming)
     navigate(`${location.pathname}${location.search}`, { replace: true, state: null })
-  }, [location.pathname, location.search, location.state, navigate])
+  }, [location.pathname, location.search, location.state, navigate, openNewDraft])
 
   const openNewCheckItem = () => {
     setEditingCheckItem(undefined)
@@ -1400,7 +1401,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
     const source = sourceContextForGroup(group)
     if (!source?.sourceJobId || !source.command) return
     navigate(
-      `/skills/parser/source-jobs/${encodeURIComponent(source.sourceJobId)}`
+      businessHref(`/skills/parser/source-jobs/${encodeURIComponent(source.sourceJobId)}`)
       + `?tab=assets&command=${encodeURIComponent(source.command)}`,
     )
   }
@@ -1430,7 +1431,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
       command: source.command,
       action: 'parser',
     })
-    navigate(`/skills/parser?${params.toString()}`)
+    navigate(businessHref(`/skills/parser?${params.toString()}`))
   }
   const openTextAdapter = (group: CheckItemProductionGroup) => {
     const checkItem = associatedCheckItem(group)
@@ -1935,14 +1936,14 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
                   <Button
                     size="small"
                     onClick={() => navigate(
-                      `/skills/parser?workspace=production&subtab=asset-production-units&source_job_id=${encodeURIComponent(sourceJobScope)}&offline_job_id=${encodeURIComponent(sourceJobScope)}&action=parser`,
+                      businessHref(`/skills/parser?workspace=production&subtab=asset-production-units&source_job_id=${encodeURIComponent(sourceJobScope)}&offline_job_id=${encodeURIComponent(sourceJobScope)}&action=parser`),
                     )}
                   >
                     处理结构化命令
                   </Button>
                   <Button
                     size="small"
-                    onClick={() => navigate('/skills/parser?workspace=production&subtab=catalog-management')}
+                    onClick={() => navigate(businessHref('/skills/parser?workspace=production&subtab=catalog-management'))}
                   >
                     查看全部目录
                   </Button>
@@ -2095,7 +2096,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
             check_item_version_id: checkItemVersionId,
           })
           setCheckItemEditorOpen(false)
-          navigate(`/skills/parser?${params.toString()}`)
+          navigate(businessHref(`/skills/parser?${params.toString()}`))
         }}
       />
 

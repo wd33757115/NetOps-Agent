@@ -1,3 +1,4 @@
+import { businessHref } from '../../../apps/appRoutes'
 import React, { useState } from 'react'
 import { Alert, Button, Input, Segmented, Space, Table, Tabs, Tag, Typography } from 'antd'
 import { ArrowRightOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
@@ -52,7 +53,7 @@ const RuleGapsWorkspace: React.FC = () => {
       vendor: gap.vendor || '',
       suggested_job_type: gap.suggested_job_type || '',
     })
-    navigate(`/skills/parser?${params.toString()}`)
+    navigate(businessHref(`/skills/parser?${params.toString()}`))
   }
 
   const runtimeGaps = (

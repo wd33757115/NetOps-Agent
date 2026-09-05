@@ -284,9 +284,12 @@ test('traces a failed patrol run to its parser, change policy, and event rule', 
   await mockPatrolOperations(page)
   await page.goto('/devices?tab=patrol')
 
-  await expect(page.getByRole('tab', { name: '巡检运行' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page).toHaveURL(/\/apps\/patrol$/)
+  await expect(page.getByRole('tab', { name: '在线巡检' })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByText('batch-incident-1').first()).toBeVisible()
   await page.getByRole('button', { name: /查看批次详情/ }).first().click()
+  await expect(page).toHaveURL(/patrol_batch_id=batch-incident-1/)
+  await page.reload()
 
   await expect(page.getByText('设备分组：core').last()).toBeVisible()
   await expect(page.getByText('SSH authentication failed', { exact: true })).toBeVisible()

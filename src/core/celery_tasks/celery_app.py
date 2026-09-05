@@ -53,6 +53,7 @@ celery = Celery(
         "src.core.patrol.offline_tasks",
         "src.core.rule_control.engineering_revision_async",
         "src.core.rule_control.tasks",
+        "src.core.official_documents.tasks",
     ],
 )
 
@@ -72,6 +73,8 @@ _celery_conf: dict = {
     "broker_connection_retry_on_startup": True,
     # Phase 2：按 Skill domain 路由到独立队列（Worker 需监听对应 queue）
     "task_routes": {
+        "execute_document_operation": {"queue": "netops.ai"},
+        "reconcile_document_operations": {"queue": "netops.ai"},
         "src.core.celery_tasks.tasks.execute_firewall_policy_task": {"queue": "netops.firewall"},
         "src.core.celery_tasks.tasks.execute_config_backup_task": {"queue": "netops.patrol"},
         "src.core.celery_tasks.tasks.execute_device_patrol_task": {"queue": "netops.patrol"},
@@ -118,6 +121,11 @@ _beat_heartbeat_expires = max(
 )
 
 celery.conf.beat_schedule = {
+    "reconcile-document-operations": {
+        "task": "reconcile_document_operations",
+        "schedule": 30.0,
+        "options": {"queue": "netops.ai"},
+    },
     "celery-beat-heartbeat": {
         "task": "record_celery_beat_heartbeat",
         "schedule": float(_beat_heartbeat_interval),

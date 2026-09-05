@@ -1,3 +1,4 @@
+import { businessHref } from '../../apps/appRoutes'
 import React, { useMemo, useState } from 'react'
 import {
   Alert,
@@ -54,12 +55,12 @@ const workItemLabels: Record<ProductionFeedbackWorkItemKind, string> = {
 
 const nextActionUrl = (kind?: ProductionFeedbackWorkItemKind) => {
   if (kind === 'rule_sample') {
-    return '/skills/parser?workspace=inbox&subtab=source-jobs'
+    return businessHref('/skills/parser?workspace=inbox&subtab=source-jobs')
   }
   if (kind === 'assessment_policy') {
-    return '/skills/parser?workspace=runtime&subtab=assessment-policies'
+    return businessHref('/skills/parser?workspace=runtime&subtab=assessment-policies')
   }
-  return '/skills/parser?workspace=runtime&subtab=rule-gaps'
+  return businessHref('/skills/parser?workspace=runtime&subtab=rule-gaps')
 }
 
 const ProductionFeedbackWorkspace: React.FC = () => {

@@ -160,6 +160,7 @@ const renderPanel = (
         {options.accessory}
         <Routes>
           {purpose === 'rule_asset_source' ? <>
+            <Route path="/apps/patrol-rules/source-jobs/:jobId" element={<SourceJobDetailHarness />} />
             <Route path="/skills/parser/source-jobs/:jobId" element={<SourceJobDetailHarness />} />
             <Route path="*" element={<OfflineFileJobWorkbench purpose="rule_asset_source" />} />
           </> : (

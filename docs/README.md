@@ -41,6 +41,8 @@ Latest architecture: [check-item-command-adapter-simplification-remediation-2026
 
 | 文档 | 说明 |
 |------|------|
+| [workbench-apps-guide-2026-09-05.md](./workbench-apps-guide-2026-09-05.md) | 工作台、巡检应用入口、布局保存、部署迁移与回退 |
+| [official-document-workspace-guide-2026-09-05.md](./official-document-workspace-guide-2026-09-05.md) | 公文工作台使用、版本保存、AI 修改、Word 导出与部署 |
 | [check-item-command-adapter-simplification-remediation-2026-08-10.md](./check-item-command-adapter-simplification-remediation-2026-08-10.md) | 当前架构：检查项、命令适配器、样本任务以及可信巡检报告 |
 | [implementation/check-item-platform-completion-matrix-2026-07-28.md](./implementation/check-item-platform-completion-matrix-2026-07-28.md) | 当前实现、验证证据、生产阻断项和下一步 |
 | [implementation/check-item-platform-e2e-evidence-matrix-2026-07-30.md](./implementation/check-item-platform-e2e-evidence-matrix-2026-07-30.md) | 35 条浏览器验收场景的证据层级、现有证据和剩余门禁 |
@@ -65,6 +67,8 @@ Latest architecture: [check-item-command-adapter-simplification-remediation-2026
 
 | 文档 | 状态 |
 |------|------|
+| [official-document-workspace-plan-2026-09-05.md](./official-document-workspace-plan-2026-09-05.md) | proposed；公文编辑、AI 修改、审查、版本与 DOCX 导出 |
+| [workbench-patrol-app-migration-plan-2026-09-05.md](./workbench-patrol-app-migration-plan-2026-09-05.md) | proposed |
 | [auth-rbac-plan.md](./auth-rbac-plan.md) | proposed |
 | [device-management-control-plane-roadmap.md](./device-management-control-plane-roadmap.md) | proposed |
 | [langfuse-sse-plan.md](./langfuse-sse-plan.md) | proposed |

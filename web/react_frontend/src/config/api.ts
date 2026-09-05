@@ -64,6 +64,9 @@ export function saveAuthSession(session: AuthSession) {
 }
 
 export function clearAuthStorage() {
+  for (const key of Object.keys(localStorage)) {
+    if (key.startsWith('official-document:')) localStorage.removeItem(key)
+  }
   localStorage.removeItem(TOKEN_KEY)
   localStorage.removeItem('access')
   localStorage.removeItem(REFRESH_TOKEN_KEY)
