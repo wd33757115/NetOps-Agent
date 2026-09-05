@@ -1,47 +1,15 @@
-# Rule Asset Approve Workflow
+# 规则资产审批工作流
 
-这个 Workflow 用于审批并激活已经进入 `pending_approval` 状态的规则资产版本。
+本插件调用 `rule-asset-approver`，由 `RuleAssetApprovalService` 确定性地审批并激活候选，不重新调用模型生成资产。
 
-```text
-pending_approval RuleGenerationJob
-  -> rule-asset-approver
-  -> RuleAssetApprovalService
-  -> active asset version
-```
+## 输入与门禁
 
-审批激活是确定性控制面操作。它不会重新生成规则，也不会让 LLM 参与运行时判断。
+`job_id` 为待审批任务 ID，必填；`actor` 用于审批审计，不是身份凭证或自动发布授权。聊天 Intent 缺少任务 ID 时不会启动。
 
-## 输入
+发布要求任务处于 `pending_approval`、资产版本引用完整且验证成功。Bundle 还需通过资产完整性、上下文、按需求执行的回放和工程复核等门禁，并在适用时重新核对不可变上下文及来源摘要。Bundle 子资产必须通过整包治理，不能绕过 Bundle 单独激活。
 
-- `job_id`：待审批规则资产任务 ID，必填。
-- `actor`：审批人或触发来源，默认可使用 `workflow` 或 `chat`。
+服务在事务内激活新版本并按对应资产规则替代旧 active 版本，保留历史与审批证据。结果包含任务、版本及审计信息。只有报告顶层 `success: true` 不足以证明整包可发布。
 
-## 前置条件
+管理员授权的自动制作有独立授权校验；本 Workflow 只传递 `job_id` 和 `actor`，不会凭一个来源字符串自动获得发布授权。权限须由受保护的上层入口落实。
 
-- `job_id` 对应任务必须处于 `pending_approval`。
-- 任务必须有资产版本引用。
-- 验证报告中的 `success` 必须为 `true`。
-- 对 EventRule 或 ChangePolicy，审批服务会在同一事务内激活新版本并废弃同一资产的旧 active 版本。
-
-## 输出
-
-- 已激活的规则资产任务。
-- 被激活的资产版本摘要。
-- 审批人和审批时间审计信息。
-
-## 聊天触发
-
-示例：
-
-```text
-审批激活规则资产 任务 689eb656-815d-49c6-9961-90b141bb43c2
-```
-
-缺少 `job_id` 时不会启动 Workflow。
-
-## 边界
-
-- 不调用 LLM。
-- 不接受未验证候选。
-- 不激活缺少资产版本引用的任务。
-- 不删除历史版本和审批证据。
+参数以同目录 `WORKFLOW.yaml` 为准。当前默认业务流程见[规则自动制作](../../../../docs/patrol-rule-autopilot-guide-2026-09-05.md)，详细门禁见[规则资产治理](../../../../docs/rule-asset-control-plane-guide.md)。

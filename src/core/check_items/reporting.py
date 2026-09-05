@@ -4653,11 +4653,8 @@ def _render_audit_check_item_xlsx(report: Mapping[str, Any]) -> bytes:
 def render_check_item_xlsx(report: Mapping[str, Any]) -> bytes:
     """Render the immutable technical annex used by report delivery.
 
-    The compact inspection workbook is useful for ad-hoc command browsing, but
-    it omits frozen claims, coverage, authority, risk and evidence ledgers.
-    Delivered patrol artifacts must retain those governed report surfaces, so
-    use the audit renderer here and keep the compact renderer as an explicit
-    UI-only view.
+    Preserve frozen claims, coverage, authority, risk and evidence ledgers in
+    every delivered workbook.
     """
 
     return _render_audit_check_item_xlsx(report)

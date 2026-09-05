@@ -1,28 +1,23 @@
-# Rule Asset Generation Workflow
+# 兼容规则资产生成工作流
 
-这个 Workflow 用于离线生成和验证规则资产候选：
+本目录仍是已注册的契约式资产编排入口。当前产品默认流程见[规则自动制作](../../../../docs/patrol-rule-autopilot-guide-2026-09-05.md)：人工定义检查项及命令关联，AI 制作并验证其余资产。不要要求该默认流程再手工维护一套 ObservationContract。
+
+## 实际编排
 
 ```text
-Structured Records
-  -> ObservationContract
-  -> ChangePolicy
-  -> EventRule
-  -> Deterministic Validation
+脱敏解析记录 → 生成并验证 ObservationContract → 编译规则目标
+    → 按需生成 ChangePolicy / EventRule → 事件规则验证
+    → 按需历史回放 → 持久化候选资产包
 ```
 
-它不会直接激活生产规则，也不会读取设备密码或连接网络设备。生产链路只执行已经审批激活的模板、契约、策略和事件规则。
+同目录 `WORKFLOW.yaml` 是参数与条件的权威定义。首步使用 `infer_and_validate`；`rule-target-planner` 从已验证契约及记录编译策略和事件目标。后续变化策略、事件规则及回放分别受 `rule_asset_requirements` 控制，不是每种检查项都必须生成全部资产。
 
-## 输入
+主要输入包括 `command`、`records`，以及适用的 `record_groups`、厂商型号、字段画像、标准观察目标、策略/事件意图、来源与不可变上下文引用。`historical_values` / `historical_values_by_field` 用于阈值建议；`replay_run_ids` 与 `replay_limit` 控制回放范围。实际模型提供方与重试参数由调用方传入。
 
-- `command`: canonical command。
-- `records`: TextFSM 解析后的结构化记录，必须是脱敏样本。
-- `observation_type`: 标准观察类型。
-- `field_name`: 要生成变化策略的字段。
-- `field_semantics`: 字段语义，例如 `gauge/percent`。
-- `historical_values`: 脱敏历史值，用于阈值和 deadband 建议。
+YAML 中的 Generic/LAB 和 builtin 数据是试跑配置，不代表生产样本覆盖或真实模型质量。试跑也可能持久化资产，须使用隔离测试环境。
 
-## 输出
+## 输出与发布
 
-- ObservationContract 候选与验证报告。
-- ChangePolicy 候选与统计摘要。
-- EventRule 候选与确定性验证报告。
+输出包括契约、适用的策略与事件候选、验证/回放证据，以及资产包持久化结果。生成结束不等于生产发布：审批服务继续校验 Bundle、上下文、来源、回放和工程复核门禁。自动发布由管理员授权的自动制作链路处理，本 Workflow 不自行授予授权。
+
+它不连接设备采集数据；生产巡检执行冻结资产。兼容服务及整体发布约束见[规则资产治理](../../../../docs/rule-asset-control-plane-guide.md)。

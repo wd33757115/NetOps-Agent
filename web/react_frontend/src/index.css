@@ -1677,65 +1677,6 @@ body {
   overflow: hidden;
 }
 
-/* ── App nav (非 Chat 页) ── */
-.app-nav-sider {
-  border-right: 1px solid #ececec !important;
-  background: #fafafa !important;
-}
-
-.app-nav-menu {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 100vh;
-}
-
-.app-nav-brand {
-  padding: 20px 16px 4px;
-  font-weight: 700;
-  line-height: 1.2;
-}
-
-.app-nav-logo {
-  display: block;
-  font-size: 17px;
-  color: #111827;
-}
-
-.app-nav-sub {
-  font-size: 13px;
-  color: #64748b;
-  font-weight: 500;
-}
-
-.app-nav-user {
-  padding: 8px 16px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.app-nav-username {
-  font-size: 13px;
-  color: #374151;
-}
-
-.app-nav-role {
-  align-self: flex-start;
-  margin: 0;
-}
-
-.app-nav-items {
-  flex: 1;
-  border-inline-end: none !important;
-  background: transparent !important;
-}
-
-.app-nav-footer {
-  padding: 12px;
-  border-top: 1px solid #ececec;
-}
-
 .grok-app-root {
   height: 100vh;
   height: 100dvh;
@@ -2436,10 +2377,6 @@ body {
 
 /* Mobile — 与 hooks/useBreakpoint MOBILE_BREAKPOINT_PX (768) 对齐 */
 @media (max-width: 768px) {
-  .app-nav-sider.ant-layout-sider {
-    display: none !important;
-  }
-
   .ant-layout-sider-zero-width-trigger {
     display: none !important;
   }

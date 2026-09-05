@@ -300,15 +300,6 @@ def is_bgp_change(change: dict[str, Any]) -> bool:
     return "bgp" in entity_type or "bgp" in command
 
 
-def is_interface_change(change: dict[str, Any]) -> bool:
-    return norm(change.get("entity_type")) in {
-        "interface",
-        "interface_l2",
-        "interface_l3",
-        "physical_interface",
-    }
-
-
 REQUIRED_DEVICE_EVENT_CORRELATION_KEYS = (
     "device_id",
     "entity_type",
@@ -1377,10 +1368,6 @@ class EventRuleRepository:
             }
 
 
-def _field_in(change: dict[str, Any], names: set[str]) -> bool:
-    return norm_field(change.get("field")) in names
-
-
 def load_event_rule_pack(path: str | Path | None = None) -> list[EventRuleDefinition]:
     payload = load_yaml(path or BUILTIN_EVENT_RULE_PACK)
     rules = payload.get("rules") or []
@@ -1443,11 +1430,6 @@ def match_event_rules(
             if rule.exclusive:
                 break
     return matched
-
-
-def match_event_rule(change: dict[str, Any]) -> EventRule | None:
-    matched = match_event_rules(change)
-    return matched[0] if matched else None
 
 
 def event_rule_definitions_from_snapshot(

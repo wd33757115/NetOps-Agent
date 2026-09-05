@@ -5,15 +5,10 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any
 
 from src.core.skills.result import SkillExecutionResult, SkillStatus
 from src.core.skills.resolver import get_skill_dir
-
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-SCHEMA_PATH = PROJECT_ROOT / "schemas" / "skill-execution-result-v1.json"
 
 # SKILL.md outputs.name → artifacts 标准 key
 OUTPUT_ARTIFACT_ALIASES: dict[str, str] = {
@@ -85,9 +80,3 @@ def assert_valid_execution_result(*args, **kwargs) -> SkillExecutionResult:
         result,
         skill_name=kwargs.get("skill_name") or str(result.get("skill_name")),
     )
-
-
-def load_result_schema() -> dict[str, Any]:
-    if not SCHEMA_PATH.is_file():
-        return {}
-    return json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))

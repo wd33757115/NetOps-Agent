@@ -57,7 +57,7 @@ on_complete:
 | `${run.id}` | 当前 Workflow Run ID |
 | `${steps.<step_name>.result.*}` | 某步 Skill 返回 JSON |
 | `${steps.<step_name>.artifacts.<key>.file_key}` | MinIO 对象键（供下游 Skill） |
-| `${steps.<step_name>.artifacts.<key>.download_url}` | MinIO 预签名下载 URL |
+| `${steps.<step_name>.artifacts.<key>.download_url}` | 平台产物下载地址（可为鉴权 API 地址） |
 
 常见 artifact key：`config_zip`（策略 ZIP）、`change_excel`（变更工单 Excel）、`analysis_report`（LLM 报告）。任意 Skill 只要在结果中提供 `artifacts.<key>.download_url`，平台即可自动收集并在通知中展示。
 
@@ -106,6 +106,7 @@ Webhook 入口：`POST /api/v1/itsm/webhook/{route_key}`
 workflow: my-itsm-workflow
 priority: 50
 description: 聊天触发说明
+required_context: [ticket_id]
 
 match:
   require_any:
@@ -124,10 +125,10 @@ response_template: |
 须**同时**满足：
 
 1. 匹配 `require_any` / `require_all` / `require_any_secondary`
-2. 消息含可识别工单号（如 `工单号REQ2025001`、`REQ001`）
+2. 满足插件声明的 `required_context`；本例要求当前消息提供工单号，其他插件可声明不同字段或不要求工单号
 3. 插件在治理中状态为 **published**（draft / review 不会在聊天中激活）
 
-Supervisor 通过 `match_chat_workflow()` 匹配。Webhook 触发的会话使用 `ITSM.webhook.yaml`，勿与聊天 Intent 混用 `auto_if_source`。
+Supervisor 通过 `find_matching_intents()` 匹配，并按 Intent 映射及检查必需上下文。Webhook 触发的会话使用 `ITSM.webhook.yaml`，勿与聊天 Intent 混用 `auto_if_source`。
 
 ## 4. Skill 脚本约定
 
@@ -150,7 +151,7 @@ python scripts/run.py --params /tmp/params.json --output-dir /tmp/out
 | `notify_each_step: false` | 默认，仅流程结束或失败时通知 |
 | `notify_on_failure: true` | 失败时通知（默认开启） |
 
-平台从步骤 `artifacts` 及 Skill 结果中自动收集全部 `http(s)` 链接，写入通知 `payload.downloads`：
+平台从步骤 `artifacts.*.download_url` 和结果顶层的 URL 字段收集 `http(s)` 或 `/api/` 链接，写入通知 `payload.downloads`：
 
 ```json
 {
@@ -158,13 +159,13 @@ python scripts/run.py --params /tmp/params.json --output-dir /tmp/out
     {
       "key": "config_zip",
       "label": "firewall_policies_REQ001.zip",
-      "url": "http://localhost:9000/netops-files/..."
+      "url": "/api/artifacts/download/example"
     }
   ]
 }
 ```
 
-前端通知铃铛根据 `downloads` 渲染可点击链接；无需在 YAML 中硬编码 `config_zip_url` 等字段名。下载依赖 MinIO（测试环境 `netops-minio`）。
+前端通知铃铛根据 `downloads` 渲染可点击链接；无需在 YAML 中硬编码 `config_zip_url` 等字段名。上例地址仅示意，实际使用平台返回值；下载依赖对象存储及对应 API 的身份校验，不手工拼接对象存储地址。
 
 ## 6. 发布检查清单
 
@@ -179,11 +180,10 @@ python scripts/run.py --params /tmp/params.json --output-dir /tmp/out
 ## 7. 验证
 
 ```powershell
-.\scripts\test\stop.ps1
-.\scripts\test\start.ps1
 .\venv\Scripts\python.exe -m pytest tests/unit/test_workflow_plugins.py tests/unit/test_itsm_webhook_plugins.py -q
-.\venv\Scripts\python.exe .\scripts\test\e2e_itsm_workflow.py
 ```
+
+完整集成验证使用 `scripts/test/e2e_itsm_workflow.py`；先核对参数并准备隔离服务与测试数据，回调步骤可能向外部工单系统发送请求。单元测试无需先重启服务。
 
 ## 参考实现
 

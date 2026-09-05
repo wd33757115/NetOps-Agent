@@ -1,36 +1,9 @@
-"""Command-neutral intermediate representation for generated TextFSM parsers."""
+"""Compile literal CLI evidence and typed captures into TextFSM row patterns."""
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-
-
-@dataclass(frozen=True)
-class ParserValue:
-    field: str
-    pattern: str
-    options: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class ParserRule:
-    pattern: str
-    action: str | None = None
-
-
-@dataclass(frozen=True)
-class ParserState:
-    name: str
-    rules: tuple[ParserRule, ...]
-
-
-@dataclass(frozen=True)
-class ParserIR:
-    values: tuple[ParserValue, ...]
-    states: tuple[ParserState, ...]
-    explicit_eof: bool = True
-    record_grain: str = "entity"
 
 
 @dataclass(frozen=True)
@@ -122,32 +95,3 @@ def compile_evidence_line(
     )
     output.append(r"\s*$$")
     return "".join(output)
-
-
-def compile_textfsm(ir: ParserIR) -> str:
-    """Render validated IR; planning owns semantics, this function owns syntax."""
-
-    if not ir.values:
-        raise ValueError("parser IR has no values")
-    if not ir.states or ir.states[0].name != "Start":
-        raise ValueError("parser IR must start with the Start state")
-    declarations: list[str] = []
-    seen_fields: set[str] = set()
-    for value in ir.values:
-        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value.field):
-            raise ValueError(f"invalid parser field name: {value.field!r}")
-        if value.field in seen_fields:
-            raise ValueError(f"duplicate parser field: {value.field}")
-        seen_fields.add(value.field)
-        options = f" {','.join(value.options)}" if value.options else ""
-        declarations.append(f"Value{options} {value.field} ({value.pattern})")
-    states: list[str] = []
-    for state in ir.states:
-        states.append(state.name)
-        for rule in state.rules:
-            suffix = f" -> {rule.action}" if rule.action else ""
-            states.append(f"  {rule.pattern}{suffix}")
-        states.append("")
-    if ir.explicit_eof and not any(state.name == "EOF" for state in ir.states):
-        states.append("EOF")
-    return "\n".join([*declarations, "", *states]).rstrip() + "\n"

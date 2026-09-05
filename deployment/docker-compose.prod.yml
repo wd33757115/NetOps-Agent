@@ -8,36 +8,36 @@
 
 services:
   postgres:
-    ports:
+    ports: !override
       - "127.0.0.1:5432:5432"
 
   redis:
-    ports:
+    ports: !override
       - "127.0.0.1:6379:6379"
 
   rabbitmq:
-    ports:
+    ports: !override
       - "127.0.0.1:5672:5672"
       - "127.0.0.1:15672:15672"
 
   minio:
-    ports:
+    ports: !override
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"
 
   qdrant:
-    ports:
+    ports: !override
       - "127.0.0.1:6333:6333"
       - "127.0.0.1:6334:6334"
 
   langfuse:
-    ports:
+    ports: !override
       - "127.0.0.1:3001:3000"
 
   django:
-    ports:
+    ports: !override
       - "127.0.0.1:8001:8001"
 
   react:
-    ports:
+    ports: !override
       - "127.0.0.1:3000:80"

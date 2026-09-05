@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from src.core.skills.result import SkillExecutionResult
 from src.infrastructure.db.postgres import get_db_session
@@ -44,27 +43,3 @@ def save_skill_execution(result: SkillExecutionResult) -> bool:
     except Exception as exc:
         logger.warning("保存 Skill 执行记录失败 execution_id=%s: %s", result.execution_id, exc)
         return False
-
-
-def get_skill_execution(execution_id: str) -> dict[str, Any] | None:
-    """按 execution_id 读取执行记录摘要。"""
-    try:
-        from src.infrastructure.db.models import SkillExecutionRecord
-
-        with get_db_session() as session:
-            row = session.get(SkillExecutionRecord, execution_id)
-            if not row:
-                return None
-            return {
-                "execution_id": row.execution_id,
-                "skill_name": row.skill_name,
-                "status": row.status,
-                "message": row.message,
-                "output": row.output,
-                "artifacts": row.artifacts,
-                "context": row.context,
-                "executed_at": row.executed_at.isoformat() if row.executed_at else None,
-            }
-    except Exception as exc:
-        logger.warning("读取 Skill 执行记录失败 execution_id=%s: %s", execution_id, exc)
-        return None

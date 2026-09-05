@@ -336,15 +336,6 @@ def check_skill_permission(skill_name: str, user_level: PermissionLevel = Permis
     return get_security_manager().check_permission(skill_name, user_level)
 
 
-def audit_skill_execution(
-    skill_name: str,
-    user_id: str = "system",
-    **kwargs
-):
-    """审计 Skill 执行"""
-    get_security_manager().log_execution(skill_name, user_id, "execute", **kwargs)
-
-
 def filter_sensitive_data(data: dict[str, Any]) -> dict[str, Any]:
     """过滤敏感数据"""
     return get_security_manager().filter_sensitive_data(data)

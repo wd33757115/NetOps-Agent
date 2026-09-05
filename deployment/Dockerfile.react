@@ -1,16 +1,15 @@
 # SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
 # SPDX-License-Identifier: Apache-2.0
 
-FROM node:20 AS build
+FROM node:22 AS build
 
 # 设置工作目录
 WORKDIR /app
 
-# 复制 package.json（不复制 package-lock.json）
-COPY web/react_frontend/package.json ./
+# 与本地及 CI 使用同一份依赖锁文件。
+COPY web/react_frontend/package.json web/react_frontend/package-lock.json ./
 
-# 安装依赖（不使用 package-lock.json）
-RUN npm install --no-package-lock
+RUN npm ci
 
 # 复制项目文件
 COPY web/react_frontend/ ./

@@ -15,7 +15,6 @@ from src.core.workflows.mapping import (
 )
 from src.skills.skill_manager import get_skill_manager
 
-
 # 常见 Webhook / 聊天 context 字段
 _DEFAULT_CONTEXT_FIELDS = [
     "ticket_id",
@@ -79,22 +78,6 @@ def _skill_output_hints(skill_name: str) -> list[dict[str, str]]:
     return hints
 
 
-def _resolve_upstream_step(
-    steps: list[WorkflowStepDSL],
-    step_name: str | None,
-) -> WorkflowStepDSL | None:
-    if step_name:
-        for s in steps:
-            if s.name == step_name:
-                return s
-        return None
-    if len(steps) >= 2:
-        return steps[-2]
-    if steps:
-        return steps[0]
-    return None
-
-
 def build_expression_hints(
     dsl: WorkflowDSL,
     *,
@@ -131,8 +114,7 @@ def build_expression_hints(
     prev = steps[idx - 1] if idx > 0 else None
 
     upstream_steps: dict[str, Any] = {}
-    for i, s in enumerate(steps[:idx]):
-        p = steps[i - 1] if i > 0 else None
+    for s in steps[:idx]:
         output_hints = _skill_output_hints(s.skill)
         for h in output_hints:
             h["expr"] = h["expr"].replace("<step>", s.name)

@@ -13,11 +13,6 @@ class SourceType(str, Enum):
     ITSM_WEBHOOK = "itsm_webhook"
 
 
-class AgentType(str, Enum):
-    KNOWLEDGE_QA = "knowledge_qa"
-    SCRIPT_EXECUTOR = "script_executor"
-
-
 class TaskStatus(str, Enum):
     PENDING = "pending"
     PROCESSING = "processing"
@@ -116,40 +111,6 @@ class ITSMFirewallPolicyRequest(BaseModel):
     parameters: PolicyParameters | None = Field(None, description="额外参数")
     callback_url: str = Field(..., description="回调地址")
     callback_headers: dict[str, str] | None = Field(None, description="回调请求头")
-
-
-class ITSMCallbackAttachment(BaseModel):
-    filename: str = Field(..., description="附件文件名")
-    download_url: str = Field(..., description="附件下载URL")
-
-
-class ITSMTicketUpdate(BaseModel):
-    status: str = Field(..., description="工单状态")
-    resolution_note: str | None = Field(None, description="解决备注")
-    attachments: list[ITSMCallbackAttachment] | None = Field(None, description="附件列表")
-
-
-class ITSMCallbackResult(BaseModel):
-    action: str = Field(..., description="动作类型")
-    ticket_update: ITSMTicketUpdate | None = Field(None, description="工单更新内容")
-
-
-class ITSMCallbackError(BaseModel):
-    code: str = Field(..., description="错误码")
-    message: str = Field(..., description="错误描述")
-    details: dict[str, Any] | None = Field(None, description="详细错误信息")
-    suggested_action: str | None = Field(None, description="建议的解决措施")
-
-
-class ITSMCallbackResponse(BaseModel):
-    version: str = Field(default="1.0", description="回调协议版本")
-    timestamp: str = Field(..., description="ISO 8601格式时间戳")
-    callback_id: str = Field(..., description="回调唯一标识")
-    source_ticket_id: str = Field(..., description="源工单号")
-    status: str = Field(..., description="状态: success/failed/partial")
-    result: ITSMCallbackResult | None = Field(None, description="成功结果")
-    error: ITSMCallbackError | None = Field(None, description="错误信息")
-    metadata: dict[str, Any] | None = Field(None, description="元数据")
 
 
 class ChatFileUploadRequest(BaseModel):

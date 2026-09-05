@@ -12,21 +12,10 @@ import time
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
 
 from src.skills.official_document.schema import OfficialDocumentJSON
 
 
-# ==================== 1. 定义参数模型 ====================
-class OfficialDocumentWritingParams(BaseModel):
-    """
-    公文写作技能参数
-    """
-    document_type: str | None = Field(None, description="公文类型，如'请示'、'通知'、'函'、'总结'、'纪要'、'报告'")
-    content: str | None = Field(None, description="公文内容（用于审核或修改）")
-    purpose: str | None = Field(None, description="公文用途或背景说明")
-    action: str | None = Field(None, description="操作类型：'write'（撰写）、'review'（审核）、'check'（检查）、'guide'（指导）")
-    user_query: str | None = Field(None, description="用户原始查询")
 
 
 # ==================== 2. LLM 客户端 ====================
@@ -117,122 +106,6 @@ def get_quality_checklist() -> str:
     return read_reference_file("checklists/quality-checklist.md")
 
 
-# ==================== 4. DOCX 文件生成 ====================
-def generate_docx_from_content(content: str, document_type: str) -> bytes:
-    """
-    将公文内容转换为符合 GB/T 9704-2012 标准的 DOCX 格式
-
-    GB/T 9704-2012 格式要求：
-    - 用纸：A4 (210mm × 297mm)
-    - 标题：2号小标宋体（但实际常用仿宋/黑体代替）
-    - 正文：3号仿宋_GB2312
-    - 层次标题：一、黑体；（一）楷体；1.、1. 仿宋
-    """
-    from docx import Document
-
-    from src.skills.official_document.docx_format import (
-        add_styled_paragraph,
-        setup_a4_margins,
-    )
-
-    doc = Document()
-    setup_a4_margins(doc)
-
-    lines = content.strip().split("\n")
-    is_first_block = True
-
-    for line in lines:
-        line = line.strip()
-        if not line:
-            doc.add_paragraph()
-            continue
-
-        if is_title_line(line, is_first_block):
-            add_styled_paragraph(doc, line, center=True, bold=True)
-            is_first_block = False
-        elif is_document_title(line):
-            add_styled_paragraph(doc, line, center=True, bold=True)
-        elif is_main_recipient(line):
-            add_styled_paragraph(doc, line)
-        elif is_first_level_heading(line):
-            add_styled_paragraph(doc, line, first_line_indent=0.74, bold=True)
-        elif is_second_level_heading(line):
-            add_styled_paragraph(doc, line, first_line_indent=0.74)
-        elif is_closing_line(line):
-            add_styled_paragraph(doc, line)
-        elif is_signature(line):
-            add_styled_paragraph(doc, line, right=True)
-        else:
-            add_styled_paragraph(doc, line, first_line_indent=0.74)
-
-    import io
-    docx_buffer = io.BytesIO()
-    doc.save(docx_buffer)
-    docx_buffer.seek(0)
-    return docx_buffer.getvalue()
-
-
-def is_title_line(line: str, is_first: bool) -> bool:
-    """判断是否为发文机关标题行"""
-    # 常见的单位名称模式
-    patterns = [
-        r'^[^\s]+[区县市省厅局委办]',
-        r'^[^\s]+[大学学院]$',
-        r'^[^\s]+[公司企业]$',
-        r'^[^\s]+[中心]$',
-        r'^[^\s]+[指挥部办公室]$',
-    ]
-    import re
-    for pattern in patterns:
-        if re.match(pattern, line) and len(line) < 20:
-            return True
-    return False
-
-
-def is_document_title(line: str) -> bool:
-    """判断是否为公文标题行（关于xxx的xxx）"""
-    import re
-    return bool(re.match(r'^关于.+的[请示通知函报告纪要决定总结]', line))
-
-
-def is_main_recipient(line: str) -> bool:
-    """判断是否为主送机关"""
-    import re
-    return bool(re.match(r'^[^\s：:]+[厅局委办区县省市]：?$', line)) and len(line) < 15
-
-
-def is_first_level_heading(line: str) -> bool:
-    """判断是否为一级标题（一、）"""
-    import re
-    return bool(re.match(r'^[一二三四五六七八九十]+、', line))
-
-
-def is_second_level_heading(line: str) -> bool:
-    """判断是否为二级标题（（一））"""
-    import re
-    return bool(re.match(r'^[（(][一二三四五六七八九十]+[）)]', line))
-
-
-def is_closing_line(line: str) -> bool:
-    """判断是否为结束语行"""
-    closing_phrases = [
-        '妥否，请批示', '特此通知', '请予函复', '特此函复',
-        '特此报告', '当否，请审批', '以上请示',
-        '请批示', '请审核', '请审示'
-    ]
-    return any(phrase in line for phrase in closing_phrases)
-
-
-def is_signature(line: str) -> bool:
-    """判断是否为署名/日期行"""
-    import re
-    # 匹配日期格式：2024年1月1日、2024年01月01日
-    if re.search(r'\d{4}年\d+月\d+日', line):
-        return True
-    # 匹配常见署名
-    if re.search(r'[区县市省厅局委办]', line) and len(line) < 30:
-        return True
-    return False
 
 
 # ==================== 5. 上传到 MinIO ====================

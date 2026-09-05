@@ -265,15 +265,3 @@ class SkillCache:
             "instructions": self.instructions_cache.get_stats(),
             "embedding": self.embedding_cache.get_stats()
         }
-
-
-# 全局缓存实例
-_global_cache: SkillCache | None = None
-
-
-def get_skill_cache() -> SkillCache:
-    """获取全局缓存实例"""
-    global _global_cache
-    if _global_cache is None:
-        _global_cache = SkillCache()
-    return _global_cache

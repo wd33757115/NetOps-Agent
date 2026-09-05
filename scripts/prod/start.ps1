@@ -5,7 +5,6 @@
 param(
     [string]$ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
     [switch]$Dev,
-    [switch]$UseSupervisorV1,
     [switch]$SkipPreflight,
     [switch]$SkipSeed,
     [switch]$SkipSmoke,
@@ -55,13 +54,7 @@ if (-not $SkipPreflight) {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
-if ($UseSupervisorV1) {
-    $env:USE_SUPERVISOR_V2 = "false"
-} else {
-    $env:USE_SUPERVISOR_V2 = "true"
-}
-
-Write-Step ("Docker compose up USE_SUPERVISOR_V2=" + $env:USE_SUPERVISOR_V2)
+Write-Step "Docker compose up"
 if (-not (Test-DockerAvailable -TimeoutSec $DockerProbeTimeoutSec)) {
     throw "Docker Desktop is unavailable or still starting; retry after Docker reports Ready"
 }

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Any
 
 from src.core.parser.contract_inference import (
@@ -238,10 +238,6 @@ def proposal_from_dict(payload: dict[str, Any]) -> ContractProposal:
         source=str(payload.get("source") or "provided"),
         confidence=float(payload.get("confidence") or 0.8),
     )
-
-
-def proposal_to_public_dict(proposal: ContractProposal) -> dict[str, Any]:
-    return asdict(proposal)
 
 
 _SAMPLE_BLOCK_RE = re.compile(

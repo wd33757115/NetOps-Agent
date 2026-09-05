@@ -64,7 +64,7 @@ fallback_to_rag: false
 
 # LLM 结果分析 Skill（模式 A）
 
-作为 **Workflow 第三步** 或 Supervisor 链末步，读取前两步产物（JSON / manifest / artifact 元数据），调用 LLM 生成运维分析报告。
+作为 **Workflow 分析步骤** 或 Supervisor 链末步，读取前两步产物（JSON / manifest / artifact 元数据），调用 LLM 生成运维分析报告。
 
 ## Workflow 接入示例
 
@@ -97,3 +97,23 @@ stdout 末行 JSON：`{"success": true, "analysis": "...", ...}`
 
 <!-- SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com> -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
+
+## 核心能力
+
+根据上游结构化结果生成可阅读的分析说明。
+
+## 工作流程
+
+按输入优先级读取上游产物，调用模型分析并写入报告，返回结果和诊断。
+
+## 输出格式
+
+stdout 末行提供 success、analysis 等 JSON 字段，可产生 Markdown 文件供平台归档。
+
+## 示例
+
+在 Workflow 中把实际步骤结果绑定到 prev_result，再选择所需 analysis_focus。
+
+## 注意事项
+
+模型说明不替代确定性的资产、巡检结论或审批事实；上游失败不能被改写为成功。

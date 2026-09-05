@@ -81,14 +81,6 @@ def normalize_step_result(raw: dict[str, Any] | None) -> dict[str, Any]:
     return merged
 
 
-def merge_step_artifacts(*steps: dict[str, Any]) -> dict[str, Any]:
-    merged: dict[str, Any] = {}
-    for step in steps:
-        arts = (step or {}).get("artifacts") or {}
-        merged.update(arts)
-    return merged
-
-
 def _is_http_url(value: Any) -> bool:
     if not isinstance(value, str):
         return False

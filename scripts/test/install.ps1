@@ -41,7 +41,6 @@ if (-not (Test-Path $envFile)) {
     @"
 DEBUG=true
 ENFORCE_BFF_ORIGIN=false
-USE_SUPERVISOR_V2=true
 DEEPSEEK_API_KEY=
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
@@ -60,10 +59,10 @@ CELERY_RESULT_BACKEND=redis://localhost:6379/1
 }
 
 if (-not $SkipNpm) {
-    Write-Step "npm install"
+    Write-Step "npm ci"
     Push-Location (Join-Path $ProjectRoot "web\react_frontend")
     if (Get-Command npm -ErrorAction SilentlyContinue) {
-        npm install
+        npm ci
         Write-Ok "npm done"
     } else {
         Write-Warn "npm not found"

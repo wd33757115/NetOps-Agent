@@ -223,11 +223,6 @@ def _resolve_workflow_intent(query: str, source: str | None):
     return matched[0] if matched else None
 
 
-def _match_workflow_intent(query: str, source: str | None):
-    """兼容旧调用：等价于 _resolve_workflow_intent。"""
-    return _resolve_workflow_intent(query, source)
-
-
 def _merge_params_with_deps(
     task: SkillTaskSpec,
     intermediate_results: dict[str, Any] | None,
@@ -886,7 +881,7 @@ def _format_rag_failure_message(exc: Exception) -> str:
             "**建议**：\n"
             "1. 为 DeepSeek（或当前配置的 LLM）充值后重试；\n"
             "2. 运维类指令（如「生成防火墙策略」）在余额恢复后应自动匹配 Skill 执行，无需 RAG；\n"
-            "3. 若仅需执行 Skill，请确认 `USE_SUPERVISOR_V2=true` 且服务已重启。\n"
+            "3. 若未匹配到预期 Skill，请检查该技能是否启用及当前用户是否有执行权限。\n"
         )
     return f"[FAIL] RAG 查询失败: {msg}"
 

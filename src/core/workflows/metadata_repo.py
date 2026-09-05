@@ -207,19 +207,6 @@ def get_plugin_version(plugin_name: str, version: int) -> WorkflowPluginVersion 
     return _read_or_fallback(_read, None)
 
 
-def get_published_plugin_names() -> set[str]:
-    """返回 published 插件名集合（无元数据 = 视为 published，兼容 Code-First）。"""
-
-    def _read() -> set[str]:
-        with get_db_session() as db:
-            rows = db.query(WorkflowPluginMetadata).all()
-            if not rows:
-                return set()
-            return {m.name for m in rows if m.status == "published"}
-
-    return _read_or_fallback(_read, set())
-
-
 def is_plugin_chat_active(name: str) -> bool:
     """聊天触发是否应对该插件生效。"""
     meta = get_plugin_metadata(name)

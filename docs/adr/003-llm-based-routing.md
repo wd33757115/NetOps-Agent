@@ -4,6 +4,8 @@
 
 # 003: LLM-based Routing（基于 LLM 的语义路由）
 
+> 演进核对（2026-09-06）：原“纯 LLM 路由”方案已演进为触发匹配、可选语义检索、Workflow Intent 与 ExecutionPlan 协作。下文保留取舍记录，不表示所有请求都调用 LLM 路由，也不提供当前准确率证明；以[Supervisor 指南](../12_Supervisor路由与Skill执行流程.md)为准。
+
 ## 状态
 
 已接受

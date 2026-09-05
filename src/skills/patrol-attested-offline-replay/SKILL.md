@@ -1,4 +1,7 @@
 ---
+version: 1.0.0
+category: general
+triggers: []
 name: patrol-attested-offline-replay
 description: Replay independently attested offline-current CLI evidence into a separate production PatrolRun using the frozen CheckItem RuntimeBundle.
 entry_script: scripts/run.py
@@ -45,3 +48,23 @@ The source offline job and its original PatrolRun are never updated. Missing
 commands are persisted as explicit collection failures so downstream
 Assessment and reports can say `unable_to_determine` instead of silently
 claiming health.
+
+## 核心能力
+
+把经独立认证的当前状态证据导入独立生产 PatrolRun。
+
+## 工作流程
+
+校验 execution_plan、execution_plan_id 与 workflow_run_id，验证冻结来源和摘要，按固定运行包执行导入。
+
+## 输出格式
+
+返回 snapshot_run_id、runtime_asset_manifest、source_accounting，失败包含 failure_code 和 error。
+
+## 示例
+
+由已批准当前状态资格请求生成执行计划，再经对应 Workflow 调用本 Skill。
+
+## 注意事项
+
+不能把普通历史文件直接当作当前状态；原离线任务保持不变，缺命令记为失败证据。

@@ -42,3 +42,23 @@ fallback_to_rag: false
 This Skill replays candidate event rules against stored `NetworkChange` facts. It is an offline governance step. It does not activate rules and does not participate in the production event path.
 
 The output is safe for approval workflows because it contains sanitized change summaries instead of raw device CLI output.
+
+## 核心能力
+
+用保存的 NetworkChange 对候选事件规则进行离线回放与冲突检查。
+
+## 工作流程
+
+读取 candidate_rules，可按 run_ids 限定范围，执行解释器并汇总命中及与 active 规则的冲突。
+
+## 输出格式
+
+返回回放统计、命中与冲突证据，由审批流程判断是否满足画像要求。
+
+## 示例
+
+选定历史 run_ids 和待审 candidate_rules，检查其故障、恢复和冲突结果。
+
+## 注意事项
+
+回放不激活资产；样本数量或命中数量不能单独证明规则正确。

@@ -1,332 +1,67 @@
 <!-- SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com> -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# 04 API 接口文档
+# API 使用与源码索引
 
-> 版本：2026-05-24  
-> **对外入口：** Django BFF `http://localhost:8001/api/`  
-> **内部网关：** FastAPI `http://localhost:8000`（生产 Docker 中通常不映射宿主机）
+核对日期：2026-09-06。浏览器使用 Django BFF 的 `/api/` 路由；FastAPI 内部业务接口通常以 `/api/v1/` 开头。准确参数、分页、状态与响应模型以当前 Pydantic/OpenAPI 及客户端类型为准，避免维护重复端点清单。
 
-OpenAPI 交互文档：`http://localhost:8000/docs`
+## 入口对应
 
----
+| 功能 | BFF 前缀 | 内部实现 |
+| --- | --- | --- |
+| 认证与用户 | `/api/auth/` | [auth.py](../web/django_backend/bff/auth.py)、[user_admin.py](../web/django_backend/bff/user_admin.py) |
+| 桌面布局 | `/api/auth/me/desktop-layout/` | [desktop.py](../web/django_backend/bff/views/desktop.py) |
+| 设备 | `/api/devices/` | [devices_api.py](../src/gateway/devices_api.py)，`/api/v1/devices` |
+| 规则与 Parser | `/api/parser/` | [parser_api.py](../src/gateway/parser_api.py)，`/api/v1/parser` |
+| 网络巡检 | `/api/patrol/` | [patrol_api.py](../src/gateway/patrol_api.py)，`/api/v1/patrol` |
+| 离线巡检 / 规则来源 | `/api/patrol/offline-jobs/`、`/api/parser/asset-source-jobs/` | [offline_patrol_api.py](../src/gateway/offline_patrol_api.py)，对应内部 `/api/v1/` 路径 |
+| 公文 | `/api/official-documents/` | [official_documents_api.py](../src/gateway/official_documents_api.py)，`/api/v1/official-documents` |
+| 对话、Skill、Workflow、存储 | `/api/chat/`、`/api/skills/`、`/api/workflows/`、`/api/storage/` | [BFF 路由表](../web/django_backend/bff/urls.py)和[网关注册](../src/gateway/main.py) |
 
-## 1. 认证
+其他端点从 [BFF 路由表](../web/django_backend/bff/urls.py)查找，客户端适配见 [services](../web/react_frontend/src/services/)。不要把页面地址如 `/apps/patrol` 当作 API。
 
-### 1.1 JWT 登录（BFF）
+本地已启动并允许本地调试的 FastAPI 可通过 `/docs`、`/openapi.json` 查看实时合同。生产 BFF 来源检查可能阻止直连文档端点；不要为了查看 OpenAPI 而开放内部网关。
 
-```http
-POST /api/auth/login/
-Content-Type: application/json
+## 认证与权限
 
-{"username": "admin", "password": "admin123"}
-```
+登录、刷新、登出使用 `/api/auth/login/`、`refresh/`、`logout/`；当前用户为 `GET /api/auth/me/`。BFF 校验 JWT 并转发用户、角色、会话与能力信息，后端仍执行业务授权。
 
-**响应：**
+`netops.configure` 保护设备配置和规则制作。管理员启动/授权自动发布与普通配置权限不同；只具有配置权限的操作员不能自行获得发布授权。隐藏菜单不能代替 API 校验，也不能代替按用户或组织进行数据隔离。
 
-```json
-{
-  "access": "<jwt_access>",
-  "refresh": "<jwt_refresh>",
-  "user": {"id": 1, "username": "admin", "role": "admin"}
-}
-```
+下载对象、文档版本、个人桌面布局和会话须保留对应归属校验。服务端从认证结果确定用户，不能接受客户端任意指定其他 user_id 作为所有者。
 
-### 1.2 后续请求
+## 响应与错误
 
-```http
-Authorization: Bearer <jwt_access>
-```
+成功响应按各端点合同处理。文件下载、流式事件、异步提交与普通 JSON 不使用同一种消费方式，不能一律从 `data` 字段读取。
 
-BFF 代理 FastAPI 时透传 `Authorization`，并注入可信头：
-
-- `X-Forwarded-From: django-bff`
-- `X-Internal-Request: true`
-- `X-Request-Id: <uuid>`（BFF 中间件生成）
-
-### 1.3 其他认证端点（BFF）
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/auth/refresh/` | 刷新 token |
-| POST | `/api/auth/logout/` | 登出 |
-| GET | `/api/auth/me/` | 当前用户 |
-| POST | `/api/auth/change-password/` | 修改密码 |
-| GET/POST | `/api/auth/users/` | 用户列表/创建（admin） |
-| GET/PUT/DELETE | `/api/auth/users/{id}/` | 用户详情 |
-| POST | `/api/auth/users/{id}/reset-password/` | 重置密码 |
-
-### 1.4 FastAPI 直连限制
-
-`ENFORCE_BFF_ORIGIN=true` 时，非 BFF 来源请求返回：
-
-```json
-{
-  "success": false,
-  "error": {"code": "bff_origin_required", "message": "..."},
-  "request_id": "..."
-}
-```
-
----
-
-## 2. 统一响应约定
-
-### 2.1 成功
-
-多数接口返回业务 JSON；聊天接口含 `response`、`thread_id`、`agent_type` 等。
-
-### 2.2 错误信封（P2）
+统一异常处理见 [exception_handlers.py](../src/gateway/exception_handlers.py)，稳定错误码见 [exceptions.py](../src/core/exceptions.py)。典型错误：
 
 ```json
 {
   "success": false,
   "error": {
-    "code": "skill_not_found",
-    "message": "Skill xxx 不存在",
+    "code": "validation_error",
+    "message": "参数校验失败",
     "details": {}
   },
-  "request_id": "req-abc123"
+  "request_id": "请求标识"
 }
 ```
 
-错误码详见 [09_错误码定义文档](./09_错误码定义文档.md)。
+| HTTP 状态 | 排查方向 |
+| --- | --- |
+| 401 | token 缺失、过期或会话吊销 |
+| 403 | 用户/能力限制，或未通过 BFF 来源检查 |
+| 409 | 版本冲突、输入/发布状态变化或业务门禁冲突；保留用户未保存内容 |
+| 422 | 请求字段或业务合同校验；查看 error.details，不能只凭状态码判断认证问题 |
+| 503 / 504 | 所需服务不可用或超时；检查目标队列、存储及网关日志 |
 
----
+调试使用响应中的 request_id 关联日志。不要向界面直接展示内部对象存储凭据、连接串或未过滤的异常堆栈。
 
-## 3. 系统与健康
+## 长任务与并发
 
-| BFF 路径 | FastAPI 路径 | 方法 | 说明 |
-|----------|--------------|------|------|
-| `/api/health/` | `/health` | GET | 健康检查 |
-| `/api/health/diagnostics/` | `/health/diagnostics` | GET | 诊断（PG/Redis/RAG 等） |
-| `/api/gateway/` | `/` | GET | 网关信息 |
+规则制作、公文和巡检可能异步返回任务标识。轮询或订阅状态，成功后按服务端结果打开产物；刷新页面应恢复已有任务，不重复启动。
 
-**健康检查响应示例：**
+桌面布局、公文保存及候选应用使用版本/修订校验；冲突时显式重新读取或保留本地草稿。取消或暂停不意味着已经在执行的外部调用立即消失，迟到结果需由服务端租约/版本检查拒绝。
 
-```json
-{
-  "status": "healthy",
-  "services": {"postgres": true, "rag": true}
-}
-```
-
----
-
-## 4. 聊天
-
-| BFF 路径 | FastAPI 路径 | 方法 | 说明 |
-|----------|--------------|------|------|
-| `/api/chat/` | `/api/v1/chat` | POST | 同步聊天 |
-| `/api/chat/stream/` | `/api/v1/chat/stream` | POST | SSE 流式聊天 |
-| `/api/chat/upload/` | `/api/v1/chat/upload` | POST | 上传附件 |
-| `ws://host/ws/v1/chat` | `/ws/v1/chat` | WebSocket | 实时对话 |
-
-### 4.1 同步聊天
-
-**请求：**
-
-```json
-{
-  "query": "生成防火墙策略，工单号 rg001",
-  "thread_id": "可选",
-  "conversation_id": "可选",
-  "source": "chat",
-  "ticket_id": "rg001",
-  "metadata_filters": {}
-}
-```
-
-**响应：**
-
-```json
-{
-  "response": "...",
-  "thread_id": "thread-abc",
-  "agent_type": "workflow_starter",
-  "references": [],
-  "trace_id": "lf-xxx"
-}
-```
-
-### 4.2 SSE 流式聊天
-
-**请求：** 同同步聊天
-
-**SSE 事件类型：**
-
-| event | 说明 |
-|-------|------|
-| `trace_start` | trace_id、langfuse_url（admin） |
-| `status` | 运行状态 |
-| `node_start` | LangGraph 节点开始（admin/operator） |
-| `trace_update` | 进度摘要 |
-| `final_answer` | 最终回答 + trace_id |
-| `error` | 错误信息 |
-
-### 4.3 任务状态
-
-| BFF | FastAPI | 方法 |
-|-----|---------|------|
-| `/api/tasks/{task_id}/` | `/api/v1/tasks/{task_id}` | GET |
-
----
-
-## 5. 对话 CRUD
-
-| BFF 路径 | FastAPI 路径 | 方法 |
-|----------|--------------|------|
-| `/api/conversations/` | `/api/v1/conversations` | GET, POST |
-| `/api/conversations/{id}/` | `/api/v1/conversations/{id}` | GET, PUT, DELETE |
-| `/api/conversations/{id}/messages/` | `/api/v1/conversations/{id}/messages` | POST |
-| `/api/conversations/{id}/summarize/` | `/api/v1/conversations/{id}/summarize` | POST |
-
----
-
-## 6. RAG
-
-| BFF | FastAPI | 方法 |
-|-----|---------|------|
-| `/api/rag/search/` | `/api/v1/rag/search` | POST |
-
-**请求：**
-
-```json
-{
-  "query": "防火墙配置命令",
-  "top_k": 6,
-  "metadata_filters": {"category": "安全"}
-}
-```
-
----
-
-## 7. ITSM Webhook
-
-| BFF | FastAPI | 方法 |
-|-----|---------|------|
-| `/api/itsm/webhook/` | `/api/v1/itsm/webhook` | POST |
-| `/api/itsm/webhook/callback/` | `/api/v1/itsm/webhook/callback` | POST |
-| `/api/itsm/webhook/firewall-policy/` | `/api/v1/itsm/webhook/firewall-policy` | POST |
-
-动态路由：`POST /api/v1/itsm/webhook/{route_key}`
-
----
-
-## 8. Skill 管理
-
-前缀：`/api/skills/` → FastAPI `/api/v1/skills`
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/` | 列表 |
-| GET | `/stats/` | 统计 |
-| POST | `/` | 创建 |
-| GET/PUT/DELETE | `/{skill_name}/` | 详情/更新/删除 |
-| GET/PUT | `/{skill_name}/content/` | SKILL.md 内容 |
-| GET/POST | `/{skill_name}/files/` | 附属文件 |
-| PATCH | `/{skill_name}/toggle/` | 启用/禁用 |
-| POST | `/{skill_name}/reload/` | 热加载 |
-| POST | `/{skill_name}/test-run/` | 测试执行 |
-| GET | `/{skill_name}/schema/` | 输入 schema |
-| POST | `/reload-all/` | 全量重载 |
-
----
-
-## 9. 知识库
-
-前缀：`/api/knowledge/` → FastAPI `/api/v1/knowledge`
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET/POST | `/documents/` | 列表/上传 |
-| GET | `/documents/{path}/content/` | 文档内容 |
-| DELETE | `/documents/{path}/` | 删除 |
-| GET | `/stats/` | 统计 |
-| POST | `/reindex/` | 重建索引 |
-
----
-
-## 10. Workflow
-
-前缀：`/api/workflows/` → FastAPI `/api/v1/workflows`
-
-### 10.1 模板与插件
-
-| 方法 | BFF 路径 | 说明 |
-|------|----------|------|
-| GET | `/templates/` | 模板列表 |
-| GET | `/templates/{name}/` | 模板详情 |
-| GET | `/templates/{name}/dsl/` | DSL 源码 |
-| GET | `/plugins/` | 插件列表 |
-| POST | `/import/` | 导入插件 |
-| POST | `/validate/` | 校验 YAML |
-| POST | `/preview/` | 预览 |
-| POST | `/generate/` | AI 生成 Workflow |
-| POST | `/reload/` | 重载注册表 |
-| POST | `/plugins/{name}/publish/` | 发布 |
-| GET | `/market/templates/` | 模板市场 |
-
-### 10.2 运行与监控
-
-| 方法 | BFF 路径 | 说明 |
-|------|----------|------|
-| GET | `/runs/` | 运行列表 |
-| POST | `/runs/test/` | 测试运行 |
-| GET | `/{run_id}/` | 运行详情 |
-| GET | `/{run_id}/timeline/` | 时间线 |
-| GET | `/{run_id}/events/stream/` | SSE 进度流 |
-
-**运行详情含：** `status`、`context`、`langfuse_url`（如已配置 Langfuse）
-
----
-
-## 11. 通知
-
-前缀：`/api/notifications/` → FastAPI `/api/v1/notifications`
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/` | 列表 |
-| POST | `/clear/` | 清空 |
-| POST | `/{id}/read/` | 标记已读 |
-
----
-
-## 12. 网盘（Storage）
-
-前缀：`/api/storage/` → FastAPI `/api/v1/storage`
-
-| 分组 | 主要路径 |
-|------|----------|
-| 健康 | `/health/` |
-| 团队 | `/teams/`、`/teams/{id}/members/` |
-| 目录 | `/folders/`、`/folders/tree/`、`/folders/{id}/move/` |
-| 文件 | `/list/`、`/upload/init/`、`/upload/complete/`、`/files/{id}/download/` |
-| 分享 | `/share/`、`/share/folder/` |
-
----
-
-## 13. BFF 与 FastAPI 路径映射规则
-
-1. 浏览器/前端统一访问 **`http://localhost:8001/api/...`**
-2. BFF view 将路径映射为 FastAPI `/api/v1/...`（见 `web/django_backend/bff/views/`）
-3. 生产环境 React Nginx 将 `/api/`、`/ws/` 代理至 Django（`deployment/nginx.conf`）
-
----
-
-## 14. 演示账号
-
-| 用户 | 密码 | 角色 |
-|------|------|------|
-| admin | admin123 | admin |
-| operator | operator123 | operator |
-| viewer | viewer123 | viewer |
-
----
-
-## 15. 相关文档
-
-- 认证细节：[auth-rbac-plan.md](./auth-rbac-plan.md)
-- SSE / Langfuse：[langfuse-sse-plan.md](./langfuse-sse-plan.md)
-- 错误码：[09_错误码定义文档](./09_错误码定义文档.md)
+具体操作顺序见 [自动制作](patrol-rule-autopilot-guide-2026-09-05.md)、[网络巡检](patrol-workflow-refactor-guide-2026-09-05.md)与[公文](official-document-workspace-guide-2026-09-05.md)。API 的读写权限、幂等与失败语义应通过对应测试验证，见 [维护指南](maintenance.md)。

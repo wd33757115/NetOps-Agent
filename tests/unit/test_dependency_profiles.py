@@ -32,7 +32,7 @@ def test_optional_python_dependencies_are_not_in_default_runtime_set():
     assert groups["documents"]["optional"] is True
     assert groups["qdrant"]["optional"] is True
     assert groups["observability"]["optional"] is True
-    assert groups["legacy-ui"]["optional"] is True
+    assert "legacy-ui" not in groups
 
 
 def test_core_data_plane_dependency_set_excludes_optional_product_roles():

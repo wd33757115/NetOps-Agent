@@ -76,6 +76,10 @@ fallback_to_rag: false
 > **执行说明**：本 Skill 为短时轻量任务，**必须同步执行**（`execution_mode: sync`），**禁止**走 Celery。  
 > 运行时由 `official_document_writing_handler` 完成：LLM 输出 JSON → `scripts/generate_official_document.py` / `render.py` 生成 DOCX → MinIO 返回下载链接。
 
+## 核心能力
+
+旧聊天 Skill 同步完成结构化公文生成、标准 Word 渲染与附件交付，也提供审核和指导。独立公文工作台使用自己的异步任务和版本 API，本 Skill 的同步约束不适用于该工作台。
+
 ## 核心原则（必须遵守）
 
 1. **撰写模式（write）必须输出结构化 JSON**，禁止只返回纯文字指导
@@ -84,14 +88,14 @@ fallback_to_rag: false
 4. 遵循 GB/T 9704-2012；参考 `references/` 与 `checklists/`
 5. 审核/指导模式（review/guide）可返回文本，但 write 模式必须走完整链路
 
-## 核心工作流程（write）
+## 工作流程（write）
 
 1. **需求确认**：从 `user_query` 推断文种、主送机关、事由
 2. **结构化生成**：LLM 输出符合下方 Schema 的 JSON
 3. **模板渲染**：根据 `doc_type` 选择 `assets/templates/{文种}.docx`，docxtpl 填充
 4. **上传交付**：DOCX 上传 MinIO，返回 `download_url` 与 JSON 预览
 
-## 输出要求（硬性）
+## 输出格式（硬性）
 
 ### 必须输出的 JSON Schema
 
@@ -158,7 +162,7 @@ fallback_to_rag: false
 
 ## 注意事项
 
-- 同步执行，典型耗时 0.5～3 秒（视 LLM 与 MinIO）
+- 同步执行，耗时取决于模型与存储；不提供固定秒数承诺
 - MinIO 不可用时返回 JSON 与文本预览，并提示下载失败原因
 - 复杂合并附件场景可后续扩展 `execution_mode: async`，默认不使用
 

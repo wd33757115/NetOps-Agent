@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Mapping
 from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 import yaml
 
@@ -53,41 +54,6 @@ def _string_list(value: Any, *, label: str) -> list[str]:
         if normalized not in seen:
             output.append(normalized)
             seen.add(normalized)
-    return output
-
-
-def _normalize_mappings(
-    value: Any,
-    *,
-    reject_ambiguous_aliases: bool,
-) -> dict[str, list[str]]:
-    if value is None:
-        return {}
-    if not isinstance(value, Mapping):
-        raise ValueError("schema_field_aliases must be an object")
-    output: dict[str, list[str]] = {}
-    owners: dict[str, str] = {}
-    for raw_canonical, raw_aliases in value.items():
-        canonical = _value_name(raw_canonical, label="canonical Value")
-        aliases = [
-            alias
-            for alias in _string_list(
-                raw_aliases,
-                label=f"schema_field_aliases.{canonical}",
-            )
-            if alias != canonical
-        ]
-        if not aliases:
-            continue
-        if reject_ambiguous_aliases:
-            for alias in aliases:
-                owner = owners.get(alias)
-                if owner is not None and owner != canonical:
-                    raise ValueError(
-                        f"TextFSM Value alias {alias!r} maps to both {owner!r} and {canonical!r}"
-                    )
-                owners[alias] = canonical
-        output[canonical] = aliases
     return output
 
 
@@ -211,29 +177,6 @@ def save_value_mapping_document(
     )
     temporary.replace(target)
     return normalized
-
-
-def merge_schema_field_aliases(
-    builtin: Mapping[str, Any] | None,
-    custom: Mapping[str, Any] | None,
-) -> dict[str, list[str]]:
-    merged = _normalize_mappings(
-        builtin or {},
-        reject_ambiguous_aliases=False,
-    )
-    custom_normalized = _normalize_mappings(
-        custom or {},
-        reject_ambiguous_aliases=True,
-    )
-    for canonical, aliases in custom_normalized.items():
-        current = list(merged.get(canonical) or [])
-        seen = {item.casefold() for item in current}
-        for alias in aliases:
-            if alias.casefold() not in seen:
-                current.append(alias)
-                seen.add(alias.casefold())
-        merged[canonical] = current
-    return merged
 
 
 def parser_value_mapping_view() -> dict[str, Any]:

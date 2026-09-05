@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from src.core.parser.parser_ir import EvidenceCapture, compile_evidence_line
+from src.core.parser.evidence_line import EvidenceCapture, compile_evidence_line
 from src.core.parser.textfsm_input import TEXTFSM_END_OF_INPUT
 
 from ..samples import ParserSample

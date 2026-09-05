@@ -30,16 +30,8 @@ from src.core.events.idempotency import (
 logger = logging.getLogger(__name__)
 
 
-class RetryableConsumerError(RuntimeError):
-    """A transient handler failure that should remain pending before DLQ."""
-
-
 class PermanentConsumerError(RuntimeError):
     """A valid event that cannot succeed on retry."""
-
-
-class PoisonMessageError(PermanentConsumerError):
-    """An invalid envelope or payload that should be quarantined immediately."""
 
 
 class StreamConsumer(ABC):

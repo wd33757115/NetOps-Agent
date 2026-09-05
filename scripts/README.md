@@ -1,86 +1,36 @@
 <!-- SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com> -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# NetOps 部署脚本
+# 脚本目录
 
-本目录提供**测试环境**与**生产环境**的安装、启动、关闭脚本。
+所有命令默认从仓库根目录执行。完整步骤见 [开发与构建](../docs/06_环境%20&%20编译构建说明.md)、[部署](../docs/10_部署安装手册.md)和[维护与验证](../docs/maintenance.md)。
 
-## 测试环境（本地开发）
+| 目录 / 文件 | 用途 |
+| --- | --- |
+| `test/install.ps1` | Windows 虚拟环境、Python 依赖、锁定的 npm 依赖和中间件镜像 |
+| `test/start.ps1` / `test/stop.ps1` | 本地中间件、核心/AI Worker、Beat、API、BFF 和前端 |
+| `prod/` | Compose 预检、启动、停止、冒烟和备份 |
+| `migrate_db.py` | Alembic 业务 schema 升级；`--check` 只验证版本 |
+| `init_db.py` | 业务 schema 与 LangGraph checkpoint 初始化 |
+| `migrate_sqlite_data.py` / `migrate_django_sqlite.py` | 历史 SQLite 数据迁入；保留用于旧部署升级 |
+| `docs/audit_docs.py` | 文档登记、过期状态和链接检查 |
+| `deprecations/` | 历史路径调用观测及退出证据 |
+| `validate_ps1.ps1` | PowerShell 语法检查，不运行被检查脚本 |
+| `test/` 中的 Python 工具 | 样本回放、业务诊断与集成验收；先阅读参数和数据副作用 |
 
-适用于 Windows 本地联调：Docker 跑中间件，应用进程本地热重载。
-
-| 脚本 | 说明 |
-|------|------|
-| `scripts/test/install.ps1` | 创建 venv、安装 Python/npm 依赖、拉取中间件镜像 |
-| `scripts/test/start.ps1` | 启动中间件 + FastAPI + Django + React |
-| `scripts/test/stop.ps1` | 停止本地进程与中间件 |
-| `scripts/test/e2e_supervisor_v2.ps1` | 经 Django BFF 做 Supervisor v2 三类联调 |
+## 本地联调
 
 ```powershell
-# 首次
 .\scripts\test\install.ps1
-
-# 启动（默认 USE_SUPERVISOR_V2=true）
-.\scripts\test\start.ps1
-
-# 联调
-.\scripts\test\e2e_supervisor_v2.ps1
-
-# 关闭
-.\scripts\test\stop.ps1
+.\scripts\test\start.ps1 -SkipLangfuse
 ```
 
-中间件 Compose 文件：`deployment/docker-compose.middleware.yml`
+默认前端是构建预览，热更新加 `-DevMode`。已有中间件时加 `-SkipMiddleware`；停止时可加 `-KeepMiddleware` / `-KeepLangfuse`。日志与进程信息位于 `.runtime/test/`。
 
-日志与 PID：`.runtime/test/logs/`、`.runtime/test/pids.json`
+Supervisor 入口固定为 v2，不再提供 v1 启动选项。不要通过旧文档中的 `USE_SUPERVISOR_V2` 变量判断当前执行方式。
 
-## 生产环境（全 Docker）
+## 测试与生产
 
-| 脚本 | 说明 |
-|------|------|
-| `scripts/prod/install.ps1` | Windows：拉镜像、构建 django/react |
-| `scripts/prod/start.ps1` | Windows：docker compose up -d + migrate |
-| `scripts/prod/stop.ps1` | Windows：docker compose down |
-| `scripts/prod/install.sh` | Linux：同上 |
-| `scripts/prod/start.sh` | Linux：同上 |
-| `scripts/prod/stop.sh` | Linux：同上（`--volumes` 删卷） |
+完整测试应使用独立测试数据库、队列和对象存储。`test/` 下的业务回放脚本可能创建样本、任务或资产，文件位于测试目录不代表没有数据副作用。
 
-```powershell
-.\scripts\prod\install.ps1
-.\scripts\prod\start.ps1
-.\scripts\prod\stop.ps1
-```
-
-```bash
-chmod +x scripts/prod/*.sh
-./scripts/prod/install.sh
-./scripts/prod/start.sh
-./scripts/prod/stop.sh
-```
-
-Compose 文件：`deployment/docker-compose.yml`
-
-## 环境变量
-
-| 变量 | 测试默认 | 生产建议 |
-|------|----------|----------|
-| `USE_SUPERVISOR_V2` | `true` | `true` |
-| `ENFORCE_BFF_ORIGIN` | `false` | `true` |
-| `DEBUG` | `true` | `false` |
-
-## 自动化测试
-
-```powershell
-# PowerShell 脚本语法校验（Windows 5.1 需 UTF-8 BOM，已内置）
-.\scripts\validate_ps1.ps1
-
-# Supervisor v2 图流程（Mock LLM，无需 API Key）
-venv\Scripts\python.exe -m pytest tests/agents/test_graph_v2.py tests/integration/test_supervisor_v2_e2e.py -v
-```
-
-## 常见问题
-
-1. **`﻿<#` 无法识别 / param 赋值无效**：不要用 UTF-8 BOM；不要用文件头 `<# ... #>` 块注释。请拉取最新脚本（已改为 `#` 行注释 + UTF-8 无 BOM）。
-2. **正确执行方式**：`.\scripts\validate_ps1.ps1`（不要用点号源入 `. .\scripts\...`）。
-3. **控制台中文乱码**：可 `chcp 65001`，不影响脚本执行。
-4. **Docker 未启动**：先开 Docker Desktop，或 `.\scripts\test\start.ps1 -SkipMiddleware`。
+生产脚本默认使用 core profile；AI 需要叠加 `deployment/docker-compose.ai.yml`。已有正式账号时使用 `start.ps1 -SkipSeed` / `SKIP_SEED=1`，避免演示用户命令重设账号。具体限制及流程见 [生产脚本说明](prod/README.md)。

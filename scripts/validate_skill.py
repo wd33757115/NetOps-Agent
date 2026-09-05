@@ -42,7 +42,7 @@ if sys.platform == "win32":
 BASE_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
-from src.skill_system.metadata import parse_frontmatter, parse_skill_md
+from src.skill_system.metadata import parse_frontmatter
 
 REQUIRED_FRONTMATTER_FIELDS = [
     "name", "version", "description", "category", "triggers",
@@ -114,11 +114,11 @@ def validate_frontmatter(content: str, result: ValidationResult):
         return
 
     for field in REQUIRED_FRONTMATTER_FIELDS:
-        if field not in frontmatter or not frontmatter[field]:
+        if field not in frontmatter or (field != "triggers" and not frontmatter[field]):
             result.error(f"frontmatter 缺少必填字段: {field}")
 
     for field in RECOMMENDED_FRONTMATTER_FIELDS:
-        if field not in frontmatter or not frontmatter[field]:
+        if field not in frontmatter or frontmatter[field] is None:
             result.warn(f"frontmatter 缺少推荐字段: {field}")
 
     if "name" in frontmatter:
@@ -133,11 +133,12 @@ def validate_frontmatter(content: str, result: ValidationResult):
 
     if "triggers" in frontmatter:
         triggers = frontmatter["triggers"]
-        if not triggers or not isinstance(triggers, list) or len(triggers) == 0:
-            result.error("triggers 不能为空")
-        else:
-            if len(triggers) < 2:
-                result.warn("triggers 推荐至少 2 个触发词")
+        if not isinstance(triggers, list) or any(
+            not isinstance(item, str) or not item.strip() for item in triggers
+        ):
+            result.error("triggers 必须是非空字符串组成的列表；内部 Skill 可显式使用 []")
+        elif len(triggers) == 1:
+            result.warn("聊天 Skill 推荐至少 2 个触发词")
 
     if "category" in frontmatter:
         valid_categories = ["network", "security", "compute", "storage", "monitoring", "general", "test"]
@@ -207,19 +208,16 @@ def validate_body(content: str, result: ValidationResult):
 
 def validate_format(content: str, result: ValidationResult):
     """验证文件格式"""
-    lines = content.split("\n")
-
-    if len(lines) > 0 and lines[0] != "---":
+    normalized = re.sub(r"^\s*(?:<!--.*?-->\s*)*", "", content, flags=re.DOTALL)
+    if not normalized.startswith("---\n") and not normalized.startswith("---\r\n"):
         result.error("文件必须以 --- 开头（frontmatter 标记）")
 
-    if not content.strip().endswith("\n"):
+    if not content.endswith("\n"):
         result.warn("文件末尾建议添加空行")
 
     if "\r\n" in content:
         result.info_msg("检测到 Windows 换行符 (CRLF)")
 
-    if content.startswith("\n") or content.startswith("\r\n"):
-        result.error("文件开头不能有空行")
 
 
 def validate_skill_file(file_path: str, strict: bool = False) -> ValidationResult:
@@ -381,6 +379,8 @@ def main():
             ],
         }
         print(json.dumps(output, ensure_ascii=False, indent=2))
+        if output["failed"]:
+            raise SystemExit(1)
     else:
         print("=" * 60)
         print("  Skill 格式验证 v2.0")

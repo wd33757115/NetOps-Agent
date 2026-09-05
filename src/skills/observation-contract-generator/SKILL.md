@@ -99,7 +99,7 @@ Change Detector
 - 验证报告不回显完整记录，不保存原始 CLI。
 - 契约变更必须创建新版本，不能覆盖历史契约。
 - 新的结构化运行时不再创建或更新 ObservationContract。Projection 绑定到已选 CheckItem 版本，随 CommandAdapter 版本审批和发布。
-- Projection 候选只能使用已选 CheckItem 的标准字段和已选 Parser 的源字段；未映射枚举必须 fail-closed，且候选必须经本地验证和人工确认。
+- Projection 候选只能使用已选 CheckItem 的标准字段和已选 Parser 的源字段；未映射枚举必须 fail-closed，且候选必须经本地验证；发布由上层手工审批或管理员限定授权流程决定。
 
 ## V2 Projection 模式
 
@@ -110,7 +110,7 @@ projection_candidate（最多三轮候选）
   ↓
 projection_validate / migrate_adapter（本地确定性验证）
   ↓
-人工确认后作为 CommandAdapter 新版本发布
+验证后由上层受控流程作为 CommandAdapter 新版本发布
 ```
 
 `migrate_adapter` 只复制旧 Adapter 和 ObservationContract 中已经明确的表达式、枚举映射和单位换算。无法无歧义迁移、缺少 Parser 字段合同或缺少原始 CLI 回放证明时，结果会保持阻塞，绝不猜测补全。
@@ -149,3 +149,23 @@ projection_validate / migrate_adapter（本地确定性验证）
   ]
 }
 ```
+
+## 核心能力
+
+生成并本地验证绑定检查项和 Parser 的 CommandAdapter v2 Projection，保留受开关约束的历史模式。
+
+## 工作流程
+
+读取所选检查项和 Parser 字段，生成 Projection；或对已有候选执行验证、对旧映射做可证明的迁移。
+
+## 输出格式
+
+返回 Projection 候选、校验诊断或迁移阻断信息；以具体 mode 的结果为准。
+
+## 示例
+
+使用下文 projection_candidate 输入，并在实际 Parser 记录上验证其标准输出。
+
+## 注意事项
+
+本 Skill 只准备候选。手工或管理员授权的自动发布均由上层流程执行，必须满足对应验证及授权门禁。

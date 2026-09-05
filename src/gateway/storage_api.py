@@ -22,7 +22,6 @@ from src.storage.schemas import (
     FolderCreateRequest,
     FolderResponse,
     FolderTreeNode,
-    CopyFileRequest,
     MoveRequest,
     RenameRequest,
     ShareFileRequest,

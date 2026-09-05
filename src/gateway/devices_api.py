@@ -670,18 +670,6 @@ def _production_parser_coverage(
     return PatrolTool._production_coverage(device, commands)
 
 
-def _blocking_parser_coverage(
-    device: dict[str, Any], commands: list[str], mode: str
-) -> list[dict[str, Any]]:
-    from src.core.patrol.coverage_policy import decide_parser_coverage
-
-    decision = decide_parser_coverage(
-        coverage=_production_parser_coverage(device, commands),
-        mode=mode,
-    )
-    return list(decision.get("violations") or [])
-
-
 def _runtime_rule_asset_health(
     *,
     mode: str,

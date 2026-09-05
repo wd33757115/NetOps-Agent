@@ -30,12 +30,6 @@ from src.core.patrol.statuses import derive_command_status, normalize_execution_
 from src.infrastructure.db.postgres import require_postgres_connection
 
 
-class ParserCoverageError(RuntimeError):
-    def __init__(self, message: str, violations: list[dict[str, Any]]):
-        super().__init__(message)
-        self.violations = violations
-
-
 def _non_repairable_output(raw_text: str) -> bool:
     text = (raw_text or "").lower()
     return len(text.strip()) < 20 or any(

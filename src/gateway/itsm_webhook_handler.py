@@ -56,10 +56,3 @@ async def handle_itsm_webhook(route_key: str, body: dict[str, Any]) -> JSONRespo
                 "query_endpoint": "",
             },
         )
-
-
-async def handle_itsm_webhook_legacy(path: str, body: dict[str, Any]) -> JSONResponse:
-    plugin = get_itsm_webhook_registry().get_by_path(path)
-    if not plugin:
-        raise HTTPException(status_code=404, detail=f"未找到 Webhook 插件: {path}")
-    return await handle_itsm_webhook(plugin.route_key, body)

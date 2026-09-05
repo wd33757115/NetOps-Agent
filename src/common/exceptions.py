@@ -184,20 +184,6 @@ class ValidationError(NetOpsBaseError):
         )
 
 
-class NetworkDeviceError(NetOpsBaseError):
-    """网络设备错误"""
-
-    def __init__(self, device_name: str, message: str, original_error: Exception = None):
-        self.device_name = device_name
-        super().__init__(
-            f"设备 '{device_name}' 操作失败: {message}",
-            details={
-                "device_name": device_name,
-                "original_error": str(original_error)
-            } if original_error else {"device_name": device_name}
-        )
-
-
 class StorageError(NetOpsBaseError):
     """存储错误"""
 

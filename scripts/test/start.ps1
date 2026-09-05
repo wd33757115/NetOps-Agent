@@ -10,7 +10,6 @@ param(
     [switch]$SkipMiddleware,
     [switch]$SkipLangfuse,
     [switch]$AllowNoDocker,
-    [switch]$UseSupervisorV1,
     [switch]$DevMode
 )
 
@@ -238,7 +237,6 @@ $migrateLog = Join-Path $logDir "django-migrate.log"
 Pop-Location
 Write-ColorOutput '  [OK] migrate done (log: django-migrate.log)' "Green"
 
-$useV2 = if ($UseSupervisorV1) { "false" } else { "true" }
 $pids = @{}
 $py = Escape-SingleQuotedPath $venvPython
 
@@ -247,7 +245,6 @@ $jwtSecret = if ($dotEnv.ContainsKey("JWT_SECRET_KEY")) { $dotEnv["JWT_SECRET_KE
 $fastapiEnv = @{
     DEBUG = "true"
     ENFORCE_BFF_ORIGIN = "false"
-    USE_SUPERVISOR_V2 = $useV2
     POSTGRES_HOST = "localhost"
     REDIS_HOST = "localhost"
     QDRANT_HOST = "localhost"
@@ -339,7 +336,7 @@ if ($DevMode) {
 }
 New-LauncherScript -Path $fastapiLauncher -WorkingDirectory $ProjectRoot -EnvVars $fastapiEnv -CommandLine $fastapiCmd -LogFile $fastapiLog
 $pids.fastapi = (Start-LauncherProcess -LauncherPath $fastapiLauncher).Id
-Write-ColorOutput "  [OK] FastAPI PID=$($pids.fastapi) USE_SUPERVISOR_V2=$useV2" "Green"
+Write-ColorOutput "  [OK] FastAPI PID=$($pids.fastapi)" "Green"
 
 Write-ColorOutput "[Step 6/7] Start Django BFF :$DjangoPort ..." "Yellow"
 $djangoLog = Join-Path $logDir "django.log"

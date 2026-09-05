@@ -48,3 +48,23 @@ fallback_to_rag: false
 # Event Rule Generator
 
 这个 Skill 只生成候选 EventRule，不激活生产规则。候选规则必须通过 `event-rule-validator` 后进入审批。
+
+## 核心能力
+
+从标准规则合同和 ChangePolicy 准备故障、恢复及相关事件规则候选。
+
+## 工作流程
+
+检查 contract 与 change_policy，生成候选并执行确定性验证，保留失败诊断供修订。
+
+## 输出格式
+
+返回候选 rules、逐规则 reports 与验证摘要。
+
+## 示例
+
+将同一检查项版本产生的 canonical contract 与策略交给本 Skill，核对故障和恢复覆盖。
+
+## 注意事项
+
+历史 changes 仅作验证，不允许从厂商字段重新定义业务语义；发布通过上层治理。

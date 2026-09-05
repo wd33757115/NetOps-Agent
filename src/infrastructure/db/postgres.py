@@ -92,19 +92,3 @@ def require_postgres_connection() -> None:
         result = conn.execute(text("SELECT 1"))
         if result.scalar() != 1:
             raise RuntimeError("PostgreSQL health check returned an unexpected result")
-
-
-def get_postgres_saver():
-    import psycopg
-    from langgraph.checkpoint.postgres import PostgresSaver
-
-    conn = psycopg.connect(settings.postgres_url, autocommit=True)
-    return PostgresSaver(conn)
-
-
-def get_async_postgres_saver():
-    import psycopg
-    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-
-    conn = psycopg.AsyncConnection.connect(settings.postgres_url, autocommit=True)
-    return AsyncPostgresSaver(conn)

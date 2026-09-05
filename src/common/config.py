@@ -103,12 +103,10 @@ class Settings(BaseSettings):
 
     QDRANT_HOST: str = "localhost"
     QDRANT_PORT: int = 6333
-    QDRANT_COLLECTION: str = "netops_knowledge"
 
     FASTAPI_HOST: str = "0.0.0.0"
     FASTAPI_PORT: int = 8000
 
-    STREAMLIT_SERVER_PORT: int = 8501
 
     LANGFUSE_HOST: str | None = None
     LANGFUSE_PUBLIC_KEY: str | None = None
@@ -123,7 +121,6 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "console"  # console | json
-    USE_SUPERVISOR_V2: bool = True
 
     # Embedding（Skill Catalog / 分级路由）
     EMBEDDING_MODEL: str = "BAAI/bge-m3"

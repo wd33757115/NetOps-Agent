@@ -221,7 +221,7 @@ const DevGuideTab: React.FC = () => {
         type="info"
         showIcon
         message="Workflow 插件开发指南"
-        description="完整文档见 src/workflows/itsm/README.md 与 docs/logging-handbook.md。以下为编排、聊天触发、通知与产物交付要点；下方可查看最近运行记录。"
+        description="完整文档见 src/workflows/itsm/README.md 与 docs/README.md。以下为编排、聊天触发、通知与产物交付要点；下方可查看最近运行记录。"
         style={{ marginBottom: 16 }}
       />
 

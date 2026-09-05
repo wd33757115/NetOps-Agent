@@ -812,23 +812,6 @@ def _enrich_structural_spec(
     return ParserSpec.from_dict(enriched).to_dict()
 
 
-def _structural_expectation(
-    spec: ParserSpec,
-    raw_text: str,
-) -> dict[str, Any] | None:
-    if len(spec.primary_keys) != 2:
-        return None
-    layout = _nested_record_layout(raw_text)
-    if layout is None:
-        return None
-    keys, _source_labels = layout
-    return {
-        "record_count": len(keys),
-        "primary_keys": [[parent, channel] for parent, channel in keys],
-        "expectation_source": "deterministic:nested_repeated_block",
-    }
-
-
 def _normalize_sample_plans(
     payload: dict[str, Any],
     *,

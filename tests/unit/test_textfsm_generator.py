@@ -552,21 +552,26 @@ Swap:            0         0         0
     mock_session.assert_not_called()
 
 
+@pytest.mark.parametrize("emits_records", [False, True], ids=["empty-output", "semantic-rejection"])
 @patch("parser_model.create_textfsm_tool_session")
-def test_third_semantic_rejection_yields_executable_human_review_candidate(
+def test_generation_exhaustion_distinguishes_empty_output_from_semantic_rejection(
     mock_session,
     tmp_path,
+    emits_records,
 ):
     job = _job()
     job["samples"] = [dict(job["samples"][0])]
-    job["samples"][0]["sanitized_text"] = "UNMATCHED OUTPUT"
-    template = """Value interface (\\S+)
+    raw = "GE0/1 UP\nGE0/2 DOWN"
+    job["samples"][0]["sanitized_text"] = raw
+    template = """Value interface (GE0/1)
 Value status (\\S+)
 
 Start
   ^NEVER\\s+${interface}\\s+${status} -> Record
 """
 
+    if emits_records:
+        template = template.replace(r"^NEVER\s+", "^")
     feedbacks = []
 
     class FailedSession:
@@ -586,13 +591,13 @@ Start
         def review(self, **_kwargs):
             return ParserReviewReport(
                 passed=False,
-                summary="Positive data sample produced no records.",
+                summary="The second source interface is missing from parsed records.",
                 diagnostics=(
                     {
                         "code": "missing_records",
                         "sample_id": "sample-generation",
                         "target": "record_scope",
-                        "message": "positive sample produced no records",
+                        "message": "second interface missing",
                     },
                 ),
                 primary_key_assessment={"passed": False},
@@ -604,7 +609,7 @@ Start
         "mode": "parser_validation",
         "snapshot": SimpleNamespace(
             snapshot_id="snapshot-generation",
-            raw_text="UNMATCHED OUTPUT",
+            raw_text=raw,
         ),
     }
     with patch("generate_templates.NtcTemplateResolver") as ntc_resolver:
@@ -636,18 +641,21 @@ Start
                     dry_run=True,
                 )
 
-    assert report.accepted is True
+    assert report.accepted is emits_records
     assert report.compile_success is True
-    assert report.record_count == 0
-    assert report.passed_samples == 1
-    assert report.validation_pass_rate == 1.0
+    assert report.record_count == (1 if emits_records else 0)
+    assert report.passed_samples == (1 if emits_records else 0)
+    assert report.validation_pass_rate == (1.0 if emits_records else 0.0)
     assert report.agent_loop["stop_reason"] == (
         "human_review_required:independent_semantic_review_failed"
+        if emits_records else "generation_validation_failed"
     )
     assert feedbacks[0] is None
     assert len(feedbacks) == 3
     assert all(
-        item["failure_type"] == "independent_semantic_review_failed"
+        item["failure_type"] == (
+            "independent_semantic_review_failed" if emits_records else "hard_validation_failed"
+        )
         for item in feedbacks[1:]
     )
     assert all(item["parsed_results"] for item in feedbacks[1:])

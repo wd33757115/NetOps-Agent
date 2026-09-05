@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.core.rule_control.runtime_assets import RuntimeRuleAssetResolver
 
 
 def command_four_states(
@@ -86,52 +85,3 @@ def command_four_states(
             }
         )
     return rows
-
-
-def enrich_runtime_health_for_device(
-    *,
-    mode: str,
-    coverage: list[dict[str, Any]],
-) -> dict[str, Any]:
-    """Resolve runtime assets and attach missing lists for four-state mapping."""
-    schemas = []
-    for item in coverage:
-        template_id = str(item.get("template_id") or "").strip()
-        if (
-            item.get("policy_status") == "eligible"
-            and item.get("coverage_status") == "ready"
-            and template_id
-        ):
-            schemas.append(("cli", template_id))
-    if not schemas:
-        return {
-            "status": "not_required" if not coverage else "degraded",
-            "collection_ready": False,
-            "analysis_ready": False,
-            "event_evaluation_ready": False,
-            "missing_observation_contracts": [],
-            "missing_change_policies": [],
-            "missing_event_rules": [],
-        }
-    try:
-        resolved = RuntimeRuleAssetResolver().load_bundle(observation_schemas=schemas)
-        payload = resolved.to_dict()
-        payload["status"] = (
-            "ready"
-            if payload.get("event_evaluation_ready")
-            else "degraded"
-            if payload.get("collection_ready")
-            else "blocked"
-        )
-        return payload
-    except Exception as exc:
-        return {
-            "status": "error",
-            "error": str(exc),
-            "collection_ready": False,
-            "analysis_ready": False,
-            "event_evaluation_ready": False,
-            "missing_observation_contracts": [],
-            "missing_change_policies": [],
-            "missing_event_rules": [],
-        }

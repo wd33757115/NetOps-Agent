@@ -1,4 +1,7 @@
 ---
+version: 1.0.0
+category: general
+triggers: []
 name: state-normalizer
 description: Convert parsed patrol command snapshots into versioned StateObservation records and production CurrentState.
 entry_script: scripts/run.py
@@ -35,10 +38,29 @@ output_schema:
 
 `state-normalizer` is the bridge from parser output to platform state facts.
 
-It reads PostgreSQL `netops_command_snapshots.structured_json`, applies the parser
-template data contract (`entity_type`, `primary_keys`, `ignore_fields`), writes
+It reads PostgreSQL `netops_command_snapshots.structured_json`, applies the frozen CommandAdapter v2 projection (or a governed legacy contract), writes
 immutable field-level `netops_state_observations`, and updates
 `netops_current_state` only for production runs.
 
 `parser_validation` snapshots are allowed to generate observations for validation,
 but they are not allowed to update production current state.
+
+## 核心能力
+
+将保存的解析证据按固定运行资产转换为状态事实。
+
+## 工作流程
+
+读取巡检运行参数，调用 NormalizePatrolHandler，按用途与 update_current_state 控制当前状态写入。
+
+## 输出格式
+
+返回状态标准化结果及错误，具体统计由处理器产生。
+
+## 示例
+
+历史回放传 update_current_state=false，避免覆盖当前状态。
+
+## 注意事项
+
+新路径使用 CommandAdapter v2，旧合同读取用于兼容；验证样本不能写成生产当前健康事实。

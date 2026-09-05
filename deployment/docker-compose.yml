@@ -196,7 +196,6 @@ services:
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
       - DEBUG=false
       - ENFORCE_BFF_ORIGIN=true
-      - USE_SUPERVISOR_V2=true
       - TZ=Asia/Shanghai
     depends_on:
       postgres:
@@ -228,7 +227,6 @@ services:
       - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
       - DEBUG=false
-      - USE_SUPERVISOR_V2=true
       - CELERY_WORKER_ROLE=patrol
       - CELERY_WORKER_QUEUES=netops.patrol
       - TZ=Asia/Shanghai

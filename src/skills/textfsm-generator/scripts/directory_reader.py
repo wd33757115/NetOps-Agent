@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from config_loader import CommandMapping, normalize_command
-from device_detector import DeviceIdentity
+from src.core.parser.identity import DeviceIdentity
 
 from src.core.parser.identity import DeviceIdentityResolver
 from src.core.parser.policy import ParserPolicy

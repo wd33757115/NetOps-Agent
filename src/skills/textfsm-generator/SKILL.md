@@ -55,90 +55,46 @@ fallback_to_rag: false
 
 # TextFSM Generator
 
-将 CLI 原始输出转换为可复用、可验证的共享 Parser 资产。
+消费受治理的 Parser Job，生成可执行、可追溯的 TextFSM 候选。当前默认由命令自动制作调度，人工可暂停并接管。
 
 ## 核心能力
 
-- 消费控制面自动采纳或工程师修订的 `ParserSpec` 和不可变样本清单。
-- 生产默认进入 DeepSeek thinking 工具循环；三类确定性编译器仅保留为显式回退接口。
-- 每次明确生成运行最多三次模型调用；显式重试恢复本轮预算但保留全局调用历史。
-- 模型通过 `validate_textfsm_candidate` 提交完整模板；平台本地执行编译、解析和硬门禁并回传结构化诊断。
-- 本地门禁通过后使用全新模型会话独立复核最终记录、字段和主键。
-- 至少对一份 generation 样本执行硬门禁；存在 acceptance 和 negative 样本时一并验证。
-- 保存不可变候选、验证证据和尝试历史，等待人工审批。
+- 读取冻结 ParserSpec、脱敏样本与来源证据。
+- 复用并重新验证已有候选，必要时调用模型生成和定向修复。
+- 使用实际 TextFSM 执行结果及独立语义复核，保留每轮模板、记录和诊断。
+- 登记候选与版本证据；完整运行包发布由上层受控流程完成。
 
 ## 工作流程
 
-1. 只接受 Parser 控制面创建的 `job_id`，读取任务绑定的不可变 PostgreSQL 样本。
-2. 离线导入、聊天和生产缺口扫描只负责创建或补充 Job，不得调用本 Skill 绕过任务治理。
-3. LLM 自动形成并采纳 ParserSpec 与逐样本记录方案；工程师可在高级修订中定向调整。
-4. 生成阶段只读取 generation samples；acceptance samples 不进入 Prompt，也不参与修复。
-5. 模型最多进行三次“生成/修复 → 调用本地校验工具 → 接收结构化结果”的连续会话。
-6. 本地门禁通过后，由独立 LLM 会话复核最终解析结果；复核失败诊断返回生成会话。
-7. 候选写入平台管理的不可变资产目录，并登记为 `pending_approval`。
-8. 人工默认只确认原始 CLI 对应的最终解析结果和主键；TextFSM 与过程资产保留在次级页签。
-9. 审批激活后才进入生产 ParserRuntime，并独立触发后续规则资产生成。
-
-## 核心原则
-
-- Parser 资产独立于生成 Skill，可被巡检、导入和回放流程共同消费。
-- 结构化字段首先服务于稳定实体比较和事件构建，不追求解析全部 CLI。
-- 一份 generation 样本即可生成候选并进入人工审批；存在独立 acceptance 样本时必须全部通过。
-- 自动路径禁止按厂商、型号、命令或业务字段编写 Python 分支。
-- 手工内置 Provider 只保留为显式兼容接口，不进入自动生成流程。
-- 报告的 `success` 只统计本地硬门禁与独立复核全部通过的资产，不能使用平均分绕过门禁。
+1. 只接受当前 Simple Parser v2 的 job_id；历史非 job 生成模式保持只读兼容。
+2. 解析方案可通过 operation=suggest_spec 准备；生成操作读取已冻结的方案和样本。
+3. 初始生成上下文使用 generation 样本。acceptance 与 negative 样本参与执行验证；失败诊断和解析预览可进入修复反馈，因此不能将 acceptance 宣称为从未参与修复的独立最终验收。
+4. 外层候选最多三次模型调用，Provider 重试和单轮证据工具调用各有独立预算。
+5. 本地执行后独立复核语义，无法通过时保留诊断或待人工复核候选，不擅自降低门禁。
+6. publish 控制候选登记，不等同于生产激活；上层自动制作在管理员启动或授权后，验证完整依赖再发布。手工复核和审批入口仍保留。
 
 ## 输入参数说明
 
-- `job_id` 是唯一生产入口。
-- `publish=false` 或 `dry_run=true` 不写共享资产。
+job_id 是生成的必要身份。publish=false 或 dry_run=true 不发布候选共享资产，但任务验证和尝试仍需追踪，不能假定 dry_run 完全不写任务记录。
 
 ## 输出格式
 
-```json
-{
-  "success": true,
-  "mode": "job",
-  "job_id": "parser-job-123",
-  "candidate_groups": 1,
-  "success_count": 1,
-  "published_count": 0,
-  "validation_pass_rate": 1.0,
-  "asset_store": "postgresql"
-}
-```
+stdout 返回 JSON，包含 success、mode、job_id、生成统计和逐候选报告。候选可执行、需要人工复核与已发布运行包是不同状态，应同时查看诊断和任务状态，不凭单个计数推断生产可用。
 
 ## 示例
 
-受控任务参数：
-
-```json
-{
-  "job_id": "parser-job-123",
-  "publish": false,
-  "dry_run": true
-}
-```
+由平台把真实任务 ID 写入 params.json，使用 scripts/run.py --params params.json 执行；需要仅验证时设置 publish=false、dry_run=true。不能编造 job_id 或用任意目录输入绕过任务来源校验。
 
 ## 安全规范
 
-- 不连接或执行任何网络设备命令。
-- LLM 只接收 generation 角色的脱敏样本，不能读取 raw CLI 或 acceptance samples。
-- 工具白名单只包含 TextFSM 本地校验和工程师复核请求；模型不能执行本地代码、Shell、数据库或文件访问。
-- 工具调用后的连续请求必须回传完整 assistant 工具消息；`reasoning_content` 只用于当前会话续接，不持久化或展示。
-- 字段、主键和校验器来自自动采纳或工程师修订的 ParserSpec，并固化到模板版本的 `validation_json`。
-- 正式巡检只读取 PostgreSQL 中 active 模板及其已审批契约，不实时调用 LLM。
-- 至少一份 generation 样本通过即可进入人工审批；没有独立 acceptance 时必须明确标记单样本验证风险。
-- 新候选模板正文和 SHA-256 摘要作为不可变资产保存在 PostgreSQL；Worker 不写本地模板文件。
-- 已激活的历史本地模板只保留运行时只读兼容，不能作为新候选的发布目标。
-- 目录和直接输入不能发布生产模板；发布必须来自 PostgreSQL `parser_validation` 快照创建的 Job。
+模型只使用受控脱敏证据。工具包括样本片段读取、已发布模板检索、编译、回放、验证诊断、候选提交与工程复核请求；均通过受限本地工具实现，不提供任意 Shell、Python 或数据库写入权限。
 
-## 实际执行说明
-
-平台通过 `scripts/run.py --params <json>` 执行。Worker 只接受 `simple_v2` Job；历史 Agent Job
-保持只读审计，必须在控制面补齐 ParserSpec 和样本角色后才能升级并重新执行。
+工具消息按调用 ID 续接；reasoning_content 仅用于当前模型会话，不作为展示或持久报告。检查项含义和命令关联由人工决定，TextFSM 不补造源输出中不存在的数据。
 
 ## 注意事项
 
-- 依赖 `textfsm` 和已配置的 LLM API。
-- ParserSpec 或样本清单变化后必须产生新的摘要和候选版本，不能覆盖已审批资产。
+当前 Provider 适配不限定为 DeepSeek；其专属 thinking 参数由适配层处理。历史协议标签保持稳定以支持已有任务。
+
+没有正样本记录、输入变化、标准输出不完整或发布范围不兼容时不能自动发布。需要证明跨设备泛化时，在制作结束后另取未参与修复的样本回放。
+
+详情与代码入口见 [TextFSM 生成指南](../../../docs/parser-generation-guide.md)。

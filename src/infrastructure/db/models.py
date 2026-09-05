@@ -6778,11 +6778,3 @@ class LegacyPathObservationRecord(Base):
 
     def to_dict(self):
         return {column.name: getattr(self, column.name) for column in self.__table__.columns}
-
-
-def init_db_models(engine):
-    """Compatibility wrapper; schema changes are owned by Alembic."""
-    from src.infrastructure.db.migrations import upgrade_database
-
-    upgrade_database()
-    print("[OK] Database migrations applied")

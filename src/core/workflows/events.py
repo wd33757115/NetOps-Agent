@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Iterator
+from typing import Any
 
 from src.auth.token_store import get_redis
 
@@ -58,32 +58,6 @@ def get_workflow_timeline(run_id: str, *, limit: int = 200) -> list[dict[str, An
     except Exception as exc:
         logger.warning("读取 workflow timeline 失败: %s", exc)
         return []
-
-
-def iter_workflow_pubsub(run_id: str, *, stop_when_terminal: bool = True) -> Iterator[dict[str, Any]]:
-    """阻塞迭代 Redis Pub/Sub 事件（供 SSE）。"""
-    client = get_redis()
-    if not client:
-        return
-    pubsub = client.pubsub(ignore_subscribe_messages=True)
-    pubsub.subscribe(_channel(run_id))
-    try:
-        while True:
-            message = pubsub.get_message(timeout=1.0)
-            if not message or message.get("type") != "message":
-                continue
-            try:
-                payload = json.loads(message["data"])
-            except Exception:
-                continue
-            yield payload
-            if stop_when_terminal and payload.get("status") in ("completed", "failed"):
-                break
-    finally:
-        try:
-            pubsub.close()
-        except Exception:
-            pass
 
 
 def publish_workflow_event(

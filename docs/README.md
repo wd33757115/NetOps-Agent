@@ -1,162 +1,56 @@
 <!-- SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com> -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-Latest architecture: [check-item-command-adapter-simplification-remediation-2026-08-10.md](./check-item-command-adapter-simplification-remediation-2026-08-10.md)
+# NetOps 文档中心
 
-# NetOps Agent 文档中心
-
-> 版本：2026-07-30
->
-> 文档治理清单：[document-governance.yaml](./document-governance.yaml)
-> 当前实施证据：[检查项平台实施与验收矩阵](./implementation/check-item-platform-completion-matrix-2026-07-28.md)
-> 分层 E2E 证据：[35 项 E2E 证据矩阵](./implementation/check-item-platform-e2e-evidence-matrix-2026-07-30.md)
-
----
+当前入口按工作内容组织。已替代方案、已实施计划和旧验收快照可通过 Git 历史查找；文档日期或旧测试数量不能证明目标环境已就绪。
 
 <!-- governed-index: active -->
 
-## 正式文档（01–11）
+## 使用业务应用
 
-| 编号 | 文档 | 说明 |
-|------|------|------|
-| 01 | [系统架构设计](./01_系统架构设计.md) | 逻辑/物理架构、数据流、安全边界 |
-| 02 | [概要与详细设计](./02_概要与详细设计.md) | Supervisor、Skill、Workflow、RAG 详细设计 |
-| 03 | [数据库设计 & 数据字典](./03_数据库设计%20&%20数据字典.md) | PostgreSQL 表结构、字段说明 |
-| 04 | [API 接口文档](./04_API%20接口文档.md) | BFF/FastAPI 端点、认证、错误格式 |
-| 05 | [编码 & 工程规范](./05_编码%20&%20工程规范.md) | Python/React 规范、测试、Git |
-| 06 | [环境 & 编译构建说明](./06_环境%20&%20编译构建说明.md) | 依赖安装、本地启动、构建 |
-| 07 | [系统配置说明](./07_系统配置说明.md) | 环境变量完整清单 |
-| 08 | [日志规范 & 日志字典](./08_日志规范%20&%20日志字典.md) | structlog、事件字典、Langfuse |
-| 09 | [错误码定义文档](./09_错误码定义文档.md) | ErrorCode、统一错误信封 |
-| 10 | [部署安装手册](./10_部署安装手册.md) | Docker Compose、生产 checklist |
-| 11 | [运维技术手册 & 故障排查](./11_运维技术手册%20&%20故障排查.md) | 巡检、排障、备份恢复 |
-| 12 | [Supervisor 路由与 Skill 执行流程](./12_Supervisor路由与Skill执行流程.md) | 用户提问→Skill 匹配→Workflow/ExecutionPlan 全链路 + ITSM 时序 |
-| 13 | [生产上线清单](./13_生产上线清单.md) | 先上生产：阻塞项、冒烟、回滚、Compose 陷阱 |
+| 说明 | 内容 |
+| --- | --- |
+| [工作台](workbench-apps-guide-2026-09-05.md) | 应用入口、桌面布局、保存与恢复 |
+| [网络巡检与规则工作区](patrol-workflow-refactor-guide-2026-09-05.md) | 在线/离线任务、报告、补齐能力与复检 |
+| [规则自动制作](patrol-rule-autopilot-guide-2026-09-05.md) | 人工定义、AI 制作、接管与授权发布 |
+| [公文写作](official-document-workspace-guide-2026-09-05.md) | 全文起草、文种扩展、版本、排版与 Word 导出 |
 
----
+## 开发与运行
 
-<!-- governed-index: active -->
+| 说明 | 内容 |
+| --- | --- |
+| [系统架构](01_系统架构设计.md) | 当前模块职责、数据流与权限边界 |
+| [开发与构建](06_环境%20&%20编译构建说明.md) | 安装、迁移、本地进程与前端构建 |
+| [部署](10_部署安装手册.md) | 核心与 AI 服务、生产启动 |
+| [配置参考](07_系统配置说明.md) | 配置来源与环境变量 |
+| [API 参考](04_API%20接口文档.md) | BFF、业务 API 与认证 |
+| [数据库](03_数据库设计%20&%20数据字典.md) | 持久化及迁移 |
+| [维护与验证](maintenance.md) | 文档检查、回归范围和兼容代码退出 |
+| [脚本目录](../scripts/README.md) | 部署、迁移与诊断工具 |
 
-## 专项指南
+## 技术参考
 
-| 文档 | 说明 |
-|------|------|
-| [patrol-workflow-refactor-guide-2026-09-05.md](./patrol-workflow-refactor-guide-2026-09-05.md) | 巡检与规则工作台重构、证据复用、复检及废弃代码清理 |
-| [patrol-rule-autopilot-guide-2026-09-05.md](./patrol-rule-autopilot-guide-2026-09-05.md) | 人工定义、AI 自动制作、人工接管和管理员授权发布 |
-| [workbench-apps-guide-2026-09-05.md](./workbench-apps-guide-2026-09-05.md) | 工作台、巡检应用入口、布局保存、部署迁移与回退 |
-| [official-document-workspace-guide-2026-09-05.md](./official-document-workspace-guide-2026-09-05.md) | 公文工作台使用、版本保存、AI 修改、Word 导出与部署 |
-| [check-item-command-adapter-simplification-remediation-2026-08-10.md](./check-item-command-adapter-simplification-remediation-2026-08-10.md) | 当前架构：检查项、命令适配器、样本任务以及可信巡检报告 |
-| [implementation/check-item-platform-completion-matrix-2026-07-28.md](./implementation/check-item-platform-completion-matrix-2026-07-28.md) | 当前实现、验证证据、生产阻断项和下一步 |
-| [implementation/check-item-platform-e2e-evidence-matrix-2026-07-30.md](./implementation/check-item-platform-e2e-evidence-matrix-2026-07-30.md) | 35 条浏览器验收场景的证据层级、现有证据和剩余门禁 |
-| [simple-parser-pipeline-v2-2026-07-22.md](./simple-parser-pipeline-v2-2026-07-22.md) | Parser Job、样本、生成、验证、人工审批与激活的当前架构 |
-| [textfsm-generator-guide.md](./textfsm-generator-guide.md) | TextFSM 生成与人工审批操作指南 |
-| [patrol-report-canonical-observation-design-2026-07-27.md](./patrol-report-canonical-observation-design-2026-07-27.md) | canonical observation 与跨厂商报告字段设计 |
-| [rule-asset-control-plane-guide.md](./rule-asset-control-plane-guide.md) | 规则资产生成、工程修订、审批、激活和回滚 |
-| [observation-fabric-system-design.md](./observation-fabric-system-design.md) | Observation、CurrentState、Change、Event 事实层设计 |
-| [patrol-change-event-pipeline.md](./patrol-change-event-pipeline.md) | 在线与历史巡检的状态、变化、事件、风险和故障排查 |
-| [patrol-parser-dual-mode-guide.md](./patrol-parser-dual-mode-guide.md) | Parser 验证数据与生产巡检数据的边界 |
-| [rule-asset-unattended-automation-2026-07-27.md](./rule-asset-unattended-automation-2026-07-27.md) | 规则资产候选自动化、人工复核与独立发布门禁（文件名为历史兼容） |
-| [textfsm-deepseek-thinking-tool-loop-2026-07-26.md](./textfsm-deepseek-thinking-tool-loop-2026-07-26.md) | Thinking 模型与本地工具校验循环协议 |
-| [unstructured-patrol-comparison-remediation-2026-07-19.md](./unstructured-patrol-comparison-remediation-2026-07-19.md) | 非结构化输出摘要比较与事件边界 |
-| [SKILL_CREATION_GUIDE.md](./SKILL_CREATION_GUIDE.md) | Skill 创建与 SKILL.md v2.0 |
-| [测试手册.md](./测试手册.md) | 单元/集成/E2E 测试 |
+- [检查项与命令适配器](patrol-rule-architecture.md)
+- [TextFSM 生成、验证与模型工具循环](parser-generation-guide.md)
+- [规则资产治理与兼容协调器](rule-asset-control-plane-guide.md)
+- [变化与事件](patrol-change-event-pipeline.md)、[报告与证据](patrol-report-guide.md)
+- [验证与生产边界](patrol-parser-dual-mode-guide.md)、[文本比较](patrol-text-comparison-guide.md)
+- [编码规范](05_编码%20&%20工程规范.md)、[Skill 开发](SKILL_CREATION_GUIDE.md)、[Supervisor 流程](12_Supervisor路由与Skill执行流程.md)
+- [日志](08_日志规范%20&%20日志字典.md)、[错误码](09_错误码定义文档.md)、[运维排障](11_运维技术手册%20&%20故障排查.md)、[上线检查](13_生产上线清单.md)
 
-<!-- governed-index: proposed -->
+当前默认制作体验以“规则自动制作”为准；技术指南单独说明仍保留的兼容路径。架构决策保存在 [ADR](adr/) 中，阅读时注意决策年代与后续演进；它们用于解释取舍，不替代当前接口和配置。
 
-## 提案与路线图
+## 权限与平台服务
 
-以下文档尚未成为当前运行合同，实施时必须重新评审：
+- [用户角色、能力与数据范围](permissions-guide.md)
+- [网盘与对象存储](storage-guide.md)
+- [流式进度与 Langfuse](observability-guide.md)
 
-| 文档 | 状态 |
-|------|------|
-| [patrol-workflow-review-2026-09-05.md](./patrol-workflow-review-2026-09-05.md) | proposed；网络巡检与规则生成体验审查、证据及流程重构建议 |
-| [official-document-workspace-plan-2026-09-05.md](./official-document-workspace-plan-2026-09-05.md) | proposed；公文编辑、AI 修改、审查、版本与 DOCX 导出 |
-| [workbench-patrol-app-migration-plan-2026-09-05.md](./workbench-patrol-app-migration-plan-2026-09-05.md) | proposed |
-| [auth-rbac-plan.md](./auth-rbac-plan.md) | proposed |
-| [device-management-control-plane-roadmap.md](./device-management-control-plane-roadmap.md) | proposed |
-| [langfuse-sse-plan.md](./langfuse-sse-plan.md) | proposed |
-| [storage-minio-plan.md](./storage-minio-plan.md) | proposed |
-| [system-overall-design-and-phased-implementation-plan.md](./system-overall-design-and-phased-implementation-plan.md) | proposed |
-
----
+已经偏离当前入口和数据架构的阶段路线图保存在 Git 历史中。新增业务需求应基于当前架构单独设计，不沿用旧计划中的“待实施”状态。
 
 <!-- governed-index: active -->
 
-## 架构决策记录（ADR）
+## 文档管理
 
-| 编号 | 文档 |
-|------|------|
-| 001 | [Skill 体系架构](./adr/001-skill-system-architecture.md) |
-| 002 | [Progressive Disclosure](./adr/002-progressive-disclosure.md) |
-| 003 | [LLM 路由](./adr/003-llm-based-routing.md) |
-| 004 | [生产加固](./adr/004-production-hardening.md) |
-| 005 | [Django + React BFF](./adr/005-django-react-architecture.md) |
-| 006 | [Docker Compose 编排](./adr/006-docker-compose-orchestration.md) |
-| 007 | [通用 Workflow Context](./adr/007-generic-workflow-context.md) |
-| 008 | [检查项作为巡检业务主身份](./adr/008-check-item-business-identity.md) |
-
----
-
-<!-- governed-index: historical -->
-
-## 已归档 / 重定向
-
-以下文档已合并至编号系列，保留跳转。其余 superseded/archived 文档只通过
-`document-governance.yaml` 查找，不再作为推荐入口：
-
-| 旧文档 | 新文档 |
-|--------|--------|
-| [API文档.md](./API文档.md) | → [04_API 接口文档](./04_API%20接口文档.md) |
-| [DEPLOYMENT.md](./DEPLOYMENT.md) | → [10_部署安装手册](./10_部署安装手册.md) |
-| [logging-handbook.md](./logging-handbook.md) | → [08_日志规范 & 日志字典](./08_日志规范%20&%20日志字典.md) |
-
----
-
-<!-- governed-index: active -->
-
-## 文档治理
-
-当前架构、专项设计和历史文档的状态不再由文件名中的“最新”“最终”判断，而由
-[`document-governance.yaml`](./document-governance.yaml) 统一登记。审计命令：
-
-```powershell
-venv\Scripts\python.exe scripts\docs\audit_docs.py --today 2026-07-30
-venv\Scripts\python.exe scripts\deprecations\audit_deprecations.py --today 2026-07-30
-```
-
-旧链路退出前必须从迁移 `0095` 的观测台账导出至少两个真实发布周期。示例：
-
-```powershell
-venv\Scripts\python.exe scripts\deprecations\export_runtime_evidence.py `
-  --candidate legacy-parser-job-dispatch `
-  --window "2026.08=2026-08-01T00:00:00+08:00/2026-09-01T00:00:00+08:00" `
-  --window "2026.09=2026-09-01T00:00:00+08:00/2026-10-01T00:00:00+08:00" `
-  --output .tmp\deprecations\legacy-parser-job-dispatch.json
-```
-
-导出结果必须存入不可变对象存储，并把 URI 与 SHA-256 连同其他六项 gate 证据写入 registry；脚本返回
-零调用也不能替代替代覆盖检查、数据库零写入证明或回滚演练。
-
-最终产品目标使用保守审计命令复核：
-
-```powershell
-venv\Scripts\python.exe scripts\test\check_item_product_goal_audit.py `
-  --output .tmp\product-goal-audit\current-state.json
-```
-
-仅在发布门禁中同时使用 `--external-evidence <immutable-evidence.json>` 与
-`--require-achieved`。外部证据逐 gate 提供不可变对象 URI、SHA-256、责任人类型和带时区复核时点；
-即使数据库计数全部满足，缺少该证据时工程全栈、甲方内容验收和授权签发仍保持
-`external_evidence_required`。测试账号、历史 `lixian` 数据和合成生产夹具不能替代这些责任主体。
-
-`active` 文档是当前权威说明；`superseded` 仅用于理解迁移前设计；`archived` 只保留审计。
-未登记文档属于待治理范围，不得作为当前架构依据。
-
----
-
-## 快速链接
-
-- 项目根 [README.md](../README.md)
-- 脚本说明 [scripts/README.md](../scripts/README.md)
-- Web 开发 [web/README.md](../web/README.md)
-- OpenAPI：http://localhost:8000/docs（开发环境）
+[状态登记](document-governance.yaml)记录各文档职责和最近核对日期。审计命令与代码清理进度见 [维护与验证](maintenance.md)。新文档必须登记；删除文档同步移除引用。根目录 [README](../README.md) 提供最短启动路径。

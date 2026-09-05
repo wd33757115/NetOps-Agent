@@ -11,14 +11,11 @@ COMPOSE_BASE="$PROJECT_ROOT/deployment/docker-compose.yml"
 COMPOSE_PROD="$PROJECT_ROOT/deployment/docker-compose.prod.yml"
 
 DEV="${DEV:-0}"
-USE_V2="${USE_SUPERVISOR_V2:-true}"
 SKIP_PREFLIGHT="${SKIP_PREFLIGHT:-0}"
 SKIP_SEED="${SKIP_SEED:-0}"
 SKIP_SMOKE="${SKIP_SMOKE:-0}"
 SKIP_BUILD="${SKIP_BUILD:-0}"
 WAIT_SECONDS="${WAIT_SECONDS:-60}"
-
-export USE_SUPERVISOR_V2="$USE_V2"
 
 COMPOSE_ARGS=(-f "$COMPOSE_BASE")
 if [[ "$DEV" != "1" && -f "$COMPOSE_PROD" ]]; then
@@ -29,7 +26,7 @@ else
 fi
 
 echo "============================================================"
-echo "  NetOps 生产环境 - 启动 (USE_SUPERVISOR_V2=$USE_V2)"
+echo "  NetOps 生产环境 - 启动"
 echo "============================================================"
 
 cd "$PROJECT_ROOT"

@@ -43,3 +43,23 @@ This Skill submits a validated rule generation job to the rule asset approval qu
 It does not approve or activate production assets. It delegates persistence to
 `rule-asset-persister`, records submission metadata on the source job, and leaves
 activation to the deterministic approval control plane.
+
+## 核心能力
+
+提交已验证生成任务并登记提交信息。
+
+## 工作流程
+
+读取 job_id，调用 RuleAssetSubmissionService，委托受控持久化并保留提交身份。
+
+## 输出格式
+
+返回 success、生成任务和提交结果，激活仍由审批服务负责。
+
+## 示例
+
+对已完成候选验证的真实 job_id 提交审批，再查看待审版本和证据。
+
+## 注意事项
+
+提交不等于审批，不能用模型自填 actor 代替平台身份与权限。

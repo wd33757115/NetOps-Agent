@@ -50,3 +50,23 @@ fallback_to_rag: false
 
 <!-- SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com> -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
+
+## 核心能力
+
+把变更结果和已有附件链接提交给配置的 ITSM 接收端。
+
+## 工作流程
+
+读取任务参数并构造 payload，向 callback_url 发起 HTTP POST，保留响应或错误。未配置地址时返回 skipped。
+
+## 输出格式
+
+stdout 返回 JSON，包含 success 及回调结果；附件引用来自输入，不现场编造。
+
+## 示例
+
+在测试 Workflow 中使用隔离接收端及测试工单，核对收到的附件链接。
+
+## 注意事项
+
+此步骤有外部发送副作用，必须在已授权 Workflow 中运行；跳过回调不等于接收端已收到。

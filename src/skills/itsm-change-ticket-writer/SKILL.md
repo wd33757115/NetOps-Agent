@@ -108,3 +108,23 @@ python src/skills/itsm-change-ticket-writer/scripts/itsm_change_ticket_excel.py 
 
 <!-- SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com> -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
+
+## 核心能力
+
+将防火墙生成产物中的设备、脚本和变更信息填入工单模板。
+
+## 工作流程
+
+读取 manifest 或 ZIP，校验输入并填充模板，输出 Excel，由平台上传归档。
+
+## 输出格式
+
+生成变更工单 Excel 和平台 artifact 引用；具体字段由模板及脚本输出合同决定。
+
+## 示例
+
+使用下文本地调试命令和脱敏 ZIP，检查设备、验证、回退与审批信息是否完整。
+
+## 注意事项
+
+生成工单不等于变更已经审批或已下发设备，未知事实应交由业务确认。

@@ -90,17 +90,6 @@ def literal_line_pattern(line: str) -> str:
     return r"^\s*" + r"\s+".join(re.escape(token) for token in tokens) + r"\s*$$"
 
 
-def mapped_tokens(line: str, spec: ParserSpec) -> list[str | None]:
-    labels = field_label_map(spec)
-    spaced_columns = [item for item in re.split(r"\s{2,}", line.strip()) if item]
-    tokens = spaced_columns if len(spaced_columns) >= 2 else re.findall(r"\S+", line.strip())
-    mapped: list[str | None] = []
-    for token in tokens:
-        normalized = normalize_label(token)
-        mapped.append(labels.get(normalized))
-    return mapped
-
-
 def render_row_pattern(
     mapped: list[str | None],
     spec: ParserSpec,

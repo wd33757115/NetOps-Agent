@@ -3,6 +3,8 @@
 
 # 巡检状态、变化与事件运行指南
 
+核对日期：2026-09-06。
+
 ## 1. 文档定位
 
 本文说明生产巡检执行线中，原始命令输出如何形成状态、变化、事件、风险和报告事实。平台当前以
@@ -20,6 +22,7 @@ PostgreSQL 为权威数据面；Redis Stream 只承担可选事件分发，MinIO
   -> 采集原始 CLI 并保存 CommandSnapshot
   -> EvidenceQualification / CoverageDecision
   -> Parser Runtime
+  -> CommandAdapter v2 标准转换（历史实现使用冻结的 ObservationContract）
   -> StateObservation
   -> CurrentStateRule / Finding
   -> ChangePolicy / Change
@@ -31,8 +34,8 @@ PostgreSQL 为权威数据面；Redis Stream 只承担可选事件分发，MinIO
 关键边界：
 
 - 原始 CLI 先落证据，再进行解析；Parser 升级后可以基于不可变 Snapshot 回放。
-- Parser、ObservationContract、CurrentStateRule、ChangePolicy 和 EventRule 必须来自同一个冻结
-  RuntimeBundle，运行中不得临时改用另一版资产。
+- Parser、Adapter 及需求画像所要求的规则必须来自同一个冻结 RuntimeBundle；历史实现
+  还可能引用 ObservationContract，运行中不得临时改用另一版资产。
 - Change 是事实差异，Event 是规则命中的运维语义，RiskCase 是跨批次持续跟踪对象；三者不能互相
   替代。
 - `event_count=0` 只表示没有形成事件，不能单独证明设备健康。
@@ -96,6 +99,7 @@ device-patrol
 ```text
 Snapshot
   -> Parser
+  -> CommandAdapter v2 / 历史 ObservationContract
   -> canonical observation_type
   -> ChangePolicy
   -> EventRule
@@ -105,7 +109,7 @@ Snapshot
 
 ### 4.2 原文变化路径
 
-运行配置、启动配置和部分诊断输出可以在命令策略中声明 `raw_hash_diff`。这类输出：
+当前检查项使用版本化 TextComparisonProfile（`normalized_diff` / `hash_only`）；旧命令策略仍可声明 `raw_hash_diff`。两条路径与日志窗口差异见[文本比较指南](patrol-text-comparison-guide.md)。旧命令级输出：
 
 - 保存原始输出摘要和版本化差异；
 - 可以形成 `raw_text_hash` Change；
@@ -153,6 +157,5 @@ venv\Scripts\python.exe scripts\test\check_item_golden_runtime_replay.py
 ```
 
 总体产品合同、资产治理和报告权限以
-[检查项中心巡检平台改造方案](./check-item-command-adapter-simplification-remediation-2026-08-10.md) 为准；
-实际完成状态以
-[实施与验收矩阵](./implementation/check-item-platform-completion-matrix-2026-07-28.md) 为准。
+[检查项与规则架构](./patrol-rule-architecture.md) 为准；
+环境完成状态须重新运行[维护与验证指南](./maintenance.md)中的检查命令；旧验收快照保存在 Git 历史中，不代表当前生产资产状态。

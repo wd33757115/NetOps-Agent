@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import copy
-import json
 import re
 from collections.abc import Callable
 from datetime import datetime
@@ -17,8 +16,6 @@ from src.core.collection import CollectionPolicyResolver, ExecutionPlan
 from src.core.device_ops.manager import DeviceInventoryManager
 from src.core.ingestion.adapters.cli import (
     CLICommandCollector,
-    connect_cli_device,
-    device_type_for,
     load_command_collection_manifest,
     test_cli_connectivity,
 )
@@ -82,14 +79,6 @@ class TaskResult(BaseModel):
 DBManager = DeviceInventoryManager
 
 
-def _device_type(device: dict[str, Any]) -> str:
-    return device_type_for(device)
-
-
-def _connect(device: dict[str, Any]):
-    return connect_cli_device(device)
-
-
 def test_device_connectivity(device: dict[str, Any]) -> dict[str, Any]:
     """Open and close a real device session using the same path as patrol."""
     return test_cli_connectivity(device)
@@ -117,18 +106,6 @@ def _record_connection_health(
         )
     except Exception:
         pass
-
-
-def _collect_command_outputs(
-    *,
-    device: dict[str, Any],
-    plan: ExecutionPlan,
-) -> Any:
-    """Collect raw CLI command outputs for later snapshot parsing and reporting."""
-    return CLICommandCollector().collect_command_outputs(
-        device=device,
-        execution_plan=plan,
-    )
 
 
 def _validate_plan_for_device(
@@ -650,80 +627,4 @@ def _task_result(
         output_files=[str(item["output_file"]) for item in results if item.get("output_file")],
         execution_time=(datetime.now() - started_at).total_seconds(),
         errors=[str(item["error"]) for item in results if item.get("error")],
-    )
-
-
-class IntentParser:
-    def parse(self, query: str) -> tuple[ActionType, DeviceFilter]:
-        lowered = query.lower()
-        if "巡检" in query or "patrol" in lowered:
-            action = ActionType.PATROL
-        elif "备份" in query or "backup" in lowered:
-            action = ActionType.BACKUP
-        elif "分组" in query or "group" in lowered:
-            action = ActionType.LIST_GROUPS
-        elif "设备" in query or "device" in lowered:
-            action = ActionType.LIST_DEVICES
-        else:
-            action = ActionType.UNKNOWN
-        ip_match = re.search(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", query)
-        return action, DeviceFilter(ip=ip_match.group(0) if ip_match else None)
-
-
-class NetOpsToolsOrchestrator:
-    def __init__(self):
-        self.db_manager = DBManager()
-        self.intent_parser = IntentParser()
-
-    async def execute_async(self, query: str) -> dict[str, Any]:
-        action, device_filter = self.intent_parser.parse(query)
-        if action == ActionType.LIST_GROUPS:
-            return {"success": True, "groups": self.db_manager.list_groups()}
-        if action == ActionType.LIST_DEVICES:
-            devices = self.db_manager.get_devices_by_filter(device_filter)
-            return {
-                "success": True,
-                "devices": [
-                    {key: value for key, value in item.items() if key != "password"}
-                    for item in devices
-                ],
-            }
-        if action in {ActionType.BACKUP, ActionType.PATROL}:
-            from src.core.celery_tasks.tasks import (
-                execute_config_backup_task,
-                execute_device_patrol_task,
-            )
-
-            task = (
-                execute_config_backup_task.delay(
-                    filter_params=device_filter.model_dump(exclude_none=True)
-                )
-                if action == ActionType.BACKUP
-                else execute_device_patrol_task.delay(
-                    filter_params=device_filter.model_dump(exclude_none=True)
-                )
-            )
-            return {
-                "success": True,
-                "action": action.value,
-                "celery_task_id": task.id,
-                "status": "pending",
-            }
-        return {"success": False, "message": "Unsupported request."}
-
-    def execute_sync(self, query: str) -> dict[str, Any]:
-        return asyncio.run(self.execute_async(query))
-
-    execute = execute_async
-
-
-def describe_inventory() -> str:
-    manager = DBManager()
-    return json.dumps(
-        {
-            "groups": manager.list_groups(),
-            "devices": manager.get_devices_by_filter(DeviceFilter()),
-        },
-        ensure_ascii=False,
-        default=str,
     )

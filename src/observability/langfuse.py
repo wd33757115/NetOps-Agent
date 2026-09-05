@@ -453,8 +453,3 @@ def end_workflow_trace(
         logger.warning("Langfuse workflow trace end failed: %s", exc)
     finally:
         flush_langfuse(wf_trace.client)
-
-
-def get_langfuse_handler(**kwargs: Any) -> LangfuseChatTrace | None:
-    """兼容旧调用方：等价于 start_chat_trace。"""
-    return start_chat_trace(**kwargs)

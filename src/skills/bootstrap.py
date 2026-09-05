@@ -27,10 +27,6 @@ def get_default_skill_dirs() -> list[str]:
     return [str(base_dir / "src" / "skills")]
 
 
-def normalize_skill_name(name: str) -> str:
-    return name.replace("-", "_").lower().strip()
-
-
 def bootstrap_skills(
     rag_service=None,
     skill_dirs: list[str] | None = None,

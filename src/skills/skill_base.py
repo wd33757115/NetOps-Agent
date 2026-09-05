@@ -17,15 +17,6 @@ from src.common.metrics import Metrics, get_metrics_collector
 logger = logging.getLogger(__name__)
 
 
-class SkillParameter(BaseModel):
-    """技能参数定义"""
-    name: str = Field(..., description="参数名称")
-    type: str = Field(..., description="参数类型：string, int, float, bool, list")
-    required: bool = Field(True, description="是否必填")
-    description: str = Field("", description="参数描述")
-    default: Any = Field(None, description="默认值")
-
-
 class SkillResult(BaseModel):
     """技能执行结果"""
     success: bool = Field(True, description="执行是否成功")
@@ -40,7 +31,7 @@ class SkillResult(BaseModel):
 
 class BaseSkill(ABC, BaseModel):
     """
-    Skill 基类 - 所有运维技能必须继承此类
+    Python Skill 适配基类；脚本型 Skill 通过 SKILL.md 注册，无需继承。
 
     设计原则：
     1. 每个 Skill 必须有唯一的 name

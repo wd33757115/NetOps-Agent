@@ -36,7 +36,6 @@ if (-not (Test-Path $envFile)) {
         @"
 DEBUG=false
 ENFORCE_BFF_ORIGIN=true
-USE_SUPERVISOR_V2=true
 DEEPSEEK_API_KEY=
 POSTGRES_PASSWORD=netops123456
 DJANGO_SECRET_KEY=change-me-in-production

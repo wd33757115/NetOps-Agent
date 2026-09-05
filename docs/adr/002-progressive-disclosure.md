@@ -4,6 +4,8 @@
 
 # 002: Progressive Disclosure（渐进式披露）
 
+> 演进核对（2026-09-06）：保留元数据与指令分层加载的决策。下文性能描述与缓存数值属于当时设计，不作为当前测量结论或默认配置；当前缓存实例配置见 [cache.py](../../src/skill_system/cache.py)，执行入口见[Supervisor 指南](../12_Supervisor路由与Skill执行流程.md)。
+
 ## 状态
 
 已接受

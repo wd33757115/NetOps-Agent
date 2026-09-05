@@ -1,47 +1,14 @@
-# Rule Asset Submit Workflow
+# 规则资产提交工作流
 
-这个 Workflow 用于把已经验证成功的规则资产生成任务提交到审批队列。
+本插件调用 `rule-asset-submitter`，通过 `RuleAssetSubmissionService` 将已验证候选交给 `rule-asset-persister` 保存为可审批资产。它不激活生产版本。
 
-```text
-validated RuleGenerationJob
-  -> rule-asset-submitter
-  -> rule-asset-persister
-  -> pending_approval
-```
+## 输入与结果
 
-它不会激活生产规则，也不会修改正在运行的 active 资产。
+- `job_id`：真实规则生成任务 ID，必填；聊天 Intent 缺少该字段时不会启动。
+- `actor`：审计来源标识，不是身份凭证或管理员授权。
 
-## 输入
+服务要求任务存在，状态为 `validating` 或 `pending_approval`，且验证报告的 `success` 为 `true`。服务按任务类型检查 `skill_result` 中的候选内容，再组装持久化输入。只有成功验证而没有可持久化候选也不能提交。
 
-- `job_id`：规则生成任务 ID，必填。
-- `actor`：触发来源，默认可使用 `workflow` 或 `chat`。
+结果包含 `submitted_job`、`persister_result` 与成功状态。提交后仍须满足对应资产或 Bundle 的发布门禁；不能以提交成功替代审批。
 
-## 前置条件
-
-- `job_id` 对应的任务必须存在。
-- 任务必须已经完成确定性验证。
-- 验证报告中的 `success` 必须为 `true`。
-- 候选资产必须能被 `rule-asset-persister` 转换为可审批资产版本。
-
-## 输出
-
-- 提交后的规则资产任务。
-- `rule-asset-persister` 的持久化结果。
-- 等待审批的资产版本引用。
-
-## 聊天触发
-
-示例：
-
-```text
-提交规则资产审批 job_id=689eb656-815d-49c6-9961-90b141bb43c2
-```
-
-缺少 `job_id` 时不会启动 Workflow。
-
-## 边界
-
-- 不调用 LLM。
-- 不激活生产资产。
-- 不覆盖已有 active 版本。
-- 不读取设备密码或连接网络设备。
+同目录 `WORKFLOW.yaml` 和 `CHAT.intent.yaml` 描述编排与触发方式。权限由受保护的上层入口落实，调用方不能通过改写 `actor` 获得能力。当前默认业务流程见[规则自动制作](../../../../docs/patrol-rule-autopilot-guide-2026-09-05.md)，兼容资产流程见[规则资产治理](../../../../docs/rule-asset-control-plane-guide.md)。

@@ -6,8 +6,7 @@
 from __future__ import annotations
 
 import os
-from typing import Mapping
-
+from collections.abc import Mapping
 
 # 允许不经 BFF 直连的路径（外部 ITSM 等集成场景，可通过环境变量关闭）
 _ITSM_DIRECT_PATHS = {
@@ -58,11 +57,6 @@ def is_bff_bypass_path(path: str) -> bool:
         return True
     # 插件化 Webhook：/api/v1/itsm/webhook/{route_key}
     return path.startswith("/api/v1/itsm/webhook/")
-
-
-def reject_message() -> dict:
-    """遗留兼容：纯字符串错误。新代码请用 reject_envelope。"""
-    return {"error": "Access only allowed via Django BFF"}
 
 
 def reject_envelope(*, request_id: str | None = None) -> dict:

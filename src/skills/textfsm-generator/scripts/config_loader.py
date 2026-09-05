@@ -7,28 +7,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from src.core.parser.policy import SHARED_PARSER_CONFIG_ROOT, ParserPolicy, load_yaml
 
 DEFAULT_MAPPING = SHARED_PARSER_CONFIG_ROOT / "command_policy.yaml"
-
-
-@dataclass(frozen=True)
-class CategorySpec:
-    name: str
-    required_fields: list[str]
-    optional_fields: list[str]
-    entity_type: str
-    primary_keys: list[str]
-    validators: dict[str, dict[str, Any]]
-    allow_empty: bool = False
-    empty_patterns: list[str] | None = None
-    ignore_fields: list[str] | None = None
-
-    @property
-    def fields(self) -> list[str]:
-        return [*self.required_fields, *self.optional_fields]
 
 
 @dataclass(frozen=True)
@@ -98,57 +80,3 @@ def normalize_command(command: str, aliases: dict[str, str] | None = None) -> st
 
 def list_device_profiles(mappings: list[CommandMapping]) -> list[str]:
     return sorted({f"{item.vendor} {item.model}" for item in mappings})
-
-
-def resolve_device_mapping(
-    device_model: str,
-    mappings: list[CommandMapping],
-) -> tuple[str, str] | None:
-    normalized = str(device_model or "").strip()
-    for item in mappings:
-        if normalized in {item.model, f"{item.vendor} {item.model}"}:
-            return item.vendor, item.model
-    return None
-
-
-def find_category(
-    vendor: str,
-    model: str,
-    command: str,
-    mappings: list[CommandMapping],
-) -> str | None:
-    normalized = normalize_command(command)
-    for item in mappings:
-        if (
-            item.vendor.lower() == vendor.lower()
-            and item.model.lower() == model.lower()
-            and item.command == normalized
-        ):
-            return item.category
-    return None
-
-
-def resolve_category(
-    vendor: str,
-    model: str,
-    command: str,
-    mappings: list[CommandMapping],
-    *,
-    explicit_category: str | None = None,
-) -> str | None:
-    if explicit_category and explicit_category.strip():
-        return explicit_category.strip()
-    category = find_category(vendor, model, command, mappings)
-    if category:
-        return category
-    if model.lower() != "generic":
-        return find_category(vendor, "Generic", command, mappings)
-    return None
-
-
-def required_fields_for_category(
-    category: str,
-    categories: dict[str, CategorySpec],
-) -> list[str]:
-    spec = categories.get(category)
-    return list(spec.required_fields) if spec else []

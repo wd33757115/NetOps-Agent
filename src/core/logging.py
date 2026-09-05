@@ -129,8 +129,3 @@ def bind_context(**kwargs: str | None) -> list[tuple[ContextVar[str | None], Tok
 def reset_context(pairs: list[tuple[ContextVar[str | None], Token]]) -> None:
     for var, token in reversed(pairs):
         var.reset(token)
-
-
-def clear_context() -> None:
-    for var in _CONTEXT_VARS.values():
-        var.set(None)

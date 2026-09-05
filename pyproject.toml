@@ -130,12 +130,6 @@ optional = true
 [tool.poetry.group.observability.dependencies]
 langfuse = ">=2.0.*"
 
-[tool.poetry.group.legacy-ui]
-optional = true
-
-[tool.poetry.group.legacy-ui.dependencies]
-streamlit = "1.40.*"
-
 [tool.poetry.group.dev.dependencies]
 black = ">=24.0.*"
 ruff = ">=0.4.*"
