@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_
 
-from src.auth.dependencies import require_role
+from src.auth.dependencies import require_netops_access, require_role
 from src.auth.models import CurrentUser
 from src.core.agent_modules.control import (
     AGENT_MODULE_CONTROL_STATUSES,
@@ -86,7 +86,7 @@ def _enqueue_patrol_batch_dispatch(patrol_batch_id: str) -> str:
 router = APIRouter(
     prefix="/api/v1/devices",
     tags=["Device Management"],
-    dependencies=[Depends(require_role(["admin", "operator"]))],
+    dependencies=[Depends(require_netops_access)],
 )
 
 

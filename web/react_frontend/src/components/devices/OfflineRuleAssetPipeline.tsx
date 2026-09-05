@@ -1,8 +1,8 @@
+import { useRuleTaskNavigate } from '../../hooks/useRuleTaskNavigate'
 import React from 'react'
 import { Alert, Button, Progress, Space, Tooltip, Typography } from 'antd'
 import { ArrowRightOutlined, CheckOutlined, CloseOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useQuery } from 'react-query'
-import { useNavigate } from 'react-router-dom'
 import { ruleAssetSourceApi } from '../../services/api'
 import { useIsMobile } from '../../hooks/useBreakpoint'
 
@@ -17,7 +17,7 @@ const statusLabel: Record<string, string> = {
 }
 
 const OfflineRuleAssetPipeline: React.FC<{ jobId: string }> = ({ jobId }) => {
-  const navigate = useNavigate()
+  const navigate = useRuleTaskNavigate()
   const isMobile = useIsMobile()
   const query = useQuery(
     ['offline-rule-asset-pipeline', jobId],
@@ -119,8 +119,9 @@ const OfflineRuleAssetPipeline: React.FC<{ jobId: string }> = ({ jobId }) => {
       <Alert
         showIcon
         type="info"
-        message="导入职责到此结束"
-        description="样本导入只保存原始 CLI 证据、识别命令并创建待归类命令。请在检查项目录关联 CheckItem；结构化命令随后生成 TextFSM 与 Projection，文本命令创建文本命令适配器。"
+        message="样本导入是制作任务的第一步"
+        description="继续确认检查项、校对标准结果并验证发布。每条命令独立保存进度，可以稍后返回。"
+        action={<Button onClick={() => navigate(`/apps/patrol-rules/source-jobs/${encodeURIComponent(jobId)}?tab=production`)}>继续制作与验证</Button>}
       />
     </Space>
   )

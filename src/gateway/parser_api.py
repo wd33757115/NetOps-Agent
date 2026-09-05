@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.auth.dependencies import get_current_user, require_role
+from src.auth.dependencies import require_netops_access, get_current_user, require_role
 from src.auth.models import CurrentUser
 from src.core.celery_tasks.celery_app import celery
 from src.core.check_items import (
@@ -143,7 +143,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/api/v1/parser",
     tags=["Parser Control Plane"],
-    dependencies=[Depends(require_role(["admin", "operator"]))],
+    dependencies=[Depends(require_netops_access)],
 )
 
 

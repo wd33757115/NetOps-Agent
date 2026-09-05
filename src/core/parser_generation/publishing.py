@@ -643,6 +643,8 @@ def persist_generation(
         if current_job is None:
             raise RuntimeError("Parser job disappeared before generation was persisted")
         if isinstance(current_job, Mapping):
+            if current_job.get("celery_task_id") != job.get("celery_task_id"):
+                raise RuntimeError("Parser task was replaced or paused; discarding the stale generation result")
             readiness = dict(current_job.get("generation_readiness") or {})
             if "generation_readiness" in current_job and not readiness.get("ready"):
                 raise RuntimeError(
@@ -714,6 +716,7 @@ def persist_generation(
         source_job_id=str(job["id"]),
         status="pending_approval",
         candidate_sample_manifest=list(validation["sample_manifest"]),
+        **({"expected_celery_task_id": job["celery_task_id"]} if job.get("celery_task_id") else {}),
     )
     return PersistedGeneration(tuple(attempts), best_attempt_id, True, asset_uri, validation)
 

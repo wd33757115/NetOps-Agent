@@ -138,6 +138,7 @@ describe('OfflinePatrolResultPanel', () => {
     )
 
     expect(screen.getByText('发现重大网络风险')).toBeVisible()
+    await user.click(screen.getByText('解析覆盖与技术诊断'))
     expect(screen.getByText('22/26 · 84.6%')).toBeVisible()
     expect(screen.getAllByText('WGE1/0/15').length).toBeGreaterThan(0)
     expect(screen.getByText(/2 项信号与主故障相关/)).toBeVisible()
@@ -158,6 +159,26 @@ describe('OfflinePatrolResultPanel', () => {
     expect(screen.getByText('contract-1')).toBeVisible()
     expect(screen.getByText('rule-1')).toBeVisible()
     expect(screen.getByText('analysis-1')).toBeVisible()
+  })
+
+  it('never presents validation-only samples as healthy devices', () => {
+    render(<OfflinePatrolResultPanel purpose="rule_asset_source" report={{ ...report, risks: [],
+      assessment: { ...report.assessment, code: 'rule_replay_only', conclusion_allowed: false, status: '仅用于规则验证' } }}
+      loading={false} isMobile={false} onRetry={vi.fn()} onDownloadReport={vi.fn()} onDownloadWorkbook={vi.fn()}
+      onOpenRuleAssets={vi.fn()} onLoadComparisonEvidence={vi.fn()} />)
+    expect(screen.getByRole('button', { name: /下载验证报告/ })).toBeVisible()
+    expect(screen.queryByText('分析期风险')).not.toBeInTheDocument()
+    expect(screen.queryByText(/未发现.*风险/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /下载巡检报告/ })).not.toBeInTheDocument()
+  })
+
+  it('does not turn incomplete zero-risk data green', () => {
+    render(<OfflinePatrolResultPanel report={{ ...report, risks: [],
+      assessment: { ...report.assessment, conclusion_allowed: false }, data_quality: { status: 'incomplete' } }}
+      loading={false} isMobile={false} onRetry={vi.fn()} onDownloadReport={vi.fn()} onDownloadWorkbook={vi.fn()}
+      onOpenRuleAssets={vi.fn()} onLoadComparisonEvidence={vi.fn()} />)
+    expect(screen.getByText('尚不能形成完整风险结论，请查看覆盖缺口和证据')).toBeVisible()
+    expect(screen.queryByText('本次已覆盖范围内未发现风险')).not.toBeInTheDocument()
   })
 
   it('formats composite entity keys without exposing JSON punctuation', () => {

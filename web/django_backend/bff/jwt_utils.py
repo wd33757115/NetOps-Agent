@@ -20,8 +20,8 @@ def token_is_revoked(token) -> bool:
 
 
 def attach_auth_context(request, user, token) -> None:
-    """绑定用户上下文；角色/线程前缀优先读 JWT，避免 async 视图内查库。"""
-    from .roles import get_user_role, user_thread_prefix
+    """同步绑定当前数据库角色及权限；线程前缀可复用 JWT，避免异步视图查库。"""
+    from .roles import get_user_role, get_user_permissions, user_thread_prefix
 
     request.user = user
     request.auth = token
@@ -30,14 +30,13 @@ def attach_auth_context(request, user, token) -> None:
     except Exception:
         request.bff_session_id = ""
 
-    role = None
     thread_prefix = None
     try:
-        role = token.get("role")
         thread_prefix = token.get("thread_id")
     except Exception:
         pass
 
     # 在同步鉴权阶段解析角色（此处可安全访问 ORM）
-    request.bff_user_role = str(role or get_user_role(user))
+    request.bff_user_role = get_user_role(user)
+    request.bff_user_permissions = get_user_permissions(user)
     request.bff_user_thread_prefix = str(thread_prefix or user_thread_prefix(user))

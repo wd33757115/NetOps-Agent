@@ -1,3 +1,4 @@
+import { useRuleTaskNavigate } from '../../../hooks/useRuleTaskNavigate'
 import { businessHref } from '../../../apps/appRoutes'
 import React, { useEffect, useMemo, useState } from 'react'
 import {
@@ -9,7 +10,7 @@ import {
   HistoryOutlined, PlayCircleOutlined, ReloadOutlined, WarningOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from 'react-query'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 
 import {
   parserApi,
@@ -79,7 +80,7 @@ const backfillScopeLabel = (row: ParserBackfillJob) => {
 const CoverageBackfillWorkspace: React.FC = () => {
   const screens = Grid.useBreakpoint()
   const isMobile = !screens.md
-  const navigate = useNavigate()
+  const navigate = useRuleTaskNavigate()
   const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const view: CoverageView = searchParams.get('subtab') === 'rule-gaps'

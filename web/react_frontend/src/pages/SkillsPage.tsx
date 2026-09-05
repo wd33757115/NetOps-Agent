@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
 // SPDX-License-Identifier: Apache-2.0
 
+import { useCanConfigureNetOps } from '../context/AuthContext'
 import React, { Suspense, useCallback, useMemo, useState } from 'react'
 import { Spin, Tabs } from 'antd'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -23,6 +24,7 @@ const workspaceFallback = (
 
 const SkillsPage: React.FC = () => {
   const isMobile = useIsMobile()
+  const canConfigure = useCanConfigureNetOps()
   const navigate = useNavigate()
   const { section } = useParams<{ section?: string }>()
   const activeTab = ['skills', 'workflows', 'market', 'parser', 'guide'].includes(section || '')
@@ -112,7 +114,7 @@ const SkillsPage: React.FC = () => {
         <Tabs
           activeKey={activeTab}
           onChange={(key) => navigate(key === 'skills' ? '/skills' : `/skills/${key}`)}
-          items={tabItems}
+          items={tabItems.filter(tab => tab.key !== 'parser' || canConfigure)}
           size={isMobile ? 'small' : 'middle'}
           className="grok-skills-tabs"
         />

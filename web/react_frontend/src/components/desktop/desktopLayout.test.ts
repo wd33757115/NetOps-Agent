@@ -14,7 +14,7 @@ describe('desktop layout', () => {
     })
     expect(layout.nodes.find((n) => n.id === 'patrol-rules')?.col).toBe(0)
     expect(layout.nodes.find((n) => n.id === 'patrol')?.col).toBe(1)
-    expect(layout.nodes).toHaveLength(3)
+    expect(layout.nodes).toHaveLength(4)
   })
   it('moves in and out of folders and dissolves without touching Dock', () => {
     const layout = defaultLayout()
@@ -23,7 +23,7 @@ describe('desktop layout', () => {
       kind: 'folder',
       name: '网络',
       containerId: 'desktop:0',
-      col: 3,
+      col: 4,
       row: 0,
     })
     const moved = moveNode(
@@ -41,7 +41,7 @@ describe('desktop layout', () => {
     )
     expect(dissolved.dockAppIds).toEqual(layout.dockAppIds)
     expect(new Set(dissolved.nodes.map((n) => `${n.col}:${n.row}`)).size).toBe(
-      3,
+      4,
     )
   })
   it('retains unknown app references and reconciles new apps and duplicates', () => {
@@ -58,7 +58,7 @@ describe('desktop layout', () => {
     ]
     layout.nodes.push({ ...layout.nodes[0] })
     const result = reconcileLayout(layout)
-    expect(result.nodes).toHaveLength(4)
+    expect(result.nodes).toHaveLength(5)
     expect(result.nodes[0].appId).toBe('future')
   })
   it('rejects nested or missing folders', () => {

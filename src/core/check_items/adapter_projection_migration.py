@@ -407,7 +407,8 @@ def deterministic_projection_candidate(
 
 
 def generate_projection_candidate(
-    params: Mapping[str, Any]) -> dict[str, Any]:
+    params: Mapping[str, Any], *, execution_validator: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Generate or validate a V2 projection candidate with a three-round cap."""
 
     raw = dict(params)
@@ -436,16 +437,21 @@ def generate_projection_candidate(
         ),
     )
     _, check_item = _selected_check_item(selected_raw, check_item_id=check_item_id)
+    def validate(candidate):
+        validation = validate_projection_candidate(candidate, context=context, check_item=check_item)
+        if validation.get("success") and execution_validator:
+            executed = execution_validator(validation["adapter_spec"])
+            validation["execution"] = executed
+            if executed.get("success") is not True:
+                validation["success"] = False
+                validation["errors"] = [*validation.get("errors", []), *executed.get("errors", [])]
+        return validation
     mode = str(raw.get("mode") or "projection_candidate").strip().casefold()
     proposal = _as_mapping(raw.get("proposal") or raw.get("adapter_spec"))
     if mode in {"projection_validate", "validate_projection"}:
         if not proposal:
             raise ValueError("projection_validate requires proposal or adapter_spec")
-        validation = validate_projection_candidate(
-            proposal,
-            context=context,
-            check_item=check_item,
-        )
+        validation = validate(proposal)
         return {
             "success": validation["success"],
             "mode": "projection_validate",
@@ -462,11 +468,7 @@ def generate_projection_candidate(
         ).run(
             stage="adapter_projection",
             context=context,
-            validator=lambda candidate: validate_projection_candidate(
-                candidate,
-                context=context,
-                check_item=check_item,
-            ),
+            validator=validate,
         )
         validation = dict(generated.get("validation") or {})
         return {
@@ -480,11 +482,7 @@ def generate_projection_candidate(
         }
 
     candidate = proposal or deterministic_projection_candidate(context=context)
-    validation = validate_projection_candidate(
-        candidate,
-        context=context,
-        check_item=check_item,
-    )
+    validation = validate(candidate)
     return {
         "success": validation["success"],
         "mode": "projection_candidate",

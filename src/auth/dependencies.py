@@ -49,3 +49,14 @@ def require_role(allowed_roles: list[str]):
         return user
 
     return _dependency
+
+
+async def require_netops_access(request: Request) -> CurrentUser:
+    from src.auth.netops_access import READ_METHODS, requires_netops_configuration
+    user = await get_current_user(request)
+    if requires_netops_configuration(request.method, request.url.path):
+        if not user.can_configure_netops():
+            raise HTTPException(status_code=403, detail="需要设备与规则配置权限，请联系管理员授权")
+    elif request.method not in READ_METHODS and not user.can_execute_skills():
+        raise HTTPException(status_code=403, detail="当前角色仅可查看巡检")
+    return user

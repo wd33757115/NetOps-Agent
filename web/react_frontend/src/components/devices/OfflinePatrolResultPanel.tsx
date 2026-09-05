@@ -1,6 +1,6 @@
 import React from 'react'
 import {
-  Alert, Button, Descriptions, Drawer, Space, Spin, Table, Tag, Typography,
+  Alert, Button, Collapse, Descriptions, Drawer, Space, Spin, Table, Tag, Typography,
 } from 'antd'
 import {
   DownloadOutlined,
@@ -13,9 +13,13 @@ import type {
   OfflinePatrolComparisonEvidenceSide,
   OfflinePatrolReportRisk,
   OfflinePatrolReportTrendGroup,
+  OfflinePatrolJobPurpose,
 } from '../../services/api'
+import { offlineResultPresentation } from './offlineResultPresentation'
 
 interface OfflinePatrolResultPanelProps {
+  canManageRules?: boolean
+  purpose?: OfflinePatrolJobPurpose
   report?: OfflinePatrolAnalysisSummary
   loading: boolean
   error?: unknown
@@ -32,6 +36,8 @@ interface OfflinePatrolResultPanelProps {
 }
 
 const eventTypeLabel: Record<string, string> = {
+  InterfaceDown: '接口运行中断',
+  InterfaceUp: '接口恢复',
   interface_link_down: '接口链路中断',
   interface_link_up: '接口链路恢复',
   interface_oper_down: '接口运行状态中断',
@@ -201,6 +207,8 @@ const trendColumns = [
 ]
 
 const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
+  purpose,
+  canManageRules = true,
   report,
   loading,
   error,
@@ -294,6 +302,7 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
     )
   }
 
+  const presentation = offlineResultPresentation(report, purpose)
   const parserReady = metric(report, 'parser_ready_count')
   const parserEligible = metric(report, 'parser_eligible_count')
   const templateMissing = metric(report, 'template_missing_count')
@@ -334,25 +343,40 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <Alert
-        type={risks.length ? 'error' : 'success'}
+        type={presentation.tone}
         showIcon
         message={report.assessment.status}
-        description={`${report.assessment.basis}；结论可信度：${report.assessment.trust}`}
+        description={`${report.assessment.basis.replaceAll('当前风险', '分析期风险')}；结论可信度：${report.assessment.trust}`}
       />
 
-      <Descriptions bordered size="small" column={isMobile ? 1 : 3}>
-        <Descriptions.Item label="当前风险">{report.risk_summary.total}</Descriptions.Item>
+      <Space wrap className="patrol-result-actions">
+        <Button type="primary" icon={<DownloadOutlined />} loading={reportDownloading} onClick={onDownloadReport}>{presentation.reportLabel}</Button>
+        <Button icon={<DownloadOutlined />} loading={workbookDownloading} onClick={onDownloadWorkbook}>{presentation.workbookLabel}</Button>
+        {canManageRules && <Button icon={<SafetyCertificateOutlined />} onClick={onOpenRuleAssets}>{presentation.validation ? "继续制作规则" : "补齐检查能力"}</Button>}
+      </Space>
+      {(templateMissing > 0 || String(report.data_quality.status || '') !== 'ready') && (
+        <Alert
+          type="warning"
+          showIcon
+          message="数据质量未达到完全覆盖"
+          description={`Parser Ready ${parserReady}/${parserEligible}，缺失模板 ${templateMissing}；未覆盖领域不能据此判定健康。`}
+        />
+      )}
+      {!presentation.validation && <Descriptions bordered size="small" column={isMobile ? 1 : 3}>
+        <Descriptions.Item label={presentation.riskLabel}>{report.risk_summary.total}</Descriptions.Item>
         <Descriptions.Item label="关闭已跟踪故障">{report.event_summary.resolved_prior_fault_count || 0}</Descriptions.Item>
         <Descriptions.Item label="状态改善">{report.event_summary.state_improvement_count || 0}</Descriptions.Item>
         <Descriptions.Item label="事件事实">{report.event_summary.fact_count}</Descriptions.Item>
+      </Descriptions>}
+      <Collapse ghost items={[{ key: "diagnostics", label: "解析覆盖与技术诊断", children: <Descriptions bordered size="small" column={isMobile ? 1 : 3}>
         <Descriptions.Item label="Parser Ready">{parserReady}/{parserEligible} · {formatPercent(metric(report, 'parser_ready_rate'))}</Descriptions.Item>
         <Descriptions.Item label="缺失模板">{templateMissing}</Descriptions.Item>
         <Descriptions.Item label="Observation / Change">{metric(report, 'observation_count')} / {metric(report, 'change_count')}</Descriptions.Item>
         <Descriptions.Item label="分析版本"><Typography.Text copyable code>{analysis.revision || '-'}</Typography.Text></Descriptions.Item>
         <Descriptions.Item label="权威 Change">{analysis.source_change_count || 0}</Descriptions.Item>
-      </Descriptions>
+      </Descriptions> }]} />
 
-      {trend?.available && (
+      {!presentation.validation && trend?.available && (
         <section>
           <Typography.Title level={5}>跨周期趋势</Typography.Title>
           <Alert
@@ -375,8 +399,8 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
         </section>
       )}
 
-      <section>
-        <Typography.Title level={5}>当前风险</Typography.Title>
+      {!presentation.validation && <section>
+        <Typography.Title level={5}>{presentation.riskLabel}</Typography.Title>
         {risks.length ? (
           <Table<OfflinePatrolReportRisk>
             rowKey={(row) => String(row.evidence_chain?.event_id || row.evidence_id || `${row.device_id}-${row.event_type}-${row.entity_key}`)}
@@ -387,10 +411,10 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
             expandable={{ expandedRowRender: (row) => <RiskEvidence row={row} isMobile={isMobile} /> }}
             scroll={{ x: 940 }}
           />
-        ) : <Alert type="success" showIcon message="本次已覆盖范围内未发现当前风险" />}
-      </section>
+        ) : <Alert type={presentation.tone} showIcon message={presentation.emptyText} />}
+      </section>}
 
-      {correlated.length > 0 && (
+      {!presentation.validation && correlated.length > 0 && (
         <section>
           <Typography.Title level={5}>关联信号</Typography.Title>
           <Alert
@@ -411,14 +435,7 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
         </section>
       )}
 
-      {(templateMissing > 0 || String(report.data_quality.status || '') !== 'ready') && (
-        <Alert
-          type="warning"
-          showIcon
-          message="数据质量未达到完全覆盖"
-          description={`Parser Ready ${parserReady}/${parserEligible}，缺失模板 ${templateMissing}；未覆盖领域不能据此判定健康。`}
-        />
-      )}
+
 
       {parserFailureEvidenceCount > 0 && (
         <Alert
@@ -594,11 +611,7 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
         )}
       </Drawer>
 
-      <Space wrap>
-        <Button icon={<SafetyCertificateOutlined />} onClick={onOpenRuleAssets}>查看规则资产包</Button>
-        <Button icon={<DownloadOutlined />} loading={reportDownloading} onClick={onDownloadReport}>下载巡检报告</Button>
-        <Button icon={<DownloadOutlined />} loading={workbookDownloading} onClick={onDownloadWorkbook}>下载巡检明细 Excel</Button>
-      </Space>
+
     </Space>
   )
 }

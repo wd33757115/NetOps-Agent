@@ -1,3 +1,4 @@
+import ReusePatrolSamples from './ReusePatrolSamples'
 import React from 'react'
 import { Alert, Space, Typography } from 'antd'
 import { useSearchParams } from 'react-router-dom'
@@ -31,6 +32,9 @@ const RuleAssetSourceJobsWorkspace: React.FC = () => {
   const initialJobName = focusedCommand
     ? `${checkItemId || focusedCommand}${observationType ? ` · ${observationType}` : ''} CLI 样本`
     : undefined
+
+  const patrolSourceId = searchParams.get('patrol_source_job_id')
+  if (patrolSourceId) return <ReusePatrolSamples patrolId={patrolSourceId} />
 
   return (
     <Space className="parser-source-jobs-workspace" direction="vertical" size={16} style={{ width: '100%' }}>

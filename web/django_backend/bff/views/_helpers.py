@@ -59,6 +59,7 @@ def forward_client_headers(request: HttpRequest) -> dict:
         headers["X-User-Id"] = str(user.id)
         headers["X-User-Name"] = user.username
         headers["X-User-Role"] = _request_user_role(request)
+        headers["X-User-Permissions"] = ",".join(getattr(request, "bff_user_permissions", []))
         headers["X-User-Thread-Prefix"] = _request_thread_prefix(request, user)
         session_id = getattr(request, "bff_session_id", "")
         if session_id:

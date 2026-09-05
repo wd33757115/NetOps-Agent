@@ -254,17 +254,6 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
     }
   }
 
-  const synchronizeContract = () => {
-    try {
-      const contract = buildCanonicalContract(form.getFieldsValue())
-      form.setFieldValue('canonical_contract_json', JSON.stringify(contract, null, 2))
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : '标准输出契约无法刷新')
-      return
-    }
-    message.success('标准输出契约已按当前字段选择刷新')
-  }
-
   const save = async () => {
     try {
       const values = await form.validateFields()
@@ -455,6 +444,15 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
                             showSearch
                             optionFilterProp="label"
                             loading={canonicalLoading}
+                            onChange={(id) => {
+                              const definition = canonicalCatalog?.items.find((item) => item.id === id)
+                              if (!definition) return
+                              form.setFieldValue(['canonical_fields', name, 'value_type'], definition.value_types[0] || 'text')
+                              form.setFieldValue(['canonical_fields', name, 'unit'], definition.canonical_unit || '')
+                              if (!form.getFieldValue(['canonical_fields', name, 'name'])) {
+                                form.setFieldValue(['canonical_fields', name, 'name'], id.replaceAll('.', '_'))
+                              }
+                            }}
                             options={(canonicalCatalog?.items || []).map((item) => ({
                               value: item.id,
                               label: `${item.id} · ${item.description || item.semantic_type}`,
@@ -505,9 +503,7 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
               )}
             </Form.List>
           </div>
-          <Form.Item className="check-item-catalog-form-wide">
-            <Button onClick={synchronizeContract}>刷新标准输出契约</Button>
-          </Form.Item>
+          <Typography.Text type="secondary">选择标准语义后自动填入类型与单位；保存时统一生成并校验数据契约。</Typography.Text>
         </div>
 
         {resultMode === 'structured' && (

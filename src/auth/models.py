@@ -14,6 +14,7 @@ class CurrentUser(BaseModel):
     user_id: str
     username: str
     role: str = Field(default="operator", description="admin | operator | viewer")
+    permissions: list[str] = Field(default_factory=list)
     thread_prefix: str | None = None
     session_id: str | None = None
 
@@ -24,6 +25,10 @@ class CurrentUser(BaseModel):
 
     def can_execute_skills(self) -> bool:
         return self.role in {"admin", "operator"}
+
+    def can_configure_netops(self) -> bool:
+        from src.auth.netops_access import NETOPS_CONFIGURE
+        return self.is_admin() or NETOPS_CONFIGURE in self.permissions
 
     def is_admin(self) -> bool:
         return self.role == "admin"

@@ -7,6 +7,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import AppLayout from './components/Layout/AppLayout'
 import ProtectedRoute from './components/ProtectedRoute'
 import AdminRoute from './components/AdminRoute'
+import NetOpsConfigRoute from './components/NetOpsConfigRoute'
 import BusinessRoute from './components/BusinessRoute'
 import { workbenchEnabled, documentsEnabled } from './apps/appRoutes'
 import { AuthProvider } from './context/AuthContext'
@@ -56,12 +57,13 @@ const App: React.FC = () => {
             <Route path="skills" element={<SkillsPage />} />
             <Route path="workbench" element={workbenchEnabled ? <WorkbenchPage /> : <Navigate to="/chat" replace />} />
             <Route path="apps/patrol" element={<BusinessRoute><PatrolAppPage /></BusinessRoute>} />
-            <Route path="apps/patrol-rules" element={<BusinessRoute><PatrolRulesAppPage /></BusinessRoute>} />
-            <Route path="apps/patrol-rules/source-jobs/:jobId" element={<BusinessRoute><RuleAssetSourceJobDetailPage /></BusinessRoute>} />
-            <Route path="skills/parser" element={<BusinessRoute><SkillsPage /></BusinessRoute>} />
-            <Route path="skills/parser/source-jobs/:jobId" element={<BusinessRoute><RuleAssetSourceJobDetailPage /></BusinessRoute>} />
+            <Route path="apps/patrol-rules" element={<BusinessRoute><NetOpsConfigRoute><PatrolRulesAppPage /></NetOpsConfigRoute></BusinessRoute>} />
+            <Route path="apps/patrol-rules/source-jobs/:jobId" element={<BusinessRoute><NetOpsConfigRoute><RuleAssetSourceJobDetailPage /></NetOpsConfigRoute></BusinessRoute>} />
+            <Route path="skills/parser" element={<BusinessRoute><NetOpsConfigRoute><SkillsPage /></NetOpsConfigRoute></BusinessRoute>} />
+            <Route path="skills/parser/source-jobs/:jobId" element={<BusinessRoute><NetOpsConfigRoute><RuleAssetSourceJobDetailPage /></NetOpsConfigRoute></BusinessRoute>} />
             <Route path="skills/:section" element={<SkillsPage />} />
             <Route path="devices" element={<DevicesPage />} />
+            <Route path="admin/netops/devices" element={<NetOpsConfigRoute><DevicesPage /></NetOpsConfigRoute>} />
             <Route path="knowledge" element={<KnowledgePage />} />
             <Route path="storage" element={<StoragePage />} />
             <Route path="status" element={<StatusPage />} />

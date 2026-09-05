@@ -9,11 +9,12 @@ from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping
 from typing import Any
 from urllib.parse import urlencode
+from sqlalchemy import and_, or_
 
 from src.core.check_items.assessment_policy import (
     normalize_assessment_policy_contract,
 )
-from src.core.check_items.canonical import load_canonical_catalog
+from src.core.check_items.canonical import rule_semantics_catalog
 from src.core.check_items.catalog import (
     CollectionCommand,
     primary_collection_commands,
@@ -1406,9 +1407,9 @@ class RuntimeBundleAssemblyPlanner:
         change_policy_version_ids: Iterable[str] = (),
         event_rule_version_ids: Iterable[str] = (),
         comparison_profile_version_id: str | None = None,
+        _preview_candidates: bool = False,
     ) -> dict[str, Any]:
         db = self.db
-        canonical_catalog = load_canonical_catalog()
         blockers: list[dict[str, Any]] = []
         warnings: list[dict[str, Any]] = []
 
@@ -1441,6 +1442,7 @@ class RuntimeBundleAssemblyPlanner:
                 warnings=warnings,
             )
 
+        canonical_catalog = rule_semantics_catalog(dict(check_version.canonical_contract_json or {}))
         check_item = db.get(CheckItemRecord, check_version.check_item_id)
         implementation = db.get(
             CollectionImplementationRecord,
@@ -1644,7 +1646,8 @@ class RuntimeBundleAssemblyPlanner:
 
         parser_rows = (
             db.query(ParserTemplate)
-            .filter(ParserTemplate.status == "active")
+            .filter(or_(ParserTemplate.status == "active", and_(
+                _preview_candidates, ParserTemplate.id.in_(requested_parser_ids), ParserTemplate.status == "pending_approval")))
             .order_by(
                 ParserTemplate.canonical_command,
                 ParserTemplate.vendor,
@@ -2108,7 +2111,8 @@ class RuntimeBundleAssemblyPlanner:
         policy_rows_all = (
             db.query(ChangePolicyVersionRecord)
             .filter(
-                ChangePolicyVersionRecord.status == "active",
+                or_(ChangePolicyVersionRecord.status == "active", and_(
+                    _preview_candidates, ChangePolicyVersionRecord.id.in_(requested_policy_ids), ChangePolicyVersionRecord.status.in_(["draft", "pending_approval"]))),
                 ChangePolicyVersionRecord.observation_type.in_(
                     sorted(change_required) or [""]
                 ),
@@ -2358,7 +2362,8 @@ class RuntimeBundleAssemblyPlanner:
         rule_rows_all = (
             db.query(EventRuleVersionRecord, EventRuleRecord)
             .join(EventRuleRecord, EventRuleRecord.id == EventRuleVersionRecord.rule_id)
-            .filter(EventRuleVersionRecord.status == "active")
+            .filter(or_(EventRuleVersionRecord.status == "active", and_(
+                _preview_candidates, EventRuleVersionRecord.id.in_(requested_rule_ids), EventRuleVersionRecord.status.in_(["draft", "pending_approval"]))))
             .order_by(
                 EventRuleVersionRecord.priority.desc(),
                 EventRuleRecord.name,

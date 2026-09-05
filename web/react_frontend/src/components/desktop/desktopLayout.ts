@@ -27,7 +27,7 @@ export const defaultLayout = (): DesktopLayout => ({
     col,
     row: 0,
   })),
-  dockAppIds: appRegistry.filter(app => app.enabled && app.id !== 'official-document').map((app) => app.id),
+  dockAppIds: appRegistry.filter(app => app.enabled && ['patrol', 'patrol-rules'].includes(app.id)).map((app) => app.id),
 })
 export function firstFree(nodes: DesktopNode[], columns = 6) {
   for (let index = 0; index < 20000; index++) {

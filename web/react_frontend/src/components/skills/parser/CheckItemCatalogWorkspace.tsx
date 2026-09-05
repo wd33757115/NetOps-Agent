@@ -1,3 +1,4 @@
+import { useRuleTaskNavigate } from '../../../hooks/useRuleTaskNavigate'
 import { businessHref } from '../../../apps/appRoutes'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -34,7 +35,7 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from 'react-query'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import {
   parserApi,
@@ -422,7 +423,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
   >({})
   const [cutoverReason, setCutoverReason] = useState('')
   const [form] = Form.useForm<ImplementationDraftForm>()
-  const navigate = useNavigate()
+  const navigate = useRuleTaskNavigate()
   const location = useLocation()
   const sourceJobScope = initialOfflineJobId?.trim() || undefined
   const [draftSourceContext, setDraftSourceContext] = useState<CommandAdapterDraftContext>()
@@ -653,10 +654,12 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
       command: string
     }) => ruleAssetSourceApi.associateUnclassifiedCommandAsset(jobId, unitId, {
       check_item_id: checkItemId,
+      auto_continue: true,
     }),
     {
       onSuccess: async (_result, variables) => {
-        message.success('已关联 CheckItem；已准备 Parser 任务，尚未创建生产命令适配器')
+        if (_result.autopilot_error) message.warning(`关联已保存：${_result.autopilot_error}`)
+        else message.success('关联已确认，后台自动制作已启动')
         setAssociationTarget(undefined)
         setAssociationCheckItemId(undefined)
         await refreshAll()
@@ -669,6 +672,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
           source_job_id: variables.jobId,
           offline_job_id: variables.jobId,
           command: variables.command,
+          unit_id: variables.unitId,
           action: 'parser',
         })
         navigate(businessHref(`/skills/parser?${params.toString()}`))
@@ -1643,7 +1647,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
             检查项目录
           </Typography.Title>
           <Typography.Text type="secondary">
-            定义标准语义与规则；展开检查项维护厂商命令、TextFSM、A→B Projection 和回放。
+            维护检查标准和设备适配范围；生成任务在制作工作台中继续。
           </Typography.Text>
         </div>
         <Space>
@@ -1676,21 +1680,22 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
         <button
           type="button"
           role="tab"
-          className={view === 'cutover' ? 'is-active' : ''}
-          aria-selected={view === 'cutover'}
-          onClick={() => setView('cutover')}
-        >
-          回放与切换
-        </button>
-        <button
-          type="button"
-          role="tab"
           className={view === 'changes' ? 'is-active' : ''}
           aria-selected={view === 'changes'}
           onClick={() => setView('changes')}
         >
           变更与审批
         </button>
+        {user?.role === 'admin' && <details className="rule-workspace-tools"><summary>平台管理</summary>        <button
+          type="button"
+          role="tab"
+          className={view === 'cutover' ? 'is-active' : ''}
+          aria-selected={view === 'cutover'}
+          onClick={() => setView('cutover')}
+        >
+          回放与切换
+        </button>
+</details>}
       </div>
 
       {view === 'cutover' ? (
@@ -2120,7 +2125,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
             命令：<Typography.Text code>{associationTarget ? sourceContextForGroup(associationTarget)?.command || '-' : '-'}</Typography.Text>
           </Typography.Text>
           <Typography.Text type="secondary">
-            关联即选择该命令的标准语义 B；不会提前创建生产命令适配器。
+            确认后，系统按此检查项自动完成解析、字段转换、规则生成和验证；可随时暂停接管。
           </Typography.Text>
           <Select
             aria-label="关联目标检查项"
@@ -2471,6 +2476,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
                                       >
                                         <Input placeholder="例如 cpu_usage_percent 或 100 - cpu_idle_percent" />
                                       </Form.Item>
+                                      <details><summary>单位与高级转换</summary>
                                       <Form.Item
                                         {...mappingRest}
                                         name={[mappingName, 'projection_json']}
@@ -2478,6 +2484,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
                                       >
                                         <Input placeholder='高级投影 JSON，例如 {"value_mapping":{"UP":"up"}}' />
                                       </Form.Item>
+                                      </details>
                                       <Button
                                         type="text"
                                         danger
@@ -2540,9 +2547,11 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
                 </Button>
               </div>
             )}
+            <details className="check-item-catalog-form-wide"><summary>高级输出质量策略</summary>
             <Form.Item className="check-item-catalog-form-wide" label="输出质量策略（高级 JSON）" name="output_quality_policy_json">
               <Input.TextArea rows={5} placeholder="留空继承平台默认策略" />
             </Form.Item>
+            </details>
             <Form.Item className="check-item-catalog-form-wide" label="修订备注" name="reason">
               <Input.TextArea rows={3} placeholder="可补充新增或变更范围、命令及预期影响" />
             </Form.Item>

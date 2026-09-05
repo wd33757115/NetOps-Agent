@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { canConfigureNetOps } from '../apps/permissions'
 import { useDesktopStore } from '../store/useDesktopStore'
 import { authApi, AuthUser } from '../services/api'
 import {
@@ -59,6 +60,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     refreshProfile().finally(() => setLoading(false))
   }, [refreshProfile])
 
+  useEffect(() => {
+    const onFocus = () => { void refreshProfile() }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [refreshProfile])
+
   const login = useCallback(async (username: string, password: string) => {
     const session = (await authApi.login(username, password)) as AuthSession & { user: AuthUser }
     saveAuthSession(session)
@@ -100,3 +107,12 @@ export function useAuth(): AuthContextValue {
 }
 
 export { REFRESH_TOKEN_KEY, TOKEN_KEY, USER_KEY }
+
+/** Presentation-only check, default-deny outside an authenticated provider. */
+export function useCanConfigureNetOps(): boolean {
+  return canConfigureNetOps(useContext(AuthContext)?.user)
+}
+
+export function useIsAdmin(): boolean {
+  return useContext(AuthContext)?.user?.role === 'admin'
+}

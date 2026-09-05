@@ -151,8 +151,8 @@ async function authenticatedParserPage(
 
   await page.goto('/skills/parser')
   await expect(page).toHaveURL(/\/apps\/patrol-rules$/)
-  await expect(page.getByText('巡检规则生成', { exact: true }).first()).toBeVisible()
-  await expect(page.getByRole('button', { name: '生产工作台' }))
+  await expect(page.getByText('巡检规则工作台', { exact: true }).first()).toBeVisible()
+  await expect(page.getByRole('button', { name: '制作工作台' }))
     .toHaveAttribute('aria-current', 'page')
   return requests
 }
@@ -161,9 +161,10 @@ test('loads product workspaces on demand without page overflow', async ({ page }
   const requests = await authenticatedParserPage(page)
 
   await expect.poll(
-    () => requests.some((path) => path.endsWith('/parser/check-items/')),
+    () => requests.some((path) => path.endsWith('/parser/asset-production/check-items/')),
   ).toBe(true)
-  // The unified catalog now loads its check-item projection; other production work remains lazy.
+  // The task inbox loads its persisted production groups; catalog and expert work remain lazy.
+  expect(requests.some((path) => path.endsWith('/parser/check-items/'))).toBe(false)
   expect(requests.some((path) => path.includes('/parser/asset-production/') && !path.endsWith('/parser/asset-production/check-items/'))).toBe(false)
   expect(requests.some((path) => path.endsWith('/parser/approval-audit/'))).toBe(false)
 
@@ -317,7 +318,6 @@ test('resolves an evidence deep link to the focused published Parser asset', asy
 
   await expect(page.getByRole('button', { name: '已发布资产', exact: true }))
     .toHaveAttribute('aria-current', 'page')
-  await expect(page.getByText('正在定位 parser-template')).toBeVisible()
   await expect(page.getByText('show interface status', { exact: true }).first()).toBeVisible()
 
   if ((page.viewportSize()?.width || 0) >= 768) {
@@ -334,23 +334,23 @@ test('normalizes conflicting deep-link parameters to the canonical product works
     + '&workspace=runtime&subtab=coverage-backfill',
   )
 
-  await expect(page.getByText('深链参数已安全回退')).toBeVisible()
+  await expect(page.getByText('已打开兼容视图')).toBeVisible()
   await expect(page.getByRole('button', { name: '已发布资产', exact: true }))
     .toHaveAttribute('aria-current', 'page')
   await page.getByRole('button', { name: '使用推荐视图' }).click()
   await expect(page).toHaveURL(/workspace=inventory/)
   await expect(page).toHaveURL(/subtab=published-assets/)
   await expect(page).not.toHaveURL(/focus=/)
-  await expect(page.getByText('深链参数已安全回退')).not.toBeVisible()
+  await expect(page.getByText('已打开兼容视图')).not.toBeVisible()
 })
 
 test('navigates between Devices and the canonical Parser control plane', async ({ page }) => {
   await authenticatedParserPage(page)
   const isMobile = (page.viewportSize()?.width || 0) < 768
 
-  if (isMobile) await page.getByRole('button', { name: '打开菜单' }).click()
-  await page.getByRole('button', { name: /Devices$/ }).click()
-  await expect(page).toHaveURL(/\/devices$/)
+  await expect(page.getByRole('button', { name: /Devices$/ })).toHaveCount(0)
+  await page.goto('/admin/netops/devices')
+  await expect(page).toHaveURL(/\/admin\/netops\/devices$/)
 
   if (isMobile) await page.getByRole('button', { name: '打开菜单' }).click()
   await page.getByRole('button', { name: /Skills$/ }).click()
@@ -358,6 +358,6 @@ test('navigates between Devices and the canonical Parser control plane', async (
 
   await page.goto('/skills/parser')
   await expect(page).toHaveURL(/\/apps\/patrol-rules$/)
-  await expect(page.getByRole('button', { name: '生产工作台' }))
+  await expect(page.getByRole('button', { name: '制作工作台' }))
     .toHaveAttribute('aria-current', 'page')
 })

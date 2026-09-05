@@ -41,6 +41,8 @@ Latest architecture: [check-item-command-adapter-simplification-remediation-2026
 
 | 文档 | 说明 |
 |------|------|
+| [patrol-workflow-refactor-guide-2026-09-05.md](./patrol-workflow-refactor-guide-2026-09-05.md) | 巡检与规则工作台重构、证据复用、复检及废弃代码清理 |
+| [patrol-rule-autopilot-guide-2026-09-05.md](./patrol-rule-autopilot-guide-2026-09-05.md) | 人工定义、AI 自动制作、人工接管和管理员授权发布 |
 | [workbench-apps-guide-2026-09-05.md](./workbench-apps-guide-2026-09-05.md) | 工作台、巡检应用入口、布局保存、部署迁移与回退 |
 | [official-document-workspace-guide-2026-09-05.md](./official-document-workspace-guide-2026-09-05.md) | 公文工作台使用、版本保存、AI 修改、Word 导出与部署 |
 | [check-item-command-adapter-simplification-remediation-2026-08-10.md](./check-item-command-adapter-simplification-remediation-2026-08-10.md) | 当前架构：检查项、命令适配器、样本任务以及可信巡检报告 |
@@ -67,6 +69,7 @@ Latest architecture: [check-item-command-adapter-simplification-remediation-2026
 
 | 文档 | 状态 |
 |------|------|
+| [patrol-workflow-review-2026-09-05.md](./patrol-workflow-review-2026-09-05.md) | proposed；网络巡检与规则生成体验审查、证据及流程重构建议 |
 | [official-document-workspace-plan-2026-09-05.md](./official-document-workspace-plan-2026-09-05.md) | proposed；公文编辑、AI 修改、审查、版本与 DOCX 导出 |
 | [workbench-patrol-app-migration-plan-2026-09-05.md](./workbench-patrol-app-migration-plan-2026-09-05.md) | proposed |
 | [auth-rbac-plan.md](./auth-rbac-plan.md) | proposed |

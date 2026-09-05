@@ -31,7 +31,7 @@ from .audit import log_auth_event
 from .jwt_utils import attach_auth_context, token_is_revoked
 from .middleware import get_client_ip
 from .response import bff_error, bff_success
-from .roles import get_user_role, user_thread_prefix
+from .roles import get_user_permissions, get_user_role, user_thread_prefix
 
 
 def get_tokens_for_user(user, request=None):
@@ -69,6 +69,7 @@ def get_tokens_for_user(user, request=None):
             "username": user.username,
             "email": user.email,
             "role": role,
+            "permissions": get_user_permissions(user),
         },
     }
 
@@ -187,6 +188,7 @@ def bff_me(request):
                 "username": user.username,
                 "email": user.email,
                 "role": get_user_role(user),
+                "permissions": get_user_permissions(user),
                 "thread_id": user_thread_prefix(user),
             }
         )

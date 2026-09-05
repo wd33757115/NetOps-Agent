@@ -17,6 +17,7 @@ const {
   offlineList,
   offlineGet,
   offlineRetry,
+  reanalysis,
   offlineExecute,
   offlineConfirmBindings,
   offlineConfirmOutputDispositions,
@@ -79,6 +80,7 @@ const {
   sourceConfirmOutputDispositions: vi.fn().mockResolvedValue({ success: true }),
   offlineGet: vi.fn(),
   offlineRetry: vi.fn(),
+  reanalysis: vi.fn(),
   offlineExecute: vi.fn(),
   offlineConfirmBindings: vi.fn().mockResolvedValue({ success: true }),
   offlineConfirmOutputDispositions: vi.fn().mockResolvedValue({ success: true }),
@@ -131,6 +133,8 @@ vi.mock('../../services/api', async (importOriginal) => {
   }
 })
 
+vi.mock('../../services/patrolRuleSource', () => ({ createPatrolReanalysis: reanalysis }))
+
 vi.mock('../../hooks/useBreakpoint', () => ({ useIsMobile: () => breakpoint.mobile }))
 
 afterEach(() => {
@@ -142,6 +146,7 @@ afterEach(() => {
   sourceConfirmOutputDispositions.mockClear()
   offlineGet.mockReset()
   offlineRetry.mockReset()
+  reanalysis.mockReset()
   offlineExecute.mockReset()
   offlineConfirmBindings.mockClear()
   offlineConfirmOutputDispositions.mockClear()
@@ -296,7 +301,7 @@ describe('OfflinePatrolPanel', () => {
     expect(offlineList).toHaveBeenCalled()
   })
 
-  it('reruns a completed patrol with the currently active production rules', async () => {
+  it('creates a separate historical analysis without resetting or executing the original patrol', async () => {
     const completedJob = {
       id: 'offline-patrol-completed',
       purpose: 'offline_patrol',
@@ -316,21 +321,18 @@ describe('OfflinePatrolPanel', () => {
     offlineList.mockReset().mockResolvedValue({
       items: [completedJob], total: 1, page: 1, page_size: 25,
     })
-    offlineRetry.mockResolvedValue({ ...completedJob, status: 'ready' })
-    offlineExecute.mockResolvedValue({ ...completedJob, status: 'queued' })
-    offlineGet.mockResolvedValue(completedJob)
+    reanalysis.mockResolvedValue('new-analysis')
+    offlineGet.mockResolvedValue({ ...completedJob, id: 'new-analysis', status: 'uploading', report_intent: 'historical', periods: [], source_files: [] })
 
     const user = userEvent.setup()
     renderPanel('offline_patrol')
 
     expect(await screen.findByText(completedJob.name)).toBeInTheDocument()
-    await user.click(await screen.findByRole('button', { name: /按当前规则重新执行/ }))
+    await user.click(await screen.findByRole('button', { name: /复用文件新建分析/ }))
     await waitFor(() => {
-      expect(offlineRetry).toHaveBeenCalledWith('offline-patrol-completed')
-      expect(offlineExecute).toHaveBeenCalledWith(
-        'offline-patrol-completed',
-        expect.any(String),
-      )
+      expect(reanalysis).toHaveBeenCalledWith('offline-patrol-completed', expect.any(String))
+      expect(offlineRetry).not.toHaveBeenCalled()
+      expect(offlineExecute).not.toHaveBeenCalled()
     })
   })
 
@@ -393,7 +395,7 @@ describe('OfflinePatrolPanel', () => {
     const user = userEvent.setup()
     renderPanel('offline_patrol')
 
-    await user.click(await screen.findByRole('button', { name: /详情/ }))
+    await user.click(await screen.findByRole('button', { name: /查看进度|查看结果|继续制作/ }))
     await user.click(await screen.findByRole('tab', { name: /文件与设备/ }))
 
     expect(screen.queryByRole('button', { name: /作为外部设备/ })).not.toBeInTheDocument()
@@ -539,14 +541,12 @@ describe('OfflinePatrolPanel', () => {
 
     expect(await screen.findByRole('region', { name: 'CLI 样本导入任务详情' })).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    let tabs = await screen.findAllByRole('tab')
-    expect(tabs[0]).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: '任务信息' })).toHaveAttribute('aria-selected', 'true')
 
     await user.click(screen.getByRole('button', { name: 'switch-same-job-source-tab' }))
 
     await waitFor(() => {
-      tabs = screen.getAllByRole('tab')
-      expect(tabs[1]).toHaveAttribute('aria-selected', 'true')
+      expect(screen.getByRole('tab', { name: /文件与设备/ })).toHaveAttribute('aria-selected', 'true')
     })
     expect(sourceGet).toHaveBeenCalledWith('offline-test-1')
   })
@@ -604,7 +604,7 @@ describe('OfflinePatrolPanel', () => {
     const user = userEvent.setup()
     renderPanel()
 
-    await user.click(await screen.findByRole('button', { name: /详情/ }))
+    await user.click(await screen.findByRole('button', { name: /查看进度|查看结果|继续制作/ }))
     await user.click(await screen.findByRole('tab', { name: /文件与设备/ }))
     expect(await screen.findByText('样本设备识别')).toBeVisible()
     expect(screen.getByText('已识别为样本设备')).toBeVisible()
@@ -657,7 +657,7 @@ describe('OfflinePatrolPanel', () => {
     const user = userEvent.setup()
     renderPanel()
 
-    await user.click(await screen.findByRole('button', { name: /详情/ }))
+    await user.click(await screen.findByRole('button', { name: /查看进度|查看结果|继续制作/ }))
     await user.click(await screen.findByRole('tab', { name: /输出确认/ }))
     await user.click(screen.getByRole('checkbox', { name: '选择 N9K-1 show vpc' }))
     await user.click(screen.getByRole('button', { name: /确认为空并忽略所选命令/ }))
@@ -678,7 +678,7 @@ describe('OfflinePatrolPanel', () => {
     expect(await screen.findByText('Q1 Parser 验证')).toBeInTheDocument()
     expect(screen.getByText('共 10001 个任务')).toBeInTheDocument()
     expect(screen.queryByRole('columnheader', { name: '任务 / 创建时间' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /详情/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /查看进度|查看结果|继续制作/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '更多操作' })).toBeInTheDocument()
   })
 })

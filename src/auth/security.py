@@ -64,6 +64,7 @@ def user_from_bff_headers(headers: Mapping[str, str]) -> CurrentUser | None:
         user_id=user_id,
         username=_header(headers, "X-User-Name") or user_id,
         role=normalize_role(_header(headers, "X-User-Role") or "operator"),
+        permissions=[p for p in _header(headers, "X-User-Permissions").split(",") if p],
         thread_prefix=_header(headers, "X-User-Thread-Prefix") or None,
         session_id=session_id,
     )

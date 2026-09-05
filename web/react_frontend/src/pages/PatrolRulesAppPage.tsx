@@ -11,7 +11,7 @@ export default function PatrolRulesAppPage() {
   const navigate = useNavigate()
   return (
     <GrokShellLayout
-      title="巡检规则生成"
+      title="巡检规则工作台"
       subtitle="检查项目录、命令样本与规则资产"
       toolbar={
         <Button onClick={() => navigate(appRoutes.workbench)}>

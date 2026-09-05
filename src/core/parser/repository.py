@@ -1903,6 +1903,7 @@ class ParserRepository:
         status: str = "draft",
         contract_version: int | None = None,
         candidate_sample_manifest: list[dict[str, Any]] | None = None,
+        expected_celery_task_id: str | None = None,
     ) -> str:
         validation = dict(validation or {})
         normalized_candidate_manifest: list[dict[str, Any]] = []
@@ -1947,6 +1948,11 @@ class ParserRepository:
                 raise ValueError("parser template content does not match its SHA-256")
         digest = contract_digest(validation)
         with get_db_session() as db:
+            if expected_celery_task_id is not None:
+                job = db.query(ParserTemplateJob).filter_by(id=source_job_id).with_for_update().first()
+                if (not job or job.status not in {"running", "validating"}
+                        or job.celery_task_id != expected_celery_task_id):
+                    raise ParserJobStateError("Parser task was replaced or paused; stale candidate discarded")
             registration_key = "|".join(
                 (
                     str(vendor).strip().casefold(),
@@ -2084,6 +2090,7 @@ class ParserRepository:
         force: bool = False,
         approval_kind: str = "approval",
         allow_same_reviewer: bool = False,
+        automation_authorization: tuple[str, str] | None = None,
     ) -> ParserTemplate:
         normalized_actor = str(approved_by or "").strip()
         normalized_reason = str(reason or "").strip()
@@ -2100,6 +2107,12 @@ class ParserRepository:
                 db.expunge(template)
                 return template
             validation = dict(template.validation_json or {})
+            automated = None
+            if automation_authorization:
+                from src.core.rule_control.autopilot_authorization import require_autopilot_release
+                automated = require_autopilot_release(db, automation_authorization, kind="parser", asset_id=template_id)
+                if validation.get("human_direct_review_required") and not (validation.get("ai_review") or {}).get("passed"):
+                    raise ParserTemplateStateError("自动发布需要通过 AI 语义复核；当前候选仍需人工复核")
             regression = dict(validation.get("regression_validation") or {})
             sample_count = int(regression.get("sample_count") or 0)
             passed_samples = int(regression.get("passed_samples") or 0)
@@ -2136,7 +2149,7 @@ class ParserRepository:
                 template,
                 validation,
             )
-            if not force and semantic_review_errors:
+            if not force and semantic_review_errors and not automated:
                 raise ParserTemplateStateError(
                     "template activation blocked by human semantic review: "
                     + "; ".join(semantic_review_errors)
@@ -2215,6 +2228,8 @@ class ParserRepository:
             validation["contract_approved_by"] = normalized_actor
             validation["contract_approval_reason"] = normalized_reason
             validation["contract_approval_kind"] = approval_kind
+            if automated:
+                validation["automated_approval"] = automated
             validation["contract_force_activated"] = bool(force)
             validation["separation_of_duties_override"] = bool(
                 not force and same_review_and_release_actor and allow_same_reviewer
@@ -2252,11 +2267,12 @@ class ParserRepository:
             template.validation_json = validation
             template.activated_at = utcnow()
             template.updated_at = utcnow()
-            ObservationContractRepository().upsert_from_parser_template_row(
-                db,
-                template,
-                status="active",
-            )
+            if not automated:
+                ObservationContractRepository().upsert_from_parser_template_row(
+                    db,
+                    template,
+                    status="active",
+                )
             profile = (
                 db.query(ParserDeviceProfile)
                 .filter(

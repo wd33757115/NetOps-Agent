@@ -15,7 +15,7 @@ from django.views.decorators.csrf import csrf_exempt
 from .audit import log_auth_event
 from .decorators import require_jwt, require_role
 from .response import bff_error, bff_success
-from .roles import ALL_ROLES, ROLE_ADMIN, ROLE_OPERATOR, assign_user_role, count_active_admins, get_user_role
+from .roles import get_user_permissions, assign_netops_configuration, ALL_ROLES, ROLE_ADMIN, ROLE_OPERATOR, assign_user_role, count_active_admins, get_user_role
 
 
 def _serialize_user(user) -> dict:
@@ -25,6 +25,8 @@ def _serialize_user(user) -> dict:
         "email": user.email or "",
         "role": get_user_role(user),
         "is_active": user.is_active,
+        "permissions": get_user_permissions(user),
+        "netops_configure": user.groups.filter(name="netops-config").exists(),
         "last_login": user.last_login.isoformat() if user.last_login else None,
         "date_joined": user.date_joined.isoformat() if user.date_joined else None,
     }
@@ -82,6 +84,9 @@ def bff_users_list_or_create(request):
     if User.objects.filter(username=username).exists():
         return bff_error("username already exists", 400)
 
+    grant = body.get("netops_configure", False)
+    if not isinstance(grant, bool) or (grant and role == "viewer"):
+        return bff_error("配置授权必须为布尔值，且仅可授予 operator 或 admin", 400)
     user = User(username=username, email=email or f"{username}@local")
     try:
         validate_password(password, user)
@@ -92,6 +97,8 @@ def bff_users_list_or_create(request):
     user.is_active = True
     user.save()
     assign_user_role(user, role)
+    assign_netops_configuration(user, grant)
+    user.save()
 
     log_auth_event(
         "user_create",
@@ -146,6 +153,9 @@ def bff_user_detail(request, user_id: int):
 
     body = _parse_body(request)
     updates: list[str] = []
+    grant = body.get("netops_configure")
+    if "netops_configure" in body and (not isinstance(grant, bool) or (grant and body.get("role", get_user_role(user)) == "viewer")):
+        return bff_error("配置授权必须为布尔值，且仅可授予 operator 或 admin", 400)
 
     if "email" in body:
         user.email = (body.get("email") or "").strip()
@@ -169,6 +179,12 @@ def bff_user_detail(request, user_id: int):
         user.is_active = is_active
         updates.append("is_active")
 
+    if "netops_configure" in body:
+        assign_netops_configuration(user, grant)
+        updates.append("netops_configure")
+    if body.get("role") == "viewer":
+        assign_netops_configuration(user, False)
+
     if not updates:
         return bff_error("no valid fields to update", 400)
 
@@ -177,7 +193,7 @@ def bff_user_detail(request, user_id: int):
         "user_update",
         request.user,
         request,
-        detail={"target_user_id": user.id, "fields": updates},
+        detail={"target_user_id": user.id, "fields": updates, "netops_configure": grant},
     )
     return bff_success(_serialize_user(user))
 

@@ -3365,6 +3365,7 @@ export const conversationApi = {
 }
 
 export interface AuthUser {
+  permissions?: string[]
   id: number
   username: string
   email: string
@@ -3373,6 +3374,8 @@ export interface AuthUser {
 }
 
 export interface ManagedUser {
+  permissions?: string[]
+  netops_configure?: boolean
   id: number
   username: string
   email: string
@@ -3410,13 +3413,13 @@ export const userAdminApi = {
     const response = await api.get<ManagedUser[]>('/auth/users/')
     return response.data
   },
-  create: async (data: { username: string; password: string; role: string; email?: string }) => {
+  create: async (data: { username: string; password: string; role: string; email?: string; netops_configure?: boolean }) => {
     const response = await api.post<ManagedUser>('/auth/users/', data)
     return response.data
   },
   update: async (
     id: number,
-    data: Partial<Pick<ManagedUser, 'email' | 'role' | 'is_active'>>
+    data: Partial<Pick<ManagedUser, 'email' | 'role' | 'is_active' | 'netops_configure'>>
   ) => {
     const response = await api.patch<ManagedUser>(`/auth/users/${id}/`, data)
     return response.data
@@ -4432,7 +4435,7 @@ export const ruleAssetSourceApi = {
   associateUnclassifiedCommandAsset: async (
     id: string,
     unitId: string,
-    payload: { check_item_id: string },
+    payload: { check_item_id: string; auto_continue?: boolean },
   ): Promise<{
     success: boolean
     association: {
@@ -4440,6 +4443,7 @@ export const ruleAssetSourceApi = {
       check_item_version_id: string
     }
     parser_job_id?: string | null
+    autopilot_error?: string
   }> => (
     await api.post(
       `${RULE_ASSET_SOURCE_JOBS_BASE}/${id}/command-asset-units/${unitId}/check-item-association/`,

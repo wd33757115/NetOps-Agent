@@ -50,7 +50,7 @@ describe('RuleGapsWorkspace', () => {
           label: '导入规则样本',
           description: '只导入并确认证据。',
           target_url: (
-            '/skills/parser?workspace=production&subtab=source-jobs'
+            '/apps/patrol-rules?workspace=production&subtab=source-jobs'
             + '&action=asset-gap-source&asset_gap_id=gap-1'
             + '&check_item_id=system.cpu_usage'
             + '&implementation_version_id=impl-h3c-cpu-v1'
@@ -78,7 +78,7 @@ describe('RuleGapsWorkspace', () => {
     await user.click(screen.getByRole('button', { name: /导入规则样本/ }))
 
     expect(screen.getByLabelText('current route')).toHaveTextContent(
-      '/skills/parser?workspace=production&subtab=source-jobs'
+      '/apps/patrol-rules?workspace=production&subtab=source-jobs'
       + '&action=asset-gap-source&asset_gap_id=gap-1'
       + '&check_item_id=system.cpu_usage'
       + '&implementation_version_id=impl-h3c-cpu-v1'

@@ -1,10 +1,11 @@
+import { canConfigureNetOps } from '../../apps/permissions'
 import { useAuth } from '../../context/AuthContext'
 import { usePatrolDraft } from '../../hooks/usePatrolDraft'
 import PatrolDeviceSelector from './PatrolDeviceSelector'
 import { businessHref } from '../../apps/appRoutes'
 import { appRoutes, workbenchEnabled } from '../../apps/appRoutes'
 import React, { useMemo, useState } from 'react'
-import { Alert, AutoComplete, Button, Descriptions, Drawer, Dropdown, Form, Input, Modal, Progress, Row, Col, Select, Space, Switch, Table, Tabs, Tag, Tooltip, Typography, Upload, message } from 'antd'
+import { Alert, AutoComplete, Button, Collapse, Descriptions, Drawer, Dropdown, Form, Input, Modal, Progress, Row, Col, Select, Space, Switch, Table, Tabs, Tag, Tooltip, Typography, Upload, message } from 'antd'
 import { DeleteOutlined, DownloadOutlined, EditOutlined, EyeOutlined, ImportOutlined, LinkOutlined, MoreOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined, SafetyCertificateOutlined, SearchOutlined, StopOutlined } from '@ant-design/icons'
 import { useMutation, useQuery } from 'react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -356,6 +357,7 @@ export interface DeviceOperationsWorkspaceProps { mode?: 'devices' | 'patrol' }
 const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ mode = 'devices' }) => {
   const patrolApp = mode === 'patrol'
   const { user } = useAuth()
+  const canConfigure = canConfigureNetOps(user)
   const { draft: patrolDraft, saveDraft, clearDraft } = usePatrolDraft(user!.id)
   const isMobile = useIsMobile()
   const navigate = useNavigate()
@@ -381,6 +383,7 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ m
   }
   const [form] = Form.useForm<DeviceFormValues>()
   const [bulkForm] = Form.useForm<BulkFormValues>()
+  const [sourcePickerOpen, setSourcePickerOpen] = useState(false)
   const [patrolForm] = Form.useForm<PatrolFormValues>()
   const [dynamicGroupForm] = Form.useForm<DynamicGroupFormValues>()
   const [profileBindingForm] = Form.useForm<ProfileBindingFormValues>()
@@ -2139,7 +2142,7 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ m
             <Typography.Text type="secondary">
               最近检查：{formatDateTime(effectivePatrolReadiness.checked_at)}
             </Typography.Text>
-            {checkDetails}
+            <Collapse ghost defaultActiveKey={effectivePatrolReadiness.can_launch ? [] : ['environment']} items={[{ key: 'environment', label: '运行环境详情', children: checkDetails }]} />
           </Space>
         )}
         action={(
@@ -2315,6 +2318,7 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ m
               if (!patrolApp && workbenchEnabled) {
                 const params = new URLSearchParams({ launch: '1' }); selectedRowKeys.forEach(id => params.append('device_id', String(id))); Object.entries(filters).forEach(([key, value]) => { if (value) params.set(`scope_${key}`, value) }); navigate(`${appRoutes.patrol}?${params}`); return
               }
+              if (patrolApp) { setSourcePickerOpen(true); return }
               patrolForm.resetFields()
               patrolForm.setFieldsValue({
                 ...patrolDraft.values, group: searchParams.get('group') || patrolDraft.values.group,
@@ -2324,7 +2328,7 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ m
               setPatrolOpen(true)
             }}
           >
-            发起巡检
+            新建巡检
           </Button>
           {!patrolApp && <Dropdown
             trigger={['click']}
@@ -2340,7 +2344,7 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ m
           >
             <Button icon={<MoreOutlined />} aria-label="更多设备操作">更多</Button>
           </Dropdown>}
-          {patrolApp && <Button onClick={() => navigate('/devices')}>设备管理</Button>}
+          {patrolApp && canConfigure && <Button onClick={openProfileBinding}>巡检方案</Button>}
           {activeTab === 'overview' && selectedRowKeys.length > 0 && (
             <Space wrap className="device-selection-toolbar">
               <Typography.Text type="secondary">已选择 {selectedRowKeys.length} 台</Typography.Text>
@@ -3229,6 +3233,20 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ m
         </Space>
       </Drawer>
 
+      <Modal title="新建巡检 · 选择数据来源" open={sourcePickerOpen} onCancel={() => setSourcePickerOpen(false)} footer={null}>
+        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <Button block size="large" onClick={() => {
+            setSourcePickerOpen(false); patrolForm.resetFields(); patrolForm.setFieldsValue(patrolDraft.values)
+            setPatrolPreview(null); setPatrolLaunch(null); setPatrolOpen(true)
+          }}>在线采集 · 从设备读取数据</Button>
+          <Button block size="large" onClick={() => {
+            setSourcePickerOpen(false)
+            const next = new URLSearchParams(searchParams); next.set('patrol_view', 'offline'); next.set('new_offline', '1')
+            next.delete('offline_job_id'); next.delete('offline_job_tab'); setSearchParams(next)
+          }}>离线文件 · 单周期检查或双周期对比</Button>
+          <Typography.Text type="secondary">两种方式均使用已发布检查方案。发起前先核对范围、采集时间与覆盖缺口。</Typography.Text>
+        </Space>
+      </Modal>
       <Modal
         title="新建巡检 Profile"
         open={checkItemProfileOpen}
@@ -3756,6 +3774,8 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ m
         destroyOnClose
       >
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Space wrap><Typography.Text strong>检查方案：沿用设备已绑定的方案</Typography.Text>{canConfigure && <Button onClick={openProfileBinding}>查看或配置方案</Button>}</Space>
+          <Typography.Paragraph type="secondary">预检后核对每台设备的检查项与命令。方案由拥有配置权限的人员维护。</Typography.Paragraph>
           {renderPatrolPlatformReadiness()}
           <Alert
             type="info"

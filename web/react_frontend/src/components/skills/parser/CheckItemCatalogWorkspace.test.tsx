@@ -258,9 +258,11 @@ describe('CheckItemCatalogWorkspace', () => {
     expect(screen.getByText(/Active 版本不会被覆盖/)).toBeInTheDocument()
   })
 
-  it('keeps replay proof and guarded cutover in the command-adapter workspace', async () => {
+  it('keeps replay proof and guarded cutover in administrator tools', async () => {
+    localStorage.setItem('access_token', 'test-token')
     renderWorkspace()
 
+    await userEvent.click(await screen.findByText('平台管理'))
     await userEvent.click(await screen.findByRole('tab', { name: '回放与切换' }))
 
     expect(await screen.findByText('全量一次切换门禁')).toBeInTheDocument()

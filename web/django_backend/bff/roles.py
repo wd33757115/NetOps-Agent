@@ -48,7 +48,8 @@ def assign_user_role(user, role: str) -> None:
     for group_name in ALL_ROLES:
         Group.objects.get_or_create(name=group_name)
     group = Group.objects.get(name=role)
-    user.groups.set([group])
+    user.groups.remove(*user.groups.filter(name__in=ALL_ROLES))
+    user.groups.add(group)
     user.is_staff = role == ROLE_ADMIN
     user.is_superuser = role == ROLE_ADMIN
 
@@ -62,3 +63,22 @@ def count_active_admins(*, exclude_user_id: int | None = None) -> int:
     if exclude_user_id is not None:
         qs = qs.exclude(pk=exclude_user_id)
     return sum(1 for user in qs if get_user_role(user) == ROLE_ADMIN)
+
+
+def get_user_permissions(user) -> list[str]:
+    from src.auth.netops_access import NETOPS_CONFIGURE, NETOPS_CONFIG_GROUP
+    if not user or not getattr(user, "is_authenticated", False):
+        return []
+    if get_user_role(user) == ROLE_ADMIN or user.groups.filter(name=NETOPS_CONFIG_GROUP).exists():
+        return [NETOPS_CONFIGURE]
+    return []
+
+
+def assign_netops_configuration(user, enabled: bool) -> None:
+    from django.contrib.auth.models import Group
+    from src.auth.netops_access import NETOPS_CONFIG_GROUP
+    group, _ = Group.objects.get_or_create(name=NETOPS_CONFIG_GROUP)
+    if enabled:
+        user.groups.add(group)
+    else:
+        user.groups.remove(group)

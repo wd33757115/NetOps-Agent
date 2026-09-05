@@ -308,6 +308,8 @@ class RuleAssetBundleService:
         governance = dict(report.get("governance") or {})
         engineering_review = dict(governance.get("engineering_review") or {})
         engineering_review_ready = engineering_review.get("decision") == "accepted"
+        automated_approval = dict(governance.get("automated_approval") or {})
+        automatically_released = row.status == "active" and automated_approval.get("mode") == "administrator_delegated_automation"
         context_id = str(context_gate.get("context_id") or payload.get("context_id") or "")
         context_meta = dict((context_by_id or {}).get(context_id) or {})
         context_row = context_meta.get("record")
@@ -367,7 +369,7 @@ class RuleAssetBundleService:
             and source_integrity_ready
             and composition_complete
             and children_release_ready
-            and engineering_review_ready
+            and (engineering_review_ready or automatically_released)
         )
         blockers = list(bundle_gate.get("blockers") or [])
 
@@ -476,9 +478,9 @@ class RuleAssetBundleService:
             },
             {
                 "key": "review",
-                "label": "工程师复核",
-                "status": "passed" if engineering_review_ready else "ready",
-                "detail": engineering_review,
+                "label": "授权自动验证" if automatically_released else "工程师复核",
+                "status": "passed" if engineering_review_ready or automatically_released else "ready",
+                "detail": automated_approval if automatically_released else engineering_review,
             },
             {
                 "key": "release",

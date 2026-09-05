@@ -1,3 +1,4 @@
+import { useAuth } from '../../context/AuthContext';
 import React, { useEffect, useRef, useState } from "react";
 import { Button, Dropdown, Input, Modal, Space } from "antd";
 import {
@@ -24,7 +25,7 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { useNavigate } from "react-router-dom";
-import { findApp } from "../../apps/appRegistry";
+import { canOpenApp, findApp } from "../../apps/appRegistry";
 import { useDesktopStore } from "../../store/useDesktopStore";
 import {
   dissolveFolder,
@@ -289,6 +290,7 @@ function DesktopClock() {
 }
 
 export default function DesktopCanvas() {
+  const { user } = useAuth();
   const navigate = useNavigate();
   const { layout, edit, status } = useDesktopStore();
   const [selected, setSelected] = useState<string | null>(null);
@@ -316,7 +318,7 @@ export default function DesktopCanvas() {
   }, []);
   const disabled = status === "conflict";
   const visibleNodes = layout.nodes.filter(
-    (n) => n.kind === "folder" || findApp(n.appId!),
+    (n) => n.kind === "folder" || canOpenApp(n.appId!, user),
   );
   const nodes = visibleNodes.filter((n) => n.containerId === "desktop:0");
   // Responsive projection is render-only: resize never saves or overwrites positions.
@@ -345,7 +347,7 @@ export default function DesktopCanvas() {
     node.kind === "folder"
       ? setFolderId(node.id)
       : navigate(findApp(node.appId!)!.route);
-  const dockIds = layout.dockAppIds.filter((id) => findApp(id));
+  const dockIds = layout.dockAppIds.filter((id) => canOpenApp(id, user));
   const pin = (appId: string) =>
     edit((value) => ({
       ...value,

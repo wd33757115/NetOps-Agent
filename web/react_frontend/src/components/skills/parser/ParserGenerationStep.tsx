@@ -44,6 +44,7 @@ import {
 } from '../../../services/api'
 import { codePanelStyle } from './parserUi'
 import ParserTemplateApprovalDrawer from './ParserTemplateApprovalDrawer'
+import StandardResultTable from './StandardResultTable'
 
 type SampleRole = 'unassigned' | 'generation' | 'acceptance' | 'negative'
 
@@ -1845,7 +1846,7 @@ const ParserGenerationStep: React.FC<{
             <ParserAttemptHistory
               attempts={generationAttempts}
               loading={attemptsQuery.isLoading}
-              fallbackTemplateText={evidenceTemplate?.content}
+              fallbackTemplateText={comparisonQuery.data?.candidate_template.content}
               mode="all"
               onUseTemplate={(attempt) => {
                 setManualTemplateText(attempt.template_text || '')
@@ -1931,6 +1932,7 @@ const ParserGenerationStep: React.FC<{
                   style={{ minWidth: 280 }}
                 />
               </Space>
+              <details><summary>编辑字段转换规则（高级）</summary>
               <Input.TextArea
                 aria-label="Adapter Projection JSON"
                 value={projectionText}
@@ -1942,6 +1944,7 @@ const ParserGenerationStep: React.FC<{
                 autoSize={{ minRows: 8, maxRows: 20 }}
                 style={{ fontFamily: 'Consolas, Monaco, monospace' }}
               />
+              </details>
               {onCreateAdapter && (
                 <Alert
                   type={projectionPreview?.success ? 'success' : 'info'}
@@ -1962,7 +1965,7 @@ const ParserGenerationStep: React.FC<{
               <div style={{
                 display: 'grid',
                 gap: 12,
-                gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))',
+                gridTemplateColumns: 'minmax(0, 1fr)',
               }}>
                 <div>
                   <Typography.Text strong>CLI 原文</Typography.Text>
@@ -1971,24 +1974,26 @@ const ParserGenerationStep: React.FC<{
                   </pre>
                 </div>
                 <div>
-                  <Typography.Text strong>Vendor Record</Typography.Text>
-                  <pre style={{ ...codePanelStyle, maxHeight: 420, whiteSpace: 'pre-wrap' }}>
-                    {selectedComparisonRow
-                      ? JSON.stringify(selectedComparisonRow.proposed.record_sets || [], null, 2)
-                      : '等待 Parser 执行结果'}
+                  <Typography.Text strong>生成的 TextFSM</Typography.Text>
+                  <pre style={{ ...codePanelStyle, maxHeight: 420, whiteSpace: 'pre', overflow: 'auto' }}>
+                    {comparisonQuery.data?.candidate_template.content || (comparisonQuery.isLoading ? '正在加载 TextFSM…' : '当前模板暂无可显示的 TextFSM 内容')}
                   </pre>
                 </div>
                 <div>
-                  <Typography.Text strong>Canonical Observation</Typography.Text>
-                  <pre style={{ ...codePanelStyle, maxHeight: 420, whiteSpace: 'pre-wrap' }}>
-                    {projectionPreview
-                      ? JSON.stringify({
-                        success: projectionPreview.success,
-                        batches: projectionPreview.batches,
-                        observations: projectionPreview.observations,
-                      }, null, 2)
-                      : '生成 Projection 后点击“本地执行”'}
-                  </pre>
+                  <Typography.Text strong>实际解析结果</Typography.Text>
+                  {(selectedComparisonRow?.proposed.record_sets || []).map((recordSet, index) => <section key={index}>
+                    <Typography.Paragraph type="secondary">{recordSet.name}</Typography.Paragraph>
+                    <StandardResultTable records={recordSet.records || []} />
+                  </section>)}
+                </div>
+                <div>
+                  <Typography.Text strong>标准检查结果</Typography.Text>
+                  {projectionPreview ? projectionPreview.batches.map((batch, index) => <section key={index}>
+                    <Space><Tag>{batch.check_item_id}</Tag><Tag color={batch.errors.length ? 'orange' : 'blue'}>{batch.quality_status}</Tag></Space>
+                    {batch.errors.map(error => <Alert key={error} type="warning" message={error} />)}
+                    <StandardResultTable records={batch.records} />
+                  </section>) : <Typography.Paragraph type="secondary">生成字段转换后点击“本地执行”，对照原文校验。</Typography.Paragraph>}
+                  <details><summary>查看完整执行证据</summary><pre style={{ ...codePanelStyle, whiteSpace: 'pre-wrap' }}>{JSON.stringify(projectionPreview || {}, null, 2)}</pre></details>
                 </div>
               </div>
             </Space>

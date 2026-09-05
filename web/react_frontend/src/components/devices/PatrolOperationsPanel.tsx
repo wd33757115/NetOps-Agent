@@ -1,3 +1,4 @@
+import PatrolTaskInbox from './PatrolTaskInbox'
 import { useSearchParams } from 'react-router-dom'
 import React, { useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Descriptions, Drawer, Form, Input, Modal, Pagination, Progress, Select, Space, Switch, Table, Tabs, Tag, Typography, message, type TableProps } from 'antd'
@@ -1123,13 +1124,14 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
   return (
     <>
       <Tabs
-        activeKey={['offline', 'risks', 'feedback'].includes(String(patrolView)) ? String(patrolView) : 'online'}
+        activeKey={['online', 'offline', 'risks', 'feedback'].includes(String(patrolView)) ? String(patrolView) : patrolParams.get('patrol_batch_id') ? 'online' : 'tasks'}
         onChange={(value) => {
           const next = new URLSearchParams(patrolParams)
           next.set('patrol_view', value)
           setPatrolParams(next)
         }}
         items={[
+          { key: 'tasks', label: '全部任务', children: <PatrolTaskInbox /> },
           { key: 'online', label: '在线巡检', children: onlineContent },
           { key: 'offline', label: '离线巡检', children: <OfflinePatrolPanel /> },
           {

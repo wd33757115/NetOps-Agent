@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.core.check_items.assessment_policy import canonical_digest
-from src.core.check_items.canonical import load_canonical_catalog
+from src.core.check_items.canonical import rule_semantics_catalog
 from src.core.check_items.runtime_bundle_assembly import (
     derive_asset_requirement_profile,
 )
@@ -77,21 +77,22 @@ def _rule_requirements(profile: Mapping[str, Any]) -> dict[str, Any]:
     event = dict(requirements.get("event_rule") or {})
     return {
         "requires_observation_contract": False,
-        "requires_change_policy": change.get("required") is True,
-        "requires_current_state_rule": current.get("required") is True,
-        "requires_event_rule": event.get("required") is True,
+        "requires_change_policy": change.get("required") is True or bool(change.get("conditional_observation_types")),
+        "requires_current_state_rule": current.get("required") is True or bool(current.get("conditional_observation_types")),
+        "requires_event_rule": event.get("required") is True or bool(event.get("conditional_event_types_by_observation")),
         "requires_event_rule_assets": (
             current.get("required") is True or event.get("required") is True
+            or bool(current.get("conditional_observation_types")) or bool(event.get("conditional_event_types_by_observation"))
         ),
         "requires_historical_replay": False,
         "current_state_observation_types": list(
-            current.get("required_observation_types") or []
+            [*(current.get("required_observation_types") or []), *(current.get("conditional_observation_types") or [])]
         ),
         "change_policy_observation_types": list(
-            change.get("required_observation_types") or []
+            [*(change.get("required_observation_types") or []), *(change.get("conditional_observation_types") or [])]
         ),
         "required_event_types_by_observation": dict(
-            event.get("required_event_types_by_observation") or {}
+            {**(event.get("required_event_types_by_observation") or {}), **(event.get("conditional_event_types_by_observation") or {})}
         ),
     }
 
@@ -122,7 +123,7 @@ def build_canonical_rule_context(
     if result_mode == "structured" and not rows:
         raise ValueError("structured CheckItem requires canonical observations")
 
-    catalog = load_canonical_catalog()
+    catalog = rule_semantics_catalog(contract)
     state_semantics: dict[str, dict[str, Any]] = {}
     targets: list[dict[str, Any]] = []
     for row in rows:
@@ -343,6 +344,8 @@ def generate_canonical_rule_candidates(
             )
             continue
         policies.append(candidate)
+        if observation_type not in current_targets | event_targets:
+            continue
         compiled = compile_event_rule_intents(
             candidate_rules=[],
             contract=contract,
@@ -467,6 +470,24 @@ class CanonicalRuleContextService:
                 )
             )
         check_item_id = str(candidates["check_item_id"])
+        # A second vendor adapter reuses the exact rules of the same human-owned
+        # CheckItem version; do not create replacement drafts for every command.
+        with self._session_scope() as db:
+            existing = db.query(RuleGenerationJobRecord).filter(
+                RuleGenerationJobRecord.job_type == "RULE_ASSET_BUNDLE",
+                RuleGenerationJobRecord.asset_ref == f"check_item_version:{check_item_version_id}",
+                RuleGenerationJobRecord.asset_digest == candidates["digest"],
+                RuleGenerationJobRecord.status.in_(["active", "pending_approval"]),
+            ).order_by(RuleGenerationJobRecord.created_at.desc()).first()
+            if existing:
+                children = db.query(RuleGenerationJobRecord).filter(RuleGenerationJobRecord.id.in_(existing.payload_json.get("child_job_ids", []))).all()
+                return {**candidates, "drafts_created": True, "reused": True,
+                        "bundle_id": existing.id, "bundle_status": existing.status,
+                        "change_policy_assets": [{"version_id": child.asset_version_id, "policy_id": child.asset_id,
+                                                  "policy": child.payload_json.get("policy", {}), "digest": child.asset_digest}
+                                                 for child in children if child.job_type == "CHANGE_POLICY"],
+                        "event_rule_version_ids": [child.asset_version_id for child in children if child.job_type == "EVENT_RULE"],
+                        "rule_job_ids": [child.id for child in children]}
         policy_assets: list[dict[str, Any]] = []
         rule_assets: list[dict[str, Any]] = []
         for policy in candidates.get("change_policies") or []:

@@ -30,6 +30,7 @@ from src.core.check_items.command_adapter import (
     is_direct_projection_adapter,
     validate_adapter_spec,
 )
+from src.core.check_items.canonical import freeze_rule_semantics
 from src.core.check_items.resolver import CheckItemImplementationResolver
 from src.core.check_items.rollout import (
     RolloutCampaignService,
@@ -228,6 +229,7 @@ class CheckItemCatalogGovernanceService:
                     "status": "draft",
                 }
             )
+            raw["canonical_contract"] = freeze_rule_semantics(dict(raw.get("canonical_contract") or {}))
             candidate = build_check_item_definition(raw, defaults=defaults)
             validate_check_item_definition(candidate)
             _require_text(candidate.name, label="check item name", minimum=2)

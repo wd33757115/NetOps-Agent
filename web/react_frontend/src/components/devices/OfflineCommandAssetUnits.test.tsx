@@ -1,3 +1,4 @@
+import userEvent from '@testing-library/user-event'
 import React from 'react'
 import { render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from 'react-query'
@@ -104,7 +105,7 @@ describe('OfflineCommandAssetUnits', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByRole('region', { name: '按检查项归类' })).toBeVisible()
+    await userEvent.setup().click(await screen.findByText('按检查项归类 · 1 项待归类'))
     expect(screen.getByText('待归类检查项（1）')).toBeVisible()
     expect(screen.getAllByText('display vendor-special-state').length).toBeGreaterThan(0)
     expect(screen.getByRole('button', { name: '在检查项目录归类' })).toBeVisible()

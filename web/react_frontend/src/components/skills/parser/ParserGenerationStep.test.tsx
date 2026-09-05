@@ -726,6 +726,9 @@ describe('ParserGenerationStep', () => {
     }))
     await userEvent.click(screen.getByRole('button', { name: /本地执行$/ }))
     await waitFor(() => expect(previewProjection).toHaveBeenCalled())
+    expect(screen.getByText('标准检查结果')).toBeVisible()
+    expect(screen.getAllByText('peer-link1').length).toBeGreaterThanOrEqual(2)
+    await userEvent.click(screen.getByText('查看完整执行证据'))
     expect(screen.getByText(/"observation_type": "interface.oper_status"/)).toBeVisible()
     await userEvent.click(screen.getByRole('button', { name: '使用 Projection 创建适配器' }))
     expect(createAdapter).toHaveBeenCalledWith(expect.objectContaining({

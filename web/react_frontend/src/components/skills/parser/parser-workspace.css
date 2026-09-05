@@ -529,3 +529,19 @@
     border-bottom: 0;
   }
 }
+
+/* Task-oriented workspaces: one action area, readable rows, optional diagnostics. */
+.rule-task-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+.rule-task-heading h2 { margin: 0 0 6px !important; }
+.rule-production-tasks { padding: 8px 0 24px; }
+.rule-workspace-tools { margin-left: auto; position: relative; }
+.rule-workspace-tools summary { cursor: pointer; padding: 8px 12px; color: #596579; border-radius: 6px; }
+.rule-workspace-tools[open] { background: #f6f8fb; border-radius: 8px; padding-bottom: 8px; }
+.patrol-task-context { padding: 12px 0 16px; border-bottom: 1px solid #e8edf2; margin-bottom: 12px; }
+.patrol-task-context .ant-typography { margin-bottom: 0; }
+.patrol-result-actions { position: sticky; top: 0; z-index: 2; background: #fff; padding: 10px 0; border-bottom: 1px solid #e8edf2; }
+.rule-production-tasks .ant-table-row, .rule-workspace-tools summary { transition: background-color 120ms ease; }
+@media (max-width: 767px) { .rule-task-heading { align-items: flex-start; } .rule-workspace-tools { margin-left: 0; } .patrol-result-actions { position: static; } }
+@media (prefers-reduced-motion: reduce) { .rule-production-tasks .ant-table-row, .rule-workspace-tools summary { transition: none; } }
+
+.command-group-browser > summary { cursor: pointer; padding: 10px 0; font-weight: 600; }

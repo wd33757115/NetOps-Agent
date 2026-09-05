@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -43,6 +43,41 @@ class CanonicalObservationCatalog:
             (item for item in self.observations if item.id == observation_type),
             None,
         )
+
+
+def freeze_rule_semantics(contract: dict[str, Any]) -> dict[str, Any]:
+    """Freeze server-owned semantic definitions when a human creates a revision."""
+    catalog = load_canonical_catalog()
+    selected = {str(row.get("observation_type") or "") for row in contract.get("observations", [])}
+    unknown = selected - {item.id for item in catalog.observations}
+    if unknown:
+        raise ValueError(f"unknown canonical observation types: {sorted(unknown)}")
+    return {
+        **contract,
+        "rule_semantics_snapshot": {
+            "catalog_id": catalog.catalog_id,
+            "version": catalog.version,
+            "digest": catalog.digest,
+            "observations": [asdict(item) for item in catalog.observations if item.id in selected],
+        },
+    }
+
+
+def rule_semantics_catalog(contract: dict[str, Any]) -> CanonicalObservationCatalog:
+    """Legacy contracts use the installed catalog; new revisions use their snapshot."""
+    snapshot = contract.get("rule_semantics_snapshot")
+    if snapshot is None:
+        return load_canonical_catalog()
+    if not isinstance(snapshot, dict) or not snapshot.get("digest"):
+        raise ValueError("invalid frozen rule semantics")
+    definitions = tuple(CanonicalObservationDefinition(**row) for row in snapshot.get("observations", []))
+    required = {row["observation_type"] for row in contract.get("observations", [])}
+    if required - {item.id for item in definitions}:
+        raise ValueError("frozen rule semantics do not cover the CheckItem")
+    return CanonicalObservationCatalog(
+        catalog_id=snapshot["catalog_id"], version=int(snapshot["version"]),
+        status="active", digest=snapshot["digest"], observations=definitions,
+    )
 
 
 @lru_cache(maxsize=4)
@@ -382,7 +417,6 @@ def validate_check_item_contract(
 ) -> tuple[str, ...]:
     """Validate one CheckItem contract against approved canonical semantics."""
 
-    catalog = catalog or load_canonical_catalog()
     check_item_id = str(
         getattr(check_item, "id", None)
         or (check_item.get("id") if isinstance(check_item, dict) else "")
@@ -394,6 +428,7 @@ def validate_check_item_contract(
         else check_item.get("canonical_contract")
     )
     contract = dict(contract or {})
+    catalog = catalog or rule_semantics_catalog(contract)
     rows = contract.get("observations") or []
     errors: list[str] = []
     identity_dimensions = tuple(
@@ -506,7 +541,6 @@ def validate_check_item_catalog_contracts(
     *,
     catalog: CanonicalObservationCatalog | None = None,
 ) -> None:
-    catalog = catalog or load_canonical_catalog()
     errors = [
         error
         for item in check_items

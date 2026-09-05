@@ -6,12 +6,17 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
 from ..decorators import require_jwt, require_role_with_viewer_readonly
+from ..response import bff_error
 from ..proxy_client import proxy_to_fastapi
 from ..sync_async import sync_bff_view
 from ._helpers import forward_client_headers, parse_json_body
 
 
 async def _proxy(request: HttpRequest, path: str) -> JsonResponse:
+    from src.auth.netops_access import NETOPS_CONFIGURE, requires_netops_configuration
+    if requires_netops_configuration(request.method, "/devices/" + path):
+        if getattr(request, "bff_user_role", "") != "admin" and NETOPS_CONFIGURE not in getattr(request, "bff_user_permissions", []):
+            return bff_error("需要设备与规则配置权限，请联系管理员授权", 403)
     if path.startswith("?"):
         fastapi_path = f"/api/v1/devices{path}"
     elif path:

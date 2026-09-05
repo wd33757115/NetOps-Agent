@@ -36,6 +36,26 @@ def _load_projection_skill_module():
     spec.loader.exec_module(module)
     return module
 
+
+def test_projection_rejects_structurally_valid_mapping_when_sample_execution_fails():
+    calls = []
+    def execute(proposal):
+        calls.append(proposal)
+        return {"success": False, "errors": ["sample-2: unrecognized state testing"], "sample_reports": []}
+    result = generate_projection_candidate({
+        "mode": "projection_validate",
+        "selected_check_item": {"id": "interface.oper_status", **CHECK_ITEM},
+        "parser": {"template_id": "parser", "source_record_set": "default", "source_fields": ["interface", "oper_status"]},
+        "proposal": {"schema_version": "command-adapter/v2", "parser": {"template_id": "parser"}, "outputs": [{
+            "check_item_id": "interface.oper_status", "check_item_version_id": "interface-oper-v6", "source_record_set": "default",
+            "projection": {"fields": {"interface": {"source": "interface"}, "oper_status": {
+                "source": "oper_status", "value_mapping": {value: value for value in ["up", "down", "admin_down", "unknown"]}, "on_unmapped": "reject"}}},
+        }]},
+    }, execution_validator=execute)
+    assert calls
+    assert result["success"] is False
+    assert "sample-2: unrecognized state testing" in result["validation"]["errors"]
+
 CHECK_ITEM = {
     "version_id": "interface-oper-v6",
     "canonical_contract": {

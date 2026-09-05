@@ -285,6 +285,7 @@ test('traces a failed patrol run to its parser, change policy, and event rule', 
   await page.goto('/devices?tab=patrol')
 
   await expect(page).toHaveURL(/\/apps\/patrol$/)
+  await page.getByRole('tab', { name: '在线巡检' }).click()
   await expect(page.getByRole('tab', { name: '在线巡检' })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByText('batch-incident-1').first()).toBeVisible()
   await page.getByRole('button', { name: /查看批次详情/ }).first().click()
@@ -315,6 +316,7 @@ test('paginates patrol batch history on the server and persists the page in the 
   await mockPatrolOperations(page)
   await page.goto('/devices?tab=patrol')
 
+  await page.getByRole('tab', { name: '在线巡检' }).click()
   const pageTwo = page.locator('.ant-pagination-item-2')
   await expect(pageTwo).toBeVisible()
   await pageTwo.click()

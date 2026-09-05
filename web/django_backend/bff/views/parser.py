@@ -43,6 +43,10 @@ def _require_admin_for_sensitive(request: HttpRequest, *, action: str | None = N
 
 
 async def _proxy(request: HttpRequest, path: str) -> JsonResponse:
+    from src.auth.netops_access import NETOPS_CONFIGURE, requires_netops_configuration
+    if requires_netops_configuration(request.method, "/parser/" + path):
+        if getattr(request, "bff_user_role", "") != "admin" and NETOPS_CONFIGURE not in getattr(request, "bff_user_permissions", []):
+            return bff_error("需要设备与规则配置权限，请联系管理员授权", 403)
     normalized_path = path.split("?", 1)[0].rstrip("/")
     timeout = (
         _REPORT_TIMEOUT

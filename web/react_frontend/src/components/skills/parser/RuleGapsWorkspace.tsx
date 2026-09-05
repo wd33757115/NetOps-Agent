@@ -1,9 +1,9 @@
+import { useRuleTaskNavigate } from '../../../hooks/useRuleTaskNavigate'
 import { businessHref } from '../../../apps/appRoutes'
 import React, { useState } from 'react'
 import { Alert, Button, Input, Segmented, Space, Table, Tabs, Tag, Typography } from 'antd'
 import { ArrowRightOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
 import { useQuery } from 'react-query'
-import { useNavigate } from 'react-router-dom'
 
 import { parserApi, type ParserAssetGap } from '../../../services/api'
 
@@ -23,7 +23,7 @@ const RuleGapsWorkspace: React.FC = () => {
   const [assetPage, setAssetPage] = useState(1)
   const [assetPageSize, setAssetPageSize] = useState(20)
   const [assetSearch, setAssetSearch] = useState('')
-  const navigate = useNavigate()
+  const navigate = useRuleTaskNavigate()
   const assetGapsQuery = useQuery(
     ['parser-asset-gaps', assetPage, assetPageSize, assetSearch],
     () => parserApi.assetGaps({

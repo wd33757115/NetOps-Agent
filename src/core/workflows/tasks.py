@@ -166,6 +166,8 @@ def execute_skill_task(self, skill_name: str, **params):
         if repository is None:
             return
         current = repository.get_job_lifecycle(job_id)
+        if current and str(current.get("celery_task_id") or "") != str(self.request.id or ""):
+            return
         if not current or current["status"] not in {
             "collecting",
             "pending",
@@ -217,6 +219,8 @@ def execute_skill_task(self, skill_name: str, **params):
 
     if repository:
         current = repository.get_job_lifecycle(job_id)
+        if current and str(current.get("celery_task_id") or "") != str(self.request.id or ""):
+            return {"success": False, "error": "stale_generation_discarded"}
         if current and current["status"] == "cancelled":
             return {"success": False, "message": "parser job cancelled", "error": "cancelled"}
         if current and current["status"] == "succeeded" and bool((result or {}).get("success")):

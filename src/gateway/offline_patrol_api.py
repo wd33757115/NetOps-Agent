@@ -17,7 +17,7 @@ from fastapi import (
 )
 from pydantic import BaseModel, Field
 
-from src.auth.dependencies import get_current_user, require_role
+from src.auth.dependencies import require_netops_access, get_current_user, require_role
 from src.auth.models import CurrentUser
 from src.core.check_items.current_authority import (
     COMPLETENESS_EVIDENCE_OPTIONS,
@@ -91,6 +91,15 @@ class CommandAssetNotApplicableConfirmRequest(BaseModel):
 
 class CommandAssetCheckItemAssociationRequest(BaseModel):
     check_item_id: str = Field(min_length=1, max_length=128)
+    auto_continue: bool = False
+
+
+class CommandAutopilotControlRequest(BaseModel):
+    action: Literal["start", "pause", "resume", "authorize"]
+
+
+class CommandAutopilotProjectionRequest(BaseModel):
+    proposal: dict[str, Any]
 
 
 class OfflinePatrolExecuteRequest(BaseModel):
@@ -584,6 +593,50 @@ def associate_rule_asset_source_command_unit_check_item(
             "parser_job_id": result.get("parser_job_id"),
         },
     )
+    if payload.auto_continue:
+        from src.core.rule_control.command_autopilot import CommandAutopilotService
+        try:
+            result["autopilot"] = CommandAutopilotService().control(job_id, unit_id, action="start", actor=user.username, authorize_publish=user.is_admin())
+        except ValueError as exc:
+            # The manual binding has succeeded; do not invite a duplicate binding retry.
+            result["autopilot_error"] = str(exc)
+    return result
+
+
+@asset_source_routes.get("/{job_id}/command-asset-units/{unit_id}/autopilot")
+def get_command_autopilot(job_id: str, unit_id: str, user: CurrentUser = Depends(get_current_user)):
+    from src.core.rule_control.command_autopilot import CommandAutopilotService
+    _detail_or_http(job_id, user)
+    return CommandAutopilotService().get(job_id, unit_id)
+
+
+@asset_source_routes.post("/{job_id}/command-asset-units/{unit_id}/autopilot")
+def control_command_autopilot(job_id: str, unit_id: str, payload: CommandAutopilotControlRequest,
+                              request: Request, user: CurrentUser = Depends(require_role(["admin", "operator"]))):
+    from src.core.rule_control.command_autopilot import CommandAutopilotService
+    _detail_or_http(job_id, user)
+    if payload.action == "authorize" and not user.is_admin():
+        raise HTTPException(status_code=403, detail="只有管理员可授权自动发布")
+    try:
+        result = CommandAutopilotService().control(job_id, unit_id, action=payload.action, actor=user.username, authorize_publish=user.is_admin())
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    _audit(request, user, "rule_asset_source_autopilot_control", job_id, {"unit_id": unit_id, "action": payload.action})
+    return result
+
+
+@asset_source_routes.put("/{job_id}/command-asset-units/{unit_id}/autopilot/projection")
+def edit_command_autopilot_projection(job_id: str, unit_id: str, payload: CommandAutopilotProjectionRequest,
+                                     request: Request, user: CurrentUser = Depends(require_role(["admin", "operator"]))):
+    from src.core.rule_control.command_autopilot import CommandAutopilotService
+    _detail_or_http(job_id, user)
+    try:
+        result = CommandAutopilotService().edit_projection(job_id, unit_id, proposal=payload.proposal, actor=user.username)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    _audit(request, user, "rule_asset_source_autopilot_edit", job_id, {"unit_id": unit_id})
     return result
 
 
@@ -892,13 +945,13 @@ router.include_router(
     routes,
     prefix="/api/v1/parser/asset-source-jobs",
     tags=["Rule Asset Sources"],
-    dependencies=[Depends(_enforce_workspace_scope)],
+    dependencies=[Depends(_enforce_workspace_scope), Depends(require_netops_access)],
 )
 router.include_router(
     asset_source_routes,
     prefix="/api/v1/parser/asset-source-jobs",
     tags=["Rule Asset Sources"],
-    dependencies=[Depends(_enforce_workspace_scope)],
+    dependencies=[Depends(_enforce_workspace_scope), Depends(require_netops_access)],
 )
 router.include_router(
     routes,

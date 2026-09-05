@@ -1,3 +1,4 @@
+import { useRuleTaskNavigate } from '../../hooks/useRuleTaskNavigate'
 import { businessHref } from '../../apps/appRoutes'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
@@ -29,7 +30,6 @@ import {
   SafetyCertificateOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from 'react-query'
-import { useNavigate } from 'react-router-dom'
 import {
   ruleAssetSourceApi,
   type CheckItemProductionGroup,
@@ -42,6 +42,7 @@ import ParserGenerationStep, {
   type ParserProjectionAdapterDraft,
 } from '../skills/parser/ParserGenerationStep'
 import RuleAssetProductionStep from '../skills/parser/RuleAssetProductionStep'
+import CommandAutopilotPanel from '../skills/parser/CommandAutopilotPanel'
 
 const stageOptions = [
   ['output_slicing', '命令输出切片'],
@@ -176,7 +177,7 @@ export const CommandAssetDetail: React.FC<{
   onChanged,
 }) => {
   const screens = Grid.useBreakpoint()
-  const navigate = useNavigate()
+  const navigate = useRuleTaskNavigate()
   const isMobile = !screens.md
   const [activeTab, setActiveTab] = useState(initialTab)
   useEffect(() => {
@@ -287,6 +288,7 @@ export const CommandAssetDetail: React.FC<{
     >
       {detail && (
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <CommandAutopilotPanel jobId={detail.offline_job_id} unitId={detail.id} associated={Boolean(detail.candidate_check_item_id || detail.check_item_id)} />
           <Descriptions bordered size="small" column={isMobile ? 1 : 3}>
             <Descriptions.Item label="规范命令" span={isMobile ? 1 : 3}>
               <Typography.Text code>{detail.canonical_command}</Typography.Text>
@@ -527,7 +529,7 @@ const OfflineCommandAssetUnits: React.FC<OfflineCommandAssetUnitsProps> = ({
 }) => {
   const screens = Grid.useBreakpoint()
   const isMobile = !screens.md
-  const navigate = useNavigate()
+  const navigate = useRuleTaskNavigate()
   const queryClient = useQueryClient()
   const autoRefreshAttempted = useRef(false)
   const [page, setPage] = useState(1)
@@ -537,14 +539,14 @@ const OfflineCommandAssetUnits: React.FC<OfflineCommandAssetUnitsProps> = ({
   const [status, setStatus] = useState<string>()
   const [stage, setStage] = useState<string>()
   const [assetMode, setAssetMode] = useState<string>()
-  const [selectedUnitId, setSelectedUnitId] = useState<string>()
+  const [selectedUnitId, setSelectedUnitId] = useState<string>(() => new URLSearchParams(window.location.search).get('unit_id') || undefined)
   const initialFocusOpened = useRef(false)
   const [evidencePage, setEvidencePage] = useState(1)
   const [evidencePageSize, setEvidencePageSize] = useState(25)
 
   useEffect(() => {
     initialFocusOpened.current = false
-    setSelectedUnitId(undefined)
+    setSelectedUnitId(new URLSearchParams(window.location.search).get('unit_id') || undefined)
     setSearchDraft(initialSearch)
     setSearch(initialSearch)
     setPage(1)
@@ -590,7 +592,8 @@ const OfflineCommandAssetUnits: React.FC<OfflineCommandAssetUnitsProps> = ({
     setSelectedUnitId(unitId)
     if (canonicalCommand) {
       const next = new URLSearchParams(window.location.search)
-      if (next.get('command') !== canonicalCommand) {
+      if (next.get('command') !== canonicalCommand || next.get('unit_id') !== unitId) {
+        next.set('unit_id', unitId)
         next.set('command', canonicalCommand)
         navigate(`${window.location.pathname}?${next.toString()}`, { replace: true })
       }
@@ -680,12 +683,16 @@ const OfflineCommandAssetUnits: React.FC<OfflineCommandAssetUnitsProps> = ({
   useEffect(() => {
     if (
       initialFocusOpened.current
-      || !initialSearch
+      || !(initialSearch || new URLSearchParams(window.location.search).get('unit_id'))
       || !listQuery.data
       || listQuery.isFetching
     ) return
+    const persistedUnitId = new URLSearchParams(window.location.search).get('unit_id')
+    if (persistedUnitId) { initialFocusOpened.current = true; setSelectedUnitId(persistedUnitId); return }
     const exactMatch = listQuery.data.items.find(
-      (item) => item.canonical_command === initialSearch,
+      (item) => new URLSearchParams(window.location.search).get('unit_id')
+        ? item.id === new URLSearchParams(window.location.search).get('unit_id')
+        : item.canonical_command === initialSearch,
     )
     initialFocusOpened.current = true
     if (exactMatch) openUnitDetail(exactMatch.id, exactMatch.canonical_command)
@@ -895,7 +902,8 @@ const OfflineCommandAssetUnits: React.FC<OfflineCommandAssetUnitsProps> = ({
           </div>
         ))}
       </div>
-      <section aria-label="按检查项归类">
+      <details className="command-group-browser">
+        <summary>按检查项归类 · {checkItemGroupsQuery.data?.summary.unclassified || 0} 项待归类</summary>
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
           <div>
             <Typography.Title level={4} style={{ marginBottom: 2 }}>按检查项归类</Typography.Title>
@@ -931,7 +939,7 @@ const OfflineCommandAssetUnits: React.FC<OfflineCommandAssetUnitsProps> = ({
             />
           )}
         </Space>
-      </section>
+      </details>
       <div className="command-asset-unit__toolbar">
         <Input.Search
           allowClear
@@ -1081,6 +1089,8 @@ const OfflineCommandAssetUnits: React.FC<OfflineCommandAssetUnitsProps> = ({
         onClose={() => {
           setEvidencePage(1)
           setSelectedUnitId(undefined)
+          const next = new URLSearchParams(window.location.search); next.delete('unit_id'); next.delete('command')
+          navigate(`${window.location.pathname}?${next}`, { replace: true })
         }}
       />
     </Space>

@@ -10,6 +10,26 @@ from src.core.check_items.catalog import load_catalog
 from src.core.patrol.event_rule_compiler import compile_event_rule_intents
 
 
+def test_frozen_semantics_survive_an_installed_catalog_upgrade(monkeypatch):
+    from src.core.check_items import canonical
+    item = _catalog_item("interface.oper_status")
+    frozen = canonical.freeze_rule_semantics(item.canonical_contract)
+    def compile_context():
+        return build_canonical_rule_context(check_item_id=item.id, check_item_version_id=item.version_id,
+            result_mode=item.result_mode, assessment_mode=item.assessment_mode, canonical_contract=frozen)
+    before = compile_context()
+    monkeypatch.setattr(canonical, "load_canonical_catalog", lambda: (_ for _ in ()).throw(AssertionError("must use frozen semantics")))
+    assert compile_context() == before
+
+
+def test_incomplete_frozen_semantics_cannot_fall_back_silently():
+    from src.core.check_items.canonical import freeze_rule_semantics, rule_semantics_catalog
+    frozen = freeze_rule_semantics(_catalog_item("interface.oper_status").canonical_contract)
+    frozen["rule_semantics_snapshot"]["observations"] = []
+    with pytest.raises(ValueError, match="do not cover"):
+        rule_semantics_catalog(frozen)
+
+
 def _catalog_item(check_item_id: str):
     return next(
         item for item in load_catalog().check_items if item.id == check_item_id

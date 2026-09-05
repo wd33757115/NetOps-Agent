@@ -14,7 +14,7 @@ from src.common.governance import actor_matches_any
 from src.core.check_items.assessment_policy import (
     normalize_assessment_policy_contract,
 )
-from src.core.check_items.canonical import load_canonical_catalog
+from src.core.check_items.canonical import load_canonical_catalog, rule_semantics_catalog
 from src.core.check_items.catalog import CheckItemCatalogRepository
 from src.core.check_items.command_adapter import is_direct_projection_adapter
 from src.core.check_items.identity import EntityIdentityPolicyRepository
@@ -190,7 +190,6 @@ class CheckItemRuntimeBundleService:
     ) -> dict[str, Any]:
         identity_repository = EntityIdentityPolicyRepository(self._session_scope)
         identity_repository.bootstrap(actor=actor)
-        canonical_catalog = load_canonical_catalog()
         now = datetime.now(timezone.utc)
         requested_rule_bindings = normalize_rule_bindings(event_rule_bindings)
         with self._session_scope() as db:
@@ -250,6 +249,7 @@ class CheckItemRuntimeBundleService:
                 raise RuntimeBundleValidationError(
                     ["check item or implementation version does not exist"]
                 )
+            canonical_catalog = rule_semantics_catalog(dict(check_version.canonical_contract_json or {}))
             check_item = db.get(CheckItemRecord, check_version.check_item_id)
             implementation = db.get(
                 CollectionImplementationRecord,
@@ -1428,7 +1428,7 @@ class CheckItemRuntimeBundleService:
                     blockers.append(
                         f"runtime dependency digest changed: {key}"
                     )
-        canonical_catalog = load_canonical_catalog()
+        canonical_catalog = rule_semantics_catalog(dict(check_version.canonical_contract_json or {})) if check_version else load_canonical_catalog()
         if (
             str(expected_dependencies.get("canonical_catalog") or "")
             != str(canonical_catalog.digest)

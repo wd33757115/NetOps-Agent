@@ -179,6 +179,11 @@ celery.conf.beat_schedule = {
         "schedule": 30.0,
         "options": {"queue": "netops.ai"},
     },
+    "recover-command-autopilots": {
+        "task": "recover_command_autopilots",
+        "schedule": 60.0,
+        "options": {"queue": "netops.ai"},
+    },
     "promote-parser-gap-ledger": {
         "task": "promote_parser_gap_ledger",
         "schedule": 3600.0,

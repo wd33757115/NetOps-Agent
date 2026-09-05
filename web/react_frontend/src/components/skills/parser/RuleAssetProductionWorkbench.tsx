@@ -9,8 +9,9 @@ import CheckItemCatalogWorkspace from './CheckItemCatalogWorkspace'
 import RuleAssetSourceJobsWorkspace from './RuleAssetSourceJobsWorkspace'
 import RuleAssetBundleWorkspace from './RuleAssetBundleWorkspace'
 import OfflineCommandAssetUnits from '../../devices/OfflineCommandAssetUnits'
+import RuleProductionTasks from './RuleProductionTasks'
 
-export type RuleAssetWorkbenchView = 'commands' | 'sources' | 'catalog' | 'policies'
+export type RuleAssetWorkbenchView = 'tasks' | 'commands' | 'sources' | 'catalog' | 'policies'
 
 interface RuleAssetProductionWorkbenchProps {
   view: RuleAssetWorkbenchView
@@ -22,6 +23,7 @@ interface RuleAssetProductionWorkbenchProps {
   focusRuleSeedJobId?: string
   focusBundleId?: string
   focusCheckItemVersionId?: string
+  focusChangeId?: string
   datasetIds?: string[]
 }
 
@@ -32,6 +34,7 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
   focusOfflineJobId,
   focusBundleId,
   focusCheckItemVersionId,
+  focusChangeId,
   initialSearch,
 }) => {
   // `commands` used to be a second top-level page for the very same catalog.
@@ -43,8 +46,7 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
   // Parser/TextFSM is command-evidence work. Keep it reachable from the
   // unified catalog only for an explicitly selected sample action; it does
   // not reintroduce a third top-level workspace.
-  const showSourceParserFlow = currentView === 'catalog'
-    && focusAction === 'parser'
+  const showSourceParserFlow = focusAction === 'parser'
     && Boolean(focusOfflineJobId)
   // The legacy release workspace is folded into this workbench.  It must
   // still reach the bundle list when callers have no single bundle to focus.
@@ -53,6 +55,7 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
   return (
     <Space className="parser-production-workspace" direction="vertical" size={16} style={{ width: '100%' }}>
       <nav className="rule-asset-view-switch" aria-label="巡检规则资产">
+        <Button type="text" className={currentView === 'tasks' ? 'is-active' : ''} onClick={() => onViewChange('tasks')}>制作任务</Button>
         <Button
           type="text"
           className={currentView === 'catalog' ? 'is-active' : ''}
@@ -85,8 +88,9 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
           initialBundleId={focusBundleId}
           initialCheckItemVersionId={focusCheckItemVersionId}
         />
-      ) : (
+      ) : currentView === 'tasks' ? <RuleProductionTasks /> : (
         <CheckItemCatalogWorkspace
+          focusChangeId={focusChangeId}
           initialOfflineJobId={catalogSourceScope ? focusOfflineJobId : undefined}
         />
       )}

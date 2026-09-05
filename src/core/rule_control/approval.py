@@ -363,12 +363,19 @@ class RuleAssetApprovalService:
         reason: str | None,
         now: datetime,
         allow_same_actor: bool = False,
+        automation_authorization: tuple[str, str] | None = None,
     ) -> dict[str, Any]:
         if bundle.status != "pending_approval":
             raise RuleGenerationJobStateError(
                 "rule asset bundle must be pending_approval before approval"
             )
         report = dict(bundle.validation_report_json or {})
+        automated = None
+        if automation_authorization:
+            from src.core.rule_control.autopilot_authorization import require_autopilot_release
+            automated = require_autopilot_release(db, automation_authorization, kind="rules", asset_id=bundle.id)
+            if (bundle.payload_json or {}).get("flow") != "check_item_semantics":
+                raise RuleGenerationJobStateError("automatic release requires human-owned CheckItem semantics")
         gate = dict(report.get("bundle_gate") or {})
         context_gate = dict(report.get("context_gate") or {})
         replay = dict(report.get("historical_replay") or {})
@@ -388,7 +395,7 @@ class RuleAssetApprovalService:
             or gate.get("success") is not True
             or context_gate.get("success") is not True
             or replay_gate.get("success") is not True
-            or engineering_review.get("decision") != "accepted"
+            or (engineering_review.get("decision") != "accepted" and not automated)
         ):
             raise RuleGenerationJobStateError(
                 "rule asset bundle cannot be approved before validation, replay, "
@@ -785,6 +792,7 @@ class RuleAssetApprovalService:
             dict(bundle.validation_report_json or {}),
             {
                 "activation_snapshot": activation_snapshot,
+                "automated_approval": automated,
                 "separation_of_duties_override": bool(
                     allow_same_actor
                     and (same_as_creator or same_as_engineering_reviewer)
@@ -1087,6 +1095,7 @@ class RuleAssetApprovalService:
         actor: str | None = None,
         reason: str | None = None,
         allow_same_actor: bool = False,
+        automation_authorization: tuple[str, str] | None = None,
     ) -> dict[str, Any]:
         now = _utcnow()
         with get_db_session() as db:
@@ -1106,6 +1115,7 @@ class RuleAssetApprovalService:
                     reason=reason,
                     now=now,
                     allow_same_actor=allow_same_actor,
+                    automation_authorization=automation_authorization,
                 )
             self._assert_direct_action_allowed(job)
             if (
