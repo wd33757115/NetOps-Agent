@@ -29,7 +29,7 @@ from src.infrastructure.db.models import (
 )
 from src.infrastructure.db.postgres import get_db_session
 
-DEFAULT_CATALOG_PATH = Path(__file__).parent / "assets" / "catalog.v10.yaml"
+DEFAULT_CATALOG_PATH = Path(__file__).parent / "assets" / "catalog.yaml"
 _ASSET_ID_RE = re.compile(r"^[a-z][a-z0-9_.-]+$")
 _RESULT_MODES = {"structured", "normalized_diff", "hash_only", "evidence_only"}
 _ASSESSMENT_MODES = {"health", "change", "evidence"}
@@ -201,6 +201,8 @@ def _load_check_item(
     canonical_contract = raw.get("canonical_contract")
     if not isinstance(canonical_contract, dict) or not canonical_contract:
         raise ValueError(f"{check_item_id} requires canonical_contract")
+    from src.core.check_items.value_contract import normalize_value_contract
+    canonical_contract = normalize_value_contract(canonical_contract)
     report_projection = str(raw.get("report_projection") or "").strip()
     if not report_projection:
         raise ValueError(f"{check_item_id} requires report_projection")

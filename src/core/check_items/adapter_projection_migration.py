@@ -437,6 +437,7 @@ def generate_projection_candidate(
         ),
     )
     _, check_item = _selected_check_item(selected_raw, check_item_id=check_item_id)
+    strict = check_item["canonical_contract"].get("value_contract") == "same-name/v1"
     def validate(candidate):
         validation = validate_projection_candidate(candidate, context=context, check_item=check_item)
         if validation.get("success") and execution_validator:
@@ -448,6 +449,17 @@ def generate_projection_candidate(
         return validation
     mode = str(raw.get("mode") or "projection_candidate").strip().casefold()
     proposal = _as_mapping(raw.get("proposal") or raw.get("adapter_spec"))
+    if strict:
+        from src.core.check_items.value_contract import same_name_fields
+        try:
+            fields = same_name_fields(check_item["canonical_contract"], context["parser"]["source_fields"])
+            direct = {"schema_version": "command-adapter/v2", "parser": {"template_id": context["parser"]["template_id"]}, "outputs": [{"check_item_id": check_item_id, "check_item_version_id": check_item["version_id"], "source_record_set": context["parser"]["source_record_set"], "projection": {"fields": fields}}]}
+            if proposal and proposal != direct:
+                raise ValueError("同名 Value 契约不允许改名或转换，请修正 TextFSM")
+            validation = validate(direct)
+            return {"success": validation["success"], "mode": "same_name_values", "proposal": direct, "validation": validation, "generation_provider": "same_name", "generation_context": context}
+        except ValueError as exc:
+            return {"success": False, "mode": "same_name_values", "proposal": {}, "validation": {"success": False, "errors": [str(exc)]}, "generation_provider": "same_name"}
     if mode in {"projection_validate", "validate_projection"}:
         if not proposal:
             raise ValueError("projection_validate requires proposal or adapter_spec")

@@ -1,252 +1,133 @@
-# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
-# SPDX-License-Identifier: Apache-2.0
-
-#version1.0-添加工单连续地址合并功能
-import json
-import ipaddress
-from collections import defaultdict
+"""Topology ownership and paths. Ownership is calculated at prefix boundaries."""
 import heapq
-import logging
-from typing import Dict, List, Tuple, Optional
+import json
+from collections import defaultdict
+from ipaddress import IPv4Network, IPv4Address
+from types import SimpleNamespace
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from policy_sets import addresses
 
-def parse_ports(ports: List[str]) -> set:
-    """解析端口，支持范围和单端口，处理英文和中文逗号"""
-    result = set()
-    for port_str in ports:
-        port_segments = port_str.replace('，', ' ').replace(',', ' ').split()
-        for segment in port_segments:
-            if '-' in segment:
-                start, end = map(int, segment.split('-'))
-                if 1 <= start <= end <= 65535:
-                    result.update(str(i) for i in range(start, end + 1))
-                else:
-                    logger.warning(f"端口范围 {segment} 超出有效范围（1-65535），忽略")
-            else:
-                if segment.isdigit() and 1 <= int(segment) <= 65535:
-                    result.add(segment)
-                else:
-                    logger.warning(f"端口 {segment} 超出有效范围（1-65535）或无效，忽略")
-    return result
-
-class SecurityDomain:
-    def __init__(self, name: str, ip_ranges: List[str], intra_connections: List[str] = None,
-                 connected_firewalls: List[dict] = None):
-        self.name = name
-        self.ip_ranges = [ipaddress.IPv4Network(r, strict=False) for r in ip_ranges]
-        self.intra_connections = intra_connections or []
-        self.connected_firewalls = connected_firewalls or []
-
-class Firewall:
-    def __init__(self, name: str, fw_type: str, domains: Dict[str, SecurityDomain]):
-        self.name = name
-        self.type = fw_type
-        self.domains = domains
 
 class NetworkTopology:
-    def __init__(self, json_path: str):
-        self.firewalls = {}
-        self.graph = defaultdict(list)
-        self.explicit_paths = {}
-        self.global_acl = []
-        self._load_topology(json_path)
-        self._build_connection_graph()
-        self._validate_topology()
-
-    def _load_topology(self, json_path: str):
-        encodings = ['utf-8-sig', 'gbk', 'utf-8']
-        for encoding in encodings:
+    def __init__(self, json_path):
+        for encoding in ("utf-8-sig", "gbk"):
             try:
-                with open(json_path, 'r', encoding=encoding) as f:
-                    data = json.load(f)
-                    logger.info(f"成功以 {encoding} 编码加载文件")
-                    break
+                with open(json_path, encoding=encoding) as stream:
+                    data = json.load(stream)
+                break
             except UnicodeDecodeError:
                 continue
-            except Exception as e:
-                logger.error(f"文件加载失败: {str(e)}")
-                raise
         else:
-            raise ValueError(f"无法解码文件，支持的编码: {encodings}")
-
-        if 'firewalls' not in data or not isinstance(data['firewalls'], list):
-            raise ValueError("拓扑文件格式错误")
-
-        self.global_acl = data.get('global_acl', [])
-        for path in data.get('explicit_paths', []):
-            start = (path['start']['firewall'], path['start']['domain'])
-            end = (path['end']['firewall'], path['end']['domain'])
-            self.explicit_paths[(start, end)] = path['path']
-
-        for fw_data in data['firewalls']:
+            raise ValueError("拓扑文件编码无效")
+        self.firewalls = {}
+        self.graph = defaultdict(set)
+        self.explicit_paths = {}
+        self.global_acl = data.get("global_acl", [])
+        self.network_context = data.get("network_context", "default")
+        self.warnings = []
+        self.prefixes = []
+        for fw in data.get("firewalls", []):
+            name = fw["name"]
+            if name in self.firewalls:
+                raise ValueError(f"拓扑设备重复：{name}")
             domains = {}
-            for sd in fw_data.get('security_domains', []):
-                domain = SecurityDomain(
-                    name=sd['name'],
-                    ip_ranges=sd.get('ip_ranges', []),
-                    intra_connections=sd.get('intra_connections', []),
-                    connected_firewalls=sd.get('connected_firewalls', [])
-                )
-                domains[domain.name] = domain
-            fw = Firewall(name=fw_data['name'], fw_type=fw_data['type'], domains=domains)
-            self.firewalls[fw.name] = fw
-
-    def _build_connection_graph(self):
-        for fw in self.firewalls.values():
-            domains = list(fw.domains.keys())
-            for i, src_domain in enumerate(domains):
-                for dst_domain in domains[i + 1:]:
-                    src_node = (fw.name, src_domain)
-                    dst_node = (fw.name, dst_domain)
-                    self.graph[src_node].append(dst_node)
-                    self.graph[dst_node].append(src_node)
-                domain_obj = fw.domains[src_domain]
-                for conn in domain_obj.connected_firewalls:
-                    target_fw = conn["firewall"]
-                    via_domain = conn["via_domain"]
-                    src = (fw.name, src_domain)
-                    dst = (target_fw, via_domain)
-                    self.graph[src].append(dst)
-                    self.graph[dst].append(src)
-
-    def _validate_topology(self):
+            for domain in fw.get("security_domains", []):
+                zone = domain["name"]
+                if zone in domains:
+                    raise ValueError(f"安全域重复：{name}.{zone}")
+                domains[zone] = domain
+                for value in domain.get("ip_ranges", []):
+                    net = IPv4Network(value, strict=False)
+                    self.prefixes.append((int(net.network_address), int(net.broadcast_address) + 1,
+                                          net.prefixlen, (name, zone), str(net)))
+            if not domains:
+                raise ValueError(f"防火墙 {name} 未配置安全域")
+            self.firewalls[name] = SimpleNamespace(name=name, type=fw["type"], domains=domains)
         if not self.firewalls:
             raise ValueError("拓扑文件中未定义任何防火墙")
-        for fw_name, fw in self.firewalls.items():
-            if not fw.domains:
-                raise ValueError(f"防火墙 {fw_name} 未配置安全域")
+        self.nodes = {(fw.name, zone) for fw in self.firewalls.values() for zone in fw.domains}
+        for fw in self.firewalls.values():
+            for zone, domain in fw.domains.items():
+                node = (fw.name, zone)
+                internal = domain.get("intra_connections")
+                if internal is None:
+                    # Preserve existing files. Explicit [] means no internal edges.
+                    internal = [other for other in fw.domains if other != zone]
+                    if internal:
+                        self.warnings.append(f"{fw.name}.{zone} 沿用旧拓扑的域间互连；路径为拓扑推导，请人工核对")
+                for other in internal:
+                    target = (fw.name, other)
+                    if target not in self.nodes:
+                        raise ValueError(f"拓扑安全域不存在：{target}")
+                    self.graph[node].add(target)
+                for connection in domain.get("connected_firewalls", []):
+                    target = (connection["firewall"], connection["via_domain"])
+                    if target not in self.nodes:
+                        self.warnings.append(f"未使用指向不存在设备/安全域的连接：{node} → {target}")
+                        continue
+                    self.graph[node].add(target)
+                    self.graph[target].add(node)
+        for entry in data.get("explicit_paths", []):
+            start = (entry["start"]["firewall"], entry["start"]["domain"])
+            end = (entry["end"]["firewall"], entry["end"]["domain"])
+            path = tuple(tuple(node) for node in entry["path"])
+            if (start, end) in self.explicit_paths:
+                raise ValueError("同一源/目的安全域配置了重复指定路径")
+            self.explicit_paths[(start, end)] = path
+            if not self._valid_path(start, end, path):
+                self.warnings.append(f"指定路径 {start} → {end} 无效；申请匹配该路径时将阻断生成")
 
-    def get_interfaces(self, fw_name: str, domain: str) -> List[str]:
-        return [
-            conn["via_domain"]
-            for conn in self.firewalls[fw_name].domains[domain].connected_firewalls
-        ]
+    def _valid_path(self, start, end, path):
+        return (bool(path) and path[0] == start and path[-1] == end
+                and len(path) == len(set(path)) and all(node in self.nodes for node in path)
+                and all(b in self.graph[a] for a, b in zip(path, path[1:])))
 
-    def find_shortest_path(self, start: Tuple[str, str], end: Tuple[str, str]) -> List[Tuple[str, str]]:
+    def split_ownership(self, intervals):
+        result = []
+        for low, high in intervals:
+            candidates = [p for p in self.prefixes if p[0] < high and p[1] > low]
+            bounds = sorted({low, high} | {max(low, p[0]) for p in candidates}
+                            | {min(high, p[1]) for p in candidates})
+            for a, b in zip(bounds, bounds[1:]):
+                matches = [p for p in candidates if p[0] <= a < p[1]]
+                if not matches:
+                    raise ValueError(f"地址 {IPv4Address(a)}-{IPv4Address(b - 1)} 无法匹配拓扑中的安全域")
+                longest = max(p[2] for p in matches)
+                winners = [p for p in matches if p[2] == longest]
+                owners = {p[3] for p in winners}
+                if len(owners) != 1:
+                    raise ValueError(f"地址 {IPv4Address(a)}-{IPv4Address(b - 1)} 的安全域归属冲突：{sorted(owners)}")
+                result.append({"interval": (a, b), "owner": winners[0][3], "prefix": winners[0][4]})
+        return result
+
+    def find_ip_owner(self, value):
+        segments = self.split_ownership(addresses(value))
+        owners = {part["owner"] for part in segments}
+        return next(iter(owners)) if len(owners) == 1 else None
+
+    def find_shortest_path(self, start, end):
         if (start, end) in self.explicit_paths:
-            return self.explicit_paths[(start, end)]
-
-        heap = []
-        heapq.heappush(heap, (0, start, []))
+            path = self.explicit_paths[(start, end)]
+            if not self._valid_path(start, end, path):
+                raise ValueError("指定路径的节点、连接、起终点或环路校验失败")
+            return list(path)
+        heap = [(0, start, ())]
         visited = set()
-        path_weights = defaultdict(lambda: float('inf'))
         while heap:
-            current_cost, current_node, path = heapq.heappop(heap)
-            if current_node in visited:
+            cost, node, path = heapq.heappop(heap)
+            if node in visited:
                 continue
-            visited.add(current_node)
-            new_path = path + [current_node]
-            if current_node == end:
-                return new_path
-            for neighbor in self.graph.get(current_node, []):
-                edge_cost = 1 if current_node[0] == neighbor[0] else 5
-                total_cost = current_cost + edge_cost
-                if total_cost < path_weights[neighbor]:
-                    path_weights[neighbor] = total_cost
-                    heapq.heappush(heap, (total_cost, neighbor, new_path))
+            visited.add(node)
+            path = (*path, node)
+            if node == end:
+                return list(path)
+            for neighbor in sorted(self.graph[node]):
+                if neighbor not in visited:
+                    heapq.heappush(heap, (cost + (1 if node[0] == neighbor[0] else 5), neighbor, path))
         return []
 
-    def _handle_ip_range(self, ip_range: str) -> Optional[Tuple[str, str]]:
-        """处理范围 IP，仅验证首尾 IP 的安全域，支持跨c类地址范围"""
-        try:
-            # 处理完整范围格式，如 "10.6.145.24-10.6.146.24"
-            if '-' in ip_range and ip_range.count('.') == 6:
-                start_ip, end_ip = ip_range.split('-')
-                start_owner = self.find_ip_owner(start_ip)
-                end_owner = self.find_ip_owner(end_ip)
-                if start_owner and start_owner == end_owner:
-                    return start_owner
-                logger.error(f"IP范围 {ip_range} 首尾IP安全域不一致: {start_owner} != {end_owner}")
-                return None
-
-            # 处理简写范围格式，如 "10.16.152.91-92"
-            elif '-' in ip_range and not ip_range.startswith('range'):
-                base = ip_range.rsplit('.', 1)[0]
-                range_part = ip_range.split('.')[-1]
-                start, end = map(int, range_part.split('-'))
-                if not (0 <= start <= end <= 255):
-                    raise ValueError(f"无效IP范围: {ip_range}")
-                start_ip = f"{base}.{start}"
-                end_ip = f"{base}.{end}"
-                start_owner = self.find_ip_owner(start_ip)
-                end_owner = self.find_ip_owner(end_ip)
-                if start_owner and start_owner == end_owner:
-                    return start_owner
-                logger.error(f"IP范围 {ip_range} 首尾IP安全域不一致: {start_owner} != {end_owner}")
-                return None
-
-            else:
-                raise ValueError(f"无效IP范围格式: {ip_range}")
-
-        except ValueError as e:
-            logger.error(f"IP范围解析失败: {str(e)}")
-            return None
-
-    def find_ip_owner(self, ip_str: str) -> Optional[Tuple[str, str]]:
-        """查找 IP 归属，支持单IP、CIDR和范围，仅验证首尾IP"""
-        try:
-            # 处理完整范围格式，如 "10.6.145.24-10.6.146.24"
-            if '-' in ip_str and ip_str.count('.') == 6:
-                return self._handle_ip_range(ip_str)
-            # 处理简写范围格式，如 "10.16.152.91-92"
-            elif '-' in ip_str and not ip_str.startswith('range'):
-                return self._handle_ip_range(ip_str)
-            # 处理 CIDR 格式，如 "10.230.240.0/20"
-            elif '/' in ip_str:
-                network = ipaddress.IPv4Network(ip_str, strict=False)
-                start_ip = str(network.network_address)
-                end_ip = str(network.broadcast_address)
-                start_owner = self._get_single_ip_owner(start_ip)
-                end_owner = self._get_single_ip_owner(end_ip)
-                if start_owner and start_owner == end_owner:
-                    return start_owner
-                logger.error(f"CIDR {ip_str} 首尾IP安全域不一致: {start_owner} != {end_owner}")
-                return None
-            # 处理单 IP
-            ip = ipaddress.IPv4Address(ip_str)
-            candidates = []
-            for fw in self.firewalls.values():
-                for domain in fw.domains.values():
-                    for net in domain.ip_ranges:
-                        if ip in net:
-                            candidates.append((net.prefixlen, fw.name, domain.name))
-            if candidates:
-                candidates.sort(reverse=True)  # 按前缀长度降序，选择最精确的子网
-                return candidates[0][1], candidates[0][2]
-            return None
-        except (ipaddress.AddressValueError, ipaddress.NetmaskValueError) as e:
-            logger.error(f"IP格式解析失败: {ip_str} - {str(e)}")
-            return None
-
-    def _get_single_ip_owner(self, ip_str: str) -> Optional[Tuple[str, str]]:
-        """查找单个 IP 的归属"""
-        try:
-            ip = ipaddress.IPv4Address(ip_str)
-            candidates = []
-            for fw in self.firewalls.values():
-                for domain in fw.domains.values():
-                    for net in domain.ip_ranges:
-                        if ip in net:
-                            candidates.append((net.prefixlen, fw.name, domain.name))
-            if candidates:
-                candidates.sort(reverse=True)  # 按前缀长度降序，选择最精确的子网
-                return candidates[0][1], candidates[0][2]
-            return None
-        except ipaddress.AddressValueError:
-            return None
-
-    def check_global_acl(self, src_fw: str, src_zone: str, dst_fw: str, dst_zone: str) -> bool:
-        """检查全局 ACL 是否允许源防火墙和安全域到目标防火墙和安全域的访问"""
+    def check_global_acl(self, src_fw, src_zone, dst_fw, dst_zone):
         for acl in self.global_acl:
-            if (acl.get('source_fw') == src_fw and
-                acl.get('source_zone') == src_zone and
-                acl.get('destination_fw') == dst_fw and
-                acl.get('destination_zone') == dst_zone):
-                action = acl.get('action', 'permit')
-                if action.lower() == 'deny':
-                    logger.info(f"全局 ACL 禁止 {src_fw}.{src_zone} 到 {dst_fw}.{dst_zone} 的访问")
-                    return False
-                return True
+            if (acl.get("source_fw"), acl.get("source_zone"), acl.get("destination_fw"), acl.get("destination_zone")) == (src_fw, src_zone, dst_fw, dst_zone):
+                return acl.get("action", "permit").lower() != "deny"
         return True

@@ -470,9 +470,20 @@ def _normalize_spec(
             normalized.pop("expected_records", None)
         return normalized
 
+    def validate_names(record_sets):
+        if (field_naming_context or {}).get("strict_value_names"):
+            from src.core.check_items.value_contract import validate_same_name_record_sets
+
+            contracts = [
+                item["canonical_contract"] for item in field_naming_context["check_items"]
+            ]
+            validate_same_name_record_sets(contracts, record_sets)
+
     raw_record_sets = raw.get("record_sets")
     if raw_record_sets is None:
-        return normalize_record_set(raw, include_metadata=False)
+        normalized = normalize_record_set(raw, include_metadata=False)
+        validate_names([normalized])
+        return normalized
     if isinstance(raw_record_sets, dict):
         record_sets = [
             normalize_record_set(
@@ -497,6 +508,7 @@ def _normalize_spec(
         "record_sets": record_sets,
     }
     normalized_document = ParserSpecDocument.from_dict(document).to_dict()
+    validate_names(normalized_document["record_sets"])
     for record_set in normalized_document.get("record_sets") or []:
         record_set.pop("expected_records", None)
     return normalized_document
@@ -953,6 +965,12 @@ Trusted local parser execution evidence (if any):
 
 Approved check-item field naming guidance (advisory, not a parse gate):
 {json.dumps(field_naming_context or {}, ensure_ascii=True, indent=2)}
+
+When strict_value_names is true, the CheckItem canonical_contract is authoritative:
+use only its identity_dimensions and observations[].canonical_field as Value names.
+Do not add aliases, auxiliary fields or conversion mappings. Include every available
+declared field with its exact approved meaning. Missing source data stays missing,
+never zero. The same field names flow directly into change and event rules.
 
 Engineer revision instruction (advisory and evidence-bound):
 {json.dumps(str(revision_instruction or "")[:4000], ensure_ascii=True)}
@@ -1644,7 +1662,7 @@ def suggest_parser_spec(params: dict[str, Any]) -> dict[str, Any]:
                 evidence=ntc_evidence,
                 field_naming_context=field_naming_context,
             )
-            if ntc_spec is not None and not revision_instruction:
+            if ntc_spec is not None and not revision_instruction and not field_naming_context.get("strict_value_names"):
                 spec = ParserSpecDocument.from_dict(ntc_spec).to_dict()
                 sample_plans = _normalize_sample_plans({}, samples=data_samples)
                 selected_ntc = max(

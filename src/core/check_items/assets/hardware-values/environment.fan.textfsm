@@ -1,0 +1,13 @@
+Value Filldown,Required slot (\d+)
+Value Required fan (\d+)
+Value fan_status (\S+)
+Value fan_airflow_direction (\S+)
+Value preferred_fan_airflow_direction (\S+)
+
+Start
+  ^\s*(?:Slot|Fan)\s+\d+\s*: -> Continue.Record
+  ^\s*Slot\s+${slot}\s*:\s*$$
+  ^\s*Fan\s+${fan}\s*:\s*$$
+  ^\s*State\s*:\s*${fan_status}\s*$$
+  ^\s*Airflow Direction:\s*${fan_airflow_direction}\s*$$
+  ^\s*Prefer Airflow Direction:\s*${preferred_fan_airflow_direction}\s*$$

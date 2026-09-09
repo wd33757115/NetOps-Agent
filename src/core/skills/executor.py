@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from hashlib import sha256
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -126,6 +127,7 @@ def _prepare_local_inputs(skill_name: str, params: dict[str, Any], tmpdir: str) 
 
     policy_url = prepared.get("policy_file_url")
     if policy_url and not prepared.get("_policy_path"):
+        prepared.setdefault("policy_input_name", Path(str(policy_url).split("?", 1)[0]).name)
         policy_path = os.path.join(tmpdir, "policy_input.xlsx")
         _download_url_to_path(str(policy_url), Path(policy_path))
         prepared["_policy_path"] = policy_path
@@ -140,8 +142,9 @@ def _prepare_local_inputs(skill_name: str, params: dict[str, Any], tmpdir: str) 
         try:
             _download_url_to_path(str(topo), Path(topo_path))
             prepared["topology_file_url"] = topo_path
-        except Exception:
-            pass
+        except Exception as exc:
+            if skill_name == "firewall-policy-generator":
+                raise SkillExecutionError("拓扑文件下载失败，请检查文件地址或重新上传") from exc
 
     return prepared
 
@@ -307,6 +310,11 @@ def _upload_file_output(
         else:
             object_name = f"change_tickets/{ticket_id}/{filename}"
             content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            if skill_name == "itsm-change-ticket-writer":
+                # Editing a ticket must not replace an earlier download's contents.
+                digest = sha256(Path(file_path).read_bytes()).hexdigest()[:24]
+                filename = "变更工单.xlsx"
+                object_name = f"change_tickets/{ticket_id}/{digest}/{filename}"
         with open(file_path, "rb") as f:
             if minio.upload_file(object_name, f.read(), content_type=content_type):
                 download_url = minio.get_presigned_url(object_name, expires=3600 * 24 * 7)
@@ -341,12 +349,15 @@ def _upload_dir_output(
     zip_name = f"{skill_name.replace('-', '_')}_{ticket_id}.zip"
     zip_path = os.path.join(os.path.dirname(output_dir), zip_name)
     shutil.make_archive(zip_path.replace(".zip", ""), "zip", output_dir)
+    artifact_prefix = f"skill_outputs/{skill_name}/{ticket_id}"
+    if skill_name == "firewall-policy-generator" and skill_result.get("policy_plan_id"):
+        artifact_prefix += "/" + str(skill_result["policy_plan_id"])
 
     minio = get_minio_storage()
     object_name = None
     download_url = None
     if minio and minio.is_ready():
-        object_name = f"skill_outputs/{skill_name}/{ticket_id}/{zip_name}"
+        object_name = f"{artifact_prefix}/{zip_name}"
         with open(zip_path, "rb") as f:
             if minio.upload_file(object_name, f, content_type="application/zip"):
                 download_url = minio.get_presigned_url(object_name, expires=3600 * 24 * 7)
@@ -360,6 +371,20 @@ def _upload_dir_output(
     skill_result.setdefault("artifacts", {})["config_zip"] = art
     skill_result.setdefault("download_url", download_url)
     skill_result.setdefault("config_file_key", object_name)
+    if skill_name == "firewall-policy-generator" and minio and minio.is_ready():
+        for artifact_key, filename, content_type in (
+            ("policy_preview", "策略计划预览.html", "text/html; charset=utf-8"),
+            ("policy_request", "策略申请表.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        ):
+            file_path = Path(output_dir) / filename
+            if not file_path.is_file():
+                continue
+            key = f"{artifact_prefix}/{filename}"
+            with file_path.open("rb") as stream:
+                if minio.upload_file(key, stream, content_type=content_type):
+                    skill_result["artifacts"][artifact_key] = make_file_artifact(
+                        file_key=key, download_url=minio.get_presigned_url(key, expires=3600 * 24 * 7),
+                        filename=filename, content_type=content_type)
     return skill_result
 
 
@@ -451,6 +476,8 @@ def _execute_skill_impl(skill_name: str, params: dict[str, Any] | None = None) -
             raise
         except Exception as exc:
             logger.exception("Skill subprocess 异常 skill=%s", skill_name)
+            if skill_name == "firewall-policy-generator":
+                raise SkillExecutionError(f"防火墙策略输入读取或生成失败：{exc}") from exc
             if skill_name in _LEGACY_TASK_NAMES:
                 logger.warning("回退 legacy task: %s", skill_name)
                 return _run_legacy_task(skill_name, params)

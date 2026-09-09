@@ -996,11 +996,18 @@ def _primary_keys(check_item: Mapping[str, Any]) -> tuple[str, ...]:
 
 
 def _field_specs(check_item: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
-    return {
+    specs = {
         str(item.get("canonical_field") or "").strip(): dict(item)
         for item in _canonical_rows(check_item)
         if str(item.get("canonical_field") or "").strip()
     }
+    contract = check_item.get("canonical_contract") or {}
+    # Identity declarations carry semantics too. Previously scope=1 passed even
+    # though the CheckItem only permits system/slot/processor.
+    for name, rule in (contract.get("identity_dimension_rules") or {}).items():
+        if name in _primary_keys(check_item):
+            specs[name] = {**dict(rule), "required": True}
+    return specs
 
 
 def _validate_target_contract(
@@ -1026,6 +1033,10 @@ def _validate_target_contract(
             f"but the selected CheckItem version is {expected_version}"
         )
     field_specs = _field_specs(check_item)
+    if (check_item.get("canonical_contract") or {}).get("value_contract") == "same-name/v1":
+        for name, binding in fields.items():
+            if dict(binding) != {"source": name}:
+                raise CommandAdapterError(f"同名 Value {name} 不允许改名或转换；请修正 TextFSM")
     primary_keys = set(_primary_keys(check_item))
     allowed = set(field_specs) | primary_keys
     unknown = sorted(set(fields) - allowed)
@@ -1154,7 +1165,12 @@ def _normalize_mapped_record(
         if value is None or (isinstance(value, str) and not value.strip()):
             continue
         value_type = str(spec.get("value_type") or "").strip().lower()
-        if value_type in {"number", "percent"}:
+        if value_type == "integer":
+            try:
+                normalized[field] = int(str(value).strip())
+            except (TypeError, ValueError) as exc:
+                raise CommandAdapterError(f"canonical field is not integer: {field}={value!r}") from exc
+        elif value_type in {"number", "percent"}:
             try:
                 normalized[field] = float(str(value).strip().rstrip("%"))
             except (TypeError, ValueError) as exc:

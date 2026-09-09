@@ -17,6 +17,7 @@ from src.core.check_items.resolver import CheckItemImplementationResolver
 from src.core.parser.identity import DeviceIdentityResolver
 from src.core.parser.runtime import ParserRuntime, ParserRuntimeResult
 from src.core.patrol.command_splitter import (
+    canonicalize_command,
     infer_device_from_filename,
     inspect_raw_capture,
     split_cli_capture,
@@ -420,6 +421,38 @@ def _resolve_offline_direct_projection_bindings(
     return bindings
 
 
+def _attach_command_analysis_routes(
+    status_items: list[dict[str, Any]], *, identity: Any,
+    device_id: str, commands: list[str],
+) -> list[dict[str, Any]]:
+    # Explicit command-set runs already carry collection statuses, but do not
+    # have check-item-driven collection bindings. Attach only existing active
+    # analysis routes; keep every original status, command and raw output.
+    if status_items and not any(item.get("check_item_bindings") for item in status_items):
+        routes = _resolve_offline_direct_projection_bindings(
+            identity=identity,
+            device_id=device_id,
+            commands=commands,
+        )
+        by_command = {canonicalize_command(item["command"]): item for item in routes}
+        status_items = [dict(item) for item in status_items]
+        for item in status_items:
+            route = by_command.get(canonicalize_command(str(item.get("command") or "")))
+            if route:
+                item["check_item_bindings"] = route["check_item_bindings"]
+                item["selected_for_bindings"] = route["selected_for_bindings"]
+    return status_items
+
+
+def _align_collection_statuses(blocks, status_items):
+    """Use the splitter's identity for both raw commands and their analysis bindings."""
+    queues: dict[str, list[dict[str, Any]]] = {}
+    for item in status_items:
+        key = canonicalize_command(str(item.get("command") or ""))
+        queues.setdefault(key, []).append(item)
+    return [(queues.get(block.command_canonical) or [{}]).pop(0) for block in blocks]
+
+
 def _parse_capture_blocks(
     *,
     runtime: ParserRuntime,
@@ -756,14 +789,11 @@ def import_raw_capture(
         ]
     else:
         status_items = [dict(item) for item in command_collection_statuses or []]
-    status_queues: dict[str, list[dict[str, Any]]] = {}
-    for item in status_items:
-        canonical = " ".join(str(item.get("command") or "").strip().lower().split())
-        status_queues.setdefault(canonical, []).append(item)
-    block_collection_statuses = [
-        (status_queues.get(block.command_canonical) or [{}]).pop(0)
-        for block in blocks
-    ]
+    status_items = _attach_command_analysis_routes(
+        status_items, identity=identity, device_id=device_id,
+        commands=[block.command for block in blocks],
+    )
+    block_collection_statuses = _align_collection_statuses(blocks, status_items)
     command_observed_ats = [
         (command_collection.get("observed_at") or observed_at or inspected.observed_at_text)
         for block, command_collection in zip(

@@ -959,7 +959,7 @@ class RiskCaseService:
                 for item in assets
             ):
                 blockers.append("recovery_rule_not_in_frozen_bundle")
-            elif str(rule_version.event_class) != "recovery":
+            elif str(rule_version.event_class) == "fault":
                 blockers.append("recovery_rule_class_mismatch")
 
             refs = set(evidence_refs)
@@ -1028,7 +1028,7 @@ class RiskCaseService:
             item
             for item in current_rule_versions
             if str(item.event_type) == str(case_record.risk_type)
-            and str(item.event_class or "fault") != "recovery"
+            and str(item.event_class or "fault") == "fault"
         ]
         assessment_blockers = list(common_blockers)
         if not relevant_current_rules:

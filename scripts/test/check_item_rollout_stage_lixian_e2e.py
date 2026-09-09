@@ -69,20 +69,6 @@ SCENARIOS = (
         "asset_file": "cpu.json",
     },
     {
-        "scenario_id": "interface-h3c-msr5620",
-        "check_item_id": "interface.oper_status",
-        "template_scope": {
-            "vendor": "H3C",
-            "profile": "MSR5620",
-            "command": "display interface brief",
-        },
-        "regression_globs": {
-            "baseline": ["lixian/Q2/*RT5620*.txt"],
-            "current": ["lixian/Q3/*RT5620*.txt"],
-        },
-        "asset_file": "interface-h3c.json",
-    },
-    {
         "scenario_id": "optical-h3c-s6850",
         "check_item_id": "interface.optical_power",
         "template_scope": {

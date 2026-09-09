@@ -3,6 +3,7 @@ import type { AuthUser } from '../services/api'
 import { appRoutes, documentsEnabled } from './appRoutes'
 
 export const appRegistry = [
+  { id: 'firewall-policy', name: '防火墙策略生成', route: appRoutes.firewall, symbol: 'shield', enabled: true },
   {
     id: 'patrol',
     name: '网络巡检',
@@ -18,7 +19,7 @@ export const appRegistry = [
     symbol: 'rules',
     enabled: true,
   },
-  { id: 'device-configuration', name: '设备配置', route: '/admin/netops/devices', symbol: 'rules', enabled: true, permission: 'netops.configure' },
+  { id: 'device-configuration', name: '设备管理', route: appRoutes.devices, symbol: 'rules', enabled: true, permission: 'netops.configure' },
   {
     id: 'official-document',
     name: '公文写作',

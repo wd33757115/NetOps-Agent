@@ -12,14 +12,13 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import GrokShellLayout from '../Layout/GrokShellLayout'
 import WorkflowRunMonitor from '../skills/WorkflowRunMonitor'
 import AgentModuleControlTab from '../devices/AgentModuleControlTab'
-import ControlPlaneOverview from '../devices/ControlPlaneOverview'
+import PatrolCommandBindingDrawer from './PatrolCommandBindingDrawer'
 import DeviceAssetInventoryPanel, { type DeviceAssetFilters } from '../devices/DeviceAssetInventoryPanel'
 import PatrolOperationsPanel from '../devices/PatrolOperationsPanel'
 import { canCancelPatrolBatch } from '../devices/patrolBatchLifecycle'
 import EvidenceTimeline from '../devices/EvidenceTimeline'
 import {
   deviceApi,
-  parserApi,
   workflowApi,
   type DeviceBulkPreview,
   type DeviceBulkDeletePreview,
@@ -39,9 +38,6 @@ import {
   type DevicePatrolPreview,
   type DeviceUpsertPayload,
   type ManagedDevice,
-  type ParserCheckItem,
-  type ParserCommandProfile,
-  type ParserCommandProfileImpactPreview,
   type PatrolBatchPage,
   type PatrolBatchResultSummary,
   type PatrolBatchDevicePage,
@@ -239,19 +235,9 @@ interface DynamicGroupRule {
   values: string[]
 }
 
-interface ProfileBindingFormValues {
-  profile_version_id?: string
-  priority?: number
-  target_type?: 'selected' | 'group' | 'dynamic_group' | 'filters'
-  dynamic_group_id?: string
-  group?: string
-  reason?: string
-}
 
-interface CheckItemProfileFormValues {
-  name: string
-  check_item_ids: string[]
-}
+
+
 
 const dynamicGroupSelectorFields = [
   { value: 'vendor', label: '厂商' },
@@ -286,24 +272,6 @@ const buildDeviceAttributes = (
   delete attributes.patrol_commands
   return Object.keys(attributes).length ? attributes : undefined
 }
-
-const findCommandProfile = (profiles: ParserCommandProfile[], value?: string) => {
-  const key = String(value || '').trim()
-  if (!key) return undefined
-  return (
-    profiles.find((profile) => profile.version_status === 'active' && profile.profile_name === key) ||
-    profiles.find((profile) => profile.version_status === 'active' && profile.profile_id === key) ||
-    profiles.find((profile) => profile.profile_version_id === key) ||
-    profiles.find((profile) => profile.profile_name === key) ||
-    profiles.find((profile) => profile.profile_id === key)
-  )
-}
-
-const commandProfileCommands = (profile?: ParserCommandProfile) =>
-  (profile?.items || [])
-    .filter((item) => !item.action || item.action === 'patrol')
-    .map((item) => item.command)
-    .filter(Boolean)
 
 const createRuleId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`
 
@@ -386,8 +354,6 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ m
   const [sourcePickerOpen, setSourcePickerOpen] = useState(false)
   const [patrolForm] = Form.useForm<PatrolFormValues>()
   const [dynamicGroupForm] = Form.useForm<DynamicGroupFormValues>()
-  const [profileBindingForm] = Form.useForm<ProfileBindingFormValues>()
-  const [checkItemProfileForm] = Form.useForm<CheckItemProfileFormValues>()
   const [filters, setFilters] = useState<DeviceAssetFilters>({
     keyword: searchParams.get('scope_keyword') || '',
     vendor: searchParams.get('scope_vendor') || '',
@@ -439,11 +405,10 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ m
   const [dynamicGroupPreview, setDynamicGroupPreview] = useState<DeviceDynamicGroupPreview | null>(null)
   const [dynamicGroupRules, setDynamicGroupRules] = useState<DynamicGroupRule[]>([])
   const [profileBindingOpen, setProfileBindingOpen] = useState(false)
-  const [checkItemProfileOpen, setCheckItemProfileOpen] = useState(false)
-  const [profileBindingImpact, setProfileBindingImpact] = useState<ParserCommandProfileImpactPreview | null>(null)
-  const [profileBindingDraft, setProfileBindingDraft] = useState<ProfileBindingFormValues>({})
   const [credentialInspection, setCredentialInspection] = useState<DeviceCredentialInspection | null>(null)
 
+  const [devicePage, setDevicePage] = useState(1)
+  const [devicePageSize, setDevicePageSize] = useState(20)
   const queryParams = useMemo(() => {
     const keyword = filters.keyword.trim()
     return {
@@ -459,9 +424,10 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ m
       status: filters.status || undefined,
       connection_status: filters.connectionStatus || undefined,
       include_patrol_readiness: 'true',
-      limit: 200,
+      limit: devicePageSize,
+      offset: (devicePage - 1) * devicePageSize,
     }
-  }, [filters])
+  }, [filters, devicePage, devicePageSize])
 
   const { data, error: devicesError, isError: devicesIsError, isLoading, refetch } = useQuery(
     ['devices', queryParams],
@@ -581,33 +547,6 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ m
     ['device-credentials'],
     () => deviceApi.credentials(),
     { refetchOnWindowFocus: false, enabled: !patrolApp },
-  )
-  const { data: commandProfilePage, refetch: refetchCommandProfiles } = useQuery(
-    ['device-command-profiles'],
-    () => parserApi.commandProfiles({ limit: 100, offset: 0 }),
-    { refetchOnWindowFocus: false },
-  )
-  const { data: checkItemPage } = useQuery(
-    ['patrol-check-item-catalog'],
-    () => parserApi.checkItems({ limit: 200, offset: 0 }),
-    { refetchOnWindowFocus: false },
-  )
-  const commandProfiles = useMemo(
-    () => commandProfilePage?.items || [],
-    [commandProfilePage?.items],
-  )
-  const checkItems = useMemo<ParserCheckItem[]>(
-    () => checkItemPage?.items || [],
-    [checkItemPage?.items],
-  )
-  const watchedCommandProfile = Form.useWatch('command_profile', form)
-  const currentCommandProfile = useMemo(
-    () => findCommandProfile(commandProfiles, watchedCommandProfile),
-    [commandProfiles, watchedCommandProfile],
-  )
-  const currentCommandProfileCommands = useMemo(
-    () => commandProfileCommands(currentCommandProfile),
-    [currentCommandProfile],
   )
   const { data: importTemplate } = useQuery<DeviceImportTemplate>(
     ['device-import-template'],
@@ -857,17 +796,6 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ m
     },
   )
 
-  const checkItemProfileVersionOptions = commandProfiles
-    .filter((profile: ParserCommandProfile) =>
-      profile.profile_version_id && profile.profile_mode === 'check_items')
-    .map((profile) => ({
-      value: profile.profile_version_id!,
-      label: `${String(profile.profile_name || '-')} v${String(profile.version || profile.current_version || '-')} · ${statusLabel(profile.version_status)} · ${profile.check_item_ids?.length || 0} 项`,
-    }))
-  const selectedBindingProfile = commandProfiles.find(
-    (profile) => profile.profile_version_id === profileBindingDraft.profile_version_id,
-  )
-
   const currentFilterSelector = (): Record<string, unknown> => {
     const selector: Record<string, unknown> = {
       device_name: queryParams.device_name,
@@ -888,128 +816,7 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ m
     return selector
   }
 
-  const buildProfileBindingSelector = (values: ProfileBindingFormValues): Record<string, unknown> => {
-    if (values.target_type === 'selected') {
-      return { device_id: selectedRowKeys.map(String) }
-    }
-    if (values.target_type === 'dynamic_group') {
-      const group = dynamicGroups.find((item) => item.id === values.dynamic_group_id)
-      if (!group) throw new Error('请选择动态分组')
-      return group.selector || {}
-    }
-    if (values.target_type === 'group') {
-      if (!values.group) throw new Error('请选择设备分组')
-      return { group: values.group }
-    }
-    return currentFilterSelector()
-  }
-
-  const openProfileBinding = () => {
-    setProfileBindingImpact(null)
-    const targetType = selectedRowKeys.length ? 'selected' : 'filters'
-    const draft = {
-      target_type: targetType,
-      priority: 100,
-      profile_version_id: checkItemProfileVersionOptions[0]?.value,
-    }
-    setProfileBindingDraft(draft)
-    profileBindingForm.setFieldsValue(draft)
-    refetchCommandProfiles()
-    setProfileBindingOpen(true)
-  }
-
-  const previewProfileBindingImpact = useMutation(
-    async () => {
-      const values = await profileBindingForm.validateFields()
-      if (!values.profile_version_id) throw new Error('必须选择巡检 Profile')
-      return parserApi.commandProfileImpactPreview({
-        profile_version_id: values.profile_version_id,
-        selector: buildProfileBindingSelector(values),
-        mode: 'production',
-        limit: 100,
-        save_evidence: true,
-      })
-    },
-    {
-      onSuccess: setProfileBindingImpact,
-      onError: (error: any) => message.error(extractErrorMessage(error, '预览巡检 Profile 影响失败')),
-    },
-  )
-
-  const createCheckItemProfile = useMutation(
-    async () => {
-      const values = await checkItemProfileForm.validateFields()
-      return parserApi.upsertCommandProfile({
-        name: values.name.trim(),
-        action: 'patrol',
-        check_item_ids: values.check_item_ids,
-        status: 'draft',
-      })
-    },
-    {
-      onSuccess: async (result) => {
-        message.success('巡检 Profile 草稿已创建，请完成影响预览后激活')
-        setCheckItemProfileOpen(false)
-        checkItemProfileForm.resetFields()
-        await refetchCommandProfiles()
-        const draft = {
-          ...profileBindingDraft,
-          profile_version_id: result.profile_version_id,
-        }
-        setProfileBindingDraft(draft)
-        profileBindingForm.setFieldValue('profile_version_id', result.profile_version_id)
-        setProfileBindingImpact(null)
-      },
-      onError: (error: any) => message.error(extractErrorMessage(error, '创建巡检 Profile 失败')),
-    },
-  )
-
-  const activateCheckItemProfile = useMutation(
-    async () => {
-      const values = await profileBindingForm.validateFields(['profile_version_id', 'reason'])
-      if (!values.profile_version_id) throw new Error('必须选择巡检 Profile')
-      if (!profileBindingImpact?.evidence_saved) throw new Error('请先完成并保存影响预览')
-      if (profileBindingImpact.blocked_device_count > 0) throw new Error('仍有阻断项，不能激活')
-      return parserApi.activateCommandProfile(values.profile_version_id, values.reason || '')
-    },
-    {
-      onSuccess: async () => {
-        message.success('巡检 Profile 已激活，可以绑定到设备范围')
-        await refetchCommandProfiles()
-      },
-      onError: (error: any) => message.error(extractErrorMessage(error, '激活巡检 Profile 失败')),
-    },
-  )
-
-  const saveProfileBinding = useMutation(
-    async () => {
-      const values = await profileBindingForm.validateFields()
-      if (!values.profile_version_id) throw new Error('必须选择巡检 Profile')
-      if (selectedBindingProfile?.version_status !== 'active') {
-        throw new Error('请先激活巡检 Profile')
-      }
-      const selector = buildProfileBindingSelector(values)
-      if (!Object.keys(selector).length) throw new Error('目标选择器不能为空')
-      const created = await parserApi.upsertCommandProfileBinding({
-        profile_version_id: values.profile_version_id,
-        selector,
-        priority: values.priority || 100,
-        status: 'disabled',
-      })
-      await parserApi.enableCommandProfileBinding(
-        created.binding_id,
-        values.reason || '',
-      )
-      return created
-    },
-    {
-      onSuccess: async () => {
-        message.success('巡检 Profile 已绑定并启用')
-        await previewProfileBindingImpact.mutateAsync()
-      },
-      onError: (error: any) => message.error(extractErrorMessage(error, '保存巡检 Profile 绑定失败')),
-    },
-  )
+  const openProfileBinding = () => setProfileBindingOpen(true)
 
   const buildBulkPayload = (values: BulkFormValues): DeviceBulkRequest => {
     const update: DeviceBulkUpdate = {
@@ -1571,23 +1378,6 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ m
     setEvidenceOpen(true)
   }
 
-  const controlPlaneOverview = useMemo(() => {
-    const total = data?.total || devices.length
-    const active = devices.filter((item) => item.status === 'active').length
-    const credentials = devices.filter((item) => Boolean(item.credential_ref)).length
-    const connected = devices.filter((item) => item.last_connection_status === 'connected').length
-    const connectionFailed = devices.filter((item) =>
-      ['failed', 'preflight_failed'].includes(String(item.last_connection_status || '')),
-    ).length
-    const patrolReady = devices.filter((item) =>
-      ['ready', 'degraded'].includes(String(item.patrol_readiness?.status || '')),
-    ).length
-    const patrolBlocked = devices.filter((item) =>
-      ['blocked', 'error'].includes(String(item.patrol_readiness?.status || '')),
-    ).length
-    const activeRuns = activeBatchSummary.running + activeBatchSummary.pending
-    return { total, active, credentials, connected, connectionFailed, patrolReady, patrolBlocked, activeRuns }
-  }, [activeBatchSummary.pending, activeBatchSummary.running, data?.total, devices])
 
   const credentialOptions = credentialRefs.map((item) => ({
     value: item.ref,
@@ -1822,7 +1612,7 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ m
       } },
     { title: '策略来源', dataIndex: ['plan', 'policy_source'], width: 140,
       render: (value: string) => value || '-' },
-    { title: '巡检 Profile', dataIndex: ['plan', 'profile_name'], width: 180,
+    { title: '巡检命令集', dataIndex: ['plan', 'profile_name'], width: 180,
       render: (value: string) => value || '-' },
     { title: '检查项', dataIndex: ['plan', 'check_item_ids'],
       render: (value: string[], row: DevicePatrolPreview['rows'][number]) => value?.length
@@ -1895,28 +1685,6 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ m
       ) },
   ]
 
-  const profileBindingImpactColumns = [
-    { title: '设备', dataIndex: 'device_name', width: 220 },
-    { title: 'IP', dataIndex: 'ip', width: 130 },
-    { title: '厂商', dataIndex: 'vendor', width: 110 },
-    { title: '型号', dataIndex: 'model', width: 170 },
-    { title: '站点', dataIndex: 'site', width: 120, render: (value: string) => value || '-' },
-    { title: '角色', dataIndex: 'role', width: 120, render: (value: string) => value || '-' },
-    { title: '状态', dataIndex: 'status', width: 120,
-      render: (value: string) => <Tag color={value === 'ready' ? 'green' : value === 'blocked' ? 'red' : 'default'}>{statusLabel(value)}</Tag> },
-    { title: '检查项覆盖', width: 190,
-      render: (_: unknown, row: ParserCommandProfileImpactPreview['rows'][number]) =>
-        `${row.ready_count}/${row.eligible_count} 就绪，${row.blocked_count} 阻塞，${row.not_applicable_count || 0} 不适用` },
-    { title: '阻塞原因', dataIndex: 'violations',
-      render: (value: Array<Record<string, unknown>>) => {
-        if (!value?.length) return '-'
-        return value.map((item) => {
-          const reasonCodes = Array.isArray(item.reason_codes) ? item.reason_codes.join(', ') : ''
-          return String(item.check_item_id || item.canonical_command || item.command || item.coverage_status || '未就绪')
-            + (reasonCodes ? `：${reasonCodes}` : '')
-        }).join('; ')
-      } },
-  ]
 
   const patrolRunColumns = [
     { title: '设备', dataIndex: 'device_name', width: 220 },
@@ -2311,6 +2079,7 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ m
         <Space wrap>
           <Button onClick={() => navigate(appRoutes.workbench)} hidden={!workbenchEnabled}>返回工作台</Button>
           {!patrolApp && <Button icon={<PlusOutlined />} type="primary" onClick={openCreate}>新增设备</Button>}
+          {!patrolApp && <Button icon={<LinkOutlined />} onClick={openProfileBinding}>绑定巡检命令集</Button>}
           <Button
             icon={<PlayCircleOutlined />}
             type={patrolApp ? 'primary' : 'default'}
@@ -2336,7 +2105,6 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ m
               items: [
                 { key: 'import', icon: <ImportOutlined />, label: '导入设备', onClick: () => setImportOpen(true) },
                 { key: 'dynamic-group', icon: <SearchOutlined />, label: '动态分组', onClick: openDynamicGroupCreate },
-                { key: 'profile-binding', icon: <LinkOutlined />, label: '配置巡检 Profile', onClick: openProfileBinding },
                 { type: 'divider' },
                 { key: 'refresh', icon: <ReloadOutlined />, label: '刷新当前数据', onClick: () => refetch() },
               ],
@@ -2344,7 +2112,12 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ m
           >
             <Button icon={<MoreOutlined />} aria-label="更多设备操作">更多</Button>
           </Dropdown>}
-          {patrolApp && canConfigure && <Button onClick={openProfileBinding}>巡检方案</Button>}
+          {patrolApp && canConfigure && (
+            <>
+              <Button onClick={() => navigate(appRoutes.devices)}>设备管理</Button>
+              <Button onClick={openProfileBinding}>巡检命令集</Button>
+            </>
+          )}
           {activeTab === 'overview' && selectedRowKeys.length > 0 && (
             <Space wrap className="device-selection-toolbar">
               <Typography.Text type="secondary">已选择 {selectedRowKeys.length} 台</Typography.Text>
@@ -2383,22 +2156,9 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ m
         items={[
           {
             key: 'overview',
-            label: '总览与设备资产',
+            label: '设备资产',
             children: (
               <Space direction="vertical" size={16} style={{ width: '100%' }}>
-                <ControlPlaneOverview metrics={controlPlaneOverview} />
-        <Alert
-          type="info"
-          showIcon
-          message="解析模板与巡检规则资产统一管理"
-          description="设备列表只展示运行就绪度和阻塞原因；模板、LLM 候选资产、回放、审批与激活在唯一控制面处理。"
-          action={<Button size="small" onClick={() => navigate(businessHref('/skills/parser'))}>管理巡检规则</Button>}
-        />
-        <Alert
-          type="info"
-          showIcon
-          message="device-patrol 和 device-backup 会优先使用设备管理生成的 ExecutionPlan；这里用于维护设备资产、检查连接状态和确认计划来源。"
-        />
         {devicesIsError && (
           <Alert
             type="error"
@@ -2414,7 +2174,10 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ m
           loading={isLoading}
           selectedRowKeys={selectedRowKeys}
           total={data?.total || 0}
-          onFiltersChange={(patch) => setFilters((value) => ({ ...value, ...patch }))}
+          page={devicePage}
+          pageSize={devicePageSize}
+          onPageChange={(page, pageSize) => { setDevicePage(page); setDevicePageSize(pageSize) }}
+          onFiltersChange={(patch) => { setFilters((value) => ({ ...value, ...patch })); setDevicePage(1); setSelectedRowKeys([]) }}
           onSelectedRowKeysChange={setSelectedRowKeys}
         />
               </Space>
@@ -3032,207 +2795,15 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ m
         </Space>
       </Drawer>
 
-      <Drawer
-        title="配置巡检 Profile"
+      <PatrolCommandBindingDrawer
         open={profileBindingOpen}
         onClose={() => setProfileBindingOpen(false)}
-        width={isMobile ? '100vw' : 1100}
-        destroyOnClose
-      >
-        <Space direction="vertical" size={16} style={{ width: '100%' }}>
-          <Alert
-            type="info"
-            showIcon
-            message="先选择业务检查项，再由平台按设备厂商、型号和能力解析实际命令与规则资产。"
-            description="Profile 版本经过全目标影响预览和激活后才能绑定；旧命令 Profile 仅保留兼容读取，不会出现在这里。"
-          />
-          <Form<ProfileBindingFormValues>
-            form={profileBindingForm}
-            layout="vertical"
-            requiredMark={false}
-            onValuesChange={(_, values) => {
-              setProfileBindingDraft(values)
-              setProfileBindingImpact(null)
-            }}
-          >
-            <Row gutter={12}>
-              <Col xs={24} md={9}>
-                <Form.Item
-                  name="profile_version_id"
-                  label="巡检 Profile 版本"
-                  rules={[{ required: true, message: '请选择巡检 Profile 版本' }]}
-                >
-                  <Select
-                    showSearch
-                    optionFilterProp="label"
-                    placeholder="选择检查项 Profile"
-                    options={checkItemProfileVersionOptions}
-                  />
-                </Form.Item>
-              </Col>
-              <Col xs={24} md={5}>
-                <Form.Item name="priority" label="优先级" initialValue={100}>
-                  <Input type="number" />
-                </Form.Item>
-              </Col>
-              <Col xs={24} md={10}>
-                <Form.Item name="target_type" label="目标" initialValue={selectedRowKeys.length ? 'selected' : 'filters'}>
-                  <Select
-                    options={[
-                      { value: 'selected', label: '已勾选设备（' + selectedRowKeys.length + '）', disabled: selectedRowKeys.length === 0 },
-                      { value: 'group', label: '设备分组' },
-                      { value: 'dynamic_group', label: '动态分组' },
-                      { value: 'filters', label: '当前筛选条件' },
-                    ]}
-                  />
-                </Form.Item>
-              </Col>
-              <Form.Item shouldUpdate noStyle>
-                {({ getFieldValue }) => getFieldValue('target_type') === 'group' ? (
-                  <Col span={24}>
-                    <Form.Item
-                      name="group"
-                      label="设备分组"
-                      rules={[{ required: true, message: '请选择设备分组' }]}
-                    >
-                      <Select
-                        showSearch
-                        allowClear
-                        optionFilterProp="label"
-                        placeholder="选择导入或资产维护中的设备分组"
-                        options={deviceGroups.map((group) => ({
-                          value: group,
-                          label: group,
-                        }))}
-                      />
-                    </Form.Item>
-                  </Col>
-                ) : null}
-              </Form.Item>
-              <Form.Item shouldUpdate noStyle>
-                {({ getFieldValue }) => getFieldValue('target_type') === 'dynamic_group' ? (
-                  <Col span={24}>
-                    <Form.Item
-                      name="dynamic_group_id"
-                      label="动态分组"
-                      rules={[{ required: true, message: '请选择动态分组' }]}
-                    >
-                      <Select
-                        showSearch
-                        optionFilterProp="label"
-                        options={dynamicGroups.map((group) => ({
-                          value: group.id,
-                          label: `${group.name} (${group.status})`,
-                        }))}
-                      />
-                    </Form.Item>
-                  </Col>
-                ) : null}
-              </Form.Item>
-              <Col span={24}>
-                <Form.Item
-                  name="reason"
-                  label="变更原因"
-                  rules={[{ required: true, message: '请填写激活或绑定原因' }]}
-                >
-                  <Input placeholder="例如：西安核心网络季度巡检范围调整" />
-                </Form.Item>
-              </Col>
-            </Row>
-          </Form>
-          <Space wrap>
-            <Tag color={selectedBindingProfile?.version_status === 'active' ? 'green' : 'gold'}>
-              {selectedBindingProfile ? statusLabel(selectedBindingProfile.version_status) : '未选择'}
-            </Tag>
-            {(selectedBindingProfile?.check_items || []).map((item) => (
-              <Tag key={item.check_item_id}>{item.check_item_name || item.check_item_id}</Tag>
-            ))}
-            <Button
-              icon={<PlusOutlined />}
-              onClick={() => {
-                checkItemProfileForm.resetFields()
-                setCheckItemProfileOpen(true)
-              }}
-            >
-              新建 Profile
-            </Button>
-          </Space>
-          <Descriptions size="small" bordered column={isMobile ? 1 : 3}>
-            <Descriptions.Item label="已选择">{selectedRowKeys.length}</Descriptions.Item>
-            <Descriptions.Item label="当前筛选">{Object.keys(currentFilterSelector()).length} 个字段</Descriptions.Item>
-            <Descriptions.Item label="设备分组">{deviceGroups.length}</Descriptions.Item>
-            <Descriptions.Item label="动态分组">{dynamicGroups.length}</Descriptions.Item>
-          </Descriptions>
-          <Typography.Paragraph style={codeStyle}>
-            {JSON.stringify({
-              selector: (() => {
-                try {
-                  return buildProfileBindingSelector(profileBindingDraft)
-                } catch {
-                  return {}
-                }
-              })(),
-            }, null, 2)}
-          </Typography.Paragraph>
-          <Space wrap>
-            <Button
-              icon={<EyeOutlined />}
-              loading={previewProfileBindingImpact.isLoading}
-              onClick={() => previewProfileBindingImpact.mutate()}
-            >
-              预览并保存证据
-            </Button>
-            {selectedBindingProfile?.version_status !== 'active' && (
-              <Button
-                icon={<SafetyCertificateOutlined />}
-                loading={activateCheckItemProfile.isLoading}
-                disabled={
-                  !profileBindingImpact?.evidence_saved
-                  || Boolean(profileBindingImpact?.blocked_device_count)
-                }
-                onClick={() => activateCheckItemProfile.mutate()}
-              >
-                激活 Profile
-              </Button>
-            )}
-            <Button
-              type="primary"
-              icon={<LinkOutlined />}
-              loading={saveProfileBinding.isLoading}
-              disabled={
-                !profileBindingImpact
-                || selectedBindingProfile?.version_status !== 'active'
-                || Boolean(profileBindingImpact.blocked_device_count)
-              }
-              onClick={() => saveProfileBinding.mutate()}
-            >
-              绑定并启用
-            </Button>
-            <Button icon={<ReloadOutlined />} onClick={() => refetchCommandProfiles()}>
-              刷新 Profile
-            </Button>
-          </Space>
-          {profileBindingImpact && (
-            <Alert
-              type={profileBindingImpact.blocked_device_count ? 'warning' : 'success'}
-              showIcon
-              message={'影响范围：' + profileBindingImpact.matched_device_count + ' 台设备，' + profileBindingImpact.blocked_device_count + ' 台阻断'}
-              description={`检查项覆盖率 ${(profileBindingImpact.coverage_rate * 100).toFixed(1)}%；就绪 ${profileBindingImpact.ready_check_item_count ?? profileBindingImpact.ready_command_count}/${profileBindingImpact.eligible_command_count}；阻断 ${profileBindingImpact.blocked_check_item_count ?? profileBindingImpact.blocked_command_count}；不适用 ${profileBindingImpact.not_applicable_check_item_count || 0}`}
-            />
-          )}
-          {profileBindingImpact && (
-            <Table<ParserCommandProfileImpactPreview['rows'][number]>
-              rowKey={(row, index) => `${row.device_id || row.device_name || index}`}
-              size="small"
-              dataSource={profileBindingImpact.rows}
-              columns={profileBindingImpactColumns}
-              pagination={{ pageSize: 10 }}
-              scroll={{ x: 1180 }}
-            />
-          )}
-        </Space>
-      </Drawer>
-
+        onSaved={() => { refetch() }}
+        selectedDeviceIds={selectedRowKeys.map(String)}
+        currentSelector={currentFilterSelector()}
+        groups={deviceGroups}
+        dynamicGroups={dynamicGroups}
+      />
       <Modal title="新建巡检 · 选择数据来源" open={sourcePickerOpen} onCancel={() => setSourcePickerOpen(false)} footer={null}>
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
           <Button block size="large" onClick={() => {
@@ -3244,80 +2815,9 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ m
             const next = new URLSearchParams(searchParams); next.set('patrol_view', 'offline'); next.set('new_offline', '1')
             next.delete('offline_job_id'); next.delete('offline_job_tab'); setSearchParams(next)
           }}>离线文件 · 单周期检查或双周期对比</Button>
-          <Typography.Text type="secondary">两种方式均使用已发布检查方案。发起前先核对范围、采集时间与覆盖缺口。</Typography.Text>
+          <Typography.Text type="secondary">在线按设备绑定的命令集采集；离线按上传文件分析。发起前核对设备范围、采集时间与检查缺口。</Typography.Text>
         </Space>
       </Modal>
-      <Modal
-        title="新建巡检 Profile"
-        open={checkItemProfileOpen}
-        onCancel={() => setCheckItemProfileOpen(false)}
-        onOk={() => createCheckItemProfile.mutate()}
-        okText="创建草稿"
-        confirmLoading={createCheckItemProfile.isLoading}
-        width={720}
-        destroyOnClose
-      >
-        <Alert
-          type="info"
-          showIcon
-          message="Profile 只描述要检查什么，不维护不同厂商的具体命令。"
-          description="创建后回到上一步选择目标设备，平台会解析每台设备的兼容实现、命令和完整 Active RuntimeBundle。"
-          style={{ marginBottom: 16 }}
-        />
-        <Form<CheckItemProfileFormValues>
-          form={checkItemProfileForm}
-          layout="vertical"
-          requiredMark={false}
-        >
-          <Form.Item
-            name="name"
-            label="Profile 名称"
-            rules={[{ required: true, message: '请输入 Profile 名称' }]}
-          >
-            <Input placeholder="例如：核心网络季度巡检" />
-          </Form.Item>
-          <Form.Item
-            name="check_item_ids"
-            label="业务检查项"
-            rules={[{ required: true, type: 'array', min: 1, message: '至少选择一个检查项' }]}
-          >
-            <Select
-              mode="multiple"
-              showSearch
-              optionFilterProp="label"
-              placeholder="选择 CPU、内存、接口、光功率等检查项"
-              options={checkItems.map((item) => ({
-                value: item.check_item_id,
-                label: `${item.display_name || item.name} · ${item.check_item_id} · ${item.implementation_count} 个兼容实现`,
-              }))}
-            />
-          </Form.Item>
-          <Form.Item shouldUpdate noStyle>
-            {({ getFieldValue }) => {
-              const selectedIds = getFieldValue('check_item_ids') || []
-              const selectedItems = checkItems.filter((item) => selectedIds.includes(item.check_item_id))
-              return selectedItems.length ? (
-                <Table<ParserCheckItem>
-                  rowKey="check_item_id"
-                  size="small"
-                  pagination={false}
-                  dataSource={selectedItems}
-                  columns={[
-                    {
-                      title: '检查项',
-                      render: (_: unknown, item: ParserCheckItem) => item.display_name || item.name,
-                    },
-                    { title: '结果模式', dataIndex: 'result_mode', width: 130 },
-                    { title: '评估模式', dataIndex: 'assessment_mode', width: 120 },
-                    { title: '兼容实现', dataIndex: 'implementation_count', width: 100 },
-                  ]}
-                />
-              ) : null
-            }}
-          </Form.Item>
-        </Form>
-      </Modal>
-
       <Modal
         title={editing ? '编辑设备' : '新增设备'}
         open={modalOpen}
@@ -3381,34 +2881,13 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ m
                 </Space.Compact>
               </Form.Item>
             </Col>
-            <Col xs={24} md={12}><Form.Item name="command_profile" label="历史 Profile 引用"><Input disabled /></Form.Item></Col>
+            <Form.Item name="command_profile" hidden><Input /></Form.Item>
             <Col xs={24} md={12}><Form.Item name="groups" label="分组"><Input placeholder="core, xian-dc" /></Form.Item></Col>
             <Col span={24}>
-              <Form.Item label="巡检 Profile">
-                <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                  <Alert
-                    type={currentCommandProfile ? 'info' : 'warning'}
-                    showIcon
-                    message={currentCommandProfile
-                      ? `巡检 Profile：${currentCommandProfile.profile_name} v${currentCommandProfile.version || currentCommandProfile.current_version || '-'}`
-                      : '未匹配到已登记的巡检 Profile'}
-                    description={currentCommandProfile
-                      ? currentCommandProfile.profile_mode === 'check_items'
-                        ? `已选择 ${currentCommandProfile.check_item_ids?.length || 0} 个检查项；实际命令按设备身份和 Active RuntimeBundle 解析。`
-                        : `兼容命令 Profile，共 ${currentCommandProfileCommands.length} 条命令。`
-                      : '请通过“配置巡检 Profile”绑定设备范围；设备级命令覆盖已停用。'}
-                  />
-                  <pre style={{ ...codeStyle, maxHeight: 180 }}>
-                    {currentCommandProfile?.profile_mode === 'check_items'
-                      ? (currentCommandProfile.check_item_ids || []).join('\n')
-                      : currentCommandProfileCommands.length
-                      ? currentCommandProfileCommands.join('\n')
-                      : '暂无可展示命令'}
-                  </pre>
-                </Space>
-              </Form.Item>
+              <Typography.Paragraph type="secondary">保存设备后，在设备列表勾选设备，使用“绑定巡检命令集”配置要执行的命令。实际生效范围和命令以巡检预览为准。</Typography.Paragraph>
             </Col>
             <Col span={24}>
+              <details><summary style={{ marginBottom: 12 }}>高级采集设置</summary>
               <Form.Item
                 name="attributes_json"
                 label="扩展属性 JSON"
@@ -3425,6 +2904,7 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ m
               >
                 <Input.TextArea rows={4} placeholder='{"collector_options": {"read_timeout": 60}}' />
               </Form.Item>
+              </details>
             </Col>
           </Row>
           {credentialInspection && (
@@ -3774,7 +3254,7 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = ({ m
         destroyOnClose
       >
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
-          <Space wrap><Typography.Text strong>检查方案：沿用设备已绑定的方案</Typography.Text>{canConfigure && <Button onClick={openProfileBinding}>查看或配置方案</Button>}</Space>
+          <Space wrap><Typography.Text strong>采集命令：沿用设备已绑定的命令集</Typography.Text>{canConfigure && <Button onClick={openProfileBinding}>配置命令集</Button>}</Space>
           <Typography.Paragraph type="secondary">预检后核对每台设备的检查项与命令。方案由拥有配置权限的人员维护。</Typography.Paragraph>
           {renderPatrolPlatformReadiness()}
           <Alert

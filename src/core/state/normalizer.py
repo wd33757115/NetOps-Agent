@@ -36,6 +36,7 @@ from src.core.observation.semantic_projection import (
 from src.core.parser.key_contract import EntityKeyError, build_entity_key
 from src.core.parser.repository import ParserTemplateRepository
 from src.core.parser.value_types import is_unassigned_ip, is_unavailable_value
+from src.core.patrol.command_splitter import canonicalize_command
 from src.core.state.domain import StateObservation
 from src.core.state.observation_applicability import (
     APPLICABILITY_CONTEXT_KEY,
@@ -1018,6 +1019,14 @@ def observations_from_snapshot(
             }
         else:
             entity_key = source_entity_key
+        if raw_text_comparison:
+            # Text is command-scoped: all empty-primary-key records must not
+            # collapse into a single raw hash for the entire device.
+            entity_key = json.dumps(
+                [canonicalize_command(snapshot["canonical_command"])],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
         for field_name in sorted(record):
             normalized_field_name = str(field_name).strip().lower()
             if (

@@ -1,0 +1,912 @@
+{
+  "template_id": "netops.patrol.standard",
+  "version": 2,
+  "status": "design_not_integrated",
+  "supersedes": "template-bindings.design.json v1",
+  "default_ai_enabled": false,
+  "source_of_truth": "frozen offline analysis and observations; active catalog is not historical evidence",
+  "rendering": "device sections repeat; out of scope sections omitted; in-scope missing data explained",
+  "slots": [
+    {
+      "tag": "manual.period",
+      "label": "报告周期",
+      "source": "manual.period",
+      "availability": "manual_optional"
+    },
+    {
+      "tag": "manual.recipient",
+      "label": "客户单位",
+      "source": "manual.recipient",
+      "availability": "manual_optional"
+    },
+    {
+      "tag": "manual.issuer",
+      "label": "编制单位",
+      "source": "manual.issuer",
+      "availability": "manual_optional"
+    },
+    {
+      "tag": "generated_at",
+      "label": "报告生成时间",
+      "source": "generated_at",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "assessment.status",
+      "label": "现有分析结论",
+      "source": "assessment.status",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "assessment.basis",
+      "label": "结论依据及覆盖限制",
+      "source": "assessment.basis",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.metrics.0",
+      "label": "统计项",
+      "source": "report.metrics.column[0]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.metrics.1",
+      "label": "数量",
+      "source": "report.metrics.column[1]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.inventory.0",
+      "label": "序号",
+      "source": "report.device_inventory_rows.column[0]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.inventory.1",
+      "label": "设备",
+      "source": "report.device_inventory_rows.column[1]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.inventory.2",
+      "label": "型号",
+      "source": "report.device_inventory_rows.column[2]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.inventory.3",
+      "label": "厂商",
+      "source": "report.device_inventory_rows.column[3]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.check_summary.0",
+      "label": "检查项",
+      "source": "snapshot check-item binding + observations + frozen assessment.column[0]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.check_summary.1",
+      "label": "用途",
+      "source": "snapshot check-item binding + observations + frozen assessment.column[1]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.check_summary.2",
+      "label": "数据状态",
+      "source": "snapshot check-item binding + observations + frozen assessment.column[2]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.check_summary.3",
+      "label": "判定与限制",
+      "source": "snapshot check-item binding + observations + frozen assessment.column[3]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.risks.0",
+      "label": "等级与事项",
+      "source": "report.risk_groups.column[0]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.risks.1",
+      "label": "设备及对象",
+      "source": "report.risk_groups.column[1]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.risks.2",
+      "label": "当前值",
+      "source": "report.risk_groups.column[2]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.risks.3",
+      "label": "判定依据",
+      "source": "report.risk_groups.column[3]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.gaps.0",
+      "label": "检查项或对象",
+      "source": "report.data_quality + report.rule_coverage + command execution results.column[0]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.gaps.1",
+      "label": "缺口",
+      "source": "report.data_quality + report.rule_coverage + command execution results.column[1]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.gaps.2",
+      "label": "对结论的影响",
+      "source": "report.data_quality + report.rule_coverage + command execution results.column[2]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.resources.device_name",
+      "label": "设备名称",
+      "source": "view.resources.device_name",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.resources.limitation",
+      "label": "数据状态及判定限制",
+      "source": "view.resources.limitation",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.version.0",
+      "label": "设备型号",
+      "source": "report.basic_observation_tables[key=device_version].column[0]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.version.1",
+      "label": "软件版本",
+      "source": "report.basic_observation_tables[key=device_version].column[1]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.cpu.0",
+      "label": "CPU 对象",
+      "source": "summary.observations: cpu_scope / device.cpu.utilization.column[0]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.cpu.1",
+      "label": "统计窗口",
+      "source": "summary.observations: cpu_scope / device.cpu.utilization.column[1]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.cpu.2",
+      "label": "利用率（%）",
+      "source": "summary.observations: cpu_scope / device.cpu.utilization.column[2]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.memory.0",
+      "label": "内存对象",
+      "source": "summary.observations: memory_scope; memory_total_bytes / memory_used_bytes / memory_usage_percent.column[0]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.memory.1",
+      "label": "总量（GiB）",
+      "source": "summary.observations: memory_scope; memory_total_bytes / memory_used_bytes / memory_usage_percent.column[1]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.memory.2",
+      "label": "已用（GiB）",
+      "source": "summary.observations: memory_scope; memory_total_bytes / memory_used_bytes / memory_usage_percent.column[2]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.memory.3",
+      "label": "利用率（%）",
+      "source": "summary.observations: memory_scope; memory_total_bytes / memory_used_bytes / memory_usage_percent.column[3]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.resources.assessment",
+      "label": "资源检查的判定结果及依据缺口",
+      "source": "view.resources.assessment",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.environment.device_name",
+      "label": "设备名称",
+      "source": "view.environment.device_name",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.environment.limitation",
+      "label": "数据状态及判定限制",
+      "source": "view.environment.limitation",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.temperature.0",
+      "label": "传感器对象",
+      "source": "report.basic_observation_tables[key=temperature].column[0]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.temperature.1",
+      "label": "当前温度（℃）",
+      "source": "report.basic_observation_tables[key=temperature].column[1]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.temperature.2",
+      "label": "预警值（℃）",
+      "source": "report.basic_observation_tables[key=temperature].column[2]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.temperature.3",
+      "label": "严重值（℃）",
+      "source": "report.basic_observation_tables[key=temperature].column[3]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.fan.0",
+      "label": "风扇对象",
+      "source": "report.basic_observation_tables[key=fan].column[0]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.fan.1",
+      "label": "采集状态",
+      "source": "report.basic_observation_tables[key=fan].column[1]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.power.0",
+      "label": "电源对象",
+      "source": "report.basic_observation_tables[key=power].column[0]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.power.1",
+      "label": "采集状态",
+      "source": "report.basic_observation_tables[key=power].column[1]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.environment.assessment",
+      "label": "环境部件判定结果及覆盖限制",
+      "source": "view.environment.assessment",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.interfaces.device_name",
+      "label": "设备名称",
+      "source": "view.interfaces.device_name",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.interfaces.limitation",
+      "label": "数据状态及判定限制",
+      "source": "view.interfaces.limitation",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.interface_status.0",
+      "label": "接口",
+      "source": "summary.observations: interface / oper_status.column[0]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.interface_status.1",
+      "label": "运行状态",
+      "source": "summary.observations: interface / oper_status.column[1]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.interface_counters.0",
+      "label": "接口",
+      "source": "summary.observations: interface / input_errors, output_errors.column[0]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.interface_counters.1",
+      "label": "输入错误累计值",
+      "source": "summary.observations: interface / input_errors, output_errors.column[1]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.interface_counters.2",
+      "label": "输出错误累计值",
+      "source": "summary.observations: interface / input_errors, output_errors.column[2]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.interface_addresses.0",
+      "label": "地址对象",
+      "source": "summary.observations: interface_address / ip_address + dimensions.address_family.column[0]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.interface_addresses.1",
+      "label": "地址族",
+      "source": "summary.observations: interface_address / ip_address + dimensions.address_family.column[1]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.interface_addresses.2",
+      "label": "IP 地址",
+      "source": "summary.observations: interface_address / ip_address + dimensions.address_family.column[2]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.stack.0",
+      "label": "成员对象",
+      "source": "summary.observations: stack_member / member_status.column[0]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.stack.1",
+      "label": "成员状态",
+      "source": "summary.observations: stack_member / member_status.column[1]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.optical.device_name",
+      "label": "设备名称",
+      "source": "view.optical.device_name",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.optical.limitation",
+      "label": "数据状态及判定限制",
+      "source": "view.optical.limitation",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.optical_presence.0",
+      "label": "模块对象",
+      "source": "summary.observations: interface_transceiver / transceiver_present.column[0]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.optical_presence.1",
+      "label": "在位状态",
+      "source": "summary.observations: interface_transceiver / transceiver_present.column[1]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.optical_port.0",
+      "label": "接口对象",
+      "source": "summary.observations: interface_optical_power / rx_* and tx_*.column[0]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.optical_port.1",
+      "label": "指标",
+      "source": "summary.observations: interface_optical_power / rx_* and tx_*.column[1]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.optical_port.2",
+      "label": "实测值",
+      "source": "summary.observations: interface_optical_power / rx_* and tx_*.column[2]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.optical_port.3",
+      "label": "下限",
+      "source": "summary.observations: interface_optical_power / rx_* and tx_*.column[3]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.optical_port.4",
+      "label": "上限",
+      "source": "summary.observations: interface_optical_power / rx_* and tx_*.column[4]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.optical_channel.0",
+      "label": "接口及通道对象",
+      "source": "summary.observations: interface_optical_channel_power / rx_* and tx_*.column[0]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.optical_channel.1",
+      "label": "指标",
+      "source": "summary.observations: interface_optical_channel_power / rx_* and tx_*.column[1]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.optical_channel.2",
+      "label": "实测值",
+      "source": "summary.observations: interface_optical_channel_power / rx_* and tx_*.column[2]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.optical_channel.3",
+      "label": "下限",
+      "source": "summary.observations: interface_optical_channel_power / rx_* and tx_*.column[3]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.optical_channel.4",
+      "label": "上限",
+      "source": "summary.observations: interface_optical_channel_power / rx_* and tx_*.column[4]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.optical.assessment",
+      "label": "光功率单位 阈值及判定规则的可用情况",
+      "source": "view.optical.assessment",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.facts.device_name",
+      "label": "设备名称",
+      "source": "view.facts.device_name",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.facts.limitation",
+      "label": "数据状态及判定限制",
+      "source": "view.facts.limitation",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.facts.dataset_title",
+      "label": "检查项或原始记录集名称",
+      "source": "view.facts.dataset_title",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.fact_records.0",
+      "label": "对象",
+      "source": "summary.observations: unconsumed records with field, value, unit and full entity identity.column[0]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.fact_records.1",
+      "label": "字段",
+      "source": "summary.observations: unconsumed records with field, value, unit and full entity identity.column[1]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.fact_records.2",
+      "label": "值",
+      "source": "summary.observations: unconsumed records with field, value, unit and full entity identity.column[2]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.fact_records.3",
+      "label": "单位",
+      "source": "summary.observations: unconsumed records with field, value, unit and full entity identity.column[3]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.evidence.0",
+      "label": "本报告编号",
+      "source": "summary.observations: command, evidence_id, id.column[0]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.evidence.1",
+      "label": "来源命令",
+      "source": "summary.observations: command, evidence_id, id.column[1]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.evidence.2",
+      "label": "原始证据标识",
+      "source": "summary.observations: command, evidence_id, id.column[2]",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.attachments",
+      "label": "已经实际生成的附件清单",
+      "source": "view.attachments",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.comparison_availability",
+      "label": "本期和基线是否具备可比条件",
+      "source": "view.comparison_availability",
+      "availability": "local_projection_required"
+    },
+    {
+      "tag": "view.changes.0",
+      "label": "设备及对象",
+      "source": "report.structured_event_evidence.items.column[0]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.changes.1",
+      "label": "字段",
+      "source": "report.structured_event_evidence.items.column[1]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.changes.2",
+      "label": "基线值",
+      "source": "report.structured_event_evidence.items.column[2]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.changes.3",
+      "label": "本期值",
+      "source": "report.structured_event_evidence.items.column[3]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.changes.4",
+      "label": "事件判定",
+      "source": "report.structured_event_evidence.items.column[4]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.text_changes.0",
+      "label": "设备及命令",
+      "source": "report.unstructured_comparison.items.column[0]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.text_changes.1",
+      "label": "新增行",
+      "source": "report.unstructured_comparison.items.column[1]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.text_changes.2",
+      "label": "删除行",
+      "source": "report.unstructured_comparison.items.column[2]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.text_changes.3",
+      "label": "变化分类",
+      "source": "report.unstructured_comparison.items.column[3]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.recommendations.0",
+      "label": "优先级",
+      "source": "report.recommendations: priority, action.column[0]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "view.recommendations.1",
+      "label": "建议动作",
+      "source": "report.recommendations: priority, action.column[1]",
+      "availability": "existing_report_field"
+    },
+    {
+      "tag": "manual.followup",
+      "label": "人工确认的处理计划和复核意见",
+      "source": "manual.followup",
+      "availability": "manual_optional"
+    },
+    {
+      "tag": "manual.signoff",
+      "label": "编制与复核签署",
+      "source": "manual.signoff",
+      "availability": "manual_optional"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "view.metrics",
+      "kind": "repeat_table_row",
+      "columns": [
+        "统计项",
+        "数量"
+      ],
+      "repeat_source": "report.metrics",
+      "empty_policy": "explicit reason if in scope; omit if confirmed out of scope",
+      "availability": "existing_report_field",
+      "grain": "selected metric name and exact value"
+    },
+    {
+      "id": "view.inventory",
+      "kind": "repeat_table_row",
+      "columns": [
+        "序号",
+        "设备",
+        "型号",
+        "厂商"
+      ],
+      "repeat_source": "report.device_inventory_rows",
+      "empty_policy": "explicit reason if in scope; omit if confirmed out of scope",
+      "availability": "existing_report_field",
+      "grain": "one source row"
+    },
+    {
+      "id": "view.check_summary",
+      "kind": "repeat_table_row",
+      "columns": [
+        "检查项",
+        "用途",
+        "数据状态",
+        "判定与限制"
+      ],
+      "repeat_source": "snapshot check-item binding + observations + frozen assessment",
+      "empty_policy": "explicit reason if in scope; omit if confirmed out of scope",
+      "availability": "local_projection_required",
+      "grain": "device + check_item version; unresolved bindings kept separately"
+    },
+    {
+      "id": "view.risks",
+      "kind": "repeat_table_row",
+      "columns": [
+        "等级与事项",
+        "设备及对象",
+        "当前值",
+        "判定依据"
+      ],
+      "repeat_source": "report.risk_groups",
+      "empty_policy": "explicit reason if in scope; omit if confirmed out of scope",
+      "availability": "existing_report_field",
+      "grain": "one source row"
+    },
+    {
+      "id": "view.gaps",
+      "kind": "repeat_table_row",
+      "columns": [
+        "检查项或对象",
+        "缺口",
+        "对结论的影响"
+      ],
+      "repeat_source": "report.data_quality + report.rule_coverage + command execution results",
+      "empty_policy": "explicit reason if in scope; omit if confirmed out of scope",
+      "availability": "local_projection_required",
+      "grain": "one source row"
+    },
+    {
+      "id": "view.version",
+      "kind": "repeat_table_row",
+      "columns": [
+        "设备型号",
+        "软件版本"
+      ],
+      "repeat_source": "report.basic_observation_tables[key=device_version]",
+      "empty_policy": "explicit reason if in scope; omit if confirmed out of scope",
+      "availability": "existing_report_field",
+      "grain": "one source row"
+    },
+    {
+      "id": "view.cpu",
+      "kind": "repeat_table_row",
+      "columns": [
+        "CPU 对象",
+        "统计窗口",
+        "利用率（%）"
+      ],
+      "repeat_source": "summary.observations: cpu_scope / device.cpu.utilization",
+      "empty_policy": "explicit reason if in scope; omit if confirmed out of scope",
+      "availability": "local_projection_required",
+      "grain": "snapshot + device + full entity key + window"
+    },
+    {
+      "id": "view.memory",
+      "kind": "repeat_table_row",
+      "columns": [
+        "内存对象",
+        "总量（GiB）",
+        "已用（GiB）",
+        "利用率（%）"
+      ],
+      "repeat_source": "summary.observations: memory_scope; memory_total_bytes / memory_used_bytes / memory_usage_percent",
+      "empty_policy": "explicit reason if in scope; omit if confirmed out of scope",
+      "availability": "local_projection_required",
+      "grain": "snapshot + device + full entity key"
+    },
+    {
+      "id": "view.temperature",
+      "kind": "repeat_table_row",
+      "columns": [
+        "传感器对象",
+        "当前温度（℃）",
+        "预警值（℃）",
+        "严重值（℃）"
+      ],
+      "repeat_source": "report.basic_observation_tables[key=temperature]",
+      "empty_policy": "explicit reason if in scope; omit if confirmed out of scope",
+      "availability": "existing_report_field",
+      "grain": "device + complete slot and sensor identity"
+    },
+    {
+      "id": "view.fan",
+      "kind": "repeat_table_row",
+      "columns": [
+        "风扇对象",
+        "采集状态"
+      ],
+      "repeat_source": "report.basic_observation_tables[key=fan]",
+      "empty_policy": "explicit reason if in scope; omit if confirmed out of scope",
+      "availability": "existing_report_field",
+      "grain": "device + complete slot and fan identity"
+    },
+    {
+      "id": "view.power",
+      "kind": "repeat_table_row",
+      "columns": [
+        "电源对象",
+        "采集状态"
+      ],
+      "repeat_source": "report.basic_observation_tables[key=power]",
+      "empty_policy": "explicit reason if in scope; omit if confirmed out of scope",
+      "availability": "existing_report_field",
+      "grain": "device + complete slot and power identity"
+    },
+    {
+      "id": "view.interface_status",
+      "kind": "repeat_table_row",
+      "columns": [
+        "接口",
+        "运行状态"
+      ],
+      "repeat_source": "summary.observations: interface / oper_status",
+      "empty_policy": "explicit reason if in scope; omit if confirmed out of scope",
+      "availability": "local_projection_required",
+      "grain": "snapshot + device + interface"
+    },
+    {
+      "id": "view.interface_counters",
+      "kind": "repeat_table_row",
+      "columns": [
+        "接口",
+        "输入错误累计值",
+        "输出错误累计值"
+      ],
+      "repeat_source": "summary.observations: interface / input_errors, output_errors",
+      "empty_policy": "explicit reason if in scope; omit if confirmed out of scope",
+      "availability": "local_projection_required",
+      "grain": "snapshot + device + interface"
+    },
+    {
+      "id": "view.interface_addresses",
+      "kind": "repeat_table_row",
+      "columns": [
+        "地址对象",
+        "地址族",
+        "IP 地址"
+      ],
+      "repeat_source": "summary.observations: interface_address / ip_address + dimensions.address_family",
+      "empty_policy": "explicit reason if in scope; omit if confirmed out of scope",
+      "availability": "local_projection_required",
+      "grain": "snapshot + device + full address identity; preserve multiple records"
+    },
+    {
+      "id": "view.stack",
+      "kind": "repeat_table_row",
+      "columns": [
+        "成员对象",
+        "成员状态"
+      ],
+      "repeat_source": "summary.observations: stack_member / member_status",
+      "empty_policy": "explicit reason if in scope; omit if confirmed out of scope",
+      "availability": "local_projection_required",
+      "grain": "snapshot + device + member identity"
+    },
+    {
+      "id": "view.optical_presence",
+      "kind": "repeat_table_row",
+      "columns": [
+        "模块对象",
+        "在位状态"
+      ],
+      "repeat_source": "summary.observations: interface_transceiver / transceiver_present",
+      "empty_policy": "explicit reason if in scope; omit if confirmed out of scope",
+      "availability": "local_projection_required",
+      "grain": "snapshot + device + module entity identity"
+    },
+    {
+      "id": "view.optical_port",
+      "kind": "repeat_table_row",
+      "columns": [
+        "接口对象",
+        "指标",
+        "实测值",
+        "下限",
+        "上限"
+      ],
+      "repeat_source": "summary.observations: interface_optical_power / rx_* and tx_*",
+      "empty_policy": "explicit reason if in scope; omit if confirmed out of scope",
+      "availability": "local_projection_required",
+      "grain": "snapshot + device + interface entity + direction; threshold level recorded in header"
+    },
+    {
+      "id": "view.optical_channel",
+      "kind": "repeat_table_row",
+      "columns": [
+        "接口及通道对象",
+        "指标",
+        "实测值",
+        "下限",
+        "上限"
+      ],
+      "repeat_source": "summary.observations: interface_optical_channel_power / rx_* and tx_*",
+      "empty_policy": "explicit reason if in scope; omit if confirmed out of scope",
+      "availability": "local_projection_required",
+      "grain": "snapshot + device + full interface/channel identity + direction"
+    },
+    {
+      "id": "view.fact_records",
+      "kind": "repeat_table_row",
+      "columns": [
+        "对象",
+        "字段",
+        "值",
+        "单位"
+      ],
+      "repeat_source": "summary.observations: unconsumed records with field, value, unit and full entity identity",
+      "empty_policy": "explicit reason if in scope; omit if confirmed out of scope",
+      "availability": "local_projection_required",
+      "grain": "one original observation; no semantic inference"
+    },
+    {
+      "id": "view.evidence",
+      "kind": "repeat_table_row",
+      "columns": [
+        "本报告编号",
+        "来源命令",
+        "原始证据标识"
+      ],
+      "repeat_source": "summary.observations: command, evidence_id, id",
+      "empty_policy": "explicit reason if in scope; omit if confirmed out of scope",
+      "availability": "local_projection_required",
+      "grain": "evidence id; preserve observation associations"
+    },
+    {
+      "id": "view.changes",
+      "kind": "repeat_table_row",
+      "columns": [
+        "设备及对象",
+        "字段",
+        "基线值",
+        "本期值",
+        "事件判定"
+      ],
+      "repeat_source": "report.structured_event_evidence.items",
+      "empty_policy": "explicit reason if in scope; omit if confirmed out of scope",
+      "availability": "existing_report_field",
+      "grain": "one structured change"
+    },
+    {
+      "id": "view.text_changes",
+      "kind": "repeat_table_row",
+      "columns": [
+        "设备及命令",
+        "新增行",
+        "删除行",
+        "变化分类"
+      ],
+      "repeat_source": "report.unstructured_comparison.items",
+      "empty_policy": "explicit reason if in scope; omit if confirmed out of scope",
+      "availability": "existing_report_field",
+      "grain": "one compared command output"
+    },
+    {
+      "id": "view.recommendations",
+      "kind": "repeat_table_row",
+      "columns": [
+        "优先级",
+        "建议动作"
+      ],
+      "repeat_source": "report.recommendations: priority, action",
+      "empty_policy": "explicit reason if in scope; omit if confirmed out of scope",
+      "availability": "existing_report_field",
+      "grain": "one source row"
+    }
+  ],
+  "constraints": [
+    "Keep full snapshot/device/entity/dimension/source identity until uniqueness is proven",
+    "Never convert missing data or missing assessment to healthy",
+    "Do not use dynamic display columns to define semantic identity",
+    "No generated attachment references without an existing artifact",
+    "AI cannot modify measurements, status or thresholds"
+  ]
+}

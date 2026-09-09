@@ -9,13 +9,6 @@ from src.core.patrol.event_rules import EventRuleRepository
 
 BUILTIN_CHANGE_POLICIES: tuple[dict[str, Any], ...] = (
     {
-        "name": "policy:interface.oper_status",
-        "observation_type": "interface.oper_status",
-        "semantic_type": "state",
-        "compare_mode": "state_transition",
-        "reason": "builtin runtime seed for interface up/down events",
-    },
-    {
         "name": "policy:device.cpu.utilization",
         "observation_type": "device.cpu.utilization",
         "semantic_type": "gauge",

@@ -12,7 +12,7 @@ from typing import Any
 import yaml
 
 DEFAULT_CANONICAL_CATALOG_PATH = (
-    Path(__file__).parent / "assets" / "canonical_observations.v3.yaml"
+    Path(__file__).parent / "assets" / "canonical_observations.yaml"
 )
 
 
@@ -256,7 +256,7 @@ def _validate_event_constraints(
         {
             value
             for value in event_classes.values()
-            if value not in {"fault", "recovery"}
+            if value not in {"fault", "recovery", "change"}
         }
     )
     if invalid_classes:
@@ -483,6 +483,13 @@ def validate_check_item_contract(
             errors.append(f"{check_item_id}.observations[{index}] must be an object")
             continue
         observation_type = str(row.get("observation_type") or "").strip()
+        if "health_policy" in row:
+            from src.core.check_items.numeric_health import validate_health_policy
+
+            errors.extend(
+                f"{check_item_id}.{observation_type}: {error}"
+                for error in validate_health_policy(row["health_policy"])
+            )
         if not observation_type:
             errors.append(f"{check_item_id}.observations[{index}] has no observation_type")
             continue
@@ -508,6 +515,22 @@ def validate_check_item_contract(
                 f"{definition.canonical_unit or '<none>'}"
             )
         dimensions = {str(item) for item in row.get("dimensions") or ()}
+        fixed = row.get("fixed_dimensions") or {}
+        if not isinstance(fixed, dict):
+            errors.append(f"{check_item_id}.{observation_type} fixed_dimensions must be an object")
+            fixed = {}
+        for key, value in fixed.items():
+            allowed = definition.allowed_dimension_values.get(key, ())
+            if (isinstance(value, (dict, list)) or value in (None, "")
+                    or (allowed and value not in allowed)):
+                errors.append(
+                    f"{check_item_id}.{observation_type} invalid fixed dimension {key}"
+                )
+        if set(fixed) & dimensions:
+            errors.append(
+                f"{check_item_id}.{observation_type} fixed and dynamic dimensions overlap"
+            )
+        dimensions |= set(fixed)
         unknown_dimensions = sorted(dimensions - set(definition.dimensions))
         if unknown_dimensions:
             errors.append(

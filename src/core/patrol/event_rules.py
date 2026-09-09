@@ -654,6 +654,8 @@ def current_state_condition_matches(
     if "value" not in observation:
         value = observation.get("value_json")
 
+    if kind == "numeric_health_result":
+        return condition.get("unhealthy") is True
     if kind == "threshold":
         threshold = to_float(condition.get("gte"))
         current = to_float(value)

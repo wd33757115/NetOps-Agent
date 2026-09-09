@@ -107,7 +107,8 @@ def build_canonical_rule_context(
 ) -> dict[str, Any]:
     """Compile one immutable, vendor-neutral rule-generation context."""
 
-    contract = dict(canonical_contract or {})
+    from src.core.check_items.value_contract import normalize_value_contract
+    contract = normalize_value_contract(dict(canonical_contract or {}))
     forbidden = _forbidden_paths(contract)
     if forbidden:
         raise ValueError(
@@ -138,6 +139,7 @@ def build_canonical_rule_context(
         ).strip()
         dimensions = list(row.get("dimensions") or definition.dimensions)
         semantics = {
+            "event_on_change": row.get("event_on_change", False),
             "observation_type": observation_type,
             "semantic_type": str(
                 row.get("semantic_type") or definition.semantic_type
@@ -145,6 +147,7 @@ def build_canonical_rule_context(
             "value_types": list(definition.value_types),
             "unit": row.get("unit") or definition.canonical_unit,
             "dimensions": dimensions,
+            "fixed_dimensions": dict(row.get("fixed_dimensions") or {}),
             "allowed_values": list(definition.allowed_values),
             "state_groups": {
                 key: list(values)
@@ -161,6 +164,7 @@ def build_canonical_rule_context(
             "baseline_comparison": dict(
                 row.get("baseline_comparison") or {}
             ),
+            "health_policy": dict(row.get("health_policy") or {}),
             "context_fields": list(row.get("context_fields") or []),
         }
         state_semantics[canonical_field] = semantics
@@ -246,6 +250,12 @@ def _compile_policy_candidate(target: Mapping[str, Any]) -> dict[str, Any]:
         },
         dimension_selector=dimension_selector,
     ).to_dict()
+    if target.get("event_on_change"):
+        proposal.update(deadband=0, thresholds={}, threshold_references={})
+        proposal["compare_mode"] = {"counter": "counter_delta", "gauge": "numeric_delta", "threshold": "numeric_delta", "state": "state_transition"}.get(target.get("semantic_type"), "exact")
+        proposal["source"] = "check_item_all_value_changes"
+        proposal["reason"] = "Every available standard Value change produces an informational event."
+        return proposal
     allowed_modes = [
         str(item)
         for item in constraints.get("allowed_compare_modes") or []

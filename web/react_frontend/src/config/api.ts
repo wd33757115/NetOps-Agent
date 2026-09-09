@@ -132,7 +132,7 @@ api.interceptors.response.use(
     }
     return response
   },
-  async (error: AxiosError<BffEnvelope | Blob | { error?: string; detail?: string }>) => {
+  async (error: AxiosError<BffEnvelope | Blob | string | { error?: string; detail?: string }>) => {
     const status = error.response?.status
     const original = error.config as InternalAxiosRequestConfig & { _retry?: boolean }
     let payload = error.response?.data

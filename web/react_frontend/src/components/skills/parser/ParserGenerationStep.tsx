@@ -1859,10 +1859,10 @@ const ParserGenerationStep: React.FC<{
         <section className="parser-generation-step">
           <div className="parser-generation-step__heading">
             <div>
-              <Typography.Text strong>3. A→B Projection 与标准 Observation</Typography.Text>
+              <Typography.Text strong>{selectedCheckItem?.canonical_contract?.value_contract === 'same-name/v1' ? '3. 同名 Value 校验与检查项数据' : '3. A→B Projection 与标准 Observation'}</Typography.Text>
               <br />
               <Typography.Text type="secondary">
-                使用同一个 CheckItem B 生成 Projection，并用当前 Parser 的实际记录做本地预览。
+                {selectedCheckItem?.canonical_contract?.value_contract === 'same-name/v1' ? 'TextFSM Value 直接对应检查项字段；本地校验名称、语义和实际样本，不再生成字段映射。' : '使用同一个 CheckItem B 生成 Projection，并用当前 Parser 的实际记录做本地预览。'}
               </Typography.Text>
             </div>
             <Space wrap>
@@ -1872,7 +1872,7 @@ const ParserGenerationStep: React.FC<{
                 loading={generateProjection.isLoading}
                 onClick={() => generateProjection.mutate()}
               >
-                LLM 生成 Projection
+                {selectedCheckItem?.canonical_contract?.value_contract === 'same-name/v1' ? '校验同名字段' : 'LLM 生成 Projection'}
               </Button>
               <Button
                 icon={<PlayCircleOutlined />}
@@ -1932,7 +1932,7 @@ const ParserGenerationStep: React.FC<{
                   style={{ minWidth: 280 }}
                 />
               </Space>
-              <details><summary>编辑字段转换规则（高级）</summary>
+              {selectedCheckItem?.canonical_contract?.value_contract !== 'same-name/v1' && <details><summary>编辑字段转换规则（高级）</summary>
               <Input.TextArea
                 aria-label="Adapter Projection JSON"
                 value={projectionText}
@@ -1944,20 +1944,22 @@ const ParserGenerationStep: React.FC<{
                 autoSize={{ minRows: 8, maxRows: 20 }}
                 style={{ fontFamily: 'Consolas, Monaco, monospace' }}
               />
-              </details>
+              </details>}
               {onCreateAdapter && (
                 <Alert
                   type={projectionPreview?.success ? 'success' : 'info'}
                   showIcon
                   message="完成本地预览后创建命令适配器"
-                  description="这会带着当前 Parser 和 Projection 打开命令适配器草稿；适配器仍需按正常流程验证和审批，未审批前不会进入生产。"
+                  description={selectedCheckItem?.canonical_contract?.value_contract === 'same-name/v1'
+                    ? '使用当前解析器和同名字段创建命令适配器草稿，通过验证与发布流程后生效。'
+                    : '这会带着当前 Parser 和 Projection 打开命令适配器草稿；适配器仍需按正常流程验证和审批，未审批前不会进入生产。'}
                   action={(
                     <Button
                       type="primary"
                       disabled={!projectionPreview?.success}
                       onClick={createAdapterFromProjection}
                     >
-                      使用 Projection 创建适配器
+                      {selectedCheckItem?.canonical_contract?.value_contract === 'same-name/v1' ? '使用同名字段创建适配器' : '使用 Projection 创建适配器'}
                     </Button>
                   )}
                 />

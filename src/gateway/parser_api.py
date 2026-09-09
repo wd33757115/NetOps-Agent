@@ -4868,11 +4868,11 @@ def upsert_command_profile(request: Request, payload: CommandProfileUpsertReques
     try:
         if payload.status == "active":
             raise ValueError("command profile versions must be created as draft")
-        commands = [
-            str(item).strip()
-            for item in payload.commands
-            if str(item).strip()
-        ]
+        commands = list(dict.fromkeys(
+            str(item).strip() for item in payload.commands if str(item).strip()
+        ))
+        if any(any(ord(char) < 32 for char in command) for command in commands):
+            raise ValueError("each command must be a single line without control characters")
         check_item_ids = sorted(
             {
                 str(item).strip()
@@ -4886,7 +4886,7 @@ def upsert_command_profile(request: Request, payload: CommandProfileUpsertReques
             )
         if not commands and not check_item_ids:
             raise ValueError(
-                "a patrol profile requires at least one check item"
+                "a patrol profile requires at least one command or check item"
             )
         if check_item_ids and payload.action != "patrol":
             raise ValueError("check-item profiles only support patrol action")
@@ -5355,7 +5355,9 @@ def preview_command_profile_impact(payload: CommandProfileImpactPreviewRequest):
         eligible_commands = 0
         ready_commands = 0
         blocked_commands = 0
-        for device in devices[:limit]:
+        if not devices:
+            raise ValueError("no active devices match the impact-preview selector")
+        for device in devices:
             plan = ExecutionPlan(
                 device_id=str(device.get("device_id") or ""),
                 action=payload.action,
@@ -5423,14 +5425,14 @@ def preview_command_profile_impact(payload: CommandProfileImpactPreviewRequest):
             "command_count": len(commands),
             "matched_device_count": len(devices),
             "evaluated_device_count": len(rows),
-            "returned_device_count": len(rows),
+            "returned_device_count": min(len(rows), limit),
             "blocked_device_count": blocked_devices,
             "ready_device_count": len(rows) - blocked_devices,
             "eligible_command_count": eligible_commands,
             "ready_command_count": ready_commands,
             "blocked_command_count": blocked_commands,
             "coverage_rate": ready_commands / eligible_commands if eligible_commands else 1.0,
-            "rows": rows,
+            "rows": rows[:limit],
         }
         if payload.save_evidence and profile_version_id:
             repository.record_profile_coverage(profile_version_id, result)

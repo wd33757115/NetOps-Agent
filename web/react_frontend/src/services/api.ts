@@ -1190,6 +1190,23 @@ export interface OfflinePatrolAnalysisSummary {
   risks: OfflinePatrolReportRisk[]
   correlated_evidence: OfflinePatrolReportRisk[]
   trend?: OfflinePatrolReportTrend
+  numeric_trends?: {
+    notice_count: number
+    recovered_count: number
+    unknown_count: number
+    summary: string
+    items: Array<{
+      observation_id: string
+      device_id: string
+      entity_key: string
+      label: string
+      status: 'notice' | 'recovered'
+      unit: string
+      baseline_value: number
+      current_value: number
+      explanation: string
+    }>
+  }
   structured_event_evidence?: {
     structured_change_count: number
     event_fact_count: number

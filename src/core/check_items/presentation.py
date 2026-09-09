@@ -29,9 +29,9 @@ _ZH_CN_PRESENTATIONS = MappingProxyType(
             "内存使用率",
             "评估设备或槽位的内存容量与使用率。",
         ),
-        "interface.oper_status": CheckItemPresentation(
-            "接口运行状态",
-            "评估网络接口当前的物理状态和协议状态。",
+        "interface.runtime_statistics": CheckItemPresentation(
+            "接口状态运行信息和统计信息",
+            "检查接口状态、配置及收发统计，每个可用字段的变化产生信息事件。",
         ),
         "interface.optical_power": CheckItemPresentation(
             "接口光功率",
@@ -56,10 +56,6 @@ _ZH_CN_PRESENTATIONS = MappingProxyType(
         "environment.temperature": CheckItemPresentation(
             "温度传感器状态",
             "根据设备上报阈值评估温度传感器状态。",
-        ),
-        "interface.statistics": CheckItemPresentation(
-            "接口错误计数",
-            "保留接口收发错误计数，用于趋势和周期比较。",
         ),
         "interface.ip_assignment": CheckItemPresentation(
             "接口 IP 配置",

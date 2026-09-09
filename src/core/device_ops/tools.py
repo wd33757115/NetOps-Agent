@@ -340,6 +340,7 @@ class PatrolTool:
                 coverage_decision = decide_parser_coverage(
                     coverage=self._production_coverage(device, plan.command_texts()),
                     mode=mode,
+                    execution_plan=plan,
                 )
                 coverage_preflight = list(coverage_decision.get("violations") or [])
                 if coverage_decision["decision"] == "block":

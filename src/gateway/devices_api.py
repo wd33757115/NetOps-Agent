@@ -2806,6 +2806,7 @@ def _patrol_launch_preview(
                 else decide_parser_coverage(
                     coverage=parser_coverage,
                     mode=payload.mode,
+                    execution_plan=plan,
                 )
             )
             coverage_violations = list(coverage_decision.get("violations") or [])

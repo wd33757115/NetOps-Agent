@@ -74,7 +74,7 @@ export default function CommandAutopilotPanel({ jobId, unitId, associated }: {
         <Space wrap>
           {data.outputs.implementation && <Button onClick={() => navigate(`/apps/patrol-rules?workspace=production&subtab=catalog-management&change_id=${encodeURIComponent(data.outputs.implementation!.id)}`)}>查看设备适配草稿</Button>}
           {data.outputs.rules?.bundle_id && <Button onClick={() => navigate(`/apps/patrol-rules?workspace=production&subtab=asset-production-units&action=release&bundle_id=${encodeURIComponent(data.outputs.rules!.bundle_id!)}`)}>查看检查规则</Button>}
-          {data.outputs.parser?.template_id && data.status !== 'completed' && <Button disabled={!data.can_edit} onClick={() => {
+          {!data.same_name_values && data.outputs.parser?.template_id && data.status !== 'completed' && <Button disabled={!data.can_edit} onClick={() => {
             setText(JSON.stringify(data.outputs.projection?.proposal || {}, null, 2)); setEditing(true)
           }}>人工编辑字段转换</Button>}
         </Space>

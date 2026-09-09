@@ -49,6 +49,7 @@ SEVERITY_LABEL = {
     "unknown": "未知",
 }
 EVENT_TYPE_LABEL = {
+    "NumericHealthAbnormal": "数值健康异常",
     "InterfaceDown": "接口运行状态中断",
     "InterfaceUp": "接口运行状态恢复",
     "interface_link_down": "接口链路中断",
@@ -480,7 +481,7 @@ def _build_risks(summary: dict[str, Any]) -> list[dict[str, Any]]:
         }
         risks[_risk_key(row)] = row
     for event in summary.get("events") or []:
-        if str(event.get("event_class") or "fault") == "recovery":
+        if str(event.get("event_class") or "fault") != "fault":
             continue
         if str(event.get("status_after_occurrence") or "").casefold() in {
             "resolved",
@@ -547,7 +548,7 @@ def _build_longitudinal_trend(
     historical_fault_events = [
         {**event, "status_after_occurrence": "open"}
         for event in previous.get("events") or []
-        if str(event.get("event_class") or "fault") != "recovery"
+        if str(event.get("event_class") or "fault") == "fault"
     ]
     historical_fault_risks = _build_risks({"events": historical_fault_events})
     previous_evidence = list(
@@ -1052,6 +1053,7 @@ def _build_structured_event_evidence(
                 "event": {
                     "event_id": event.get("id") or event.get("event_id"),
                     "event_type": event_type,
+                    "event_class": event.get("event_class"),
                     "event_label": _event_type_label(event_type) if event_type else "未触发 Event",
                     "severity": event.get("severity"),
                     "status": event_status,
@@ -1503,9 +1505,9 @@ def build_leadership_report(
         for item in events
     )
     state_improvement_count = recovery_event_count - resolved_prior_fault_count
-    fault_event_count = len(events) - recovery_event_count
+    fault_event_count = sum(str(item.get("event_class") or "fault") == "fault" for item in events)
     unresolved_fault_event_count = sum(
-        str(item.get("event_class") or "fault") != "recovery"
+        str(item.get("event_class") or "fault") == "fault"
         and str(item.get("status_after_occurrence") or "open").casefold()
         not in {"resolved", "closed", "cancelled"}
         for item in events
@@ -1518,9 +1520,88 @@ def build_leadership_report(
     fault_by_type = Counter(
         str(item.get("event_type") or "unknown")
         for item in events
-        if str(item.get("event_class") or "fault") != "recovery"
+        if str(item.get("event_class") or "fault") == "fault"
     )
     limitations = ["结论仅适用于本批次实际完成并形成结构化观测的设备及检查项。"]
+    health_missing_labels = {
+        "device_high_threshold_missing": "设备上限未提供",
+        "device_low_threshold_missing": "设备下限未提供",
+        "measurement_window_missing": "缺少要求的5分钟统计",
+        "baseline_reference_missing": "缺少匹配的基线数据",
+        "zero_baseline_relative_deviation_undefined": "基线为0且当前非0，相对偏差无法计算",
+        "baseline_unit_mismatch": "两期单位不一致",
+    }
+    health_labels = {
+        "device.cpu.utilization": "CPU",
+        "device.memory.utilization": "内存",
+        "interface.optical.rx_power": "接收光功率",
+        "interface.optical.tx_power": "发射光功率",
+    }
+    missing_health = Counter(
+        (basis.get("observation_type"), code)
+        for basis in (coverage.get("assessment_basis") or {}).get("entries", [])
+        for code in (basis.get("health_assessment") or {}).get("missing", [])
+    )
+    for (observation_type, code), count in sorted(missing_health.items()):
+        limitations.append(
+            f"{health_labels.get(observation_type, observation_type)}：{count}项"
+            f"{health_missing_labels.get(code, '判定依据不完整')}，不能标为健康。"
+        )
+    numeric_trends = {
+        "notice_count": 0, "recovered_count": 0, "unknown_count": 0,
+        "unverified_identity_count": 0, "items": [],
+    }
+    for basis in (coverage.get("assessment_basis") or {}).get("entries", []):
+        health = basis.get("health_assessment") or {}
+        numeric_trend = health.get("trend") or {}
+        state = numeric_trend.get("status")
+        if numeric_trend.get("unverified_identity_fields"):
+            numeric_trends["unverified_identity_count"] += 1
+        if state == "unknown":
+            numeric_trends["unknown_count"] += 1
+        if state not in {"notice", "recovered"}:
+            continue
+        numeric_trends["notice_count" if state == "notice" else "recovered_count"] += 1
+        identity = basis.get("entity_identity") or {}
+        label = health_labels.get(basis.get("observation_type"), basis.get("observation_type"))
+        if state == "recovered":
+            explanation = "基线超出当时设备阈值，当前已回到设备正常范围。"
+        elif numeric_trend.get("kind") == "linear_power_drop":
+            explanation = (
+                f"实际光功率下降 {numeric_trend['ratio']:.2%}，"
+                f"超过趋势门槛 {numeric_trend['threshold_ratio']:.0%}；当前仍在设备阈值内。"
+            )
+        else:
+            explanation = (
+                f"使用率增加 {numeric_trend['increase_points']:g} 个百分点，"
+                f"相对增长 {numeric_trend['ratio']:.2%}；当前仍在设备阈值内。"
+            )
+        if numeric_trend.get("unverified_identity_fields"):
+            explanation += "按同一设备、接口和通道比较，模块身份未核实。"
+        numeric_trends["items"].append(
+            {
+                "observation_id": basis.get("observation_id"),
+                "device_id": identity.get("device_id"),
+                "entity_key": identity.get("entity_key"),
+                "label": label,
+                "status": state,
+                "unit": basis.get("unit"),
+                "baseline_value": health.get("baseline_value"),
+                "current_value": health.get("value"),
+                "explanation": explanation,
+            }
+        )
+    numeric_trends["summary"] = (
+        f"数值趋势提醒 {numeric_trends['notice_count']} 项，"
+        f"阈值恢复 {numeric_trends['recovered_count']} 项；"
+        "趋势提醒不计入当前故障数。"
+        f"另有 {numeric_trends['unknown_count']} 项缺少可比依据，未作趋势或恢复判断。"
+    )
+    if numeric_trends["unverified_identity_count"]:
+        numeric_trends["summary"] += (
+            f"此外，{numeric_trends['unverified_identity_count']} 项光功率观测仅按接口和通道比较，"
+            "模块身份未核实。"
+        )
     if int(scope.get("completed_count") or 0) < int(scope.get("target_count") or 0):
         limitations.append("存在未完成、跳过或失败设备，不能据此评价未覆盖设备的健康状态。")
     if quality.get("status") != "ready":
@@ -1660,6 +1741,7 @@ def build_leadership_report(
         "correlated_evidence": correlated_evidence,
         "correlated_evidence_groups": _aggregate_risk_groups(correlated_evidence),
         "trend": trend,
+        "numeric_trends": numeric_trends,
         "device_inventory_rows": _build_device_inventory_rows(summary),
         "domains": domains,
         "basic_observation_tables": _build_basic_observation_tables(summary),

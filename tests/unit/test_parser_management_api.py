@@ -3481,3 +3481,20 @@ def test_rollout_stage_execution_read_endpoints_enforce_campaign_scope(
         )
 
     assert exc_info.value.status_code == 404
+
+
+def test_command_profile_impact_evaluates_all_devices_but_limits_display(monkeypatch):
+    class Devices:
+        def get_devices_by_filter(self, **kwargs):
+            return [{"device_id": f"d{i}", "device_name": f"SW{i}"} for i in range(3)]
+    checked = []
+    def coverage(device, commands):
+        checked.append(device["device_id"])
+        return [{"canonical_command": commands[0], "policy_status": "eligible", "coverage_status": "missing" if device["device_id"] == "d2" else "ready"}]
+    monkeypatch.setattr(parser_api, "DeviceRepository", Devices)
+    monkeypatch.setattr(parser_api.PatrolTool, "_production_coverage", staticmethod(coverage))
+    result = parser_api.preview_command_profile_impact(parser_api.CommandProfileImpactPreviewRequest(profile_name="explicit", commands=["show version"], limit=1))
+    assert checked == ["d0", "d1", "d2"]
+    assert result["matched_device_count"] == result["evaluated_device_count"] == 3
+    assert result["returned_device_count"] == len(result["rows"]) == 1
+    assert result["blocked_command_count"] == 1

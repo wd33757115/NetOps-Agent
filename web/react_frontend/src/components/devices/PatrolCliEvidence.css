@@ -1,0 +1,15 @@
+.patrol-cli-scroll { width: 100%; max-width: 100%; contain: inline-size; overflow-x: auto; border: 1px solid #d7dee8; border-radius: 6px; box-sizing: border-box; }
+.patrol-cli-table { width: 100%; min-width: 780px; border-collapse: collapse; text-align: left; }
+.patrol-cli-table th { width: 50%; text-align: left; background: #e8eff8; padding: 10px 12px; vertical-align: top; border-right: 1px solid #d7dee8; }
+.patrol-cli-table th div { font-size: 12px; font-weight: 400; color: #526175; margin-top: 5px; overflow-wrap: anywhere; }
+.patrol-cli-table td { padding: 3px 10px; border-top: 1px solid #e5e9ef; border-right: 1px solid #d7dee8; vertical-align: top; }
+.patrol-cli-table pre { margin: 0; white-space: pre; font: 12px/1.7 Consolas, 'Courier New', monospace; tab-size: 8; }
+.patrol-cli-line-number { display: inline-block; min-width: 36px; margin-right: 12px; color: #707b89; text-align: right; user-select: none; }
+.patrol-cli-anomaly { background: transparent; color: #c00000; font-weight: 700; }
+.patrol-cli-replace { color: #996000; }
+.patrol-cli-insert.patrol-cli-current { color: #175c9c; background: #f1f7fd; }
+.patrol-cli-delete.patrol-cli-baseline { color: #666; text-decoration: line-through; background: #f7f7f7; }
+.patrol-cli-gap, .patrol-cli-missing { color: #707b89; font-size: 12px; }
+.patrol-cli-full { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; width: 100%; }
+.patrol-cli-full pre { max-height: 440px; overflow: auto; padding: 10px; background: #f5f7fa; font: 12px/1.7 Consolas, 'Courier New', monospace; white-space: pre; }
+@media (max-width: 700px) { .patrol-cli-full { grid-template-columns: 1fr; } }

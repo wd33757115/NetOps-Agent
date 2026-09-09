@@ -3,7 +3,9 @@ export const workbenchEnabled =
 export const documentsEnabled = import.meta.env.VITE_OFFICIAL_DOCUMENTS_ENABLED !== 'false'
 export const appRoutes = {
   workbench: '/workbench',
+  devices: '/admin/netops/devices',
   documents: '/apps/official-documents',
+  firewall: '/apps/firewall-policy',
   patrol: workbenchEnabled ? '/apps/patrol' : '/devices?tab=patrol',
   rules: workbenchEnabled ? '/apps/patrol-rules' : '/skills/parser',
 }

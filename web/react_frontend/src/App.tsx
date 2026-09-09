@@ -25,6 +25,7 @@ const OfficialDocumentListPage = React.lazy(() => import('./pages/OfficialDocume
 const OfficialDocumentCreatePage = React.lazy(() => import('./pages/OfficialDocumentCreatePage'))
 const OfficialDocumentEditorPage = React.lazy(() => import('./pages/OfficialDocumentEditorPage'))
 const PatrolAppPage = React.lazy(() => import('./pages/PatrolAppPage'))
+const FirewallPolicyPage = React.lazy(() => import('./pages/FirewallPolicyPage'))
 const PatrolRulesAppPage = React.lazy(() => import('./pages/PatrolRulesAppPage'))
 const RuleAssetSourceJobDetailPage = React.lazy(() => import('./pages/RuleAssetSourceJobDetailPage'))
 
@@ -57,6 +58,7 @@ const App: React.FC = () => {
             <Route path="skills" element={<SkillsPage />} />
             <Route path="workbench" element={workbenchEnabled ? <WorkbenchPage /> : <Navigate to="/chat" replace />} />
             <Route path="apps/patrol" element={<BusinessRoute><PatrolAppPage /></BusinessRoute>} />
+            <Route path="apps/firewall-policy" element={<FirewallPolicyPage />} />
             <Route path="apps/patrol-rules" element={<BusinessRoute><NetOpsConfigRoute><PatrolRulesAppPage /></NetOpsConfigRoute></BusinessRoute>} />
             <Route path="apps/patrol-rules/source-jobs/:jobId" element={<BusinessRoute><NetOpsConfigRoute><RuleAssetSourceJobDetailPage /></NetOpsConfigRoute></BusinessRoute>} />
             <Route path="skills/parser" element={<BusinessRoute><NetOpsConfigRoute><SkillsPage /></NetOpsConfigRoute></BusinessRoute>} />

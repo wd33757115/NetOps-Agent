@@ -1,0 +1,939 @@
+{
+  "template_id": "netops.patrol.standard",
+  "version": "1.1",
+  "status": "design_not_integrated",
+  "ai_default": "off",
+  "slots": [
+    {
+      "tag": "meta.project",
+      "label": "项目或数据中心名称"
+    },
+    {
+      "tag": "meta.period_label",
+      "label": "报告周期"
+    },
+    {
+      "tag": "meta.recipient",
+      "label": "客户单位"
+    },
+    {
+      "tag": "meta.issuer",
+      "label": "编制单位"
+    },
+    {
+      "tag": "meta.author",
+      "label": "编制人员"
+    },
+    {
+      "tag": "meta.reviewer",
+      "label": "复核人员"
+    },
+    {
+      "tag": "meta.report_date",
+      "label": "报告日期"
+    },
+    {
+      "tag": "meta.report_number",
+      "label": "报告编号"
+    },
+    {
+      "tag": "meta.revision",
+      "label": "版本"
+    },
+    {
+      "tag": "conclusion.text",
+      "label": "总体结论"
+    },
+    {
+      "tag": "conclusion.basis",
+      "label": "结论依据及未覆盖范围"
+    },
+    {
+      "tag": "summary.0",
+      "label": "计划设备"
+    },
+    {
+      "tag": "summary.1",
+      "label": "已采集设备"
+    },
+    {
+      "tag": "summary.2",
+      "label": "异常设备"
+    },
+    {
+      "tag": "summary.3",
+      "label": "待确认设备"
+    },
+    {
+      "tag": "scope.site",
+      "label": "巡检地点"
+    },
+    {
+      "tag": "scope.current_capture_time",
+      "label": "本期采集时间"
+    },
+    {
+      "tag": "scope.baseline_capture_time",
+      "label": "基线采集时间"
+    },
+    {
+      "tag": "scope.analysis_time",
+      "label": "分析生成时间"
+    },
+    {
+      "tag": "scope.source_purpose",
+      "label": "数据来源与报告用途"
+    },
+    {
+      "tag": "scope.disclosure",
+      "label": "数据来源对应的结论适用范围"
+    },
+    {
+      "tag": "priorities.0",
+      "label": "优先级"
+    },
+    {
+      "tag": "priorities.1",
+      "label": "问题或数据缺口"
+    },
+    {
+      "tag": "priorities.2",
+      "label": "影响范围"
+    },
+    {
+      "tag": "priorities.3",
+      "label": "建议动作"
+    },
+    {
+      "tag": "scope.method",
+      "label": "实际采集方式和执行范围说明"
+    },
+    {
+      "tag": "devices.0",
+      "label": "设备名称"
+    },
+    {
+      "tag": "devices.1",
+      "label": "型号与厂商"
+    },
+    {
+      "tag": "devices.2",
+      "label": "管理地址"
+    },
+    {
+      "tag": "devices.3",
+      "label": "软件版本"
+    },
+    {
+      "tag": "devices.4",
+      "label": "位置或分组"
+    },
+    {
+      "tag": "scope.difference",
+      "label": "计划范围与实际覆盖差异"
+    },
+    {
+      "tag": "standards.0",
+      "label": "检查项"
+    },
+    {
+      "tag": "standards.1",
+      "label": "指标与观察范围"
+    },
+    {
+      "tag": "standards.2",
+      "label": "标准及来源"
+    },
+    {
+      "tag": "standards.3",
+      "label": "标准版本"
+    },
+    {
+      "tag": "manual.scope",
+      "label": "已确认的现场人工检查或专项检查范围"
+    },
+    {
+      "tag": "assets.summary",
+      "label": "设备版本与硬件资产记录摘要"
+    },
+    {
+      "tag": "hardware.0",
+      "label": "设备或成员"
+    },
+    {
+      "tag": "hardware.1",
+      "label": "组件与槽位"
+    },
+    {
+      "tag": "hardware.2",
+      "label": "型号"
+    },
+    {
+      "tag": "hardware.3",
+      "label": "序列号"
+    },
+    {
+      "tag": "hardware.4",
+      "label": "版本或状态"
+    },
+    {
+      "tag": "resources.summary",
+      "label": "资源使用检查摘要"
+    },
+    {
+      "tag": "temperature.summary",
+      "label": "温度检查摘要"
+    },
+    {
+      "tag": "temperature.0",
+      "label": "设备与传感器"
+    },
+    {
+      "tag": "temperature.1",
+      "label": "实测温度"
+    },
+    {
+      "tag": "temperature.2",
+      "label": "告警阈值"
+    },
+    {
+      "tag": "temperature.3",
+      "label": "严重阈值"
+    },
+    {
+      "tag": "temperature.4",
+      "label": "检查结果"
+    },
+    {
+      "tag": "components.summary",
+      "label": "风扇与电源检查摘要"
+    },
+    {
+      "tag": "resources.gaps",
+      "label": "资源与环境的数据缺口及影响范围"
+    },
+    {
+      "tag": "interfaces.summary",
+      "label": "接口状态及光功率检查摘要"
+    },
+    {
+      "tag": "interfaces.0",
+      "label": "设备与接口"
+    },
+    {
+      "tag": "interfaces.1",
+      "label": "管理状态"
+    },
+    {
+      "tag": "interfaces.2",
+      "label": "运行状态"
+    },
+    {
+      "tag": "interfaces.3",
+      "label": "光功率及单位"
+    },
+    {
+      "tag": "interfaces.4",
+      "label": "检查结果"
+    },
+    {
+      "tag": "redundancy.summary",
+      "label": "VRRP 堆叠与 MLAG 检查摘要"
+    },
+    {
+      "tag": "redundancy.0",
+      "label": "设备与对象"
+    },
+    {
+      "tag": "redundancy.1",
+      "label": "冗余类型"
+    },
+    {
+      "tag": "redundancy.2",
+      "label": "角色或状态"
+    },
+    {
+      "tag": "redundancy.3",
+      "label": "预期及依据"
+    },
+    {
+      "tag": "redundancy.4",
+      "label": "检查结果"
+    },
+    {
+      "tag": "forwarding.summary",
+      "label": "VRF ARP 与 MAC 记录摘要"
+    },
+    {
+      "tag": "forwarding.0",
+      "label": "设备名称"
+    },
+    {
+      "tag": "forwarding.1",
+      "label": "记录类别"
+    },
+    {
+      "tag": "forwarding.2",
+      "label": "记录数量"
+    },
+    {
+      "tag": "forwarding.3",
+      "label": "采集时间"
+    },
+    {
+      "tag": "forwarding.4",
+      "label": "记录状态"
+    },
+    {
+      "tag": "gaps.0",
+      "label": "设备与检查项"
+    },
+    {
+      "tag": "gaps.1",
+      "label": "缺口类型"
+    },
+    {
+      "tag": "gaps.2",
+      "label": "缺失内容"
+    },
+    {
+      "tag": "gaps.3",
+      "label": "影响及补充措施"
+    },
+    {
+      "tag": "comparison.scope",
+      "label": "基线有效性 可比范围及限制"
+    },
+    {
+      "tag": "changes.0",
+      "label": "设备与检查项"
+    },
+    {
+      "tag": "changes.1",
+      "label": "对象或位置"
+    },
+    {
+      "tag": "changes.2",
+      "label": "前后差异摘要"
+    },
+    {
+      "tag": "changes.3",
+      "label": "判定与证据"
+    },
+    {
+      "tag": "changes.summary",
+      "label": "运行配置 启动配置及关键日志分析摘要"
+    },
+    {
+      "tag": "issues.0",
+      "label": "编号及等级"
+    },
+    {
+      "tag": "issues.1",
+      "label": "问题与影响范围"
+    },
+    {
+      "tag": "issues.2",
+      "label": "判定依据"
+    },
+    {
+      "tag": "issues.3",
+      "label": "处置建议"
+    },
+    {
+      "tag": "issues.review_notes",
+      "label": "未确认影响与需人工复核事项"
+    },
+    {
+      "tag": "issue_evidence.0",
+      "label": "问题编号"
+    },
+    {
+      "tag": "issue_evidence.1",
+      "label": "设备与对象"
+    },
+    {
+      "tag": "issue_evidence.2",
+      "label": "实测值及标准"
+    },
+    {
+      "tag": "issue_evidence.3",
+      "label": "发生时间"
+    },
+    {
+      "tag": "issue_evidence.4",
+      "label": "证据编号"
+    },
+    {
+      "tag": "issue_followup.0",
+      "label": "问题编号"
+    },
+    {
+      "tag": "issue_followup.1",
+      "label": "本次复核结果"
+    },
+    {
+      "tag": "issue_followup.2",
+      "label": "恢复或未复核依据"
+    },
+    {
+      "tag": "issue_followup.3",
+      "label": "后续动作"
+    },
+    {
+      "tag": "narrative.summary",
+      "label": "根据已验证结果生成的巡检总结"
+    },
+    {
+      "tag": "narrative.limitations",
+      "label": "已确认的问题范围及结果限制"
+    },
+    {
+      "tag": "actions.0",
+      "label": "关联问题"
+    },
+    {
+      "tag": "actions.1",
+      "label": "工作内容"
+    },
+    {
+      "tag": "actions.2",
+      "label": "优先级"
+    },
+    {
+      "tag": "actions.3",
+      "label": "负责人"
+    },
+    {
+      "tag": "actions.4",
+      "label": "计划日期"
+    },
+    {
+      "tag": "actions.5",
+      "label": "验收依据"
+    },
+    {
+      "tag": "manual_checks.0",
+      "label": "检查内容"
+    },
+    {
+      "tag": "manual_checks.1",
+      "label": "记录与结论"
+    },
+    {
+      "tag": "manual_checks.2",
+      "label": "记录人及时间"
+    },
+    {
+      "tag": "manual_checks.3",
+      "label": "附件或证据"
+    },
+    {
+      "tag": "review.comment",
+      "label": "复核意见"
+    },
+    {
+      "tag": "signoff.0",
+      "label": "编制人"
+    },
+    {
+      "tag": "signoff.1",
+      "label": "复核人"
+    },
+    {
+      "tag": "signoff.2",
+      "label": "客户确认人"
+    },
+    {
+      "tag": "signoff.3",
+      "label": "确认日期"
+    },
+    {
+      "tag": "deliverables.0",
+      "label": "附件编号"
+    },
+    {
+      "tag": "deliverables.1",
+      "label": "文件名称"
+    },
+    {
+      "tag": "deliverables.2",
+      "label": "内容及范围"
+    },
+    {
+      "tag": "deliverables.3",
+      "label": "交付状态"
+    },
+    {
+      "tag": "backup.disclosure",
+      "label": "配置备份是否提供 完整性及交付位置"
+    },
+    {
+      "tag": "evidence.0",
+      "label": "证据编号"
+    },
+    {
+      "tag": "evidence.1",
+      "label": "关联检查或问题"
+    },
+    {
+      "tag": "evidence.2",
+      "label": "设备与来源文件"
+    },
+    {
+      "tag": "evidence.3",
+      "label": "采集时间"
+    },
+    {
+      "tag": "trace.run_id",
+      "label": "巡检任务编号"
+    },
+    {
+      "tag": "trace.result_version",
+      "label": "结果版本"
+    },
+    {
+      "tag": "trace.standards_version",
+      "label": "检查标准版本"
+    },
+    {
+      "tag": "trace.template_version",
+      "label": "模板版本"
+    },
+    {
+      "tag": "trace.revision",
+      "label": "报告修订版本"
+    },
+    {
+      "tag": "cpu.0",
+      "label": "设备ID"
+    },
+    {
+      "tag": "cpu.1",
+      "label": "槽位"
+    },
+    {
+      "tag": "cpu.2",
+      "label": "5秒值"
+    },
+    {
+      "tag": "cpu.3",
+      "label": "1分钟值"
+    },
+    {
+      "tag": "cpu.4",
+      "label": "5分钟值"
+    },
+    {
+      "tag": "memory.0",
+      "label": "设备ID"
+    },
+    {
+      "tag": "memory.1",
+      "label": "槽"
+    },
+    {
+      "tag": "memory.2",
+      "label": "总内存"
+    },
+    {
+      "tag": "memory.3",
+      "label": "已用内存"
+    },
+    {
+      "tag": "memory.4",
+      "label": "使用率"
+    },
+    {
+      "tag": "fan.0",
+      "label": "设备ID"
+    },
+    {
+      "tag": "fan.1",
+      "label": "槽位"
+    },
+    {
+      "tag": "fan.2",
+      "label": "风扇编号"
+    },
+    {
+      "tag": "fan.3",
+      "label": "状态"
+    },
+    {
+      "tag": "power.0",
+      "label": "设备ID"
+    },
+    {
+      "tag": "power.1",
+      "label": "槽"
+    },
+    {
+      "tag": "power.2",
+      "label": "电源号"
+    },
+    {
+      "tag": "power.3",
+      "label": "状态"
+    },
+    {
+      "tag": "power.4",
+      "label": "模式"
+    },
+    {
+      "tag": "power.5",
+      "label": "电流"
+    },
+    {
+      "tag": "power.6",
+      "label": "电压"
+    },
+    {
+      "tag": "power.7",
+      "label": "功率"
+    },
+    {
+      "tag": "interface_counters.0",
+      "label": "设备ID"
+    },
+    {
+      "tag": "interface_counters.1",
+      "label": "接口"
+    },
+    {
+      "tag": "interface_counters.2",
+      "label": "总包数"
+    },
+    {
+      "tag": "interface_counters.3",
+      "label": "广播包数"
+    },
+    {
+      "tag": "interface_counters.4",
+      "label": "组播包数"
+    },
+    {
+      "tag": "interface_counters.5",
+      "label": "错误数"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "summary",
+      "kind": "single_table_row",
+      "columns": [
+        "计划设备",
+        "已采集设备",
+        "异常设备",
+        "待确认设备"
+      ],
+      "repeat_source": "proposed_report_view.summary",
+      "empty_policy": "explicit_status_message"
+    },
+    {
+      "id": "priorities",
+      "kind": "repeat_table_row",
+      "columns": [
+        "优先级",
+        "问题或数据缺口",
+        "影响范围",
+        "建议动作"
+      ],
+      "repeat_source": "proposed_report_view.priorities",
+      "empty_policy": "explicit_status_message"
+    },
+    {
+      "id": "devices",
+      "kind": "repeat_table_row",
+      "columns": [
+        "设备名称",
+        "型号与厂商",
+        "管理地址",
+        "软件版本",
+        "位置或分组"
+      ],
+      "repeat_source": "proposed_report_view.devices",
+      "empty_policy": "explicit_status_message"
+    },
+    {
+      "id": "standards",
+      "kind": "repeat_table_row",
+      "columns": [
+        "检查项",
+        "指标与观察范围",
+        "标准及来源",
+        "标准版本"
+      ],
+      "repeat_source": "proposed_report_view.standards",
+      "empty_policy": "explicit_status_message"
+    },
+    {
+      "id": "hardware",
+      "kind": "repeat_table_row",
+      "columns": [
+        "设备或成员",
+        "组件与槽位",
+        "型号",
+        "序列号",
+        "版本或状态"
+      ],
+      "repeat_source": "proposed_report_view.hardware",
+      "empty_policy": "explicit_status_message"
+    },
+    {
+      "id": "temperature",
+      "kind": "repeat_table_row",
+      "columns": [
+        "设备与传感器",
+        "实测温度",
+        "告警阈值",
+        "严重阈值",
+        "检查结果"
+      ],
+      "repeat_source": "proposed_report_view.temperature",
+      "empty_policy": "explicit_status_message"
+    },
+    {
+      "id": "interfaces",
+      "kind": "repeat_table_row",
+      "columns": [
+        "设备与接口",
+        "管理状态",
+        "运行状态",
+        "光功率及单位",
+        "检查结果"
+      ],
+      "repeat_source": "proposed_report_view.interfaces",
+      "empty_policy": "explicit_status_message"
+    },
+    {
+      "id": "redundancy",
+      "kind": "repeat_table_row",
+      "columns": [
+        "设备与对象",
+        "冗余类型",
+        "角色或状态",
+        "预期及依据",
+        "检查结果"
+      ],
+      "repeat_source": "proposed_report_view.redundancy",
+      "empty_policy": "explicit_status_message"
+    },
+    {
+      "id": "forwarding",
+      "kind": "repeat_table_row",
+      "columns": [
+        "设备名称",
+        "记录类别",
+        "记录数量",
+        "采集时间",
+        "记录状态"
+      ],
+      "repeat_source": "proposed_report_view.forwarding",
+      "empty_policy": "explicit_status_message"
+    },
+    {
+      "id": "gaps",
+      "kind": "repeat_table_row",
+      "columns": [
+        "设备与检查项",
+        "缺口类型",
+        "缺失内容",
+        "影响及补充措施"
+      ],
+      "repeat_source": "proposed_report_view.gaps",
+      "empty_policy": "explicit_status_message"
+    },
+    {
+      "id": "changes",
+      "kind": "repeat_table_row",
+      "columns": [
+        "设备与检查项",
+        "对象或位置",
+        "前后差异摘要",
+        "判定与证据"
+      ],
+      "repeat_source": "proposed_report_view.changes",
+      "empty_policy": "explicit_status_message"
+    },
+    {
+      "id": "issues",
+      "kind": "repeat_table_row",
+      "columns": [
+        "编号及等级",
+        "问题与影响范围",
+        "判定依据",
+        "处置建议"
+      ],
+      "repeat_source": "proposed_report_view.issues",
+      "empty_policy": "explicit_status_message"
+    },
+    {
+      "id": "issue_evidence",
+      "kind": "repeat_table_row",
+      "columns": [
+        "问题编号",
+        "设备与对象",
+        "实测值及标准",
+        "发生时间",
+        "证据编号"
+      ],
+      "repeat_source": "proposed_report_view.issue_evidence",
+      "empty_policy": "explicit_status_message"
+    },
+    {
+      "id": "issue_followup",
+      "kind": "repeat_table_row",
+      "columns": [
+        "问题编号",
+        "本次复核结果",
+        "恢复或未复核依据",
+        "后续动作"
+      ],
+      "repeat_source": "proposed_report_view.issue_followup",
+      "empty_policy": "explicit_status_message"
+    },
+    {
+      "id": "actions",
+      "kind": "repeat_table_row",
+      "columns": [
+        "关联问题",
+        "工作内容",
+        "优先级",
+        "负责人",
+        "计划日期",
+        "验收依据"
+      ],
+      "repeat_source": "proposed_report_view.actions",
+      "empty_policy": "explicit_status_message"
+    },
+    {
+      "id": "manual_checks",
+      "kind": "repeat_table_row",
+      "columns": [
+        "检查内容",
+        "记录与结论",
+        "记录人及时间",
+        "附件或证据"
+      ],
+      "repeat_source": "proposed_report_view.manual_checks",
+      "empty_policy": "explicit_status_message"
+    },
+    {
+      "id": "signoff",
+      "kind": "single_table_row",
+      "columns": [
+        "编制人",
+        "复核人",
+        "客户确认人",
+        "确认日期"
+      ],
+      "repeat_source": "proposed_report_view.signoff",
+      "empty_policy": "explicit_status_message"
+    },
+    {
+      "id": "deliverables",
+      "kind": "repeat_table_row",
+      "columns": [
+        "附件编号",
+        "文件名称",
+        "内容及范围",
+        "交付状态"
+      ],
+      "repeat_source": "proposed_report_view.deliverables",
+      "empty_policy": "explicit_status_message"
+    },
+    {
+      "id": "evidence",
+      "kind": "repeat_table_row",
+      "columns": [
+        "证据编号",
+        "关联检查或问题",
+        "设备与来源文件",
+        "采集时间"
+      ],
+      "repeat_source": "proposed_report_view.evidence",
+      "empty_policy": "explicit_status_message"
+    },
+    {
+      "id": "cpu",
+      "kind": "repeat_table_row",
+      "columns": [
+        "设备ID",
+        "SLOT",
+        "FIVE_SEC",
+        "ONE_MIN",
+        "FIVE_MIN"
+      ],
+      "repeat_source": "proposed_report_view.cpu",
+      "empty_policy": "preserve missing values; never fabricate",
+      "binding_status": "design_pending_source_mapping",
+      "presentation": "columns and order supplied by user screenshots"
+    },
+    {
+      "id": "memory",
+      "kind": "repeat_table_row",
+      "columns": [
+        "设备ID",
+        "SLOT",
+        "TOTAL_MEMORY",
+        "USED_MEMORY",
+        "USED_RATE"
+      ],
+      "repeat_source": "proposed_report_view.memory",
+      "empty_policy": "preserve missing values; never fabricate",
+      "binding_status": "design_pending_source_mapping",
+      "presentation": "columns and order supplied by user screenshots"
+    },
+    {
+      "id": "fan",
+      "kind": "repeat_table_row",
+      "columns": [
+        "设备ID",
+        "SLOT",
+        "FAN",
+        "STATE"
+      ],
+      "repeat_source": "proposed_report_view.fan",
+      "empty_policy": "preserve missing values; never fabricate",
+      "binding_status": "design_pending_source_mapping",
+      "presentation": "columns and order supplied by user screenshots"
+    },
+    {
+      "id": "power",
+      "kind": "repeat_table_row",
+      "columns": [
+        "设备ID",
+        "SLOT",
+        "POWERID",
+        "STATE",
+        "MODE",
+        "CURRENT",
+        "VOLTAGE",
+        "POWER"
+      ],
+      "repeat_source": "proposed_report_view.power",
+      "empty_policy": "preserve missing values; never fabricate",
+      "binding_status": "design_pending_source_mapping",
+      "presentation": "columns and order supplied by user screenshots"
+    },
+    {
+      "id": "interface_counters",
+      "kind": "repeat_table_row",
+      "columns": [
+        "设备ID",
+        "INTERFACE",
+        "TOTAL_PKTS",
+        "BROADCAST_PKTS",
+        "MULTICAST_PKTS",
+        "ERR_PKTS"
+      ],
+      "repeat_source": "proposed_report_view.interface_counters",
+      "empty_policy": "preserve missing values; never fabricate",
+      "binding_status": "design_pending_source_mapping",
+      "presentation": "columns and order supplied by user screenshots"
+    }
+  ],
+  "base_version": 1,
+  "revision_scope": "Only CPU, memory, fan, power and interface counters tables revised to user screenshots; v1 chapters retained"
+}

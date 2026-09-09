@@ -12,32 +12,43 @@ from src.core.patrol.event_rule_compiler import compile_event_rule_intents
 
 def test_frozen_semantics_survive_an_installed_catalog_upgrade(monkeypatch):
     from src.core.check_items import canonical
-    item = _catalog_item("interface.oper_status")
+
+    item = _catalog_item("interface.runtime_statistics")
     frozen = canonical.freeze_rule_semantics(item.canonical_contract)
+
     def compile_context():
-        return build_canonical_rule_context(check_item_id=item.id, check_item_version_id=item.version_id,
-            result_mode=item.result_mode, assessment_mode=item.assessment_mode, canonical_contract=frozen)
+        return build_canonical_rule_context(
+            check_item_id=item.id,
+            check_item_version_id=item.version_id,
+            result_mode=item.result_mode,
+            assessment_mode=item.assessment_mode,
+            canonical_contract=frozen,
+        )
+
     before = compile_context()
-    monkeypatch.setattr(canonical, "load_canonical_catalog", lambda: (_ for _ in ()).throw(AssertionError("must use frozen semantics")))
+    monkeypatch.setattr(
+        canonical,
+        "load_canonical_catalog",
+        lambda: (_ for _ in ()).throw(AssertionError("must use frozen semantics")),
+    )
     assert compile_context() == before
 
 
 def test_incomplete_frozen_semantics_cannot_fall_back_silently():
     from src.core.check_items.canonical import freeze_rule_semantics, rule_semantics_catalog
-    frozen = freeze_rule_semantics(_catalog_item("interface.oper_status").canonical_contract)
+
+    frozen = freeze_rule_semantics(_catalog_item("interface.runtime_statistics").canonical_contract)
     frozen["rule_semantics_snapshot"]["observations"] = []
     with pytest.raises(ValueError, match="do not cover"):
         rule_semantics_catalog(frozen)
 
 
 def _catalog_item(check_item_id: str):
-    return next(
-        item for item in load_catalog().check_items if item.id == check_item_id
-    )
+    return next(item for item in load_catalog().check_items if item.id == check_item_id)
 
 
 def test_rule_context_is_derived_only_from_check_item_canonical_semantics():
-    item = _catalog_item("interface.oper_status")
+    item = _catalog_item("interface.runtime_statistics")
 
     first = build_canonical_rule_context(
         check_item_id=item.id,
@@ -56,12 +67,15 @@ def test_rule_context_is_derived_only_from_check_item_canonical_semantics():
 
     assert first["digest"] == second["digest"]
     assert first["rule_asset_requirements"]["requires_observation_contract"] is False
-    assert "interface.oper_status" in first["rule_asset_requirements"][
-        "change_policy_observation_types"
-    ]
-    semantics = first["contract"]["state_semantics"]["oper_status"]
-    assert semantics["state_groups"]["healthy"] == ["up"]
-    assert "down" in semantics["state_groups"]["unhealthy"]
+    assert (
+        "interface.runtime_statistics.line_status"
+        in first["rule_asset_requirements"]["change_policy_observation_types"]
+    )
+    semantics = first["contract"]["state_semantics"]["line_status"]
+    assert semantics["event_on_change"] is True
+    assert semantics["event_constraints"]["required_event_classes"] == {
+        "interface.runtime_statistics.line_status.changed": "change"
+    }
     serialized = repr(first).casefold()
     assert "parser_template_id" not in serialized
     assert "dataset_id" not in serialized
@@ -69,7 +83,7 @@ def test_rule_context_is_derived_only_from_check_item_canonical_semantics():
 
 
 def test_rule_context_rejects_collection_evidence_in_contract():
-    item = _catalog_item("interface.oper_status")
+    item = _catalog_item("interface.runtime_statistics")
     contract = {**item.canonical_contract, "samples": [{"oper_status": "up"}]}
 
     with pytest.raises(ValueError, match="cannot contain collection evidence"):
@@ -83,7 +97,7 @@ def test_rule_context_rejects_collection_evidence_in_contract():
 
 
 def test_current_state_rule_uses_canonical_state_groups_without_samples():
-    item = _catalog_item("interface.oper_status")
+    item = _catalog_item("environment.fan")
     context = build_canonical_rule_context(
         check_item_id=item.id,
         check_item_version_id=item.version_id,
@@ -96,14 +110,14 @@ def test_current_state_rule_uses_canonical_state_groups_without_samples():
         candidate_rules=[],
         contract=context["contract"],
         change_policy={
-            "observation_type": "interface.oper_status",
+            "observation_type": "environment.fan.state",
             "semantic_type": "state",
             "compare_mode": "state_transition",
         },
         rule_asset_requirements={
             "requires_current_state_rule": True,
             "requires_event_rule": False,
-            "current_state_observation_types": ["interface.oper_status"],
+            "current_state_observation_types": ["environment.fan.state"],
         },
     )
 
@@ -111,14 +125,15 @@ def test_current_state_rule_uses_canonical_state_groups_without_samples():
     assert result["compiled"] is True
     assert result["rules"][0]["condition"]["kind"] == "entity_status_down"
     assert result["rules"][0]["condition"]["values"] == [
+        "absent",
         "down",
-        "error_disabled",
-        "unavailable",
+        "failed",
+        "faulty",
     ]
 
 
 def test_generates_change_and_event_candidates_without_collection_inputs():
-    item = _catalog_item("interface.oper_status")
+    item = _catalog_item("interface.runtime_statistics")
     context = build_canonical_rule_context(
         check_item_id=item.id,
         check_item_version_id=item.version_id,
@@ -135,12 +150,11 @@ def test_generates_change_and_event_candidates_without_collection_inputs():
         "sample_count": 0,
         "parser_template_count": 0,
     }
-    assert result["change_policies"][0]["source"] == (
-        "canonical_check_item_semantics"
-    )
-    assert {item["event_type"] for item in result["event_rules"]} == {
-        "InterfaceDown",
-        "InterfaceUp",
+    assert result["change_policies"][0]["source"] == ("check_item_all_value_changes")
+    assert len(result["event_rules"]) == 23
+    assert {rule["event_class"] for rule in result["event_rules"]} == {"change"}
+    assert {rule["event_type"] for rule in result["event_rules"]} == {
+        row["observation_type"] + ".changed" for row in item.canonical_contract["observations"]
     }
 
 
@@ -157,21 +171,30 @@ def test_health_target_without_state_groups_or_thresholds_is_blocked():
     result = generate_canonical_rule_candidates(context)
 
     assert result["success"] is False
-    assert result["blockers"] == [{
-        "code": "canonical_rule_semantics_missing",
-        "observation_type": "environment.temperature.current",
-        "message": (
-            "标准语义 B 声明需要健康判断，但尚未提供可执行的"
-            "状态分组或阈值约束。"
-        ),
-    }]
+    assert result["blockers"] == [
+        {
+            "code": "canonical_rule_semantics_missing",
+            "observation_type": "environment.temperature.current",
+            "message": ("标准语义 B 声明需要健康判断，但尚未提供可执行的状态分组或阈值约束。"),
+        }
+    ]
 
 
 @pytest.mark.parametrize(
     ("check_item_id", "observation_type", "warning_field", "alarm_field"),
     [
-        ("system.cpu_usage", "device.cpu.utilization", "cpu_high_warning_percent", "cpu_high_alarm_percent"),
-        ("system.memory_usage", "device.memory.utilization", "memory_high_warning_percent", "memory_high_alarm_percent"),
+        (
+            "system.cpu_usage",
+            "device.cpu.utilization",
+            "cpu_high_warning_percent",
+            "cpu_high_alarm_percent",
+        ),
+        (
+            "system.memory_usage",
+            "device.memory.utilization",
+            "memory_high_warning_percent",
+            "memory_high_alarm_percent",
+        ),
     ],
 )
 def test_cpu_and_memory_candidates_use_dynamic_thresholds_only(
@@ -191,8 +214,7 @@ def test_cpu_and_memory_candidates_use_dynamic_thresholds_only(
 
     result = generate_canonical_rule_candidates(context)
     policy = next(
-        row for row in result["change_policies"]
-        if row["observation_type"] == observation_type
+        row for row in result["change_policies"] if row["observation_type"] == observation_type
     )
 
     assert result["success"] is True
@@ -216,7 +238,8 @@ def test_optical_candidate_declares_linear_baseline_and_module_identity():
 
     result = generate_canonical_rule_candidates(context)
     rx = next(
-        row for row in result["change_policies"]
+        row
+        for row in result["change_policies"]
         if row["observation_type"] == "interface.optical.rx_power"
     )
 
@@ -226,7 +249,6 @@ def test_optical_candidate_declares_linear_baseline_and_module_identity():
         "identity_fields": ["part_number", "serial_number"],
     }
     baseline_rule = next(
-        row for row in result["event_rules"]
-        if row["event_type"] == "OpticalRxPowerDegraded"
+        row for row in result["event_rules"] if row["event_type"] == "OpticalRxPowerDegraded"
     )
     assert baseline_rule["condition"]["kind"] == "linear_power_baseline_loss"

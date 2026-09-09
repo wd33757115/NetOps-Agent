@@ -282,12 +282,12 @@ REPORT_VIEWS = (
             ReportColumn(
                 "oper_status",
                 "链路状态",
-                ("interface.oper_status",),
+                ("interface.runtime_statistics.line_status",),
             ),
             ReportColumn(
                 "protocol_status",
                 "协议状态",
-                ("interface.protocol_status",),
+                ("interface.runtime_statistics.protocol_status",),
             ),
             ReportColumn(
                 "ip_address",
@@ -297,17 +297,17 @@ REPORT_VIEWS = (
             ReportColumn(
                 "speed",
                 "速率",
-                ("interface.speed",),
+                ("interface.runtime_statistics.speed",),
             ),
             ReportColumn(
                 "duplex",
                 "双工",
-                ("interface.duplex",),
+                ("interface.runtime_statistics.duplex",),
             ),
             ReportColumn(
                 "description",
                 "描述",
-                ("interface.description",),
+                ("interface.runtime_statistics.description",),
             ),
         ),
     ),

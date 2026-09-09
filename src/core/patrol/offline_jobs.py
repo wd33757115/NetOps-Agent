@@ -22,6 +22,7 @@ from typing import Any
 from sqlalchemy import or_
 
 from src.core.check_items.command_adapter import is_direct_projection_adapter
+from src.core.check_items.numeric_health import policy_rule
 from src.core.check_items.report_contract import OFFLINE_HISTORICAL
 from src.core.check_items.runtime_bundle_assembly import RuntimeBundleAssemblyPlanner
 from src.core.patrol.change_event_repository import ChangeEventRepository
@@ -1560,6 +1561,17 @@ class OfflinePatrolJobService:
         if not run_id:
             raise ValueError("offline patrol job has not produced a patrol run")
         if kind == "excel":
+            if detail.get("purpose") == "offline_patrol":
+                from .detail_data import load_detail_data
+                from .detail_workbook import render_detail_workbook
+                from .report_service import report_context
+
+                report, source = report_context(job_id, owner_id=detail["owner_id"])
+                return (
+                    "patrol-details.xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    render_detail_workbook(report, source, load_detail_data(source)),
+                )
             summary = self._build_offline_leadership_summary(detail, run_id)
             return (
                 f"{job_id}-patrol-report.xlsx",
@@ -1567,6 +1579,14 @@ class OfflinePatrolJobService:
                 render_patrol_batch_xlsx(job_id, summary),
             )
         if kind == "report":
+            if detail.get("purpose") == "offline_patrol":
+                from .report_service import export_default
+
+                return (
+                    f"{job_id}-patrol-report.docx",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    export_default(job_id),
+                )
             report = self.build_leadership_report_data(
                 job_id,
                 detail=detail,
@@ -1611,6 +1631,7 @@ class OfflinePatrolJobService:
         run_id: str | None = None,
         analysis_attempt_id: str | None = None,
         include_raw_evidence: bool = False,
+        include_source: bool = False,
     ) -> dict[str, Any]:
         """Return the same compact fact model used by the downloadable DOCX report."""
 
@@ -1664,12 +1685,15 @@ class OfflinePatrolJobService:
                     "correlated_evidence": predecessor_report["correlated_evidence"],
                     "analysis": predecessor_report["evidence"]["analysis"],
                 }
-        return build_leadership_report(
+        report = build_leadership_report(
             job_id,
             summary,
             issuer="网络运维中心",
             recipient="项目建设单位",
         )
+        if include_source:
+            report["_source"] = summary
+        return report
 
     @staticmethod
     def _snapshot_comparison_evidence(snapshot: Any | None) -> dict[str, Any] | None:
@@ -1920,6 +1944,7 @@ class OfflinePatrolJobService:
                         "observation_contract_digest": metadata.get("observation_contract_digest"),
                         "context": metadata.get(APPLICABILITY_CONTEXT_KEY),
                         "dimensions": metadata.get("dimensions"),
+                        "metadata": metadata,
                     }
                 )
             frozen_attempt = (
@@ -1965,6 +1990,39 @@ class OfflinePatrolJobService:
             }
             for row in observation_facts
         ]
+        # Only the baseline explicitly selected for this job may supply health evidence.
+        from src.core.check_items.current_state import _attach_baselines
+
+        baseline_run_ids = {
+            str(period["patrol_run_id"])
+            for period in detail.get("periods") or []
+            if period.get("role") == "baseline" and period.get("patrol_run_id")
+        }
+        baseline_facts = []
+        if len(baseline_run_ids) == 1:
+            with get_db_session() as db:
+                for row in (
+                    db.query(StateObservationRecord)
+                    .filter(StateObservationRecord.run_id == next(iter(baseline_run_ids)))
+                    .all()
+                ):
+                    metadata = dict(row.metadata_json or {})
+                    baseline_facts.append(
+                        {
+                            "id": row.id,
+                            "snapshot_id": row.snapshot_id,
+                            "device_id": row.device_id,
+                            "entity_type": row.entity_type,
+                            "entity_key": row.entity_key,
+                            "field": row.field_name,
+                            "value": row.value_json,
+                            "unit": row.unit,
+                            "observed_at": row.observed_at.isoformat() if row.observed_at else "",
+                            "dimensions": metadata.get("dimensions") or {},
+                            "context": metadata.get(APPLICABILITY_CONTEXT_KEY) or {},
+                        }
+                    )
+        observations = _attach_baselines(observations, baseline_facts)
         if frozen_attempt is not None:
             bundle = frozen_attempt["rule_bundle"]
             rules = list(bundle.get("event_rules") or [])
@@ -1972,8 +2030,7 @@ class OfflinePatrolJobService:
             rule_digest = frozen_attempt["rule_bundle_digest"]
             rule_error = None
         elif (
-            detail.get("purpose") == "offline_patrol"
-            or detail.get("job_type") == "history_compare"
+            detail.get("purpose") == "offline_patrol" or detail.get("job_type") == "history_compare"
         ):
             try:
                 rules = EventRuleRepository().snapshot_active_rules()
@@ -1997,7 +2054,7 @@ class OfflinePatrolJobService:
                 rule_source=rule_source,
                 rule_bundle_digest=rule_digest,
             )
-            if rules
+            if rules or (rule_source != "not_applicable" and any(map(policy_rule, observations)))
             else {
                 "available": False,
                 "rule_source": rule_source,
@@ -2187,7 +2244,9 @@ class OfflinePatrolJobService:
             device_events = [
                 item for item in events if str(item.get("device_id") or "") == device_id
             ]
-            if rules:
+            if rules or (
+                rule_source != "not_applicable" and any(map(policy_rule, device_observations))
+            ):
                 device_assessment = evaluate_current_state(
                     device_observations,
                     rules,

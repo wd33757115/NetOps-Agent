@@ -15,6 +15,12 @@ from src.agents.supervisor.heuristic_plan import (
 from src.skill_system.router import SkillMatch
 
 
+def test_firewall_user_can_disable_merging():
+    params = build_heuristic_skill_params('firewall-policy-generator', '工单 T1，生成防火墙策略，不要合并', 'request.xlsx', 'T1')
+    assert params['merge_policies'] is False
+    assert params['policy_file_url'] == 'request.xlsx'
+
+
 def test_workflow_only_skills_excluded_from_heuristic_chain():
     query = "编写变更工单，工单号 REQ001，回调 ITSM"
     matches = [
@@ -96,3 +102,12 @@ def test_build_heuristic_skill_params_firewall():
 def test_workflow_only_skills_constant():
     assert "itsm-change-ticket-writer" in WORKFLOW_ONLY_SKILLS
     assert "itsm-callback" in WORKFLOW_ONLY_SKILLS
+
+
+def test_firewall_business_paths_opt_in():
+    for query, expected in [('生成防火墙策略，展示业务系统和拓扑路径', True),
+                            ('生成防火墙策略，不需要业务系统说明', False)]:
+        params = build_heuristic_skill_params('firewall-policy-generator', query, '/uploads/policy.xlsx', 'TEST')
+        assert params['include_business_paths'] is expected
+    params = build_heuristic_skill_params('firewall-policy-generator', '生成防火墙策略', '/uploads/policy.xlsx', 'TEST')
+    assert 'include_business_paths' not in params

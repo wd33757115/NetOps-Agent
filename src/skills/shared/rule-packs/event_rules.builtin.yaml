@@ -58,37 +58,6 @@ rules:
       fields: [memory, memory_usage, mem_usage, usage, used_percent, memory_used_percent]
       lt: 90
 
-  - name: interface-down
-    version: 1
-    event_type: InterfaceDown
-    severity: major
-    description: A network interface transitions from up to down, or is first observed operationally down.
-    condition:
-      kind: transition
-      observation_types: [interface.oper_status]
-      entity_types: [interface, interface_l2, interface_l3, physical_interface]
-      fields: [status, protocol, physical, physical_status, oper_status, line_protocol]
-      from_group: up
-      to_group: down
-      allow_initial_target: true
-
-  - name: interface-up
-    version: 1
-    event_type: InterfaceUp
-    severity: info
-    event_class: recovery
-    recovery:
-      resolves: [InterfaceDown]
-    description: A network interface recovers from down to up.
-    condition:
-      kind: transition
-      observation_types: [interface.oper_status]
-      entity_types: [interface, interface_l2, interface_l3, physical_interface]
-      fields: [status, protocol, physical, physical_status, oper_status, line_protocol]
-      from_group: down
-      to_group: up
-      allow_initial_target: false
-
   - name: bgp-neighbor-lost
     version: 1
     event_type: BGPNeighborLost

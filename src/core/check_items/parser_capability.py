@@ -289,22 +289,33 @@ def build_parser_field_naming_context(
             if str(field).strip()
         }
     )
+    strict_value_names = any(
+        item["canonical_contract"].get("value_contract") == "same-name/v1" for item in items
+    )
     return {
         "schema_version": "parser-field-naming-guidance/v1",
+        "strict_value_names": strict_value_names,
         "resolved": bool(items),
         "semantic_profile_id": semantic_profile_id,
         "preferred_value_names": preferred_value_names,
         "check_items": items,
         "policy": {
             "preference": (
+                "Use exactly the canonical field and identity names declared by the CheckItem."
+                if strict_value_names else
                 "Use the check-item preferred name when it faithfully represents "
                 "the visible source value, unit and record grain."
             ),
             "fallback": (
+                "Do not invent aliases, auxiliary Values or conversions. Missing source values "
+                "remain absent; report unsupported required fields for human intervention."
+                if strict_value_names else
                 "When semantics differ, keep a clear source-faithful snake_case name "
                 "and leave canonical mapping to the approved ObservationContract."
             ),
             "validation": (
+                "Undeclared Value names or missing required fields must fail validation."
+                if strict_value_names else
                 "A naming difference alone must never invalidate an executable Parser."
             ),
         },

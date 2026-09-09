@@ -115,10 +115,7 @@ def test_bootstrap_shared_templates_discovers_filesystem_assets_without_manifest
     registered = repositories[0].registered[0]
     assert registered["category"] == "interface_l2"
     assert registered["validation"]["entity_type"] == "interface_l2"
-    assert registered["validation"]["state_semantics"]["status"] == {
-        "semantic_type": "state",
-        "observation_type": "interface.oper_status",
-    }
+    assert registered["validation"]["state_semantics"] == {}
 
 
 def test_contract_defaults_define_optical_observation_contract():

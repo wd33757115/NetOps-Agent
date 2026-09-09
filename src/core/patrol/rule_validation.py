@@ -998,32 +998,6 @@ def builtin_event_rule_validation_cases() -> list[EventRuleValidationCase]:
             },
         ),
         EventRuleValidationCase(
-            name="initial-interface-down",
-            change={
-                "entity_type": "interface_l3",
-                "entity_key": "interface=interface-1",
-                "field": "protocol",
-                "old": None,
-                "new": "down",
-                "change_type": "initial",
-            },
-            expected_event_type="InterfaceDown",
-            expected_rule_id="interface-down",
-        ),
-        EventRuleValidationCase(
-            name="interface-up",
-            change={
-                "entity_type": "interface_l2",
-                "entity_key": "interface=interface-1",
-                "field": "status",
-                "old": "notconnect",
-                "new": "connected",
-                "change_type": "modified",
-            },
-            expected_event_type="InterfaceUp",
-            expected_rule_id="interface-up",
-        ),
-        EventRuleValidationCase(
             name="initial-interface-admin-disabled",
             change={
                 "entity_type": "interface_l2",

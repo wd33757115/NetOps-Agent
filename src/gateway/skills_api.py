@@ -160,7 +160,7 @@ async def reload_skill(skill_name: str):
 
 
 @router.post("/{skill_name}/test-run")
-async def test_run_skill(skill_name: str, request: SkillTestRunRequest = SkillTestRunRequest()):
+def test_run_skill(skill_name: str, request: SkillTestRunRequest = SkillTestRunRequest()):
     """同步试跑 Skill（用于向导内测试）。"""
     from src.core.skills.executor import SkillExecutionError, execute_skill
 

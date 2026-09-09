@@ -55,6 +55,11 @@ def _params_firewall_policy(
     params: dict[str, Any] = {"ticket_title": "防火墙策略生成"}
     if uploaded_file_path:
         params["policy_file_url"] = uploaded_file_path
+    if any(word in query for word in ("不要合并", "不合并", "关闭合并")):
+        params["merge_policies"] = False
+    if any(word in query for word in ("业务系统", "业务路径", "业务访问关系")):
+        params["include_business_paths"] = not any(word in query for word in (
+            "不要业务", "不需要业务", "关闭业务", "不展示业务", "不显示业务"))
     return params
 
 

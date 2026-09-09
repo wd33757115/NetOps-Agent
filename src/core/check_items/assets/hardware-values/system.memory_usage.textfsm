@@ -1,0 +1,19 @@
+Value Required slot (\d+)
+Value memory_total_kb (\d+)
+Value memory_used_kb (\d+)
+Value memory_free_kb (\d+)
+Value memory_shared_kb (\d+)
+Value memory_buffers_kb (\d+)
+Value memory_cached_kb (\d+)
+Value memory_free_percent (\d+(?:\.\d+)?)
+Value memory_usage_percent (\d+(?:\.\d+)?)
+Value memory_high_warning_percent (\d+(?:\.\d+)?)
+Value memory_high_alarm_percent (\d+(?:\.\d+)?)
+
+Start
+  ^\s*Memory statistics are measured in KB:\s*$$ -> Memory
+
+Memory
+  ^\s*Slot\s+\d+\s*: -> Continue.Record
+  ^\s*Slot\s+${slot}:\s*$$
+  ^\s*Mem:\s+${memory_total_kb}\s+${memory_used_kb}\s+${memory_free_kb}\s+${memory_shared_kb}\s+${memory_buffers_kb}\s+${memory_cached_kb}\s+${memory_free_percent}%\s*$$

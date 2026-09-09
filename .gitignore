@@ -133,6 +133,7 @@ temp/
 # Excel / Office temp files
 # ============================================================
 *.xlsx
+!web/react_frontend/public/templates/firewall-policy-request.xlsx
 ~$*.xlsx
 ~$*.docx
 ~$*.pptx
@@ -175,6 +176,7 @@ src/skills/shared/textfsm-templates/H3C/*
 src/skills/shared/textfsm-templates/H3C/Comware7/*
 !src/skills/shared/textfsm-templates/H3C/Comware7/display_transceiver_diagnosis_interface__1.0.0.textfsm
 !src/skills/shared/textfsm-templates/H3C/Comware7/display_transceiver_diagnosis_interface_thresholds__1.0.0.textfsm
+!src/skills/shared/textfsm-templates/H3C/Comware7/display_interface_values__1.0.0.textfsm
 src/skills/shared/outputs/*
 !src/skills/shared/outputs/.gitkeep
 templates/**/*.textfsm

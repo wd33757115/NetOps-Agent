@@ -5,6 +5,8 @@
 import logging
 import os
 from typing import List
+from hashlib import sha256
+from policy_sets import cidrs, addresses, address_text
 
 logger = logging.getLogger(__name__)
 
@@ -290,13 +292,17 @@ class H3CF1000ConfigGenerator:
             config.extend(H3CF1000ConfigGenerator._format_address(src, src_group_name, src_index, is_source=True))
             src_index += 5  # 索引递增 5
 
-        # # 生成目的地址组
+        config.append("quit")
+
+        # 生成目的地址组
         dst_group_name = f"Dst_{ticket_id}_{rule_index}"
         dst_index = 0
         config.append(f"object-group ip address {dst_group_name}")
         for dst in rule_data.get("destinations", []):
             config.extend(H3CF1000ConfigGenerator._format_address(dst, dst_group_name, dst_index, is_source=False))
             dst_index += 5
+
+        config.append("quit")
 
         # 生成服务组
         service_name = f"{proto}_{ticket_id}_{rule_index}"
@@ -306,10 +312,12 @@ class H3CF1000ConfigGenerator:
         else:
             config.append(f"0 service {proto}")
 
+        config.append("quit")
+
         # 生成安全策略
         config.extend([
             f"security-policy ip",
-            f" rule {rule_index} name {ticket_id}_{rule_index}",
+            f" rule name {ticket_id}_{rule_index}",
             f"  description {ticket_id}",
             f"  source-zone {src_zone}",
             f"  destination-zone {dst_zone}",
@@ -317,7 +325,6 @@ class H3CF1000ConfigGenerator:
             f"  destination-ip {dst_group_name}",
             f"  service {service_name}",
             f"  action {'pass' if rule_data.get('action', '').lower() == 'permit' else 'drop'}",
-            f"  move rule name xxx bottom",
             f"  quit\n"
         ])
         return config
@@ -343,33 +350,8 @@ class H3CF1000ConfigGenerator:
 class TopSecConfigGenerator:
     @staticmethod
     def _format_address(ip_str: str) -> List[str]:
-        """格式化天融信防火墙的源/目的地址"""
-        if not ip_str or ip_str.strip() == "":
-            logger.warning(f"无效的IP地址: {ip_str}，跳过处理")
-            return ["source-address 0.0.0.0 255.255.255.255"]
-
-        # 处理完整范围格式，如 "10.16.152.91-10.16.152.92"
-        if '-' in ip_str and ip_str.count('.') == 6:
-            start_ip, end_ip = ip_str.split('-')
-            start = int(start_ip.split('.')[-1])
-            end = int(end_ip.split('.')[-1])
-            base_ip = start_ip.rsplit('.', 1)[0]
-            return [f"source-address {base_ip}.{i} 255.255.255.255" for i in range(start, end + 1)]
-
-        # 处理简写范围格式，如 "10.253.22.24-28"
-        elif '-' in ip_str and not ip_str.startswith('range'):
-            base_ip = ip_str.rsplit('.', 1)[0]
-            range_part = ip_str.split('.')[-1]
-            start, end = map(int, range_part.split('-'))
-            return [f"source-address {base_ip}.{i} 255.255.255.255" for i in range(start, end + 1)]
-
-        elif '/' in ip_str:
-            ip, mask = ip_str.split('/')
-            mask_int = int(mask)
-            subnet_mask = '.'.join([str((0xFFFFFFFF << (32 - mask_int)) >> (24 - 8*i) & 0xFF) for i in range(4)])
-            return [f"source-address {ip} {subnet_mask}"]
-
-        return [f"source-address {ip_str} 255.255.255.255"]
+        # Exact CIDR decomposition supports cross-subnet ranges without expanding hosts.
+        return [f"source-address {net.network_address} {net.netmask}" for net in cidrs(ip_str)]
 
     @staticmethod
     def _format_ports(ports: set) -> str:
@@ -429,88 +411,48 @@ class TopSecConfigGenerator:
         logger.info(f"生成天融信防火墙配置: {output_path}")
 
 class HillstoneConfigGenerator:
+    """StoneOS 5.5 policy/service syntax; see vendor references in README.md."""
     @staticmethod
-    def _format_address(ip_str: str) -> List[str]:
-        """格式化山石防火墙的源/目的地址"""
-        if not ip_str or ip_str.strip() == "":
-            logger.warning(f"无效的IP地址: {ip_str}，跳过处理")
-            return ["address 0.0.0.0 mask 255.255.255.255"]
-
-        # 处理完整范围格式，如 "10.16.152.91-10.16.152.92"
-        if '-' in ip_str and ip_str.count('.') == 6:
-            start_ip, end_ip = ip_str.split('-')
-            start = int(start_ip.split('.')[-1])
-            end = int(end_ip.split('.')[-1])
-            base_ip = start_ip.rsplit('.', 1)[0]
-            return [f"address {base_ip}.{i} mask 255.255.255.255" for i in range(start, end + 1)]
-
-        # 处理简写范围格式，如 "10.253.22.24-28"
-        elif '-' in ip_str and not ip_str.startswith('range'):
-            base_ip = ip_str.rsplit('.', 1)[0]
-            range_part = ip_str.split('.')[-1]
-            start, end = map(int, range_part.split('-'))
-            return [f"address {base_ip}.{i} mask 255.255.255.255" for i in range(start, end + 1)]
-
-        elif '/' in ip_str:
-            ip, mask = ip_str.split('/')
-            mask_int = int(mask)
-            subnet_mask = '.'.join([str((0xFFFFFFFF << (32 - mask_int)) >> (24 - 8*i) & 0xFF) for i in range(4)])
-            return [f"address {ip} mask {subnet_mask}"]
-
-        return [f"address {ip_str} mask 255.255.255.255"]
-
-    @staticmethod
-    def _format_ports(ports: set) -> str:
-        """格式化山石防火墙的服务端口"""
-        if not ports:
-            return ""
-        formatted = []
-        for p in sorted(ports, key=lambda x: int(x.split('-')[0]) if '-' in x else int(x)):
-            if '-' in p:
-                start, end = p.split('-')
-                formatted.append(f"{start}-{end}")
+    def _format_address(ip_str: str, is_source=True) -> List[str]:
+        prefix = "src" if is_source else "dst"
+        result = []
+        for value in address_text(addresses(ip_str)):
+            if "-" in value:
+                first, last = value.split("-")
+                result.append(f"{prefix}-range {first} {last}")
             else:
-                formatted.append(p)
-        return ' '.join(formatted)
+                result.append(f"{prefix}-ip {value}/32")
+        return result
 
     @staticmethod
     def _generate_rule(rule_data: dict, rule_index: int) -> List[str]:
-        """生成山石防火墙的安全策略规则"""
-        src_zone, dst_zone = rule_data['rule_key']
-        ticket_id = rule_data['ticket_id']
-        config = [
-            f"policy security",
-            f" rule {rule_index} name {ticket_id}-{rule_index}",
-            f"  source zone {src_zone}",
-            f"  destination zone {dst_zone}"
-        ]
-        for src in rule_data.get("sources", []):
-            config.extend([f"  {line}" for line in HillstoneConfigGenerator._format_address(src)])
-        for dst in rule_data.get("destinations", []):
-            config.extend([f"  {line.replace('source', 'destination')}" for line in HillstoneConfigGenerator._format_address(dst)])
-        if ports := rule_data.get("ports"):
-            ports_str = HillstoneConfigGenerator._format_ports(ports)
-            proto = rule_data['proto'] if rule_data['proto'] else 'ip'
-            config.append(f"  service {proto} {ports_str}")
-        else:
-            proto = rule_data['proto'] if rule_data['proto'] else 'ip'
-            config.append(f"  service {proto}")
-        action = "permit" if rule_data.get("action", "").lower() == "permit" else "deny"
-        config.append(f"  action {action}")
-        return config
+        proto = rule_data['proto']
+        service_names = []
+        commands = []
+        # One interval per service object stays within the documented 8-entry limit.
+        for port in rule_data['ports']:
+            signature = f"{rule_data['ticket_id']}:{proto}:{port}"
+            name = 'NP_' + sha256(signature.encode()).hexdigest()[:24]
+            service_names.append(name)
+            commands += [f"service {name}", f" {proto} dst-port {port.replace('-', ' ')}", 'exit']
+        if proto == 'icmp':
+            service_names = ['ICMP']
+        commands += ['policy-global', 'rule', f" name {rule_data['ticket_id']}_{rule_index}",
+                     f" src-zone {rule_data['rule_key'][0]}", f" dst-zone {rule_data['rule_key'][1]}"]
+        for source in rule_data['sources']:
+            commands.extend(HillstoneConfigGenerator._format_address(source, True))
+        for destination in rule_data['destinations']:
+            commands.extend(HillstoneConfigGenerator._format_address(destination, False))
+        commands.extend(f" service {name}" for name in service_names)
+        commands += [' action permit', 'exit', 'exit']
+        return commands
 
     @staticmethod
     def generate(output_dir: str, fw_name: str, rules: List[dict]):
-        """生成山石防火墙的配置"""
-        config = ["configure"]
-        rule_index = 1
-        for rule_data in rules:
-            config.extend(HillstoneConfigGenerator._generate_rule(rule_data, rule_index))
-            config.append("")
-            rule_index += 1
-        config.append("exit")
+        config = ['configure']
+        for index, rule in enumerate(rules, 1):
+            config.extend(HillstoneConfigGenerator._generate_rule(rule, index))
+        config.append('exit')
         os.makedirs(output_dir, exist_ok=True)
-        output_path = os.path.join(output_dir, f"{fw_name}.cfg")
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write("\n".join([line for line in config if line.strip()]))
-        logger.info(f"生成山石防火墙配置: {output_path}")
+        with open(os.path.join(output_dir, f"{fw_name}.cfg"), 'w', encoding='utf-8') as stream:
+            stream.write('\n'.join(config))

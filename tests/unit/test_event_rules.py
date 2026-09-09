@@ -687,9 +687,8 @@ def test_builtin_event_rules_are_loaded_from_rule_pack():
     definitions = default_event_rule_definitions()
     by_id = {definition.rule_id: definition for definition in definitions}
 
-    assert by_id["interface-down"].condition["kind"] == "transition"
-    assert by_id["interface-down"].condition["allow_initial_target"] is True
-    assert "interface_l3" in by_id["interface-down"].condition["entity_types"]
+    assert "interface-down" not in by_id
+    assert "interface-up" not in by_id
     assert by_id["power-failed"].condition["entity_types"] == [
         "power",
         "power_supply",
@@ -710,7 +709,7 @@ def test_event_rule_pack_validation_generates_rule_cases():
     result = validate_event_rule_pack()
 
     assert result["success"] is True
-    assert result["rule_count"] >= 10
+    assert result["rule_count"] == len(default_event_rule_definitions())
     assert result["generated_case_count"] >= result["rule_count"]
     assert result["invariant_case_count"] == len(builtin_event_rule_validation_cases())
 

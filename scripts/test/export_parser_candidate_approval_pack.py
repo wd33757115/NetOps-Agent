@@ -52,14 +52,6 @@ DEFAULT_CANDIDATES = (
         "6a883f4d-04df-4595-81ba-637dbeabfccc",
     ),
     (
-        "interface.oper_status",
-        "51c7dabd-57f1-409e-a1e2-649fee11fd85",
-    ),
-    (
-        "interface.oper_status",
-        "28c056b9-74f9-4f88-88e1-d67dccd51fb6",
-    ),
-    (
         "interface.optical_power",
         "bd1b9a28-e780-4057-84f2-28d47fbf5ddc",
     ),

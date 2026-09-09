@@ -5,6 +5,7 @@ export interface CommandAutopilot {
   stage: string
   stage_label: string
   can_edit: boolean
+  same_name_values?: boolean
   error?: string | null
   updated_at?: string
   publish_grant?: { by: string; expires_at: string } | null

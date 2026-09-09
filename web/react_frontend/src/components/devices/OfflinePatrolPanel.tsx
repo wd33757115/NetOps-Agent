@@ -26,6 +26,7 @@ import { useIsMobile } from '../../hooks/useBreakpoint'
 import { downloadBlob } from '../../utils/storageLocalOpen'
 import WorkflowRunMonitor from '../skills/WorkflowRunMonitor'
 import OfflinePatrolResultPanel from './OfflinePatrolResultPanel'
+import PatrolReportDialog from './PatrolReportDialog'
 import OfflineRuleAssetPipeline from './OfflineRuleAssetPipeline'
 import OfflineCurrentAuthorityPanel from './OfflineCurrentAuthorityPanel'
 import OfflineCommandAssetUnits from './OfflineCommandAssetUnits'
@@ -584,6 +585,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
   }
 
   const downloadArtifact = async (job: OfflinePatrolJob, kind: 'raw' | 'changes' | 'events' | 'report' | 'excel') => {
+    if (kind === 'report' && !isAssetSource) { setReportJobId(job.id); return }
     setArtifactLoading(kind)
     try {
       const blob = await jobApi.artifact(job.id, kind)
@@ -808,8 +810,10 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
       ? ['current']
       : ['baseline', 'current']
 
+  const [reportJobId, setReportJobId] = useState<string>()
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      {reportJobId && <PatrolReportDialog key={reportJobId} jobId={reportJobId} onClose={() => setReportJobId(undefined)} />}
       {!isDetailPage && <>
       <div className="patrol-history__header">
         <Space direction="vertical" size={0}>
@@ -1560,6 +1564,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
           { key: 'result', label: isAssetSource ? '验证结果' : '巡检结果', children: detail.job_type === 'parser_validation'
             ? <Descriptions bordered size="small" column={isMobile ? 1 : 3}><Descriptions.Item label="Snapshot">{String(detail.result?.snapshot_count ?? '-')}</Descriptions.Item><Descriptions.Item label="新增">{String(detail.result?.new_snapshot_count ?? '-')}</Descriptions.Item><Descriptions.Item label="重复">{String(detail.result?.duplicate_snapshot_count ?? '-')}</Descriptions.Item></Descriptions>
             : <OfflinePatrolResultPanel
+                jobId={isAssetSource ? undefined : detail.id}
                 canManageRules={canConfigure}
                 purpose={purpose}
                 report={analysisQuery.data}

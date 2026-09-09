@@ -142,7 +142,7 @@ async def proxy_skill_test_run(request: HttpRequest, skill_name: str) -> JsonRes
         method="POST",
         fastapi_path=f"/api/v1/skills/{skill_name}/test-run",
         request_id=request.bff_request_id,
-        timeout=TASK_TIMEOUT,
+        timeout=330 if skill_name in {"firewall-policy-generator", "itsm-change-ticket-writer"} else TASK_TIMEOUT,
         data=parse_json_body(request),
         extra_headers=forward_client_headers(request),
     )

@@ -254,7 +254,7 @@ driver_version, state_reason, or uptime in domain_semantic_type instead.
 For each independently comparable operational value, set a stable,
 vendor-neutral observation_type, comparison_role=observation, and monitor=true.
 Observation types must use at least two lowercase dot-separated namespaces,
-for example interface.oper_status; never use a bare field alias such as
+for example interface.runtime_statistics.line_status; never use a bare field alias such as
 link_state. Treat parser field names as source-specific implementation details:
 different vendors and commands that describe the same operational fact must map
 to the same canonical observation_type. Multiple source fields may map to the
@@ -424,8 +424,17 @@ values exactly and do not infer replacements from the sample distribution."""
             common
             + f"""
 
-Create a small EventRule set for the supplied Contract and ChangePolicy. Allowed
-condition.kind values are: {kinds}. Conditions may reference only declared
+Create a small EventRule set for the supplied Contract and ChangePolicy.
+An approved health_policy in CheckItem semantics is executed separately as current
+health assessment. Preserve its device threshold sources, measurement window and
+declared baseline mode. In trend_only mode, device thresholds determine health;
+linear_power_drop compares directional optical power loss, and utilization_increase
+only reports sufficient load increases. Trends never become fault events, and an
+abnormal baseline returning inside device bounds represents recovery. Preserve
+legacy frozen policies when replaying historical versions. Never invent thresholds.
+State transitions alone do not establish
+that an unused interface is faulty; expected-state requirements remain mandatory.
+Allowed condition.kind values are: {kinds}. Conditions may reference only declared
 fields and entity types. When canonical_entity_type is present, all EventRule
 conditions must use it because StateObservation runtime identity has already
 been projected from the parser-native entity_type. Generate fault and recovery

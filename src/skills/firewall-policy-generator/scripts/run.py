@@ -16,7 +16,6 @@ from datetime import datetime
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-SKILL_ROOT = SCRIPT_DIR.parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
@@ -37,27 +36,33 @@ def main() -> int:
 
     with open(args.params, encoding="utf-8-sig") as f:
         p = json.load(f)
+    for key, default in (("merge_policies", True), ("include_business_paths", False)):
+        if not isinstance(p.get(key, default), bool):
+            print(json.dumps({"success": False, "error": f"{key} 必须为 true 或 false"}, ensure_ascii=False), file=sys.stderr)
+            return 1
 
     ticket_id = (p.get("ticket_id") or "").strip() or f"POLICY_{datetime.now().strftime('%Y%m%d%H%M%S')}"
     os.makedirs(args.output_dir, exist_ok=True)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         policy_path = args.policy or p.get("policy_file_url") or p.get("_policy_path")
-        if not policy_path or not os.path.exists(str(policy_path)):
-            default = SCRIPT_DIR / "policies.xlsx"
-            if not default.exists():
-                default = SKILL_ROOT.parent / "firewall-policy-generator" / "scripts" / "policies.xlsx"
-            policy_path = str(default) if default.exists() else None
         if not policy_path:
-            print(json.dumps({"success": False, "error": "未提供策略文件"}, ensure_ascii=False), file=sys.stderr)
+            print(json.dumps({"success": False, "error": "请上传策略申请表；工单号本身不包含需要放行的地址和端口"}, ensure_ascii=False), file=sys.stderr)
+            return 1
+        if not Path(policy_path).is_file():
+            print(json.dumps({"success": False, "error": "策略申请表不存在或无法读取，请重新上传 Excel 文件"}, ensure_ascii=False), file=sys.stderr)
             return 1
 
-        policy_copy = os.path.join(tmpdir, f"policy_{ticket_id}.xlsx")
+        policy_copy = os.path.join(tmpdir, "policy.xlsx")
         shutil.copy(str(policy_path), policy_copy)
 
         topology = p.get("topology_file_url") or str(DEFAULT_TOPOLOGY)
-        if not os.path.exists(str(topology)):
-            topology = str(DEFAULT_TOPOLOGY)
+        if not Path(topology).is_file():
+            print(json.dumps({"success": False, "error": "指定的拓扑文件不存在或无法读取"}, ensure_ascii=False), file=sys.stderr)
+            return 1
+
+        # Only publish this run's verified files; stale output cannot count as success.
+        generated_dir = os.path.join(tmpdir, "generated")
 
         cmd = [
             sys.executable,
@@ -67,20 +72,29 @@ def main() -> int:
             "-p",
             policy_copy,
             "-o",
-            args.output_dir,
+            generated_dir,
             "-u",
             p.get("requester") or "system",
             "--ticket-id",
             ticket_id,
+            "--input-name",
+            p.get("policy_input_name") or Path(policy_path).name,
         ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300, cwd=str(SCRIPT_DIR))
+        if p.get("merge_policies") is False:
+            cmd.append("--no-merge")
+        if p.get("include_business_paths") is True:
+            cmd.append("--business-paths")
+        env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", env=env, timeout=300, cwd=str(SCRIPT_DIR))
         if proc.returncode != 0:
-            err = {"success": False, "error": proc.stderr or proc.stdout or "策略生成失败"}
+            error_lines = [line for line in proc.stderr.splitlines() if line.startswith("策略生成失败：")]
+            err = {"success": False, "error": error_lines[-1] if error_lines else (proc.stderr or proc.stdout or "策略生成失败")}
             print(json.dumps(err, ensure_ascii=False), file=sys.stderr)
             return 1
 
         manifest = build_manifest_from_output(
-            args.output_dir,
+            generated_dir,
             ticket_id=ticket_id,
             ticket_title=p.get("ticket_title", "防火墙策略生成"),
             change_background=p.get("change_background") or p.get("ticket_title", ""),
@@ -93,22 +107,25 @@ def main() -> int:
             topology_path=str(topology),
             trace_id=p.get("workflow_run_id"),
         )
-        write_manifest_file(args.output_dir, manifest)
-
-        zip_name = f"firewall_policies_{ticket_id}.zip"
-        zip_base = os.path.join(tmpdir, zip_name.replace(".zip", ""))
-        shutil.make_archive(zip_base, "zip", args.output_dir)
-        zip_path = zip_base + ".zip"
+        if not manifest["scripts"] or any(not script["commands"].strip() for script in manifest["scripts"]):
+            print(json.dumps({"success": False, "error": "未生成有效设备配置，已取消导出。请检查策略输入和拓扑。"}, ensure_ascii=False), file=sys.stderr)
+            return 1
+        write_manifest_file(generated_dir, manifest)
+        shutil.copytree(generated_dir, args.output_dir, dirs_exist_ok=True)
+        plan = json.loads((Path(generated_dir) / 'policy_plan.json').read_text(encoding='utf-8'))
 
         result = {
             "success": True,
             "status": "success",
-            "message": "防火墙策略生成成功",
+            "message": f"防火墙策略生成成功，共 {manifest['device_count']} 台设备",
             "ticket_id": ticket_id,
-            "filename": zip_name,
             "manifest": manifest,
-            "_local_zip": zip_path,
+            "policy_plan_id": plan["plan_id"],
+            "optimization": plan["optimization"],
         }
+        # The app requests the structured plan; chat keeps its compact result.
+        if p.get("include_policy_plan") is True:
+            result["policy_plan"] = plan
         print(json.dumps(result, ensure_ascii=False, default=str))
         return 0
 

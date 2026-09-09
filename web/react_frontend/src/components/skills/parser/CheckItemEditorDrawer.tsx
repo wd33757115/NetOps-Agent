@@ -43,6 +43,7 @@ interface CheckItemFormValues {
   description?: string
   result_mode: CheckItemCatalogCheckItemDraftInput['result_mode']
   assessment_mode: CheckItemCatalogCheckItemDraftInput['assessment_mode']
+  change_events?: boolean
   entity_type: string
   identity_dimensions: string[]
   canonical_fields: Array<{
@@ -87,6 +88,7 @@ const initialValues = (checkItem?: ParserCheckItem): CheckItemFormValues => {
     description: checkItem?.description || '',
     result_mode: (checkItem?.result_mode || 'structured') as CheckItemFormValues['result_mode'],
     assessment_mode: (checkItem?.assessment_mode || 'health') as CheckItemFormValues['assessment_mode'],
+    change_events: typeof contract.change_events === 'boolean' ? contract.change_events : checkItem ? undefined : false,
     entity_type: String(contract.entity_type || 'device'),
     identity_dimensions: Array.isArray(contract.identity_dimensions)
       ? contract.identity_dimensions.map(String)
@@ -209,6 +211,7 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
     }
     return {
       ...canonicalBase,
+      ...(typeof values.change_events === 'boolean' ? { change_events: values.change_events, value_contract: 'same-name/v1' } : {}),
       entity_type: values.entity_type,
       identity_dimensions: values.identity_dimensions || [],
       observations,
@@ -299,7 +302,7 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
         category: values.category.trim(),
         description: values.description?.trim(),
         result_mode: values.result_mode,
-        assessment_mode: values.assessment_mode,
+        assessment_mode: values.change_events === true && values.assessment_mode === 'evidence' ? 'change' : values.assessment_mode,
         canonical_contract: canonicalContract,
         report_projection: values.report_projection.trim(),
         applicability,
@@ -389,6 +392,9 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
               { value: 'hash_only', label: '原文哈希变化' },
               { value: 'evidence_only', label: '仅保留证据' },
             ]} />
+          </Form.Item>
+          <Form.Item label="启用全部字段变化事件" name="change_events" valuePropName="checked" extra="开启后每个检查字段的变化都会产生信息事件；对象标识用于匹配。TextFSM Value 必须使用这里定义的字段名。">
+            <Switch />
           </Form.Item>
           <Form.Item label="评估模式" name="assessment_mode" rules={[{ required: true }]}>
             <Select options={[
@@ -513,7 +519,7 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
               type="info"
               showIcon
               message="变化策略和事件规则只读取这里的标准语义"
-              description="厂商样本与 TextFSM 只负责把原始输出投影为标准观测，不参与规则生成。状态值域、阈值、恢复条件与事件名称由检查项版本统一定义。"
+              description="检查项统一定义字段名称和语义。新契约要求 TextFSM 使用同名 Value；启用全部字段变化事件后，系统直接为每个检查字段生成变化规则与信息事件。"
               style={{ marginBottom: 16 }}
             />
             <Space direction="vertical" size={8} style={{ width: '100%' }}>

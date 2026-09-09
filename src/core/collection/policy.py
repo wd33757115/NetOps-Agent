@@ -337,18 +337,23 @@ class CollectionPolicyResolver:
             commands = [str(item) for item in configured]
             policy_source = "device_attributes"
         else:
-            if device.get("command_file"):
+            # Patrol bindings supersede the historical command_file. Other
+            # collection actions retain their existing device-profile priority.
+            if action != "patrol" and device.get("command_file"):
                 active_profile = self._load_active_profile(profile_name, action)
                 policy_source = "device_profile" if active_profile else "default"
             if not active_profile:
                 active_profile = self._load_bound_profile(device, action)
-                if active_profile:
-                    profile_name = str(active_profile["profile_name"])
-                    policy_source = "profile_binding"
-                    binding_id = str(active_profile["binding_id"])
-                    selector = dict(active_profile["selector"])
-            profile_version_id = profile_version_id or (
-                active_profile.get("profile_version_id") if active_profile else None
+            if active_profile and active_profile.get("binding_id"):
+                profile_name = str(active_profile["profile_name"])
+                policy_source = "profile_binding"
+                binding_id = str(active_profile["binding_id"])
+                selector = dict(active_profile["selector"])
+            elif not active_profile and device.get("command_file"):
+                active_profile = self._load_active_profile(profile_name, action)
+                policy_source = "device_profile" if active_profile else "default"
+            profile_version_id = (
+                active_profile.get("profile_version_id") if active_profile else profile_version_id
             )
             commands = list(active_profile["commands"]) if active_profile else []
             check_item_ids = tuple(
@@ -356,14 +361,14 @@ class CollectionPolicyResolver:
                 if active_profile
                 else ()
             )
-        if profile_version_id and not check_item_ids:
+        if profile_version_id and not check_item_ids and not commands:
             check_item_ids = self._load_profile_check_item_ids(
                 str(profile_version_id)
             )
         unique_commands: list[str] = []
         seen_commands: set[str] = set()
         for command in commands:
-            normalized = " ".join(str(command).strip().lower().split())
+            normalized = str(command).strip()
             if not normalized or normalized in seen_commands:
                 continue
             seen_commands.add(normalized)
@@ -886,6 +891,24 @@ class CommandProfileRepository:
                     raise ValueError(
                         "only an active patrol profile version can be enabled"
                     )
+            replaced_binding_ids = []
+            if status == "active":
+                peers = db.query(CollectionProfileBindingRecord).filter(
+                    CollectionProfileBindingRecord.status == "active",
+                    CollectionProfileBindingRecord.id != row.id,
+                ).all()
+                actions = {item.get("action") or "patrol" for item in version.items_json or []} or {"patrol"}
+                for peer in peers:
+                    if dict(peer.selector_json or {}) == dict(row.selector_json or {}):
+                        peer_version = db.get(CommandProfileVersionRecord, peer.profile_version_id)
+                        if peer_version is None:
+                            continue
+                        peer_actions = {item.get("action") or "patrol" for item in peer_version.items_json or []} or {"patrol"}
+                        if peer_actions != actions:
+                            continue
+                        peer.status = "disabled"
+                        peer.updated_at = datetime.now(timezone.utc)
+                        replaced_binding_ids.append(str(peer.id))
             previous_status = row.status
             row.status = status
             now = datetime.now(timezone.utc)
@@ -900,6 +923,7 @@ class CommandProfileRepository:
                     "binding_id": binding_id,
                     "from_status": previous_status,
                     "to_status": status,
+                    "replaced_binding_ids": replaced_binding_ids,
                     "selector": dict(row.selector_json or {}),
                 },
                 occurred_at=now,
@@ -1020,6 +1044,9 @@ class CommandProfileRepository:
             profile_version_id
         )
         if not check_item_ids:
+            matched = int(coverage.get("matched_device_count") or 0)
+            if matched < 1 or int(coverage.get("evaluated_device_count") or 0) != matched:
+                raise ValueError("command profile impact evidence must cover every matched device")
             return
         if str(coverage.get("profile_mode") or "") != "check_items":
             raise ValueError(

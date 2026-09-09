@@ -116,13 +116,13 @@ def test_collection_policy_does_not_create_default_commands():
     assert plan.profile_version_id is None
 
 
-def test_collection_policy_deduplicates_profile_commands(monkeypatch):
+def test_collection_policy_deduplicates_exact_commands_preserving_case_sensitive_arguments(monkeypatch):
     monkeypatch.setattr(
         CollectionPolicyResolver,
         "_load_active_profile",
         lambda *_args, **_kwargs: {
             "profile_version_id": "version-1",
-            "commands": ["show version", " SHOW   VERSION ", "show inventory"],
+            "commands": ["show version", " show version ", 'show interface description "Core"', 'show interface description "core"'],
         },
     )
 
@@ -132,7 +132,7 @@ def test_collection_policy_deduplicates_profile_commands(monkeypatch):
         mode="production",
     )
 
-    assert plan.command_texts() == ["show version", "show inventory"]
+    assert plan.command_texts() == ["show version", 'show interface description "Core"', 'show interface description "core"']
 
 
 def test_collection_policy_projects_existing_commands_without_changing_them(
@@ -365,6 +365,7 @@ def test_command_profile_activation_requires_saved_impact_evidence(monkeypatch, 
         version_id,
         {
             "matched_device_count": 1,
+            "evaluated_device_count": 1,
             "blocked_device_count": 1,
             "blocked_command_count": 1,
         },
@@ -375,6 +376,7 @@ def test_command_profile_activation_requires_saved_impact_evidence(monkeypatch, 
         version_id,
         {
             "matched_device_count": 1,
+            "evaluated_device_count": 1,
             "blocked_device_count": 0,
             "blocked_command_count": 0,
             "coverage_rate": 1.0,
@@ -677,3 +679,50 @@ def test_backup_by_plan_executes_explicit_plan(tmp_path):
     assert result.total_devices == 1
     assert captured["commands"] == ["show running-config"]
     assert result.details[0]["execution_plan"]["profile_name"] == "explicit-backup"
+
+
+def test_bound_command_set_overrides_old_profile_without_expanding_check_items(monkeypatch):
+    monkeypatch.setattr(CollectionPolicyResolver, "_load_bound_profile", lambda *args: {
+        "binding_id": "new-binding", "selector": {"group": "core"},
+        "profile_name": "explicit-commands", "profile_version_id": "new-version",
+        "commands": ["show version", "show inventory", "show interfaces"],
+    })
+    def unexpected(*args):
+        raise AssertionError("must not load stale profile or expand check-item selection")
+    monkeypatch.setattr(CollectionPolicyResolver, "_load_active_profile", unexpected)
+    monkeypatch.setattr(CollectionPolicyResolver, "_load_profile_check_item_ids", unexpected)
+    plan = CollectionPolicyResolver().build_plan(device={
+        "device_id": "d1", "command_file": "old-profile",
+        "attributes": {"patrol_profile_version_id": "stale-version"},
+    }, action="patrol", mode="production")
+    assert plan.profile_version_id == "new-version"
+    assert plan.check_item_ids == ()
+    assert plan.command_texts() == ["show version", "show inventory", "show interfaces"]
+
+
+def test_rebinding_same_scope_disables_old_binding_but_keeps_other_scopes(monkeypatch, tmp_path):
+    _patch_collection_db(monkeypatch, tmp_path)
+    repository = CommandProfileRepository()
+    old = repository.create_profile_version(name="old", action="patrol", commands=["show old"], status="active")
+    new = repository.create_profile_version(name="new", action="patrol", commands=["show new"], status="active")
+    old_binding = repository.upsert_binding(profile_version_id=old, selector={"group": "core"}, status="active")
+    other_binding = repository.upsert_binding(profile_version_id=old, selector={"group": "edge"}, status="active")
+    backup = repository.create_profile_version(name="backup", action="backup", commands=["show running-config"], status="active")
+    backup_binding = repository.upsert_binding(profile_version_id=backup, selector={"group": "core"}, status="active")
+    new_binding = repository.upsert_binding(profile_version_id=new, selector={"group": "core"})
+    repository.set_binding_status(new_binding, "active", actor="admin", reason="replace core commands")
+    statuses = {row["binding_id"]: row["status"] for row in repository.list_bindings()}
+    assert statuses == {old_binding: "disabled", new_binding: "active", other_binding: "active", backup_binding: "active"}
+
+
+@pytest.mark.parametrize("coverage", [
+    {"matched_device_count": 0, "evaluated_device_count": 0},
+    {"matched_device_count": 201, "evaluated_device_count": 100},
+])
+def test_command_activation_rejects_empty_or_truncated_preview(monkeypatch, tmp_path, coverage):
+    _patch_collection_db(monkeypatch, tmp_path)
+    repository = CommandProfileRepository()
+    version = repository.create_profile_version(name="core", action="patrol", commands=["show version"])
+    repository.record_profile_coverage(version, coverage)
+    with pytest.raises(ValueError, match="cover every matched device"):
+        repository.validate_profile_activation(version)

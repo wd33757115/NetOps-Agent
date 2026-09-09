@@ -574,7 +574,7 @@ def test_event_rule_validator_exposes_event_type_governance_to_agent_loop():
     )
 
 
-def test_event_rule_generator_builds_interface_rules():
+def test_generic_generator_does_not_recreate_retired_interface_rules():
     result = generate_and_validate_event_rules(
         contract={
             "entity_type": "interface_l3",
@@ -592,11 +592,8 @@ def test_event_rule_generator_builds_interface_rules():
         },
     )
 
-    assert result["success"] is True
-    assert {rule["event_type"] for rule in result["rules"]} == {
-        "InterfaceDown",
-        "InterfaceUp",
-    }
+    assert result["success"] is False
+    assert result["rules"] == []
 
 
 def test_event_rule_generator_builds_cpu_threshold_rules():

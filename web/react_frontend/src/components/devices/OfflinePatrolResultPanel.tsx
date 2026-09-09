@@ -16,8 +16,10 @@ import type {
   OfflinePatrolJobPurpose,
 } from '../../services/api'
 import { offlineResultPresentation } from './offlineResultPresentation'
+import PatrolCliEvidence, { LazyPatrolCliEvidence } from './PatrolCliEvidence'
 
 interface OfflinePatrolResultPanelProps {
+  jobId?: string
   canManageRules?: boolean
   purpose?: OfflinePatrolJobPurpose
   report?: OfflinePatrolAnalysisSummary
@@ -36,6 +38,7 @@ interface OfflinePatrolResultPanelProps {
 }
 
 const eventTypeLabel: Record<string, string> = {
+  NumericHealthAbnormal: '数值健康异常',
   InterfaceDown: '接口运行中断',
   InterfaceUp: '接口恢复',
   interface_link_down: '接口链路中断',
@@ -100,9 +103,16 @@ const evidenceFields: Array<[string, string]> = [
   ['Event Occurrence', 'event_occurrence_id'],
 ]
 
-const RiskEvidence: React.FC<{ row: OfflinePatrolReportRisk; isMobile: boolean }> = ({ row, isMobile }) => {
+const RiskEvidence: React.FC<{ row: OfflinePatrolReportRisk; isMobile: boolean; jobId?: string }> = ({ row, isMobile, jobId }) => {
   const chain = row.evidence_chain || {}
+  const reference = row.source === 'current_state'
+    ? chain.current_observation_id || row.evidence_id
+    : chain.event_id || chain.change_id || chain.current_observation_id || row.evidence_id
   return (
+    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+    {jobId && Boolean(reference) && <PatrolCliEvidence key={`${jobId}-${reference}`} jobId={jobId}
+      reference={String(reference)} revision={String(chain.analysis_attempt_id || chain.analysis_revision || '')} />}
+    <Collapse items={[{ key: 'trace', label: '技术追溯信息', children:
     <Descriptions bordered size="small" column={isMobile ? 1 : 2}>
       {evidenceFields.map(([label, key]) => (
         <Descriptions.Item key={key} label={label}>
@@ -110,6 +120,8 @@ const RiskEvidence: React.FC<{ row: OfflinePatrolReportRisk; isMobile: boolean }
         </Descriptions.Item>
       ))}
     </Descriptions>
+    }]} />
+    </Space>
   )
 }
 
@@ -207,6 +219,7 @@ const trendColumns = [
 ]
 
 const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
+  jobId,
   purpose,
   canManageRules = true,
   report,
@@ -227,9 +240,14 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
   const [comparisonEvidenceLoading, setComparisonEvidenceLoading] = React.useState(false)
   const [comparisonEvidenceError, setComparisonEvidenceError] = React.useState<string>()
   const [comparisonEvidenceOpen, setComparisonEvidenceOpen] = React.useState(false)
+  const [cliReference, setCliReference] = React.useState<string>()
 
   const openComparisonEvidence = async (changeId: string) => {
     setComparisonEvidenceOpen(true)
+    if (jobId) {
+      setCliReference(changeId)
+      return
+    }
     setComparisonEvidenceLoading(true)
     setComparisonEvidenceError(undefined)
     setComparisonEvidence(undefined)
@@ -376,6 +394,23 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
         <Descriptions.Item label="权威 Change">{analysis.source_change_count || 0}</Descriptions.Item>
       </Descriptions> }]} />
 
+      {!presentation.validation && report.numeric_trends && (
+        <section>
+          <Typography.Title level={5}>数值趋势与恢复</Typography.Title>
+          <Typography.Paragraph type="secondary">{report.numeric_trends.summary}</Typography.Paragraph>
+          {report.numeric_trends.items.map((item) => <div key={item.observation_id}>
+            <Typography.Paragraph key={item.observation_id}>
+              <Tag color={item.status === 'recovered' ? 'green' : 'blue'}>
+                {item.status === 'recovered' ? '已恢复' : '趋势提醒'}
+              </Tag>
+              {item.device_id} / {formatOfflineEntityKey(item.entity_key)} / {item.label}：
+              {item.baseline_value} → {item.current_value} {item.unit}。{item.explanation}
+            </Typography.Paragraph>
+            {jobId && <LazyPatrolCliEvidence jobId={jobId} reference={item.observation_id} revision={analysis.revision} />}
+          </div>)}
+        </section>
+      )}
+
       {!presentation.validation && trend?.available && (
         <section>
           <Typography.Title level={5}>跨周期趋势</Typography.Title>
@@ -403,12 +438,13 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
         <Typography.Title level={5}>{presentation.riskLabel}</Typography.Title>
         {risks.length ? (
           <Table<OfflinePatrolReportRisk>
+            tableLayout="fixed"
             rowKey={(row) => String(row.evidence_chain?.event_id || row.evidence_id || `${row.device_id}-${row.event_type}-${row.entity_key}`)}
             size="small"
             pagination={risks.length > 20 ? { pageSize: 20, showSizeChanger: false } : false}
             dataSource={risks}
             columns={riskColumns}
-            expandable={{ expandedRowRender: (row) => <RiskEvidence row={row} isMobile={isMobile} /> }}
+            expandable={{ expandedRowRender: (row) => <RiskEvidence row={row} isMobile={isMobile} jobId={jobId} /> }}
             scroll={{ x: 940 }}
           />
         ) : <Alert type={presentation.tone} showIcon message={presentation.emptyText} />}
@@ -424,12 +460,13 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
             style={{ marginBottom: 8 }}
           />
           <Table<OfflinePatrolReportRisk>
+            tableLayout="fixed"
             rowKey={(row) => String(row.evidence_chain?.event_id || row.evidence_id || `${row.device_id}-${row.event_type}-${row.entity_key}`)}
             size="small"
             pagination={correlated.length > 20 ? { pageSize: 20, showSizeChanger: false } : false}
             dataSource={correlated}
             columns={riskColumns}
-            expandable={{ expandedRowRender: (row) => <RiskEvidence row={row} isMobile={isMobile} /> }}
+            expandable={{ expandedRowRender: (row) => <RiskEvidence row={row} isMobile={isMobile} jobId={jobId} /> }}
             scroll={{ x: 940 }}
           />
         </section>
@@ -450,6 +487,9 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
         <section>
           <Typography.Title level={5}>结构化变化与 Event 证据</Typography.Title>
           <Table<StructuredEvidenceRow>
+            expandable={jobId ? { rowExpandable: row => Boolean(row.change_id),
+              expandedRowRender: row => <PatrolCliEvidence key={`${jobId}-${row.change_id}`} jobId={jobId}
+                reference={String(row.change_id)} revision={analysis.revision} /> } : undefined}
             rowKey={(row) => String(
               row.change_id || [row.command, row.entity_key, row.field].join('-'),
             )}
@@ -505,6 +545,9 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
         <section>
           <Typography.Title level={5}>文本对比证据</Typography.Title>
           <Table<UnstructuredEvidenceRow>
+            expandable={jobId ? { rowExpandable: row => Boolean(row.change_id),
+              expandedRowRender: row => <PatrolCliEvidence key={`${jobId}-${row.change_id}`} jobId={jobId}
+                reference={String(row.change_id)} revision={analysis.revision} /> } : undefined}
             rowKey={(row) => String(
               row.change_id || [row.device_id, row.command].join('-'),
             )}
@@ -560,9 +603,12 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
           setComparisonEvidenceOpen(false)
           setComparisonEvidence(undefined)
           setComparisonEvidenceError(undefined)
+          setCliReference(undefined)
         }}
         width={isMobile ? '100%' : 920}
       >
+        {jobId && cliReference && <PatrolCliEvidence key={`${jobId}-${cliReference}`} jobId={jobId}
+          reference={cliReference} revision={analysis.revision} />}
         {comparisonEvidenceLoading && (
           <Typography.Text type="secondary">正在读取完整 CLI 原文...</Typography.Text>
         )}

@@ -183,6 +183,7 @@
   background: linear-gradient(155deg, #a5c8ff, #6089dc 52%, #4866b1);
 }
 .desktop-glyph.is-document { background: linear-gradient(155deg, #74bdff, #3979d1 60%, #275eae); }
+.desktop-glyph.is-firewall { background: linear-gradient(155deg, #85b4e4, #447bb7 65%, #326298); }
 .desktop-glyph.is-folder {
   background: none;
   box-shadow: none;

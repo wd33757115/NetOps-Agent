@@ -620,7 +620,6 @@ contract_profiles:
         interface: {semantic_type: identity}
         oper_status:
           semantic_type: state
-          observation_type: interface.oper_status
         protocol_status: {semantic_type: state}
 
   - id: interface-l2

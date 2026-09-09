@@ -17,6 +17,7 @@ from src.core.check_items.assessment_policy import (
     build_assessment_basis,
     resolve_assessment_basis,
 )
+from src.core.check_items.numeric_health import policy_rule
 from src.core.patrol.event_rules import (
     EventRuleRepository,
     current_state_condition_matches,
@@ -205,7 +206,7 @@ class PatrolBatchService:
             unresolved_fault_events = [
                 item
                 for item in domain_events
-                if str(item.get("event_class") or "fault") != "recovery"
+                if str(item.get("event_class") or "fault") == "fault"
                 and str(item.get("status_after_occurrence") or "open").casefold()
                 not in {"resolved", "closed", "cancelled"}
             ]
@@ -426,6 +427,7 @@ def _condition_applies_to_observation(
         "threshold_field_gte",
         "threshold_field_lte",
         "linear_power_baseline_loss",
+        "numeric_health",
         "transition",
         "bgp_transition",
         "entity_status_down",
@@ -479,7 +481,7 @@ def evaluate_current_state(
     fault_rules = [
         row
         for row in rules
-        if str(row.get("event_class") or "fault") != "recovery"
+        if str(row.get("event_class") or "fault") == "fault"
         and govern_evaluation_scope(
             row.get("evaluation_scope"),
             event_class=str(row.get("event_class") or "fault"),
@@ -488,7 +490,8 @@ def evaluate_current_state(
     ]
     for observation_key, observation in latest.items():
         applicable = []
-        for row in fault_rules:
+        health_rule = policy_rule(observation)
+        for row in ([health_rule] if health_rule else fault_rules):
             condition = dict(row.get("effective_condition") or row.get("condition") or {})
             if _condition_applies_to_observation(condition, observation):
                 applicable.append((row, condition))
@@ -662,6 +665,8 @@ def evaluate_current_state(
                 "evaluation_scope": scope,
                 "condition": condition,
                 "dimensions": dict(observation.get("dimensions") or {}),
+                "health_assessment": basis.get("health_assessment"),
+                "assessment_source": row.get("source") or rule_source,
                 "reference_field": reference_field,
                 "reference_value": reference_value,
                 "reference_source": reference_binding.get("source_kind"),
@@ -1471,6 +1476,8 @@ def build_patrol_batch_summary(
                     "parser_version": row.parser_version,
                     "contract_version": row.contract_version,
                     "context": ((row.metadata_json or {}).get(APPLICABILITY_CONTEXT_KEY)),
+                    "metadata": dict(row.metadata_json or {}),
+                    "dimensions": dict((row.metadata_json or {}).get("dimensions") or {}),
                 }
                 for row in observation_rows
             ]
@@ -1480,7 +1487,7 @@ def build_patrol_batch_summary(
                     runtime_rule_bundle = _runtime_event_rule_bundle(db)
                 effective_rule_bundle = runtime_rule_bundle
             rules = list(effective_rule_bundle.get("rules") or [])
-            if rules:
+            if rules or any(map(policy_rule, observations)):
                 current_assessment = evaluate_current_state(
                     observations,
                     rules,

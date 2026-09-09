@@ -155,6 +155,7 @@ describe('OfflinePatrolResultPanel', () => {
 
     const expanders = screen.getAllByRole('button', { name: 'Expand row' })
     await user.click(expanders[0])
+    await user.click(screen.getByText('技术追溯信息'))
     expect(await screen.findByText('snapshot-1')).toBeVisible()
     expect(screen.getByText('contract-1')).toBeVisible()
     expect(screen.getByText('rule-1')).toBeVisible()
@@ -184,5 +185,19 @@ describe('OfflinePatrolResultPanel', () => {
   it('formats composite entity keys without exposing JSON punctuation', () => {
     expect(formatOfflineEntityKey('["WGE1/0/15"]')).toBe('WGE1/0/15')
     expect(formatOfflineEntityKey('plain-interface')).toBe('plain-interface')
+  })
+
+  it('shows numeric trend notices separately from fault counts', () => {
+    render(<OfflinePatrolResultPanel report={{ ...report, numeric_trends: {
+      notice_count: 1, recovered_count: 0, unknown_count: 0,
+      summary: '趋势提醒不计入当前故障数。',
+      items: [{ observation_id: 'trend-1', device_id: 'SW1', entity_key: '["GE1/0/1"]',
+        label: '接收光功率', status: 'notice', unit: 'dBm', baseline_value: -10,
+        current_value: -11, explanation: '实际光功率下降 20.57%，当前仍在设备阈值内。' }],
+    } }} loading={false} isMobile={false} onRetry={vi.fn()} onDownloadReport={vi.fn()}
+      onDownloadWorkbook={vi.fn()} onOpenRuleAssets={vi.fn()} onLoadComparisonEvidence={vi.fn()} />)
+    expect(screen.getByText('数值趋势与恢复')).toBeVisible()
+    expect(screen.getByText('趋势提醒')).toBeVisible()
+    expect(screen.getByText('趋势提醒不计入当前故障数。')).toBeVisible()
   })
 })

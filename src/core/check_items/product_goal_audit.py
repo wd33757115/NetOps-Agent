@@ -22,7 +22,7 @@ ProductGateStatus = Literal[
 GOLDEN_CHECK_ITEM_IDS = frozenset(
     {
         "system.cpu_usage",
-        "interface.oper_status",
+        "interface.runtime_statistics",
         "interface.optical_power",
         "device.version",
         "configuration.running",

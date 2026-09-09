@@ -163,7 +163,13 @@ def _project_batch(
                     "CommandAdapter V2 projection is missing declared dimensions "
                     f"for canonical field: {field_name}"
                 )
-            dimensions = dict(field_dimensions or {})
+            # Fixed dimensions belong to the field's meaning (e.g. an explicit
+            # five-minute CPU Value), not to an adapter-created CLI value.
+            fixed_dimensions = dict(declaration.get("fixed_dimensions") or {})
+            if any(key in fixed_dimensions and fixed_dimensions[key] != val
+                   for key, val in (field_dimensions or {}).items()):
+                raise SemanticProjectionError(f"conflicting fixed dimensions for {field_name}")
+            dimensions = {**fixed_dimensions, **dict(field_dimensions or {})}
             dimension_signature = dimension_value_signature(dimensions)
             observation_type = str(declaration.get("observation_type") or "").strip() or None
             semantic_field = observation_type or field_name

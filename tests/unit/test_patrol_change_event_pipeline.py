@@ -405,6 +405,66 @@ def test_change_detector_uses_latest_fact_for_duplicate_state_key():
     assert observations[0]["value_json"] == "10.10.1.1/24"
 
 
+def test_legacy_raw_hash_keys_never_merge_different_commands():
+    observations = [
+        {
+            "device_id": "d",
+            "state_key": "legacy-shared-key",
+            "field_name": "raw_text_hash",
+            "canonical_command": command,
+            "value_json": command,
+        }
+        for command in ["display startup", "display logbuffer level 2", "display logbuffer level 4"]
+    ]
+    assert len(_deduplicate_current_observations(observations)) == 3
+
+
+def test_raw_hash_comparison_isolated_by_command_across_two_periods(tmp_path):
+    run1, run2 = f"raw-scoped-{uuid.uuid4()}", f"raw-scoped-{uuid.uuid4()}"
+    try:
+        for run, changed in [(run1, False), (run2, True)]:
+            path = tmp_path / f"{run}.txt"
+            path.write_text(
+                "命令: show running-config\n输出:\nhostname SW1\n"
+                "命令: show startup-config\n输出:\n"
+                + ("hostname SW2\n" if changed else "hostname SW1\n"),
+                encoding="utf-8",
+            )
+            _persist_patrol_snapshots(
+                details=[{"device_name": "SW1", "ip": "10.0.0.1", "output_file": str(path)}],
+                snapshot_run_id=run,
+                mode="parser_validation",
+            )
+            result = normalize_run(run)
+            observations = [o for r in result["results"] for o in r["observations"]]
+            assert len(observations) == 2
+            assert len({o["state_key"] for o in observations}) == 2
+        result = detect_changes_from_params(
+            {
+                "current_run_id": run2,
+                "previous_run_id": run1,
+                "use_state_observations": True,
+                "persist": True,
+            }
+        )
+        assert result["compared_observations"] == 2
+        assert len(result["unstructured_compared_outputs"]) == 2
+        assert result["change_count"] == 1
+        change = result["changes"][0]
+        assert change["command"] == "show startup-config"
+        repository = PatrolRepository()
+        assert (
+            repository.get_snapshot(change["previous_snapshot_id"]).command_canonical
+            == "show startup-config"
+        )
+        assert (
+            repository.get_snapshot(change["current_snapshot_id"]).command_canonical
+            == "show startup-config"
+        )
+    finally:
+        _cleanup_runs(run1, run2)
+
+
 def test_change_detector_reconstructs_dimensioned_keys_from_persisted_metadata():
     common = {
         "device_id": "device-1",

@@ -853,11 +853,6 @@ class SkillRegistry:
             Dict[str, Any]: 补全后的参数字典
         """
         if task_name == "execute_firewall_policy_task":
-            from src.core.firewall_policy.paths import DEFAULT_POLICY_FILE
-
-            if not params.get("policy_file_url") and DEFAULT_POLICY_FILE.exists():
-                params["policy_file_url"] = str(DEFAULT_POLICY_FILE)
-
             if not params.get("ticket_id"):
                 for key in ("query", "user_query", "message"):
                     extracted = None

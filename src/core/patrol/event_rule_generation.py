@@ -16,13 +16,6 @@ from src.core.patrol.event_rules import EventRuleDefinition
 from src.core.patrol.rule_validation import validate_event_rule_definition
 from src.core.state.observation_applicability import attach_governed_applicability
 
-INTERFACE_ENTITY_TYPES = {
-    "interface",
-    "interface_l2",
-    "interface_l3",
-    "physical_interface",
-}
-
 
 def _fields(contract: dict[str, Any]) -> list[str]:
     return [
@@ -103,42 +96,7 @@ def generate_event_rule_definitions(
 
     if policy.compare_mode == "state_transition":
         fields = _state_fields(contract) or ["state"]
-        if entity_type in INTERFACE_ENTITY_TYPES or "interface" in observation_type:
-            definitions.extend(
-                [
-                    EventRuleDefinition(
-                        rule_id="interface-down",
-                        version=1,
-                        event_type="InterfaceDown",
-                        severity="major",
-                        description="Generated interface down rule candidate.",
-                        condition={
-                            "kind": "transition",
-                            "entity_types": sorted(INTERFACE_ENTITY_TYPES),
-                            "fields": fields,
-                            "from_group": "up",
-                            "to_group": "down",
-                            "allow_initial_target": True,
-                        },
-                    ),
-                    EventRuleDefinition(
-                        rule_id="interface-up",
-                        version=1,
-                        event_type="InterfaceUp",
-                        severity="info",
-                        description="Generated interface recovery rule candidate.",
-                        condition={
-                            "kind": "transition",
-                            "entity_types": sorted(INTERFACE_ENTITY_TYPES),
-                            "fields": fields,
-                            "from_group": "down",
-                            "to_group": "up",
-                            "allow_initial_target": False,
-                        },
-                    ),
-                ]
-            )
-        elif entity_type == "bgp_neighbor" or "bgp" in observation_type:
+        if entity_type == "bgp_neighbor" or "bgp" in observation_type:
             definitions.extend(
                 [
                     EventRuleDefinition(
@@ -427,7 +385,6 @@ def generate_event_rule_definitions(
     recovery_pairs = {
         "CPURecovered": ["CPUHigh"],
         "MemoryRecovered": ["MemoryHigh"],
-        "InterfaceUp": ["InterfaceDown"],
         "BGPNeighborEstablished": ["BGPNeighborLost"],
         "OpticalRecovered": ["OpticalRxPowerLow", "OpticalTxPowerLow"],
     }

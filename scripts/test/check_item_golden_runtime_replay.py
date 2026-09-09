@@ -97,20 +97,6 @@ SCENARIOS = (
         },
     },
     {
-        "check_item_id": "interface.oper_status",
-        "template_scope": {
-            "vendor": "H3C",
-            "profile": "MSR5620",
-            "command": "display interface brief",
-        },
-        "regression_globs": {
-            "baseline": ["lixian/Q2/*RT5620*.txt"],
-            "current": ["lixian/Q3/*RT5620*.txt"],
-        },
-        "asset_file": "interface-h3c.json",
-        "expected_event_types": {"InterfaceDown", "InterfaceUp"},
-    },
-    {
         "check_item_id": "interface.optical_power",
         "template_scope": {
             "vendor": "H3C",

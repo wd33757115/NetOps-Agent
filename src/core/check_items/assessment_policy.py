@@ -1238,6 +1238,60 @@ def resolve_assessment_basis(
         )
         or {}
     )
+    # Report compatibility callers must also honor the frozen CheckItem semantics.
+    semantics = dict(
+        dict(observation.get("metadata") or observation.get("metadata_json") or {}).get("semantics")
+        or {}
+    )
+    if (
+        not expected_requirement
+        and dict(semantics.get("event_constraints") or {}).get("allow_initial_transition_fault")
+        is False
+    ):
+        expected_requirement = {"required": True, "allow_catalog_default": False}
+
+    if kind == "numeric_health":
+        from src.core.check_items.numeric_health import evaluate_numeric_health
+
+        health = evaluate_numeric_health(
+            dict(observation), dict(condition.get("health_policy") or {})
+        )
+        basis["health_assessment"] = health
+        basis["baseline_binding"] = {
+            "status": "not_required" if health.get("baseline_mode") == "trend_only" else "resolved"
+            if health["baseline_observation_id"] and health["baseline_value"] is not None
+            else "missing",
+            "value": health["baseline_value"],
+            "relative_deviation": health["relative_deviation"],
+            "baseline_observation_id": health["baseline_observation_id"],
+            "baseline_snapshot_id": health["baseline_snapshot_id"],
+            "trend": health.get("trend"),
+        }
+        basis["threshold_binding"] = {
+            "status": "missing"
+            if any("threshold" in code for code in health["missing"])
+            else "resolved",
+            "source_kind": "device_output",
+            "limits": health["thresholds"],
+        }
+        resolved = health["status"] != "unknown"
+        blocker = health["missing"][0] if health["missing"] else None
+        basis["policy_resolution"] = {
+            "status": "resolved" if resolved else "missing",
+            "reason_code": blocker,
+        }
+        basis["digest"] = canonical_digest(basis)
+        return AssessmentBasisResolution(
+            status="resolved" if resolved else "missing",
+            blocker_code=blocker,
+            effective_condition={
+                **condition,
+                "kind": "numeric_health_result",
+                "unhealthy": health["status"] == "abnormal",
+            },
+            should_evaluate=health["status"] == "abnormal",
+            basis=basis,
+        )
     relevant_policy_roles = {str(role)} if role else set()
     if expected_requirement.get("required"):
         relevant_policy_roles.add("expected_state")
@@ -1249,10 +1303,7 @@ def resolve_assessment_basis(
             not item.get("observation_type")
             or str(item.get("observation_type")) == observation_type
         )
-        and (
-            not item.get("policy_role")
-            or str(item.get("policy_role")) in relevant_policy_roles
-        )
+        and (not item.get("policy_role") or str(item.get("policy_role")) in relevant_policy_roles)
         and _entity_scope_matches(dict(item), observation)
     ]
     if strict and relevant_invalid_sources:

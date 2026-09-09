@@ -4,7 +4,6 @@ import copy
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timezone
-from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine
@@ -78,15 +77,14 @@ def _repository(tmp_path):
 def test_production_catalog_is_check_item_centered_and_complete():
     catalog = load_catalog()
 
-    assert catalog.catalog_version == 10
+    assert catalog.catalog_version == 12
     assert {item.id for item in catalog.check_items} == {
         "device.version",
         "device.inventory",
         "system.cpu_usage",
         "system.memory_usage",
-        "interface.oper_status",
+        "interface.runtime_statistics",
         "interface.optical_power",
-        "interface.statistics",
         "interface.ip_assignment",
         "environment.fan",
         "environment.power",
@@ -101,7 +99,7 @@ def test_production_catalog_is_check_item_centered_and_complete():
         "configuration.startup",
         "operations.critical_logs",
     }
-    assert len(catalog.check_items) == 20
+    assert len(catalog.check_items) == 19
     optical = catalog.check_item("interface.optical_power")
     assert optical is not None
     assert {
@@ -148,11 +146,11 @@ def test_production_catalog_is_check_item_centered_and_complete():
 
 def test_parser_field_naming_guidance_comes_from_resolved_check_item_contract():
     context = build_parser_field_naming_context(
-        vendor="Cisco",
-        model="N9K-C9364C",
-        family="NXOS9K",
-        profile="NEXUS9000",
-        command="show interface status",
+        vendor="H3C",
+        model="S6850-56HF",
+        family="Comware7",
+        profile="S6850-56HF",
+        command="display interface",
         catalog=load_catalog(),
     )
 
@@ -160,16 +158,16 @@ def test_parser_field_naming_guidance_comes_from_resolved_check_item_contract():
     interface = next(
         item
         for item in context["check_items"]
-        if item["check_item_id"] == "interface.oper_status"
+        if item["check_item_id"] == "interface.runtime_statistics"
     )
     assert interface["preferred_identity_fields"] == ["interface"]
     fields = {
         item["observation_type"]: item
         for item in interface["preferred_observation_fields"]
     }
-    assert fields["interface.oper_status"]["preferred_name"] == "oper_status"
-    assert fields["interface.admin_status"]["preferred_name"] == "admin_status"
-    assert "must never invalidate" in context["policy"]["validation"]
+    assert fields["interface.runtime_statistics.line_status"]["preferred_name"] == "line_status"
+    assert fields["interface.runtime_statistics.input_errors"]["preferred_name"] == "input_errors"
+    assert context["strict_value_names"] is True
 
     optical_context = build_parser_field_naming_context(
         vendor="Cisco",
@@ -208,16 +206,13 @@ def test_top_catalog_uses_only_approved_canonical_observations():
     assert cpu.dimensions == ("window",)
     cpu_check = catalog.check_item("system.cpu_usage")
     assert cpu_check is not None
-    cpu_target = cpu_check.canonical_contract["observations"][0]
-    assert cpu_check.version == 9
+    cpu_target = next(r for r in cpu_check.canonical_contract["observations"]
+                      if r["canonical_field"] == "cpu_usage_percent")
+    assert cpu_check.version == 12
     assert cpu_target["canonical_field"] == "cpu_usage_percent"
-    assert "must never be labelled 5m" in cpu_target["mapping_guidance"]
-    assert cpu_target["projection_recipes"][0]["id"] == (
-        "utilization_from_idle_percent"
-    )
-    assert "cpu_usage_percent" in cpu_check.canonical_contract[
-        "parser_field_vocabulary"
-    ]
+    assert cpu_target["fixed_dimensions"] == {"window": "5m"}
+    assert "projection_recipes" not in cpu_target
+    assert cpu_check.canonical_contract["value_contract"] == "same-name/v1"
     assert "required_thresholds" not in cpu_target["policy_constraints"]
     assert cpu_target["threshold_references"] == {
         "high": {"field_name": "cpu_high_warning_percent"},
@@ -230,51 +225,37 @@ def test_top_catalog_uses_only_approved_canonical_observations():
     }
     memory_check = catalog.check_item("system.memory_usage")
     assert memory_check is not None
-    assert memory_check.version == 7
+    assert memory_check.version == 11
     memory_utilization = next(
         item
         for item in memory_check.canonical_contract["observations"]
         if item["observation_type"] == "device.memory.utilization"
     )
-    assert "used memory divided by total memory" in memory_utilization[
-        "mapping_guidance"
-    ]
-    assert memory_utilization["projection_recipes"][0]["id"] == (
-        "utilization_from_used_and_total"
-    )
-    interface_status = canonical.get("interface.oper_status")
+    assert "projection_recipes" not in memory_utilization
+    assert memory_utilization["fixed_dimensions"] == {"window": "5m"}
+    assert memory_utilization["required"] is False
+    interface_status = canonical.get("interface.runtime_statistics.line_status")
     assert interface_status is not None
-    assert "operational state" in interface_status.description
-    assert set(interface_status.allowed_values) >= {
-        "up",
-        "down",
-        "admin_down",
-        "absent",
-    }
-    interface = catalog.check_item("interface.oper_status")
+    assert interface_status.semantic_type == "state"
+    assert canonical.get("interface.oper_status") is None
+    interface = catalog.check_item("interface.runtime_statistics")
     assert interface is not None
     requirements = {
         item["observation_type"]: item.get("required", True)
         for item in interface.canonical_contract["observations"]
     }
-    assert requirements == {
-        "interface.oper_status": True,
-        "interface.admin_status": False,
+    assert len(requirements) == 23
+    assert {name for name, required in requirements.items() if required} == {
+        "interface.runtime_statistics.line_status",
+        "interface.runtime_statistics.protocol_status",
     }
-    admin_target = next(
-        item
-        for item in interface.canonical_contract["observations"]
-        if item["observation_type"] == "interface.admin_status"
-    )
-    assert "never infer" in admin_target["mapping_guidance"]
     oper_target = next(
         item
         for item in interface.canonical_contract["observations"]
-        if item["observation_type"] == "interface.oper_status"
+        if item["observation_type"] == "interface.runtime_statistics.line_status"
     )
     assert oper_target["event_constraints"]["role_event_types"] == {
-        "down": "InterfaceDown",
-        "up": "InterfaceUp",
+        "change": "interface.runtime_statistics.line_status.changed",
     }
     optical = catalog.check_item("interface.optical_power")
     assert optical is not None
@@ -334,7 +315,8 @@ def test_catalog_contract_rejects_incomplete_event_semantics():
     cpu_check = catalog.check_item("system.cpu_usage")
     assert cpu_check is not None
     contract = copy.deepcopy(cpu_check.canonical_contract)
-    constraints = contract["observations"][0]["event_constraints"]
+    constraints = next(r["event_constraints"] for r in contract["observations"]
+                       if r["canonical_field"] == "cpu_usage_percent")
     constraints["required_severities"].pop(
         "CpuUtilizationRecovered"
     )
@@ -456,7 +438,7 @@ def test_catalog_bootstrap_is_idempotent_and_versions_are_immutable(tmp_path):
     first = repository.bootstrap(catalog)
     second = repository.bootstrap(catalog)
 
-    assert first["created_check_items"] == 20
+    assert first["created_check_items"] == 19
     assert first["created_implementations"] == len(catalog.implementations)
     assert first["created_links"] > len(catalog.implementations)
     assert second == {
@@ -465,7 +447,7 @@ def test_catalog_bootstrap_is_idempotent_and_versions_are_immutable(tmp_path):
         "created_links": 0,
     }
     active = repository.load_active()
-    assert len(active.check_items) == 20
+    assert len(active.check_items) == 19
     assert len(active.implementations) == len(catalog.implementations)
 
     changed_item = replace(catalog.check_items[0], digest="0" * 64)
@@ -504,114 +486,21 @@ def test_empty_command_adapter_keeps_legacy_implementation_digest_stable():
     assert with_empty_adapter.digest == without_adapter.digest
 
 
-def test_latest_catalog_transactionally_replaces_v1_without_mutating_history(
-    tmp_path,
-):
+def test_current_seed_does_not_recreate_removed_interface_entries(tmp_path):
     repository, session_factory = _repository(tmp_path)
-    v1_path = (
-        Path(__file__).parents[2]
-        / "src"
-        / "core"
-        / "check_items"
-        / "assets"
-        / "catalog.v1.yaml"
-    )
-    legacy = load_catalog(v1_path)
     current = load_catalog()
-
-    repository.bootstrap(legacy, actor="test:v1")
-    repository.bootstrap(current, actor="test:latest")
+    repository.bootstrap(current, actor="test:current")
+    repository.bootstrap(current, actor="test:restart")
     active = repository.load_active()
-
-    assert active.catalog_version == 11
-    assert {item.version for item in active.check_items} == {
-        1, 2, 3, 6, 7, 9, 11
-    }
-    assert {
-        implementation.version
-        for implementation in active.implementations
-    } == {1, 2, 3}
-    assert all(
-        len(implementation.commands) == 1
-        for implementation in active.implementations
-    )
-    assert all(
-        item.freshness_policy and item.coverage_policy
-        for item in active.check_items
-        if item.assessment_mode == "health"
-    )
-
+    assert {item.id for item in active.check_items} == {item.id for item in current.check_items}
+    assert active.check_item("interface.runtime_statistics") is not None
+    assert active.check_item("interface.oper_status") is None
+    assert active.check_item("interface.statistics") is None
     with _session_scope(session_factory) as db:
-        active_item_rows = (
-            db.query(CheckItemRecord, CheckItemVersionRecord)
-            .join(
-                CheckItemVersionRecord,
-                CheckItemVersionRecord.check_item_id == CheckItemRecord.id,
-            )
-            .filter(CheckItemVersionRecord.status == "active")
-            .all()
+        assert db.query(CheckItemVersionRecord).count() == len(current.check_items)
+        assert db.query(CollectionImplementationVersionRecord).count() == len(
+            current.implementations
         )
-        assert all(
-            int(root.current_version) == int(version.version)
-            for root, version in active_item_rows
-        )
-        active_implementation_rows = (
-            db.query(
-                CollectionImplementationRecord,
-                CollectionImplementationVersionRecord,
-            )
-            .join(
-                CollectionImplementationVersionRecord,
-                CollectionImplementationVersionRecord.implementation_id
-                == CollectionImplementationRecord.id,
-            )
-            .filter(CollectionImplementationVersionRecord.status == "active")
-            .all()
-        )
-        assert all(
-            int(root.current_version) == int(version.version)
-            for root, version in active_implementation_rows
-        )
-        legacy_items = (
-            db.query(CheckItemVersionRecord)
-            .filter(CheckItemVersionRecord.version == 1)
-            .filter(
-                CheckItemVersionRecord.check_item_id.in_(
-                    [item.id for item in legacy.check_items]
-                )
-            )
-            .all()
-        )
-        legacy_implementations = (
-            db.query(CollectionImplementationVersionRecord)
-            .filter(CollectionImplementationVersionRecord.version == 1)
-            .filter(
-                CollectionImplementationVersionRecord.implementation_id.in_(
-                    [item.id for item in legacy.implementations]
-                )
-            )
-            .all()
-        )
-        assert legacy_items
-        assert legacy_implementations
-        assert {item.status for item in legacy_items} == {"deprecated"}
-        assert {
-            item.status for item in legacy_implementations
-        } == {"deprecated"}
-        assert all(item.deprecated_at is not None for item in legacy_items)
-
-    repository.bootstrap(legacy, actor="test:restart-with-older-seed")
-    after_restart = repository.load_active()
-    assert {
-        item.version_id for item in after_restart.check_items
-    } == {
-        item.version_id for item in active.check_items
-    }
-    assert {
-        item.version_id for item in after_restart.implementations
-    } == {
-        item.version_id for item in active.implementations
-    }
 
 
 def test_execution_completion_is_distinct_from_health_assessment(tmp_path):

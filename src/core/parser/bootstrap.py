@@ -153,16 +153,7 @@ def _contract_defaults(command: str) -> dict[str, Any]:
             "primary_keys": ["interface"],
             "required_fields": ["interface", "status", "protocol"],
             "optional_fields": ["ip_address", "description"],
-            "state_semantics": {
-                "status": {
-                    "semantic_type": "state",
-                    "observation_type": "interface.oper_status",
-                },
-                "protocol": {
-                    "semantic_type": "state",
-                    "observation_type": "interface.oper_status",
-                },
-            },
+            "state_semantics": {},
         }
     if normalized == "show interface status":
         return {
@@ -171,12 +162,7 @@ def _contract_defaults(command: str) -> dict[str, Any]:
             "primary_keys": ["interface"],
             "required_fields": ["interface", "status"],
             "optional_fields": ["description", "vlan", "duplex", "speed", "type"],
-            "state_semantics": {
-                "status": {
-                    "semantic_type": "state",
-                    "observation_type": "interface.oper_status",
-                }
-            },
+            "state_semantics": {},
         }
     if normalized in {
         "show interface transceiver detail",

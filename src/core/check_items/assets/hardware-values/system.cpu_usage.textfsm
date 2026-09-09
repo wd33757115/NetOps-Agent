@@ -1,0 +1,14 @@
+Value Required slot (\d+)
+Value Required cpu (\d+)
+Value cpu_5s_percent (\d+(?:\.\d+)?)
+Value cpu_1m_percent (\d+(?:\.\d+)?)
+Value cpu_usage_percent (\d+(?:\.\d+)?)
+Value cpu_high_warning_percent (\d+(?:\.\d+)?)
+Value cpu_high_alarm_percent (\d+(?:\.\d+)?)
+
+Start
+  ^\s*Slot\s+\d+\s+CPU\s+\d+\s+CPU\s+usage: -> Continue.Record
+  ^\s*Slot\s+${slot}\s+CPU\s+${cpu}\s+CPU\s+usage:\s*$$
+  ^\s+${cpu_5s_percent}%\s+in\s+last\s+5\s+seconds\s*$$
+  ^\s+${cpu_1m_percent}%\s+in\s+last\s+1\s+minute\s*$$
+  ^\s+${cpu_usage_percent}%\s+in\s+last\s+5\s+minutes\s*$$

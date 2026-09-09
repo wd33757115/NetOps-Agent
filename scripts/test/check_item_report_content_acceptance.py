@@ -75,7 +75,7 @@ def _check_item(
         "assessment_mode": "health",
         "canonical_contract": {
             "observations": [
-                {"observation_type": observation_type},
+                {"observation_type": observation_type, "canonical_field": observation_type.rsplit(".", 1)[-1]},
             ]
         },
         "report_projection": report_projection,
@@ -202,11 +202,11 @@ def build_controlled_manifest() -> dict[str, Any]:
             observation_type="interface.optical.rx_power",
             report_projection="optical_power",
         ),
-        "check-item:interface.oper_status:v1": _check_item(
-            "interface.oper_status",
-            version_id="check-item:interface.oper_status:v1",
-            observation_type="interface.oper_status",
-            report_projection="interface_status",
+        "check-item:interface.runtime_statistics:v1": _check_item(
+            "interface.runtime_statistics",
+            version_id="check-item:interface.runtime_statistics:v1",
+            observation_type="interface.runtime_statistics.line_status",
+            report_projection="auto@1",
         ),
     }
     report_projection_snapshot = build_report_projection_snapshot(
@@ -233,7 +233,7 @@ def build_controlled_manifest() -> dict[str, Any]:
     interface_execution, interface_assessment = _execution(
         execution_id="execution-interface",
         device_id="device-edge",
-        check_item_version_id="check-item:interface.oper_status:v1",
+        check_item_version_id="check-item:interface.runtime_statistics:v1",
         assessment_status="unable_to_determine",
         comparison_status="baseline_stale",
         finding_count=0,
@@ -774,7 +774,7 @@ def build_controlled_manifest() -> dict[str, Any]:
             {
                 "device_id": "device-edge",
                 "check_item_version_id": (
-                    "check-item:interface.oper_status:v1"
+                    "check-item:interface.runtime_statistics:v1"
                 ),
                 "fallback_resilience": "full",
                 "declared_command_count": 1,

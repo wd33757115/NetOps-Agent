@@ -1,7 +1,7 @@
 ---
 name: firewall-policy-generator
-version: 1.0.0
-description: 防火墙策略生成，擅长从Excel文件导入策略规则，生成可直接部署的防火墙配置
+version: 1.1.0
+description: 从策略申请表生成可核对的逐设备放行计划与配置，支持精确合并和等价校验
 category: security
 tags:
 - firewall
@@ -36,12 +36,20 @@ inputs:
   description: 工单标题
 - name: policy_file_url
   type: string
+  required: true
+  description: 必须提供策略申请表 Excel 路径或 URL，不使用默认测试表
+- name: merge_policies
+  type: boolean
   required: false
-  description: 策略Excel文件路径或URL
+  description: 是否进行等价合并，默认 true；用户说明不要合并时传 false
 - name: topology_file_url
   type: string
   required: false
   description: 拓扑文件路径或URL，可选
+- name: include_business_paths
+  type: boolean
+  required: false
+  description: 默认 false；用户要求业务系统访问关系和拓扑路径说明时设为 true，页面和完整预览按申请行展示
 - name: requester
   type: string
   required: false
@@ -65,123 +73,45 @@ references:
   source: firewall-policy-guide
   description: 防火墙策略编写指南
 - type: file
-  path: scripts/generate_config.py
-  description: Skill 标准入口（与 scripts/firewall-policy.py 等价）
+  path: scripts/run.py
+  description: Skill 标准入口（参数、生成、结果校验）
 - type: file
   path: scripts/firewall-policy.py
-  description: 策略生成主程序（含 core、policy_engine、vendor_config）
+  description: 策略计划、等价合并与厂商配置生成主程序
 enabled: true
 fallback_to_rag: true
 ---
 
-# 防火墙策略生成专家
+# 防火墙放行策略生成
 
-你是一位专业的防火墙策略生成专家，擅长根据策略需求生成多厂商防火墙配置文件。
+只生成申请需要的 permit 放行策略。设备默认拒绝机制保持原状，不追加拒绝规则。
+现有回退流程与相关清单保持原实现，不新增备份或恢复步骤。
 
-## 核心原则
+## 输入
 
-执行本 Skill 时必须遵守以下硬性规则：
+必须上传策略申请表，包含 src_ip、dst_ip、port、proto 四列，也支持中文表头。
+旧表可带 action 列，空值或 permit 接受，deny 拒绝。表头可位于任意行。
+支持单 IPv4、CIDR、连续地址范围及多个地址；支持 tcp、udp、tcp/udp、icmp。
+TCP/UDP 必须填写端口，ICMP 端口留空。当前不支持有效期及长连接设置，已填写时明确报错。
+没有文件、文件错误、拓扑缺失、地址归属冲突或生成失败时返回错误，不能使用样例替代或声称完成。
 
-1. **参数验证**：执行前检查 policy_file_url 是否有效，Excel 文件是否正确解析
-2. **幂等性**：相同策略文件和参数产生一致的配置输出
-3. **超时控制**：策略生成超过 300 秒视为失败，触发 RAG 兜底
-4. **错误处理**：Excel 格式错误、规则冲突时给出清晰的错误提示
-5. **不编造数据**：缺失必填字段（源/目的/端口/动作）时拒绝生成，不得猜测填充
-6. **安全第一**：生成配置时必须包含默认拒绝规则，遵循最小权限原则
+## 执行与人工干预
 
-## 核心能力
+统一入口为 scripts/run.py，由平台执行器调用；业务流程位于 scripts/firewall-policy.py。
+按照申请表 → 归属分段 → 拓扑路径 → 逐设备计划 → 等价合并 → 厂商命令 → CLI 回读校验执行。
+地址和端口按区间计算，不展开主机或逐个端口。优化超过预算或等价校验不通过时保留原始有效规则。
+用户说明“不要合并”“不合并”“关闭合并”时，设置 merge_policies=false。
+用户要求展示业务系统之间的访问关系和拓扑路径时，设置 include_business_paths=true；默认关闭。
+可选列“源业务系统”“目的业务系统”只作为申请说明保留，不参与地址归属或策略合并。名称缺失显示“未填写”，不推测。
+说明按申请行及地址归属分段关联最终设备规则，不能把合并规则中的业务名称交叉组合，也不能声称设备已经开通或实测连通。
+用户可下载并编辑“策略申请表.xlsx”后重新上传生成，人工修改后重新执行完整验证。
 
-1. **策略解析**
-   - 从Excel文件导入策略规则
-   - 解析源地址、目的地址、服务端口、动作
-   - 验证规则的合规性
+## 输出
 
-2. **多厂商支持**
-   - 支持 Palo Alto、Cisco ASA、Fortinet、Checkpoint
-   - 自动适配各厂商语法
+- 配置 ZIP：设备 CLI、policy_plan.json、策略计划预览.html、策略申请表.xlsx、原有 manifest.json。
+- 单独的策略计划预览链接：申请行号、源/目的地址、安全域、匹配前缀、路径、最终 CLI。
+- 可编辑申请表下载链接。
+- policy_plan_id 与 optimization：标识本次计划及合并校验结果。
 
-3. **策略优化**
-   - 规则合并与优化
-   - 冗余检测
-   - 风险评估
-
-## 工作流程
-
-1. **需求确认**：获取策略文件、工单信息
-2. **策略解析**：解析Excel文件，验证规则
-3. **配置生成**：生成各厂商配置
-4. **质量检查**：语法检查、逻辑检查
-5. **输出结果**：打包配置文件并提供报告
-
-## 输入参数说明
-
-### 必填参数
-- **policy_file_url**：策略Excel文件路径（如果没有提供，使用默认测试文件）
-
-### 可选参数
-- **ticket_id**：工单号，格式如 TICKET_001
-- **ticket_title**：工单标题
-- **topology_file_url**：拓扑文件
-- **requester**：申请人
-- **assignee**：处理人
-
-## 输出格式
-
-### 成功响应
-```json
-{
-  "success": true,
-  "message": "策略生成成功",
-  "data": {
-    "task_id": "...",
-    "config_files": "下载链接",
-    "policy_report": "报告内容"
-  }
-}
-```
-
-## 实际执行说明
-
-此 Skill 通过 Celery 任务 `execute_firewall_policy_task` 执行，调用链如下：
-
-1. Supervisor 从用户话术中提取 `ticket_id`（支持「工单号test001」「工单号：test001」）
-2. Celery 任务调用 `scripts/firewall-policy.py --ticket-id <工单号>`
-3. Skill 目录 `scripts/generate_config.py` 为文档/引用入口，与上述脚本等价
-
-**脚本位置说明**：
-- **Skill 入口**：`src/skills/firewall-policy-generator/scripts/generate_config.py`
-- **实现代码**：`src/skills/firewall-policy-generator/scripts/`（topology.json、core、policy_engine 等）
-
-执行步骤：
-1. 接收用户参数（含 ticket_id、policy_file_url）
-2. 调用 `execute_firewall_policy_task.delay(**params)`
-3. 等待任务完成（最长 300 秒）
-4. 返回配置文件下载链接
-
-## 安全规范
-
-1. **凭证安全**：策略生成过程不涉及设备凭证，仅读取 Excel 文件
-2. **操作审计**：每次策略生成记录审计日志（工单号、策略条数、厂商、用户）
-3. **权限控制**：POWER_USER 及以上级别可执行策略生成
-4. **敏感信息过滤**：策略报告中自动屏蔽内网 IP 段等敏感信息摘要
-5. **Dry-run 建议**：生成的配置文件应先在测试环境部署验证，再上线
-
-## 示例
-
-**输入**："帮我生成防火墙策略，工单ID是TICKET_001"
-
-**执行步骤**：
-1. 调用 Celery 任务 `execute_firewall_policy_task`
-2. 传递参数：ticket_id=TICKET_001
-3. 等待任务完成
-4. 返回包含配置文件下载链接的结果
-
-## 注意事项
-
-- 确保上传的 Excel 文件包含正确的列标题（源地址、目的地址、服务端口、动作等）
-- 生成配置前建议 review 策略规则列表，避免误开放端口
-- 多厂商配置文件在下载压缩包中按目录分类
-- 超时或失败时自动触发 RAG 知识库兜底
-
-<!-- SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com> -->
-<!-- SPDX-License-Identifier: Apache-2.0 -->
+当前适配器包括华为、H3C、H3CF1000、天融信和山石。CLI 回读校验只证明生成文本与计划中匹配条件一致，不能代替目标设备版本验证。
+生成流程不调用外部 AI、不下发设备配置、不改变回退行为。

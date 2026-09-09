@@ -214,6 +214,27 @@ class OfflinePatrolRouteTests(SimpleTestCase):
 
 
 class PatrolGovernanceRouteTests(SimpleTestCase):
+    async def test_report_details_uses_binary_proxy(self):
+        from bff.views.patrol import _proxy
+        request = RequestFactory().get('/api/patrol/offline-jobs/job/report/details')
+        request.user = AnonymousUser()
+        request.bff_request_id = 'details-test'
+        with patch('bff.views.patrol.proxy_binary_to_fastapi', new_callable=AsyncMock) as proxy:
+            await _proxy(request, 'job/report/details')
+        self.assertEqual(proxy.call_args.kwargs['method'], 'GET')
+        self.assertTrue(proxy.call_args.kwargs['fastapi_path'].endswith('/report/details'))
+
+    async def test_report_export_forwards_json_and_binary_response(self):
+        from bff.views.patrol import _proxy
+        request = RequestFactory().post('/api/patrol/offline-jobs/job/report/export', data='{"bundle":true}', content_type='application/json')
+        request.user = AnonymousUser()
+        request.bff_request_id = 'report-test'
+        with patch('bff.views.patrol.proxy_binary_to_fastapi', new_callable=AsyncMock) as proxy:
+            await _proxy(request, 'job/report/export')
+        self.assertEqual(proxy.call_args.kwargs['method'], 'POST')
+        self.assertEqual(proxy.call_args.kwargs['data'], {'bundle': True})
+        self.assertEqual(proxy.call_args.kwargs['fastapi_path'], '/api/v1/patrol/offline-jobs/job/report/export')
+
     def test_report_manifest_and_risk_routes_use_patrol_proxy(self):
         for suffix in (
             "batches/patrol-batch-test/report-manifest",

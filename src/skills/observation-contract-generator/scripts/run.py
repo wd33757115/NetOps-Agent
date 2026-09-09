@@ -1645,7 +1645,7 @@ def _contract_governance_errors(
             if not OBSERVATION_TYPE_PATTERN.fullmatch(observation_type):
                 errors.append(
                     f"state_semantics.{field}.observation_type must use a stable "
-                    "lowercase dot namespace such as interface.oper_status"
+                    "lowercase dot namespace such as interface.runtime_statistics.line_status"
                 )
             if semantic_type not in COMPARABLE_SEMANTIC_TYPES:
                 errors.append(

@@ -115,6 +115,7 @@ def _attach_baselines(
                     "baseline_value": prior.get("value"),
                     "baseline_observation_id": prior.get("id"),
                     "baseline_snapshot_id": prior.get("snapshot_id"),
+                    "baseline_unit": prior.get("unit"),
                     "baseline_context": prior_context,
                 }
             )

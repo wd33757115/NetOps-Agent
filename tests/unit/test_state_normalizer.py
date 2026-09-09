@@ -140,6 +140,7 @@ def test_raw_hash_diff_normalizes_only_the_digest():
 
     assert len(observations) == 1
     assert observations[0].field_name == "raw_text_hash"
+    assert observations[0].entity_key == '["display current-configuration"]'
     assert observations[0].value == "a" * 64
     assert observations[0].parser_template_id is None
     assert observations[0].metadata["unstructured_comparison"] == {

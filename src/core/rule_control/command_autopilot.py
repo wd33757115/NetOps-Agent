@@ -85,6 +85,7 @@ class CommandAutopilotService:
         # Internal lease tokens are never a browser capability.
         state.pop("lease_token", None)
         state["stage_label"] = STAGE_LABELS.get(state["stage"], state["stage"])
+        state["same_name_values"] = (state.get("inputs") or {}).get("value_contract") == "same-name/v1"
         state["can_edit"] = state["status"] not in ACTIVE and not _future(state.get("lease_until"))
         return state
 
@@ -104,6 +105,7 @@ class CommandAutopilotService:
             )},
             "check_item_id": item.id, "check_item_version_id": item.version_id,
             "check_item_digest": item.digest, "result_mode": item.result_mode,
+            "value_contract": item.canonical_contract.get("value_contract"),
         }
 
     def control(self, job_id: str, unit_id: str, *, action: str, actor: str, authorize_publish: bool = False) -> dict[str, Any]:

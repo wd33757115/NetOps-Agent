@@ -8,6 +8,7 @@ from sqlalchemy import engine_from_config, pool
 from src.common.config import get_settings
 from src.infrastructure.db.models import Base
 from src.core.official_documents import models as official_document_models  # noqa: F401
+from src.core.patrol import report_models as patrol_report_models  # noqa: F401
 
 config = context.config
 if config.config_file_name:

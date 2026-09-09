@@ -46,10 +46,10 @@ def _create_bundle() -> dict[str, str]:
     }
     now = datetime.now(timezone.utc)
     contract = {
-        "category": "interface",
-        "entity_type": "interface_l2",
-        "primary_keys": ["interface"],
-        "required_fields": ["interface", "status"],
+        "category": "fan",
+        "entity_type": "fan",
+        "primary_keys": ["slot"],
+        "required_fields": ["slot", "status"],
         "optional_fields": [],
         "ignore_fields": [],
         "allow_empty": False,
@@ -57,22 +57,22 @@ def _create_bundle() -> dict[str, str]:
         "state_semantics": {
             "status": {
                 "semantic_type": "state",
-                "observation_type": "interface.oper_status",
+                "observation_type": "environment.fan.state",
             }
         },
     }
     policy = {
-        "observation_type": "interface.oper_status",
+        "observation_type": "environment.fan.state",
         "semantic_type": "state",
         "compare_mode": "state_transition",
         "reason": "engineer review test",
     }
     rule = {
-        "name": f"interface-down-{suffix}",
-        "event_type": "InterfaceDown",
+        "name": f"fan-failed-{suffix}",
+        "event_type": "FanFailed",
         "severity": "warning",
         "condition": {
-            "observation_types": ["interface.oper_status"],
+            "observation_types": ["environment.fan.state"],
             "field": "status",
             "operator": "changed_to",
             "value": "down",
@@ -97,8 +97,8 @@ def _create_bundle() -> dict[str, str]:
         db.add(
             FileMetadata(
                 id=ids["file"],
-                name="interface-brief.txt",
-                object_key=f"tests/engineering-revision/{suffix}/interface-brief.txt",
+                name="fan.txt",
+                object_key=f"tests/engineering-revision/{suffix}/fan.txt",
                 owner_id="pytest",
                 visibility="private",
                 size_bytes=64,
@@ -151,7 +151,7 @@ def _create_bundle() -> dict[str, str]:
                 job_id=ids["offline_job"],
                 period_role="sample",
                 file_id=ids["file"],
-                relative_path="interface-brief.txt",
+                relative_path="fan.txt",
                 sha256=hashlib.sha256(suffix.encode()).hexdigest(),
                 size_bytes=64,
                 status="verified",
@@ -163,7 +163,7 @@ def _create_bundle() -> dict[str, str]:
             [ids["dataset"]],
         )
         context_payload = {
-            "records": [{"interface": "Gi1/0/1", "status": "up"}],
+            "records": [{"slot": "1", "status": "up"}],
             "record_groups": [],
             "replay_run_ids": [ids["run"]],
         }
@@ -192,6 +192,11 @@ def _create_bundle() -> dict[str, str]:
                     asset_version_id=ids["context"],
                     asset_digest=f"bundle-digest-{suffix}",
                     payload_json={
+                        "asset_requirements": {
+                            "requires_observation_contract": True,
+                            "requires_change_policy": True,
+                            "requires_event_rule_assets": True,
+                        },
                         "child_job_ids": [
                             ids["contract_job"],
                             ids["policy_job"],
@@ -199,7 +204,7 @@ def _create_bundle() -> dict[str, str]:
                         ],
                         "context_id": ids["context"],
                         "context_digest": context_digest,
-                        "command": "display interface brief",
+                        "command": "display fan",
                         "vendor": "H3C",
                         "model": "LAB",
                     },
@@ -291,9 +296,9 @@ def _create_bundle() -> dict[str, str]:
                 source_type="cli",
                 schema_id=f"schema-{suffix}",
                 schema_ref=f"parser_template:template-{suffix}",
-                entity_type="interface_l2",
-                primary_keys_json=["interface"],
-                required_fields_json=["interface", "status"],
+                entity_type="fan",
+                primary_keys_json=["slot"],
+                required_fields_json=["slot", "status"],
                 optional_fields_json=[],
                 validators_json={},
                 ignore_fields_json=[],
@@ -349,8 +354,8 @@ def test_engineering_review_exposes_candidates_and_records_acceptance():
         service = RuleAssetEngineeringRevisionService()
         draft = service.get_draft(ids["bundle"])
 
-        assert draft["completeness"]["complete"] is True
-        assert draft["contract"]["entity_type"] == "interface_l2"
+        assert draft["completeness"]["complete"] is True, draft["completeness"]
+        assert draft["contract"]["entity_type"] == "fan"
         assert len(draft["change_policies"]) == 1
         assert len(draft["event_rules"]) == 1
 

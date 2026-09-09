@@ -93,6 +93,7 @@ from src.gateway.notification_api import router as notification_router
 from src.gateway.offline_patrol_api import router as offline_patrol_router
 from src.gateway.parser_api import router as parser_router
 from src.gateway.patrol_api import router as patrol_router
+from src.gateway.patrol_reports_api import router as patrol_reports_router
 from src.gateway.schemas import (
     AddMessageRequest,
     ChatFileUploadRequest,
@@ -316,6 +317,7 @@ app.include_router(parser_router)
 app.include_router(devices_router)
 app.include_router(patrol_router)
 app.include_router(offline_patrol_router)
+app.include_router(patrol_reports_router)
 app.include_router(maintenance_router)
 register_exception_handlers(app)
 

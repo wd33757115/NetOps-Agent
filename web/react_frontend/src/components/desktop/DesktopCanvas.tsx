@@ -39,7 +39,7 @@ export function AppGlyph({ id }: { id?: string }) {
   const symbol = id ? findApp(id)?.symbol : undefined;
   return (
     <span
-      className={`desktop-glyph ${symbol === "radar" ? "is-patrol" : symbol === "document" ? "is-document" : id ? "is-rules" : "is-folder"}`}
+      className={`desktop-glyph ${symbol === "shield" ? "is-firewall" : symbol === "radar" ? "is-patrol" : symbol === "document" ? "is-document" : id ? "is-rules" : "is-folder"}`}
     >
       <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
         {!id ? (
@@ -59,6 +59,8 @@ export function AppGlyph({ id }: { id?: string }) {
               strokeLinecap="round"
             />
           </>
+        ) : symbol === "shield" ? (
+          <><path d="M32 7 51 15v16c0 13-10 21-19 26-9-5-19-13-19-26V15L32 7Z" fill="white" fillOpacity=".94" /><path d="m23 31 6 6 13-14" stroke="#4076b8" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" /></>
         ) : symbol === "document" ? (
           <><rect x="15" y="8" width="34" height="48" rx="4" fill="white" /><path d="M23 21h18M23 29h18M23 37h13M23 45h15" stroke="#4d84cd" strokeWidth="2.5" strokeLinecap="round" /></>
         ) : symbol === "radar" ? (

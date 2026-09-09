@@ -1,0 +1,35 @@
+100GE1/0/1 current state : UP
+Line protocol current state : UP
+Description:
+Switch Port, Link-type : trunk(configured),
+PVID :    1, TPID : 8100(Hex), The Maximum Frame Length is 9216
+IP Sending Frames' Format is PKTFMT_ETHNT_2, Hardware address is 0025-9ea9-5f00
+Last physical up time   : 2019-02-23 15:06:26
+Last physical down time : 2019-02-21 16:20:53
+Current system time: 2019-02-25 15:25:13
+Port Mode: COMMON FIBER
+Speed : 100000, Loopback: NONE
+Duplex: FULL,   Negotiation: DISABLE
+Mdi   : -,      Flow-control: DISABLE
+FEC   : NONE
+Last 10 seconds input rate 0 bits/sec, 0 packets/sec
+Last 10 seconds output rate 0 bits/sec, 0 packets/sec
+Input peak rate 0 bits/sec, Record time: -
+Output peak rate 0 bits/sec, Record time: -
+Input:  0 packets, 0 bytes
+Unicast:                          0,  Multicast:                           0
+Broadcast:                        0,  Jumbo:                               0
+Discard:                          0,  Pause:                               0
+Total Error:                      0
+CRC:                              0,  Giants:                              0
+Runts:                            0,  Fragments:                           0
+Alignments:                       0,  Symbols:                             0
+Ignoreds:                         0
+Output:  0 packets, 0 bytes
+Unicast:                          0,  Multicast:                           0
+Broadcast:                        0,  Jumbo:                               0
+Discard:                          0,  Pause:                               0
+Input bandwidth utilization threshold : 80.00%
+Output bandwidth utilization threshold: 80.00%
+Input bandwidth utilization  :    0%
+Output bandwidth utilization :    0%

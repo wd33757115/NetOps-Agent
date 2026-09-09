@@ -372,6 +372,21 @@ def _number(value: Any) -> float | None:
 
 
 def _state_key(observation: dict[str, Any]) -> str:
+    if (
+        observation.get("observation_type") == "raw.command.hash"
+        or observation.get("field_name") == "raw_text_hash"
+    ):
+        # Rebuild even for persisted keys: older rows omitted the command and
+        # would pair unrelated configuration/log outputs across periods.
+        return json.dumps(
+            [
+                observation.get("device_id"),
+                "raw.command.hash",
+                canonicalize_command(str(observation.get("canonical_command") or "")),
+            ],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
     if observation.get("state_key"):
         return str(observation["state_key"])
     metadata = dict(observation.get("metadata_json") or {})
@@ -1460,6 +1475,7 @@ def _detect_observation_changes_against_history_impl(
     derived_observations: list[Any] = []
     decisions: list[dict[str, Any]] = []
     compared_observations = 0
+    compared_text_outputs: set[tuple[str, str]] = set()
     baseline_observations = 0
     suppressed_initial_observations = 0
     suppressed_initial_actions = set(
@@ -1589,6 +1605,10 @@ def _detect_observation_changes_against_history_impl(
             current,
             patrol_repository,
         )
+        if unstructured_diff is not None and not unstructured_diff.get(
+            "parser_failure_text_comparison"
+        ):
+            compared_text_outputs.add(_collection_identity(current))
         if unstructured_diff is not None and not unstructured_diff.get("changed"):
             decisions.append(
                 _change_decision(
@@ -1813,6 +1833,7 @@ def _detect_observation_changes_against_history_impl(
         "previous_run_id": previous_run_id,
         "device_ids": device_ids or [],
         "compared_observations": compared_observations,
+        "unstructured_compared_outputs": sorted(compared_text_outputs),
         "baseline_observations": baseline_observations,
         "initial_observations": sum(1 for change in changes if change.change_type == "initial"),
         "suppressed_initial_observations": suppressed_initial_observations,
@@ -1883,6 +1904,7 @@ def _detect_scoped_observation_changes_impl(
     decisions: list[dict[str, Any]] = []
     derived_observations: list[Any] = []
     compared_observations = 0
+    compared_text_outputs: set[tuple[str, str]] = set()
     baseline_observations = 0
     suppressed_comparison_observations = 0
     scope_status_counts: dict[str, int] = {}
@@ -2001,6 +2023,9 @@ def _detect_scoped_observation_changes_impl(
             include_internal=True,
         )
         compared_observations += int(result.get("compared_observations") or 0)
+        compared_text_outputs.update(
+            tuple(key) for key in result.get("unstructured_compared_outputs") or []
+        )
         baseline_observations += int(result.get("baseline_observations") or 0)
         for change in result.get("_change_objects") or []:
             scoped_change = replace(
@@ -2076,6 +2101,7 @@ def _detect_scoped_observation_changes_impl(
             sorted(scope_status_counts.items())
         ),
         "compared_observations": compared_observations,
+        "unstructured_compared_outputs": sorted(compared_text_outputs),
         "baseline_observations": baseline_observations,
         "suppressed_comparison_observations": (
             suppressed_comparison_observations

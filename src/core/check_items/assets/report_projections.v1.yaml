@@ -49,20 +49,6 @@ profiles:
     sort: [device_name, entity_key]
     null_policy: preserve_null
 
-  - profile_id: interface_status
-    version: 1
-    check_item_id: interface.oper_status
-    source_kind: canonical_observation
-    row_grain: device_and_interface
-    canonical_columns:
-      - {column_id: interface_oper_status, source: interface.oper_status}
-      - {column_id: interface_admin_status, source: interface.admin_status}
-    status_columns: [execution_status, assessment_status, completeness_status, risk_verification_status, blocking_reason_codes]
-    evidence_columns: [execution_id, snapshot_id, parser_template_id, runtime_bundle_digest, observed_at]
-    sheet_id: interface_status
-    sort: [device_name, entity_key]
-    null_policy: preserve_null
-
   - profile_id: optical_power
     version: 1
     check_item_id: interface.optical_power
@@ -149,20 +135,6 @@ profiles:
     status_columns: [execution_status, assessment_status, completeness_status, threshold_unknown_count, blocking_reason_codes]
     evidence_columns: [execution_id, snapshot_id, parser_template_id, runtime_bundle_digest, observed_at]
     sheet_id: temperature
-    sort: [device_name, entity_key]
-    null_policy: preserve_null
-
-  - profile_id: interface_statistics
-    version: 1
-    check_item_id: interface.statistics
-    source_kind: canonical_observation
-    row_grain: device_and_interface
-    canonical_columns:
-      - {column_id: input_errors, source: interface.statistics.input_errors, unit: count}
-      - {column_id: output_errors, source: interface.statistics.output_errors, unit: count}
-    status_columns: [execution_status, assessment_status, completeness_status, blocking_reason_codes]
-    evidence_columns: [execution_id, snapshot_id, parser_template_id, runtime_bundle_digest, observed_at]
-    sheet_id: interface_statistics
     sort: [device_name, entity_key]
     null_policy: preserve_null
 

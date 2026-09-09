@@ -134,6 +134,7 @@ async def proxy_request(
     timeout: int | None = None,
     extra_headers: dict | None = None,
     json_response: bool = True,
+    files: dict | None = None,
 ) -> JsonResponse:
     client = _get_client()
     url = _build_url(path)
@@ -144,7 +145,12 @@ async def proxy_request(
         req_kwargs["timeout"] = httpx.Timeout(timeout)
     if params:
         req_kwargs["params"] = params
-    if data is not None and method in ("POST", "PUT", "PATCH", "DELETE"):
+    if files is not None:
+        headers.pop("Content-Type", None)
+        req_kwargs["files"] = files
+        if data is not None:
+            req_kwargs["data"] = data
+    elif data is not None and method in ("POST", "PUT", "PATCH", "DELETE"):
         req_kwargs["json"] = data
 
     try:
@@ -252,6 +258,7 @@ async def proxy_binary_to_fastapi(
     params: dict | None = None,
     timeout: int | None = None,
     extra_headers: dict | None = None,
+    data: dict | None = None,
 ):
     """代理二进制响应（文件下载/预览）。"""
     from django.http import HttpResponse
@@ -260,6 +267,8 @@ async def proxy_binary_to_fastapi(
     url = _build_url(fastapi_path)
     headers = _build_headers(request_id, extra_headers)
     req_kwargs: dict[str, Any] = {"headers": headers}
+    if data is not None:
+        req_kwargs["json"] = data
     if timeout is not None:
         req_kwargs["timeout"] = httpx.Timeout(timeout)
     if params:

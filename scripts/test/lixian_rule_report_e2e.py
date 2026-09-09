@@ -66,38 +66,6 @@ PERIODS = ("Q1", "Q2", "Q3")
 PERIOD_PAIRS = (("Q1", "Q2"), ("Q2", "Q3"))
 ASSET_SPECS = (
     {
-        "key": "interface",
-        "entity_type": "interface",
-        "command": "display interface brief",
-        "observation_targets": (
-            {
-                "canonical_field": "status",
-                "observation_type": "interface.oper_status",
-            },
-        ),
-        "policy_intent": (
-            "接口运行状态仅比较状态迁移；UP 到 DOWN 形成故障，DOWN 到 UP 形成恢复。"
-            "首次采集的 DOWN 不直接判定故障，管理关闭状态不得误报。"
-        ),
-        "event_intent": (
-            "生成 InterfaceDown 故障规则和 InterfaceUp 恢复规则；故障只匹配 up 到 down，"
-            "恢复只匹配 down 到 up，规则名称稳定且可审计。"
-        ),
-        "policy_constraints": {
-            "allowed_compare_modes": ["state_transition"],
-            "allowed_minimum_durations": [None, "0s"],
-            "evidence_only_reason": True,
-        },
-        "event_contract": {
-            "fault": "InterfaceDown",
-            "recovery": "InterfaceUp",
-            "fault_severity": "major",
-            "fault_kind": "transition",
-            "recovery_kind": "transition",
-            "allow_initial_transition_fault": False,
-        },
-    },
-    {
         "key": "optical",
         "entity_type": "interface_optical",
         "command": "display transceiver diagnosis interface",

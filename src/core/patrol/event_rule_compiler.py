@@ -159,6 +159,8 @@ def expected_rule_roles(
         "observation_types": [observation_type],
     }
     dimension_selector = dict(change_policy.get("dimension_selector") or {})
+    if any(dict(contract.get("state_semantics", {}).get(field) or {}).get("event_on_change") for field in fields):
+        return [RuleRole("change", "change", {"kind": "field_change", **base, "allow_initial": False}, "info")], []
     if dimension_selector:
         base["dimensions"] = dimension_selector
     compare_mode = str(change_policy.get("compare_mode") or "").strip()
@@ -768,7 +770,7 @@ def compile_event_rule_intents(
                 "current_state"
                 if current_state_only
                 else "change"
-                if role.event_class == "recovery"
+                if role.event_class in {"recovery", "change"}
                 else str(source.get("evaluation_scope") or "both")
             ),
             "recovery": {},
