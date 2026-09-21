@@ -162,20 +162,11 @@ print(d.get('success') or d.get('data') is not None)
         assert_ok "Skills list API" 0 "request failed"
     fi
 
-    if readiness="$(bff_json GET "/api/devices/patrol/readiness/" -H "Authorization: Bearer $TOKEN" 2>/dev/null)"; then
-        readiness_ok="$(echo "$readiness" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-print(bool(d.get('success')) and bool((d.get('data') or {}).get('can_launch')))
-" 2>/dev/null || echo false)"
-        readiness_detail="$(echo "$readiness" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-print('; '.join(str(x.get('message') or '') for x in (d.get('data') or {}).get('blockers') or []))
-" 2>/dev/null || true)"
-        assert_ok "Formal patrol production readiness" "$([[ "$readiness_ok" == "True" || "$readiness_ok" == "true" ]] && echo 1 || echo 0)" "$readiness_detail"
+    if apps="$(bff_json GET "/api/platform/apps/" -H "Authorization: Bearer $TOKEN" 2>/dev/null)"; then
+        apps_ok="$(echo "$apps" | python3 -c "import sys,json; print(json.load(sys.stdin).get('success') is True)" 2>/dev/null || echo false)"
+        assert_ok "App catalog API (disabled Apps may be absent)" "$([[ "$apps_ok" == "True" ]] && echo 1 || echo 0)"
     else
-        assert_ok "Formal patrol production readiness" 0 "request failed"
+        assert_ok "App catalog API" 0 "request failed"
     fi
 fi
 

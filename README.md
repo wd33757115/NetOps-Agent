@@ -3,59 +3,42 @@
 
 # NetOps Agent
 
-NetOps Agent 提供网络巡检、巡检规则制作、公文写作和 AI 对话。业务应用从工作台进入；Skill 和 Workflow 承担底层执行与长流程编排。
+面向数据中心网络的 AIOps 工作台。巡检、规则治理、防火墙策略、公文写作和资料管理以独立业务包交付；开放式问答由 DeepSeek Harness SDK（DSH）执行。
 
-## 当前入口
+## 应用入口
 
-| 功能 | 路径 | 用途 |
-| --- | --- | --- |
-| 工作台 | `/workbench` | 应用图标、文件夹、Dock 和个人布局 |
-| 网络巡检 | `/apps/patrol` | 在线采集、离线分析、任务与报告 |
-| 巡检规则工作台 | `/apps/patrol-rules` | 人工定义检查项及命令关联，AI 制作、验证和授权发布 |
-| 设备配置 | `/admin/netops/devices` | 设备、凭据与巡检方案配置 |
-| 公文写作 | `/apps/official-documents` | 全文起草、修改、版本管理和 Word 导出 |
-| 对话 | `/chat` | Supervisor v2 调度 Skill、Workflow 与知识问答 |
+| 应用 | 路径 | 用途 |
+|---|---|---|
+| 工作台 | `/workbench` | 个人应用布局、文件夹、Dock、桌面壁纸及会话入口 |
+| 网络巡检 | `/apps/inspection` | 在线/离线巡检、证据、风险整改及报告 |
+| 规则治理 | `/apps/rule-governance` | 检查项、解析适配器、规则制作与发布 |
+| 设备管理 | `/apps/rule-governance/devices` | 设备、凭据与巡检命令集 |
+| 防火墙策略 | `/apps/firewall-policy` | 申请导入、策略核对、配置及工单导出 |
+| 公文写作 | `/apps/official-documents` | 起草、修订和 Word 导出 |
+| 资料管理 | `/apps/materials` | 整份资料导入发布、修订比较、停用/恢复/删除 |
+| 知识问答 | `/chat`、`/apps/assistant` | 按需搜索、阅读资料，查询巡检业务证据 |
 
-设备配置和规则制作共用 `netops.configure` 权限。前端控制入口，Django BFF 与 FastAPI 执行权限校验；管理员可以授权操作员配置，自动发布另需管理员授权。
+业务 App 通过 `app.yaml` 自注册前端、API、工具与任务，按用户/用户组授予 App 使用权。巡检和规则治理使用固定业务流程与 Celery，新任务不依赖 Workflow。DSH 是问答的唯一 Agent 执行器；原 LangGraph/Supervisor 和 RAG 知识库入口已退出。
 
-## 架构
+## 本地启动
 
-```text
-浏览器 React → Django BFF → FastAPI 业务 API
-                              ├─ 巡检、规则资产、公文、设备、存储
-                              ├─ Supervisor v2 / Skill / Workflow
-                              └─ Celery Worker + Beat
-                                  ├─ netops.patrol
-                                  ├─ netops.default / firewall / health
-                                  └─ netops.ai
-数据：PostgreSQL、Redis、RabbitMQ、MinIO
-可选：RAG / Chroma、Qdrant、Langfuse
-```
-
-Django 默认使用 PostgreSQL 的 `django` schema，业务数据由 SQLAlchemy/Alembic 管理。数据库迁移与运行进程分开执行。巡检运行包固定资产版本；运行时不能因为缺失规则而静默调用 AI 补齐或把未知当作正常。
-
-## 本地开发
-
-需要 Python 3.11、Node.js 22 和 Docker Compose v2。从项目根目录执行；首次创建 `.env` 后按实际环境修改数据库、对象存储、认证和模型配置。
+Python 3.11、Node.js 22、Docker Compose v2。从项目根目录执行；已有 `.env` 时不要覆盖。
 
 ```powershell
 Copy-Item .env.example .env
 .\scripts\test\install.ps1
-.\scripts\test\start.ps1 -SkipLangfuse
+.\scripts\test\start.ps1 -EnableApps official-documents,firewall-policy,rule-governance,inspection,materials,assistant
 ```
 
-已有 `.env` 时跳过复制。默认前端为 `http://localhost:3000`，BFF 为 `http://localhost:8001`，FastAPI 本地端口为 `8000`。测试启动脚本默认构建并预览前端；开发热更新使用 `-DevMode`。停止命令为 `.\scripts\test\stop.ps1`，日志位于 `.runtime/test/logs/`。
+后续直接运行 `scripts/test/start.ps1` 保留启用状态与授权。默认构建预览前端，热更新使用 `-DevMode`；只做启动预检使用 `-CheckOnly`。应用源码升级必须先完成停用排空，见[能力包部署](docs/capability-packages-guide.md)。
 
-完整安装、迁移、独立进程和构建步骤见 [开发与构建](docs/06_环境%20&%20编译构建说明.md)。默认核心 Compose 不包含 AI Worker；需要规则生成和公文任务时叠加 `deployment/docker-compose.ai.yml`，见 [部署说明](docs/10_部署安装手册.md)。
+React 默认端口 3000，Django BFF 8001，FastAPI 8000。日志在 `.runtime/test/logs/`；停止使用 `scripts/test/stop.ps1`。浏览器经 BFF 访问业务 API，PostgreSQL、Redis、RabbitMQ、MinIO 提供持久化与任务基础设施，Langfuse 为可选观测服务。
 
-## 文档与维护
+## 文档
 
-- [文档中心](docs/README.md)：按功能与开发职责查找当前说明。
-- [系统架构](docs/01_系统架构设计.md)：模块职责、数据流和权限边界。
-- [维护与验证](docs/maintenance.md)：回归命令、文档检查和旧代码退出方法。
-- [脚本目录](scripts/README.md)：开发、生产、迁移和诊断脚本。
+[文档中心](docs/README.md) · [系统架构](docs/01_系统架构设计.md) · [工作台](docs/workbench-apps-guide-2026-09-05.md) · [开发与构建](docs/06_环境%20&%20编译构建说明.md) · [实施状态与待验收项](docs/netops-architecture-implementation-plan.md)
 
-旧阶段方案和一次性验收快照通过 Git 历史查阅，不作为当前运行状态的证据。历史兼容读取、数据库迁移与持久任务不能仅因名称含有 legacy 就删除。
+代码测试和本地部署通过不等于真实设备、专家问答或生产服务器验收完成。当前验收边界见对应文档。
 
 ## 许可
 

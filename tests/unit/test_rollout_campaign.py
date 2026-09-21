@@ -1815,3 +1815,9 @@ def test_snapshot_selection_uses_single_command_periods_after_adapter_cutover(tm
     # fallback commands.
     assert [len(item["snapshot_ids"]) for item in target["periods"]] == [1, 1]
     assert len(target["snapshot_ids"]) == 2
+
+
+@pytest.fixture(autouse=True)
+def application_authority(monkeypatch):
+    # These tests exercise frozen rollout evidence; App admission is tested over HTTP.
+    monkeypatch.setattr("src.apps.rule_governance.backend.access.authorize", lambda user_id: None)

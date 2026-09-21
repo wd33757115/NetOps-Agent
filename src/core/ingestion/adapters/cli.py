@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from src.core.collection import ExecutionPlan
-from src.core.credentials import CredentialResolver
+from src.platform.inventory.credentials import CredentialResolver
 from src.core.ingestion.adapter import IngestionAdapter
 from src.core.ingestion.domain import IngestionResult
 

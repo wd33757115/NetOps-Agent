@@ -23,6 +23,7 @@ from src.infrastructure.db.models import (
     PatrolBatchDeviceRecord,
     PatrolBatchRecord,
     PatrolReportMaterializationRequestRecord,
+    PatrolRun,
     WorkflowRun,
     WorkflowStepRecord,
 )
@@ -351,7 +352,10 @@ class PatrolBatchManifestRepository:
                 .with_for_update()
                 .first()
             )
-            if batch is None or batch.dispatch_status in {"completed", "partial", "cancelled"}:
+            if batch is None or batch.archived or batch.dispatch_status in {"completed", "partial", "cancelled", "revoked", "failed"}:
+                return []
+            if (batch.patrol_mode == "production" and batch.launch_mode == "direct"
+                    and not batch.runtime_manifest_id):
                 return []
             rows = (
                 db.query(PatrolBatchDeviceRecord)
@@ -560,9 +564,14 @@ class PatrolBatchManifestRepository:
                 else []
             )
             run_statuses = {str(run.id): str(run.status or "pending") for run in runs}
+            from src.apps.inspection.backend.online_reads import states_for_targets
+
+            direct_states = states_for_targets(db, targets)
 
             unfinished: list[PatrolBatchDeviceRecord] = []
             for target in targets:
+                if direct_states.get(target.id, {}).get("status") in {"completed", "failed"}:
+                    continue
                 if target.workflow_run_id:
                     status = run_statuses.get(str(target.workflow_run_id), "missing")
                     if status not in {"completed", "failed"}:
@@ -635,8 +644,8 @@ class PatrolBatchManifestRepository:
             )
             if batch is None:
                 return "not_found"
-            if batch.dispatch_status == "cancelled":
-                return "cancelled"
+            if batch.dispatch_status in {"cancelled", "revoked"}:
+                return str(batch.dispatch_status)
             pending = (
                 db.query(func.count(PatrolBatchDeviceRecord.id))
                 .filter(
@@ -732,6 +741,11 @@ class PatrolBatchManifestRepository:
                 .all()
             )
             if batch.runtime_manifest_id:
+                if batch.launch_mode == "direct":
+                    from src.apps.inspection.backend.online_reads import all_targets_terminal
+
+                    if not all_targets_terminal(db, targets):
+                        return False
                 runtime_manifest = db.get(
                     CheckItemRuntimeManifestRecord,
                     batch.runtime_manifest_id,
@@ -1310,20 +1324,41 @@ class PatrolBatchManifestRepository:
                 run_for_target = db.query(WorkflowRun.id).filter(
                     WorkflowRun.id == PatrolBatchDeviceRecord.workflow_run_id,
                 )
+                direct_run = db.query(PatrolRun.id).filter(
+                    PatrolRun.id == "patrol-" + PatrolBatchDeviceRecord.celery_task_id,
+                )
+
+                def has_status(values):
+                    return or_(
+                        run_for_target.filter(WorkflowRun.status.in_(values)).exists(),
+                        direct_run.filter(
+                            PatrolRun.metadata_json["inspection_execution"]["status"].as_string().in_(values)
+                        ).exists(),
+                        and_(
+                            PatrolBatchDeviceRecord.workflow_run_id.is_(None),
+                            PatrolBatchDeviceRecord.celery_task_id.is_not(None),
+                            ~direct_run.exists(),
+                            PatrolBatchDeviceRecord.dispatch_status.in_(
+                                [value for value in values if value in {"failed", "cancelled"}]
+                                + (["dispatched"] if "queued" in values else [])
+                            ),
+                        ),
+                    )
+
                 active_exists = db.query(PatrolBatchDeviceRecord.id).filter(
                     PatrolBatchDeviceRecord.patrol_batch_id
                     == PatrolBatchRecord.patrol_batch_id,
-                    run_for_target.filter(WorkflowRun.status.in_(ACTIVE_STATUSES)).exists(),
+                    has_status(list(ACTIVE_STATUSES)),
                 ).exists()
                 failed_exists = db.query(PatrolBatchDeviceRecord.id).filter(
                     PatrolBatchDeviceRecord.patrol_batch_id
                     == PatrolBatchRecord.patrol_batch_id,
-                    run_for_target.filter(WorkflowRun.status == "failed").exists(),
+                    has_status(["failed"]),
                 ).exists()
                 cancelled_exists = db.query(PatrolBatchDeviceRecord.id).filter(
                     PatrolBatchDeviceRecord.patrol_batch_id
                     == PatrolBatchRecord.patrol_batch_id,
-                    run_for_target.filter(WorkflowRun.status == "cancelled").exists(),
+                    has_status(["cancelled"]),
                 ).exists()
                 launched_target_count = (
                     db.query(func.count(PatrolBatchDeviceRecord.id))
@@ -1339,10 +1374,7 @@ class PatrolBatchManifestRepository:
                     PatrolBatchDeviceRecord.patrol_batch_id
                     == PatrolBatchRecord.patrol_batch_id,
                     PatrolBatchDeviceRecord.selection_status != "skipped",
-                    or_(
-                        PatrolBatchDeviceRecord.workflow_run_id.is_(None),
-                        ~run_for_target.filter(WorkflowRun.status == "completed").exists(),
-                    ),
+                    ~has_status(["completed"]),
                 ).exists()
                 completed = and_(
                     PatrolBatchRecord.launched_count > 0,
@@ -1392,6 +1424,9 @@ class PatrolBatchManifestRepository:
             )
             runs_by_id = {str(row.id): row for row in runs}
 
+            from src.apps.inspection.backend.online_reads import states_for_targets
+
+            direct_states = states_for_targets(db, targets)
             targets_by_batch: dict[str, list[Any]] = {}
             for row in targets:
                 targets_by_batch.setdefault(str(row.patrol_batch_id), []).append(row)
@@ -1404,8 +1439,11 @@ class PatrolBatchManifestRepository:
                     for row in batch_targets
                     if row.workflow_run_id and str(row.workflow_run_id) in runs_by_id
                 )
+                run_statuses.update(
+                    direct_states[row.id]["status"] for row in batch_targets if row.id in direct_states
+                )
                 connection_statuses = Counter(
-                    _connection_status(
+                    direct_states[row.id]["connection_status"] if row.id in direct_states else _connection_status(
                         selection_status=str(row.selection_status),
                         run=runs_by_id.get(str(row.workflow_run_id or "")),
                     )
@@ -1421,6 +1459,10 @@ class PatrolBatchManifestRepository:
                     and str(run.id)
                     in {str(row.workflow_run_id) for row in batch_targets if row.workflow_run_id}
                 ]
+                completed_at_values.extend(
+                    direct_states[row.id]["completed_at"] for row in batch_targets
+                    if row.id in direct_states and direct_states[row.id]["completed_at"]
+                )
                 result.append(
                     {
                         "patrol_batch_id": batch.patrol_batch_id,
@@ -1548,9 +1590,13 @@ class PatrolBatchManifestRepository:
                 db.query(WorkflowRun).filter(WorkflowRun.id.in_(run_ids)).all() if run_ids else []
             )
             runs_by_id = {str(row.id): row for row in runs}
+            from src.apps.inspection.backend.online_reads import states_for_targets
+
+            direct_states = states_for_targets(db, rows)
             items = []
             for row in rows:
                 run = runs_by_id.get(str(row.workflow_run_id or ""))
+                direct = direct_states.get(row.id) or {}
                 items.append(
                     {
                         "device_id": row.device_id,
@@ -1558,18 +1604,22 @@ class PatrolBatchManifestRepository:
                         "management_ip": row.management_ip,
                         "selection_status": row.selection_status,
                         "preflight_status": row.preflight_status,
-                        "connection_status": _connection_status(
+                        "connection_status": direct.get("connection_status") or _connection_status(
                             selection_status=str(row.selection_status), run=run
                         ),
                         "workflow_run_id": row.workflow_run_id,
+                        "celery_task_id": row.celery_task_id,
+                        "snapshot_run_id": direct.get("snapshot_run_id"),
+                        "execution_status": direct.get("status") or (str(run.status) if run else None),
+                        "execution_phase": direct.get("phase"),
                         "execution_plan_id": row.execution_plan_id,
                         "dispatch_status": row.dispatch_status,
                         "dispatch_attempts": int(row.dispatch_attempts or 0),
                         "workflow_status": str(run.status or "unknown") if run else None,
                         "failure_code": row.failure_code,
-                        "error_message": row.error_message or (run.error_message if run else None),
+                        "error_message": row.error_message or direct.get("error") or (run.error_message if run else None),
                         "created_at": _iso(row.created_at),
-                        "completed_at": _iso(run.completed_at) if run else None,
+                        "completed_at": _iso(direct.get("completed_at")) if direct else _iso(run.completed_at) if run else None,
                     }
                 )
             return {

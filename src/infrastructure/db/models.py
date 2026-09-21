@@ -69,23 +69,6 @@ class ITSMEvent(Base):
     result_task_id = Column(String(64), nullable=True)
 
 
-class KnowledgeBaseIndex(Base):
-    __tablename__ = "netops_knowledge_index"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    file_name = Column(String(512), index=True)
-    file_path = Column(String(1024))
-    file_hash = Column(String(128), index=True)
-    doc_type = Column(String(64), comment="sop / configuration / troubleshooting")
-    meta_info = Column(JSON)
-    vector_ids = Column(JSON, comment="关联向量库ID列表")
-    is_indexed = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(
-        DateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
-    )
 
 
 class Conversation(Base):

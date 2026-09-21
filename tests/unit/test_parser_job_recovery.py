@@ -151,6 +151,7 @@ def test_retry_preserves_adopted_semantic_plan_and_clears_run_state(sqlite_repos
     assert retried["status"] == "pending"
     assert retried["agent_state_json"] == {
         "parser_spec_suggestion": semantic_suggestion,
+        "execution_identity": {"user_id": None, "display": None, "task_id": None},
     }
     assert retried["agent_budget_json"] is None
     assert retried["model_calls_used"] == 0
@@ -624,3 +625,39 @@ def test_spec_suggestion_heartbeat_backfills_legacy_missing_deadline(
     assert second["agent_state_json"]["parser_spec_suggestion"]["deadline_at"] == (
         first_state["deadline_at"]
     )
+
+
+def test_suggestion_identity_is_persisted_with_task_and_audit(sqlite_repository):
+    repository, factory = sqlite_repository
+    job_id = _insert_suggestion_job(factory, suggestion_minutes_ago=31)
+    repository.queue_parser_spec_suggestion(job_id, task_id="identity-task", actor="renamable",
+        actor_user_id="stable-id", reason="request a fresh semantic plan")
+    restored = ParserJobRepository().record_parser_spec_suggestion(job_id, task_id="identity-task", status="running")
+    suggestion = restored["agent_state_json"]["parser_spec_suggestion"]
+    assert suggestion["requested_by_user_id"] == "stable-id"
+    assert suggestion["requested_by"] == "renamable"
+    with _session_scope(factory) as db:
+        audit = db.query(AuditLogRecord).filter_by(action="parser_spec_suggestion_queued").one()
+        assert audit.user_id == "stable-id"
+        assert audit.username == "renamable"
+
+
+@pytest.mark.parametrize("explicit_dispatch", [False, True])
+def test_retry_identity_survives_beat_dispatch_or_is_replaced_by_explicit_dispatch(sqlite_repository, monkeypatch, explicit_dispatch):
+    repository, factory = sqlite_repository
+    job_id = _insert_job(factory, status="failed", started_minutes_ago=None)
+    repository.retry_job(job_id, actor="retry-user", actor_user_id="retry-id", reason="retry failed run")
+    monkeypatch.setattr(parser_repository, "_parser_generation_readiness", lambda *args: {"ready": True})
+    context = {"actor": "dispatcher", "actor_user_id": "dispatcher-id"} if explicit_dispatch else {}
+    dispatched = repository.mark_job_dispatched(job_id, "new-delivery", **context)
+    identity = dispatched["agent_state_json"]["execution_identity"]
+    assert identity["task_id"] == "new-delivery"
+    assert identity["user_id"] == ("dispatcher-id" if explicit_dispatch else "retry-id")
+    with _session_scope(factory) as db:
+        audit = db.query(AuditLogRecord).filter_by(action="parser_job_retry").one()
+        assert audit.user_id == "retry-id"
+    repository.transition_job_status(job_id, "failed", "worker failed")
+    retried = repository.retry_job(job_id, actor="legacy-service", reason="legacy retry")
+    assert retried["agent_state_json"]["execution_identity"]["user_id"] is None
+    unknown = repository.mark_job_dispatched(job_id, "legacy-delivery")
+    assert unknown["agent_state_json"]["execution_identity"]["user_id"] is None

@@ -22,9 +22,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # 复制角色依赖清单
 COPY requirements*.txt /app/
+COPY src/__init__.py /app/src/__init__.py
+COPY src/platform /app/src/platform
+COPY src/apps /app/src/apps
 
 # 安装 Python 依赖（只在构建时执行一次）
-RUN pip install --no-cache-dir -r ${REQUIREMENTS_FILE}
+RUN python -m src.platform.kernel.build_constraints --output /tmp/app-requirements.lock \
+    && pip install --no-cache-dir -r ${REQUIREMENTS_FILE} -r /tmp/app-requirements.lock
 
 # 复制项目文件
 COPY . /app/

@@ -68,3 +68,7 @@ Skill metadata、平台用户角色和业务能力各有职责，需同时核对
 业务功能通过工作台 App 和当前 React 页面接入，Skill 保持底层执行能力。不要为每个 Skill 新建系统级左侧菜单。
 
 参考 [device-patrol](../src/skills/device-patrol/SKILL.md)、[TextFSM 生成指南](parser-generation-guide.md)，但输入和输出必须按当前需求定义。通用工程约定见[编码规范](05_编码%20&%20工程规范.md)。
+
+## 业务包与当前问答
+
+新业务能力应先放入独立 App 包，SKILL.md 可附带使用说明；Agent 接入采用包的工具契约。当前问答由 DSH 选择并执行工具，旧 Skill 的触发词/目录并不自动获得新聊天入口。不要重新建立 Supervisor 图、RAG 回退或让巡检/规则任务依赖 Workflow。参见[能力包](capability-packages-guide.md)和[问答](assistant-guide.md)。

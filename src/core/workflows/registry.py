@@ -153,7 +153,10 @@ def get_template(name: str) -> WorkflowTemplate | None:
 
 def list_templates() -> list[WorkflowTemplate]:
     load_workflows()
-    return list(_TEMPLATES.values())
+    # Retain definitions for historical reads, but do not offer migrated business
+    # workflows as executable templates.
+    retired = {"patrol-change-event", "patrol-attested-offline-current", "patrol-offline-current", "patrol-history-change-event", "rule-asset-generation", "rule-asset-submit", "rule-asset-approve", "parser-validation-ingest", "rollout-live-capture"}
+    return [template for name, template in _TEMPLATES.items() if name not in retired]
 
 
 def find_step_template(template: WorkflowTemplate, step_name: str) -> WorkflowStepTemplate | None:

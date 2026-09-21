@@ -1,4 +1,6 @@
 """User-owned desktop preferences. Business permissions are independent."""
+import base64
+import binascii
 import json
 import re
 
@@ -8,6 +10,23 @@ from django.views.decorators.csrf import csrf_exempt
 from ..decorators import require_jwt
 from ..models import DesktopPreference
 from ..response import bff_error, bff_success
+
+
+def validate_wallpaper(value):
+    if not isinstance(value, dict):
+        raise ValueError("壁纸格式无效")
+    if value.get("type") == "preset" and value.get("id") in ("mountains", "midnight", "forest", "dusk"):
+        return {"type": "preset", "id": value["id"]}
+    data = value.get("dataUrl")
+    if value.get("type") != "image" or not isinstance(data, str) or len(data) > 524288 or not data.startswith("data:image/jpeg;base64,"):
+        raise ValueError("壁纸必须为经过压缩的 JPEG 图片")
+    try:
+        image = base64.b64decode(data.split(",", 1)[1], validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise ValueError("壁纸图片编码无效") from exc
+    if not image.startswith(b"\xff\xd8\xff") or not image.endswith(b"\xff\xd9"):
+        raise ValueError("壁纸图片格式无效")
+    return {"type": "image", "dataUrl": data}
 
 
 def default_layout():
@@ -78,7 +97,10 @@ def validate_layout(body):
         keys = ["id", "kind", "containerId", "name" if node["kind"] == "folder" else "appId"]
         keys += ["col", "row"] if node["containerId"] == "desktop:0" else ["order"]
         clean_nodes.append({key: node[key] for key in keys})
-    return {"schemaVersion": 1, "nodes": clean_nodes, "dockAppIds": dock}
+    layout = {"schemaVersion": 1, "nodes": clean_nodes, "dockAppIds": dock}
+    if "wallpaper" in body:
+        layout["wallpaper"] = validate_wallpaper(body["wallpaper"])
+    return layout
 
 
 @csrf_exempt
@@ -89,7 +111,7 @@ def desktop_layout(request):
     if request.method == "GET":
         record = DesktopPreference.objects.filter(user=request.user).first()
         return bff_success({**(record.layout if record else default_layout()), "revision": record.revision if record else 0})
-    if len(request.body) > 65536:
+    if len(request.body) > 614400:
         return bff_error("布局大小超出限制", 413)
     try:
         body = json.loads(request.body)
@@ -97,6 +119,9 @@ def desktop_layout(request):
     except (ValueError, TypeError, UnicodeDecodeError) as exc:
         return bff_error(str(exc), 400)
     record, _ = DesktopPreference.objects.get_or_create(user=request.user, defaults={"layout": default_layout()})
+    # Older clients editing icon positions must not erase a user's wallpaper.
+    if "wallpaper" not in layout and "wallpaper" in record.layout:
+        layout["wallpaper"] = record.layout["wallpaper"]
     updated = DesktopPreference.objects.filter(pk=record.pk, revision=body["revision"]).update(
         layout=layout, revision=body["revision"] + 1, updated_at=timezone.now(),
     )

@@ -94,6 +94,10 @@ class FileBasedSkill(BaseSkill):
         object.__setattr__(self, "_metadata", skill_metadata)
 
     async def execute(self, **kwargs) -> SkillResult:
+        from src.platform.kernel.registry import migrated_skill_app
+        app_id = migrated_skill_app(self.name)
+        if app_id:
+            return SkillResult(success=False, message=f"请在业务应用中继续：/apps/{app_id}", error="app_entry_required")
         from src.skills.registry import skill_registry
 
         try:
@@ -127,6 +131,10 @@ class FileBasedSkill(BaseSkill):
 
     async def _execute_sync_handler(self, params: dict) -> SkillResult:
         """同步执行注册的 Python handler（不经 Celery）。"""
+        from src.platform.kernel.registry import migrated_skill_app
+        app_id = migrated_skill_app(self.name)
+        if app_id:
+            return SkillResult(success=False, message=f"请在业务应用中继续：/apps/{app_id}", error="app_entry_required")
         import asyncio
         import importlib
 

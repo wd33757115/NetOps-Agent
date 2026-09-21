@@ -65,17 +65,6 @@ async def get_async_db_session():
         await session.close()
 
 
-def init_postgres_schema():
-    from langgraph.checkpoint.postgres import PostgresSaver
-
-    print("[OK] Initializing PostgreSQL Schema for LangGraph...")
-
-    with PostgresSaver.from_conn_string(settings.postgres_url) as saver:
-        saver.setup()
-
-    print("[OK] PostgreSQL LangGraph Schema initialized")
-
-
 def verify_postgres_connection() -> bool:
     try:
         with engine.connect() as conn:

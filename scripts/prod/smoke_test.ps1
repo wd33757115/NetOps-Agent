@@ -149,15 +149,10 @@ if ($token) {
     }
 
     try {
-        $readiness = Invoke-BffJson -Path "/api/devices/patrol/readiness/" -Headers $auth
-        $detail = if ($readiness.data.blockers) {
-            ($readiness.data.blockers | ForEach-Object { $_.message }) -join "; "
-        } else { "" }
-        Assert-Ok "Formal patrol production readiness" (
-            $readiness.success -eq $true -and $readiness.data.can_launch -eq $true
-        ) $detail
+        $apps = Invoke-BffJson -Path "/api/platform/apps/" -Headers $auth
+        Assert-Ok "App catalog API (disabled Apps may be absent)" ($apps.success -eq $true)
     } catch {
-        Assert-Ok "Formal patrol production readiness" $false $_.Exception.Message
+        Assert-Ok "App catalog API" $false $_.Exception.Message
     }
 }
 

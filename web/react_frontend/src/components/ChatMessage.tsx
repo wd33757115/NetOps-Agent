@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React from 'react'
-import { renderAssistantContent, extractDownloadUrlFromContent } from '../utils/linkify'
+import { extractDownloadUrlFromContent } from '../utils/linkify'
+import MarkdownAnswer from './MarkdownAnswer'
 
 interface ChatMessageProps {
   role: 'user' | 'assistant'
@@ -26,7 +27,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ role, content, agentType, dow
 
   return (
     <article className="grok-message grok-message-assistant">
-      <div className="grok-message-body">{renderAssistantContent(content)}</div>
+      <div className="grok-message-body"><MarkdownAnswer content={content} /></div>
       {resolvedDownload && (
         <p className="grok-message-download" style={{ marginTop: 8 }}>
           <a

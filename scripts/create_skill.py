@@ -248,7 +248,7 @@ def _generate_default_instructions(name: str, description: str, triggers: list) 
 
 - 注意事项一：执行前请确认操作范围和影响
 - 注意事项二：变更类操作建议先在测试环境验证
-- 注意事项三：超时或失败时自动触发 RAG 知识库兜底
+- 注意事项三：超时或失败时返回明确失败状态，不自动重复执行
 """
 
 

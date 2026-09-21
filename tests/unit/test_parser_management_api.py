@@ -774,7 +774,7 @@ def test_simple_parser_dispatch_reports_readiness_blockers(monkeypatch):
     monkeypatch.setattr(parser_api, "ParserJobRepository", FakeJobRepository)
 
     with pytest.raises(HTTPException) as exc_info:
-        parser_api.dispatch_job("job-1")
+        parser_api.dispatch_job("job-1", _admin_request("engineer"))
 
     assert exc_info.value.status_code == 409
     assert "parser_spec_not_confirmed" in str(exc_info.value.detail)
@@ -810,6 +810,7 @@ def test_retry_and_dispatch_is_one_server_side_operator_command(monkeypatch):
     assert result["success"] is True
     assert calls[0][0] == "retry"
     assert calls[0][1]["actor"] == "engineer"
+    assert calls[0][1]["actor_user_id"] == "user:engineer"
     assert calls[1][0] == "dispatch"
     assert calls[1][1]["repository"] is repository
 
@@ -923,8 +924,9 @@ def test_parser_spec_suggestion_is_queued_without_starting_generation_lifecycle(
     assert result["status"] == "queued"
     assert calls[0][0] == "queue"
     assert calls[0][1]["actor"] == "engineer"
+    assert calls[0][1]["actor_user_id"] == "user:engineer"
     assert calls[0][1]["check_item_id"] == "interface.oper_status"
-    assert calls[1][0] == "execute_skill_task"
+    assert calls[1][0] == "netops.rule_governance.execute_parser"
     assert calls[1][1]["kwargs"]["operation"] == "suggest_spec"
 
 
@@ -1148,17 +1150,9 @@ def test_parser_template_comparison_returns_complete_human_approval_evidence(
         candidate.id,
         _request("review-engineer", "operator"),
     )
-    assert same_operator["release_actor"] == {
-        "username": "review-engineer",
-        "role": "operator",
-        "same_as_semantic_reviewer": True,
-        "admin_override_applies": False,
-        "can_activate": False,
-        "blockers": ["当前账号已完成语义复核，发布必须由其他审批人执行"],
-    }
-    assert "当前账号已完成语义复核，发布必须由其他审批人执行" in (
-        same_operator["activation_readiness"]["blockers"]
-    )
+    assert same_operator["release_actor"]["role"] == "operator"
+    assert same_operator["release_actor"]["can_activate"] is True
+    assert same_operator["release_actor"]["blockers"] == []
 
     same_admin = parser_api.compare_template(
         candidate.id,
@@ -2503,10 +2497,11 @@ def test_rule_generation_job_start_generation_endpoint(monkeypatch):
             }
 
     class FakeService:
-        def start_generation_workflow(self, job_id, *, context_overrides, actor, context_id):
+        def start_generation(self, job_id, *, context_overrides, actor, actor_user_id, context_id):
             assert job_id == "job-1"
             assert context_overrides == {"records": [{"field": "value"}]}
             assert actor == "operator"
+            assert actor_user_id == _admin_request().state.current_user.user_id
             assert context_id == "context-1"
             return {"success": True, "run_id": "workflow-1"}
 
@@ -3273,14 +3268,14 @@ def test_rollout_stage_start_is_async_and_public_result_ingress_is_removed():
         route
         for route in parser_api.router.routes
         if route.path
-        == "/api/v1/parser/check-item-rollout-campaigns/{campaign_id}/start"
+        == "/parser/check-item-rollout-campaigns/{campaign_id}/start"
         and "POST" in (route.methods or set())
     )
 
     assert start_route.status_code == 202
     assert not any(
         route.path
-        == "/api/v1/parser/check-item-rollout-campaigns/{campaign_id}/result"
+        == "/parser/check-item-rollout-campaigns/{campaign_id}/result"
         and "POST" in (route.methods or set())
         for route in parser_api.router.routes
     )
@@ -3319,6 +3314,7 @@ def test_rollout_stage_start_forwards_live_capture_mode(monkeypatch):
         {
             "campaign_id": "campaign-1",
             "actor": "engineer",
+            "actor_user_id": "user:engineer",
             "reason": "capture frozen targets",
             "idempotency_key": "rollout-live-key",
             "execution_mode": "live_capture",

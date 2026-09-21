@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import path from 'node:path'
+import './scripts/generate-apps.mjs'
+import { hostDependencies } from './scripts/package-resolve.mjs'
+import { appBuildMetadata } from './scripts/app-build.mjs'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
@@ -30,6 +33,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [
+      appBuildMetadata(),
       react({ fastRefresh: false }),
       {
         name: 'strip-crossorigin-for-embedded-browser',
@@ -39,7 +43,9 @@ export default defineConfig(({ mode }) => {
       },
     ],
     resolve: {
+      dedupe: hostDependencies,
       alias: {
+        '@netops': path.resolve(__dirname, 'src'),
         '@harmony-font-regular.css': path.join(harmonyFontDist, 'Regular.css'),
         '@harmony-font-medium.css': path.join(harmonyFontDist, 'Medium.css'),
         '@harmony-font-semibold.css': path.join(harmonyFontDist, 'Semibold.css'),
@@ -56,6 +62,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
+      fs: { allow: [path.resolve(__dirname, '../..')] },
       port: 3000,
       strictPort: true,
       host: '0.0.0.0',

@@ -1,3 +1,6 @@
+<!-- document-status: archived -->
+> 历史版本交付/设计记录；当时的部署状态、待办和测试数量不代表当前版本。当前状态见[实施状态](netops-architecture-implementation-plan.md)。
+
 # 巡检报告重构实施方案
 
 实施基线：用户修改并确认的 v1 CLI 证据模板。原文件保留，运行时模板打包进代码资产。离线巡检是本轮验收入口。

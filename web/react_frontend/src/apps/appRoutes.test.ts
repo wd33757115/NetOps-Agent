@@ -7,7 +7,7 @@ describe('business route compatibility', () => {
       businessHref(
         '/devices?tab=patrol&patrol_batch_id=b1&patrol_view=offline#result',
       ),
-    ).toBe('/apps/patrol?patrol_batch_id=b1&patrol_view=offline#result')
+    ).toBe('/apps/inspection?patrol_batch_id=b1&patrol_view=offline#result')
     expect(businessHref('/devices?tab=overview')).toBe('/devices?tab=overview')
   })
   it('preserves source job and legacy focus links', () => {
@@ -24,12 +24,12 @@ describe('business route compatibility', () => {
     try {
       const { businessHref: fallback } = await import('./appRoutes')
       expect(fallback('/apps/patrol?patrol_batch_id=b1')).toBe(
-        '/devices?patrol_batch_id=b1&tab=patrol',
+        '/apps/inspection?patrol_batch_id=b1',
       )
       expect(fallback('/apps/patrol-rules/source-jobs/j1?tab=sources')).toBe(
         '/skills/parser/source-jobs/j1?tab=sources',
       )
-      expect(fallback('/devices?tab=patrol')).toBe('/devices?tab=patrol')
+      expect(fallback('/devices?tab=patrol')).toBe('/apps/inspection')
     } finally {
       vi.unstubAllEnvs()
       vi.resetModules()

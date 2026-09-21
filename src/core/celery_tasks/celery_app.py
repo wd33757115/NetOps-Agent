@@ -48,12 +48,6 @@ celery = Celery(
     include=[
         "src.core.celery_tasks.tasks",
         "src.core.workflows.tasks",
-        "src.core.parser.tasks",
-        "src.core.patrol.tasks",
-        "src.core.patrol.offline_tasks",
-        "src.core.rule_control.engineering_revision_async",
-        "src.core.rule_control.tasks",
-        "src.core.official_documents.tasks",
     ],
 )
 
@@ -73,8 +67,6 @@ _celery_conf: dict = {
     "broker_connection_retry_on_startup": True,
     # Phase 2：按 Skill domain 路由到独立队列（Worker 需监听对应 queue）
     "task_routes": {
-        "execute_document_operation": {"queue": "netops.ai"},
-        "reconcile_document_operations": {"queue": "netops.ai"},
         "src.core.celery_tasks.tasks.execute_firewall_policy_task": {"queue": "netops.firewall"},
         "src.core.celery_tasks.tasks.execute_config_backup_task": {"queue": "netops.patrol"},
         "src.core.celery_tasks.tasks.execute_device_patrol_task": {"queue": "netops.patrol"},
@@ -86,18 +78,12 @@ _celery_conf: dict = {
         "cleanup_expired_patrol_outputs": {"queue": "netops.patrol"},
         "materialize_patrol_batch_report": {"queue": "netops.patrol"},
         "publish_network_event_outbox": {"queue": "netops.patrol"},
-        "publish_rollout_outbox": {"queue": "netops.patrol"},
-        "execute_rollout_stage": {"queue": "netops.patrol"},
-        "reconcile_rollout_live_captures": {"queue": "netops.patrol"},
         "reconcile_patrol_runs": {"queue": "netops.patrol"},
         "preview_offline_patrol_job": {"queue": "netops.ai"},
-        "dispatch_parser_jobs": {"queue": "netops.ai"},
-        "publish_parser_outbox": {"queue": "netops.ai"},
-        "sanitize_parser_samples": {"queue": "netops.ai"},
-        "reconcile_parser_jobs": {"queue": "netops.ai"},
-        "validate_rule_asset_engineering_revision": {"queue": "netops.ai"},
-        "reconcile_rule_asset_automation": {"queue": "netops.ai"},
-        "promote_parser_gap_ledger": {"queue": "netops.ai"},
+        "netops.inspection.execute_offline": {"queue": "netops.patrol"},
+        "netops.inspection.recover_offline": {"queue": "netops.patrol"},
+        "netops.inspection.execute_online": {"queue": "netops.patrol"},
+        "netops.inspection.recover_online": {"queue": "netops.patrol"},
     },
     "task_default_queue": "netops.default",
 }
@@ -121,11 +107,6 @@ _beat_heartbeat_expires = max(
 )
 
 celery.conf.beat_schedule = {
-    "reconcile-document-operations": {
-        "task": "reconcile_document_operations",
-        "schedule": 30.0,
-        "options": {"queue": "netops.ai"},
-    },
     "celery-beat-heartbeat": {
         "task": "record_celery_beat_heartbeat",
         "schedule": float(_beat_heartbeat_interval),
@@ -139,58 +120,23 @@ celery.conf.beat_schedule = {
         "schedule": 30 * 24 * 3600.0,
         "options": {"queue": "netops.default"},
     },
-    "dispatch-parser-jobs": {
-        "task": "dispatch_parser_jobs",
-        "schedule": 30.0,
-        "options": {"queue": "netops.ai"},
-    },
-    "publish-parser-outbox": {
-        "task": "publish_parser_outbox",
-        "schedule": 10.0,
-        "options": {"queue": "netops.ai"},
-    },
-    "sanitize-parser-samples": {
-        "task": "sanitize_parser_samples",
-        "schedule": 15.0,
-        "options": {"queue": "netops.ai"},
-    },
     "publish-network-event-outbox": {
         "task": "publish_network_event_outbox",
         "schedule": 5.0,
         "options": {"queue": "netops.patrol"},
     },
-    "publish-rollout-outbox": {
-        "task": "publish_rollout_outbox",
-        "schedule": 5.0,
-        "options": {"queue": "netops.patrol"},
-    },
-    "reconcile-rollout-live-captures": {
-        "task": "reconcile_rollout_live_captures",
-        "schedule": 10.0,
-        "options": {"queue": "netops.patrol"},
-    },
-    "reconcile-parser-jobs": {
-        "task": "reconcile_parser_jobs",
-        "schedule": 60.0,
-        "options": {"queue": "netops.ai"},
-    },
-    "reconcile-rule-asset-automation": {
-        "task": "reconcile_rule_asset_automation",
-        "schedule": 30.0,
-        "options": {"queue": "netops.ai"},
-    },
-    "recover-command-autopilots": {
-        "task": "recover_command_autopilots",
-        "schedule": 60.0,
-        "options": {"queue": "netops.ai"},
-    },
-    "promote-parser-gap-ledger": {
-        "task": "promote_parser_gap_ledger",
-        "schedule": 3600.0,
-        "options": {"queue": "netops.ai"},
-    },
     "reconcile-patrol-runs": {
         "task": "reconcile_patrol_runs",
+        "schedule": 60.0,
+        "options": {"queue": "netops.patrol"},
+    },
+    "recover-offline-patrol": {
+        "task": "netops.inspection.recover_offline",
+        "schedule": 60.0,
+        "options": {"queue": "netops.patrol"},
+    },
+    "recover-online-patrol": {
+        "task": "netops.inspection.recover_online",
         "schedule": 60.0,
         "options": {"queue": "netops.patrol"},
     },
@@ -237,5 +183,18 @@ def _on_worker_ready(**kwargs):
 
 celery.autodiscover_tasks(["src.core.celery_tasks"])
 
-if __name__ == "__main__":
+# Application packages own task modules, routes and periodic schedules.
+from src.platform.kernel.registry import task_configuration
+_app_modules, _app_routes, _app_schedules = task_configuration()
+celery.conf.include = list(celery.conf.include or []) + _app_modules
+celery.conf.task_routes = {**celery.conf.task_routes, **_app_routes}
+celery.conf.beat_schedule = {
+    **{name: entry for name, entry in celery.conf.beat_schedule.items() if entry["task"] not in _app_routes},
+    **_app_schedules,
+}
+from src.platform.kernel.runtime import register_worker_inspection
+register_worker_inspection()
+celery.conf.beat_scheduler = 'src.platform.kernel.scheduler:AppScheduler'
+
+if __name__ == '__main__':
     celery.start()

@@ -10,7 +10,10 @@ param(
     [switch]$SkipMiddleware,
     [switch]$SkipLangfuse,
     [switch]$AllowNoDocker,
-    [switch]$DevMode
+    [switch]$DevMode,
+    [string[]]$EnableApps = @(),
+    [switch]$CheckOnly,
+    [switch]$NoBrowser
 )
 
 $ErrorActionPreference = "Continue"
@@ -25,7 +28,7 @@ function Import-DotEnvFile {
         if (-not $line -or $line.StartsWith("#")) { return }
         $idx = $line.IndexOf("=")
         if ($idx -lt 1) { return }
-        $vars[$line.Substring(0, $idx).Trim()] = $line.Substring($idx + 1).Trim()
+        $vars[$line.Substring(0, $idx).Trim()] = $line.Substring($idx + 1).Trim().Trim('"').Trim("'")
     }
     return $vars
 }
@@ -60,8 +63,8 @@ function New-LauncherScript {
 function Start-LauncherProcess {
     param([string]$LauncherPath)
     return Start-Process -FilePath "powershell.exe" -ArgumentList @(
-        "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $LauncherPath
-    ) -PassThru -WindowStyle Minimized
+        "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$LauncherPath`""
+    ) -PassThru -WindowStyle Hidden
 }
 
 function Wait-ProjectPythonCommand {
@@ -102,11 +105,46 @@ Write-ColorOutput "  FastAPI: $FastAPIPort | Django: $DjangoPort | React: $React
 Write-ColorOutput "" "Cyan"
 
 Set-Location $ProjectRoot
+$env:PYTHONUTF8 = "1"
 
 $venvPython = Join-Path $ProjectRoot "venv\Scripts\python.exe"
 if (-not (Test-Path $venvPython)) {
     Write-ColorOutput "  [ERROR] venv not found. Run scripts\test\install.ps1" "Red"
     exit 1
+}
+
+$dotEnv = Import-DotEnvFile -Path (Join-Path $ProjectRoot ".env")
+if ($DevMode -and $EnableApps.Count) {
+    throw "App enablement requires a production build; omit -DevMode."
+}
+# All local processes and management commands must share authority and transport.
+$env:NETOPS_AUTHORITY_URL = "http://localhost:$DjangoPort"
+$env:FASTAPI_BASE_URL = "http://localhost:$FastAPIPort"
+$env:POSTGRES_HOST = "localhost"
+$env:REDIS_HOST = "localhost"
+foreach ($key in @("NETOPS_APP_INTERNAL_SECRET", "CELERY_BROKER_URL", "CELERY_RESULT_BACKEND")) {
+    if (-not [Environment]::GetEnvironmentVariable($key) -and $dotEnv.ContainsKey($key)) {
+        [Environment]::SetEnvironmentVariable($key, $dotEnv[$key], "Process")
+    }
+}
+if (-not $env:CELERY_BROKER_URL) { $env:CELERY_BROKER_URL = "amqp://guest:guest@localhost:5672//" }
+if (-not $env:CELERY_RESULT_BACKEND) { $env:CELERY_RESULT_BACKEND = "redis://localhost:6379/0" }
+if (-not $env:NETOPS_APP_INTERNAL_SECRET -or $env:NETOPS_APP_INTERNAL_SECRET.Length -lt 32) {
+    throw "Configure NETOPS_APP_INTERNAL_SECRET (at least 32 characters) in .env before starting Apps."
+}
+
+Write-ColorOutput 'Check App dependencies before stopping services (including DSH SDK/runtime)...' "Yellow"
+& $venvPython -m src.platform.kernel.cli check-dependencies
+if ($LASTEXITCODE -ne 0) {
+    throw "App dependencies are missing or mismatched. Run scripts\test\install.ps1 -SkipDocker -SkipNpm, then retry."
+}
+if (-not (Get-Command npm -ErrorAction SilentlyContinue) -or
+    -not (Test-Path -LiteralPath (Join-Path $ProjectRoot 'web\react_frontend\node_modules\vite\package.json'))) {
+    throw "Frontend dependencies are unavailable. Run scripts\test\install.ps1 -SkipDocker, then retry."
+}
+if ($CheckOnly) {
+    Write-ColorOutput '  [OK] Startup checks passed. No services were stopped or started.' "Green"
+    return
 }
 
 Write-ColorOutput "[Step 0/7] Stop old processes and free ports..." "Yellow"
@@ -122,9 +160,7 @@ if ($dockerOk) {
 }
 if (Test-Path $pidFile) {
     $old = Get-Content $pidFile -Raw | ConvertFrom-Json
-    foreach ($name in $old.PSObject.Properties.Name) {
-        Stop-Process -Id ([int]$old.$name) -Force -ErrorAction SilentlyContinue
-    }
+    Stop-RecordedProjectLaunchers -Records $old -ProjectRoot $ProjectRoot
     Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
 }
 # Celery Beat writes its own PID file. A forced Windows process-tree stop cannot
@@ -146,8 +182,6 @@ foreach ($round in 1..2) {
     Start-Sleep -Seconds 2
 }
 Write-ColorOutput "  [OK] Ports cleared" "Green"
-
-$dotEnv = Import-DotEnvFile -Path (Join-Path $ProjectRoot ".env")
 
 Write-ColorOutput "[Step 1/7] Check Docker..." "Yellow"
 if ($SkipMiddleware -and $SkipLangfuse) {
@@ -185,7 +219,7 @@ if ($dockerOk) {
                 exit 1
             }
         }
-        $middleware = @("netops-postgres", "netops-redis", "netops-rabbitmq", "netops-minio", "netops-qdrant")
+        $middleware = @("netops-postgres", "netops-redis", "netops-rabbitmq", "netops-minio")
         foreach ($svc in $middleware) {
             $running = Get-DockerContainersRunning -Names @($svc)
             if ($running -contains $svc) {
@@ -234,8 +268,12 @@ Push-Location (Join-Path $ProjectRoot "web\django_backend")
 $env:DJANGO_SETTINGS_MODULE = "django_backend.settings"
 $migrateLog = Join-Path $logDir "django-migrate.log"
 & $venvPython manage.py migrate --noinput *>&1 | Out-File $migrateLog -Encoding utf8
+$migrationExit = $LASTEXITCODE
 Pop-Location
+if ($migrationExit -ne 0) { throw "Django migration failed; see $migrateLog" }
 Write-ColorOutput '  [OK] migrate done (log: django-migrate.log)' "Green"
+& $venvPython web/django_backend/manage.py app_packages prepare
+if ($LASTEXITCODE -ne 0) { throw "App preparation failed; resolve the reported package before starting." }
 
 $pids = @{}
 $py = Escape-SingleQuotedPath $venvPython
@@ -247,7 +285,6 @@ $fastapiEnv = @{
     ENFORCE_BFF_ORIGIN = "false"
     POSTGRES_HOST = "localhost"
     REDIS_HOST = "localhost"
-    QDRANT_HOST = "localhost"
     MINIO_ENDPOINT = "localhost:9000"
 }
 foreach ($k in @("DEEPSEEK_API_KEY", "POSTGRES_PASSWORD", "POSTGRES_USER", "POSTGRES_DB", "POSTGRES_PORT")) {
@@ -264,17 +301,12 @@ Write-ColorOutput '[Step 4/7] Start Celery Core/AI Workers + Beat (Windows) ...'
 $celeryEnv = @{
     POSTGRES_HOST = "localhost"
     REDIS_HOST = "localhost"
+    MINIO_ENDPOINT = "localhost:9000"
+    CELERY_BROKER_URL = $env:CELERY_BROKER_URL
+    CELERY_RESULT_BACKEND = $env:CELERY_RESULT_BACKEND
 }
-foreach ($k in @("DEEPSEEK_API_KEY", "POSTGRES_PASSWORD", "POSTGRES_USER", "POSTGRES_DB", "POSTGRES_PORT", "CELERY_BROKER_URL", "CELERY_RESULT_BACKEND")) {
+foreach ($k in @("DEEPSEEK_API_KEY", "POSTGRES_PASSWORD", "POSTGRES_USER", "POSTGRES_DB", "POSTGRES_PORT")) {
     if ($dotEnv.ContainsKey($k)) { $celeryEnv[$k] = $dotEnv[$k] }
-}
-if ($dockerOk -and -not $SkipMiddleware) {
-    if (-not $celeryEnv.ContainsKey("CELERY_BROKER_URL")) {
-        $celeryEnv["CELERY_BROKER_URL"] = "amqp://guest:guest@localhost:5672//"
-    }
-    if (-not $celeryEnv.ContainsKey("CELERY_RESULT_BACKEND")) {
-        $celeryEnv["CELERY_RESULT_BACKEND"] = "redis://localhost:6379/0"
-    }
 }
 if ($jwtSecret) { $celeryEnv["JWT_SECRET_KEY"] = $jwtSecret }
 foreach ($k in @("LANGFUSE_HOST", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY")) {
@@ -297,7 +329,7 @@ $aiCeleryEnv["CELERY_WORKER_ROLE"] = "ai"
 $aiCeleryEnv["CELERY_WORKER_QUEUES"] = "netops.ai"
 $aiCeleryLog = Join-Path $logDir "celery-ai.log"
 $aiCeleryLauncher = Join-Path $logDir "celery-ai-launcher.ps1"
-$aiCeleryCmd = "& '$py' -m celery -A src.core.celery_tasks.celery_app worker --loglevel=info -P solo --concurrency=1 --hostname=netops-ai@%h -Q netops.ai"
+$aiCeleryCmd = "& '$py' -m src.platform.kernel.worker --loglevel=info -P solo --concurrency=1 --hostname=netops-ai@%h --queues netops.ai --exclude-queues netops.patrol"
 New-LauncherScript -Path $aiCeleryLauncher -WorkingDirectory $ProjectRoot -EnvVars $aiCeleryEnv -CommandLine $aiCeleryCmd -LogFile $aiCeleryLog -PreCommands @(
     'Remove-Item Env:DJANGO_SETTINGS_MODULE -ErrorAction SilentlyContinue'
 )
@@ -363,9 +395,13 @@ $reactLog = Join-Path $logDir "react.log"
 $reactDir = Join-Path $ProjectRoot "web\react_frontend"
 $reactLauncher = Join-Path $logDir "react-launcher.ps1"
 if ($DevMode) {
-    $viteCache = Join-Path $reactDir "node_modules\.vite"
+    $viteCache = [IO.Path]::GetFullPath((Join-Path $reactDir "node_modules\.vite"))
+    $workspacePrefix = [IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\') + '\'
+    if (-not $viteCache.StartsWith($workspacePrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Vite cache path escapes the project"
+    }
     if (Test-Path $viteCache) {
-        Remove-Item $viteCache -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $viteCache -Recurse -Force -ErrorAction SilentlyContinue
         Write-ColorOutput '  Cleared Vite dep cache (dev mode)' "Gray"
     }
     $reactCmd = "npm run dev -- --host 0.0.0.0 --port $ReactPort --strictPort"
@@ -413,6 +449,22 @@ if (-not $bffOk) {
     exit 1
 }
 
+if (-not $DevMode) {
+    Write-ColorOutput 'Verify enabled App deployments (Gateway / frontend / Workers / Beat)...' "Yellow"
+    $appProbe = @("--gateway-url", "http://localhost:$FastAPIPort", "--frontend-url", "http://localhost:$ReactPort", "--wait-seconds", "60")
+    foreach ($appId in $EnableApps) {
+        & $venvPython web/django_backend/manage.py app_packages enable $appId @appProbe
+        if ($LASTEXITCODE -ne 0) { throw "App enablement failed: $appId" }
+    }
+} else {
+    Write-ColorOutput '  [DEV] App deployment verification requires the default production preview.' "Yellow"
+}
+& $venvPython web/django_backend/manage.py app_packages status --compact
+
+Write-ColorOutput "Running verify.ps1..." "Yellow"
+& (Join-Path $PSScriptRoot "verify.ps1") -ProjectRoot $ProjectRoot -FastAPIPort $FastAPIPort -DjangoPort $DjangoPort -ReactPort $ReactPort -DevMode:$DevMode
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
 Write-ColorOutput "" "Cyan"
 Write-ColorOutput "============================================================" "Cyan"
 Write-ColorOutput "  Test Environment Ready" "Green"
@@ -420,19 +472,18 @@ Write-ColorOutput "============================================================"
 Write-ColorOutput "  React:   http://localhost:$ReactPort/chat  $(if ($reactOk) { '[OK]' } else { '[WAIT]' })" "Gray"
 Write-ColorOutput "  Django:  http://localhost:$DjangoPort/api/health/  $(if ($bffOk) { '[OK]' } else { '[WAIT]' })" "Gray"
 Write-ColorOutput "  FastAPI: http://localhost:$FastAPIPort/health  $(if ($apiOk) { '[OK]' } else { '[WAIT]' })" "Gray"
-Write-ColorOutput ("  Celery:  see {0}\celery.log - required for firewall/backup/patrol Skills" -f $logDir) "Gray"
+Write-ColorOutput "  Materials: http://localhost:$ReactPort/apps/materials (publish shared sources; App grant required)" "Gray"
+Write-ColorOutput "  Assistant: http://localhost:$ReactPort/apps/assistant (DSH runs inside Gateway; App grant required)" "Gray"
+Write-ColorOutput '  First enablement: add -EnableApps materials,assistant; existing enablement and grants are preserved.' "Gray"
+Write-ColorOutput "  Celery:  celery-core.log (patrol), celery-ai.log (discovered App queues), celery-beat.log" "Gray"
 if ($dockerOk -and -not $SkipLangfuse) {
     Write-ColorOutput '  Langfuse: http://localhost:3001  (admin@netops.local / netops-langfuse-admin)' "Gray"
 }
 Write-ColorOutput "  Logs:    $logDir" "Gray"
 Write-ColorOutput "" "Cyan"
 Write-ColorOutput 'Tip: scripts\test\stop.ps1 to stop (add -KeepMiddleware / -KeepLangfuse to keep Docker stacks)' "Yellow"
-Start-Process "http://localhost:$ReactPort/chat"
+if (-not $NoBrowser) { Start-Process "http://localhost:$ReactPort/" }
 
 if (-not $bffOk -or -not $apiOk) {
     Write-ColorOutput "  [WARN] Some backend health checks pending; see logs" "Yellow"
 }
-
-Write-ColorOutput "Running verify.ps1..." "Yellow"
-& (Join-Path $PSScriptRoot "verify.ps1") -ProjectRoot $ProjectRoot -FastAPIPort $FastAPIPort -DjangoPort $DjangoPort -ReactPort $ReactPort
-if ($LASTEXITCODE -ne 0) { exit 1 }

@@ -1,0 +1,16 @@
+manifest_version: 1
+id: materials
+name: 资料管理
+version: 1.2.0
+platform_api: '>=1.0,<2.0'
+icon: document
+dependencies: {}
+backend:
+  router: src.apps.materials.backend.api:router
+frontend:
+  entry: frontend/index.tsx
+database:
+  mode: package
+  migrations: migrations
+  head: materials_0002
+  tables: [app_materials_documents, app_materials_revisions]

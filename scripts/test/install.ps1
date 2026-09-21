@@ -26,13 +26,23 @@ if (-not (Test-Path $venvPython)) {
     python -m venv venv
 }
 & $venvPython --version
+if ($LASTEXITCODE -ne 0) { throw "Python venv is unavailable" }
 Write-Ok "venv ready"
 
 Write-Step "pip install"
 & $venvPython -m pip install --upgrade pip
-& $venvPython -m pip install -r requirements.txt
-& $venvPython -m pip install -r web\django_backend\requirements.txt
+if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed" }
+$runtimeDir = Join-Path $ProjectRoot '.runtime\test'
+New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
+$appRequirements = Join-Path $runtimeDir 'app-requirements.lock'
+& $venvPython -m src.platform.kernel.build_constraints --output $appRequirements
+if ($LASTEXITCODE -ne 0) { throw "App dependency locks conflict or are invalid" }
+& $venvPython -m pip install -r requirements.txt -r web\django_backend\requirements.txt -r $appRequirements
+if ($LASTEXITCODE -ne 0) { throw "Python/App dependency installation failed" }
 & $venvPython -m pip install pytest httpx
+if ($LASTEXITCODE -ne 0) { throw "Test dependency installation failed" }
+& $venvPython -m src.platform.kernel.cli check-dependencies
+if ($LASTEXITCODE -ne 0) { throw "Installed App dependencies do not match their locks" }
 Write-Ok "Python deps installed"
 
 Write-Step ".env"
@@ -48,7 +58,6 @@ POSTGRES_DB=netops_agent
 POSTGRES_USER=netops
 POSTGRES_PASSWORD=netops123456
 REDIS_HOST=localhost
-QDRANT_HOST=localhost
 MINIO_ENDPOINT=localhost:9000
 CELERY_BROKER_URL=redis://localhost:6379/0
 CELERY_RESULT_BACKEND=redis://localhost:6379/1
@@ -63,6 +72,7 @@ if (-not $SkipNpm) {
     Push-Location (Join-Path $ProjectRoot "web\react_frontend")
     if (Get-Command npm -ErrorAction SilentlyContinue) {
         npm ci
+        if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
         Write-Ok "npm done"
     } else {
         Write-Warn "npm not found"

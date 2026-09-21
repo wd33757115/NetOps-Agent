@@ -91,7 +91,7 @@ def main() -> int:
     )
     assert conclusion["status"] == "未发现变化（健康未判定）"
     assert conclusion["trust"] == "中"
-    assert ParserRuntimeBundle.__module__ == "src.core.parser.runtime_bundle"
+    assert ParserRuntimeBundle.__module__ == "src.apps.rule_governance.backend.parser.runtime_bundle"
     assert PatrolRunCoordinator.__module__ == "src.core.patrol.run_coordinator"
 
     print(

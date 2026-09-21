@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from src.core.device_ops.repository import DeviceRepository
+from src.platform.inventory.repository import DeviceRepository
 
 
 class DeviceInventoryManager:

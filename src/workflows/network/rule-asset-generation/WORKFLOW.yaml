@@ -148,6 +148,7 @@ steps:
       rule_generation_context_id: ${context.rule_generation_context_id}
       rule_generation_context_digest: ${context.rule_generation_context_digest}
       created_by: ${context.rule_generation_actor}
+      generation_identity: ${context.rule_generation_identity}
       rule_asset_requirements: ${steps.rule_target_planning.result.rule_asset_requirements}
       contract_result: ${steps.observation_contract.result}
       change_policy_result: ${steps.change_policy.result}

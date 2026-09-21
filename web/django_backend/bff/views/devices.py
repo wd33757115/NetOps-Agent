@@ -13,10 +13,10 @@ from ._helpers import forward_client_headers, parse_json_body
 
 
 async def _proxy(request: HttpRequest, path: str) -> JsonResponse:
-    from src.auth.netops_access import NETOPS_CONFIGURE, requires_netops_configuration
+    from src.auth.netops_access import requires_netops_configuration
     if requires_netops_configuration(request.method, "/devices/" + path):
-        if getattr(request, "bff_user_role", "") != "admin" and NETOPS_CONFIGURE not in getattr(request, "bff_user_permissions", []):
-            return bff_error("需要设备与规则配置权限，请联系管理员授权", 403)
+        from .app_proxy import proxy_app
+        return await proxy_app(request, "rule-governance", "devices/" + path.split("?", 1)[0])
     if path.startswith("?"):
         fastapi_path = f"/api/v1/devices{path}"
     elif path:
@@ -34,7 +34,6 @@ async def _proxy(request: HttpRequest, path: str) -> JsonResponse:
 
 @csrf_exempt
 @require_jwt
-@require_role_with_viewer_readonly("admin", "operator")
 @sync_bff_view
 async def proxy_devices_collection(request: HttpRequest) -> JsonResponse:
     query = request.META.get("QUERY_STRING", "")
@@ -44,7 +43,6 @@ async def proxy_devices_collection(request: HttpRequest) -> JsonResponse:
 
 @csrf_exempt
 @require_jwt
-@require_role_with_viewer_readonly("admin", "operator")
 @sync_bff_view
 async def proxy_device_path(request: HttpRequest, path: str) -> JsonResponse:
     query = request.META.get("QUERY_STRING", "")
@@ -54,7 +52,6 @@ async def proxy_device_path(request: HttpRequest, path: str) -> JsonResponse:
 
 @csrf_exempt
 @require_jwt
-@require_role_with_viewer_readonly("admin", "operator")
 @sync_bff_view
 async def proxy_patrol_batch_live_events(request: HttpRequest, batch_id: str):
     """SSE proxy for live patrol batch failure / stage events."""

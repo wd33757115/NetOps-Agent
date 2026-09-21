@@ -137,6 +137,12 @@ def test_terminal_workflow_ignores_late_celery_delivery(monkeypatch):
 
 
 def test_report_reconciler_restores_retryable_state_when_enqueue_fails(monkeypatch):
+    from contextlib import nullcontext
+    from src.apps.inspection.backend import access
+
+    monkeypatch.setattr(access, "execution_lock", lambda **_: nullcontext())
+    monkeypatch.setattr(access, "require_running", lambda: None)
+    monkeypatch.setattr(access, "inspection_batch", lambda _: True)
     from src.core.celery_tasks import tasks
     from src.core.patrol import batch_manifest
 

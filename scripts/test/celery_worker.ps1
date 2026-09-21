@@ -8,6 +8,7 @@ param(
     [string]$Queues = "netops.default,netops.firewall,netops.device,netops.health,netops.patrol,netops.ai",
     [string]$Pool = "solo",
     [string]$NodeName = "netops-standalone@%h",
+    [int]$DjangoPort = 8001,
     [switch]$KeepExisting
 )
 
@@ -33,12 +34,13 @@ if (-not $KeepExisting) {
 }
 
 Remove-Item Env:DJANGO_SETTINGS_MODULE -ErrorAction SilentlyContinue
+$env:NETOPS_AUTHORITY_URL = "http://localhost:$DjangoPort"
 
 Write-Host "Starting Celery worker (pool=$Pool, queues=$Queues) ..." -ForegroundColor Cyan
 $concurrencyArgs = if ($Pool -eq "solo") { @("--concurrency=1") } else { @() }
-& $venvPython -m celery -A src.core.celery_tasks.celery_app worker `
+& $venvPython -m src.platform.kernel.worker `
     --loglevel=$LogLevel `
     -P $Pool `
     @concurrencyArgs `
     --hostname=$NodeName `
-    -Q $Queues
+    --queues $Queues

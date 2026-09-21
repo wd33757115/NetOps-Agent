@@ -339,8 +339,3 @@ class Metrics:
     LLM_REQUEST_DURATION = "llm_request_duration_ms"
     LLM_TOKEN_USAGE = "llm_token_usage"
 
-    # RAG 指标
-    RAG_QUERY_TOTAL = "rag_query_total"
-    RAG_QUERY_SUCCESS = "rag_query_success"
-    RAG_QUERY_ERROR = "rag_query_error"
-    RAG_QUERY_DURATION = "rag_query_duration_ms"

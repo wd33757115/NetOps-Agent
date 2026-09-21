@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from src.core.parser import tasks as parser_tasks
 from src.core.rule_control.template_activation import (
     RuleAssetTemplateActivationService,
@@ -417,7 +419,8 @@ def test_generation_context_requires_sanitized_records_and_rejects_raw_fields():
         raise AssertionError("nested raw context should be rejected")
 
 
-def test_start_generation_workflow_uses_prepared_context(monkeypatch):
+@pytest.mark.parametrize("principal", [None, "real-user-id"])
+def test_start_generation_workflow_uses_prepared_context(monkeypatch, principal):
     started = []
 
     class FakeJobRepository:
@@ -448,16 +451,16 @@ def test_start_generation_workflow_uses_prepared_context(monkeypatch):
             self.updated.append((job_id, changes))
             return {"id": job_id, **changes}
 
-    class FakeWorkflowEngine:
+    class FakeGenerationJobs:
         @staticmethod
-        def start(template_name, context, **kwargs):
+        def submit(template_name, context, **kwargs):
             started.append((template_name, context, kwargs))
             return "workflow-1"
 
-    import src.core.workflows.engine as workflow_engine
+    from src.apps.rule_governance.backend.rule_control import generation_jobs
     from src.core.rule_control.dataset_context import DatasetRuleGenerationContextService
 
-    monkeypatch.setattr(workflow_engine, "WorkflowEngine", FakeWorkflowEngine)
+    monkeypatch.setattr(generation_jobs, "GenerationJobs", FakeGenerationJobs)
     monkeypatch.setattr(
         DatasetRuleGenerationContextService,
         "load",
@@ -475,29 +478,22 @@ def test_start_generation_workflow_uses_prepared_context(monkeypatch):
         "job-1",
         context_id="context-1",
         actor="operator",
+        actor_user_id=principal,
+        context_overrides={"rule_generation_identity": {"actor_user_id": "forged"}},
     )
 
     assert result["success"] is True
     assert result["run_id"] == "workflow-1"
-    assert started[0][0] == "rule-asset-generation"
+    assert started[0][0] == "job-1"
     assert started[0][1]["source_ref"] == "parser_template:template-1"
     assert started[0][1]["schema_id"] == "template-1"
     assert started[0][1]["source_template_id"] == "template-1"
     assert started[0][1]["rule_generation_seed_job_id"] == "job-1"
     assert started[0][1]["rule_generation_actor"] == "operator"
-    assert started[0][2]["source"] == "parser-control-plane"
-    assert started[0][2]["user_id"] == "operator"
-    assert job_repository.updated[0][0] == "job-1"
-    persisted_payload = job_repository.updated[0][1]["payload_json"]
-    assert persisted_payload["latest_generation_run_id"] == "workflow-1"
-    assert persisted_payload["latest_generation_context_id"] == "context-1"
-    assert persisted_payload["generation_workflow_runs"] == [
-        {
-            "run_id": "workflow-1",
-            "context_id": "context-1",
-            "context_digest": "digest-1",
-        }
-    ]
+    assert result["execution"] == "rule-generation"
+    assert started[0][2]["user_id"] == principal
+    assert started[0][1]["rule_generation_identity"]["actor_user_id"] == principal
+    assert job_repository.updated == []  # Submission owns the atomic seed/history update.
 
 
 def test_start_generation_workflow_rejects_context_without_offline_evidence():
@@ -526,3 +522,13 @@ def test_multi_entity_check_item_context_is_generation_ready():
     )
 
     assert missing == []
+
+
+@pytest.fixture(autouse=True)
+def app_admission_for_business_unit_tests(monkeypatch):
+    from contextlib import nullcontext
+    from unittest.mock import Mock
+    from src.apps.rule_governance.backend import access
+    monkeypatch.setattr(access, "authorize", Mock())
+    monkeypatch.setattr(access, "require_running", lambda: None)
+    monkeypatch.setattr(access, "execution_lock", lambda **kwargs: nullcontext())

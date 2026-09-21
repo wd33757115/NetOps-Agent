@@ -116,7 +116,7 @@ async function setup(
     localStorage.setItem("access_token", "document-e2e");
     localStorage.setItem(
       "auth_user",
-      JSON.stringify({ id: 71, username: "测试用户", role: "admin" }),
+      JSON.stringify({ id: 71, username: "测试用户", role: "admin", app_ids: ["official-documents"] }),
     );
   });
   await page.route("**/api/**", async (route) => {
@@ -124,7 +124,7 @@ async function setup(
       method = route.request().method();
     if (path.endsWith("/auth/me/"))
       return route.fulfill({
-        json: { id: 71, username: "测试用户", role: "admin" },
+        json: { id: 71, username: "测试用户", role: "admin", app_ids: ["official-documents"] },
       });
     const ok = (data: unknown) =>
       route.fulfill({ json: { success: true, data, error: null } });

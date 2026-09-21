@@ -24,7 +24,8 @@ if (-not (Test-DockerAvailable -TimeoutSec $probeTimeoutSec)) {
     exit 1
 }
 
-$downArgs = @("compose", "-f", $composeFile, "down")
+$aiCompose = Join-Path $ProjectRoot "deployment\docker-compose.ai.yml"
+$downArgs = @("compose", "-f", $composeFile, "-f", $aiCompose, "--profile", "core", "--profile", "ai", "down")
 if ($RemoveVolumes) {
     $downArgs += "-v"
 }

@@ -5,6 +5,17 @@ from src.core.celery_tasks.tasks import (
 )
 
 
+import pytest
+from contextlib import nullcontext
+
+@pytest.fixture(autouse=True)
+def isolate_admission(monkeypatch):
+    from src.apps.inspection.backend import access
+    monkeypatch.setattr(access, "execution_lock", lambda **_: nullcontext())
+    monkeypatch.setattr(access, "require_running", lambda: None)
+    monkeypatch.setattr(access, "authorize_authority_request", lambda request_id: None)
+
+
 def test_reconcile_current_authority_reuses_one_readiness_snapshot(monkeypatch):
     from src.core.check_items import current_authority
     from src.core.patrol import production_readiness
@@ -58,7 +69,7 @@ def test_reconcile_current_authority_reuses_one_readiness_snapshot(monkeypatch):
     result = reconcile_current_authority_dispatches_task.run()
 
     assert readiness_calls == [
-        ("patrol-attested-offline-current", "workflow")
+        ("patrol-attested-offline-current", "direct")
     ]
     assert prepared == ["request-1", "request-2"]
     assert result == {
@@ -136,7 +147,7 @@ def test_reconcile_current_authority_defers_all_candidates_when_blocked(
             executing_worker_queues: list[str],
         ):
             assert workflow_name == "patrol-attested-offline-current"
-            assert launch_mode == "workflow"
+            assert launch_mode == "direct"
             assert executing_worker_queues == []
             return {
                 "status": "blocked",

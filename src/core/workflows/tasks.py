@@ -6,11 +6,17 @@
 from __future__ import annotations
 
 import logging
-import re
 
-from billiard.exceptions import SoftTimeLimitExceeded
 from celery import chord
 
+from src.apps.rule_governance.backend.parser.worker import (
+    _PARSER_FAILURE_CODE_RE,
+    _parser_skill_failure_code,
+    _refresh_rule_asset_projection_from_skill_result,
+)
+from src.apps.rule_governance.backend.parser.worker import (
+    _refresh_rule_asset_projection as _refresh_rule_asset_projection,
+)
 from src.core.celery_tasks.celery_app import celery
 from src.core.workflows.engine import WorkflowEngine
 from src.core.workflows.registry import find_step_template, get_template
@@ -23,54 +29,6 @@ from src.core.workflows.repository import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-_PARSER_FAILURE_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
-
-
-def _parser_skill_failure_code(exc: Exception) -> str:
-    """Preserve a stable generator reason instead of flattening every failure."""
-
-    payload = getattr(exc, "payload", None)
-    if not isinstance(payload, dict):
-        return "skill_execution_failed"
-
-    reasons: list[str] = []
-
-    def add_reason(value) -> None:
-        reason = str(value or "").strip()
-        if reason:
-            reasons.append(reason)
-
-    add_reason(payload.get("failure_code"))
-    add_reason(payload.get("error_code"))
-    add_reason(payload.get("skipped_reason"))
-    if isinstance(payload.get("agent_loop"), dict):
-        add_reason(payload["agent_loop"].get("stop_reason"))
-    for report in payload.get("reports") or []:
-        if not isinstance(report, dict):
-            continue
-        add_reason(report.get("skipped_reason"))
-        if isinstance(report.get("agent_loop"), dict):
-            add_reason(report["agent_loop"].get("stop_reason"))
-
-    error_text = str(payload.get("error") or "")
-    terminal_match = re.search(
-        r"terminal status:\s*([a-z][a-z0-9_]{2,63})",
-        error_text,
-        flags=re.IGNORECASE,
-    )
-    if terminal_match:
-        reasons.append(terminal_match.group(1))
-
-    for reason in reasons:
-        segments = [segment.strip().lower() for segment in reason.split(":")]
-        candidate = segments[0]
-        if candidate == "model_requested_review" and len(segments) > 1:
-            candidate = segments[1]
-        if _PARSER_FAILURE_CODE_RE.fullmatch(candidate):
-            return candidate
-    return "skill_execution_failed"
 
 
 def _workflow_exception_failure_code(exc: Exception) -> str:
@@ -102,143 +60,21 @@ def _workflow_exception_failure_code(exc: Exception) -> str:
     return "workflow_step_exception"
 
 
-def _refresh_rule_asset_projection(parser_job_id: str) -> None:
-    """Keep the rule control-plane read model aligned with Parser job state."""
-
-    try:
-        from src.core.rule_control.command_asset_units import (
-            RuleAssetCommandUnitService,
-        )
-
-        RuleAssetCommandUnitService().reconcile_for_parser_job(parser_job_id)
-    except Exception:
-        logger.exception(
-            "Rule asset projection refresh failed parser_job_id=%s",
-            parser_job_id,
-        )
-
-
-def _refresh_rule_asset_projection_from_skill_result(
-    skill_name: str,
-    result: dict | None,
-) -> None:
-    """Refresh command-unit state after a rule bundle becomes durable."""
-
-    if skill_name != "rule-asset-persister" or not isinstance(result, dict):
-        return
-    bundle = result.get("bundle")
-    if not isinstance(bundle, dict):
-        return
-    payload = bundle.get("payload_json")
-    if not isinstance(payload, dict):
-        payload = {}
-    offline_job_id = str(payload.get("offline_job_id") or "").strip()
-    if not offline_job_id:
-        return
-    try:
-        from src.core.rule_control.command_asset_units import (
-            RuleAssetCommandUnitService,
-        )
-
-        RuleAssetCommandUnitService().reconcile(offline_job_id)
-    except Exception:
-        logger.exception(
-            "Rule asset projection refresh failed offline_job_id=%s bundle_id=%s",
-            offline_job_id,
-            bundle.get("id"),
-        )
-
-
 @celery.task(bind=True, name="execute_skill_task")
 def execute_skill_task(self, skill_name: str, **params):
-    """通用 Skill 执行 Celery 任务。"""
-    from src.core.parser.repository import ParserJobRepository, ParserJobStateError
+    """Legacy Parser deliveries share the package worker; other Skills stay generic."""
+    if skill_name == "textfsm-generator":
+        from src.apps.rule_governance.backend.parser.worker import execute_parser_delivery
+
+        return execute_parser_delivery(task_id=str(self.request.id or ""), params=params)
+
     from src.core.skills.executor import SkillExecutionError, execute_skill
-
-    manages_parser_job_lifecycle = (
-        skill_name == "textfsm-generator"
-        and str(params.get("operation") or "generate") != "suggest_spec"
-    )
-    job_id = str(params.get("job_id") or "") if manages_parser_job_lifecycle else ""
-    repository = ParserJobRepository() if job_id else None
-
-    def fail_active_parser_job(error: str, failure_code: str) -> None:
-        if repository is None:
-            return
-        current = repository.get_job_lifecycle(job_id)
-        if current and str(current.get("celery_task_id") or "") != str(self.request.id or ""):
-            return
-        if not current or current["status"] not in {
-            "collecting",
-            "pending",
-            "running",
-            "validating",
-        }:
-            return
-        repository.transition_job_status(
-            job_id,
-            "failed",
-            error,
-            failure_code=failure_code,
-        )
-        _refresh_rule_asset_projection(job_id)
-
-    if repository:
-        try:
-            repository.transition_job_status(
-                job_id,
-                "running",
-                expected_status="pending",
-                expected_celery_task_id=str(self.request.id or ""),
-            )
-            _refresh_rule_asset_projection(job_id)
-        except ParserJobStateError as exc:
-            return {"success": False, "message": str(exc), "error": str(exc)}
 
     try:
         result = execute_skill(skill_name, params)
     except SkillExecutionError as exc:
-        failure_code = _parser_skill_failure_code(exc)
-        fail_active_parser_job(str(exc), failure_code)
-        return {
-            "success": False,
-            "message": str(exc),
-            "error": str(exc),
-            "failure_code": failure_code,
-        }
-    except SoftTimeLimitExceeded:
-        fail_active_parser_job(
-            "textfsm-generator exceeded the Celery soft time limit",
-            "worker_timeout",
-        )
-        raise
-    except Exception as exc:
-        fail_active_parser_job(str(exc), "worker_exception")
-        logger.exception("Skill execution failed skill=%s job=%s", skill_name, job_id or None)
-        raise
-
-    if repository:
-        current = repository.get_job_lifecycle(job_id)
-        if current and str(current.get("celery_task_id") or "") != str(self.request.id or ""):
-            return {"success": False, "error": "stale_generation_discarded"}
-        if current and current["status"] == "cancelled":
-            return {"success": False, "message": "parser job cancelled", "error": "cancelled"}
-        if current and current["status"] == "succeeded" and bool((result or {}).get("success")):
-            return result
-        if current and current["status"] not in {"running", "validating"}:
-            return {
-                "success": False,
-                "message": "parser job inputs changed while generation was running",
-                "error": "stale_generation_discarded",
-            }
-        success = bool((result or {}).get("success"))
-        repository.transition_job_status(
-            job_id,
-            "succeeded" if success else "failed",
-            None if success else str((result or {}).get("error") or (result or {}).get("message")),
-            failure_code=None if success else "generator_failed",
-        )
-        _refresh_rule_asset_projection(job_id)
+        return {"success": False, "message": str(exc), "error": str(exc),
+                "failure_code": _parser_skill_failure_code(exc)}
     _refresh_rule_asset_projection_from_skill_result(skill_name, result)
     return result
 
@@ -356,7 +192,7 @@ def _run_workflow_step(run_id: str, step_index: int) -> dict:
 
     template = get_template(run.template_name)
     steps = list_workflow_steps(run_id)
-    if not template or step_index >= len(steps):
+    if not template or not isinstance(step_index, int) or not 0 <= step_index < len(steps):
         return {"success": False, "error": "invalid step", "step_index": step_index}
 
     step_rec = steps[step_index]
@@ -368,6 +204,12 @@ def _run_workflow_step(run_id: str, step_index: int) -> dict:
             "step_index": step_index,
         }
 
+    if run.template_name in {"patrol-change-event", "patrol-attested-offline-current", "patrol-offline-current", "patrol-history-change-event"}:
+        return {"success": False, "error": "巡检 Workflow 已停止，请通过巡检应用重新提交",
+                "failure_code": "offline_patrol_workflow_retired", "step_index": step_index}
+    if run.template_name in {"rule-asset-generation", "rule-asset-submit", "rule-asset-approve", "parser-validation-ingest", "rollout-live-capture"}:
+        return {"success": False, "error": "旧规则 Workflow 已停止，请从规则治理应用重新提交",
+                "failure_code": "rule_workflow_retired", "step_index": step_index}
     if step_tpl.subworkflow:
         return _run_subworkflow_step(run_id, step_index, step_tpl)
 
@@ -388,7 +230,7 @@ def _workflow_step_queue(run_id: str, step_index: int) -> str:
     run = get_workflow_run(run_id)
     template = get_template(run.template_name) if run else None
     steps = list_workflow_steps(run_id)
-    if not template or step_index >= len(steps):
+    if not template or not isinstance(step_index, int) or not 0 <= step_index < len(steps):
         return "netops.default"
     step_template = find_step_template(template, steps[step_index].step_name)
     return (
@@ -402,7 +244,7 @@ def execute_workflow_step_only(self, run_id: str, step_index: int):
     from src.core.workflows.repository import mark_step_completed
 
     steps = list_workflow_steps(run_id)
-    if step_index >= len(steps):
+    if not isinstance(step_index, int) or not 0 <= step_index < len(steps):
         return {"success": False, "error": "invalid step", "step_index": step_index}
 
     step_rec = steps[step_index]
@@ -472,7 +314,7 @@ def dispatch_parallel_batch_task(self, run_id: str, indices: list[int]):
 
 @celery.task(bind=True, name="dispatch_workflow_step_task")
 def dispatch_workflow_step_task(self, run_id: str, step_index: int):
-    """调度 Workflow 单步 Skill（通过 execute_skill_task）。"""
+    """Dispatch a durable step to its package adapter or the generic Skill path."""
     run = get_workflow_run(run_id)
     if not run:
         return {"success": False, "error": "workflow run not found"}
@@ -490,7 +332,7 @@ def dispatch_workflow_step_task(self, run_id: str, step_index: int):
         }
 
     steps = list_workflow_steps(run_id)
-    if step_index >= len(steps):
+    if not isinstance(step_index, int) or not 0 <= step_index < len(steps):
         return {"success": False, "error": "invalid step"}
 
     step_rec = steps[step_index]

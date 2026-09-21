@@ -36,8 +36,7 @@ EOF
   fi
 fi
 
-docker compose -f "$COMPOSE_FILE" pull postgres redis rabbitmq minio qdrant
+docker compose -f "$COMPOSE_FILE" pull postgres redis rabbitmq minio
 docker compose -f "$COMPOSE_FILE" build django react
-mkdir -p "$PROJECT_ROOT/deployment/qdrant_storage"
 
 echo "[完成] 运行 ./scripts/prod/start.sh"

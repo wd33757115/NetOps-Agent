@@ -1,0 +1,122 @@
+"""Bounded, user-visible execution summaries, not model reasoning or tool payloads."""
+
+from copy import deepcopy
+from datetime import timezone
+
+from .repository import now
+
+LABELS = {
+    "glob": "查找资料文件",
+    "grep": "搜索资料内容",
+    "read": "阅读原文",
+    "mcp__netops__submit_answer": "核对答案引用",
+    "mcp__netops__inspection__read_batch": "查询巡检记录",
+    "mcp__netops__inspection__search_devices": "查找设备资产",
+    "mcp__netops__inspection__list_runs": "查询巡检运行与质量",
+    "mcp__netops__inspection__list_events": "查询网络事件",
+    "mcp__netops__inspection__list_snapshots": "查找采集证据",
+    "mcp__netops__inspection__read_snapshot": "阅读采集原文",
+    "mcp__netops__rule_governance__read_generation": "查询规则治理记录",
+}
+STATUS = {
+    "running": "正在准备资料与工具",
+    "cancel_requested": "正在停止本次问答",
+    "completed": "已完成",
+    "failed": "本次问答未完成，可重新提问",
+    "cancelled": "已停止本次问答",
+    "interrupted": "运行已中断，可重新提问",
+}
+ERRORS = {
+    "model_output_truncated": (
+        "回答达到单次输出上限，未发布被截断的配置。"
+        "请指定设备角色或拆分配置范围"
+    ),
+    "dsh_run_failed": "Agent 执行异常，未发布答案；可使用本次运行编号排查",
+    "citation_validation_failed": "回答引用未通过原文校验，请重新提问",
+    "citation_unread": "回答引用了未读取的原文，自动修正未完成，请重试",
+    "citation_format_invalid": "回答引用格式有误，自动修正未完成，请重试",
+    "citation_range_invalid": "回答引用的行范围无效，自动修正未完成，请重试",
+    "citation_too_large": "回答引用范围过长，自动修正未完成，请重试",
+    "citation_missing": "回答缺少可核验的原文引用，请重试或补充资料",
+    "citation_changed": "引用的资料修订不可用，请重新提问",
+    "run_budget_exceeded": "本次检索已达到调用上限，请缩小问题范围后重试",
+    "deadline_exceeded": "本次问答超时，已停止执行",
+    "provider_timeout": "模型响应超时，请稍后重试",
+    "model_unavailable": "模型服务暂不可用，请稍后重试",
+    "model_configuration_unavailable": "问答模型配置不可用",
+}
+
+
+def stamp(value=None):
+    value = value or now()
+    return value.replace(tzinfo=value.tzinfo or timezone.utc).isoformat()
+
+
+def snapshot(row):
+    data = deepcopy(row.progress_json or {"steps": [], "message": STATUS["running"]})
+    data.update(run_id=row.id, status=row.status, started_at=stamp(row.created_at))
+    if row.status != "running":
+        data["message"] = STATUS.get(row.status, "运行已结束")
+    if row.status == "failed" and row.error_code in ERRORS:
+        data["message"] = ERRORS[row.error_code]
+    if row.status not in {"running", "cancel_requested"}:
+        data.setdefault("ended_at", stamp(min(now(), row.expires_at.replace(tzinfo=timezone.utc))))
+        for step in data["steps"]:
+            if step["status"] == "running":
+                step.update(status="interrupted", ended_at=data["ended_at"])
+    return data
+
+
+def advance(row, event):
+    data = snapshot(row)
+    if event.kind == "metrics":
+        data["metrics"] = {
+            key: event.data[key]
+            for key in (
+                "model_rounds",
+                "tool_calls",
+                "elapsed_ms",
+                "model_input_characters",
+                "usage",
+                "authorization_checks",
+                "timings_ms",
+                "model_finish_reason",
+                "sdk_finish_reason",
+                "max_output_tokens",
+            )
+            if key in event.data
+        }
+    elif event.kind == "status":
+        # Phase descriptions originate in the adapter, never provider output.
+        message = event.data.get("message")
+        if message in {"正在分析问题", "正在综合资料与工具结果"}:
+            data["message"] = message
+    elif event.kind == "tool_started":
+        call_id = str(event.data.get("call_id", ""))[:128]
+        if (
+            call_id
+            and len(data["steps"]) < 30
+            and not any(s["id"] == call_id for s in data["steps"])
+        ):
+            label = LABELS.get(event.data.get("tool"), "查询业务数据")
+            data["steps"].append(
+                {
+                    "id": call_id,
+                    "label": label,
+                    "detail": str(event.data.get("detail") or "")[:200],
+                    "operation": str(event.data.get("operation") or "")[:1800],
+                    "status": "running",
+                    "started_at": stamp(),
+                }
+            )
+            data["message"] = label
+    elif event.kind == "tool_finished":
+        for step in data["steps"]:
+            if step["id"] == event.data.get("call_id") and step["status"] == "running":
+                step.update(
+                    status="completed" if event.data.get("success") else "failed",
+                    ended_at=stamp(),
+                    summary=str(event.data.get("summary") or "")[:240],
+                )
+    row.progress_json = data
+    return data

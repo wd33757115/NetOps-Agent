@@ -30,10 +30,7 @@ if ($dockerOk) {
 }
 if (Test-Path $pidFile) {
     $pids = Get-Content $pidFile -Raw | ConvertFrom-Json
-    foreach ($name in $pids.PSObject.Properties.Name) {
-        Stop-Process -Id ([int]$pids.$name) -Force -ErrorAction SilentlyContinue
-        Write-ColorOutput "  [OK] Stopped $name" "Green"
-    }
+    Stop-RecordedProjectLaunchers -Records $pids -ProjectRoot $ProjectRoot
     Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
 }
 Remove-Item (Join-Path $ProjectRoot ".runtime\test\celery-beat.pid") -Force -ErrorAction SilentlyContinue

@@ -45,6 +45,13 @@ def test_production_overlay_replaces_public_port_bindings(tmp_path, with_ai):
     )
     assert result.returncode == 0, result.stderr
     services = json.loads(result.stdout)["services"]
+    django = services["django"]["environment"]
+    patrol = services["celery-patrol"]["environment"]
+    assert "django" in django["DJANGO_ALLOWED_HOSTS"].split(",")
+    assert django["CELERY_BROKER_URL"] == patrol["CELERY_BROKER_URL"]
+    assert django["CELERY_RESULT_BACKEND"] == patrol["CELERY_RESULT_BACKEND"]
+    if with_ai:
+        assert "--exclude-queues" in services["celery-ai"]["command"]
     assert {"postgres", "django", "react", "fastapi"} <= services.keys()
     assert not services["fastapi"].get("ports")
     bindings = [

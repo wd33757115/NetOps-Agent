@@ -1,3 +1,5 @@
+import WallpaperSettings from './WallpaperSettings';
+import { wallpaperBackground } from './wallpaper';
 import { useAuth } from '../../context/AuthContext';
 import React, { useEffect, useRef, useState } from "react";
 import { Button, Dropdown, Input, Modal, Space } from "antd";
@@ -5,6 +7,7 @@ import {
   CloseOutlined,
   MoreOutlined,
   PlusOutlined,
+  PictureOutlined,
   FolderOpenOutlined,
 } from "@ant-design/icons";
 import {
@@ -29,6 +32,7 @@ import { canOpenApp, findApp } from "../../apps/appRegistry";
 import { useDesktopStore } from "../../store/useDesktopStore";
 import {
   dissolveFolder,
+  desktopColumns,
   firstFree,
   moveNode,
   type DesktopNode,
@@ -304,17 +308,18 @@ export default function DesktopCanvas() {
   } | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const [columns, setColumns] = useState(6);
+  const [canvasHeight, setCanvasHeight] = useState(464);
+  const [wallpaperOpen, setWallpaperOpen] = useState(false);
   const canvas = useRef<HTMLDivElement>(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
   );
   useEffect(() => {
     if (!canvas.current) return;
-    const observer = new ResizeObserver(([entry]) =>
-      setColumns(
-        Math.max(2, Math.min(10, Math.floor(entry.contentRect.width / 112))),
-      ),
-    );
+    const observer = new ResizeObserver(([entry]) => {
+      setColumns(desktopColumns(entry.contentRect.width));
+      setCanvasHeight(entry.contentRect.height);
+    });
     observer.observe(canvas.current);
     return () => observer.disconnect();
   }, []);
@@ -334,7 +339,7 @@ export default function DesktopCanvas() {
       slots.set(slot, node);
     });
   const count = Math.max(
-    columns * 4,
+    columns * Math.max(4, Math.floor(canvasHeight / 116)),
     Math.max(-1, ...slots.keys()) + columns + 1,
   );
   const folder = visibleNodes.find(
@@ -484,6 +489,7 @@ export default function DesktopCanvas() {
       <section
         className="desktop-surface"
         aria-label="工作台桌面"
+        style={{ background: wallpaperBackground(layout.wallpaper) }}
         onKeyDown={(event) => {
           if (event.key === "Escape") {
             setFolderId(null);
@@ -504,12 +510,19 @@ export default function DesktopCanvas() {
               新建文件夹
             </Button>
           </div>
+          <Button type="text" icon={<PictureOutlined aria-hidden="true" />} aria-label="更换壁纸" disabled={disabled} onClick={() => setWallpaperOpen(true)}>更换壁纸</Button>
           <DesktopClock />
         </header>
         <Dropdown
           trigger={["contextMenu"]}
           menu={{
             items: [
+              {
+                key: "wallpaper",
+                label: "更换壁纸",
+                disabled,
+                onClick: () => setWallpaperOpen(true),
+              },
               {
                 key: "new",
                 label: "新建文件夹",
@@ -623,6 +636,7 @@ export default function DesktopCanvas() {
           </span>
         </footer>
       </section>
+      {wallpaperOpen && <WallpaperSettings value={layout.wallpaper} disabled={disabled} onClose={() => setWallpaperOpen(false)} onSave={wallpaper => { edit(value => ({ ...value, wallpaper })); setWallpaperOpen(false); }} />}
       <DragOverlay>
         {dragNode ? (
           <div className="desktop-drag-preview">

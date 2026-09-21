@@ -1,6 +1,8 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from src.core.patrol.handlers import (
     BuildEventsHandler,
     DetectChangesHandler,
@@ -290,7 +292,8 @@ def test_deterministic_patrol_handlers_copy_adapter_input_and_delegate_once():
     assert original == {"run_id": "run-1"}
 
 
-def test_execute_patrol_handler_builds_runner_request_and_marks_completion():
+@pytest.mark.parametrize("defer_completion", [False, True])
+def test_execute_patrol_handler_builds_runner_request_and_marks_completion(defer_completion):
     requests = []
     completions = []
 
@@ -310,12 +313,13 @@ def test_execute_patrol_handler_builds_runner_request_and_marks_completion():
             task_id="task-1",
             execution_plan_id="plan-1",
             owner_token="owner-1",
+            defer_completion=defer_completion,
         )
     )
 
     assert result["snapshot_run_id"] == "patrol-task-1"
     assert requests[0].execution_plan_id == "plan-1"
-    assert completions == [("patrol-task-1", {"owner_token": "owner-1"})]
+    assert completions == ([] if defer_completion else [("patrol-task-1", {"owner_token": "owner-1"})])
 
 
 def test_generate_report_handler_materializes_summary_once_before_rendering():

@@ -1,251 +1,141 @@
-// SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
-// SPDX-License-Identifier: Apache-2.0
-
-import React, { useState, useRef, useEffect, useMemo } from 'react'
-import { message } from 'antd'
-import { useMutation } from 'react-query'
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
+import { Alert, message } from 'antd'
 import GrokShellLayout from '../components/layout/GrokShellLayout'
 import ChatMessage from '../components/ChatMessage'
+import EvidenceLinks from '../components/EvidenceLinks'
 import InputArea from '../components/InputArea'
-import TraceProgress, { type TraceStep } from '../components/TraceProgress'
-import { useChatStore } from '../store/useChatStore'
-import { chatApi, ChatResponse, conversationApi } from '../services/api'
+import TraceProgress, { isRunning, pendingProgress, type AgentProgress } from '../components/TraceProgress'
+import { useChatStore, type Message } from '../store/useChatStore'
 import { streamChatMessage } from '../services/chatStream'
-import { useAuth } from '../context/AuthContext'
+import { api } from '../config/api'
 
-const SUGGESTIONS = [
-  '备份生产环境设备配置',
-  '对 prod 分组执行设备巡检',
-  '交换机端口 Down 了如何排查？',
-]
+const SUGGESTIONS = ['查找资料中关于 BGP EVPN 的配置要求', '结合已有巡检记录分析异常', '交换机端口 Down 了如何排查？']
+interface History {
+  messages: (Message & { progress?: AgentProgress })[]
+  latest_turn: { id: string; status: string; result_message_id?: string; progress?: AgentProgress } | null
+}
 
-const ChatPage: React.FC = () => {
-  const { user } = useAuth()
-  const [threadId, setThreadId] = useState<string>('')
-  const [traceSteps, setTraceSteps] = useState<TraceStep[]>([])
-  const [traceStatus, setTraceStatus] = useState<string>('')
-  const [traceId, setTraceId] = useState<string | null>(null)
-  const [langfuseUrl, setLangfuseUrl] = useState<string | null>(null)
-  const streamAbortRef = useRef<AbortController | null>(null)
+export default function ChatPage() {
+  const [progressByConversation, setProgressByConversation] = useState<Record<string, AgentProgress | undefined>>({})
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [sending, setSending] = useState('')
+  const streamRef = useRef<{ conversation: string; controller: AbortController } | null>(null)
+  const generations = useRef<Record<string, number>>({})
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesScrollRef = useRef<HTMLDivElement>(null)
-  const prevMessageCountRef = useRef(0)
   const initialized = useRef(false)
+  const { currentConversationId, conversations, addMessage, loadConversations, refreshConversationMeta } = useChatStore()
+  const selected = currentConversationId || ''
+  const currentMessages = useMemo(() => conversations.find(c => c.id === selected)?.messages || [], [conversations, selected])
+  const progress = progressByConversation[selected]
+  const busy = !!sending || isRunning(progress)
 
-  const {
-    currentConversationId,
-    conversations,
-    addMessage,
-    uploadedFile,
-    loadConversationDetail,
-    loadConversations,
-    refreshConversationMeta,
-  } = useChatStore()
-
-  const currentMessages = useMemo(
-    () => conversations.find((c) => c.id === currentConversationId)?.messages || [],
-    [conversations, currentConversationId],
-  )
+  const updateProgress = useCallback((id: string, value?: AgentProgress) => {
+    setProgressByConversation(prev => ({ ...prev, [id]: value }))
+  }, [])
+  const refreshHistory = useCallback(async (id: string) => {
+    const generation = generations.current[id] || 0
+    const { data } = await api.get<History>(`/apps/assistant/conversations/${id}`)
+    if ((generations.current[id] || 0) !== generation || streamRef.current?.conversation === id) return
+    useChatStore.setState(state => ({ conversations: state.conversations.map(c => c.id === id
+      ? { ...c, messages: data.messages, detailLoaded: true } : c) }))
+    updateProgress(id, data.latest_turn?.result_message_id ? undefined : data.latest_turn?.progress)
+    return data.latest_turn?.status
+  }, [updateProgress])
 
   useEffect(() => {
-    if (!initialized.current) {
-      initialized.current = true
-      loadConversations().then(() => {
-        const state = useChatStore.getState()
-        if (!state.currentConversationId) {
-          useChatStore.getState().createNewConversation()
-        }
-      })
-    }
+    if (initialized.current) return
+    initialized.current = true
+    void loadConversations().then(() => {
+      if (!useChatStore.getState().currentConversationId) useChatStore.getState().createNewConversation()
+    })
   }, [loadConversations])
 
   useEffect(() => {
-    if (!currentConversationId) return
-    const conv = conversations.find((c) => c.id === currentConversationId)
-    if (!conv || conv.detailLoaded || conv.messages.length > 0) return
-    loadConversationDetail(currentConversationId)
-  }, [currentConversationId, conversations, loadConversationDetail])
-
-  useEffect(() => {
-    if (currentConversationId) {
-      setThreadId(currentConversationId)
-    }
-  }, [currentConversationId])
-
-  const sendMessageMutation = useMutation<ChatResponse, Error, string>({
-    mutationFn: async (query) => {
-      let convId = currentConversationId
-      if (!convId) {
-        const newConv = await conversationApi.createConversation({ title: '新对话' })
-        convId = newConv.id
-        setThreadId(convId)
-        useChatStore.setState((state) => ({
-          conversations: [
-            { id: newConv.id, title: newConv.title, messages: [], detailLoaded: true },
-            ...state.conversations,
-          ],
-          currentConversationId: newConv.id,
-        }))
-      }
-
-      streamAbortRef.current?.abort()
-      const controller = new AbortController()
-      streamAbortRef.current = controller
-      setTraceSteps([])
-      setTraceStatus('Agent 开始执行...')
-      setTraceId(null)
-      setLangfuseUrl(null)
-
+    if (!selected || sending === selected) return
+    let disposed = false
+    let timer: ReturnType<typeof setTimeout>
+    const refresh = async () => {
       try {
-        return await streamChatMessage(
-          {
-            query,
-            thread_id: convId || undefined,
-            uploaded_file_path: uploadedFile?.path,
-          },
-          {
-            signal: controller.signal,
-            onStatus: setTraceStatus,
-            onStep: (step) => setTraceSteps((prev) => [...prev, step]),
-            onEvent: (event, data) => {
-              if (event === 'trace_start' && data.trace_id) {
-                setTraceId(String(data.trace_id))
-              }
-              if (event === 'final_answer' && data.langfuse_url) {
-                setLangfuseUrl(String(data.langfuse_url))
-              }
-            },
-          }
-        )
-      } catch (err) {
-        if (controller.signal.aborted) {
-          throw err
+        const status = await refreshHistory(selected)
+        // Poll only an unfinished turn; this also recovers a disconnected stream.
+        if (!disposed) {
+          if (['running', 'cancel_requested'].includes(status || '')) timer = setTimeout(refresh, 2000)
         }
-        return chatApi.sendMessage({
-          query,
-          thread_id: convId || undefined,
-          uploaded_file_path: uploadedFile?.path,
-        })
+      } catch {
+        if (!disposed) setErrors(prev => ({ ...prev, [selected]: '无法读取会话状态，请刷新重试。' }))
       }
-    },
-    onMutate: async (query) => {
-      addMessage({
-        id: `user-${Date.now()}`,
-        role: 'user',
-        content: query,
-      })
-    },
-    onSuccess: async (data) => {
-      setTraceSteps([])
-      setTraceStatus('')
-      addMessage({
-        id: `assistant-${Date.now()}`,
-        role: 'assistant',
-        content: data.response,
-        agentType: data.agent_type,
-        celeryTaskId: data.celery_task_id,
-        downloadUrl: data.download_url,
-        references: data.references,
-      })
+    }
+    void refresh()
+    return () => { disposed = true; clearTimeout(timer) }
+  }, [selected, sending, refreshHistory])
 
-      if (data.thread_id !== threadId) {
-        setThreadId(data.thread_id)
-      }
-
-      void refreshConversationMeta()
-    },
-    onError: (error) => {
-      setTraceSteps([])
-      setTraceStatus('')
-      message.error(`发送失败: ${error.message}`)
-    },
-  })
-
+  useEffect(() => () => { streamRef.current?.controller.abort() }, [])
   useEffect(() => {
-    return () => {
-      streamAbortRef.current?.abort()
+    const container = messagesScrollRef.current
+    if (!container || container.scrollHeight - container.scrollTop - container.clientHeight < 180) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
     }
-  }, [])
+  }, [currentMessages, progress?.steps.length, progress?.message])
 
-  const handleSend = (text: string) => {
-    if (!currentConversationId) {
-      message.error('请先选择或创建一个对话')
-      return
+  async function handleSend(query: string) {
+    if (busy || !query.trim()) return
+    if (!selected) { message.error('请先选择或创建一个对话'); return }
+    const id = selected
+    generations.current[id] = (generations.current[id] || 0) + 1
+    const controller = new AbortController()
+    streamRef.current = { conversation: id, controller }
+    setSending(id)
+    setErrors(prev => ({ ...prev, [id]: '' }))
+    updateProgress(id, pendingProgress())
+    addMessage({ id: `user-${Date.now()}`, role: 'user', content: query })
+    let terminalStatus = 'running'
+    try {
+      const result = await streamChatMessage({ query, thread_id: id }, {
+        signal: controller.signal, onProgress: value => { terminalStatus = value.status; updateProgress(id, value) },
+      })
+      // Keep the answer even if a subsequent history refresh fails; bind to its original conversation.
+      useChatStore.setState(state => ({ conversations: state.conversations.map(c => c.id === id
+        ? { ...c, messages: [...c.messages, { id: `assistant-${Date.now()}`, role: 'assistant', content: result.response, references: result.references }] } : c) }))
+    } catch (error) {
+      if (!controller.signal.aborted && terminalStatus !== 'cancelled') setErrors(prev => ({ ...prev, [id]: error instanceof Error ? error.message : '问答未完成，请刷新查看本轮状态。' }))
+      setProgressByConversation(prev => {
+        const value = prev[id]
+        return { ...prev, [id]: value && isRunning(value) ? {
+          ...value, status: controller.signal.aborted ? 'cancelled' : 'interrupted',
+          message: controller.signal.aborted ? '已停止连接，正在核对本轮状态' : '连接已中断，正在核对本轮状态',
+          ended_at: new Date().toISOString(),
+        } : value }
+      })
+    } finally {
+      streamRef.current = null
+      setSending('')
+      void refreshConversationMeta()
     }
-    sendMessageMutation.mutate(text)
   }
 
-  useEffect(() => {
-    const count = currentMessages.length
-    const prev = prevMessageCountRef.current
-    prevMessageCountRef.current = count
+  async function stop() {
+    if (!progress) return
+    if (!progress.run_id) { streamRef.current?.controller.abort(); return }
+    try {
+      const { data } = await api.post<{ progress: AgentProgress }>(`/apps/assistant/turns/${progress.run_id}/cancel`)
+      updateProgress(selected, data.progress)
+    } catch { setErrors(prev => ({ ...prev, [selected]: '停止请求失败，请重试。' })) }
+  }
 
-    if (count === 0 && !sendMessageMutation.isLoading) return
-
-    const container = messagesScrollRef.current
-    const nearBottom =
-      !container ||
-      container.scrollHeight - container.scrollTop - container.clientHeight < 120
-
-    if (!nearBottom && count <= prev) return
-
-    requestAnimationFrame(() => {
-      messagesEndRef.current?.scrollIntoView({
-        behavior: count - prev > 1 ? 'auto' : 'smooth',
-        block: 'end',
-      })
-    })
-  }, [currentMessages, sendMessageMutation.isLoading])
-
-  return (
-    <GrokShellLayout
-      mode="chat"
-      scrollRef={messagesScrollRef}
-      footer={
-        <InputArea onSend={handleSend} loading={sendMessageMutation.isLoading} />
-      }
-    >
-      {currentMessages.length === 0 && !sendMessageMutation.isLoading && (
-        <div className="grok-welcome">
-          <h1 className="grok-welcome-title">今天有什么可以帮你？</h1>
-          <div className="grok-suggestions">
-            {SUGGESTIONS.map((text) => (
-              <button
-                key={text}
-                type="button"
-                className="grok-suggestion"
-                onClick={() => handleSend(text)}
-              >
-                {text}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {currentMessages.map((msg) => (
-        <ChatMessage
-          key={msg.id}
-          role={msg.role}
-          content={msg.content}
-          agentType={msg.agentType}
-          downloadUrl={msg.downloadUrl}
-        />
-      ))}
-
-      {sendMessageMutation.isLoading && (
-        <TraceProgress
-          steps={traceSteps}
-          statusMessage={traceStatus}
-          traceId={traceId}
-          langfuseUrl={langfuseUrl}
-          isAdmin={user?.role === 'admin'}
-        />
-      )}
-
-      <div ref={messagesEndRef} />
-    </GrokShellLayout>
-  )
+  return <GrokShellLayout mode="chat" scrollRef={messagesScrollRef}
+    footer={<InputArea onSend={text => void handleSend(text)} loading={busy} allowUpload={false} />}>
+    {currentMessages.length === 0 && !busy && <div className="grok-welcome">
+      <h1 className="grok-welcome-title">今天有什么可以帮你？</h1>
+      <div className="grok-suggestions">{SUGGESTIONS.map(text => <button key={text} type="button" className="grok-suggestion" onClick={() => void handleSend(text)}>{text}</button>)}</div>
+    </div>}
+    {currentMessages.map(msg => <React.Fragment key={msg.id}>
+      {msg.progress && <TraceProgress progress={msg.progress} />}
+      <ChatMessage role={msg.role} content={msg.content} agentType={msg.agentType} downloadUrl={msg.downloadUrl} />
+      {msg.role === 'assistant' && <EvidenceLinks conversationId={selected} references={msg.references} />}
+    </React.Fragment>)}
+    {progress && <TraceProgress progress={progress} onCancel={() => void stop()} />}
+    {errors[selected] && <Alert type="error" message={errors[selected]} showIcon style={{ margin: '12px 0' }} />}
+    <div ref={messagesEndRef} />
+  </GrokShellLayout>
 }
-
-export default ChatPage

@@ -1,0 +1,547 @@
+.parser-control-root,
+.parser-detail-shell,
+.parser-workspace-overlay {
+  --parser-text: #172033;
+  --parser-text-secondary: #667085;
+  --parser-text-tertiary: #98a2b3;
+  --parser-line: #e4e7ec;
+  --parser-line-strong: #d0d5dd;
+  --parser-surface: #fff;
+  --parser-surface-subtle: #f7f8fa;
+  --parser-surface-hover: #f9fafb;
+  --parser-accent: #1677ff;
+  --parser-action: #20242c;
+  --parser-danger: #d92d20;
+  --parser-radius: 6px;
+  color: var(--parser-text);
+}
+
+.parser-control-root {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 24px;
+  width: 100%;
+  min-width: 0;
+  animation: parser-workspace-enter 180ms ease-out both;
+}
+
+.parser-control-root > :not(.parser-control-actions):not(.rule-asset-primary-nav) {
+  grid-column: 1 / -1;
+}
+
+.parser-control-root > .rule-asset-primary-nav {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.parser-control-actions {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 52px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--parser-line);
+}
+
+.parser-production-workspace,
+.parser-source-jobs-workspace,
+.parser-production-workspace > .ant-space-item,
+.parser-source-jobs-workspace > .ant-space-item {
+  width: 100%;
+  min-width: 0;
+}
+
+.parser-control-root h2.ant-typography,
+.parser-control-root h3.ant-typography,
+.parser-detail-shell h2.ant-typography,
+.parser-detail-shell h3.ant-typography {
+  margin-top: 0;
+  letter-spacing: -.01em;
+}
+
+.parser-control-root h2.ant-typography,
+.parser-detail-shell h2.ant-typography {
+  font-size: 20px;
+  line-height: 1.35;
+}
+
+.parser-control-root h3.ant-typography,
+.parser-detail-shell h3.ant-typography {
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+.parser-control-root .ant-btn,
+.parser-detail-shell .ant-btn,
+.parser-workspace-overlay .ant-btn {
+  border-radius: var(--parser-radius);
+  box-shadow: none;
+  font-weight: 500;
+}
+
+.parser-control-root .ant-btn-primary:not(.ant-btn-dangerous),
+.parser-detail-shell .ant-btn-primary:not(.ant-btn-dangerous),
+.parser-workspace-overlay .ant-btn-primary:not(.ant-btn-dangerous) {
+  border-color: var(--parser-action);
+  background: var(--parser-action);
+}
+
+.parser-control-root .ant-btn-primary:not(.ant-btn-dangerous):hover,
+.parser-detail-shell .ant-btn-primary:not(.ant-btn-dangerous):hover,
+.parser-workspace-overlay .ant-btn-primary:not(.ant-btn-dangerous):hover {
+  border-color: #303641;
+  background: #303641;
+}
+
+.rule-asset-primary-nav,
+.rule-asset-view-switch {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 26px;
+  min-width: 0;
+  margin: 0 0 20px;
+  padding: 0;
+  border-bottom: 1px solid var(--parser-line);
+  background: transparent;
+}
+
+.rule-asset-primary-nav {
+  min-height: 52px;
+}
+
+.parser-control-root .rule-asset-primary-nav > button,
+.parser-control-root .rule-asset-primary-nav .ant-btn,
+.parser-control-root .rule-asset-view-switch .ant-btn {
+  position: relative;
+  height: 52px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--parser-text-secondary);
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 500;
+}
+
+.parser-control-root .rule-asset-view-switch .ant-btn {
+  height: 44px;
+}
+
+.rule-asset-primary-nav > button::after,
+.rule-asset-primary-nav .ant-btn::after,
+.rule-asset-view-switch .ant-btn::after {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  border-radius: 0;
+  background: var(--parser-accent);
+  content: '';
+  opacity: 0;
+  transform: scaleX(.55);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.parser-control-root .rule-asset-primary-nav > button.is-active,
+.parser-control-root .rule-asset-primary-nav > button[aria-current='page'],
+.parser-control-root .rule-asset-primary-nav .ant-btn-primary,
+.parser-control-root .rule-asset-view-switch .ant-btn-primary,
+.parser-control-root .rule-asset-primary-nav .ant-btn[aria-selected='true'],
+.parser-control-root .rule-asset-view-switch .ant-btn[aria-selected='true'] {
+  color: var(--parser-text);
+  background: transparent;
+}
+
+.rule-asset-primary-nav > button.is-active::after,
+.rule-asset-primary-nav > button[aria-current='page']::after,
+.rule-asset-primary-nav .ant-btn-primary::after,
+.rule-asset-view-switch .ant-btn-primary::after,
+.rule-asset-primary-nav .ant-btn[aria-selected='true']::after,
+.rule-asset-view-switch .ant-btn[aria-selected='true']::after {
+  opacity: 1;
+  transform: scaleX(1);
+}
+
+.parser-control-root .rule-asset-primary-nav > button:hover {
+  color: var(--parser-text);
+}
+
+.parser-control-root .rule-asset-primary-nav > button:focus {
+  outline: none;
+}
+
+.parser-control-root .rule-asset-primary-nav > button:focus-visible {
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 2px rgb(22 119 255 / 24%);
+}
+
+.parser-control-root .ant-input,
+.parser-control-root .ant-input-affix-wrapper,
+.parser-control-root .ant-select-selector,
+.parser-detail-shell .ant-input,
+.parser-detail-shell .ant-input-affix-wrapper,
+.parser-detail-shell .ant-select-selector,
+.parser-workspace-overlay .ant-input,
+.parser-workspace-overlay .ant-input-affix-wrapper,
+.parser-workspace-overlay .ant-select-selector {
+  border-color: var(--parser-line-strong) !important;
+  border-radius: var(--parser-radius) !important;
+  box-shadow: none !important;
+}
+
+.parser-control-root .ant-input-affix-wrapper:focus-within,
+.parser-control-root .ant-select-focused .ant-select-selector,
+.parser-detail-shell .ant-input-affix-wrapper:focus-within,
+.parser-detail-shell .ant-select-focused .ant-select-selector,
+.parser-workspace-overlay .ant-input-affix-wrapper:focus-within,
+.parser-workspace-overlay .ant-select-focused .ant-select-selector {
+  border-color: #8db8f5 !important;
+  box-shadow: 0 0 0 2px rgb(22 119 255 / 8%) !important;
+}
+
+.parser-control-root .ant-tabs-nav,
+.parser-detail-shell .ant-tabs-nav {
+  margin-bottom: 18px;
+}
+
+.parser-control-root .ant-tabs-tab,
+.parser-detail-shell .ant-tabs-tab {
+  padding: 11px 0;
+  color: var(--parser-text-secondary);
+}
+
+.parser-control-root .ant-tabs-tab-active .ant-tabs-tab-btn,
+.parser-detail-shell .ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: var(--parser-text) !important;
+  font-weight: 600;
+}
+
+.parser-control-root .ant-tabs-ink-bar,
+.parser-detail-shell .ant-tabs-ink-bar {
+  height: 2px !important;
+  background: var(--parser-accent);
+}
+
+.parser-table-shell,
+.parser-control-root .ant-table-wrapper,
+.parser-detail-shell .ant-table-wrapper,
+.parser-workspace-overlay .ant-table-wrapper {
+  min-width: 0;
+}
+
+.parser-control-root .ant-table,
+.parser-detail-shell .ant-table,
+.parser-workspace-overlay .ant-table {
+  color: var(--parser-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.parser-control-root .ant-table-container,
+.parser-detail-shell .ant-table-container,
+.parser-workspace-overlay .ant-table-container {
+  border-color: var(--parser-line) !important;
+  border-radius: var(--parser-radius) !important;
+}
+
+.parser-control-root .ant-table-thead > tr > th,
+.parser-detail-shell .ant-table-thead > tr > th,
+.parser-workspace-overlay .ant-table-thead > tr > th {
+  padding: 11px 12px;
+  border-bottom-color: var(--parser-line);
+  background: var(--parser-surface-subtle) !important;
+  color: #475467;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+
+.parser-control-root .ant-table-tbody > tr > td,
+.parser-detail-shell .ant-table-tbody > tr > td,
+.parser-workspace-overlay .ant-table-tbody > tr > td {
+  padding: 12px;
+  border-bottom-color: var(--parser-line);
+  transition: background-color 120ms ease;
+}
+
+.parser-control-root .ant-table-tbody > tr.ant-table-row:hover > td,
+.parser-detail-shell .ant-table-tbody > tr.ant-table-row:hover > td,
+.parser-workspace-overlay .ant-table-tbody > tr.ant-table-row:hover > td {
+  background: var(--parser-surface-hover) !important;
+}
+
+.parser-control-root .ant-tag,
+.parser-detail-shell .ant-tag,
+.parser-workspace-overlay .ant-tag {
+  margin-inline-end: 4px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.parser-control-root .ant-tag:not(.ant-tag-error):not(.ant-tag-success):not(.ant-tag-warning),
+.parser-detail-shell .ant-tag:not(.ant-tag-error):not(.ant-tag-success):not(.ant-tag-warning),
+.parser-workspace-overlay .ant-tag:not(.ant-tag-error):not(.ant-tag-success):not(.ant-tag-warning) {
+  border-color: var(--parser-line-strong);
+  background: var(--parser-surface);
+  color: #475467;
+}
+
+.parser-control-root .ant-alert,
+.parser-detail-shell .ant-alert,
+.parser-workspace-overlay .ant-alert {
+  border-radius: var(--parser-radius);
+  padding: 10px 12px;
+}
+
+.parser-control-root .ant-alert-info,
+.parser-detail-shell .ant-alert-info,
+.parser-workspace-overlay .ant-alert-info {
+  border-color: #dce3ee;
+  background: #f7f9fc;
+}
+
+.parser-control-root .ant-alert-warning,
+.parser-detail-shell .ant-alert-warning,
+.parser-workspace-overlay .ant-alert-warning {
+  border-color: #eadfbd;
+  background: #fcfaf4;
+}
+
+.parser-detail-shell {
+  width: 100%;
+  min-width: 0;
+  animation: parser-workspace-enter 180ms ease-out both;
+}
+
+.parser-detail-shell .offline-job-detail-page {
+  width: 100%;
+  min-width: 0;
+}
+
+.parser-detail-shell .offline-job-detail-page__header {
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--parser-line);
+}
+
+.parser-detail-shell .offline-job-detail-page__title-group {
+  min-width: 0;
+}
+
+.parser-detail-shell .offline-job-detail-page__actions {
+  flex: 0 0 auto;
+}
+
+.parser-detail-shell .offline-asset-pipeline {
+  margin: 18px 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.parser-detail-shell .offline-asset-pipeline__header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 12px;
+}
+
+.parser-detail-shell .offline-asset-pipeline__progress {
+  min-width: 280px;
+  max-width: 440px;
+  margin: 0;
+}
+
+.parser-detail-shell .offline-asset-pipeline__progress .ant-progress-bg {
+  background: var(--parser-action) !important;
+}
+
+.parser-detail-shell .offline-asset-pipeline__stages {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--parser-line);
+  border-radius: var(--parser-radius);
+  background: var(--parser-surface);
+}
+
+.parser-detail-shell .offline-asset-pipeline__stage {
+  min-width: 0;
+  min-height: 70px;
+  margin: 0;
+  padding: 12px;
+  border-right: 1px solid var(--parser-line);
+  border-bottom: 1px solid var(--parser-line);
+  background: transparent;
+}
+
+.parser-detail-shell .offline-asset-pipeline__stage:nth-child(5n) {
+  border-right: 0;
+}
+
+.parser-detail-shell .offline-asset-pipeline__stage:nth-last-child(-n + 5) {
+  border-bottom: 0;
+}
+
+.parser-detail-shell .offline-asset-pipeline__stage-marker {
+  width: 22px;
+  height: 22px;
+  flex-basis: 22px;
+  border-color: var(--parser-line-strong);
+  background: var(--parser-surface);
+  color: #475467;
+}
+
+.parser-detail-shell .offline-asset-pipeline__stage.is-blocked .offline-asset-pipeline__stage-marker {
+  border-color: var(--parser-danger);
+  background: var(--parser-danger);
+  color: #fff;
+}
+
+.parser-detail-shell .offline-asset-pipeline__stage-label {
+  color: var(--parser-text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.parser-detail-shell .offline-asset-pipeline__step-status {
+  margin-top: 3px;
+  color: var(--parser-text-tertiary);
+  font-size: 12px;
+}
+
+.parser-detail-shell .offline-asset-pipeline__actions {
+  margin-top: 12px;
+}
+
+.parser-detail-shell .command-asset-unit__summary {
+  overflow: hidden;
+  border: 1px solid var(--parser-line);
+  border-radius: var(--parser-radius);
+  background: var(--parser-surface);
+}
+
+.parser-detail-shell .command-asset-unit__summary .ant-statistic {
+  padding: 13px 16px;
+}
+
+.parser-detail-shell .command-asset-unit__summary .ant-statistic-title {
+  margin-bottom: 5px;
+  color: var(--parser-text-secondary);
+  font-size: 12px;
+}
+
+.parser-detail-shell .command-asset-unit__summary .ant-statistic-content {
+  color: var(--parser-text);
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.parser-detail-shell .command-asset-unit__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 0 12px;
+}
+
+.parser-detail-shell .command-asset-unit__search {
+  min-width: 260px;
+  flex: 1 1 360px;
+}
+
+.parser-detail-shell .command-asset-unit__table .ant-table-content {
+  scrollbar-color: #c5cad3 transparent;
+  scrollbar-width: thin;
+}
+
+.parser-workspace-overlay .ant-drawer-header {
+  padding: 15px 20px;
+  border-bottom-color: var(--parser-line);
+}
+
+.parser-workspace-overlay .ant-drawer-title {
+  color: var(--parser-text);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.parser-workspace-overlay .ant-drawer-body {
+  padding: 20px;
+  background: var(--parser-surface);
+}
+
+.parser-value-mapping-drawer .ant-alert {
+  margin-bottom: 16px;
+}
+
+@keyframes parser-workspace-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .parser-control-root,
+  .parser-detail-shell {
+    animation: none;
+  }
+
+  .rule-asset-primary-nav > button::after,
+  .rule-asset-primary-nav .ant-btn::after,
+  .rule-asset-view-switch .ant-btn::after,
+  .parser-control-root .ant-table-tbody > tr > td,
+  .parser-detail-shell .ant-table-tbody > tr > td {
+    transition: none;
+  }
+}
+
+@media (max-width: 1100px) {
+  .parser-detail-shell .offline-asset-pipeline__stages {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .parser-detail-shell .offline-asset-pipeline__stage:nth-child(5n) {
+    border-right: 1px solid var(--parser-line);
+  }
+
+  .parser-detail-shell .offline-asset-pipeline__stage:nth-child(4n) {
+    border-right: 0;
+  }
+
+  .parser-detail-shell .offline-asset-pipeline__stage:nth-last-child(-n + 5) {
+    border-bottom: 1px solid var(--parser-line);
+  }
+
+  .parser-detail-shell .offline-asset-pipeline__stage:nth-last-child(-n + 2) {
+    border-bottom: 0;
+  }
+}
+
+/* Task-oriented workspaces: one action area, readable rows, optional diagnostics. */
+.rule-task-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+.rule-task-heading h2 { margin: 0 0 6px !important; }
+.rule-production-tasks { padding: 8px 0 24px; }
+.rule-workspace-tools { margin-left: auto; position: relative; }
+.rule-workspace-tools summary { cursor: pointer; padding: 8px 12px; color: #596579; border-radius: 6px; }
+.rule-workspace-tools[open] { background: #f6f8fb; border-radius: 8px; padding-bottom: 8px; }
+.patrol-task-context { padding: 12px 0 16px; border-bottom: 1px solid #e8edf2; margin-bottom: 12px; }
+.patrol-task-context .ant-typography { margin-bottom: 0; }
+.patrol-result-actions { position: sticky; top: 0; z-index: 2; background: #fff; padding: 10px 0; border-bottom: 1px solid #e8edf2; }
+.rule-production-tasks .ant-table-row, .rule-workspace-tools summary { transition: background-color 120ms ease; }
+@media (max-width: 767px) { .rule-task-heading { align-items: flex-start; } .rule-workspace-tools { margin-left: 0; } .patrol-result-actions { position: static; } }
+@media (prefers-reduced-motion: reduce) { .rule-production-tasks .ant-table-row, .rule-workspace-tools summary { transition: none; } }
+
+.command-group-browser > summary { cursor: pointer; padding: 10px 0; font-weight: 600; }

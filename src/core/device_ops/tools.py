@@ -19,7 +19,7 @@ from src.core.ingestion.adapters.cli import (
     load_command_collection_manifest,
     test_cli_connectivity,
 )
-from src.core.parser.identity import DeviceIdentity, DeviceIdentityResolver
+from src.apps.rule_governance.runtime import DeviceIdentity, DeviceIdentityResolver
 from src.core.parser.runtime import ParserRuntime
 from src.core.patrol.concurrency import (
     DistributedPatrolSemaphore,

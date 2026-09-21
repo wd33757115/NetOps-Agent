@@ -233,56 +233,8 @@ def _check_minio() -> ServiceCheckResult:
         )
 
 
-def _check_qdrant() -> ServiceCheckResult:
-    t0 = time.perf_counter()
-    settings = get_settings()
-    try:
-        import httpx
-
-        url = f"http://{settings.QDRANT_HOST}:{settings.QDRANT_PORT}/collections"
-        with httpx.Client(timeout=3.0) as client:
-            resp = client.get(url)
-        ok = resp.status_code == 200
-        return ServiceCheckResult(
-            id="qdrant",
-            name="Qdrant",
-            status="ok" if ok else "degraded",
-            message="向量库可达" if ok else f"HTTP {resp.status_code}",
-            latency_ms=_ms(t0),
-            detail={"host": settings.QDRANT_HOST},
-        )
-    except Exception as exc:
-        return ServiceCheckResult(
-            id="qdrant",
-            name="Qdrant (RAG)",
-            status="degraded",
-            message=str(exc)[:200],
-            latency_ms=_ms(t0),
-        )
 
 
-def _check_rag() -> ServiceCheckResult:
-    t0 = time.perf_counter()
-    try:
-        from src.core.rag_service.service import get_rag_service
-
-        svc = get_rag_service()
-        ok = svc is not None
-        return ServiceCheckResult(
-            id="rag",
-            name="RAG Service",
-            status="ok" if ok else "degraded",
-            message="已加载" if ok else "未加载",
-            latency_ms=_ms(t0),
-        )
-    except Exception as exc:
-        return ServiceCheckResult(
-            id="rag",
-            name="RAG Service",
-            status="degraded",
-            message=str(exc)[:200],
-            latency_ms=_ms(t0),
-        )
 
 
 def run_diagnostics() -> DiagnosticsResponse:
@@ -294,8 +246,6 @@ def run_diagnostics() -> DiagnosticsResponse:
         _check_celery_worker(),
         _check_celery_beat(),
         _check_minio(),
-        _check_qdrant(),
-        _check_rag(),
     ]
 
     down = sum(1 for c in checks if c.status == "down")

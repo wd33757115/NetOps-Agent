@@ -99,6 +99,11 @@ class SkillRunner:
     ) -> SkillExecutionResult:
         from src.core.skills.executor import SkillExecutionError, _execute_skill_impl
 
+        from src.platform.kernel.registry import migrated_skill_app
+        migrated_app = migrated_skill_app(skill_name)
+        if migrated_app:
+            raise SkillExecutionError(f"该能力已迁入业务应用：/apps/{migrated_app}")
+
         params = dict(params or {})
         obs = extract_observability_context(params)
         if context is None:

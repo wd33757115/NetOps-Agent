@@ -28,9 +28,9 @@ def test_optional_python_dependencies_are_not_in_default_runtime_set():
     ):
         assert dependency not in default_dependencies
     assert groups["ai"]["optional"] is True
-    assert groups["rag"]["optional"] is True
+    assert "rag" not in groups
     assert groups["documents"]["optional"] is True
-    assert groups["qdrant"]["optional"] is True
+    assert "qdrant" not in groups
     assert groups["observability"]["optional"] is True
     assert "legacy-ui" not in groups
 
@@ -80,7 +80,7 @@ def test_core_data_plane_smoke_blocks_optional_imports():
 def test_optional_middleware_requires_explicit_compose_profiles():
     compose = yaml.safe_load(Path("deployment/docker-compose.yml").read_text(encoding="utf-8"))
 
-    assert set(compose["services"]["qdrant"]["profiles"]) == {"rag", "rag-qdrant"}
+    assert "qdrant" not in compose["services"]
     assert compose["services"]["langfuse"]["profiles"] == ["observability"]
 
 
@@ -107,7 +107,7 @@ def test_compose_runtime_roles_use_separate_dependencies_and_queues():
     assert ai_services["celery-ai"]["build"]["args"]["REQUIREMENTS_FILE"] == (
         "requirements-ai-worker.txt"
     )
-    assert "-Q netops.ai" in ai_services["celery-ai"]["command"]
+    assert "--queues netops.ai" in ai_services["celery-ai"]["command"]
     assert ai_services["fastapi"]["build"]["args"]["REQUIREMENTS_FILE"] == (
         "requirements.txt"
     )

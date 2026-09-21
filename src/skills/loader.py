@@ -5,11 +5,10 @@ from __future__ import annotations
 
 import logging
 
-
 logger = logging.getLogger(__name__)
 
 
-def load_all_skills(rag_service=None, skill_dirs: list[str] | None = None) -> int:
+def load_all_skills(skill_dirs: list[str] | None = None) -> int:
     """
     统一 Skill 加载入口（SKILL.md + SkillSystem）。
 
@@ -18,12 +17,9 @@ def load_all_skills(rag_service=None, skill_dirs: list[str] | None = None) -> in
     from src.skills.bootstrap import bootstrap_skills
 
     return bootstrap_skills(
-        rag_service=rag_service,
         skill_dirs=skill_dirs,
         force=False,
     )
-
-
 
 
 if __name__ == "__main__":

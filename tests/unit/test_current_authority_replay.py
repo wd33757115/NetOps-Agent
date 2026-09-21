@@ -164,7 +164,7 @@ def test_replay_command_report_accepts_session_independent_snapshot_values():
 def test_frozen_parser_bundle_uses_exact_versions_after_active_switch(
     monkeypatch,
 ):
-    from src.core import check_items
+    from src.apps.rule_governance import runtime as rule_runtime
     from src.core.patrol import runner
 
     resolved_version_ids: list[str] = []
@@ -185,8 +185,8 @@ def test_frozen_parser_bundle_uses_exact_versions_after_active_switch(
         lambda _plan: {"digest": "d" * 64},
     )
     monkeypatch.setattr(
-        check_items,
-        "CheckItemRuntimeBundleService",
+        rule_runtime,
+        "CheckItemRuntimeReader",
         FrozenBundleService,
     )
 

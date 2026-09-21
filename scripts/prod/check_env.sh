@@ -44,10 +44,14 @@ is_weak() {
     return 1
 }
 
-if [[ -z "$(get_env DEEPSEEK_API_KEY)" ]]; then
-    fail "DEEPSEEK_API_KEY 未设置"
+if [[ -z "$(get_env DEEPSEEK_API_KEY)" && -z "$(get_env LLM_API_KEY)" ]]; then
+    warn "No LLM_API_KEY/DEEPSEEK_API_KEY; model-backed App operations will be unavailable"
 else
     ok "DEEPSEEK_API_KEY 已设置"
+fi
+app_secret="$(get_env NETOPS_APP_INTERNAL_SECRET)"
+if [[ "${#app_secret}" -lt 32 ]]; then
+    fail "NETOPS_APP_INTERNAL_SECRET must contain at least 32 characters for App authorization"
 fi
 
 for key in SECRET_KEY JWT_SECRET_KEY POSTGRES_PASSWORD MINIO_ACCESS_KEY MINIO_SECRET_KEY ITSM_WEBHOOK_SECRET; do

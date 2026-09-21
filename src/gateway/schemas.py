@@ -64,15 +64,8 @@ class ITSMEventRequest(BaseModel):
     raw_payload: dict[str, Any] | None = None
 
 
-class RAGSearchRequest(BaseModel):
-    query: str
-    top_k: int = Field(default=6, ge=1, le=20)
-    metadata_filters: dict[str, Any] | None = None
 
 
-class RAGSearchResponse(BaseModel):
-    count: int
-    results: list[dict[str, Any]]
 
 
 class HealthResponse(BaseModel):
@@ -283,11 +276,3 @@ class ITSMWorkflowStartResponse(BaseModel):
     status: str = "accepted"
     message: str
     query_endpoint: str
-
-
-class KnowledgeUploadRequest(BaseModel):
-    filename: str = Field(..., description="文件名")
-    file_content: str = Field(..., description="Base64 编码的文件内容")
-    relative_path: str | None = Field(None, description="相对 knowledge_base 的路径，如 sops/foo.md")
-    folder: str = Field("", description="子目录（relative_path 为空时使用）")
-    auto_reindex: bool = Field(True, description="上传后是否自动重建索引")

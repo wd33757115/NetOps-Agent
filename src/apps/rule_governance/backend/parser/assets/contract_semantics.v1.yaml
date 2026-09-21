@@ -1,0 +1,685 @@
+catalog_version: parser-semantic-catalog-v1
+
+applicability_profiles:
+  optical_power_measurement: &optical_power_measurement
+    version: 1
+    on_missing_context: reject
+    exclude_when:
+      - code: transceiver_absent
+        when:
+          field: transceiver_present
+          op: in_ci
+          values: [absent, not present, notpresent, transceiver absent]
+      - code: dom_unsupported
+        when:
+          field: dom_supported
+          op: contains_any_ci
+          values: [not support, unsupported, does not support]
+      - code: measurement_not_applicable
+        when:
+          all:
+            - {field: bias_ma, op: lte, value: 0}
+            - {field: rx_power_dbm, op: equals_field, other_field: tx_power_dbm}
+            - {field: rx_power_dbm, op: lte, value: -40}
+
+field_aliases:
+  interface: [interface, port, interface name, port name]
+  oper_status: [status, state, link, physical, oper status, operational status]
+  protocol_status: [protocol, line protocol]
+  ip_address: [ip address, ip-address, primary ip, address]
+  description: [description, desc, name]
+  speed: [speed]
+  duplex: [duplex]
+  type: [type]
+  vlan_id: [vlan, vlan id, pvid]
+  vpn_instance: [vpn instance, vrf]
+  transceiver_present:
+    [transceiver present, transceiver presence, module present, present,
+     the transceiver is absent, transceiver is absent, transceiver absent]
+  dom_supported: [dom supported, diagnostic supported, diagnostics supported]
+  rx_power_dbm: [rx power, receive power, receiver power, rx optical power, current rx power]
+  tx_power_dbm: [tx power, transmit power, transmitter power, tx optical power, current tx power]
+  rx_low_warning_dbm: [rx low warning, receive low warning, warning low rx power]
+  rx_high_warning_dbm: [rx high warning, receive high warning, warning high rx power]
+  tx_low_warning_dbm: [tx low warning, transmit low warning, warning low tx power]
+  tx_high_warning_dbm: [tx high warning, transmit high warning, warning high tx power]
+  rx_low_alarm_dbm: [rx low alarm, receive low alarm, alarm low rx power]
+  rx_high_alarm_dbm: [rx high alarm, receive high alarm, alarm high rx power]
+  tx_low_alarm_dbm: [tx low alarm, transmit low alarm, alarm low tx power]
+  tx_high_alarm_dbm: [tx high alarm, transmit high alarm, alarm high tx power]
+  temperature_celsius: [temperature, temp]
+  temperature_high_alarm_celsius: [temperature high alarm, alarm high temperature]
+  temperature_low_alarm_celsius: [temperature low alarm, alarm low temperature]
+  temperature_high_warning_celsius: [temperature high warning, warning high temperature]
+  temperature_low_warning_celsius: [temperature low warning, warning low temperature]
+  voltage_v: [voltage]
+  voltage_high_alarm_v: [voltage high alarm, alarm high voltage]
+  voltage_low_alarm_v: [voltage low alarm, alarm low voltage]
+  voltage_high_warning_v: [voltage high warning, warning high voltage]
+  voltage_low_warning_v: [voltage low warning, warning low voltage]
+  bias_ma: [bias, bias current]
+  bias_high_alarm_ma: [bias high alarm, alarm high bias current]
+  bias_low_alarm_ma: [bias low alarm, alarm low bias current]
+  bias_high_warning_ma: [bias high warning, warning high bias current]
+  bias_low_warning_ma: [bias low warning, warning low bias current]
+  serial: [serial, serial number, device serial number]
+  component: [component, slot, device name]
+  model: [model, product id, pid, device name]
+
+# Exact generated-schema aliases. Unlike human-readable field_aliases, this list
+# is intentionally narrow because entries here are allowed to rename API fields.
+schema_field_aliases:
+  interface: [port, interface_name, intf, destination_port]
+  interfaces: [ports, destination_port]
+  oper_status: [status, state, link_status, interface_status]
+  state: [status]
+  fan_status: [fan_state]
+  power_supply_status: [power_supply_state]
+  temperature_status: [temperature_state]
+  protocol_status: [protocol, proto, line_protocol]
+  description: [descr]
+  speed_raw: [speed]
+  media_type: [type, media]
+  vlan_id: [vlan, pvid]
+  mac_address: [destination_address, mac]
+  entry_type: [type]
+  notification: [ntfy]
+  serial_number: [serial, serial_num, sn]
+  os_version: [version, software_version, os, nxos_version, system_version]
+  bios_version: [bios]
+  rommon_version: [rommon]
+  software_release: [release]
+  reload_reason: [last_reboot_reason]
+  boot_image: [running_image, bootfile]
+  memory_total_bytes: [total_bytes, total]
+  memory_used_bytes: [used_bytes, used]
+  memory_free_bytes: [free_bytes, free]
+  memory_usage_percent: [usage, usage_percent, memory_usage]
+  cpu_5s: [cpu_usage_5_sec, total_cpu_pct_5s]
+  cpu_1m: [cpu_usage_1_min, total_cpu_pct_1m]
+  cpu_5m: [cpu_usage_5_min, total_cpu_pct_5m]
+  cpu_interrupt_5s: [cpu_interruption_5_sec, interrupt_cpu_pct_5s]
+  process_id: [process_pid, pid]
+  process_cpu_5s: [process_cpu_usage_5_sec, cpu_pct_5s]
+  process_cpu_1m: [process_cpu_usage_1_min, cpu_pct_1m]
+  process_cpu_5m: [process_cpu_usage_5_min, cpu_pct_5m]
+  process_runtime_ms: [process_runtime]
+  process_invocation_count: [process_invoked]
+  process_usec_per_invocation: [process_cpu_time_for_invocation]
+  output_watts: [power_supply_output]
+  input_watts: [power_supply_input]
+  capacity_watts: [power_supply_capacity]
+  model: [power_supply_model, platform, hardware]
+  reading: [current_value, temperature_current]
+  warning_threshold: [minor_threshold, temperature_minor_thresh]
+  alarm_threshold: [major_threshold, temperature_major_thresh]
+  channel: [lane, lane_number, channel_number]
+  temperature_celsius: [temperature, temperature_c, temperature_current]
+  temperature_high_alarm_celsius:
+    [temperature_alarm_high, temperature_high_alarm]
+  temperature_low_alarm_celsius:
+    [temperature_alarm_low, temperature_low_alarm]
+  temperature_high_warning_celsius:
+    [temperature_warn_high, temperature_warning_high, temperature_high_warning]
+  temperature_low_warning_celsius:
+    [temperature_warn_low, temperature_warning_low, temperature_low_warning]
+  voltage_v: [voltage, voltage_volts, voltage_current]
+  voltage_high_alarm_v: [voltage_alarm_high, voltage_high_alarm]
+  voltage_low_alarm_v: [voltage_alarm_low, voltage_low_alarm]
+  voltage_high_warning_v:
+    [voltage_warn_high, voltage_warning_high, voltage_high_warning]
+  voltage_low_warning_v:
+    [voltage_warn_low, voltage_warning_low, voltage_low_warning]
+  bias_ma: [bias, bias_current, bias_current_ma, current_ma, amps_value]
+  bias_high_alarm_ma:
+    [bias_current_high_alarm_ma, current_high_alarm, amps_alarm_high]
+  bias_low_alarm_ma:
+    [bias_current_low_alarm_ma, current_low_alarm, amps_alarm_low]
+  bias_high_warning_ma:
+    [bias_current_high_warning_ma, current_high_warning, amps_warn_high]
+  bias_low_warning_ma:
+    [bias_current_low_warning_ma, current_low_warning, amps_warn_low]
+  rx_power_dbm:
+    [rx_power, rx_value, current_rx_power_dbm, measured_rx_power_dbm]
+  tx_power_dbm:
+    [tx_power, tx_value, current_tx_power_dbm, measured_tx_power_dbm]
+  rx_low_warning_dbm:
+    [warning_low_rx_power_dbm, rx_power_low_warning, rx_power_warning_low,
+     rx_power_dbm_warn_low, rx_power_dbm_warning_low, rx_warn_low]
+  rx_high_warning_dbm:
+    [warning_high_rx_power_dbm, rx_power_high_warning, rx_power_warning_high,
+     rx_power_dbm_warn_high, rx_power_dbm_warning_high, rx_warn_high]
+  tx_low_warning_dbm:
+    [warning_low_tx_power_dbm, tx_power_low_warning, tx_power_warning_low,
+     tx_power_dbm_warn_low, tx_power_dbm_warning_low, tx_warn_low]
+  tx_high_warning_dbm:
+    [warning_high_tx_power_dbm, tx_power_high_warning, tx_power_warning_high,
+     tx_power_dbm_warn_high, tx_power_dbm_warning_high, tx_warn_high]
+  rx_low_alarm_dbm:
+    [alarm_low_rx_power_dbm, rx_power_low_alarm, rx_power_alarm_low,
+     rx_power_dbm_alarm_low, rx_alarm_low]
+  rx_high_alarm_dbm:
+    [alarm_high_rx_power_dbm, rx_power_high_alarm, rx_power_alarm_high,
+     rx_power_dbm_alarm_high, rx_alarm_high]
+  tx_low_alarm_dbm:
+    [alarm_low_tx_power_dbm, tx_power_low_alarm, tx_power_alarm_low,
+     tx_power_dbm_alarm_low, tx_alarm_low]
+  tx_high_alarm_dbm:
+    [alarm_high_tx_power_dbm, tx_power_high_alarm, tx_power_alarm_high,
+     tx_power_dbm_alarm_high, tx_alarm_high]
+
+# This catalog is semantic, not vendor/model specific. Profiles are selected from
+# canonical command and sample evidence; adding a vendor never requires Python code.
+field_semantics:
+  exact:
+    uptime: {semantic_type: text, ignore: true}
+    description: {semantic_type: text, ignore: true}
+    status: &state
+      semantic_type: state
+      value_mapping:
+        up: up
+        connected: up
+        established: up
+        normal: normal
+        ok: normal
+        down: down
+        notconnect: down
+        notconnec: down
+        idle: down
+        failed: failed
+        fault: failed
+    state: *state
+    protocol: *state
+    protocol_status: *state
+    oper_status: *state
+    fan_status: *state
+    power_supply_status: *state
+    temperature_status: *state
+    line_protocol: *state
+    transceiver_present:
+      semantic_type: state
+      observation_type: interface.optical.presence
+    dom_supported: {semantic_type: state}
+    rx_power_dbm:
+      semantic_type: gauge
+      unit: dbm
+      observation_type: interface.optical.rx_power
+      applicability: *optical_power_measurement
+    tx_power_dbm:
+      semantic_type: gauge
+      unit: dbm
+      observation_type: interface.optical.tx_power
+      applicability: *optical_power_measurement
+    temperature_celsius: {semantic_type: gauge, unit: celsius}
+    temperature_high_alarm_celsius: {semantic_type: threshold, unit: celsius}
+    temperature_low_alarm_celsius: {semantic_type: threshold, unit: celsius}
+    temperature_high_warning_celsius: {semantic_type: threshold, unit: celsius}
+    temperature_low_warning_celsius: {semantic_type: threshold, unit: celsius}
+    voltage_v: {semantic_type: gauge, unit: volt}
+    voltage_high_alarm_v: {semantic_type: threshold, unit: volt}
+    voltage_low_alarm_v: {semantic_type: threshold, unit: volt}
+    voltage_high_warning_v: {semantic_type: threshold, unit: volt}
+    voltage_low_warning_v: {semantic_type: threshold, unit: volt}
+    bias_ma: {semantic_type: gauge, unit: milliampere}
+    bias_high_alarm_ma: {semantic_type: threshold, unit: milliampere}
+    bias_low_alarm_ma: {semantic_type: threshold, unit: milliampere}
+    bias_high_warning_ma: {semantic_type: threshold, unit: milliampere}
+    bias_low_warning_ma: {semantic_type: threshold, unit: milliampere}
+    rx_low_warning_dbm: {semantic_type: threshold, unit: dbm}
+    rx_high_warning_dbm: {semantic_type: threshold, unit: dbm}
+    tx_low_warning_dbm: {semantic_type: threshold, unit: dbm}
+    tx_high_warning_dbm: {semantic_type: threshold, unit: dbm}
+    rx_low_alarm_dbm: {semantic_type: threshold, unit: dbm}
+    rx_high_alarm_dbm: {semantic_type: threshold, unit: dbm}
+    tx_low_alarm_dbm: {semantic_type: threshold, unit: dbm}
+    tx_high_alarm_dbm: {semantic_type: threshold, unit: dbm}
+    cpu_5s: {semantic_type: gauge, unit: percent}
+    cpu_1m: {semantic_type: gauge, unit: percent}
+    cpu_5m: {semantic_type: gauge, unit: percent}
+    usage: {semantic_type: gauge, unit: percent}
+    used_percent: {semantic_type: gauge, unit: percent}
+    memory_usage: {semantic_type: gauge, unit: percent}
+    mem_usage: {semantic_type: gauge, unit: percent}
+    free_ratio: {semantic_type: gauge, unit: percent}
+  patterns:
+    - pattern: '^(?:rx|tx)_power_channel_(\d+)_dbm$'
+      semantics: {semantic_type: gauge, unit: dbm}
+    - pattern: '^(?:total|used|free|shared|buffers|cached|reading|temperature|warning_threshold|alarm_threshold|lower_threshold|minor_threshold|shutdown_threshold|speed|priority)$'
+      semantics: {semantic_type: gauge}
+    - pattern: '(?:_count|_total)$'
+      semantics: {semantic_type: counter}
+    - pattern: 'ip'
+      semantics: {semantic_type: text, unit: ip}
+
+contract_profiles:
+  - id: interface-optical
+    priority: 1000
+    match:
+      command_any:
+        - '(?:^|\s)(?:transceiver|optical|optics|laser)(?:\s|$)'
+    semantic_anchor_fields: [rx_power_dbm, tx_power_dbm, transceiver_present]
+    contract:
+      category: interface_optical
+      entity_type: interface_optical
+      primary_keys: [interface]
+      required_fields: [interface]
+      optional_fields:
+        - channel
+        - transceiver_present
+        - dom_supported
+        - rx_power_dbm
+        - tx_power_dbm
+        - rx_low_warning_dbm
+        - rx_high_warning_dbm
+        - tx_low_warning_dbm
+        - tx_high_warning_dbm
+        - rx_low_alarm_dbm
+        - rx_high_alarm_dbm
+        - tx_low_alarm_dbm
+        - tx_high_alarm_dbm
+        - temperature_celsius
+        - temperature_high_alarm_celsius
+        - temperature_low_alarm_celsius
+        - temperature_high_warning_celsius
+        - temperature_low_warning_celsius
+        - voltage_v
+        - voltage_high_alarm_v
+        - voltage_low_alarm_v
+        - voltage_high_warning_v
+        - voltage_low_warning_v
+        - bias_ma
+        - bias_high_alarm_ma
+        - bias_low_alarm_ma
+        - bias_high_warning_ma
+        - bias_low_warning_ma
+        - rx_power_channel_1_dbm
+        - rx_power_channel_2_dbm
+        - rx_power_channel_3_dbm
+        - rx_power_channel_4_dbm
+        - tx_power_channel_1_dbm
+        - tx_power_channel_2_dbm
+        - tx_power_channel_3_dbm
+        - tx_power_channel_4_dbm
+      validators:
+        interface: {type: interface_name}
+        rx_power_dbm: {type: number}
+        tx_power_dbm: {type: number}
+        rx_low_warning_dbm: {type: number}
+        rx_high_warning_dbm: {type: number}
+        tx_low_warning_dbm: {type: number}
+        tx_high_warning_dbm: {type: number}
+        rx_low_alarm_dbm: {type: number}
+        rx_high_alarm_dbm: {type: number}
+        tx_low_alarm_dbm: {type: number}
+        tx_high_alarm_dbm: {type: number}
+        rx_power_channel_1_dbm: {type: number}
+        rx_power_channel_2_dbm: {type: number}
+        rx_power_channel_3_dbm: {type: number}
+        rx_power_channel_4_dbm: {type: number}
+        tx_power_channel_1_dbm: {type: number}
+        tx_power_channel_2_dbm: {type: number}
+        tx_power_channel_3_dbm: {type: number}
+        tx_power_channel_4_dbm: {type: number}
+
+  - id: environment-fan
+    priority: 900
+    match:
+      command_any: ['(?:environment|env)\s+fan$']
+    contract:
+      category: fan
+      entity_type: fan
+      primary_keys: [fan]
+      required_fields: [fan, fan_status]
+      optional_fields: [slot, speed, direction, model]
+
+  - id: environment-power
+    priority: 900
+    match:
+      command_any: ['(?:environment|env)\s+power$']
+    contract:
+      category: power
+      entity_type: power_supply
+      primary_keys: [power_supply]
+      required_fields: [power_supply, power_supply_status]
+      optional_fields: [slot, model, output_watts, input_watts, capacity_watts]
+
+  - id: inventory-manuinfo-block
+    priority: 900
+    match:
+      command_any: ['\bmanuinfo$']
+      sample_any: ['(?mi)^\s*DEVICE_SERIAL_NUMBER\s+:']
+    contract:
+      category: inventory
+      entity_type: inventory_component
+      primary_keys: [component, serial]
+      required_fields: [component, name, serial]
+      optional_fields: [pid, vendor, mac_address, manufacturing_date]
+
+  - id: memory-slot-detail
+    priority: 900
+    match:
+      command_any: ['^display\s+memory$']
+    contract:
+      category: memory
+      entity_type: memory
+      primary_keys: [slot]
+      required_fields: [slot, total, used, free]
+      optional_fields: [shared, buffers, cached, free_ratio]
+      validators:
+        free_ratio: {type: percent}
+
+  - id: power-sectioned
+    priority: 950
+    match:
+      command_any: ['^display\s+power$']
+      sample_all: ['(?mi)^\s*Slot\s+\S+\s*:']
+    contract:
+      category: power
+      entity_type: power_supply
+      primary_keys: [slot, power_supply]
+      required_fields: [slot, power_supply, power_supply_status]
+      optional_fields: [mode, current, voltage, power, fan_direction, model]
+
+  - id: power-flat
+    priority: 900
+    match:
+      command_any: ['^display\s+power$']
+      sample_none: ['(?mi)^\s*Slot\s+\S+\s*:']
+    contract:
+      category: power
+      entity_type: power_supply
+      primary_keys: [power_supply]
+      required_fields: [power_supply, power_supply_status]
+      optional_fields: [slot, mode, current, voltage, power, fan_direction, model]
+
+  - id: environment-sectioned-sensor
+    priority: 950
+    match:
+      command_any: ['^display\s+environment$']
+      sample_all: ['(?mi)^\s*Slot\s+Subslot\s+Sensor\s+ID\s+Temperature']
+    contract:
+      category: environment
+      entity_type: environment_sensor
+      primary_keys: [component, subslot, location, sensor_id]
+      required_fields: [component, subslot, location, sensor_id, reading]
+      optional_fields: [lower_threshold, warning_threshold, alarm_threshold, state, unit]
+
+  - id: environment-flat-sensor
+    priority: 900
+    match:
+      command_any: ['^display\s+environment$']
+      sample_none: ['(?mi)^\s*Slot\s+Subslot\s+Sensor\s+ID\s+Temperature']
+    contract:
+      category: environment
+      entity_type: environment_sensor
+      primary_keys: [component, location]
+      required_fields: [component, location, reading]
+      optional_fields: [lower_threshold, warning_threshold, alarm_threshold, shutdown_threshold, state, unit]
+
+  - id: redundancy-irf
+    priority: 900
+    match:
+      command_any: ['^display\s+irf$']
+    contract:
+      category: redundancy
+      entity_type: redundancy_member
+      primary_keys: [member]
+      required_fields: [member, role]
+      optional_fields: [state, priority, cpu_mac, description]
+      allow_empty: true
+      empty_patterns: ['(?i)(?:not configured|incomplete command|unrecognized command)']
+
+  - id: redundancy-mlag
+    priority: 900
+    match:
+      command_any: ['\bm-lag\s+system$']
+    contract:
+      category: redundancy
+      entity_type: redundancy_member
+      primary_keys: [member]
+      required_fields: [member, state]
+      optional_fields: [role, peer, priority, description]
+      allow_empty: true
+      empty_patterns: ['(?i)(?:m-lag is not configured|not configured)']
+
+  - id: system-resources-singleton
+    priority: 900
+    match:
+      command_any: ['\bsystem\s+resources$']
+    contract:
+      category: system_resources
+      entity_type: system_resource
+      primary_keys: []
+      required_fields: [cpu_idle, total, used, free]
+      optional_fields: [cpu_user, cpu_kernel, load_1m, load_5m, load_15m, process_total, process_running, memory_status]
+      validators:
+        cpu_user: {type: percent}
+        cpu_kernel: {type: percent}
+        cpu_idle: {type: percent}
+
+  - id: redundancy-vpc
+    priority: 900
+    match:
+      command_any: ['\bvpc$']
+    contract:
+      category: redundancy
+      entity_type: redundancy_member
+      primary_keys: [member, peer]
+      required_fields: [member, peer, state]
+      optional_fields: [role, consistency, reason, priority, description]
+      allow_empty: true
+      empty_patterns: ['(?i)(?:not configured|no vpc)']
+
+  - id: fan-index-table
+    priority: 950
+    match:
+      command_any: ['\bfan$']
+      sample_all: ['(?mi)^\s*Index\s+Status\s+Speedlevel\b']
+      sample_none: ['(?mi)^\s*Slot\s+\S+\s*:']
+    contract:
+      category: fan
+      entity_type: fan
+      primary_keys: [fan]
+      required_fields: [fan, fan_status]
+      optional_fields: [speed, slot, direction, model]
+
+  - id: device-version
+    priority: 200
+    match:
+      command_any: ['\bversion$']
+    contract:
+      category: device_version
+      entity_type: device
+      primary_keys: []
+      required_fields: [model, os_version]
+      optional_fields:
+        [software_release, uptime, hostname, serial_number, boot_image,
+         reload_reason, bios_version, rommon_version,
+         software_image, config_register, restarted, mac_address]
+      ignore_fields: [uptime]
+
+  - id: inventory-generic
+    priority: 200
+    match:
+      command_any: ['\b(?:inventory|manuinfo)$']
+    contract:
+      category: inventory
+      entity_type: inventory_component
+      primary_keys: [component]
+      required_fields: [component, name]
+      optional_fields: [pid, serial, vendor]
+
+  - id: arp-generic
+    priority: 250
+    match:
+      command_any: ['\b(?:ip\s+arp|arp)$']
+    contract:
+      category: arp
+      entity_type: arp_entry
+      primary_keys: [ip_address, interface]
+      required_fields: [ip_address, mac_address]
+      optional_fields: [interface, age, protocol, entry_type, vrf]
+
+  - id: mac-address-table-generic
+    priority: 250
+    match:
+      command_any: ['\bmac(?:-|\s+)address(?:-|\s+)table$']
+    contract:
+      category: mac_address_table
+      entity_type: mac_address_entry
+      primary_keys: [vlan_id, mac_address]
+      required_fields: [vlan_id, mac_address]
+      optional_fields: [entry_type, interfaces, age, secure, notification]
+
+  - id: module-generic
+    priority: 200
+    match:
+      command_any: ['\bmodule$']
+    contract:
+      category: module
+      entity_type: hardware_module
+      primary_keys: [module]
+      required_fields: [module, model, status]
+      optional_fields:
+        [ports, type, software_version, hardware_version, serial_number,
+         mac_address]
+
+  - id: cpu-generic
+    priority: 200
+    match:
+      command_any: ['\b(?:cpu|processes\s+cpu)$']
+    contract:
+      category: cpu
+      entity_type: cpu
+      primary_keys: [slot]
+      required_fields: [slot, cpu_5s, cpu_1m, cpu_5m]
+      optional_fields:
+        [cpu_interrupt_5s, process_id, process_name, process_cpu_5s,
+         process_cpu_1m, process_cpu_5m, process_runtime_ms,
+         process_invocation_count, process_usec_per_invocation, process_tty]
+      validators:
+        cpu_5s: {type: percent}
+        cpu_1m: {type: percent}
+        cpu_5m: {type: percent}
+
+  - id: memory-generic
+    priority: 200
+    match:
+      command_any: ['\b(?:memory|processes\s+memory)$']
+    contract:
+      category: memory
+      entity_type: memory
+      primary_keys: [slot]
+      required_fields:
+        [slot, memory_total_bytes, memory_used_bytes, memory_free_bytes,
+         memory_usage_percent]
+      optional_fields:
+        [memory_pool, process_id, process_name, process_allocated_bytes,
+         process_freed_bytes, process_holding_bytes,
+         process_buffer_get_count, process_buffer_return_count, process_tty]
+      validators:
+        memory_usage_percent: {type: percent}
+
+  - id: interface-l3
+    priority: 300
+    match:
+      command_any: ['\b(?:ip\s+interface\s+brief|interface\s+brief)$']
+    semantic_anchor_fields: [oper_status, protocol_status, ip_address]
+    contract:
+      category: interface_l3
+      entity_type: interface_l3
+      primary_keys: [interface]
+      required_fields: [interface, oper_status, protocol_status]
+      optional_fields: [ip_address, vpn_instance, description]
+      validators:
+        interface: {type: interface_name}
+        ip_address: {type: ip_or_unassigned}
+      allow_empty: true
+      empty_patterns: ['(?is)Interface\s+IP Address.*Status\s*$']
+
+  - id: interface-brief-mixed
+    priority: 500
+    match:
+      command_any: ['^display\s+interface\s+brief$']
+      sample_all:
+        - '(?i)interfaces\s+in\s+route\s+mode'
+        - '(?i)interfaces\s+in\s+bridge\s+mode'
+    semantic_anchor_fields: [oper_status]
+    contract:
+      category: interface_oper
+      entity_type: interface
+      primary_keys: [interface]
+      required_fields: [interface, oper_status]
+      optional_fields:
+        [protocol_status, ip_address, speed_raw, duplex, media_type, vlan_id,
+         description]
+      validators:
+        interface: {type: interface_name}
+        ip_address: {type: ip_or_unassigned}
+      state_semantics:
+        interface: {semantic_type: identity}
+        oper_status:
+          semantic_type: state
+        protocol_status: {semantic_type: state}
+
+  - id: interface-l2
+    priority: 300
+    match:
+      command_any: ['\binterface\s+status$']
+    semantic_anchor_fields: [oper_status]
+    contract:
+      category: interface_l2
+      entity_type: interface_l2
+      primary_keys: [interface]
+      required_fields: [interface, oper_status]
+      optional_fields: [vlan_id, duplex, speed_raw, description, media_type]
+      validators:
+        interface: {type: interface_name}
+
+  - id: fan-generic
+    priority: 100
+    match:
+      command_any: ['\bfan$']
+    contract:
+      category: fan
+      entity_type: fan
+      primary_keys: [slot, fan]
+      required_fields: [slot, fan, fan_status]
+      optional_fields: [speed, direction, model]
+
+  - id: power-generic
+    priority: 100
+    match:
+      command_any: ['\bpower$']
+    contract:
+      category: power
+      entity_type: power_supply
+      primary_keys: [slot, power_supply]
+      required_fields: [slot, power_supply, power_supply_status]
+      optional_fields: [model, output_watts, input_watts, capacity_watts]
+
+  - id: environment-generic
+    priority: 100
+    match:
+      command_any: ['\b(?:environment|environment\s+temperature|env\s+all)$']
+    contract:
+      category: environment
+      entity_type: environment_sensor
+      primary_keys: [component, location]
+      required_fields: [component, location, state]
+      optional_fields: [reading, unit, warning_threshold, minor_threshold]
+
+  - id: vrrp-generic
+    priority: 100
+    match:
+      command_any: ['\bvrrp\s+(?:statistics|brief)$']
+    contract:
+      category: vrrp
+      entity_type: vrrp
+      primary_keys: [interface, group]
+      required_fields: [interface, group, state]
+      optional_fields: [virtual_ip, master_ip, priority]
+      allow_empty: true
+      empty_patterns:
+        - '(?i)(?:VRRP.*not configured|no vrrp)'
+        - '(?is)Interface\s+Grp\s+Pri\s+Time\s+Own\s+Pre\s+State\s+Master addr\s+Group addr\s*$'

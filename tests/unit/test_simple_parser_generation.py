@@ -1552,3 +1552,9 @@ def test_embedded_asset_is_verified_without_a_local_file(tmp_path):
     assert store.verify("postgresql://parser-template/test", candidate.sha256, content)
     assert store.read("postgresql://parser-template/test", candidate.sha256, content) == content
     assert not any(tmp_path.iterdir())
+
+
+@pytest.fixture(autouse=True)
+def application_authority(monkeypatch):
+    # Parser algorithm tests inject App admission; integration tests use Django.
+    monkeypatch.setattr("src.apps.rule_governance.backend.access.authorize", lambda user_id: None)

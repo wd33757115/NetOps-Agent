@@ -6,7 +6,7 @@ Skill System - Grok-style 文件驱动 Skill 系统
 
 提供：
 1. SKILL.md 解析和元数据提取
-2. 语义路由（ChromaDB embedding + LLM Judge）
+2. 语义路由（Skill Catalog embedding + LLM Judge）
 3. Progressive Disclosure 加载器
 4. Skill 缓存和性能优化
 
@@ -59,14 +59,9 @@ __all__ = [
 _skill_system = None
 
 
-def _semantic_routing_enabled(cfg, rag_service=None) -> bool:
+def _semantic_routing_enabled(cfg) -> bool:
     """Keep metadata catalog use independent from the heavy local embedder."""
-    if rag_service is not None:
-        return True
-    return bool(
-        cfg.SKILL_CATALOG_ENABLED
-        and cfg.SKILL_CATALOG_SEMANTIC_ROUTING_ENABLED
-    )
+    return bool(cfg.SKILL_CATALOG_ENABLED and cfg.SKILL_CATALOG_SEMANTIC_ROUTING_ENABLED)
 
 
 class SkillSystem:
@@ -83,16 +78,16 @@ class SkillSystem:
         self._skill_dirs = []
         self._initialized = False
 
-    def initialize(self, skill_dirs: list = None, rag_service=None):
+    def initialize(self, skill_dirs: list = None):
         """
         初始化 Skill System
 
         Args:
             skill_dirs: Skill 目录列表，默认为 ['src/skills']
-            rag_service: RAG 服务实例（用于语义路由）
         """
         if skill_dirs is None:
             from pathlib import Path
+
             base_dir = Path(__file__).parent.parent.parent
             skill_dirs = [str(base_dir / "src" / "skills")]
 
@@ -111,9 +106,8 @@ class SkillSystem:
             "true",
             "yes",
         )
-        use_embedding = _semantic_routing_enabled(cfg, rag_service)
+        use_embedding = _semantic_routing_enabled(cfg)
         self.router = SemanticRouter(
-            rag_service=rag_service,
             skill_loader=self.loader,
             use_embedding=use_embedding,
             use_llm_judge=use_llm_judge,
@@ -146,32 +140,36 @@ class SkillSystem:
         skills = self.loader.list_all_metadata()
 
         for skill in skills:
-            if not getattr(skill, 'enabled', True):
+            if not getattr(skill, "enabled", True):
                 continue
 
             # 检查 triggers
-            triggers = getattr(skill, 'triggers', [])
+            triggers = getattr(skill, "triggers", [])
             for trigger in triggers:
                 if trigger_matches(trigger, query):
-                    matches.append(SkillMatch(
-                        skill_name=skill.name,
-                        confidence=0.9,
-                        match_type="trigger",
-                        reason=f"匹配触发词: {trigger}"
-                    ))
+                    matches.append(
+                        SkillMatch(
+                            skill_name=skill.name,
+                            confidence=0.9,
+                            match_type="trigger",
+                            reason=f"匹配触发词: {trigger}",
+                        )
+                    )
                     break
 
             # 检查 tags
             if not matches or matches[-1].skill_name != skill.name:
-                tags = getattr(skill, 'tags', [])
+                tags = getattr(skill, "tags", [])
                 for tag in tags:
                     if tag.lower() in query.lower():
-                        matches.append(SkillMatch(
-                            skill_name=skill.name,
-                            confidence=0.7,
-                            match_type="tag",
-                            reason=f"匹配标签: {tag}"
-                        ))
+                        matches.append(
+                            SkillMatch(
+                                skill_name=skill.name,
+                                confidence=0.7,
+                                match_type="tag",
+                                reason=f"匹配标签: {tag}",
+                            )
+                        )
                         break
 
         # 按置信度排序
@@ -213,7 +211,7 @@ class SkillSystem:
         if self.router:
             self.router.invalidate_cache()
 
-    def reload_all(self, skill_dirs: list | None = None, rag_service=None):
+    def reload_all(self, skill_dirs: list | None = None):
         """重新加载所有 Skill（元数据 + 路由 + 内容缓存）"""
         dirs = skill_dirs or self._skill_dirs
         if not dirs:
@@ -236,9 +234,8 @@ class SkillSystem:
             "true",
             "yes",
         )
-        use_embedding = _semantic_routing_enabled(cfg, rag_service)
+        use_embedding = _semantic_routing_enabled(cfg)
         self.router = SemanticRouter(
-            rag_service=rag_service,
             skill_loader=self.loader,
             use_embedding=use_embedding,
             use_llm_judge=use_llm_judge,
@@ -266,12 +263,11 @@ def get_skill_system() -> SkillSystem:
 
 
 # 便捷函数
-def reload_all_skills(rag_service=None, skill_dirs: list | None = None):
+def reload_all_skills(skill_dirs: list | None = None):
     """重新加载所有 Skill（委托统一 bootstrap）"""
     from src.skills.bootstrap import bootstrap_skills
 
     return bootstrap_skills(
-        rag_service=rag_service,
         skill_dirs=skill_dirs,
         force=True,
     )

@@ -59,10 +59,13 @@ function Test-Weak([string]$Name, [string]$Value) {
     }
 }
 
-if (-not $envMap["DEEPSEEK_API_KEY"]) {
-    Fail "DEEPSEEK_API_KEY is not configured"
+if (-not $envMap["DEEPSEEK_API_KEY"] -and -not $envMap["LLM_API_KEY"]) {
+    Warn "No LLM_API_KEY/DEEPSEEK_API_KEY; model-backed App operations will be unavailable"
 } else {
     Ok "DEEPSEEK_API_KEY is configured"
+}
+if (-not $envMap["NETOPS_APP_INTERNAL_SECRET"] -or $envMap["NETOPS_APP_INTERNAL_SECRET"].Length -lt 32) {
+    Fail "NETOPS_APP_INTERNAL_SECRET must contain at least 32 characters for App authorization"
 }
 
 foreach ($key in @("SECRET_KEY", "JWT_SECRET_KEY", "POSTGRES_PASSWORD", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY", "ITSM_WEBHOOK_SECRET")) {

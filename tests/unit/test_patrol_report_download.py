@@ -4,7 +4,7 @@ import pytest
 from fastapi import HTTPException
 
 from src.core.check_items.reporting import ReportArtifact
-from src.gateway import workflow_api
+from src.apps.inspection.backend import batch_api as workflow_api
 
 
 def test_released_report_download_uses_attached_artifact(monkeypatch):

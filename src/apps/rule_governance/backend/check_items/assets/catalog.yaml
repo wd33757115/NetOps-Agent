@@ -1,0 +1,3167 @@
+catalog_version: 12
+defaults:
+  check_item:
+    freshness_policy:
+      max_observation_age: 24h
+      max_collection_span: 8h
+      clock_skew_tolerance: 10m
+    empty_result_policy:
+      classification: invalid
+  implementation:
+    output_quality_policy:
+      profile_version: 1
+      minimum_non_whitespace_chars: 1
+      unsupported_patterns:
+      - '%\s*(?:invalid input|unrecognized command)'
+      - error:\s*unrecognized command
+      - (?:wrong|invalid) parameter found
+      - unrecognized command found
+      - incomplete command found
+      command_error_patterns:
+      - permission denied
+      - authorization failed
+      - insufficient privilege
+      - command execution failed
+      truncation_patterns:
+      - (?im)^\s*(?:%|\[)?\s*output\s+(?:was\s+)?truncated\b
+      - (?im)^\s*\[\s*truncated\s*\]\s*$
+      - (?im)^\s*\.\.\.\s+(?:output\s+)?omitted\s+\.\.\.\s*$
+      paging_patterns:
+      - (?im)(?:--|----)\s*more\s*(?:--|----)
+      - (?im)^\s*press\s+(?:any\s+key|space|enter)\s+to\s+continue
+      - (?im)^\s*more:\s*<space>
+check_items:
+- id: device.version
+  version: 3
+  name: Device version and inventory
+  category: device
+  description: Preserve software, platform and chassis identity for audit and comparison.
+  result_mode: structured
+  assessment_mode: evidence
+  canonical_contract:
+    entity_type: device
+    identity_dimensions:
+    - device_id
+    observations:
+    - observation_type: device.software.version
+      semantic_type: state
+      canonical_field: os_version
+    - observation_type: device.hardware.model
+      semantic_type: state
+      canonical_field: model
+    parser_field_vocabulary:
+      hostname:
+        aliases:
+        - device_name
+        role: context
+      os_version:
+        aliases:
+        - version
+        - software_version
+        - nxos_version
+        - system_version
+        observation_type: device.software.version
+        role: state
+      software_release:
+        aliases:
+        - release
+        role: state
+      software_image:
+        aliases:
+        - image
+        - system_image
+        role: state
+      boot_image:
+        aliases:
+        - running_image
+        - bootfile
+        role: state
+      bootloader_version:
+        aliases:
+        - rommon_version
+        - bootware_version
+        role: state
+      model:
+        aliases:
+        - platform
+        - hardware_model
+        observation_type: device.hardware.model
+        role: state
+      serial_number:
+        aliases:
+        - serial
+        - serial_num
+        - sn
+        role: identity
+      member:
+        aliases:
+        - switch_number
+        - stack_member
+        role: identity
+      active_marker:
+        aliases:
+        - active
+        - role_marker
+        role: state
+      uptime:
+        role: context
+      reload_reason:
+        aliases:
+        - last_reboot_reason
+        role: state
+  report_projection: device_inventory
+  applicability: {}
+  coverage_policy:
+    model: fixed
+    expected_count: 1
+    require_rule_evaluation: false
+  status: active
+- id: system.cpu_usage
+  version: 12
+  name: CPU 使用率
+  category: system
+  description: Evaluate system, slot or processor CPU utilization.
+  result_mode: structured
+  assessment_mode: health
+  canonical_contract:
+    entity_type: cpu_scope
+    identity_dimensions:
+    - slot
+    - cpu
+    identity_dimension_rules:
+      slot:
+        kind: identifier
+      cpu:
+        kind: identifier
+    value_contract: same-name/v1
+    hardware_value_revision: hardware-values/v1
+    observations:
+    - canonical_field: cpu_5s_percent
+      observation_type: system.cpu_usage.cpu_5s_percent
+      semantic_type: gauge
+      value_type: number
+      unit: percent
+      description: 明确标注 last 5 seconds 的 CPU 使用率
+      required: false
+      assessment_roles:
+      - evidence
+      dimensions: []
+      fixed_dimensions:
+        window: 5s
+    - canonical_field: cpu_1m_percent
+      observation_type: system.cpu_usage.cpu_1m_percent
+      semantic_type: gauge
+      value_type: number
+      unit: percent
+      description: 明确标注 last 1 minute 的 CPU 使用率
+      required: false
+      assessment_roles:
+      - evidence
+      dimensions: []
+      fixed_dimensions:
+        window: 1m
+    - observation_type: device.cpu.utilization
+      semantic_type: gauge
+      unit: percent
+      canonical_field: cpu_usage_percent
+      dimensions: []
+      policy_constraints:
+        allowed_compare_modes:
+        - threshold_and_deadband
+        applies_to_dimensions:
+          window:
+          - 5m
+        require_structured_threshold_references: true
+        required_threshold_reference_any:
+        - high
+        - critical_high
+        required_deadband: 5
+        allowed_minimum_durations:
+        - null
+        - 0s
+        evidence_only_reason: true
+      event_constraints:
+        role_event_types:
+          high: CpuUtilizationHigh
+          critical_high: CpuUtilizationCritical
+          high_recovery: CpuUtilizationRecovered
+        required_event_types:
+        - CpuUtilizationHigh
+        - CpuUtilizationCritical
+        - CpuUtilizationRecovered
+        required_event_classes:
+          CpuUtilizationHigh: fault
+          CpuUtilizationCritical: fault
+          CpuUtilizationRecovered: recovery
+        required_severities:
+          CpuUtilizationHigh: warning
+          CpuUtilizationCritical: critical
+          CpuUtilizationRecovered: info
+        allow_critical: true
+        required_recovery_pairs:
+        - fault: CpuUtilizationHigh
+          recovery: CpuUtilizationRecovered
+        - fault: CpuUtilizationCritical
+          recovery: CpuUtilizationRecovered
+        max_rule_count: 3
+      threshold_references:
+        high:
+          field_name: cpu_high_warning_percent
+        critical_high:
+          field_name: cpu_high_alarm_percent
+      health_policy:
+        revision: device-limits-with-directional-trends-v2
+        window: 5m
+        baseline_mode: trend_only
+        trend:
+          kind: utilization_increase
+          threshold_ratio: 0.1
+          min_increase_points: 10
+        device_thresholds:
+          high:
+          - cpu_high_warning_percent
+          - cpu_high_alarm_percent
+      required: true
+      value_type: number
+      fixed_dimensions:
+        window: 5m
+      description: 设备明确输出的五分钟平均使用率或对应阈值；不能填入瞬时值或容量推算值
+    - observation_type: device.cpu.high_warning
+      semantic_type: threshold
+      unit: percent
+      canonical_field: cpu_high_warning_percent
+      dimensions: []
+      required: false
+      assessment_roles:
+      - reference
+      value_type: number
+      fixed_dimensions:
+        window: 5m
+      description: 设备明确输出的五分钟平均使用率或对应阈值；不能填入瞬时值或容量推算值
+    - observation_type: device.cpu.high_alarm
+      semantic_type: threshold
+      unit: percent
+      canonical_field: cpu_high_alarm_percent
+      dimensions: []
+      required: false
+      assessment_roles:
+      - reference
+      value_type: number
+      fixed_dimensions:
+        window: 5m
+      description: 设备明确输出的五分钟平均使用率或对应阈值；不能填入瞬时值或容量推算值
+    rule_semantics_snapshot:
+      catalog_id: netops.canonical-observations
+      version: 5
+      digest: c4d3613d81b45085b28f6d4189c7f7cdd2e634c57494786c9f791c0e7f4c2738
+      observations:
+      - id: device.cpu.utilization
+        description: CPU utilization for one canonical CPU scope and time window.
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: percent
+        dimensions:
+        - window
+        allowed_dimension_values:
+          window:
+          - instant
+          - 5s
+          - 1m
+          - 5m
+          - 15m
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - current_state
+        - change
+      - id: device.cpu.high_warning
+        description: Device-output or approved device-profile CPU warning threshold.
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: percent
+        dimensions:
+        - window
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - reference
+      - id: device.cpu.high_alarm
+        description: Device-output or approved device-profile CPU alarm threshold.
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: percent
+        dimensions:
+        - window
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - reference
+      - id: system.cpu_usage.cpu_5s_percent
+        description: 明确标注 last 5 seconds 的 CPU 使用率
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: percent
+        dimensions:
+        - window
+        allowed_dimension_values:
+          window:
+          - 5s
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: system.cpu_usage.cpu_1m_percent
+        description: 明确标注 last 1 minute 的 CPU 使用率
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: percent
+        dimensions:
+        - window
+        allowed_dimension_values:
+          window:
+          - 1m
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+  report_projection: auto@1
+  applicability: {}
+  freshness_policy:
+    max_observation_age: 24h
+    max_collection_span: 8h
+    clock_skew_tolerance: 10m
+  empty_result_policy:
+    classification: invalid
+  coverage_policy:
+    model: derived_entity_set
+    source: previous_qualified_observation
+    first_observation: unable_to_determine
+  status: active
+- id: system.memory_usage
+  version: 11
+  name: 内存使用率
+  category: system
+  description: Evaluate system or slot memory capacity and utilization.
+  result_mode: structured
+  assessment_mode: health
+  canonical_contract:
+    entity_type: memory_scope
+    identity_dimensions:
+    - slot
+    identity_dimension_rules:
+      slot:
+        kind: identifier
+    value_contract: same-name/v1
+    hardware_value_revision: hardware-values/v1
+    observations:
+    - canonical_field: memory_total_kb
+      observation_type: system.memory_usage.memory_total_kb
+      semantic_type: gauge
+      value_type: number
+      unit: kb
+      description: Mem 行 Total，原文 KB 容量
+      required: true
+      assessment_roles:
+      - evidence
+      dimensions: []
+    - canonical_field: memory_used_kb
+      observation_type: system.memory_usage.memory_used_kb
+      semantic_type: gauge
+      value_type: number
+      unit: kb
+      description: Mem 行 Used，原文 KB 容量
+      required: true
+      assessment_roles:
+      - evidence
+      dimensions: []
+    - canonical_field: memory_free_kb
+      observation_type: system.memory_usage.memory_free_kb
+      semantic_type: gauge
+      value_type: number
+      unit: kb
+      description: Mem 行 Free，原文 KB 容量
+      required: false
+      assessment_roles:
+      - evidence
+      dimensions: []
+    - canonical_field: memory_shared_kb
+      observation_type: system.memory_usage.memory_shared_kb
+      semantic_type: gauge
+      value_type: number
+      unit: kb
+      description: Mem 行 Shared，原文 KB 容量
+      required: false
+      assessment_roles:
+      - evidence
+      dimensions: []
+    - canonical_field: memory_buffers_kb
+      observation_type: system.memory_usage.memory_buffers_kb
+      semantic_type: gauge
+      value_type: number
+      unit: kb
+      description: Mem 行 Buffers，原文 KB 容量
+      required: false
+      assessment_roles:
+      - evidence
+      dimensions: []
+    - canonical_field: memory_cached_kb
+      observation_type: system.memory_usage.memory_cached_kb
+      semantic_type: gauge
+      value_type: number
+      unit: kb
+      description: Mem 行 Cached，原文 KB 容量
+      required: false
+      assessment_roles:
+      - evidence
+      dimensions: []
+    - canonical_field: memory_free_percent
+      observation_type: system.memory_usage.memory_free_percent
+      semantic_type: gauge
+      value_type: number
+      unit: percent
+      description: 设备直接输出的 FreeRatio；不由容量相除计算
+      required: false
+      assessment_roles:
+      - evidence
+      dimensions: []
+    - observation_type: device.memory.utilization
+      semantic_type: gauge
+      unit: percent
+      canonical_field: memory_usage_percent
+      policy_constraints:
+        allowed_compare_modes:
+        - threshold_and_deadband
+        require_structured_threshold_references: true
+        required_threshold_reference_any:
+        - high
+        - critical_high
+        required_deadband: 5
+        allowed_minimum_durations:
+        - null
+        - 0s
+      event_constraints:
+        role_event_types:
+          high: MemoryUtilizationHigh
+          critical_high: MemoryUtilizationCritical
+          high_recovery: MemoryUtilizationRecovered
+        required_event_types:
+        - MemoryUtilizationHigh
+        - MemoryUtilizationCritical
+        - MemoryUtilizationRecovered
+        required_event_classes:
+          MemoryUtilizationHigh: fault
+          MemoryUtilizationCritical: fault
+          MemoryUtilizationRecovered: recovery
+        required_severities:
+          MemoryUtilizationHigh: warning
+          MemoryUtilizationCritical: critical
+          MemoryUtilizationRecovered: info
+        allow_critical: true
+        required_recovery_pairs:
+        - fault: MemoryUtilizationHigh
+          recovery: MemoryUtilizationRecovered
+        - fault: MemoryUtilizationCritical
+          recovery: MemoryUtilizationRecovered
+        max_rule_count: 3
+      threshold_references:
+        high:
+          field_name: memory_high_warning_percent
+        critical_high:
+          field_name: memory_high_alarm_percent
+      health_policy:
+        revision: device-limits-with-directional-trends-v2
+        window: 5m
+        baseline_mode: trend_only
+        trend:
+          kind: utilization_increase
+          threshold_ratio: 0.1
+          min_increase_points: 10
+        device_thresholds:
+          high:
+          - memory_high_warning_percent
+          - memory_high_alarm_percent
+      dimensions: []
+      required: false
+      value_type: number
+      fixed_dimensions:
+        window: 5m
+      description: 设备明确输出的五分钟平均使用率或对应阈值；不能填入瞬时值或容量推算值
+    - observation_type: device.memory.high_warning
+      semantic_type: threshold
+      unit: percent
+      canonical_field: memory_high_warning_percent
+      required: false
+      assessment_roles:
+      - reference
+      value_type: number
+      dimensions: []
+      description: 设备明确输出的五分钟平均使用率或对应阈值；不能填入瞬时值或容量推算值
+    - observation_type: device.memory.high_alarm
+      semantic_type: threshold
+      unit: percent
+      canonical_field: memory_high_alarm_percent
+      required: false
+      assessment_roles:
+      - reference
+      value_type: number
+      dimensions: []
+      description: 设备明确输出的五分钟平均使用率或对应阈值；不能填入瞬时值或容量推算值
+    rule_semantics_snapshot:
+      catalog_id: netops.canonical-observations
+      version: 5
+      digest: c4d3613d81b45085b28f6d4189c7f7cdd2e634c57494786c9f791c0e7f4c2738
+      observations:
+      - id: device.memory.utilization
+        description: Used memory as a percentage of total memory for one memory scope.
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: percent
+        dimensions:
+        - window
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - current_state
+        - change
+      - id: device.memory.high_warning
+        description: Device-output or approved device-profile memory warning threshold.
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: percent
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - reference
+      - id: device.memory.high_alarm
+        description: Device-output or approved device-profile memory alarm threshold.
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: percent
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - reference
+      - id: system.memory_usage.memory_total_kb
+        description: Mem 行 Total，原文 KB 容量
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: kb
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: system.memory_usage.memory_used_kb
+        description: Mem 行 Used，原文 KB 容量
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: kb
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: system.memory_usage.memory_free_kb
+        description: Mem 行 Free，原文 KB 容量
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: kb
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: system.memory_usage.memory_shared_kb
+        description: Mem 行 Shared，原文 KB 容量
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: kb
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: system.memory_usage.memory_buffers_kb
+        description: Mem 行 Buffers，原文 KB 容量
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: kb
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: system.memory_usage.memory_cached_kb
+        description: Mem 行 Cached，原文 KB 容量
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: kb
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: system.memory_usage.memory_free_percent
+        description: 设备直接输出的 FreeRatio；不由容量相除计算
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: percent
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+  report_projection: auto@1
+  applicability: {}
+  freshness_policy:
+    max_observation_age: 24h
+    max_collection_span: 8h
+    clock_skew_tolerance: 10m
+  empty_result_policy:
+    classification: invalid
+  coverage_policy:
+    model: derived_entity_set
+    source: previous_qualified_observation
+    first_observation: unable_to_determine
+  status: active
+- id: interface.optical_power
+  version: 11
+  name: Interface optical power
+  category: interface
+  description: Evaluate transceiver presence and measured receive/transmit optical
+    power.
+  result_mode: structured
+  assessment_mode: health
+  canonical_contract:
+    entity_type: interface_optical
+    identity_dimensions:
+    - interface
+    - channel
+    observations:
+    - observation_type: interface.optical.presence
+      semantic_type: state
+      canonical_field: transceiver_present
+      dimensions:
+      - channel
+      required: true
+      mapping_guidance: Map explicit presence/absence evidence; an empty source status
+        may mean present only when samples prove that convention.
+      policy_constraints:
+        allowed_compare_modes:
+        - state_transition
+        - enum_transition
+      event_constraints:
+        role_event_types:
+          down: TransceiverAbsent
+          up: TransceiverRestored
+        required_event_types:
+        - TransceiverAbsent
+        - TransceiverRestored
+        required_event_classes:
+          TransceiverAbsent: fault
+          TransceiverRestored: recovery
+        required_severities:
+          TransceiverAbsent: major
+          TransceiverRestored: info
+        required_recovery_pairs:
+        - fault: TransceiverAbsent
+          recovery: TransceiverRestored
+        max_rule_count: 2
+    - observation_type: interface.optical.rx_power
+      semantic_type: gauge
+      unit: dbm
+      canonical_field: rx_power_dbm
+      dimensions:
+      - channel
+      value_type: number
+      required: true
+      required_when:
+        field: transceiver_present
+        equals: present
+      mapping_guidance: Map only the current receive optical-power measurement, not
+        alarm or warning thresholds.
+      context_fields:
+      - part_number
+      - serial_number
+      threshold_references:
+        high:
+          field_name: rx_high_warning_dbm
+        critical_high:
+          field_name: rx_high_alarm_dbm
+        low:
+          field_name: rx_low_warning_dbm
+        critical_low:
+          field_name: rx_low_alarm_dbm
+      baseline_comparison:
+        kind: linear_power_loss_ratio
+        max_loss_ratio: 0.1
+        identity_fields:
+        - part_number
+        - serial_number
+      policy_constraints:
+        allowed_compare_modes:
+        - threshold_and_deadband
+        require_structured_threshold_references: true
+        required_threshold_reference_any:
+        - high
+        - critical_high
+        - low
+        - critical_low
+        minimum_hysteresis: 2
+        deadband_bounds:
+          min: 2
+          max: 6
+      event_constraints:
+        allow_critical: true
+        evidence_bound_roles: true
+        role_event_types:
+          low: OpticalRxPowerLow
+          critical_low: OpticalRxPowerCritical
+          high: OpticalRxPowerHigh
+          critical_high: OpticalRxPowerHighCritical
+          low_recovery: OpticalRxPowerRecovered
+          high_recovery: OpticalRxPowerRecoveredFromHigh
+          baseline_degradation: OpticalRxPowerDegraded
+        required_event_types:
+        - OpticalRxPowerLow
+        - OpticalRxPowerCritical
+        - OpticalRxPowerHigh
+        - OpticalRxPowerHighCritical
+        - OpticalRxPowerDegraded
+        - OpticalRxPowerRecovered
+        - OpticalRxPowerRecoveredFromHigh
+        required_event_classes:
+          OpticalRxPowerLow: fault
+          OpticalRxPowerCritical: fault
+          OpticalRxPowerHigh: fault
+          OpticalRxPowerHighCritical: fault
+          OpticalRxPowerDegraded: fault
+          OpticalRxPowerRecovered: recovery
+          OpticalRxPowerRecoveredFromHigh: recovery
+        required_severities:
+          OpticalRxPowerLow: warning
+          OpticalRxPowerCritical: critical
+          OpticalRxPowerHigh: warning
+          OpticalRxPowerHighCritical: critical
+          OpticalRxPowerDegraded: warning
+          OpticalRxPowerRecovered: info
+          OpticalRxPowerRecoveredFromHigh: info
+        required_exclusive_event_types:
+        - OpticalRxPowerCritical
+        priority_order:
+        - higher: OpticalRxPowerCritical
+          lower: OpticalRxPowerLow
+        required_recovery_pairs:
+        - fault: OpticalRxPowerLow
+          recovery: OpticalRxPowerRecovered
+        - fault: OpticalRxPowerCritical
+          recovery: OpticalRxPowerRecovered
+        - fault: OpticalRxPowerHigh
+          recovery: OpticalRxPowerRecoveredFromHigh
+        - fault: OpticalRxPowerHighCritical
+          recovery: OpticalRxPowerRecoveredFromHigh
+        max_rule_count: 7
+    - observation_type: interface.optical.tx_power
+      semantic_type: gauge
+      unit: dbm
+      canonical_field: tx_power_dbm
+      dimensions:
+      - channel
+      value_type: number
+      required: true
+      required_when:
+        field: transceiver_present
+        equals: present
+      mapping_guidance: Map only the current transmit optical-power measurement, not
+        alarm or warning thresholds.
+      context_fields:
+      - part_number
+      - serial_number
+      threshold_references:
+        high:
+          field_name: tx_high_warning_dbm
+        critical_high:
+          field_name: tx_high_alarm_dbm
+        low:
+          field_name: tx_low_warning_dbm
+        critical_low:
+          field_name: tx_low_alarm_dbm
+      baseline_comparison:
+        kind: linear_power_loss_ratio
+        max_loss_ratio: 0.1
+        identity_fields:
+        - part_number
+        - serial_number
+      policy_constraints:
+        allowed_compare_modes:
+        - threshold_and_deadband
+        require_structured_threshold_references: true
+        required_threshold_reference_any:
+        - high
+        - critical_high
+        - low
+        - critical_low
+        minimum_hysteresis: 2
+        deadband_bounds:
+          min: 2
+          max: 6
+      event_constraints:
+        allow_critical: true
+        evidence_bound_roles: true
+        role_event_types:
+          low: OpticalTxPowerLow
+          critical_low: OpticalTxPowerCritical
+          high: OpticalTxPowerHigh
+          critical_high: OpticalTxPowerHighCritical
+          low_recovery: OpticalTxPowerRecovered
+          high_recovery: OpticalTxPowerRecoveredFromHigh
+          baseline_degradation: OpticalTxPowerDegraded
+        required_event_types:
+        - OpticalTxPowerLow
+        - OpticalTxPowerCritical
+        - OpticalTxPowerHigh
+        - OpticalTxPowerHighCritical
+        - OpticalTxPowerDegraded
+        - OpticalTxPowerRecovered
+        - OpticalTxPowerRecoveredFromHigh
+        required_event_classes:
+          OpticalTxPowerLow: fault
+          OpticalTxPowerCritical: fault
+          OpticalTxPowerHigh: fault
+          OpticalTxPowerHighCritical: fault
+          OpticalTxPowerDegraded: fault
+          OpticalTxPowerRecovered: recovery
+          OpticalTxPowerRecoveredFromHigh: recovery
+        required_severities:
+          OpticalTxPowerLow: warning
+          OpticalTxPowerCritical: critical
+          OpticalTxPowerHigh: warning
+          OpticalTxPowerHighCritical: critical
+          OpticalTxPowerDegraded: warning
+          OpticalTxPowerRecovered: info
+          OpticalTxPowerRecoveredFromHigh: info
+        required_exclusive_event_types:
+        - OpticalTxPowerCritical
+        priority_order:
+        - higher: OpticalTxPowerCritical
+          lower: OpticalTxPowerLow
+        required_recovery_pairs:
+        - fault: OpticalTxPowerLow
+          recovery: OpticalTxPowerRecovered
+        - fault: OpticalTxPowerCritical
+          recovery: OpticalTxPowerRecovered
+        - fault: OpticalTxPowerHigh
+          recovery: OpticalTxPowerRecoveredFromHigh
+        - fault: OpticalTxPowerHighCritical
+          recovery: OpticalTxPowerRecoveredFromHigh
+        max_rule_count: 7
+    - observation_type: interface.optical.rx_high_alarm
+      semantic_type: threshold
+      unit: dbm
+      canonical_field: rx_high_alarm_dbm
+      dimensions:
+      - channel
+      required: false
+      assessment_roles:
+      - reference
+    - observation_type: interface.optical.rx_high_warning
+      semantic_type: threshold
+      unit: dbm
+      canonical_field: rx_high_warning_dbm
+      dimensions:
+      - channel
+      required: false
+      assessment_roles:
+      - reference
+    - observation_type: interface.optical.rx_low_warning
+      semantic_type: threshold
+      unit: dbm
+      canonical_field: rx_low_warning_dbm
+      dimensions:
+      - channel
+      required: false
+      assessment_roles:
+      - reference
+    - observation_type: interface.optical.rx_low_alarm
+      semantic_type: threshold
+      unit: dbm
+      canonical_field: rx_low_alarm_dbm
+      dimensions:
+      - channel
+      required: false
+      assessment_roles:
+      - reference
+    - observation_type: interface.optical.tx_high_alarm
+      semantic_type: threshold
+      unit: dbm
+      canonical_field: tx_high_alarm_dbm
+      dimensions:
+      - channel
+      required: false
+      assessment_roles:
+      - reference
+    - observation_type: interface.optical.tx_high_warning
+      semantic_type: threshold
+      unit: dbm
+      canonical_field: tx_high_warning_dbm
+      dimensions:
+      - channel
+      required: false
+      assessment_roles:
+      - reference
+    - observation_type: interface.optical.tx_low_warning
+      semantic_type: threshold
+      unit: dbm
+      canonical_field: tx_low_warning_dbm
+      dimensions:
+      - channel
+      required: false
+      assessment_roles:
+      - reference
+    - observation_type: interface.optical.tx_low_alarm
+      semantic_type: threshold
+      unit: dbm
+      canonical_field: tx_low_alarm_dbm
+      dimensions:
+      - channel
+      required: false
+      assessment_roles:
+      - reference
+    - observation_type: interface.optical.part_number
+      semantic_type: state
+      canonical_field: part_number
+      dimensions:
+      - channel
+      required: false
+      assessment_roles:
+      - evidence
+    - observation_type: interface.optical.serial_number
+      semantic_type: state
+      canonical_field: serial_number
+      dimensions:
+      - channel
+      required: false
+      assessment_roles:
+      - evidence
+    parser_field_vocabulary:
+      interface:
+        aliases:
+        - port
+        - interface_id
+        - interface_name
+        role: identity
+        value_type: interface_name
+      channel:
+        aliases:
+        - lane
+        role: identity
+      transceiver_present:
+        aliases:
+        - present
+        - presence
+        - transceiver_status
+        observation_type: interface.optical.presence
+        role: state
+      rx_power_dbm:
+        aliases:
+        - rx_power
+        - receive_power
+        - receive_power_dbm
+        observation_type: interface.optical.rx_power
+        role: metric
+      rx_high_alarm_dbm:
+        aliases:
+        - rx_power_high_alarm
+        - rx_high_alarm
+        role: threshold
+      rx_high_warning_dbm:
+        aliases:
+        - rx_power_high_warning
+        - rx_high_warning
+        role: threshold
+      rx_low_warning_dbm:
+        aliases:
+        - rx_power_low_warning
+        - rx_low_warning
+        role: threshold
+      rx_low_alarm_dbm:
+        aliases:
+        - rx_power_low_alarm
+        - rx_low_alarm
+        role: threshold
+      tx_power_dbm:
+        aliases:
+        - tx_power
+        - transmit_power
+        - transmit_power_dbm
+        observation_type: interface.optical.tx_power
+        role: metric
+      tx_high_alarm_dbm:
+        aliases:
+        - tx_power_high_alarm
+        - tx_high_alarm
+        role: threshold
+      tx_high_warning_dbm:
+        aliases:
+        - tx_power_high_warning
+        - tx_high_warning
+        role: threshold
+      tx_low_warning_dbm:
+        aliases:
+        - tx_power_low_warning
+        - tx_low_warning
+        role: threshold
+      tx_low_alarm_dbm:
+        aliases:
+        - tx_power_low_alarm
+        - tx_low_alarm
+        role: threshold
+      temperature_celsius:
+        aliases:
+        - temperature
+        - temperature_c
+        role: metric
+      voltage_v:
+        aliases:
+        - voltage
+        role: metric
+      bias_ma:
+        aliases:
+        - bias
+        - current_ma
+        role: metric
+      part_number:
+        aliases:
+        - vendor_part_number
+        - transceiver_part_number
+        observation_type: interface.optical.part_number
+        role: context
+      serial_number:
+        aliases:
+        - vendor_serial_number
+        - transceiver_serial_number
+        observation_type: interface.optical.serial_number
+        role: context
+  report_projection: optical_power
+  applicability:
+    capability: optical_diagnostics
+    unknown_is: unable_to_determine
+  empty_result_policy:
+    classification: not_applicable
+  coverage_policy:
+    model: derived_entity_set
+    source: previous_qualified_observation
+    first_observation: unable_to_determine
+  status: active
+- id: environment.fan
+  version: 4
+  name: 风扇状态
+  category: environment
+  description: Evaluate fan presence and operating state.
+  result_mode: structured
+  assessment_mode: health
+  canonical_contract:
+    entity_type: environment_fan
+    identity_dimensions:
+    - slot
+    - fan
+    identity_dimension_rules:
+      slot:
+        kind: identifier
+      fan:
+        kind: identifier
+    value_contract: same-name/v1
+    hardware_value_revision: hardware-values/v1
+    observations:
+    - observation_type: environment.fan.state
+      semantic_type: state
+      canonical_field: fan_status
+      required: true
+      value_type: text
+      dimensions: []
+    - canonical_field: fan_airflow_direction
+      observation_type: environment.fan.fan_airflow_direction
+      semantic_type: text
+      value_type: text
+      unit: null
+      description: 风扇实际气流方向原文
+      required: false
+      assessment_roles:
+      - evidence
+      dimensions: []
+    - canonical_field: preferred_fan_airflow_direction
+      observation_type: environment.fan.preferred_fan_airflow_direction
+      semantic_type: text
+      value_type: text
+      unit: null
+      description: 设备期望气流方向原文
+      required: false
+      assessment_roles:
+      - evidence
+      dimensions: []
+    rule_semantics_snapshot:
+      catalog_id: netops.canonical-observations
+      version: 5
+      digest: c4d3613d81b45085b28f6d4189c7f7cdd2e634c57494786c9f791c0e7f4c2738
+      observations:
+      - id: environment.fan.state
+        description: Current presence and operating health state of one fan.
+        semantic_type: state
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values:
+        - normal
+        - up
+        - down
+        - failed
+        - absent
+        - unknown
+        - faulty
+        state_groups:
+          healthy:
+          - normal
+          - up
+          unhealthy:
+          - down
+          - failed
+          - absent
+          - faulty
+          unknown:
+          - unknown
+        assessment_roles:
+        - current_state
+        - change
+      - id: environment.fan.fan_airflow_direction
+        description: 风扇实际气流方向原文
+        semantic_type: text
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: environment.fan.preferred_fan_airflow_direction
+        description: 设备期望气流方向原文
+        semantic_type: text
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+  report_projection: auto@1
+  applicability: {}
+  freshness_policy:
+    max_observation_age: 24h
+    max_collection_span: 8h
+    clock_skew_tolerance: 10m
+  empty_result_policy:
+    classification: not_applicable
+  coverage_policy:
+    model: derived_entity_set
+    source: previous_qualified_observation
+    first_observation: unable_to_determine
+  status: active
+- id: environment.power
+  version: 4
+  name: 电源状态
+  category: environment
+  description: Evaluate power-supply presence and operating state.
+  result_mode: structured
+  assessment_mode: health
+  canonical_contract:
+    entity_type: environment_power
+    identity_dimensions:
+    - slot
+    - power_supply
+    identity_dimension_rules:
+      slot:
+        kind: identifier
+      power_supply:
+        kind: identifier
+    value_contract: same-name/v1
+    hardware_value_revision: hardware-values/v1
+    observations:
+    - observation_type: environment.power.state
+      semantic_type: state
+      canonical_field: power_supply_status
+      required: true
+      value_type: text
+      dimensions: []
+    - canonical_field: mode
+      observation_type: environment.power.mode
+      semantic_type: text
+      value_type: text
+      unit: null
+      description: 电源 AC/DC 模式原文
+      required: false
+      assessment_roles:
+      - evidence
+      dimensions: []
+    - canonical_field: current_amperes
+      observation_type: environment.power.current_amperes
+      semantic_type: gauge
+      value_type: number
+      unit: amperes
+      description: 此电源 Current(A)，-- 表示未提供
+      required: false
+      assessment_roles:
+      - evidence
+      dimensions: []
+    - canonical_field: voltage_volts
+      observation_type: environment.power.voltage_volts
+      semantic_type: gauge
+      value_type: number
+      unit: volts
+      description: 此电源 Voltage(V)，-- 表示未提供
+      required: false
+      assessment_roles:
+      - evidence
+      dimensions: []
+    - canonical_field: output_watts
+      observation_type: environment.power.output_watts
+      semantic_type: gauge
+      value_type: number
+      unit: watts
+      description: 此电源 Power(W)，不等于机框总输入功率
+      required: false
+      assessment_roles:
+      - evidence
+      dimensions: []
+    - canonical_field: fan_direction
+      observation_type: environment.power.fan_direction
+      semantic_type: text
+      value_type: text
+      unit: null
+      description: 电源风扇方向原文
+      required: false
+      assessment_roles:
+      - evidence
+      dimensions: []
+    - canonical_field: slot_input_watts
+      observation_type: environment.power.slot_input_watts
+      semantic_type: gauge
+      value_type: number
+      unit: watts
+      description: 槽位 Input Power(W)，在该槽位电源行重复展示，不能按电源求和
+      required: false
+      assessment_roles:
+      - evidence
+      dimensions: []
+    rule_semantics_snapshot:
+      catalog_id: netops.canonical-observations
+      version: 5
+      digest: c4d3613d81b45085b28f6d4189c7f7cdd2e634c57494786c9f791c0e7f4c2738
+      observations:
+      - id: environment.power.state
+        description: Current presence and operating health state of one power supply.
+        semantic_type: state
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values:
+        - normal
+        - up
+        - down
+        - failed
+        - absent
+        - unknown
+        - faulty
+        state_groups:
+          healthy:
+          - normal
+          - up
+          unhealthy:
+          - down
+          - failed
+          - absent
+          - faulty
+          unknown:
+          - unknown
+        assessment_roles:
+        - current_state
+        - change
+      - id: environment.power.mode
+        description: 电源 AC/DC 模式原文
+        semantic_type: text
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: environment.power.current_amperes
+        description: 此电源 Current(A)，-- 表示未提供
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: amperes
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: environment.power.voltage_volts
+        description: 此电源 Voltage(V)，-- 表示未提供
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: volts
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: environment.power.output_watts
+        description: 此电源 Power(W)，不等于机框总输入功率
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: watts
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: environment.power.fan_direction
+        description: 电源风扇方向原文
+        semantic_type: text
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: environment.power.slot_input_watts
+        description: 槽位 Input Power(W)，在该槽位电源行重复展示，不能按电源求和
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: watts
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+  report_projection: auto@1
+  applicability: {}
+  freshness_policy:
+    max_observation_age: 24h
+    max_collection_span: 8h
+    clock_skew_tolerance: 10m
+  empty_result_policy:
+    classification: not_applicable
+  coverage_policy:
+    model: derived_entity_set
+    source: previous_qualified_observation
+    first_observation: unable_to_determine
+  status: active
+- id: configuration.running
+  version: 2
+  name: Running configuration change
+  category: configuration
+  description: Preserve and compare normalized running configuration evidence.
+  result_mode: normalized_diff
+  assessment_mode: change
+  canonical_contract:
+    entity_type: device_configuration
+    identity_dimensions:
+    - device_id
+    comparison_profile: configuration
+  report_projection: configuration_change
+  applicability: {}
+  coverage_policy:
+    model: fixed
+    expected_count: 1
+    require_rule_evaluation: false
+  status: active
+- id: device.inventory
+  version: 2
+  name: Hardware component inventory
+  category: device
+  description: Preserve component model, serial number and manufacturer facts.
+  result_mode: structured
+  assessment_mode: evidence
+  canonical_contract:
+    entity_type: hardware_component
+    identity_dimensions:
+    - component_type
+    - component_id
+    observations:
+    - observation_type: device.hardware.model
+      semantic_type: state
+      canonical_field: model
+      required: false
+    - observation_type: device.hardware.serial_number
+      semantic_type: state
+      canonical_field: serial_number
+    - observation_type: device.hardware.vendor
+      semantic_type: state
+      canonical_field: vendor_name
+      required: false
+    parser_field_vocabulary:
+      component_id:
+        aliases:
+        - name
+        - component_name
+        role: identity
+      component_type:
+        role: identity
+      member_id:
+        aliases:
+        - member
+        - switch_number
+        role: identity
+      slot_id:
+        aliases:
+        - slot
+        role: identity
+      interface:
+        aliases:
+        - interface_name
+        - port
+        role: identity
+      model:
+        aliases:
+        - pid
+        - product_id
+        - part_number
+        observation_type: device.hardware.model
+        role: state
+      serial_number:
+        aliases:
+        - serial
+        - serial_num
+        - sn
+        observation_type: device.hardware.serial_number
+        role: identity
+      hardware_version:
+        aliases:
+        - vid
+        - version_id
+        role: state
+      vendor_name:
+        aliases:
+        - manufacturer
+        - vendor
+        observation_type: device.hardware.vendor
+        role: state
+      description:
+        aliases:
+        - descr
+        role: context
+  report_projection: hardware_inventory
+  applicability: {}
+  coverage_policy:
+    model: non_exhaustive
+    require_rule_evaluation: false
+  status: active
+- id: environment.temperature
+  version: 2
+  name: Temperature sensor health
+  category: environment
+  description: Evaluate current sensor temperature against device-reported thresholds.
+  result_mode: structured
+  assessment_mode: health
+  canonical_contract:
+    entity_type: temperature_sensor
+    identity_dimensions:
+    - slot
+    - sensor
+    observations:
+    - observation_type: environment.temperature.current
+      semantic_type: gauge
+      unit: celsius
+      canonical_field: temperature_celsius
+    - observation_type: environment.temperature.warning
+      semantic_type: threshold
+      unit: celsius
+      canonical_field: temperature_high_warning_celsius
+      required: false
+    - observation_type: environment.temperature.alarm
+      semantic_type: threshold
+      unit: celsius
+      canonical_field: temperature_high_alarm_celsius
+      required: false
+    parser_field_vocabulary:
+      slot:
+        aliases:
+        - module
+        role: identity
+      sensor:
+        aliases:
+        - sensor_name
+        role: identity
+      temperature_celsius:
+        aliases:
+        - temperature
+        - current_temperature
+        - cur_temp
+        observation_type: environment.temperature.current
+        role: metric
+      temperature_status:
+        aliases:
+        - status
+        - state
+        role: state
+      temperature_high_warning_celsius:
+        aliases:
+        - high_warning
+        - high_warn
+        - minor_thresh
+        observation_type: environment.temperature.warning
+        role: threshold
+      temperature_high_alarm_celsius:
+        aliases:
+        - high_alarm
+        - major_thresh
+        observation_type: environment.temperature.alarm
+        role: threshold
+      temperature_low_warning_celsius:
+        aliases:
+        - low_warning
+        - low_warn
+        role: threshold
+      temperature_low_alarm_celsius:
+        aliases:
+        - low_alarm
+        role: threshold
+  report_projection: temperature
+  applicability: {}
+  coverage_policy:
+    model: derived_entity_set
+    source: previous_qualified_observation
+    first_observation: unable_to_determine
+  status: active
+- id: interface.ip_assignment
+  version: 3
+  name: Interface IP assignment
+  category: interface
+  description: Preserve interface addresses in a vendor-neutral report column.
+  result_mode: structured
+  assessment_mode: evidence
+  canonical_contract:
+    entity_type: interface_address
+    identity_dimensions:
+    - interface
+    - address_family
+    observations:
+    - observation_type: interface.ip.address
+      semantic_type: state
+      canonical_field: ip_address
+      dimensions:
+      - address_family
+    parser_field_vocabulary:
+      interface:
+        aliases:
+        - port
+        - interface_id
+        - interface_name
+        role: identity
+      ip_address:
+        aliases:
+        - address
+        - ip
+        observation_type: interface.ip.address
+        role: state
+        value_type: ip_or_unassigned
+      vrf:
+        aliases:
+        - vrf_name
+        - vpn_instance
+        role: context
+      oper_status:
+        aliases:
+        - status
+        - interface_status
+        role: state
+      protocol_status:
+        aliases:
+        - protocol
+        - line_protocol
+        role: state
+  report_projection: interface_ip
+  applicability: {}
+  coverage_policy:
+    model: non_exhaustive
+    require_rule_evaluation: false
+  status: active
+- id: redundancy.vrrp
+  version: 2
+  name: VRRP redundancy state
+  category: redundancy
+  description: Evaluate the operational state of each VRRP instance.
+  result_mode: structured
+  assessment_mode: health
+  canonical_contract:
+    entity_type: vrrp_instance
+    identity_dimensions:
+    - interface
+    - vrid
+    observations:
+    - observation_type: redundancy.vrrp.state
+      semantic_type: state
+      canonical_field: state
+    parser_field_vocabulary:
+      interface:
+        aliases:
+        - port
+        - interface_name
+        role: identity
+      vrid:
+        aliases:
+        - group
+        - group_id
+        - virtual_router_id
+        role: identity
+      state:
+        aliases:
+        - status
+        observation_type: redundancy.vrrp.state
+        role: state
+      priority:
+        role: state
+      master_ip:
+        aliases:
+        - master_address
+        role: state
+      virtual_ip:
+        aliases:
+        - virtual_address
+        role: state
+  report_projection: vrrp
+  applicability: {}
+  empty_result_policy:
+    classification: not_applicable
+  coverage_policy:
+    model: derived_entity_set
+    source: previous_qualified_observation
+    first_observation: unable_to_determine
+  status: active
+- id: redundancy.stack
+  version: 2
+  name: Stack and IRF member state
+  category: redundancy
+  description: Evaluate membership and operating state for stack or IRF members.
+  result_mode: structured
+  assessment_mode: health
+  canonical_contract:
+    entity_type: stack_member
+    identity_dimensions:
+    - member_id
+    observations:
+    - observation_type: redundancy.stack.member_state
+      semantic_type: state
+      canonical_field: member_status
+    parser_field_vocabulary:
+      member_id:
+        aliases:
+        - member
+        - switch_number
+        - slot
+        role: identity
+      member_status:
+        aliases:
+        - current_state
+        - status
+        - state
+        observation_type: redundancy.stack.member_state
+        role: state
+      role:
+        role: state
+      mac_address:
+        role: identity
+      priority:
+        role: state
+      hardware_version:
+        aliases:
+        - hw_version
+        role: context
+      port1_status:
+        role: state
+      port2_status:
+        role: state
+      neighbor_port1:
+        role: context
+      neighbor_port2:
+        role: context
+      stack_mac_address:
+        role: identity
+  report_projection: stack_members
+  applicability: {}
+  empty_result_policy:
+    classification: not_applicable
+  coverage_policy:
+    model: derived_entity_set
+    source: previous_qualified_observation
+    first_observation: unable_to_determine
+  status: active
+- id: redundancy.mlag
+  version: 2
+  name: Multi-chassis aggregation state
+  category: redundancy
+  description: Evaluate the current state of an M-LAG or vPC domain.
+  result_mode: structured
+  assessment_mode: health
+  canonical_contract:
+    entity_type: mlag_domain
+    identity_dimensions:
+    - domain_id
+    observations:
+    - observation_type: redundancy.mlag.state
+      semantic_type: state
+      canonical_field: peer_status
+    parser_field_vocabulary:
+      domain_id:
+        role: identity
+      peer_status:
+        observation_type: redundancy.mlag.state
+        role: state
+      keepalive_status:
+        role: state
+      configuration_consistency_status:
+        aliases:
+        - config_consistency_status
+        role: state
+      per_vlan_consistency_status:
+        role: state
+      type2_consistency_status:
+        role: state
+      vpc_role:
+        aliases:
+        - role
+        role: state
+      vpc_id:
+        aliases:
+        - id
+        role: identity
+      interface:
+        aliases:
+        - port
+        role: identity
+      status:
+        role: state
+      consistency_status:
+        role: state
+      consistency_reason:
+        role: context
+      active_vlans:
+        role: context
+  report_projection: mlag
+  applicability: {}
+  empty_result_policy:
+    classification: not_applicable
+  coverage_policy:
+    model: derived_entity_set
+    source: previous_qualified_observation
+    first_observation: unable_to_determine
+  status: active
+- id: network.vrf_inventory
+  version: 1
+  name: VRF inventory
+  category: routing
+  description: Preserve the set and reported state of virtual routing instances.
+  result_mode: structured
+  assessment_mode: evidence
+  canonical_contract:
+    entity_type: vrf
+    identity_dimensions:
+    - vrf
+    observations:
+    - observation_type: network.vrf.status
+      semantic_type: state
+  report_projection: vrf_inventory
+  applicability:
+    capability: vrf.inventory
+    unknown_is: unable_to_determine
+  empty_result_policy:
+    classification: not_applicable
+  coverage_policy:
+    model: non_exhaustive
+    require_rule_evaluation: false
+  status: active
+- id: network.arp_table
+  version: 2
+  name: ARP binding inventory
+  category: forwarding
+  description: Preserve IP-to-MAC bindings for change and evidence reporting.
+  result_mode: structured
+  assessment_mode: evidence
+  canonical_contract:
+    entity_type: arp_binding
+    identity_dimensions:
+    - vrf
+    - ip_address
+    observations:
+    - observation_type: network.arp.mac_address
+      semantic_type: state
+      canonical_field: mac_address
+    parser_field_vocabulary:
+      vrf:
+        aliases:
+        - vrf_name
+        - vpn_instance
+        role: identity
+      ip_address:
+        aliases:
+        - address
+        - ip
+        role: identity
+      mac_address:
+        aliases:
+        - mac
+        - hardware_address
+        observation_type: network.arp.mac_address
+        role: state
+      interface:
+        aliases:
+        - port
+        - interface_name
+        role: state
+      age:
+        role: context
+      entry_type:
+        aliases:
+        - type
+        role: context
+      protocol:
+        role: context
+      flags:
+        role: context
+  report_projection: arp_bindings
+  applicability: {}
+  coverage_policy:
+    model: non_exhaustive
+    require_rule_evaluation: false
+  status: active
+- id: network.mac_table
+  version: 3
+  name: MAC forwarding inventory
+  category: forwarding
+  description: Preserve VLAN and interface placement for learned MAC addresses.
+  result_mode: structured
+  assessment_mode: evidence
+  canonical_contract:
+    entity_type: mac_binding
+    identity_dimensions:
+    - vlan_id
+    - mac_address
+    observations:
+    - observation_type: network.mac_table.interface
+      semantic_type: state
+      canonical_field: interface
+    parser_field_vocabulary:
+      vlan_id:
+        aliases:
+        - vlan
+        role: identity
+        value_type: text
+      mac_address:
+        aliases:
+        - mac
+        role: identity
+      interface:
+        aliases:
+        - interfaces
+        - port
+        - ports
+        observation_type: network.mac_table.interface
+        role: state
+      entry_type:
+        aliases:
+        - type
+        role: context
+      age:
+        role: context
+  report_projection: mac_bindings
+  applicability: {}
+  coverage_policy:
+    model: non_exhaustive
+    require_rule_evaluation: false
+  status: active
+- id: configuration.startup
+  version: 1
+  name: Startup configuration selection
+  category: configuration
+  description: Compare the selected startup configuration files and boot references.
+  result_mode: normalized_diff
+  assessment_mode: change
+  canonical_contract:
+    entity_type: startup_configuration
+    identity_dimensions:
+    - device_id
+    comparison_profile: configuration
+  report_projection: startup_configuration_change
+  applicability: {}
+  coverage_policy:
+    model: fixed
+    expected_count: 1
+    require_rule_evaluation: false
+  status: active
+- id: operations.critical_logs
+  version: 1
+  name: Critical operational log changes
+  category: operations
+  description: Compare a sanitized critical log window without inferring health.
+  result_mode: normalized_diff
+  assessment_mode: change
+  canonical_contract:
+    entity_type: device_log_window
+    identity_dimensions:
+    - device_id
+    comparison_profile: log_window
+  report_projection: critical_log_change
+  applicability: {}
+  coverage_policy:
+    model: fixed
+    expected_count: 1
+    require_rule_evaluation: false
+  status: active
+- id: interface.runtime_statistics
+  version: 1
+  name: 接口状态运行信息和统计信息
+  category: interface
+  description: 接口状态、基本配置及收发统计；每个可用 Value 的变化均产生信息事件，变化不等于故障。
+  result_mode: structured
+  assessment_mode: change
+  canonical_contract:
+    entity_type: interface
+    identity_dimensions:
+    - interface
+    value_contract: same-name/v1
+    change_events: true
+    observations:
+    - canonical_field: line_status
+      observation_type: interface.runtime_statistics.line_status
+      semantic_type: state
+      value_type: text
+      unit: null
+      description: 接口物理状态，保留管理关闭及故障原因等完整原文
+      required: true
+      event_on_change: true
+      event_constraints:
+        required_event_types:
+        - interface.runtime_statistics.line_status.changed
+        role_event_types:
+          change: interface.runtime_statistics.line_status.changed
+        required_event_classes:
+          interface.runtime_statistics.line_status.changed: change
+        required_severities:
+          interface.runtime_statistics.line_status.changed: info
+        required_recovery_pairs: []
+      assessment_roles:
+      - change
+    - canonical_field: protocol_status
+      observation_type: interface.runtime_statistics.protocol_status
+      semantic_type: state
+      value_type: text
+      unit: null
+      description: 接口链路协议状态，保留括号中的状态说明
+      required: true
+      event_on_change: true
+      event_constraints:
+        required_event_types:
+        - interface.runtime_statistics.protocol_status.changed
+        role_event_types:
+          change: interface.runtime_statistics.protocol_status.changed
+        required_event_classes:
+          interface.runtime_statistics.protocol_status.changed: change
+        required_severities:
+          interface.runtime_statistics.protocol_status.changed: info
+        required_recovery_pairs: []
+      assessment_roles:
+      - change
+    - canonical_field: description
+      observation_type: interface.runtime_statistics.description
+      semantic_type: text
+      value_type: text
+      unit: null
+      description: 接口描述，空字符串也是有效描述
+      required: false
+      event_on_change: true
+      event_constraints:
+        required_event_types:
+        - interface.runtime_statistics.description.changed
+        role_event_types:
+          change: interface.runtime_statistics.description.changed
+        required_event_classes:
+          interface.runtime_statistics.description.changed: change
+        required_severities:
+          interface.runtime_statistics.description.changed: info
+        required_recovery_pairs: []
+      assessment_roles:
+      - change
+    - canonical_field: hw_address
+      observation_type: interface.runtime_statistics.hw_address
+      semantic_type: text
+      value_type: text
+      unit: null
+      description: 接口硬件 MAC 地址
+      required: false
+      event_on_change: true
+      event_constraints:
+        required_event_types:
+        - interface.runtime_statistics.hw_address.changed
+        role_event_types:
+          change: interface.runtime_statistics.hw_address.changed
+        required_event_classes:
+          interface.runtime_statistics.hw_address.changed: change
+        required_severities:
+          interface.runtime_statistics.hw_address.changed: info
+        required_recovery_pairs: []
+      assessment_roles:
+      - change
+    - canonical_field: bandwidth_kbps
+      observation_type: interface.runtime_statistics.bandwidth_kbps
+      semantic_type: gauge
+      value_type: integer
+      unit: kbps
+      description: 接口原文 Bandwidth 配置带宽，单位 kbps，不等于当前吞吐量
+      required: false
+      event_on_change: true
+      event_constraints:
+        required_event_types:
+        - interface.runtime_statistics.bandwidth_kbps.changed
+        role_event_types:
+          change: interface.runtime_statistics.bandwidth_kbps.changed
+        required_event_classes:
+          interface.runtime_statistics.bandwidth_kbps.changed: change
+        required_severities:
+          interface.runtime_statistics.bandwidth_kbps.changed: info
+        required_recovery_pairs: []
+      assessment_roles:
+      - change
+    - canonical_field: speed
+      observation_type: interface.runtime_statistics.speed
+      semantic_type: text
+      value_type: text
+      unit: null
+      description: 接口当前速度原文，保留原文单位或厂商显示格式
+      required: false
+      event_on_change: true
+      event_constraints:
+        required_event_types:
+        - interface.runtime_statistics.speed.changed
+        role_event_types:
+          change: interface.runtime_statistics.speed.changed
+        required_event_classes:
+          interface.runtime_statistics.speed.changed: change
+        required_severities:
+          interface.runtime_statistics.speed.changed: info
+        required_recovery_pairs: []
+      assessment_roles:
+      - change
+    - canonical_field: duplex
+      observation_type: interface.runtime_statistics.duplex
+      semantic_type: state
+      value_type: text
+      unit: null
+      description: 接口双工模式原文
+      required: false
+      event_on_change: true
+      event_constraints:
+        required_event_types:
+        - interface.runtime_statistics.duplex.changed
+        role_event_types:
+          change: interface.runtime_statistics.duplex.changed
+        required_event_classes:
+          interface.runtime_statistics.duplex.changed: change
+        required_severities:
+          interface.runtime_statistics.duplex.changed: info
+        required_recovery_pairs: []
+      assessment_roles:
+      - change
+    - canonical_field: port_link_type
+      observation_type: interface.runtime_statistics.port_link_type
+      semantic_type: state
+      value_type: text
+      unit: null
+      description: 接口链路类型，保留 configured/negotiated 等原文
+      required: false
+      event_on_change: true
+      event_constraints:
+        required_event_types:
+        - interface.runtime_statistics.port_link_type.changed
+        role_event_types:
+          change: interface.runtime_statistics.port_link_type.changed
+        required_event_classes:
+          interface.runtime_statistics.port_link_type.changed: change
+        required_severities:
+          interface.runtime_statistics.port_link_type.changed: info
+        required_recovery_pairs: []
+      assessment_roles:
+      - change
+    - canonical_field: vlan_native
+      observation_type: interface.runtime_statistics.vlan_native
+      semantic_type: gauge
+      value_type: integer
+      unit: null
+      description: 接口缺省 VLAN/PVID 编号
+      required: false
+      event_on_change: true
+      event_constraints:
+        required_event_types:
+        - interface.runtime_statistics.vlan_native.changed
+        role_event_types:
+          change: interface.runtime_statistics.vlan_native.changed
+        required_event_classes:
+          interface.runtime_statistics.vlan_native.changed: change
+        required_severities:
+          interface.runtime_statistics.vlan_native.changed: info
+        required_recovery_pairs: []
+      assessment_roles:
+      - change
+    - canonical_field: mtu
+      observation_type: interface.runtime_statistics.mtu
+      semantic_type: gauge
+      value_type: integer
+      unit: bytes
+      description: 接口三层最大传输单元，不与二层最大帧长混用
+      required: false
+      event_on_change: true
+      event_constraints:
+        required_event_types:
+        - interface.runtime_statistics.mtu.changed
+        role_event_types:
+          change: interface.runtime_statistics.mtu.changed
+        required_event_classes:
+          interface.runtime_statistics.mtu.changed: change
+        required_severities:
+          interface.runtime_statistics.mtu.changed: info
+        required_recovery_pairs: []
+      assessment_roles:
+      - change
+    - canonical_field: l2mtu
+      observation_type: interface.runtime_statistics.l2mtu
+      semantic_type: gauge
+      value_type: integer
+      unit: bytes
+      description: 接口二层最大帧长度，不与三层 MTU 混用
+      required: false
+      event_on_change: true
+      event_constraints:
+        required_event_types:
+        - interface.runtime_statistics.l2mtu.changed
+        role_event_types:
+          change: interface.runtime_statistics.l2mtu.changed
+        required_event_classes:
+          interface.runtime_statistics.l2mtu.changed: change
+        required_severities:
+          interface.runtime_statistics.l2mtu.changed: info
+        required_recovery_pairs: []
+      assessment_roles:
+      - change
+    - canonical_field: input_packets
+      observation_type: interface.runtime_statistics.input_packets
+      semantic_type: counter
+      value_type: integer
+      unit: count
+      description: 接口累计接收报文数
+      required: false
+      event_on_change: true
+      event_constraints:
+        required_event_types:
+        - interface.runtime_statistics.input_packets.changed
+        role_event_types:
+          change: interface.runtime_statistics.input_packets.changed
+        required_event_classes:
+          interface.runtime_statistics.input_packets.changed: change
+        required_severities:
+          interface.runtime_statistics.input_packets.changed: info
+        required_recovery_pairs: []
+      assessment_roles:
+      - change
+    - canonical_field: output_packets
+      observation_type: interface.runtime_statistics.output_packets
+      semantic_type: counter
+      value_type: integer
+      unit: count
+      description: 接口累计发送报文数
+      required: false
+      event_on_change: true
+      event_constraints:
+        required_event_types:
+        - interface.runtime_statistics.output_packets.changed
+        role_event_types:
+          change: interface.runtime_statistics.output_packets.changed
+        required_event_classes:
+          interface.runtime_statistics.output_packets.changed: change
+        required_severities:
+          interface.runtime_statistics.output_packets.changed: info
+        required_recovery_pairs: []
+      assessment_roles:
+      - change
+    - canonical_field: input_bytes
+      observation_type: interface.runtime_statistics.input_bytes
+      semantic_type: counter
+      value_type: integer
+      unit: bytes
+      description: 接口累计接收字节数
+      required: false
+      event_on_change: true
+      event_constraints:
+        required_event_types:
+        - interface.runtime_statistics.input_bytes.changed
+        role_event_types:
+          change: interface.runtime_statistics.input_bytes.changed
+        required_event_classes:
+          interface.runtime_statistics.input_bytes.changed: change
+        required_severities:
+          interface.runtime_statistics.input_bytes.changed: info
+        required_recovery_pairs: []
+      assessment_roles:
+      - change
+    - canonical_field: output_bytes
+      observation_type: interface.runtime_statistics.output_bytes
+      semantic_type: counter
+      value_type: integer
+      unit: bytes
+      description: 接口累计发送字节数
+      required: false
+      event_on_change: true
+      event_constraints:
+        required_event_types:
+        - interface.runtime_statistics.output_bytes.changed
+        role_event_types:
+          change: interface.runtime_statistics.output_bytes.changed
+        required_event_classes:
+          interface.runtime_statistics.output_bytes.changed: change
+        required_severities:
+          interface.runtime_statistics.output_bytes.changed: info
+        required_recovery_pairs: []
+      assessment_roles:
+      - change
+    - canonical_field: input_errors
+      observation_type: interface.runtime_statistics.input_errors
+      semantic_type: counter
+      value_type: integer
+      unit: count
+      description: 接口接收错误总数；Huawei Input 下的 Total Error；没有输出则缺失
+      required: false
+      event_on_change: true
+      event_constraints:
+        required_event_types:
+        - interface.runtime_statistics.input_errors.changed
+        role_event_types:
+          change: interface.runtime_statistics.input_errors.changed
+        required_event_classes:
+          interface.runtime_statistics.input_errors.changed: change
+        required_severities:
+          interface.runtime_statistics.input_errors.changed: info
+        required_recovery_pairs: []
+      assessment_roles:
+      - change
+    - canonical_field: output_errors
+      observation_type: interface.runtime_statistics.output_errors
+      semantic_type: counter
+      value_type: integer
+      unit: count
+      description: 接口发送错误总数；只取输出方向明确的错误总数
+      required: false
+      event_on_change: true
+      event_constraints:
+        required_event_types:
+        - interface.runtime_statistics.output_errors.changed
+        role_event_types:
+          change: interface.runtime_statistics.output_errors.changed
+        required_event_classes:
+          interface.runtime_statistics.output_errors.changed: change
+        required_severities:
+          interface.runtime_statistics.output_errors.changed: info
+        required_recovery_pairs: []
+      assessment_roles:
+      - change
+    - canonical_field: input_crc_errors
+      observation_type: interface.runtime_statistics.input_crc_errors
+      semantic_type: counter
+      value_type: integer
+      unit: count
+      description: 接收方向 CRC/FCS 错误计数，保留厂商计数口径
+      required: false
+      event_on_change: true
+      event_constraints:
+        required_event_types:
+        - interface.runtime_statistics.input_crc_errors.changed
+        role_event_types:
+          change: interface.runtime_statistics.input_crc_errors.changed
+        required_event_classes:
+          interface.runtime_statistics.input_crc_errors.changed: change
+        required_severities:
+          interface.runtime_statistics.input_crc_errors.changed: info
+        required_recovery_pairs: []
+      assessment_roles:
+      - change
+    - canonical_field: last_physical_up_time
+      observation_type: interface.runtime_statistics.last_physical_up_time
+      semantic_type: text
+      value_type: text
+      unit: null
+      description: 最近物理 Up 时间，原文 - 表示未记录
+      required: false
+      event_on_change: true
+      event_constraints:
+        required_event_types:
+        - interface.runtime_statistics.last_physical_up_time.changed
+        role_event_types:
+          change: interface.runtime_statistics.last_physical_up_time.changed
+        required_event_classes:
+          interface.runtime_statistics.last_physical_up_time.changed: change
+        required_severities:
+          interface.runtime_statistics.last_physical_up_time.changed: info
+        required_recovery_pairs: []
+      assessment_roles:
+      - change
+    - canonical_field: last_physical_down_time
+      observation_type: interface.runtime_statistics.last_physical_down_time
+      semantic_type: text
+      value_type: text
+      unit: null
+      description: 最近物理 Down 时间，原文 - 表示未记录
+      required: false
+      event_on_change: true
+      event_constraints:
+        required_event_types:
+        - interface.runtime_statistics.last_physical_down_time.changed
+        role_event_types:
+          change: interface.runtime_statistics.last_physical_down_time.changed
+        required_event_classes:
+          interface.runtime_statistics.last_physical_down_time.changed: change
+        required_severities:
+          interface.runtime_statistics.last_physical_down_time.changed: info
+        required_recovery_pairs: []
+      assessment_roles:
+      - change
+    - canonical_field: negotiation
+      observation_type: interface.runtime_statistics.negotiation
+      semantic_type: state
+      value_type: text
+      unit: null
+      description: 接口自协商状态原文
+      required: false
+      event_on_change: true
+      event_constraints:
+        required_event_types:
+        - interface.runtime_statistics.negotiation.changed
+        role_event_types:
+          change: interface.runtime_statistics.negotiation.changed
+        required_event_classes:
+          interface.runtime_statistics.negotiation.changed: change
+        required_severities:
+          interface.runtime_statistics.negotiation.changed: info
+        required_recovery_pairs: []
+      assessment_roles:
+      - change
+    - canonical_field: port_mode
+      observation_type: interface.runtime_statistics.port_mode
+      semantic_type: state
+      value_type: text
+      unit: null
+      description: 接口介质工作模式原文
+      required: false
+      event_on_change: true
+      event_constraints:
+        required_event_types:
+        - interface.runtime_statistics.port_mode.changed
+        role_event_types:
+          change: interface.runtime_statistics.port_mode.changed
+        required_event_classes:
+          interface.runtime_statistics.port_mode.changed: change
+        required_severities:
+          interface.runtime_statistics.port_mode.changed: info
+        required_recovery_pairs: []
+      assessment_roles:
+      - change
+    - canonical_field: loopback
+      observation_type: interface.runtime_statistics.loopback
+      semantic_type: state
+      value_type: text
+      unit: null
+      description: 接口环回模式原文
+      required: false
+      event_on_change: true
+      event_constraints:
+        required_event_types:
+        - interface.runtime_statistics.loopback.changed
+        role_event_types:
+          change: interface.runtime_statistics.loopback.changed
+        required_event_classes:
+          interface.runtime_statistics.loopback.changed: change
+        required_severities:
+          interface.runtime_statistics.loopback.changed: info
+        required_recovery_pairs: []
+      assessment_roles:
+      - change
+  report_projection: auto@1
+  applicability: {}
+  freshness_policy:
+    max_observation_age: 24h
+    max_collection_span: 8h
+    clock_skew_tolerance: 10m
+  empty_result_policy:
+    classification: invalid
+  coverage_policy:
+    model: non_exhaustive
+    require_rule_evaluation: true
+  status: active
+  digest: 7af7c1aabc721a64574cd6d41d4144b993bd78c4fc0f7ca14f40e2d7a8b8397f
+  version_id: 5ae03063-2121-550b-8ccf-873197de9012
+implementations:
+- id: h3c-device-version
+  version: 2
+  name: H3C device version
+  check_item_ids:
+  - device.version
+  match:
+    vendor: H3C
+  commands:
+  - command: display version
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: huawei-device-version
+  version: 2
+  name: Huawei device version
+  check_item_ids:
+  - device.version
+  match:
+    vendor: Huawei
+  commands:
+  - command: display version
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: cisco-device-version
+  version: 2
+  name: Cisco device version
+  check_item_ids:
+  - device.version
+  match:
+    vendor: Cisco
+  commands:
+  - command: show version
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: h3c-cpu-usage
+  version: 3
+  name: H3C CPU utilization
+  check_item_ids:
+  - system.cpu_usage
+  match:
+    vendor: H3C
+  commands:
+  - command: display cpu-usage
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: huawei-cpu-usage
+  version: 2
+  name: Huawei CPU utilization
+  check_item_ids:
+  - system.cpu_usage
+  match:
+    vendor: Huawei
+  commands:
+  - command: display cpu-usage
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: cisco-ios-cpu-usage
+  version: 2
+  name: Cisco IOS CPU utilization
+  check_item_ids:
+  - system.cpu_usage
+  match:
+    vendor: Cisco
+    families:
+    - IOS
+    - IOS-XE
+  commands:
+  - command: show processes cpu
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: cisco-nxos-system-resources
+  version: 2
+  name: Cisco NX-OS system resources
+  check_item_ids:
+  - system.cpu_usage
+  - system.memory_usage
+  match:
+    vendor: Cisco
+    families:
+    - NXOS
+    - NXOS9K
+  commands:
+  - command: show system resources
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: h3c-memory-usage
+  version: 2
+  name: H3C memory utilization
+  check_item_ids:
+  - system.memory_usage
+  match:
+    vendor: H3C
+  commands:
+  - command: display memory
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: huawei-memory-usage
+  version: 2
+  name: Huawei memory utilization
+  check_item_ids:
+  - system.memory_usage
+  match:
+    vendor: Huawei
+  commands:
+  - command: display memory
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: cisco-ios-memory-usage
+  version: 2
+  name: Cisco IOS memory utilization
+  check_item_ids:
+  - system.memory_usage
+  match:
+    vendor: Cisco
+    families:
+    - IOS
+    - IOS-XE
+  commands:
+  - command: show processes memory
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: h3c-optical-power
+  version: 2
+  name: H3C optical diagnostics
+  check_item_ids:
+  - interface.optical_power
+  match:
+    vendor: H3C
+  commands:
+  - command: display transceiver diagnosis interface
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: huawei-optical-power
+  version: 2
+  name: Huawei optical diagnostics
+  check_item_ids:
+  - interface.optical_power
+  match:
+    vendor: Huawei
+  commands:
+  - command: display transceiver diagnosis interface
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: cisco-optical-power
+  version: 2
+  name: Cisco optical diagnostics
+  check_item_ids:
+  - interface.optical_power
+  match:
+    vendor: Cisco
+  commands:
+  - command: show interface transceiver detail
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: h3c-fan-health
+  version: 2
+  name: H3C fan health
+  check_item_ids:
+  - environment.fan
+  match:
+    vendor: H3C
+  commands:
+  - command: display fan
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: huawei-fan-health
+  version: 2
+  name: Huawei fan health
+  check_item_ids:
+  - environment.fan
+  match:
+    vendor: Huawei
+  commands:
+  - command: display fan
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: cisco-fan-health
+  version: 3
+  name: Cisco fan health
+  check_item_ids:
+  - environment.fan
+  match:
+    vendor: Cisco
+  commands:
+  - command: show environment fan
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: h3c-power-health
+  version: 2
+  name: H3C power supply health
+  check_item_ids:
+  - environment.power
+  match:
+    vendor: H3C
+  commands:
+  - command: display power
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: huawei-power-health
+  version: 2
+  name: Huawei power supply health
+  check_item_ids:
+  - environment.power
+  match:
+    vendor: Huawei
+  commands:
+  - command: display power
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: cisco-power-health
+  version: 3
+  name: Cisco power supply health
+  check_item_ids:
+  - environment.power
+  match:
+    vendor: Cisco
+  commands:
+  - command: show environment power
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: h3c-running-configuration
+  version: 2
+  name: H3C running configuration
+  check_item_ids:
+  - configuration.running
+  match:
+    vendor: H3C
+  commands:
+  - command: display current-configuration
+    priority: 100
+  collector: cli
+  parser_requirement: normalized_diff
+  template_scope: null
+  selection_priority: 100
+  status: active
+- id: huawei-running-configuration
+  version: 2
+  name: Huawei running configuration
+  check_item_ids:
+  - configuration.running
+  match:
+    vendor: Huawei
+  commands:
+  - command: display current-configuration
+    priority: 100
+  collector: cli
+  parser_requirement: normalized_diff
+  template_scope: null
+  selection_priority: 100
+  status: active
+- id: cisco-running-configuration
+  version: 2
+  name: Cisco running configuration
+  check_item_ids:
+  - configuration.running
+  match:
+    vendor: Cisco
+  commands:
+  - command: show running-config
+    priority: 100
+  collector: cli
+  parser_requirement: normalized_diff
+  template_scope: null
+  selection_priority: 100
+  status: active
+- id: h3c-device-inventory
+  version: 1
+  name: H3C hardware component inventory
+  check_item_ids:
+  - device.inventory
+  match:
+    vendor: H3C
+  commands:
+  - command: display device manuinfo
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: h3c-temperature
+  version: 1
+  name: H3C temperature sensors
+  check_item_ids:
+  - environment.temperature
+  match:
+    vendor: H3C
+  commands:
+  - command: display environment
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: h3c-interface-ip-assignment
+  version: 1
+  name: H3C interface IP assignments
+  check_item_ids:
+  - interface.ip_assignment
+  match:
+    vendor: H3C
+  commands:
+  - command: display ip interface brief
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: h3c-vrrp
+  version: 1
+  name: H3C VRRP state
+  check_item_ids:
+  - redundancy.vrrp
+  match:
+    vendor: H3C
+  commands:
+  - command: display vrrp statistics
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: h3c-irf
+  version: 1
+  name: H3C IRF member state
+  check_item_ids:
+  - redundancy.stack
+  match:
+    vendor: H3C
+  commands:
+  - command: display irf
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: h3c-mlag
+  version: 1
+  name: H3C M-LAG state
+  check_item_ids:
+  - redundancy.mlag
+  match:
+    vendor: H3C
+  commands:
+  - command: display m-lag system
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: h3c-vrf-inventory
+  version: 1
+  name: H3C VRF inventory
+  check_item_ids:
+  - network.vrf_inventory
+  match:
+    vendor: H3C
+  commands:
+  - command: display vrf
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: h3c-arp-table
+  version: 1
+  name: H3C ARP table
+  check_item_ids:
+  - network.arp_table
+  match:
+    vendor: H3C
+  commands:
+  - command: display arp
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: h3c-mac-table
+  version: 1
+  name: H3C MAC address table
+  check_item_ids:
+  - network.mac_table
+  match:
+    vendor: H3C
+  commands:
+  - command: display mac-address
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: family
+  selection_priority: 100
+  status: active
+- id: h3c-startup-configuration
+  version: 1
+  name: H3C startup configuration selection
+  check_item_ids:
+  - configuration.startup
+  match:
+    vendor: H3C
+  commands:
+  - command: display startup
+    priority: 100
+  collector: cli
+  parser_requirement: normalized_diff
+  template_scope: null
+  selection_priority: 100
+  status: active
+- id: h3c-critical-logs
+  version: 1
+  name: H3C critical log window
+  check_item_ids:
+  - operations.critical_logs
+  match:
+    vendor: H3C
+  commands:
+  - command: display logbuffer level 0
+    priority: 100
+  collector: cli
+  parser_requirement: normalized_diff
+  template_scope: null
+  selection_priority: 100
+  status: active
+- id: h3c-interface-values
+  version: 3
+  name: H3C display interface 同名字段
+  description: ''
+  check_item_ids:
+  - interface.runtime_statistics
+  match:
+    vendors:
+    - H3C
+    model_patterns:
+    - ^S6850\-56HF$
+  commands:
+  - command: display interface
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: model
+  adapter_spec:
+    schema_version: command-adapter/v2
+    parser:
+      template_id: 9ce4a079-1121-5d93-bf11-a0027e9e3977
+    outputs:
+    - check_item_id: interface.runtime_statistics
+      source_record_set: default
+      empty_status: unavailable
+      check_item_version_id: 5ae03063-2121-550b-8ccf-873197de9012
+      projection:
+        fields:
+          bandwidth_kbps:
+            source: bandwidth_kbps
+          description:
+            source: description
+          duplex:
+            source: duplex
+          hw_address:
+            source: hw_address
+          input_bytes:
+            source: input_bytes
+          input_crc_errors:
+            source: input_crc_errors
+          input_errors:
+            source: input_errors
+          input_packets:
+            source: input_packets
+          interface:
+            source: interface
+          l2mtu:
+            source: l2mtu
+          last_physical_down_time:
+            source: last_physical_down_time
+          last_physical_up_time:
+            source: last_physical_up_time
+          line_status:
+            source: line_status
+          loopback:
+            source: loopback
+          mtu:
+            source: mtu
+          negotiation:
+            source: negotiation
+          output_bytes:
+            source: output_bytes
+          output_errors:
+            source: output_errors
+          output_packets:
+            source: output_packets
+          port_link_type:
+            source: port_link_type
+          port_mode:
+            source: port_mode
+          protocol_status:
+            source: protocol_status
+          speed:
+            source: speed
+          vlan_native:
+            source: vlan_native
+  output_quality_policy:
+    profile_version: 1
+    minimum_non_whitespace_chars: 1
+    unsupported_patterns:
+    - '%\s*(?:invalid input|unrecognized command)'
+    - error:\s*unrecognized command
+    - (?:wrong|invalid) parameter found
+    - unrecognized command found
+    - incomplete command found
+    command_error_patterns:
+    - permission denied
+    - authorization failed
+    - insufficient privilege
+    - command execution failed
+    truncation_patterns:
+    - (?im)^\s*(?:%|\[)?\s*output\s+(?:was\s+)?truncated\b
+    - (?im)^\s*\[\s*truncated\s*\]\s*$
+    - (?im)^\s*\.\.\.\s+(?:output\s+)?omitted\s+\.\.\.\s*$
+    paging_patterns:
+    - (?im)(?:--|----)\s*more\s*(?:--|----)
+    - (?im)^\s*press\s+(?:any\s+key|space|enter)\s+to\s+continue
+    - (?im)^\s*more:\s*<space>
+  selection_priority: 200
+  status: active
+  digest: d6b4adf81eddab9cf41593f6444065670a40e0318de3b0700cb587df81d64aa3
+  version_id: eac8f68b-0eec-58c7-ab38-1ffb3a7935c7
+- id: huawei-interface-values
+  version: 3
+  name: Huawei display interface 同名字段
+  description: ''
+  check_item_ids:
+  - interface.runtime_statistics
+  match:
+    vendors:
+    - Huawei
+    model_patterns:
+    - ^X2E$
+  commands:
+  - command: display interface
+    priority: 100
+  collector: cli
+  parser_requirement: structured
+  template_scope: model
+  adapter_spec:
+    schema_version: command-adapter/v2
+    parser:
+      template_id: 7e1e92f2-b45d-54d2-9deb-fefd9be3380a
+    outputs:
+    - check_item_id: interface.runtime_statistics
+      source_record_set: default
+      empty_status: unavailable
+      check_item_version_id: 5ae03063-2121-550b-8ccf-873197de9012
+      projection:
+        fields:
+          bandwidth_kbps:
+            source: bandwidth_kbps
+          description:
+            source: description
+          duplex:
+            source: duplex
+          hw_address:
+            source: hw_address
+          input_bytes:
+            source: input_bytes
+          input_crc_errors:
+            source: input_crc_errors
+          input_errors:
+            source: input_errors
+          input_packets:
+            source: input_packets
+          interface:
+            source: interface
+          l2mtu:
+            source: l2mtu
+          last_physical_down_time:
+            source: last_physical_down_time
+          last_physical_up_time:
+            source: last_physical_up_time
+          line_status:
+            source: line_status
+          loopback:
+            source: loopback
+          mtu:
+            source: mtu
+          negotiation:
+            source: negotiation
+          output_bytes:
+            source: output_bytes
+          output_errors:
+            source: output_errors
+          output_packets:
+            source: output_packets
+          port_link_type:
+            source: port_link_type
+          port_mode:
+            source: port_mode
+          protocol_status:
+            source: protocol_status
+          speed:
+            source: speed
+          vlan_native:
+            source: vlan_native
+  output_quality_policy:
+    profile_version: 1
+    minimum_non_whitespace_chars: 1
+    unsupported_patterns:
+    - '%\s*(?:invalid input|unrecognized command)'
+    - error:\s*unrecognized command
+    - (?:wrong|invalid) parameter found
+    - unrecognized command found
+    - incomplete command found
+    command_error_patterns:
+    - permission denied
+    - authorization failed
+    - insufficient privilege
+    - command execution failed
+    truncation_patterns:
+    - (?im)^\s*(?:%|\[)?\s*output\s+(?:was\s+)?truncated\b
+    - (?im)^\s*\[\s*truncated\s*\]\s*$
+    - (?im)^\s*\.\.\.\s+(?:output\s+)?omitted\s+\.\.\.\s*$
+    paging_patterns:
+    - (?im)(?:--|----)\s*more\s*(?:--|----)
+    - (?im)^\s*press\s+(?:any\s+key|space|enter)\s+to\s+continue
+    - (?im)^\s*more:\s*<space>
+  selection_priority: 200
+  status: active
+  digest: b8bfe04eee1c6b60991e170f9976d7c0c24ab0a2a309296a31f68536a7ab8085
+  version_id: d2e58c5a-2be1-56f5-a15d-d34e16bbf95a

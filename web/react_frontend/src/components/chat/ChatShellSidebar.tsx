@@ -7,7 +7,6 @@ import {
   SearchOutlined,
   EditOutlined,
   AppstoreOutlined,
-  BookOutlined,
   CloudOutlined,
   TeamOutlined,
   LogoutOutlined,
@@ -85,7 +84,13 @@ const ChatShellSidebar: React.FC<ChatShellSidebarProps> = ({ embedded = false, o
     loadConversationDetail,
     deleteConversation,
     loading,
+    error,
+    loadConversations,
   } = useChatStore()
+
+  useEffect(() => {
+    if (user?.id && workbench) void loadConversations()
+  }, [user?.id, workbench, loadConversations])
 
   const navItems = useMemo(
     () => [
@@ -93,7 +98,6 @@ const ChatShellSidebar: React.FC<ChatShellSidebarProps> = ({ embedded = false, o
       { key: 'new-chat', icon: <EditOutlined />, label: '新建聊天', action: 'new-chat' as const },
       ...(workbenchEnabled ? [{ key: '/workbench', icon: <AppstoreOutlined />, label: '工作台', action: 'route' as const }] : []),
       { key: '/skills', icon: <AppstoreOutlined />, label: 'Skills', action: 'route' as const },
-      { key: '/knowledge', icon: <BookOutlined />, label: '知识库', action: 'route' as const },
       { key: '/storage', icon: <CloudOutlined />, label: '网盘', action: 'route' as const },
     ],
     []
@@ -234,7 +238,7 @@ const ChatShellSidebar: React.FC<ChatShellSidebarProps> = ({ embedded = false, o
         })}
       </nav>
 
-      {!isCollapsed && !workbench && (
+      {!isCollapsed && (
         <div className="grok-history-section">
           <button
             type="button"
@@ -261,6 +265,7 @@ const ChatShellSidebar: React.FC<ChatShellSidebarProps> = ({ embedded = false, o
               )}
 
               <div className="grok-history">
+                {error && <div className="grok-history-error" role="alert">{error}<button type="button" onClick={() => void loadConversations()}>重试</button></div>}
                 {loading && conversations.length === 0 ? (
                   <div className="grok-history-loading">
                     <Spin size="small" />
@@ -366,3 +371,4 @@ const ChatShellSidebar: React.FC<ChatShellSidebarProps> = ({ embedded = false, o
 }
 
 export default ChatShellSidebar
+

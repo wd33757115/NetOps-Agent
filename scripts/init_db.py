@@ -9,7 +9,7 @@ BASE_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
 from src.infrastructure.db.migrations import upgrade_database
-from src.infrastructure.db.postgres import init_postgres_schema, verify_postgres_connection
+from src.infrastructure.db.postgres import verify_postgres_connection
 
 if __name__ == "__main__":
     print("=" * 60)
@@ -22,9 +22,6 @@ if __name__ == "__main__":
     else:
         print("❌ PostgreSQL 连接失败，请检查配置")
         sys.exit(1)
-
-    print("\n🏗️  创建 LangGraph Checkpoint 表...")
-    init_postgres_schema()
 
     print("\n📊 创建业务状态表...")
     upgrade_database()

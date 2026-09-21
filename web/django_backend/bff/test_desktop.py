@@ -72,3 +72,29 @@ class DesktopPreferenceTests(TestCase):
         self.assertEqual(saved["nodes"][0]["containerId"], "folder:folder-1")
         self.assertNotIn("col", saved["nodes"][0])
         self.assertEqual(saved["nodes"][-1]["appId"], "future-app")
+
+    def test_wallpaper_is_private_and_survives_old_client_layout_update(self):
+        body = {**default_layout(), "revision": 0, "wallpaper": {"type": "preset", "id": "forest"}}
+        self.assertEqual(self.request("put", body).status_code, 200)
+        self.assertEqual(json.loads(self.request().content)["data"]["wallpaper"], body["wallpaper"])
+        self.assertNotIn("wallpaper", json.loads(self.request(user=self.other).content)["data"])
+        self.assertEqual(self.request("put", {**default_layout(), "revision": 1}).status_code, 200)
+        self.assertEqual(json.loads(self.request().content)["data"]["wallpaper"], body["wallpaper"])
+        self.assertEqual(self.request("put", body).status_code, 409)
+
+    def test_wallpaper_validation_rejects_external_urls_svg_and_oversized_images(self):
+        for wallpaper in [None, {"type": "preset", "id": "unknown"}, {"type": "image", "dataUrl": "https://example.com/tracker.jpg"},
+                          {"type": "image", "dataUrl": "data:image/svg+xml;base64,PHN2Zz4="},
+                          {"type": "image", "dataUrl": "data:image/jpeg;base64,bm90YW5pbWFnZQ=="},
+                          {"type": "image", "dataUrl": "data:image/jpeg;base64," + "A" * 524288}]:
+            response = self.request("put", {**default_layout(), "revision": 0, "wallpaper": wallpaper})
+            self.assertEqual(response.status_code, 400)
+        self.assertFalse(DesktopPreference.objects.exists())
+
+    def test_encoded_wallpaper_round_trip_and_oversized_request(self):
+        import base64
+        encoded = "data:image/jpeg;base64," + base64.b64encode(bytes.fromhex("ffd8ffe000104a46494600010100000100010000ffd9")).decode()
+        body = {**default_layout(), "revision": 0, "wallpaper": {"type": "image", "dataUrl": encoded}}
+        self.assertEqual(self.request("put", body).status_code, 200)
+        self.assertEqual(json.loads(self.request().content)["data"]["wallpaper"]["dataUrl"], encoded)
+        self.assertEqual(self.request("put", {**body, "padding": "x" * 614400}).status_code, 413)

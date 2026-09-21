@@ -1,37 +1,15 @@
 import { canConfigureNetOps } from './permissions'
 import type { AuthUser } from '../services/api'
-import { appRoutes, documentsEnabled } from './appRoutes'
+import { packagedApps } from './generated'
 
 export const appRegistry = [
-  { id: 'firewall-policy', name: '防火墙策略生成', route: appRoutes.firewall, symbol: 'shield', enabled: true },
-  {
-    id: 'patrol',
-    name: '网络巡检',
-    route: appRoutes.patrol,
-    symbol: 'radar',
-    enabled: true,
-  },
-  {
-    id: 'patrol-rules',
-    permission: 'netops.configure',
-    name: '巡检规则工作台',
-    route: appRoutes.rules,
-    symbol: 'rules',
-    enabled: true,
-  },
-  { id: 'device-configuration', name: '设备管理', route: appRoutes.devices, symbol: 'rules', enabled: true, permission: 'netops.configure' },
-  {
-    id: 'official-document',
-    name: '公文写作',
-    route: appRoutes.documents,
-    symbol: 'document',
-    enabled: documentsEnabled,
-  },
+  ...packagedApps.map(app => ({ id: app.aliases[0] || app.id, name: app.name, route: app.route, symbol: app.icon,
+    enabled: app.enabled, managedAppId: app.id })),
 ] as const
 export const findApp = (id: string) =>
   appRegistry.find((app) => app.id === id && app.enabled)
 
 export const canOpenApp = (id: string, user: AuthUser | null) => {
   const app = findApp(id)
-  return Boolean(app && (!('permission' in app) || canConfigureNetOps(user)))
+  return Boolean(app && ('managedAppId' in app ? user?.app_ids?.includes(app.managedAppId) : (!('permission' in app) || canConfigureNetOps(user))))
 }

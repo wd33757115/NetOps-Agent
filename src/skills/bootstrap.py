@@ -28,7 +28,6 @@ def get_default_skill_dirs() -> list[str]:
 
 
 def bootstrap_skills(
-    rag_service=None,
     skill_dirs: list[str] | None = None,
     *,
     force: bool = False,
@@ -37,7 +36,6 @@ def bootstrap_skills(
     统一加载 Skill（幂等，force=True 时强制全量刷新）。
 
     Args:
-        rag_service: 可选 RAG，用于 SemanticRouter embedding
         skill_dirs: SKILL.md 根目录列表
         force: 是否强制重新扫描（热加载、管理 API reload）
 
@@ -56,7 +54,7 @@ def bootstrap_skills(
 
     count = skill_registry.sync_skills_from_files(dirs, force_replace=force)
     skill_system = get_skill_system()
-    skill_system.reload_all(skill_dirs=dirs, rag_service=rag_service)
+    skill_system.reload_all(skill_dirs=dirs)
 
     settings = get_settings()
     if settings.SKILL_CATALOG_ENABLED:

@@ -17,8 +17,6 @@ from src.infrastructure.db.models import (
     PatrolBatchDeviceRecord,
     PatrolBatchRecord,
     PatrolRun,
-    WorkflowRun,
-    WorkflowStepRecord,
 )
 
 
@@ -44,8 +42,6 @@ def _runtime(tmp_path):
             CollectionExecutionPlanRecord.__table__,
             PatrolBatchRecord.__table__,
             PatrolBatchDeviceRecord.__table__,
-            WorkflowRun.__table__,
-            WorkflowStepRecord.__table__,
             PatrolRun.__table__,
             CommandSnapshot.__table__,
         ],
@@ -151,6 +147,7 @@ def test_live_capture_start_uses_exact_frozen_commands_and_shadow_purpose(
     assert result["status"] == "capturing"
     command = captured["command"]
     assert command.workflow_name == "rollout-live-capture"
+    assert command.launch_mode == "direct"
     assert command.mode == "parser_validation"
     assert command.report_purpose == "shadow_validation"
     assert command.check_item_ids_by_device is None
@@ -159,6 +156,22 @@ def test_live_capture_start_uses_exact_frozen_commands_and_shadow_purpose(
         for item in command.rows[0]["plan"]["collection_items"]
     ] == ["display cpu-usage", "display memory"]
     assert command.rows[0]["plan"]["runtime_manifest_id"] is None
+
+    # Exercise the real admission handler: a fake capture adapter alone used to
+    # hide an invalid launch_mode and prevented every live capture from starting.
+    from unittest.mock import Mock
+    from src.core.patrol.handlers import StartPatrolHandler
+
+    plans, batches = Mock(), Mock()
+    plans.create_plan.return_value = {"execution_plan_id": "plan-1"}
+    started = StartPatrolHandler(
+        plan_repository=plans,
+        batch_repository=batches,
+        batch_dispatcher=lambda batch_id: "dispatch-1",
+    ).handle(command)
+    assert started["launch_mode"] == "direct"
+    assert started["queued_count"] == 1
+    assert batches.create_pending_batch.call_args.kwargs["report_purpose"] == "shadow_validation"
 
 
 def test_live_capture_poll_returns_target_bound_snapshots(tmp_path):
@@ -178,7 +191,7 @@ def test_live_capture_poll_returns_target_bound_snapshots(tmp_path):
                 PatrolBatchRecord(
                     patrol_batch_id="capture-1",
                     workflow_name="rollout-live-capture",
-                    launch_mode="workflow",
+                    launch_mode="task",
                     patrol_mode="parser_validation",
                     report_purpose="shadow_validation",
                     target_type="rollout_stage",
@@ -192,16 +205,6 @@ def test_live_capture_poll_returns_target_bound_snapshots(tmp_path):
                     created_at=now,
                     updated_at=now,
                 ),
-                WorkflowRun(
-                    id="workflow-1",
-                    template_name="rollout-live-capture",
-                    source="device-management",
-                    status="completed",
-                    context={},
-                    created_at=now,
-                    updated_at=now,
-                    completed_at=now,
-                ),
                 PatrolRun(
                     id="snapshot-run-1",
                     mode="parser_validation",
@@ -213,7 +216,7 @@ def test_live_capture_poll_returns_target_bound_snapshots(tmp_path):
                     analysis_status="completed",
                     baseline_eligible=False,
                     run_purpose="scheduled_patrol",
-                    logical_run_id="snapshot-run-1",
+                    logical_run_id="patrol-task-1",
                     attempt_number=0,
                     owner_generation=1,
                     device_count=1,
@@ -234,25 +237,11 @@ def test_live_capture_poll_returns_target_bound_snapshots(tmp_path):
                     management_ip="192.0.2.1",
                     selection_status="selected",
                     preflight_status="ready",
-                    workflow_run_id="workflow-1",
+                    celery_task_id="task-1",
                     dispatch_status="dispatched",
                     dispatch_attempts=1,
                     created_at=now,
                     updated_at=now,
-                ),
-                WorkflowStepRecord(
-                    id="step-1",
-                    run_id="workflow-1",
-                    step_index=0,
-                    step_name="capture",
-                    skill_name="device-patrol",
-                    status="completed",
-                    result={
-                        "success": True,
-                        "snapshot_run_id": "snapshot-run-1",
-                    },
-                    created_at=now,
-                    completed_at=now,
                 ),
                 CommandSnapshot(
                     id="snapshot-1",

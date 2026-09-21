@@ -126,6 +126,22 @@ class BFFRateLimitMiddleware:
         return len(self._window[ip]) >= limit
 
     def _check_rate_limit(self, request: HttpRequest):
+        # Each external App request already consumes the user-facing budget.
+        # Only a cryptographically authenticated service can avoid counting its
+        # internal authorization callback a second time; the view still checks
+        # the original user/worker token, current App grant and package digest.
+        if request.method == "POST" and request.path.startswith("/api/platform/apps/") and (
+            request.path.endswith("/authorize/") or request.path.endswith("/worker-authorize/")
+        ):
+            import jwt
+            from src.platform.kernel.runtime import authenticate
+
+            try:
+                authenticate(request.headers.get("X-Netops-App-Service", ""))
+            except (ValueError, jwt.InvalidTokenError):
+                pass
+            else:
+                return None
         if settings.DEBUG and not getattr(settings, "BFF_RATE_LIMIT_IN_DEBUG", False):
             return None
         ip = get_client_ip(request)

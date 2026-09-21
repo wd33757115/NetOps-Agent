@@ -12,6 +12,7 @@ from src.infrastructure.db.models import (
     PatrolBatchDeviceRecord,
     PatrolBatchRecord,
     PatrolReportMaterializationRequestRecord,
+    PatrolRun,
     WorkflowRun,
 )
 
@@ -26,6 +27,7 @@ def _session_factory(monkeypatch):
     WorkflowRun.__table__.create(engine)
     PatrolBatchDeviceRecord.__table__.create(engine)
     PatrolReportMaterializationRequestRecord.__table__.create(engine)
+    PatrolRun.__table__.create(engine)
     session_factory = sessionmaker(bind=engine)
 
     @contextmanager

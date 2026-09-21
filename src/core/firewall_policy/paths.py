@@ -8,5 +8,5 @@ from __future__ import annotations
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-SKILL_SCRIPTS_DIR = PROJECT_ROOT / "src" / "skills" / "firewall-policy-generator" / "scripts"
+SKILL_SCRIPTS_DIR = PROJECT_ROOT / "src/apps/firewall_policy/backend/engine/policy/scripts"
 DEFAULT_POLICY_FILE = SKILL_SCRIPTS_DIR / "test_policy.xlsx"

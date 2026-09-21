@@ -28,6 +28,7 @@ from src.auth.token_store import (  # noqa: E402
 )
 
 from .audit import log_auth_event
+from .app_access import available_apps
 from .jwt_utils import attach_auth_context, token_is_revoked
 from .middleware import get_client_ip
 from .response import bff_error, bff_success
@@ -70,6 +71,7 @@ def get_tokens_for_user(user, request=None):
             "email": user.email,
             "role": role,
             "permissions": get_user_permissions(user),
+            "app_ids": [app["id"] for app in available_apps(user)],
         },
     }
 
@@ -189,6 +191,7 @@ def bff_me(request):
                 "email": user.email,
                 "role": get_user_role(user),
                 "permissions": get_user_permissions(user),
+            "app_ids": [app["id"] for app in available_apps(user)],
                 "thread_id": user_thread_prefix(user),
             }
         )

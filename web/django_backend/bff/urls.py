@@ -5,6 +5,8 @@ from django.urls import path
 
 from . import auth, user_admin
 from .views.desktop import desktop_layout
+from .views import app_platform
+from .views.app_proxy import proxy_app
 from .views.official_documents import proxy_documents
 from .views import (
     artifacts,
@@ -13,12 +15,10 @@ from .views import (
     devices,
     health,
     itsm,
-    knowledge,
     maintenance,
     notifications,
     parser,
     patrol,
-    rag,
     skills,
     storage,
     system,
@@ -28,6 +28,17 @@ from .views import (
 )
 
 urlpatterns = [
+    path("platform/apps/", app_platform.apps),
+    path("platform/apps/runtime/", app_platform.runtime_admission),
+    path("platform/apps/admin/", app_platform.administration),
+    path("platform/apps/admin/<slug:app_id>/", app_platform.administration),
+    path("platform/apps/<slug:app_id>/authorize/", app_platform.authorize),
+    path("platform/apps/<slug:app_id>/worker-authorize/", app_platform.worker_authorize),
+    path("apps/<slug:app_id>/", proxy_app),
+    path("apps/<slug:app_id>/<path:path>/", proxy_app),
+    # Accept both forms without Django's 301 converting POST into GET.
+    path("apps/<slug:app_id>", proxy_app),
+    path("apps/<slug:app_id>/<path:path>", proxy_app),
     path("official-documents/", proxy_documents, name="bff_official_documents"),
     path("official-documents/<path:path>/", proxy_documents, name="bff_official_document_path"),
     path("auth/me/desktop-layout/", desktop_layout, name="desktop_layout"),
@@ -190,7 +201,6 @@ urlpatterns = [
         conversations.proxy_summarize_conversation,
         name="bff_summarize_conversation",
     ),
-    path("rag/search/", rag.proxy_rag_search, name="bff_rag_search"),
     path("itsm/webhook/", itsm.proxy_itsm_webhook, name="bff_itsm_webhook"),
     path(
         "itsm/webhook/firewall-policy/",
@@ -251,19 +261,6 @@ urlpatterns = [
         name="bff_patrol_batch_live_events",
     ),
     path("devices/<path:path>/", devices.proxy_device_path, name="bff_device_path"),
-    path("knowledge/documents/", knowledge.proxy_knowledge_documents, name="bff_knowledge_documents"),
-    path(
-        "knowledge/documents/<path:doc_path>/content/",
-        knowledge.proxy_knowledge_document_content,
-        name="bff_knowledge_document_content",
-    ),
-    path(
-        "knowledge/documents/<path:doc_path>/",
-        knowledge.proxy_knowledge_document_detail,
-        name="bff_knowledge_document_detail",
-    ),
-    path("knowledge/stats/", knowledge.proxy_knowledge_stats, name="bff_knowledge_stats"),
-    path("knowledge/reindex/", knowledge.proxy_knowledge_reindex, name="bff_knowledge_reindex"),
     path("storage/health/", storage.proxy_storage_health, name="bff_storage_health"),
     path("storage/teams/", storage.proxy_storage_teams, name="bff_storage_teams"),
     path("storage/teams/<str:team_id>/", storage.proxy_storage_team_detail, name="bff_storage_team_detail"),

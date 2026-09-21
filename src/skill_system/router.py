@@ -5,7 +5,7 @@
 语义路由器模块
 
 提供两阶段路由：
-1. ChromaDB embedding 快速匹配
+1. Skill Catalog embedding 快速匹配
 2. LLM Judge 精准判断
 
 支持 Progressive Disclosure：只将匹配的 Skill 指令注入上下文。
@@ -32,6 +32,7 @@ class SkillMatch:
         match_type: 匹配类型 (trigger, tag, semantic, llm)
         reason: 匹配原因说明
     """
+
     skill_name: str
     confidence: float
     match_type: str
@@ -44,13 +45,12 @@ class SemanticRouter:
 
     两阶段路由：
     1. 关键词/触发词快速匹配
-    2. ChromaDB embedding 语义匹配（可选）
+    2. Skill Catalog embedding 语义匹配（可选）
     3. LLM Judge 精准判断（可选）
     """
 
     def __init__(
         self,
-        rag_service=None,
         skill_loader=None,
         embedding_model: str = "BAAI/bge-m3",
         use_llm_judge: bool = True,
@@ -60,13 +60,11 @@ class SemanticRouter:
         初始化路由器
 
         Args:
-            rag_service: RAG 服务实例（用于 embedding）
             skill_loader: Skill 加载器实例
             embedding_model: Embedding 模型名称
             use_llm_judge: 是否使用 LLM Judge
             use_embedding: 是否使用 embedding 匹配
         """
-        self.rag_service = rag_service
         self.skill_loader = skill_loader
         self.embedding_model = embedding_model
         self.use_llm_judge = use_llm_judge
@@ -89,7 +87,7 @@ class SemanticRouter:
                     model=settings.LLM_MODEL,
                     temperature=0.1,
                     api_key=settings.DEEPSEEK_API_KEY,
-                    request_timeout=30
+                    request_timeout=30,
                 )
             except Exception as e:
                 logger.warning(f"LLM 初始化失败: {e}")
@@ -130,12 +128,14 @@ class SemanticRouter:
         matches.extend(self._keyword_match(query))
         matches = filter_matches_by_allowed(matches, allowed)
 
-        has_trigger_hit = any(
-            m.match_type == "trigger" and m.confidence >= 0.9 for m in matches
-        )
+        has_trigger_hit = any(m.match_type == "trigger" and m.confidence >= 0.9 for m in matches)
 
         # L2: 域/标签扩展候选（无高置信触发词时）
-        l2_candidates = l2_expand_candidates(query, allowed) if settings.SKILL_CATALOG_USE_TIERED_ROUTING else allowed
+        l2_candidates = (
+            l2_expand_candidates(query, allowed)
+            if settings.SKILL_CATALOG_USE_TIERED_ROUTING
+            else allowed
+        )
 
         # L3: Catalog 预计算语义向量（不对全量 Skill 实时 encode）
         if self.use_embedding and not has_trigger_hit:
@@ -176,7 +176,7 @@ class SemanticRouter:
         metadata = self.skill_loader.get_metadata(skill_name)
         if metadata is None:
             return False
-        return getattr(metadata, 'enabled', True)
+        return getattr(metadata, "enabled", True)
 
     def _keyword_match(self, query: str) -> list[SkillMatch]:
         """
@@ -199,46 +199,52 @@ class SemanticRouter:
 
         for skill in skills:
             # 检查 triggers
-            triggers = getattr(skill, 'triggers', [])
+            triggers = getattr(skill, "triggers", [])
             for trigger in triggers:
                 if trigger_matches(trigger, query):
-                    matches.append(SkillMatch(
-                        skill_name=skill.name,
-                        confidence=0.95,
-                        match_type="trigger",
-                        reason=f"匹配触发词: {trigger}"
-                    ))
+                    matches.append(
+                        SkillMatch(
+                            skill_name=skill.name,
+                            confidence=0.95,
+                            match_type="trigger",
+                            reason=f"匹配触发词: {trigger}",
+                        )
+                    )
                     break
 
             # 检查 tags
             if not any(m.skill_name == skill.name for m in matches):
-                tags = getattr(skill, 'tags', [])
+                tags = getattr(skill, "tags", [])
                 for tag in tags:
                     if tag.lower() in query_lower:
-                        matches.append(SkillMatch(
-                            skill_name=skill.name,
-                            confidence=0.7,
-                            match_type="tag",
-                            reason=f"匹配标签: {tag}"
-                        ))
+                        matches.append(
+                            SkillMatch(
+                                skill_name=skill.name,
+                                confidence=0.7,
+                                match_type="tag",
+                                reason=f"匹配标签: {tag}",
+                            )
+                        )
                         break
 
             # 检查 description
             if not any(m.skill_name == skill.name for m in matches):
-                desc = getattr(skill, 'description', '').lower()
+                desc = getattr(skill, "description", "").lower()
                 if desc and desc in query_lower:
-                    matches.append(SkillMatch(
-                        skill_name=skill.name,
-                        confidence=0.6,
-                        match_type="description",
-                        reason="匹配描述关键词"
-                    ))
+                    matches.append(
+                        SkillMatch(
+                            skill_name=skill.name,
+                            confidence=0.6,
+                            match_type="description",
+                            reason="匹配描述关键词",
+                        )
+                    )
 
         return matches
 
     def _semantic_match(self, query: str, top_k: int) -> list[SkillMatch]:
         """
-        ChromaDB embedding 语义匹配
+        Skill Catalog embedding 语义匹配
 
         Args:
             query: 用户查询
@@ -272,23 +278,21 @@ class SemanticRouter:
             for skill_name, similarity in similarities[:top_k]:
                 if float(similarity) < semantic_min:
                     continue
-                matches.append(SkillMatch(
-                    skill_name=skill_name,
-                    confidence=float(similarity),
-                    match_type="semantic",
-                    reason=f"语义相似度: {similarity:.2f}"
-                ))
+                matches.append(
+                    SkillMatch(
+                        skill_name=skill_name,
+                        confidence=float(similarity),
+                        match_type="semantic",
+                        reason=f"语义相似度: {similarity:.2f}",
+                    )
+                )
 
         except Exception as e:
             logger.error(f"语义匹配失败: {e}")
 
         return matches[:top_k]
 
-    def _llm_judge(
-        self,
-        query: str,
-        candidates: list[SkillMatch]
-    ) -> list[SkillMatch]:
+    def _llm_judge(self, query: str, candidates: list[SkillMatch]) -> list[SkillMatch]:
         """
         LLM Judge 精准判断
 
@@ -347,20 +351,20 @@ class SemanticRouter:
             import re
 
             # 提取 JSON（可能包含在 ```json 中）
-            json_match = re.search(r'```json\s*(.*?)\s*```', content, re.DOTALL)
+            json_match = re.search(r"```json\s*(.*?)\s*```", content, re.DOTALL)
             if json_match:
                 content = json_match.group(1)
             else:
                 # 尝试直接解析
-                json_match = re.search(r'\{.*\}', content, re.DOTALL)
+                json_match = re.search(r"\{.*\}", content, re.DOTALL)
                 if json_match:
                     content = json_match.group(0)
 
             result = json.loads(content)
 
-            selected = result.get('selected_skill')
-            confidence = result.get('confidence', 0.5)
-            reason = result.get('reason', '')
+            selected = result.get("selected_skill")
+            confidence = result.get("confidence", 0.5)
+            reason = result.get("reason", "")
 
             if selected:
                 for match in candidates:
@@ -372,7 +376,10 @@ class SemanticRouter:
 
                 return [m for m in candidates if m.skill_name == selected]
 
-            logger.info("[LLM Judge] 建议走 RAG，保留关键词/语义候选: %s", [m.skill_name for m in candidates])
+            logger.info(
+                "[LLM Judge] 建议走 RAG，保留关键词/语义候选: %s",
+                [m.skill_name for m in candidates],
+            )
             return candidates
 
         except Exception as e:
@@ -430,19 +437,13 @@ class SemanticRouter:
         self._embedding_cache.clear()
 
 
-def route_query(
-    query: str,
-    skill_loader=None,
-    rag_service=None,
-    top_k: int = 3
-) -> list[SkillMatch]:
+def route_query(query: str, skill_loader=None, top_k: int = 3) -> list[SkillMatch]:
     """
     便捷路由函数
 
     Args:
         query: 用户查询
         skill_loader: Skill 加载器
-        rag_service: RAG 服务
         top_k: 返回前 k 个
 
     Returns:
@@ -450,6 +451,5 @@ def route_query(
     """
     router = SemanticRouter(
         skill_loader=skill_loader,
-        rag_service=rag_service
     )
     return router.route(query, top_k)

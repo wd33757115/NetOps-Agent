@@ -8,13 +8,16 @@ import {
 
 describe('desktop layout', () => {
   it('swaps occupied cells without losing applications', () => {
-    const layout = moveNode(defaultLayout(), 'patrol', 'desktop:0', {
-      col: 1,
-      row: 0,
+    const original = defaultLayout()
+    const patrol = original.nodes.find(n => n.id === 'patrol')!
+    const rules = original.nodes.find(n => n.id === 'patrol-rules')!
+    const layout = moveNode(original, 'patrol', 'desktop:0', {
+      col: rules.col!,
+      row: rules.row!,
     })
-    expect(layout.nodes.find((n) => n.id === 'patrol-rules')?.col).toBe(0)
-    expect(layout.nodes.find((n) => n.id === 'patrol')?.col).toBe(1)
-    expect(layout.nodes).toHaveLength(4)
+    expect(layout.nodes.find((n) => n.id === 'patrol-rules')?.col).toBe(patrol.col)
+    expect(layout.nodes.find((n) => n.id === 'patrol')?.col).toBe(rules.col)
+    expect(layout.nodes.map(n => n.id).sort()).toEqual(original.nodes.map(n => n.id).sort())
   })
   it('moves in and out of folders and dissolves without touching Dock', () => {
     const layout = defaultLayout()
@@ -23,7 +26,7 @@ describe('desktop layout', () => {
       kind: 'folder',
       name: '网络',
       containerId: 'desktop:0',
-      col: 4,
+      col: layout.nodes.length,
       row: 0,
     })
     const moved = moveNode(
@@ -41,11 +44,12 @@ describe('desktop layout', () => {
     )
     expect(dissolved.dockAppIds).toEqual(layout.dockAppIds)
     expect(new Set(dissolved.nodes.map((n) => `${n.col}:${n.row}`)).size).toBe(
-      4,
+      layout.nodes.length - 1,
     )
   })
   it('retains unknown app references and reconciles new apps and duplicates', () => {
     const layout = defaultLayout()
+    const appCount = layout.nodes.length
     layout.nodes = [
       {
         id: 'future',
@@ -58,7 +62,7 @@ describe('desktop layout', () => {
     ]
     layout.nodes.push({ ...layout.nodes[0] })
     const result = reconcileLayout(layout)
-    expect(result.nodes).toHaveLength(5)
+    expect(result.nodes).toHaveLength(appCount + 1)
     expect(result.nodes[0].appId).toBe('future')
   })
   it('rejects nested or missing folders', () => {

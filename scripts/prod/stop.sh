@@ -8,6 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 COMPOSE_FILE="$PROJECT_ROOT/deployment/docker-compose.yml"
+COMPOSE_ARGS=(-f "$COMPOSE_FILE" -f "$PROJECT_ROOT/deployment/docker-compose.ai.yml" --profile core --profile ai)
 
 echo "============================================================"
 echo "  NetOps 生产环境 - 关闭"
@@ -16,9 +17,9 @@ echo "============================================================"
 cd "$PROJECT_ROOT"
 
 if [[ "${1:-}" == "--volumes" ]]; then
-  docker compose -f "$COMPOSE_FILE" down -v
+  docker compose "${COMPOSE_ARGS[@]}" down -v
 else
-  docker compose -f "$COMPOSE_FILE" down
+  docker compose "${COMPOSE_ARGS[@]}" down
 fi
 
 echo "[完成] 生产环境已关闭"

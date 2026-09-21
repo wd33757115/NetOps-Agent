@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 import pytest
@@ -440,6 +441,13 @@ def test_engineering_review_allows_explicit_admin_override_for_candidate_creator
 def test_engineering_revision_creates_replacement_bundle_after_validation(monkeypatch):
     ids = _create_bundle()
     created_bundle_ids: list[str] = []
+    guarded = []
+
+    @contextmanager
+    def write_guard():
+        guarded.append("entered")
+        yield
+        guarded.append("finished")
 
     def fake_execute(skill_name, params):
         if skill_name == "observation-contract-generator":
@@ -467,6 +475,7 @@ def test_engineering_revision_creates_replacement_bundle_after_validation(monkey
                 },
             }
         if skill_name == "rule-asset-persister":
+            assert params["revision_execution"] == {"task_id": "test-task", "lease_token": "test-token"}
             repo = RuleGenerationJobRepository()
             created = repo.create_job(
                 job_type="RULE_ASSET_BUNDLE",
@@ -482,7 +491,7 @@ def test_engineering_revision_creates_replacement_bundle_after_validation(monkey
         raise AssertionError(f"unexpected skill: {skill_name}")
 
     monkeypatch.setattr(
-        "src.core.rule_control.engineering_revision.execute_skill",
+        "src.core.rule_control.engineering_revision.execute_generator",
         fake_execute,
     )
     try:
@@ -493,15 +502,21 @@ def test_engineering_revision_creates_replacement_bundle_after_validation(monkey
             change_policies=draft["change_policies"],
             event_rules=draft["event_rules"],
             actor="rule-engineer",
+            actor_user_id="engineer-user-id",
             reason="修正并重新验证候选资产",
             idempotency_key=f"revision-{uuid.uuid4().hex}",
+            revision_execution={"task_id": "test-task", "lease_token": "test-token"},
+            write_guard=write_guard,
         )
 
         assert result["created"] is True
+        assert guarded == ["entered", "finished"]
         replacement_id = result["bundle"]["id"]
         with get_db_session() as db:
             replacement = db.get(RuleGenerationJobRecord, replacement_id)
             parent = db.get(RuleGenerationJobRecord, ids["bundle"])
+            assert replacement.payload_json["engineering_revision"]["actor_user_id"] == "engineer-user-id"
+            assert parent.validation_report_json["governance"]["engineering_review"]["actor_user_id"] == "engineer-user-id"
             assert (
                 replacement.payload_json["engineering_revision"]["parent_bundle_id"]
                 == ids["bundle"]

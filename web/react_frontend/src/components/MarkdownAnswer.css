@@ -1,0 +1,15 @@
+.markdown-answer { min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.75; }
+.markdown-answer > :first-child { margin-top: 0; }
+.markdown-answer > :last-child { margin-bottom: 0; }
+.markdown-answer p, .markdown-answer ul, .markdown-answer ol { margin: .65em 0; }
+.markdown-answer ul, .markdown-answer ol { padding-left: 1.6em; }
+.markdown-answer h1, .markdown-answer h2, .markdown-answer h3 { font-size: 1.12em; font-weight: 600; margin: 1em 0 .45em; }
+.markdown-answer a { color: #2563eb; text-decoration: underline; }
+.markdown-answer code { font-family: Consolas, monospace; font-size: .9em; background: #f4f5f7; padding: .12em .3em; border-radius: 3px; }
+.markdown-answer pre { max-width: 100%; overflow-x: auto; padding: 14px 16px; background: #f4f5f7; border-radius: 8px; white-space: pre; line-height: 1.6; }
+.markdown-answer pre code { padding: 0; background: none; }
+.markdown-answer blockquote { margin: .8em 0; padding-left: 14px; border-left: 3px solid #cbd5e1; color: #64748b; }
+.markdown-answer-table { max-width: 100%; overflow-x: auto; margin: .8em 0; }
+.markdown-answer table { border-collapse: collapse; font-size: .94em; }
+.markdown-answer th, .markdown-answer td { border: 1px solid #e2e8f0; padding: 7px 12px; text-align: left; }
+.markdown-answer th { background: #f8fafc; }

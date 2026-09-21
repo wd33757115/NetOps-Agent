@@ -1,4 +1,0 @@
--r requirements.txt
-
-llama-index-vector-stores-qdrant
-qdrant-client

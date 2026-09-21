@@ -1,0 +1,20 @@
+from src.apps.assistant.backend import tool_trace
+
+
+def test_trace_bounds_and_redacts_arguments_without_copying_result_or_answer(tmp_path):
+    source = tmp_path / "manual.txt"
+    text = tool_trace.operation(
+        tmp_path, "read", {"file_path": str(source), "offset": 80, "limit": 20, "secret": "PRIVATE"}
+    )
+    assert '"file_path": "manual.txt"' in text and '"offset": 80' in text
+    assert "PRIVATE" not in text and str(tmp_path) not in text
+    outside = tool_trace.operation(tmp_path, "read", {"file_path": "../outside.txt"})
+    assert "资料范围外" in outside
+    search = tool_trace.operation(
+        tmp_path, "grep", {"pattern": "password=PRIVATE\nEVPN" + "x" * 2000}
+    )
+    assert "PRIVATE" not in search and len(search) < 500
+    draft = tool_trace.operation(
+        tmp_path, "mcp__netops__submit_answer", {"answer": "PRIVATE", "status": "answered"}
+    )
+    assert "PRIVATE" not in draft and "answered" in draft

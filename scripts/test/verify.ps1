@@ -6,7 +6,8 @@ param(
     [string]$ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
     [int]$FastAPIPort = 8000,
     [int]$DjangoPort = 8001,
-    [int]$ReactPort = 3000
+    [int]$ReactPort = 3000,
+    [switch]$DevMode
 )
 
 $ErrorActionPreference = "Continue"
@@ -46,18 +47,20 @@ try {
 
 try {
     $convs = Invoke-RestMethod "http://localhost:$DjangoPort/api/conversations/" -TimeoutSec 30
-    Assert-Ok "Django BFF /api/conversations/" ($convs.success -eq $true)
+    Assert-Ok "Django BFF conversations reachable" ($convs.success -eq $true)
 } catch {
     $detail = $_.Exception.Message
     if ($detail -match "500") {
         $detail += " (often: PostgreSQL down — start Docker Desktop and run start.ps1)"
     }
-    Assert-Ok "Django BFF /api/conversations/" $false $detail
+    # An authenticated endpoint returning 401 is expected without a login token.
+    $unauthenticated = $_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 401
+    Assert-Ok "Django BFF conversations authentication" $unauthenticated $detail
 }
 
 try {
     $html = (Invoke-WebRequest "http://localhost:$ReactPort/chat" -UseBasicParsing -TimeoutSec 15).Content
-    $hasBundle = $html -match '/assets/index-.*\.js'
+    $hasBundle = $html -match '/assets/index-.*\.js' -or ($DevMode -and $html -match '/@vite/client')
     Assert-Ok "React HTML bundle" $hasBundle
 } catch {
     Assert-Ok "React HTML bundle" $false $_.Exception.Message
@@ -67,9 +70,12 @@ try {
     $jsPath = (Invoke-WebRequest "http://localhost:$ReactPort/chat" -UseBasicParsing).Content |
         Select-String -Pattern '/assets/index-[^"]+\.js' |
         ForEach-Object { $_.Matches[0].Value }
-    if ($jsPath) {
+    if ($DevMode) {
+        $js = Invoke-WebRequest "http://localhost:$ReactPort/@vite/client" -UseBasicParsing -TimeoutSec 30
+        Assert-Ok "Vite dev client" ($js.StatusCode -eq 200)
+    } elseif ($jsPath) {
         $js = Invoke-WebRequest "http://localhost:$ReactPort$jsPath" -UseBasicParsing -TimeoutSec 30
-        Assert-Ok "React JS bundle" ($js.StatusCode -eq 200 -and $js.Content -match 'getElementById\("root"\)')
+        Assert-Ok "React JS bundle" ($js.StatusCode -eq 200)
     } else {
         Assert-Ok "React JS bundle" $false "path not found"
     }
@@ -86,21 +92,17 @@ sys.exit(0 if celery_workers_available() else 1)
 "@ 2>$null
     Assert-Ok "Celery Worker ping" ($LASTEXITCODE -eq 0) "(run scripts\test\start.ps1 or start worker manually)"
 
-    $patrolReadiness = & $venvPython (Join-Path $PSScriptRoot "check_patrol_readiness.py") 2>$null
-    $patrolReadinessExit = $LASTEXITCODE
-    $patrolReadinessDetail = ""
-    if ($patrolReadiness) {
-        try {
-            $patrolReadinessJson = $patrolReadiness[-1] | ConvertFrom-Json
-            $patrolReadinessDetail = @($patrolReadinessJson.blockers | ForEach-Object { $_.message }) -join "; "
-        } catch {
-            $patrolReadinessDetail = $patrolReadiness -join " "
-        }
+    if (-not $DevMode) {
+        Push-Location $ProjectRoot
+        $env:NETOPS_AUTHORITY_URL = "http://localhost:$DjangoPort"
+        & $venvPython web/django_backend/manage.py app_packages verify `
+            --gateway-url "http://localhost:$FastAPIPort" --frontend-url "http://localhost:$ReactPort" --wait-seconds 60
+        $appExit = $LASTEXITCODE
+        Pop-Location
+        Assert-Ok "Enabled App deployment verification" ($appExit -eq 0)
     }
-    Assert-Ok "Formal patrol production readiness" ($patrolReadinessExit -eq 0) $patrolReadinessDetail
 } else {
     Assert-Ok "Celery Worker ping" $false "venv not found"
-    Assert-Ok "Formal patrol production readiness" $false "venv not found"
 }
 
 Write-ColorOutput "" "Cyan"

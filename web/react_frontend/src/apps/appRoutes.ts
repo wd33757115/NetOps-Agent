@@ -3,17 +3,22 @@ export const workbenchEnabled =
 export const documentsEnabled = import.meta.env.VITE_OFFICIAL_DOCUMENTS_ENABLED !== 'false'
 export const appRoutes = {
   workbench: '/workbench',
-  devices: '/admin/netops/devices',
+  devices: '/apps/rule-governance/devices',
   documents: '/apps/official-documents',
   firewall: '/apps/firewall-policy',
-  patrol: workbenchEnabled ? '/apps/patrol' : '/devices?tab=patrol',
-  rules: workbenchEnabled ? '/apps/patrol-rules' : '/skills/parser',
+  patrol: '/apps/inspection',
+  rules: '/apps/rule-governance',
 }
 
 /** Accept existing links as well as canonical ones, preserving evidence parameters. */
 export function businessHref(href: string): string {
   if (!href.startsWith('/')) return href
   const url = new URL(href, 'https://netops.invalid')
+  if (url.pathname === '/apps/patrol' || (url.pathname === '/devices' && url.searchParams.get('tab') === 'patrol')) {
+    url.pathname = '/apps/inspection'
+    url.searchParams.delete('tab')
+    return url.pathname + url.search + url.hash
+  }
   if (workbenchEnabled) {
     if (
       url.pathname === '/devices' &&

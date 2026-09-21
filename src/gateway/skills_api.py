@@ -162,6 +162,9 @@ async def reload_skill(skill_name: str):
 @router.post("/{skill_name}/test-run")
 def test_run_skill(skill_name: str, request: SkillTestRunRequest = SkillTestRunRequest()):
     """同步试跑 Skill（用于向导内测试）。"""
+    from src.platform.kernel.registry import migrated_skill_app
+    if migrated_skill_app(skill_name):
+        raise HTTPException(410, "该能力已迁入业务应用，请从工作台使用")
     from src.core.skills.executor import SkillExecutionError, execute_skill
 
     params = request.params

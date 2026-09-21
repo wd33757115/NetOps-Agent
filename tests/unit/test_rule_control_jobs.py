@@ -552,7 +552,7 @@ def test_agent_loop_revision_executor_runs_validator_and_updates_report(monkeypa
             },
         }
 
-    monkeypatch.setattr("src.core.rule_control.executor.execute_skill", fake_execute_skill)
+    monkeypatch.setattr("src.core.rule_control.executor.execute_generator", fake_execute_skill)
 
     try:
         result = AgentLoopRevisionExecutor(repo).execute(job["id"], actor="pytest")
@@ -593,7 +593,7 @@ def test_agent_loop_revision_executor_rejects_failed_revision(monkeypatch):
         assert skill_name == "change-policy-generator"
         return {"success": False, "error": "invalid policy"}
 
-    monkeypatch.setattr("src.core.rule_control.executor.execute_skill", fake_execute_skill)
+    monkeypatch.setattr("src.core.rule_control.executor.execute_generator", fake_execute_skill)
 
     try:
         result = AgentLoopRevisionExecutor(repo).execute(job["id"], actor="pytest")
@@ -648,7 +648,7 @@ def test_rule_asset_submission_service_persists_successful_revision(monkeypatch)
             "jobs": [{"id": "generated-review-job"}],
         }
 
-    monkeypatch.setattr("src.core.rule_control.submission.execute_skill", fake_execute_skill)
+    monkeypatch.setattr("src.core.rule_control.submission.execute_generator", fake_execute_skill)
 
     try:
         repo.transition_job(job["id"], status="validating")

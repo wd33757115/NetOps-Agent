@@ -23,6 +23,10 @@ async def download_artifact(
     sig: str = Query(..., description="HMAC 签名"),
     filename: str | None = Query(None, description="下载文件名"),
 ):
+    if key.startswith(('inspection/', 'reports/patrol/')):
+        raise HTTPException(status_code=403, detail="请通过巡检应用授权下载产物")
+    if key.startswith('apps/firewall-policy/'):
+        raise HTTPException(status_code=403, detail="请通过防火墙应用授权下载产物")
     if not verify_download_signature(key, exp, sig):
         raise HTTPException(status_code=403, detail="无效或过期的下载链接")
 

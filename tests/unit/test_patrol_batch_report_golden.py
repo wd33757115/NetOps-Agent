@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from src.gateway import workflow_api
+from src.apps.inspection.backend import batch_api as workflow_api
 
 
 class _FixedDateTime:

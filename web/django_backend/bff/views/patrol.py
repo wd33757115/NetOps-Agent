@@ -53,7 +53,6 @@ async def _proxy(request: HttpRequest, path: str = ""):
 
 @csrf_exempt
 @require_jwt
-@require_role("admin", "operator")
 @sync_bff_view
 async def proxy_offline_patrol_jobs(request: HttpRequest) -> JsonResponse:
     return await _proxy(request)
@@ -61,7 +60,6 @@ async def proxy_offline_patrol_jobs(request: HttpRequest) -> JsonResponse:
 
 @csrf_exempt
 @require_jwt
-@require_role("admin", "operator")
 @sync_bff_view
 async def proxy_offline_patrol_job_path(request: HttpRequest, path: str):
     return await _proxy(request, path)
@@ -69,7 +67,6 @@ async def proxy_offline_patrol_job_path(request: HttpRequest, path: str):
 
 @csrf_exempt
 @require_jwt
-@require_role("admin", "operator")
 @sync_bff_view
 async def proxy_patrol_path(request: HttpRequest, path: str) -> JsonResponse:
     clean = path.strip('/')

@@ -882,6 +882,7 @@ def test_history_compare_allows_partial_report_when_parser_assets_are_missing(mo
     summary = service._serialize_job_summary(
         SimpleNamespace(
             id="offline-partial-history",
+            celery_task_id=None,
             purpose="offline_patrol",
             job_type="history_compare",
             report_intent="historical",

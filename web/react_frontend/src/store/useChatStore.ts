@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { create } from 'zustand'
+import type { AgentProgress } from '../components/TraceProgress'
 
 export interface Message {
   id: string
@@ -12,6 +13,7 @@ export interface Message {
   downloadUrl?: string
   references?: any[]
   createdAt?: string
+  progress?: AgentProgress
 }
 
 export interface Conversation {
@@ -27,6 +29,7 @@ export interface Conversation {
 }
 
 interface ChatStore {
+  reset: () => void
   currentConversationId: string | null
   conversations: Conversation[]
   uploadedFile: { name: string; path: string } | null
@@ -44,9 +47,15 @@ interface ChatStore {
   deleteConversation: (id: string) => void
 }
 
+let chatEpoch = 0
 const detailInflight = new Map<string, Promise<void>>()
 
 export const useChatStore = create<ChatStore>((set, get) => ({
+  reset: () => {
+    chatEpoch++
+    detailInflight.clear()
+    set({ currentConversationId: null, conversations: [], uploadedFile: null, loading: false, detailLoadingId: null, error: null })
+  },
   currentConversationId: null,
   conversations: [],
   uploadedFile: null,
@@ -66,10 +75,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }
   }),
   createNewConversation: async () => {
+    const epoch = chatEpoch
     set({ loading: true, error: null })
     try {
       const { conversationApi } = await import('../services/api')
       const newConv = await conversationApi.createConversation({ title: '新对话' })
+      if (epoch !== chatEpoch) return
       const conversation: Conversation = {
         id: newConv.id,
         title: newConv.title,
@@ -86,6 +97,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         currentConversationId: conversation.id
       }))
     } catch (error) {
+      if (epoch !== chatEpoch) return
       console.error('Failed to create conversation:', error)
       const newId = `conv-${Date.now()}`
       const newConv: Conversation = {
@@ -99,16 +111,18 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         currentConversationId: newId
       }))
     } finally {
-      set({ loading: false })
+      if (epoch === chatEpoch) set({ loading: false })
     }
   },
   setUploadedFile: (file) => set({ uploadedFile: file }),
   loadConversations: async () => {
+    const epoch = chatEpoch
     if (get().loading) return
     set({ loading: true, error: null })
     try {
       const { conversationApi } = await import('../services/api')
       const data = await conversationApi.getConversations()
+      if (epoch !== chatEpoch) return
       set((state) => {
         const conversations: Conversation[] = data.map((c) => {
           const existing = state.conversations.find((conv) => conv.id === c.id)
@@ -131,16 +145,19 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         set({ currentConversationId: data[0].id })
       }
     } catch (error) {
+      if (epoch !== chatEpoch) return
       console.error('Failed to load conversations:', error)
       set({ error: '加载对话列表失败' })
     } finally {
-      set({ loading: false })
+      if (epoch === chatEpoch) set({ loading: false })
     }
   },
   refreshConversationMeta: async () => {
+    const epoch = chatEpoch
     try {
       const { conversationApi } = await import('../services/api')
       const data = await conversationApi.getConversations()
+      if (epoch !== chatEpoch) return
       set((state) => ({
         conversations: state.conversations.map((conv) => {
           const remote = data.find((c) => c.id === conv.id)
@@ -160,6 +177,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }
   },
   loadConversationDetail: async (id: string) => {
+    const epoch = chatEpoch
     const existing = get().conversations.find(c => c.id === id)
     if (existing?.detailLoaded) return
     if ((existing?.messageCount ?? 0) === 0) {
@@ -178,6 +196,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       try {
         const { conversationApi } = await import('../services/api')
         const data = await conversationApi.getConversation(id)
+        if (epoch !== chatEpoch) return
         const messages: Message[] = data.messages.map(m => ({
           id: m.id,
           role: m.role as 'user' | 'assistant',
@@ -196,6 +215,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           ),
         }))
       } catch (error) {
+        if (epoch !== chatEpoch) return
         console.error('Failed to load conversation detail:', error)
         set(state => ({
           error: '加载对话详情失败',
@@ -204,10 +224,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           ),
         }))
       } finally {
-        detailInflight.delete(id)
-        set(state => ({
-          detailLoadingId: state.detailLoadingId === id ? null : state.detailLoadingId
-        }))
+        if (epoch === chatEpoch) {
+          detailInflight.delete(id)
+          set(state => ({ detailLoadingId: state.detailLoadingId === id ? null : state.detailLoadingId }))
+        }
       }
     })()
 

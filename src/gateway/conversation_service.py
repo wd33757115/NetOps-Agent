@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from src.infrastructure.db.models import Conversation, Message
 from src.infrastructure.db.postgres import get_db_session
+from src.apps.assistant.backend.evidence import public_references
 
 
 class ConversationService:
@@ -59,7 +60,7 @@ class ConversationService:
             ).first()
             if not conversation:
                 return None
-            if user_id and conversation.user_id and conversation.user_id != user_id:
+            if user_id and conversation.user_id != user_id:
                 return None
             return {
                 "id": conversation.id,
@@ -77,9 +78,9 @@ class ConversationService:
         conversation_id: str,
         user_id: str,
         *,
-        allow_legacy_unowned: bool = True,
+        allow_legacy_unowned: bool = False,
     ) -> Optional[dict]:
-        """获取对话并强制用户隔离（未绑定 user 的历史会话仅首次访问时认领）。"""
+        """按已绑定的所有者隔离；默认不认领无主历史会话。"""
         conv = self.get_conversation(conversation_id)
         if not conv:
             return None
@@ -206,7 +207,7 @@ class ConversationService:
                 "agent_type": message.agent_type,
                 "celery_task_id": message.celery_task_id,
                 "download_url": message.download_url,
-                "references": json.loads(message.references) if message.references else None,
+                "references": public_references(json.loads(message.references)) if message.references else None,
                 "created_at": message.created_at
             }
 
@@ -226,7 +227,7 @@ class ConversationService:
                     "agent_type": msg.agent_type,
                     "celery_task_id": msg.celery_task_id,
                     "download_url": msg.download_url,
-                    "references": json.loads(msg.references) if msg.references else None,
+                    "references": public_references(json.loads(msg.references)) if msg.references else None,
                     "created_at": msg.created_at
                 })
             return result

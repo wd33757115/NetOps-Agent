@@ -17,9 +17,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # 复制 requirements 文件
 COPY web/django_backend/requirements.txt /app/
+COPY src/__init__.py /app/src/__init__.py
+COPY src/platform /app/src/platform
+COPY src/apps /app/src/apps
 
 # 安装 Python 依赖
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m src.platform.kernel.build_constraints --output /tmp/app-requirements.lock \
+    && pip install --no-cache-dir -r requirements.txt -r /tmp/app-requirements.lock
 
 # 复制项目文件
 COPY . /app/

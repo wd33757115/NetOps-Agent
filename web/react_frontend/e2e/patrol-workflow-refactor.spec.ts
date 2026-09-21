@@ -56,7 +56,7 @@ test('new inspection chooses the source and keeps healthy infrastructure collaps
   await expect(page.getByText('巡检运行环境已就绪')).toBeVisible()
   await expect(page.getByText('PostgreSQL', { exact: true })).not.toBeVisible()
   await expect(page.getByRole('button', { name: /发起正式巡检/ })).toBeDisabled()
-  await expect(page.getByRole('button', { name: '查看或配置方案' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '配置命令集', exact: true })).toBeVisible()
   await page.getByRole('dialog', { name: '发起正式巡检', exact: true }).getByRole('button', { name: 'Close', exact: true }).click()
   await page.getByRole('button', { name: /新建巡检/ }).click()
   await page.getByRole('button', { name: '离线文件 · 单周期检查或双周期对比' }).click()

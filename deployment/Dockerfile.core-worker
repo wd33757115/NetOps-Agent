@@ -18,7 +18,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements*.txt /app/
-RUN pip install --no-cache-dir -r ${REQUIREMENTS_FILE}
+COPY src/__init__.py /app/src/__init__.py
+COPY src/platform /app/src/platform
+COPY src/apps /app/src/apps
+RUN python -m src.platform.kernel.build_constraints --output /tmp/app-requirements.lock \
+    && pip install --no-cache-dir -r ${REQUIREMENTS_FILE} -r /tmp/app-requirements.lock
 
 COPY . /app/
 

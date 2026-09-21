@@ -9,6 +9,8 @@ param(
     [switch]$SkipSeed,
     [switch]$SkipSmoke,
     [switch]$SkipBuild,
+    [switch]$WithAI,
+    [string[]]$EnableApps = @(),
     [int]$WaitSeconds = 60,
     [int]$DockerProbeTimeoutSec = 8,
     [int]$DockerOperationTimeoutSec = 1200
@@ -30,11 +32,16 @@ Set-Location $ProjectRoot
 $composeBase = Join-Path $ProjectRoot "deployment\docker-compose.yml"
 $composeProd = Join-Path $ProjectRoot "deployment\docker-compose.prod.yml"
 $composeArgs = @("-f", $composeBase)
+$profileArgs = @("--profile", "core")
 if (-not $Dev -and (Test-Path $composeProd)) {
     $composeArgs += @("-f", $composeProd)
     Write-Host "  Mode: production (127.0.0.1 bind)" -ForegroundColor Gray
 } else {
     Write-Host "  Mode: dev (all interfaces)" -ForegroundColor Gray
+}
+if ($WithAI) {
+    $composeArgs += @("-f", (Join-Path $ProjectRoot "deployment\docker-compose.ai.yml"))
+    $profileArgs += @("--profile", "ai")
 }
 
 $envFile = Join-Path $ProjectRoot ".env"
@@ -59,12 +66,22 @@ if (-not (Test-DockerAvailable -TimeoutSec $DockerProbeTimeoutSec)) {
     throw "Docker Desktop is unavailable or still starting; retry after Docker reports Ready"
 }
 $upArgs = @("compose") + $composeArgs + @("--profile", "core", "up", "-d")
+if ($WithAI) { $upArgs = @("compose") + $composeArgs + $profileArgs + @("up", "-d") }
 if (-not $SkipBuild) { $upArgs += "--build" }
 $upResult = Invoke-DockerCommand -Arguments $upArgs -TimeoutSec $DockerOperationTimeoutSec -ShowOutput -ProgressLabel "Building and starting production containers"
 if (-not $upResult.Succeeded) {
     throw "docker compose up failed or timed out"
 }
 Write-Ok "Containers started"
+
+Write-Step "Check locked App dependencies (including DSH SDK/runtime)"
+foreach ($service in @("fastapi", "django")) {
+    $dependencyArgs = @("compose") + $composeArgs + @("exec", "-T", "-w", "/app", $service, "python", "-m", "src.platform.kernel.cli", "check-dependencies")
+    $dependencyResult = Invoke-DockerCommand -Arguments $dependencyArgs -TimeoutSec 60 -ShowOutput
+    if (-not $dependencyResult.Succeeded) {
+        throw "App dependencies unavailable in $service; rebuild images without -SkipBuild."
+    }
+}
 
 Write-Step ("Wait $WaitSeconds seconds for healthchecks")
 Start-Sleep -Seconds $WaitSeconds
@@ -73,9 +90,25 @@ Write-Step "Django migrate"
 $migrateArgs = @("compose") + $composeArgs + @("exec", "-T", "django", "python", "manage.py", "migrate", "--noinput")
 $migrateResult = Invoke-DockerCommand -Arguments $migrateArgs -TimeoutSec 180 -ShowOutput -ProgressLabel "Running Django migrations"
 if (-not $migrateResult.Succeeded) {
-    Write-Warn "Migration failed; retry after containers become healthy."
+    throw "Migration failed; retry after containers become healthy."
 } else {
     Write-Ok "migrate done"
+}
+
+Write-Step "Prepare discovered Apps (preserve enablement and grants)"
+$prepareArgs = @("compose") + $composeArgs + @("exec", "-T", "django", "python", "manage.py", "app_packages", "prepare")
+$prepareResult = Invoke-DockerCommand -Arguments $prepareArgs -TimeoutSec 180 -ShowOutput
+if (-not $prepareResult.Succeeded) { throw "App preparation failed; finish disable/drain before an active package upgrade." }
+
+Write-Step "Verify enabled Apps and explicitly requested enablements"
+$appProbeArgs = @("--gateway-url", "http://fastapi:8000", "--frontend-url", "http://react", "--wait-seconds", "60")
+$verifyArgs = @("compose") + $composeArgs + @("exec", "-T", "django", "python", "manage.py", "app_packages", "verify") + $appProbeArgs
+$verifyResult = Invoke-DockerCommand -Arguments $verifyArgs -TimeoutSec 600 -ShowOutput
+if (-not $verifyResult.Succeeded) { throw "App deployment verification failed." }
+foreach ($appId in $EnableApps) {
+    $enableArgs = @("compose") + $composeArgs + @("exec", "-T", "django", "python", "manage.py", "app_packages", "enable", $appId) + $appProbeArgs
+    $enableResult = Invoke-DockerCommand -Arguments $enableArgs -TimeoutSec 180 -ShowOutput
+    if (-not $enableResult.Succeeded) { throw "App enablement failed: $appId (business App workers require -WithAI)." }
 }
 
 if (-not $SkipSeed) {
@@ -90,7 +123,7 @@ if (-not $SkipSeed) {
 }
 
 Write-Step "Container status"
-$statusArgs = @("compose") + $composeArgs + @("--profile", "core", "ps")
+$statusArgs = @("compose") + $composeArgs + $profileArgs + @("ps")
 $statusResult = Invoke-DockerCommand -Arguments $statusArgs -TimeoutSec 30 -ShowOutput
 if (-not $statusResult.Succeeded) {
     Write-Warn "Unable to read container status."
@@ -108,4 +141,6 @@ if (-not $SkipSmoke) {
 Write-Host ""
 Write-Host "  React:  http://127.0.0.1:3000" -ForegroundColor Gray
 Write-Host "  Django: http://127.0.0.1:8001" -ForegroundColor Gray
+Write-Host "  Assistant: http://127.0.0.1:3000/apps/assistant (DSH runs inside Gateway)" -ForegroundColor Gray
+Write-Host "  First enablement: -EnableApps assistant; existing enablement and grants are preserved." -ForegroundColor Gray
 Write-Host "============================================================" -ForegroundColor Cyan

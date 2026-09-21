@@ -167,55 +167,18 @@ def _approve(service, version_id):
     )
 
 
-def test_policy_lifecycle_requires_three_distinct_actors(policy_runtime):
+def test_policy_lifecycle_allows_app_user_to_complete_all_stages(policy_runtime):
     _factory, _session_scope, service = policy_runtime
     draft = _create_draft(service)
     version_id = draft["id"]
-
-    service.submit(
-        version_id,
-        actor="rule-engineer",
-        reason="提交语义复核",
-        idempotency_key="policy-submit-001",
-    )
-    with pytest.raises(AssessmentPolicyConflictError, match="creator"):
-        service.semantic_review(
-            version_id,
-            decision="approved",
-            actor="rule-engineer",
-            reason="自己复核",
-            idempotency_key="policy-semantic-self-001",
-        )
-    service.semantic_review(
-        version_id,
-        decision="approved",
-        actor="network-sme",
-        reason="语义和单位正确",
-        idempotency_key="policy-semantic-001",
-    )
-    with pytest.raises(AssessmentPolicyConflictError, match="independent"):
-        service.publication_review(
-            version_id,
-            decision="approved",
-            actor="network-sme",
-            reason="复核人不能发布",
-            idempotency_key="policy-publish-self-001",
-        )
-    approved = service.publication_review(
-        version_id,
-        decision="approved",
-        actor="asset-publisher",
-        reason="独立发布批准",
-        idempotency_key="policy-publish-001",
-    )
-
+    service.submit(version_id, actor="rule-engineer", reason="提交语义复核", idempotency_key="policy-submit-001")
+    service.semantic_review(version_id, decision="approved", actor="rule-engineer",
+                            reason="语义和单位正确", idempotency_key="policy-semantic-001")
+    approved = service.publication_review(version_id, decision="approved", actor="rule-engineer",
+                                         reason="确认发布批准", idempotency_key="policy-publish-001")
     assert approved["status"] == "approved"
-    assert [item["stage"] for item in approved["decisions"]] == [
-        "submission",
-        "semantic_review",
-        "publication",
-    ]
-    assert approved["approved_by"] == "asset-publisher"
+    assert [item["stage"] for item in approved["decisions"]] == ["submission", "semantic_review", "publication"]
+    assert approved["approved_by"] == "rule-engineer"
 
 
 def test_policy_creation_and_decisions_are_idempotent(policy_runtime):
@@ -404,18 +367,13 @@ def test_runtime_fails_closed_for_tampered_published_policy_assets(
     )
 
 
-def test_inventory_binding_rejects_unknown_device_and_non_publisher(policy_runtime):
+def test_inventory_binding_checks_devices_without_publisher_role(policy_runtime):
     _factory, _session_scope, service = policy_runtime
     approved = _approve(service, _create_draft(service)["id"])
-    with pytest.raises(AssessmentPolicyConflictError, match="publication approver"):
-        service.bind(
-            approved["id"],
-            binding_type="inventory_profile",
-            scope={"device_ids": ["device-1"]},
-            actor="network-sme",
-            reason="无权绑定",
-            idempotency_key="policy-binding-wrong-actor",
-        )
+    binding = service.bind(approved["id"], binding_type="inventory_profile",
+                           scope={"device_ids": ["device-1"]}, actor="network-sme",
+                           reason="确认设备绑定", idempotency_key="policy-binding-app-user")
+    assert binding["policy_version_id"] == approved["id"]
     with pytest.raises(ValueError, match="unknown device ids"):
         service.bind(
             approved["id"],

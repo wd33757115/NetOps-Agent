@@ -44,6 +44,8 @@ def _patrol_platform_is_ready(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _isolate_patrol_batch_dispatch(monkeypatch):
+    from src.apps.inspection.backend import launch
+    monkeypatch.setattr(launch, "launch_patrol", lambda payload, actor, **kwargs: devices_api._launch_patrol(payload, actor=actor, batch_id="patrol-batch-test", intent={}))
     class MemoryBatchRepository:
         def create_pending_batch(self, **_kwargs):
             return None
@@ -2308,52 +2310,24 @@ def test_launch_device_patrol_allows_direct_only_for_nonproduction_diagnostics(
     assert submitted == []
 
 
-def test_launch_device_patrol_rejects_direct_check_item_batch(
-    monkeypatch,
-):
-    preview_called = False
-
-    def forbidden_preview(payload, repository):
-        nonlocal preview_called
-        preview_called = True
-        raise AssertionError("production direct launch must fail before preview")
-
-    monkeypatch.setattr(
-        devices_api,
-        "_patrol_launch_preview",
-        forbidden_preview,
-    )
-
-    with pytest.raises(devices_api.HTTPException) as exc_info:
-        devices_api.launch_device_patrol(
-            devices_api.DevicePatrolLaunchRequest(
-                device_ids=["device-1"],
-                launch_mode="direct",
-            ),
-            None,
-        )
-
-    assert exc_info.value.status_code == 409
-    assert exc_info.value.detail["failure_code"] == (
-        "direct_check_item_patrol_disabled"
-    )
-    assert exc_info.value.detail["next_action"] == (
-        "set launch_mode=workflow"
-    )
-    assert preview_called is False
+def test_launch_device_patrol_rejects_unfrozen_production_plan(monkeypatch):
+    monkeypatch.setattr(devices_api, "_patrol_launch_preview", lambda *_: {"platform_readiness": {"can_launch": True}, "check_item_mode": False, "error_count": 0, "rows": [{"device_id": "device-1"}]})
+    with pytest.raises(devices_api.HTTPException) as exc:
+        devices_api._launch_patrol(devices_api.DevicePatrolLaunchRequest(device_ids=["device-1"]), actor="actor", batch_id="batch", intent={})
+    assert exc.value.status_code == 409
 
 
-def test_launch_device_patrol_starts_workflow_by_default(monkeypatch):
+def test_launch_device_patrol_diagnostics_default_to_fixed_dispatch(monkeypatch):
     started = []
 
     class FakePlanRepository:
         def create_plan(self, plan, **kwargs):
-            assert kwargs["launch_source"] == "workflow"
+            assert kwargs["launch_source"] == "direct"
             return {"execution_plan_id": "plan-1"}
 
         def mark_launched(self, plan_id, **kwargs):
             assert plan_id == "plan-1"
-            assert kwargs["launch_source"] == "workflow"
+            assert kwargs["launch_source"] == "direct"
             assert kwargs["workflow_run_id"] == "workflow-run-1"
             return {"execution_plan_id": plan_id}
 
@@ -2415,12 +2389,13 @@ def test_launch_device_patrol_starts_workflow_by_default(monkeypatch):
             device_ids=["device-1"],
             ticket_id="PATROL-1",
             save_baseline=True,
+            mode="parser_validation",
         ),
         None,
     )
 
     assert result["success"] is True
-    assert result["launch_mode"] == "workflow"
+    assert result["launch_mode"] == "direct"
     assert result["patrol_batch_id"].startswith("patrol-batch-")
     assert result["queued_count"] == 1
     assert result["launched_count"] == 0
@@ -2434,7 +2409,7 @@ def test_launch_device_patrol_skips_failed_preflight_when_some_devices_ready(mon
 
     class FakePlanRepository:
         def create_plan(self, plan, **kwargs):
-            assert kwargs["launch_source"] == "workflow"
+            assert kwargs["launch_source"] == "direct"
             return {"execution_plan_id": "plan-1"}
 
         def mark_launched(self, plan_id, **kwargs):

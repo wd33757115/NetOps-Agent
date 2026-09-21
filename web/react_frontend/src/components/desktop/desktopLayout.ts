@@ -1,3 +1,4 @@
+import { normalizeWallpaper, type DesktopWallpaper } from './wallpaper'
 import { appRegistry } from '../../apps/appRegistry'
 
 export interface DesktopNode {
@@ -14,6 +15,7 @@ export interface DesktopLayout {
   schemaVersion: 1
   revision: number
   nodes: DesktopNode[]
+  wallpaper?: DesktopWallpaper
   dockAppIds: string[]
 }
 export const defaultLayout = (): DesktopLayout => ({
@@ -105,6 +107,7 @@ export function reconcileLayout(input: DesktopLayout): DesktopLayout {
   return {
     schemaVersion: 1,
     revision: input.revision,
+    wallpaper: normalizeWallpaper(input.wallpaper),
     nodes,
     dockAppIds: [...new Set(input.dockAppIds)].filter((id) =>
       nodes.some((n) => n.appId === id),
@@ -175,4 +178,8 @@ export function dissolveFolder(layout: DesktopLayout, id: string) {
   ))
     result = moveNode(result, node.id, 'desktop:0')
   return result
+}
+
+export function desktopColumns(width: number) {
+  return Math.max(2, Math.min(100, Math.floor(width / 112)))
 }

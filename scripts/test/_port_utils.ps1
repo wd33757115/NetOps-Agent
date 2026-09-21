@@ -30,7 +30,7 @@ function Stop-ProjectCeleryWorkers {
         Where-Object {
             $_.CommandLine -and
             ($_.CommandLine -match $pattern) -and
-            ($_.CommandLine -match 'celery.*celery_app')
+            ($_.CommandLine -match '(celery.*celery_app|src\.platform\.kernel\.worker)')
         } |
         ForEach-Object {
             Write-ColorOutput "    Stop Celery worker PID $($_.ProcessId)" "Gray"
@@ -38,13 +38,59 @@ function Stop-ProjectCeleryWorkers {
         }
 }
 
+function Test-ProjectAppProcess {
+    param($Process, [string]$ProjectRoot)
+    $line = $Process.CommandLine
+    if (-not $line) { return $false }
+    $rootPattern = [regex]::Escape($ProjectRoot.TrimEnd('\', '/')) + '(?:[\\/]|["\s])'
+    if ($line -notmatch $rootPattern) { return $false }
+    if ($Process.Name -eq 'python.exe') {
+        # Match only service entry points, never every process using the project venv.
+        $entry = '^\s*(?:"[^"]*python\.exe"|\S*python\.exe)\s+-m\s+'
+        $service = '(?:uvicorn\s+src\.gateway\.main:app(?:\s|$)|daphne\b.*\bdjango_backend\.asgi:application(?:\s|$)|src\.platform\.kernel\.worker(?:\s|$)|celery\s+-A\s+src\.core\.celery_tasks\.celery_app\s+(?:worker|beat)(?:\s|$))'
+        return $line -match ($entry + $service)
+    }
+    if ($Process.Name -eq 'node.exe') {
+        $vite = Join-Path $ProjectRoot 'web\react_frontend\node_modules\vite\bin\vite.js'
+        foreach ($match in [regex]::Matches($line, '"([^"]+)"|(\S+)')) {
+            $argument = if ($match.Groups[1].Success) { $match.Groups[1].Value } else { $match.Groups[2].Value }
+            if ($argument -notmatch 'vite\.js$') { continue }
+            try {
+                # npm invokes .bin\..\vite on Windows; compare the resolved path.
+                if ([IO.Path]::GetFullPath($argument) -eq $vite) { return $true }
+            } catch { }
+        }
+        return $false
+    }
+    return $false
+}
+
+function Test-ProjectLauncherProcess {
+    param($Process, [string]$ProjectRoot)
+    if (-not $Process -or $Process.Name -notin @('powershell.exe', 'pwsh.exe')) { return $false }
+    $directory = [regex]::Escape((Join-Path $ProjectRoot '.runtime\test\logs'))
+    return $Process.CommandLine -match ('\s-File\s+"?' + $directory + '\\[a-z0-9-]+-launcher\.ps1"?(?:\s|$)')
+}
+
+function Stop-RecordedProjectLaunchers {
+    param($Records, [string]$ProjectRoot)
+    foreach ($property in $Records.PSObject.Properties) {
+        $procId = [int]$property.Value
+        $process = Get-CimInstance Win32_Process -Filter "ProcessId=$procId" -ErrorAction SilentlyContinue
+        if (Test-ProjectLauncherProcess -Process $process -ProjectRoot $ProjectRoot) {
+            Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+        } else {
+            Write-ColorOutput "    Skip stale/unrelated launcher PID $procId" 'Gray'
+        }
+    }
+}
+
 function Stop-ProjectAppProcesses {
     param([string]$ProjectRoot)
-    $pattern = [regex]::Escape($ProjectRoot)
     Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='node.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -and ($_.CommandLine -match $pattern) } |
+        Where-Object { Test-ProjectAppProcess -Process $_ -ProjectRoot $ProjectRoot } |
         ForEach-Object {
-            Write-ColorOutput "    Stop project process PID $($_.ProcessId)" "Gray"
+            Write-ColorOutput "    Stop project service PID $($_.ProcessId)" "Gray"
             cmd /c "taskkill /F /T /PID $($_.ProcessId)" 2>$null | Out-Null
         }
 }
@@ -203,7 +249,12 @@ function Stop-DockerAppContainers {
         return $false
     }
 
-    $appContainers = @("netops-react", "netops-django", "netops-fastapi")
+    # Switching from Compose to local processes must not leave a second Beat or
+    # old queue consumers alive against the same broker.
+    $appContainers = @(
+        "netops-celery-beat", "netops-celery-patrol", "netops-celery-control", "netops-celery-ai",
+        "netops-react", "netops-django", "netops-fastapi"
+    )
     foreach ($name in $appContainers) {
         $stopResult = Invoke-DockerCommand -Arguments @("stop", $name) -TimeoutSec $TimeoutSec -Quiet
         if ($stopResult.TimedOut) {

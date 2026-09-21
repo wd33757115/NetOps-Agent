@@ -171,7 +171,7 @@ def _service_fixture(
                 inventory_device_id=device_id,
                 device_id=f"AUTH-SW-{suffix[:8]}",
                 execution_item_id=f"execution-item-{suffix[:20]}",
-                check_item_ids_json=[],
+                check_item_ids_json=["system.cpu_usage"],
                 device_name=f"AUTH-SW-{suffix[:8]}",
                 management_ip=f"192.0.2.{int(suffix[:2], 16) % 200 + 1}",
                 vendor="H3C",
@@ -229,7 +229,7 @@ def _prepare(service: PatrolCurrentAuthorityService, job_id: str, **overrides):
     return service.prepare(**values)
 
 
-def test_prepare_maps_catalog_command_and_is_idempotent() -> None:
+def test_prepare_preserves_frozen_check_item_scope_and_is_idempotent() -> None:
     db, transaction, service, job_id = _service_fixture()
     try:
         created = _prepare(service, job_id)

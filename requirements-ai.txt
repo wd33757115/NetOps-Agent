@@ -1,9 +1,8 @@
 -r requirements-core.txt
 
-langgraph>=1.1.0,<2.0.0
-langchain>=1.3.0,<2.0.0
 langchain-core>=1.4.0,<2.0.0
+deepseek-harness-sdk==0.1.5rc1
+mcp==1.26.0
+sse-starlette==2.4.1
 langchain-deepseek
 openai>=1.109.0,<2.0.0
-langchain-postgres
-langgraph-checkpoint-postgres>=0.1.0

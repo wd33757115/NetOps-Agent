@@ -1,3 +1,4 @@
+import { useChatStore } from '../store/useChatStore'
 // SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
 // SPDX-License-Identifier: Apache-2.0
 
@@ -34,6 +35,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const token = getAccessToken()
     if (!token) {
       useDesktopStore.getState().reset()
+      useChatStore.getState().reset()
       setUser(null)
       return
     }
@@ -44,6 +46,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch {
       clearAuthStorage()
       useDesktopStore.getState().reset()
+      useChatStore.getState().reset()
       setUser(null)
     }
   }, [])
@@ -68,12 +71,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = useCallback(async (username: string, password: string) => {
     const session = (await authApi.login(username, password)) as AuthSession & { user: AuthUser }
+    useChatStore.getState().reset()
+    useDesktopStore.getState().reset()
     saveAuthSession(session)
     setUser(session.user)
   }, [])
 
   const logout = useCallback(async () => {
     useDesktopStore.getState().reset()
+      useChatStore.getState().reset()
     try {
       await authApi.logout()
     } catch {

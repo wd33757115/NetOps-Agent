@@ -299,9 +299,11 @@ def test_rule_asset_persister_creates_pending_approval_assets():
         },
     }
 
+    params["generation_identity"] = {"actor": "scheduler", "actor_user_id": "policy-user", "trigger": "schedule", "policy_revision": "policy-v1"}
     result = run_persist(params)
     try:
         assert result["success"] is True
+        assert result["bundle"]["payload_json"]["generation_identity"] == params["generation_identity"]
         assert result["asset_count"] == 3
         assert result["bundle"]["status"] == "pending_approval"
         assert {job["job_type"] for job in result["jobs"]} == {

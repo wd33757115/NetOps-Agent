@@ -28,8 +28,6 @@ from pathlib import Path
 BASE_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
-os.environ["LLAMA_INDEX_CACHE_DIR"] = str(Path("./cache/llama_index").absolute())
-os.environ["LLAMA_INDEX_DISABLE_HTTP_CACHE"] = "1"
 
 from src.common.config import get_settings
 from src.core.logging import bind_context, configure_logging, get_logger, reset_context
@@ -61,19 +59,7 @@ from src.gateway.audit_service import write_audit_log
 from src.gateway.bff_security import is_enforce_bff_origin_enabled
 
 
-def get_supervisor_graph():
-    """加载 Supervisor v2 协同图（v1 已废弃）。"""
-    from src.agents.supervisor.graph_v2 import compiled_graph_v2
-
-    log.info("supervisor_v2_enabled")
-    return compiled_graph_v2()
-
-
-def _human_message(content: str):
-    """Load the AI message type only when a chat transport is used."""
-    from langchain_core.messages import HumanMessage
-
-    return HumanMessage(content=content)
+from src.platform.authorization.client import require_app
 
 
 from src.gateway.artifacts_api import router as artifacts_router
@@ -87,7 +73,6 @@ from src.gateway.conversation_service import get_conversation_service
 from src.gateway.devices_api import router as devices_router
 from src.gateway.events_api import router as events_router
 from src.gateway.exception_handlers import register_exception_handlers
-from src.gateway.knowledge_api import router as knowledge_router
 from src.gateway.maintenance_api import router as maintenance_router
 from src.gateway.notification_api import router as notification_router
 from src.gateway.offline_patrol_api import router as offline_patrol_router
@@ -107,8 +92,6 @@ from src.gateway.schemas import (
     ITSMFirewallPolicyRequest,
     ITSMWorkflowStartResponse,
     MessageResponse,
-    RAGSearchRequest,
-    RAGSearchResponse,
     TaskResponse,
     UpdateConversationRequest,
 )
@@ -168,8 +151,7 @@ async def lifespan(app: FastAPI):
     启动时：
     - 初始化 Redis 连接池（Celery broker + result backend）
     - 验证 PostgreSQL 连接
-    - 预加载 RAG 服务和 Agent Graph
-    - 预热 Qdrant 向量数据库连接（如已配置）
+    - 延迟加载聊天执行入口
 
     关闭时：
     - 关闭 Redis 连接池
@@ -202,16 +184,6 @@ async def lifespan(app: FastAPI):
     require_postgres_connection()
     log.info("postgres_connected", host=settings.POSTGRES_HOST, port=settings.POSTGRES_PORT)
 
-    # --- 启动：预加载 RAG 服务 ---
-    try:
-        from src.core.rag_service.service import get_rag_service
-
-        app.state.rag_service = get_rag_service()
-        log.info("rag_service_loaded")
-    except Exception as e:
-        log.warning("rag_service_load_failed", error=str(e))
-        app.state.rag_service = None
-
     # --- 启动：加载 Workflow / ITSM 插件包 ---
     try:
         from src.core.plugins.chat_intent import get_chat_intent_registry
@@ -239,17 +211,13 @@ async def lifespan(app: FastAPI):
     try:
         from src.skills.bootstrap import bootstrap_skills
 
-        skill_count = bootstrap_skills(
-            rag_service=getattr(app.state, "rag_service", None),
-            force=True,
-        )
+        skill_count = bootstrap_skills(force=True)
         log.info("skill_bootstrap_complete", skill_count=skill_count)
     except Exception as e:
         log.warning("skill_bootstrap_failed", error=str(e))
 
     # --- 启动：延迟加载 Agent Graph（避免启动时因网络问题卡住）---
-    app.state.agent_graph = None
-    log.info("agent_graph_lazy_load")
+    log.info("agent_executor", executor="dsh")
 
     enforce = is_enforce_bff_origin_enabled()
     log.info(
@@ -306,14 +274,15 @@ app = FastAPI(
 )
 
 app.include_router(skills_router)
-app.include_router(knowledge_router)
 app.include_router(storage_router)
 app.include_router(artifacts_router)
-app.include_router(official_documents_router)
+app.include_router(official_documents_router)  # Legacy URL, same application admission
+from src.platform.kernel.registry import mount_apps
+mount_apps(app)
 app.include_router(workflow_router)
 app.include_router(notification_router)
 app.include_router(events_router)
-app.include_router(parser_router)
+app.include_router(parser_router, prefix="/api/v1")
 app.include_router(devices_router)
 app.include_router(patrol_router)
 app.include_router(offline_patrol_router)
@@ -427,7 +396,6 @@ async def health_check():
     except Exception:
         services["postgres"] = False
 
-    services["rag"] = app.state.rag_service is not None
 
     try:
         if app.state.redis_pool:
@@ -453,340 +421,32 @@ async def health_diagnostics():
     return run_diagnostics().model_dump(mode="json")
 
 
-@app.post("/api/chat/", tags=["Chat"], response_model=ChatResponse, status_code=status.HTTP_200_OK)
-async def chat_endpoint_legacy(request: ChatRequest):
-    """Legacy chat endpoint for backward compatibility"""
-    return await chat_endpoint(request)
+@app.post("/api/chat/", tags=["Chat"], response_model=ChatResponse)
+@app.post("/api/v1/chat", tags=["Chat"], response_model=ChatResponse)
+async def chat_endpoint(request: ChatRequest, user: CurrentUser = Depends(require_app("assistant"))):
+    from src.gateway.chat_stream import chat
 
-
-@app.post(
-    "/api/v1/chat", tags=["Chat"], response_model=ChatResponse, status_code=status.HTTP_200_OK
-)
-async def chat_endpoint(
-    request: ChatRequest,
-    http_request: Request,
-    user: CurrentUser | None = Depends(get_optional_user),
-):
-    """
-    统一聊天接口（REST，异步执行）
-
-    - 支持多轮对话状态持久化到 PostgreSQL
-    - Supervisor Agent 自动路由
-    - Skill 执行使用 Celery 异步（非阻塞）
-    - RAG Metadata 过滤
-    - 自动生成对话标题
-    """
-    if is_enforce_bff_origin_enabled() and not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未登录")
-
-    if user and not user.can_execute_skills():
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="当前角色仅可浏览，无法执行运维 Skill",
-        )
-
-    effective_user_id = user.user_id if user else request.user_id
-
-    conv_service = get_conversation_service()
-    conversation_id = request.thread_id
-
-    if not conversation_id:
-        conversation = conv_service.create_conversation(
-            title="新对话",
-            user_id=effective_user_id,
-        )
-        conversation_id = conversation["id"]
-    else:
-        if effective_user_id:
-            conversation = conv_service.get_conversation_for_user(
-                conversation_id, effective_user_id
-            )
-        else:
-            conversation = conv_service.get_conversation(conversation_id)
-        if not conversation:
-            conversation = conv_service.create_conversation(
-                title="新对话",
-                user_id=effective_user_id,
-            )
-            conversation_id = conversation["id"]
-
-    thread_id = f"thread-{conversation_id.split('-')[-1]}"
-    if user and user.thread_prefix:
-        thread_id = f"{user.thread_prefix}-{conversation_id.split('-')[-1]}"
-
-    conv_service.update_conversation(
-        conversation_id, thread_id=thread_id, user_id=effective_user_id
-    )
-
-    config = {"configurable": {"thread_id": thread_id}}
-
-    # 延迟加载 Agent Graph
-    agent_graph = app.state.agent_graph
-    if not agent_graph:
-        log.info("chat_graph_lazy_loading")
-        try:
-            agent_graph = get_supervisor_graph()
-            app.state.agent_graph = agent_graph
-            log.info("chat_graph_loaded")
-        except Exception as e:
-            log.error("chat_graph_load_failed", error=str(e), exc_info=e)
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Agent Graph loading failed: {str(e)}",
-            )
-
-    try:
-        initial_state = {
-            "messages": [_human_message(request.query)],
-            "source": request.source.value,
-            "task_id": str(uuid.uuid4()),
-            "thread_id": thread_id,
-        }
-        if user:
-            initial_state["user_id"] = user.user_id
-            initial_state["user_role"] = user.role
-
-        if request.metadata_filters:
-            initial_state["metadata_filters"] = request.metadata_filters
-
-        if request.uploaded_file_path:
-            initial_state["uploaded_file_path"] = request.uploaded_file_path
-
-        if request.ticket_id:
-            initial_state["ticket_id"] = request.ticket_id
-
-        log.debug(
-            "chat_request_prepared",
-            state_keys=sorted(initial_state.keys()),
-            ticket_id=initial_state.get("ticket_id"),
-        )
-
-        graph_timeout = int(os.getenv("CHAT_GRAPH_TIMEOUT", "170"))
-
-        # [Async] run graph.invoke in thread pool to avoid blocking event loop
-        try:
-            result = await asyncio.wait_for(
-                asyncio.to_thread(agent_graph.invoke, initial_state, config),
-                timeout=graph_timeout,
-            )
-        except asyncio.TimeoutError:
-            raise HTTPException(
-                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                detail=(
-                    f"Agent 处理超时（{graph_timeout}秒）。"
-                    "若执行防火墙/备份类 Skill，请确认 Celery Worker 已启动；"
-                    "首次语义路由可能较慢，触发词命中后应已跳过 Embedding。"
-                ),
-            )
-
-        response_msg = result["messages"][-1].content
-        next_agent = result.get("next_agent")
-        references = result.get("knowledge_references")
-        celery_task_id = result.get("celery_task_id")
-
-        from src.gateway.diagnostics import extract_download_url_from_graph_result
-
-        download_url = extract_download_url_from_graph_result(result)
-
-        # 保存用户消息和Agent回复到数据库
-        conv_service.add_message(
-            conversation_id=conversation_id, role="user", content=request.query
-        )
-
-        conv_service.add_message(
-            conversation_id=conversation_id,
-            role="assistant",
-            content=response_msg,
-            agent_type=next_agent,
-            celery_task_id=celery_task_id,
-            download_url=download_url,
-            references=references,
-        )
-
-        # 生成对话标题
-        title = conv_service.generate_title(conversation_id)
-        conv_service.update_conversation(conversation_id, title=title)
-
-        write_audit_log(
-            action="chat",
-            user_id=effective_user_id,
-            username=user.username if user else None,
-            resource_type="conversation",
-            resource_id=conversation_id,
-            detail={"agent_type": next_agent, "query_len": len(request.query or "")},
-            ip_address=http_request.client.host if http_request.client else None,
-        )
-
-        log.info(
-            "chat_completed",
-            conversation_id=conversation_id,
-            next_agent=next_agent,
-            celery_task_id=celery_task_id,
-        )
-
-        return ChatResponse(
-            response=response_msg,
-            thread_id=conversation_id,
-            agent_type=next_agent,
-            task_id=result.get("task_id"),
-            celery_task_id=celery_task_id,
-            download_url=download_url,
-            references=references,
-        )
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Agent invocation failed: {str(e)}",
-        )
+    return await chat(request, user)
 
 
 @app.post("/api/v1/chat/stream", tags=["Chat"])
-async def chat_stream_endpoint(
-    request: ChatRequest,
-    http_request: Request,
-    user: CurrentUser | None = Depends(get_optional_user),
-):
-    """SSE 流式聊天：实时推送 LangGraph 节点进度 + Langfuse trace。"""
-    agent_graph = app.state.agent_graph
-    if not agent_graph:
-        try:
-            agent_graph = get_supervisor_graph()
-            app.state.agent_graph = agent_graph
-        except Exception as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Agent Graph loading failed: {str(exc)}",
-            )
+async def chat_stream_endpoint(request: ChatRequest, user: CurrentUser = Depends(require_app("assistant"))):
+    from src.gateway.chat_stream import prepare, stream_chat
 
-    enforce_auth = is_enforce_bff_origin_enabled()
-
-    try:
-        from src.gateway.chat_stream import stream_supervisor_chat
-    except ModuleNotFoundError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"AI chat dependencies are not installed: {exc.name}",
-        ) from exc
+    run, body = await asyncio.to_thread(prepare, request, user)
 
     async def event_generator():
-        async for event in stream_supervisor_chat(
-            request=request,
-            http_request=http_request,
-            user=user,
-            agent_graph=agent_graph,
-            enforce_auth=enforce_auth,
-        ):
-            event_type = event.get("event", "message")
-            data = event.get("data", "")
-            yield f"event: {event_type}\ndata: {data}\n\n"
+        async for event in stream_chat(request, user, run, body):
+            yield f"event: {event['event']}\ndata: {event['data']}\n\n"
 
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+    return StreamingResponse(event_generator(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.websocket("/ws/v1/chat")
 async def websocket_chat_endpoint(websocket: WebSocket):
-    """
-    WebSocket 实时聊天接口
-
-    - 流式返回状态（thinking / routing / retrieving / answering）
-    - 支持保持对话上下文
-    - 使用 ainvoke 异步调用 Agent Graph
-    """
-    if is_enforce_bff_origin_enabled() and not is_trusted_bff_request(websocket.headers):
-        await websocket.close(code=4403, reason="Access only allowed via Django BFF")
-        return
-
-    await websocket.accept()
-    thread_id = f"ws-thread-{uuid.uuid4().hex[:12]}"
-    config = {"configurable": {"thread_id": thread_id}}
-
-    agent_graph = app.state.agent_graph
-    if not agent_graph:
-        try:
-            agent_graph = get_supervisor_graph()
-            app.state.agent_graph = agent_graph
-        except Exception as exc:
-            await websocket.close(code=1013, reason=f"AI chat unavailable: {exc}")
-            return
-
-    try:
-        while True:
-            data = await websocket.receive_text()
-
-            try:
-                payload = json.loads(data)
-                query = payload.get("query", "")
-                client_thread_id = payload.get("thread_id")
-                if client_thread_id:
-                    thread_id = client_thread_id
-                    config = {"configurable": {"thread_id": thread_id}}
-            except json.JSONDecodeError:
-                query = data
-
-            await websocket.send_json(
-                {
-                    "type": "status",
-                    "status": "thinking",
-                    "thread_id": thread_id,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                }
-            )
-
-            try:
-                # [Async] run graph.invoke in thread pool
-                result = await asyncio.to_thread(
-                    agent_graph.invoke, {"messages": [_human_message(query)]}, config
-                )
-                response = result["messages"][-1].content
-
-                await websocket.send_json(
-                    {
-                        "type": "message",
-                        "content": response,
-                        "thread_id": thread_id,
-                        "agent_type": result.get("next_agent"),
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    }
-                )
-
-            except Exception as e:
-                await websocket.send_json(
-                    {"type": "error", "error": str(e), "thread_id": thread_id}
-                )
-
-    except WebSocketDisconnect:
-        log.info("websocket_disconnected", thread_id=thread_id)
-    except Exception as e:
-        log.warning("websocket_error", thread_id=thread_id, error=str(e), exc_info=e)
-    finally:
-        pass
-
-
-@app.post("/api/v1/rag/search", tags=["RAG"], response_model=RAGSearchResponse)
-async def rag_search_endpoint(request: RAGSearchRequest):
-    """
-    统一 RAG 检索服务 API（供所有 Agent 或外部系统调用）
-    """
-    rag_service = app.state.rag_service
-    if not rag_service:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="RAG Service not available"
-        )
-
-    result = rag_service.retrieve_formatted(
-        query=request.query, top_k=request.top_k, metadata_filters=request.metadata_filters
-    )
-
-    return RAGSearchResponse(count=result["count"], results=result["references"])
+    # The supported authenticated streaming transport is the existing BFF SSE route.
+    await websocket.close(code=1008, reason="Use authenticated /api/v1/chat/stream")
 
 
 @app.post("/api/v1/itsm/webhook", tags=["ITSM"])
@@ -946,7 +606,7 @@ async def chat_upload_file(request: ChatFileUploadRequest):
 @app.post("/api/v1/conversations", tags=["Conversations"], response_model=ConversationResponse)
 async def create_conversation(
     request: CreateConversationRequest,
-    user: CurrentUser | None = Depends(get_optional_user),
+    user: CurrentUser = Depends(require_app("assistant")),
 ):
     """创建新对话"""
     conv_service = get_conversation_service()
@@ -973,7 +633,7 @@ async def get_conversations(
     user_id: str | None = None,
     limit: int = 20,
     offset: int = 0,
-    user: CurrentUser | None = Depends(get_optional_user),
+    user: CurrentUser = Depends(require_app("assistant")),
 ):
     """获取对话列表（登录用户仅能看到自己的会话）"""
     conv_service = get_conversation_service()
@@ -1010,7 +670,7 @@ async def get_conversations(
 )
 async def get_conversation_detail(
     conversation_id: str,
-    user: CurrentUser | None = Depends(get_optional_user),
+    user: CurrentUser = Depends(require_app("assistant")),
 ):
     """获取对话详情（含消息）"""
     conv_service = get_conversation_service()
@@ -1066,15 +726,15 @@ async def get_conversation_detail(
     tags=["Conversations"],
     response_model=ConversationResponse,
 )
-async def update_conversation(conversation_id: str, request: UpdateConversationRequest):
+async def update_conversation(conversation_id: str, request: UpdateConversationRequest, user: CurrentUser = Depends(require_app("assistant"))):
     """更新对话信息"""
     conv_service = get_conversation_service()
+    if not conv_service.get_conversation_for_user(conversation_id, user.user_id):
+        raise HTTPException(404, "Conversation not found")
 
     update_data = {}
     if request.title is not None:
         update_data["title"] = request.title
-    if request.status is not None:
-        update_data["status"] = request.status
     if request.summary is not None:
         update_data["summary"] = request.summary
 
@@ -1103,9 +763,11 @@ async def update_conversation(conversation_id: str, request: UpdateConversationR
     tags=["Conversations"],
     status_code=status.HTTP_204_NO_CONTENT,
 )
-async def delete_conversation(conversation_id: str):
+async def delete_conversation(conversation_id: str, user: CurrentUser = Depends(require_app("assistant"))):
     """删除对话"""
     conv_service = get_conversation_service()
+    if not conv_service.get_conversation_for_user(conversation_id, user.user_id):
+        raise HTTPException(404, "Conversation not found")
     success = conv_service.delete_conversation(conversation_id)
 
     if not success:
@@ -1119,9 +781,11 @@ async def delete_conversation(conversation_id: str):
     tags=["Conversations"],
     response_model=MessageResponse,
 )
-async def add_message(conversation_id: str, request: AddMessageRequest):
+async def add_message(conversation_id: str, request: AddMessageRequest, user: CurrentUser = Depends(require_app("assistant"))):
     """添加消息到对话"""
     conv_service = get_conversation_service()
+    if not conv_service.get_conversation_for_user(conversation_id, user.user_id):
+        raise HTTPException(404, "Conversation not found")
 
     conversation = conv_service.get_conversation(conversation_id)
     if not conversation:
@@ -1150,9 +814,11 @@ async def add_message(conversation_id: str, request: AddMessageRequest):
 
 
 @app.post("/api/v1/conversations/{conversation_id}/summarize", tags=["Conversations"])
-async def summarize_conversation(conversation_id: str):
+async def summarize_conversation(conversation_id: str, user: CurrentUser = Depends(require_app("assistant"))):
     """生成对话总结和标题"""
     conv_service = get_conversation_service()
+    if not conv_service.get_conversation_for_user(conversation_id, user.user_id):
+        raise HTTPException(404, "Conversation not found")
 
     conversation = conv_service.get_conversation(conversation_id)
     if not conversation:

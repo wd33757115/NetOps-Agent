@@ -27,6 +27,9 @@ DEBUG = os.getenv('DJANGO_DEBUG', 'True').lower() in ('true', '1', 't')
 
 ALLOWED_HOSTS = os.getenv('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
+# Raw capability uploads are capped again by the BFF (20 MiB) and each App.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024
+
 
 # Application definition
 
@@ -136,7 +139,9 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
-STATICFILES_DIRS = [BASE_DIR / 'static']
+# React assets are served separately; the optional Django source directory is
+# only registered when present. Django app/admin assets still use app finders.
+STATICFILES_DIRS = [BASE_DIR / 'static'] if (BASE_DIR / 'static').is_dir() else []
 
 # WhiteNoise 配置
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'

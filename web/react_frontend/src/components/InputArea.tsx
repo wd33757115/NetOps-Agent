@@ -14,9 +14,10 @@ interface InputAreaProps {
   onSend: (text: string) => void
   loading: boolean
   compact?: boolean
+  allowUpload?: boolean
 }
 
-const InputArea: React.FC<InputAreaProps> = ({ onSend, loading, compact }) => {
+const InputArea: React.FC<InputAreaProps> = ({ onSend, loading, compact, allowUpload = true }) => {
   const isMobile = useIsMobile()
   const isCompact = compact ?? isMobile
   const [text, setText] = useState('')
@@ -24,7 +25,8 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, loading, compact }) => {
   const { uploadedFile, setUploadedFile, currentConversationId } = useChatStore()
 
   const handleSend = () => {
-    if (text.trim() || uploadedFile) {
+    if (loading || uploading) return
+    if (text.trim() || (allowUpload && uploadedFile)) {
       onSend(text)
       setText('')
     }
@@ -69,11 +71,11 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, loading, compact }) => {
     return false
   }
 
-  const canSend = Boolean(text.trim() || uploadedFile)
+  const canSend = Boolean(text.trim() || (allowUpload && uploadedFile))
 
   return (
     <div className={`grok-input-shell${isCompact ? ' is-compact' : ''}`}>
-      {uploadedFile && (
+      {allowUpload && uploadedFile && (
         <div className="grok-input-attachment">
           <FileTextOutlined />
           <span>{uploadedFile.name}</span>
@@ -84,7 +86,7 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, loading, compact }) => {
       )}
 
       <div className="grok-input-pill">
-        <Upload
+        {allowUpload && <Upload
           accept=".xlsx,.xls,.csv"
           showUploadList={false}
           beforeUpload={handleFileUpload}
@@ -93,7 +95,7 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, loading, compact }) => {
           <button type="button" className="grok-input-plus" aria-label="上传附件" disabled={uploading || loading}>
             <PlusOutlined />
           </button>
-        </Upload>
+        </Upload>}
 
         <TextArea
           value={text}

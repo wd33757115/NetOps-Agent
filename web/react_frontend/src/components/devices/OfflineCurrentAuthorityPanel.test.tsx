@@ -260,13 +260,13 @@ describe('OfflineCurrentAuthorityPanel', () => {
       status: 'ready_for_attestation',
       request_digest: 'a'.repeat(64),
       requested_by_principal_id: 'operator-importer',
-      requested_by_display: '导入管理员',
+      requested_by_display: '导入独立核验人',
       blockers: [],
       production_batch: { workflow_status_counts: {} },
     })
     renderPanel()
 
-    expect(await screen.findByText('等待另一位管理员复核')).toBeInTheDocument()
+    expect(await screen.findByText('等待另一位独立核验人复核')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /确认材料并进入生产执行/ }))
       .not.toBeInTheDocument()
   })
@@ -276,7 +276,7 @@ describe('OfflineCurrentAuthorityPanel', () => {
       status: 'ready_for_attestation',
       request_digest: 'c'.repeat(64),
       requested_by_principal_id: 'operator-importer',
-      requested_by_display: '导入管理员',
+      requested_by_display: '导入独立核验人',
       blockers: [],
       production_batch: { workflow_status_counts: {} },
     })
@@ -350,7 +350,7 @@ describe('OfflineCurrentAuthorityPanel', () => {
       status: 'approved',
       request_digest: 'd'.repeat(64),
       requested_by_principal_id: 'operator-importer',
-      requested_by_display: '导入管理员',
+      requested_by_display: '导入独立核验人',
       blockers: [],
       production_batch: { workflow_status_counts: {} },
     })
@@ -392,7 +392,7 @@ describe('OfflineCurrentAuthorityPanel', () => {
       status: 'ready_for_attestation',
       request_digest: 'b'.repeat(64),
       requested_by_principal_id: 'operator-importer',
-      requested_by_display: '导入管理员',
+      requested_by_display: '导入独立核验人',
       blockers: [],
       production_batch: { workflow_status_counts: {} },
     })

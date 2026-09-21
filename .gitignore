@@ -134,6 +134,8 @@ temp/
 # ============================================================
 *.xlsx
 !web/react_frontend/public/templates/firewall-policy-request.xlsx
+!src/apps/firewall_policy/resources/*.xlsx
+!src/apps/firewall_policy/backend/engine/ticket/templates/*.xlsx
 ~$*.xlsx
 ~$*.docx
 ~$*.pptx

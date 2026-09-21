@@ -126,6 +126,10 @@ class WorkflowEngine:
         parent_trace_id: str | None = None,
         run_id: str | None = None,
     ) -> str:
+        if template_name in {"patrol-change-event", "patrol-attested-offline-current", "patrol-offline-current", "patrol-history-change-event"}:
+            raise ValueError("巡检已迁移为固定任务，请通过巡检应用提交")
+        if template_name in {"rule-asset-generation", "rule-asset-submit", "rule-asset-approve", "parser-validation-ingest", "rollout-live-capture"}:
+            raise ValueError("规则业务已迁入规则治理应用，请使用应用 API")
         load_workflows()
         template = get_template(template_name)
         if not template:
@@ -597,49 +601,11 @@ class WorkflowEngine:
 
     @classmethod
     def request_patrol_batch_report_if_terminal(
-        cls,
-        patrol_batch_id: str,
-        *,
-        run_id: str | None = None,
+        cls, patrol_batch_id: str, *, run_id: str | None = None,
     ) -> bool:
-        """Queue one report only after all batch targets are terminal."""
+        from src.apps.inspection.backend.reports import request_terminal_report
 
-        try:
-            from src.core.celery_tasks.tasks import materialize_patrol_batch_report_task
-            from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
-
-            repository = PatrolBatchManifestRepository()
-            if not repository.request_terminal_report(patrol_batch_id):
-                return False
-            materialize_patrol_batch_report_task.apply_async(
-                args=[patrol_batch_id],
-                queue="netops.patrol",
-                task_id=str(
-                    uuid.uuid5(
-                        uuid.NAMESPACE_URL,
-                        f"patrol-final-report|{patrol_batch_id}",
-                    )
-                ),
-            )
-            return True
-        except Exception as exc:
-            try:
-                from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
-
-                PatrolBatchManifestRepository().mark_report_status(
-                    patrol_batch_id,
-                    "not_requested",
-                    error=str(exc),
-                )
-            except Exception:
-                pass
-            log.warning(
-                "patrol_batch_report_materialization_dispatch_failed",
-                run_id=run_id,
-                patrol_batch_id=patrol_batch_id,
-                error=str(exc),
-            )
-            return False
+        return request_terminal_report(patrol_batch_id, run_id=run_id)
 
     @classmethod
     def cancel_run(

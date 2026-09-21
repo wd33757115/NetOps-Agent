@@ -8,7 +8,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from src.core.device_ops.repository import DeviceRepository
+from src.platform.inventory.repository import DeviceRepository
 from src.core.patrol.repository import PatrolRepository
 from src.infrastructure.db.models import CommandSnapshot, NetworkDevice, PatrolRun
 from src.infrastructure.db.postgres import get_db_session

@@ -1,0 +1,28 @@
+manifest_version: 1
+id: delivery-probe
+name: 能力包接入验证
+version: 1.1.0
+platform_api: '>=1.0,<2.0'
+icon: document
+dependencies: {}
+backend:
+  router: src.apps.delivery_probe.backend.api:router
+  task_modules: [src.apps.delivery_probe.backend.tasks]
+  task_names: [app.delivery_probe.execute, app.delivery_probe.reconcile]
+  queue: app.delivery-probe
+  schedules:
+    - name: reconcile
+      task: app.delivery_probe.reconcile
+      seconds: 30
+frontend:
+  entry: frontend/index.tsx
+agent:
+  tools: src.apps.delivery_probe.backend.tools:TOOLS
+database:
+  mode: package
+  migrations: migrations
+  head: delivery_probe_0002
+  tables: [app_delivery_probe_runs]
+lifecycle:
+  drain: src.apps.delivery_probe.backend.service:drain
+  pending: src.apps.delivery_probe.backend.service:pending

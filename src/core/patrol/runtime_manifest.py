@@ -7,7 +7,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from src.core.rule_control import RuntimeRuleAssetResolver
+from src.apps.rule_governance.runtime import RuntimeRuleAssetResolver
 
 
 def _digest(payload: dict[str, Any]) -> str:
@@ -118,9 +118,9 @@ def resolve_patrol_runtime_rule_assets(
         return dict(normalized.get("rule_assets") or {})
 
     if bundle_service is None:
-        from src.core.check_items import CheckItemRuntimeBundleService
+        from src.apps.rule_governance.runtime import CheckItemRuntimeReader
 
-        bundle_service = CheckItemRuntimeBundleService()
+        bundle_service = CheckItemRuntimeReader()
 
     policies: dict[str, dict[str, Any]] = {}
     event_rules: dict[str, dict[str, Any]] = {}

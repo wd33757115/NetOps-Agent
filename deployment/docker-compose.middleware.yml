@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
 # SPDX-License-Identifier: Apache-2.0
 
-# 测试/开发环境：仅启动中间件（PostgreSQL、Redis、RabbitMQ、MinIO、Qdrant）
+# 测试/开发环境：仅启动中间件（PostgreSQL、Redis、RabbitMQ、MinIO）
 # 应用层（FastAPI / Django / React）由 scripts/test/start.ps1 本地进程启动
 
 networks:
@@ -95,20 +95,3 @@ services:
     networks:
       - netops-network
 
-  qdrant:
-    profiles: ["rag-qdrant"]
-    image: qdrant/qdrant:latest
-    container_name: netops-qdrant
-    ports:
-      - "6333:6333"
-      - "6334:6334"
-    volumes:
-      - ./qdrant_storage:/qdrant/storage:z
-    healthcheck:
-      test: [ "CMD-SHELL", "curl -f http://localhost:6333/readyz 2>/dev/null || exit 1" ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-    networks:
-      - netops-network

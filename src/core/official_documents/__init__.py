@@ -1,1 +1,1 @@
-"""Versioned official-document workspace."""
+"""Legacy application namespace; retained for compatibility."""

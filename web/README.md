@@ -7,11 +7,11 @@ React 负责工作台、巡检、规则、公文和通用管理页面；Django B
 
 ## 开发入口
 
-- 前端：`react_frontend/src/App.tsx` 注册路由，`src/apps/appRegistry.ts` 注册桌面应用。
+- 前端：`react_frontend/src/App.tsx` 注册路由，`src/apps/generated.ts` 由业务包清单生成，`appRegistry.ts` 适配桌面入口。
 - 页面布局：`GrokShellLayout` 与当前聊天侧栏；旧 Ant Design 双侧栏已移除。
 - API 客户端：`react_frontend/src/services/`。请求走同源 `/api`，由 Vite 或 Nginx 转发至 BFF。
 - BFF：`django_backend/bff/`；Django 默认连接 PostgreSQL 的 `django` schema，SQLite 仅为显式兼容配置。
-- 权限：页面守卫和应用图标过滤改善体验，BFF/FastAPI 负责实际授权。设备配置、规则制作共用 `netops.configure`。
+- 权限：页面守卫和应用图标过滤改善体验，BFF/FastAPI 负责实际授权。业务包按 App 使用权授权；个人桌面布局与壁纸按账号保存。
 
 完整启动和迁移步骤使用 [开发与构建](../docs/06_环境%20&%20编译构建说明.md)。只启动前端可在仓库根目录执行：
 

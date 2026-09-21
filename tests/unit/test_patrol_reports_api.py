@@ -11,7 +11,7 @@ from src.gateway import patrol_reports_api as reports
 def client(monkeypatch):
     app = FastAPI()
     app.include_router(reports.router)
-    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+    app.dependency_overrides[reports.app_user] = lambda: CurrentUser(
         user_id="owner", username="test", role="operator"
     )
     monkeypatch.setattr(
@@ -46,13 +46,12 @@ def test_unauthorized_job_checked_before_loading_template(client, monkeypatch):
     )
 
 
-def test_operator_cannot_import_templates(client):
-    assert (
-        client.post(
-            "/api/v1/patrol/report-templates", files={"file": ("test.docx", b"fake")}
-        ).status_code
-        == 403
-    )
+def test_app_user_can_import_templates_without_admin_role(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(reports, "import_template", lambda *args, **kwargs: calls.append((args, kwargs)) or {"id": "custom"})
+    response = client.post("/api/v1/patrol/report-templates", files={"file": ("test.docx", b"fake")})
+    assert response.status_code == 200
+    assert calls
 
 
 def test_excel_authorizes_before_loading_private_snapshots(client, monkeypatch):

@@ -1,13 +1,9 @@
-"""Platform parser control-plane interfaces."""
+"""Compatibility exports; retain this path for legacy submodule shims."""
+from importlib import import_module as _import_module
 
-from .identity import DeviceIdentity, DeviceIdentityResolver
-from .policy import ParserPolicy
-from .runtime import ParserRuntime, ParserRuntimeResult
+_impl = _import_module('src.apps.rule_governance.backend.parser')
+__all__ = getattr(_impl, "__all__", [])
 
-__all__ = [
-    "DeviceIdentity",
-    "DeviceIdentityResolver",
-    "ParserPolicy",
-    "ParserRuntime",
-    "ParserRuntimeResult",
-]
+
+def __getattr__(name):
+    return getattr(_impl, name)

@@ -109,6 +109,40 @@ describe('EvidenceTimeline', () => {
     expect(screen.queryByText('巡检完成，未发现事件')).not.toBeInTheDocument()
   })
 
+  it('keeps fixed inspection running after collection has completed', async () => {
+    render(<EvidenceTimeline items={[baseItem({
+      workflow_run_id: null,
+      workflow_status: 'completed',
+      execution_status: 'running',
+      execution_phase: 'normalization',
+      task_id: 'inspection-task-1',
+      execution_started_at: '2026-09-20T08:00:00Z',
+      execution_steps: [
+        { phase: 'collection', label: '命令采集与解析', status: 'completed' },
+        { phase: 'normalization', label: '状态归一化', status: 'running' },
+      ],
+      event_count: 0, events: [], changes: [],
+    })]} executionPlans={[]} />)
+
+    expect(screen.getByText('巡检进行中，最终结果尚未形成')).toBeInTheDocument()
+    expect(screen.queryByText('巡检完成，未发现事件')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByText('处理过程与技术证据'))
+    expect(screen.getByText('任务 inspection-task-1')).toBeInTheDocument()
+    expect(screen.getByText(/状态归一化：/)).toBeInTheDocument()
+    expect(screen.queryByLabelText('跳转到workflow-run')).not.toBeInTheDocument()
+  })
+
+  it('shows fixed task failure without workflow steps', () => {
+    render(<EvidenceTimeline items={[baseItem({
+      workflow_status: null,
+      execution_status: 'failed',
+      execution_error: '检查项结论失败',
+      event_count: 0, events: [], changes: [], steps: [],
+    })]} executionPlans={[]} />)
+    expect(screen.getByText('巡检执行失败')).toBeInTheDocument()
+    expect(screen.getByText('检查项结论失败')).toBeInTheDocument()
+  })
+
   it('should expose policy/no_event/collision reasons separately and provide navigation callbacks', async () => {
     const navigate = vi.fn()
     const item = baseItem({

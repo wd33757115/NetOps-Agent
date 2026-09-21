@@ -134,7 +134,7 @@ def test_automatic_release_requires_live_scoped_admin_authority(environment, cor
 
 def test_release_authority_is_machine_delegation_not_a_human_review(environment):
     service, scope, _ = environment
-    service.control("source", "unit", action="start", actor="admin", authorize_publish=True)
+    service.control("source", "unit", action="start", actor="admin", actor_user_id="admin-id", authorize_publish=True)
     key = task_key("source", "unit")
     with scope() as db:
         row = db.get(ParserControlSetting, key)
@@ -143,6 +143,7 @@ def test_release_authority_is_machine_delegation_not_a_human_review(environment)
         authority = require_autopilot_release(db, (key, "secret"), kind="rules", asset_id="bundle")
     assert authority["mode"] == "administrator_delegated_automation"
     assert authority["authorized_by"] == "admin"
+    assert authority["authorized_by_user_id"] == "admin-id"
     assert "human_semantic_review" not in authority
 
 
@@ -176,11 +177,70 @@ def test_reconciled_template_does_not_revoke_admin_scope(environment):
     assert result["publish_grant"] == first["publish_grant"]
 
 
-def test_api_operator_cannot_grant_automatic_publication(monkeypatch):
-    from fastapi import HTTPException
-    from src.gateway import offline_patrol_api as api
+def test_authorized_app_user_can_confirm_publication(monkeypatch):
+    from src.apps.rule_governance.backend import source_api as api
+    from src.apps.rule_governance.backend.rule_control import command_autopilot
+    fake = Mock()
+    monkeypatch.setattr(command_autopilot, "CommandAutopilotService", lambda: fake)
     monkeypatch.setattr(api, "_detail_or_http", Mock())
-    with pytest.raises(HTTPException) as denied:
-        api.control_command_autopilot("source", "unit", api.CommandAutopilotControlRequest(action="authorize"),
-                                      request=Mock(), user=SimpleNamespace(username="operator", is_admin=lambda: False))
-    assert denied.value.status_code == 403
+    monkeypatch.setattr(api, "_audit", Mock())
+    api.control_command_autopilot("source", "unit", api.CommandAutopilotControlRequest(action="authorize"),
+                                  request=Mock(), user=SimpleNamespace(user_id="viewer-1", username="viewer", is_admin=lambda: False))
+    assert fake.control.call_args.kwargs["authorize_publish"] is True
+    assert fake.control.call_args.kwargs["actor_user_id"] == "viewer-1"
+
+
+def test_principal_survives_restart_and_different_user_resume(environment):
+    service, scope, dispatch = environment
+    first = service.control("source", "unit", action="start", actor="same-name",
+                            actor_user_id="user-a", authorize_publish=True)
+    duplicate = service.control("source", "unit", action="start", actor="same-name", actor_user_id="user-b")
+    assert duplicate["actor_user_id"] == "user-a"
+    service.control("source", "unit", action="pause", actor="same-name", actor_user_id="user-b")
+    restored = CommandAutopilotService(session_scope=scope, dispatch=dispatch)
+    restored._inputs = service._inputs
+    paused = restored.get("source", "unit")
+    assert paused["actor_user_id"] == "user-a"
+    assert paused["history"][-1]["actor_user_id"] == "user-b"
+    resumed = restored.control("source", "unit", action="resume", actor="same-name", actor_user_id="user-b")
+    assert resumed["run_id"] == first["run_id"]
+    assert resumed["actor_user_id"] == "user-b"
+    assert resumed["publish_grant"]["by_user_id"] == "user-a"
+    assert resumed["history"][-1]["actor_user_id"] == "user-b"
+
+
+def test_legacy_resume_never_inherits_previous_principal(environment):
+    service, _, _ = environment
+    service.control("source", "unit", action="start", actor="engineer", actor_user_id="user-a")
+    service.control("source", "unit", action="pause", actor="engineer")
+    resumed = service.control("source", "unit", action="resume", actor="engineer")
+    assert resumed["actor_user_id"] is None
+    assert resumed["history"][-1]["actor_user_id"] is None
+
+
+def test_api_uses_authenticated_id_instead_of_extra_payload_fields(monkeypatch):
+    from src.apps.rule_governance.backend import source_api as api
+    from src.apps.rule_governance.backend.rule_control import command_autopilot
+    from src.auth.models import CurrentUser
+    fake = Mock()
+    fake.control.return_value = {"status": "queued"}
+    monkeypatch.setattr(command_autopilot, "CommandAutopilotService", lambda: fake)
+    monkeypatch.setattr(api, "_detail_or_http", Mock())
+    monkeypatch.setattr(api, "_audit", Mock())
+    user = CurrentUser(user_id="trusted-id", username="display-name", role="admin")
+    payload = api.CommandAutopilotControlRequest.model_validate({
+        "action": "start", "actor_user_id": "forged-id", "actor": "forged-name",
+    })
+    api.control_command_autopilot("source", "unit", payload, request=Mock(), user=user)
+    assert fake.control.call_args.kwargs["actor_user_id"] == "trusted-id"
+    assert fake.control.call_args.kwargs["actor"] == "display-name"
+
+
+@pytest.fixture(autouse=True)
+def app_admission_for_business_unit_tests(monkeypatch):
+    from contextlib import nullcontext
+    from unittest.mock import Mock
+    from src.apps.rule_governance.backend import access
+    monkeypatch.setattr(access, "authorize", Mock())
+    monkeypatch.setattr(access, "require_running", lambda: None)
+    monkeypatch.setattr(access, "execution_lock", lambda **kwargs: nullcontext())

@@ -27,10 +27,10 @@ test('exports detailed Excel locally without sending data to AI', async () => {
   expect(patrolReports.prepare).not.toHaveBeenCalled()
 })
 
-test('defaults to local export with no AI call and no administrator controls', async () => {
+test('defaults to local export and exposes template import to an App user', async () => {
   render(<PatrolReportDialog jobId="job" onClose={() => {}} />)
   await screen.findByText('覆盖有限')
-  expect(screen.queryByText('导入模板')).not.toBeInTheDocument()
+  expect(screen.getByText('导入模板')).toBeInTheDocument()
   await userEvent.click(screen.getByRole('button', { name: '导出 Word' }))
   await waitFor(() => expect(patrolReports.export).toHaveBeenCalledWith('job', expect.objectContaining({ template_id: 'builtin-v1', draft_id: undefined, bundle: false })))
   expect(patrolReports.prepare).not.toHaveBeenCalled()

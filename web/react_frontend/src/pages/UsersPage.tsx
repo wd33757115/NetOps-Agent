@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
 // SPDX-License-Identifier: Apache-2.0
 
+import AppAccessPanel from '../apps/AppAccessPanel'
 import React, { useMemo, useState } from 'react'
 import {
   Form,
@@ -215,7 +216,6 @@ const UsersPage: React.FC = () => {
                 editForm.setFieldsValue({
                   email: record.email,
                   role: record.role,
-                  netops_configure: record.netops_configure || false,
                   is_active: record.is_active,
                 })
               }}
@@ -358,9 +358,6 @@ const UsersPage: React.FC = () => {
           <Form.Item name="role" label="角色" rules={[{ required: true }]}>
             <Select options={ROLE_OPTIONS} />
           </Form.Item>
-          <Form.Item name="netops_configure" label="额外授权：设备与规则配置" valuePropName="checked" extra="管理员默认拥有此权限。可单独授予运维用户；规则正式发布仍需管理员审批。">
-            <Switch />
-          </Form.Item>
         </Form>
       </Modal>
 
@@ -388,9 +385,6 @@ const UsersPage: React.FC = () => {
           </Form.Item>
           <Form.Item name="role" label="角色" rules={[{ required: true }]}>
             <Select options={ROLE_OPTIONS} />
-          </Form.Item>
-          <Form.Item name="netops_configure" label="额外授权：设备与规则配置" valuePropName="checked" extra="同时允许设备配置和规则制作；不授予用户管理权限。只读用户请先调整为运维角色。">
-            <Switch />
           </Form.Item>
           <Form.Item name="is_active" label="启用" valuePropName="checked">
             <Switch checkedChildren="启用" unCheckedChildren="禁用" />
@@ -427,6 +421,7 @@ const UsersPage: React.FC = () => {
           </Form.Item>
         </Form>
       </Modal>
+      <AppAccessPanel />
     </GrokShellLayout>
   )
 }

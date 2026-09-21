@@ -182,7 +182,7 @@ const StatusPage: React.FC = () => {
                 <div className="grok-panel-head">
                   <h2 className="grok-panel-title">全栈诊断</h2>
                   <span className="grok-muted">
-                    PostgreSQL · Redis · Celery · MinIO · Qdrant · RAG
+                    PostgreSQL · Redis · Celery · MinIO
                   </span>
                 </div>
                 {!diagnostics && !diagLoading && (

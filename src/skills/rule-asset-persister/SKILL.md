@@ -9,6 +9,10 @@ entrypoint: scripts/run.py
 entry_script: scripts/run.py
 entry_output: none
 inputs:
+  - name: generation_identity
+    type: object
+    required: false
+    description: Internal generation provenance supplied by the workflow entry; never an App authorization credential.
   - name: source_ref
     type: string
     required: false

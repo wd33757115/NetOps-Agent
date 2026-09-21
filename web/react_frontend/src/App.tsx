@@ -7,25 +7,21 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import AppLayout from './components/Layout/AppLayout'
 import ProtectedRoute from './components/ProtectedRoute'
 import AdminRoute from './components/AdminRoute'
-import NetOpsConfigRoute from './components/NetOpsConfigRoute'
 import BusinessRoute from './components/BusinessRoute'
-import { workbenchEnabled, documentsEnabled } from './apps/appRoutes'
+import { workbenchEnabled } from './apps/appRoutes'
+import { packagedApps } from './apps/generated'
+import PackageRoute from './apps/PackageRoute'
 import { AuthProvider } from './context/AuthContext'
 
 const ChatPage = React.lazy(() => import('./pages/ChatPage'))
 const SkillsPage = React.lazy(() => import('./pages/SkillsPage'))
-const KnowledgePage = React.lazy(() => import('./pages/KnowledgePage'))
 const StatusPage = React.lazy(() => import('./pages/StatusPage'))
 const StoragePage = React.lazy(() => import('./pages/StoragePage'))
 const UsersPage = React.lazy(() => import('./pages/UsersPage'))
 const LoginPage = React.lazy(() => import('./pages/LoginPage'))
 const DevicesPage = React.lazy(() => import('./pages/DevicesPage'))
 const WorkbenchPage = React.lazy(() => import('./pages/WorkbenchPage'))
-const OfficialDocumentListPage = React.lazy(() => import('./pages/OfficialDocumentListPage'))
-const OfficialDocumentCreatePage = React.lazy(() => import('./pages/OfficialDocumentCreatePage'))
-const OfficialDocumentEditorPage = React.lazy(() => import('./pages/OfficialDocumentEditorPage'))
 const PatrolAppPage = React.lazy(() => import('./pages/PatrolAppPage'))
-const FirewallPolicyPage = React.lazy(() => import('./pages/FirewallPolicyPage'))
 const PatrolRulesAppPage = React.lazy(() => import('./pages/PatrolRulesAppPage'))
 const RuleAssetSourceJobDetailPage = React.lazy(() => import('./pages/RuleAssetSourceJobDetailPage'))
 
@@ -51,22 +47,20 @@ const App: React.FC = () => {
             }
           >
             <Route index element={<Navigate to="/chat" replace />} />
-            <Route path="chat" element={<ChatPage />} />
-            <Route path="apps/official-documents" element={documentsEnabled ? <OfficialDocumentListPage /> : <Navigate to="/chat" replace />} />
-            <Route path="apps/official-documents/new" element={documentsEnabled ? <OfficialDocumentCreatePage /> : <Navigate to="/chat" replace />} />
-            <Route path="apps/official-documents/:documentId" element={documentsEnabled ? <OfficialDocumentEditorPage /> : <Navigate to="/chat" replace />} />
+            <Route path="chat" element={<PackageRoute appId="assistant"><ChatPage /></PackageRoute>} />
+            {packagedApps.filter(app => app.enabled).flatMap(app => app.frontend.routes.map(({ path, component: Page }) => (
+              <Route key={`${app.id}/${path}`} path={`apps/${app.id}${path ? '/' + path : ''}`} element={<PackageRoute appId={app.id}><Page /></PackageRoute>} />
+            )))}
             <Route path="skills" element={<SkillsPage />} />
             <Route path="workbench" element={workbenchEnabled ? <WorkbenchPage /> : <Navigate to="/chat" replace />} />
-            <Route path="apps/patrol" element={<BusinessRoute><PatrolAppPage /></BusinessRoute>} />
-            <Route path="apps/firewall-policy" element={<FirewallPolicyPage />} />
-            <Route path="apps/patrol-rules" element={<BusinessRoute><NetOpsConfigRoute><PatrolRulesAppPage /></NetOpsConfigRoute></BusinessRoute>} />
-            <Route path="apps/patrol-rules/source-jobs/:jobId" element={<BusinessRoute><NetOpsConfigRoute><RuleAssetSourceJobDetailPage /></NetOpsConfigRoute></BusinessRoute>} />
-            <Route path="skills/parser" element={<BusinessRoute><NetOpsConfigRoute><SkillsPage /></NetOpsConfigRoute></BusinessRoute>} />
-            <Route path="skills/parser/source-jobs/:jobId" element={<BusinessRoute><NetOpsConfigRoute><RuleAssetSourceJobDetailPage /></NetOpsConfigRoute></BusinessRoute>} />
+            <Route path="apps/patrol" element={<BusinessRoute><PackageRoute appId="inspection"><PatrolAppPage /></PackageRoute></BusinessRoute>} />
+            <Route path="apps/patrol-rules" element={<BusinessRoute><PackageRoute appId="rule-governance"><PatrolRulesAppPage /></PackageRoute></BusinessRoute>} />
+            <Route path="apps/patrol-rules/source-jobs/:jobId" element={<BusinessRoute><PackageRoute appId="rule-governance"><RuleAssetSourceJobDetailPage /></PackageRoute></BusinessRoute>} />
+            <Route path="skills/parser" element={<BusinessRoute><PackageRoute appId="rule-governance"><SkillsPage /></PackageRoute></BusinessRoute>} />
+            <Route path="skills/parser/source-jobs/:jobId" element={<BusinessRoute><PackageRoute appId="rule-governance"><RuleAssetSourceJobDetailPage /></PackageRoute></BusinessRoute>} />
             <Route path="skills/:section" element={<SkillsPage />} />
             <Route path="devices" element={<DevicesPage />} />
-            <Route path="admin/netops/devices" element={<NetOpsConfigRoute><DevicesPage /></NetOpsConfigRoute>} />
-            <Route path="knowledge" element={<KnowledgePage />} />
+            <Route path="admin/netops/devices" element={<PackageRoute appId="rule-governance"><DevicesPage /></PackageRoute>} />
             <Route path="storage" element={<StoragePage />} />
             <Route path="status" element={<StatusPage />} />
             <Route

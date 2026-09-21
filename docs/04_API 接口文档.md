@@ -7,6 +7,8 @@
 
 ## 入口对应
 
+新业务客户端使用 `/api/apps/{app_id}/...`，例如 inspection、rule-governance、firewall-policy、official-documents、materials、assistant。下表中的旧业务前缀仅作为兼容接口定位；不能由旧 URL 绕过 App 准入。
+
 | 功能 | BFF 前缀 | 内部实现 |
 | --- | --- | --- |
 | 认证与用户 | `/api/auth/` | [auth.py](../web/django_backend/bff/auth.py)、[user_admin.py](../web/django_backend/bff/user_admin.py) |
@@ -26,7 +28,7 @@
 
 登录、刷新、登出使用 `/api/auth/login/`、`refresh/`、`logout/`；当前用户为 `GET /api/auth/me/`。BFF 校验 JWT 并转发用户、角色、会话与能力信息，后端仍执行业务授权。
 
-`netops.configure` 保护设备配置和规则制作。管理员启动/授权自动发布与普通配置权限不同；只具有配置权限的操作员不能自行获得发布授权。隐藏菜单不能代替 API 校验，也不能代替按用户或组织进行数据隔离。
+业务 App 使用统一 App 授权，模型工具还需来源 App 使用权。已存在的业务归属与发布条件继续校验，见[权限指南](permissions-guide.md)。
 
 下载对象、文档版本、个人桌面布局和会话须保留对应归属校验。服务端从认证结果确定用户，不能接受客户端任意指定其他 user_id 作为所有者。
 
@@ -65,3 +67,5 @@
 桌面布局、公文保存及候选应用使用版本/修订校验；冲突时显式重新读取或保留本地草稿。取消或暂停不意味着已经在执行的外部调用立即消失，迟到结果需由服务端租约/版本检查拒绝。
 
 具体操作顺序见 [自动制作](patrol-rule-autopilot-guide-2026-09-05.md)、[网络巡检](patrol-workflow-refactor-guide-2026-09-05.md)与[公文](official-document-workspace-guide-2026-09-05.md)。API 的读写权限、幂等与失败语义应通过对应测试验证，见 [维护指南](maintenance.md)。
+
+个人桌面 API 的 wallpaper 为预设 ID 或有界 JPEG data URL，与布局一起按认证用户和 revision 保存；旧客户端不提交 wallpaper 时保留原设置。

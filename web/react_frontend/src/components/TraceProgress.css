@@ -1,0 +1,24 @@
+.agent-progress { margin: 12px 0 22px; color: #526175; font-size: 13px; width: 100%; }
+.agent-progress-heading { display: flex; align-items: center; gap: 12px; }
+.agent-progress-toggle { display: flex; align-items: center; gap: 9px; background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; padding: 5px 0; min-width: 0; }
+.agent-progress-toggle [role=status] { overflow-wrap: anywhere; }
+.agent-progress-time { color: #637185; white-space: nowrap; font-size: 12px; }
+.agent-progress-dot { width: 7px; height: 7px; border-radius: 50%; background: #8491a3; flex: 0 0 auto; }
+.agent-progress-dot.is-running { background: #366cb5; animation: agent-pulse 1.5s ease-in-out infinite; }
+.agent-progress-stop { background: none; border: 1px solid #d5dce5; color: #526175; border-radius: 12px; font: inherit; padding: 1px 10px; cursor: pointer; white-space: nowrap; }
+.agent-progress-stop:disabled { opacity: .5; cursor: default; }
+.agent-progress-body { margin: 10px 0 0 3px; padding-left: 18px; border-left: 1px solid #dce3ec; }
+.agent-progress-body ol { list-style: none; padding: 0; margin: 0; }
+.agent-progress-body p { margin: 0; color: #637185; }
+.agent-progress-body li { display: flex; align-items: baseline; gap: 8px; padding: 7px 0; }
+.agent-step-marker { width: 12px; flex-shrink: 0; color: #637185; }
+.agent-step-marker.completed { color: #407354; }
+.agent-step-marker.failed { color: #b64b4b; }
+.agent-step-content { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.agent-step-content small { display: block; font-size: 12px; margin-top: 3px; color: #637185; }
+.agent-step-operation { margin: 6px 0; padding: 8px 10px; border-radius: 6px; background: #f4f6f8; color: #465366; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; }
+.agent-step-operation code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.agent-step-state { font-size: 12px; white-space: nowrap; color: #637185; }
+@keyframes agent-pulse { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .agent-progress-dot.is-running { animation: none; } }
+@media (max-width: 480px) { .agent-progress-body { padding-left: 12px; } .agent-step-state { font-size: 11px; } }

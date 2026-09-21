@@ -16,9 +16,9 @@ class _FakeSkillSystem:
         )
         self.reload_calls: list[dict[str, object]] = []
 
-    def reload_all(self, *, skill_dirs, rag_service) -> None:
+    def reload_all(self, *, skill_dirs) -> None:
         self.reload_calls.append(
-            {"skill_dirs": skill_dirs, "rag_service": rag_service}
+            {"skill_dirs": skill_dirs}
         )
 
 
@@ -118,21 +118,3 @@ def test_skill_system_does_not_enable_local_embedder_from_catalog_flag_alone(
     assert skill_system.router.use_embedding is False
 
 
-def test_skill_system_accepts_an_explicit_external_rag_service(monkeypatch, tmp_path):
-    import src.common.config as config_module
-
-    monkeypatch.setattr(
-        config_module,
-        "get_settings",
-        lambda: SimpleNamespace(
-            SKILL_CATALOG_ENABLED=True,
-            SKILL_CATALOG_SEMANTIC_ROUTING_ENABLED=False,
-            EMBEDDING_MODEL="BAAI/bge-m3",
-        ),
-    )
-
-    skill_system = SkillSystem()
-    skill_system.initialize(skill_dirs=[str(tmp_path)], rag_service=object())
-
-    assert skill_system.router is not None
-    assert skill_system.router.use_embedding is True

@@ -5,7 +5,7 @@
 ## 准备
 
 - PostgreSQL、任务 Broker、结果存储、MinIO、AI Worker 和 Beat 可用，模型配置有效。Qdrant、Langfuse 不是本流程的必需条件。
-- 操作者具有 `netops.configure` 权限；自动发布需管理员启动或明确授权。
+- 操作者具有 rule-governance App 使用权；自动发布需管理员启动或明确授权。
 - 准备包含完整命令和输出的设备文件，保留设备身份、采集周期和来源。同一命令尽量提供多设备、多周期样本，以及与检查目的相关的边界情况。
 - 示例命令：`display interface brief` 对应接口运行状态；`display transceiver diagnosis interface` 对应光模块指标。不要凭命令相似度自动认定检查项关联。
 

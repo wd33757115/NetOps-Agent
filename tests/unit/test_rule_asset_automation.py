@@ -257,6 +257,7 @@ def test_disabled_automation_does_not_dispatch_work():
 
 
 def test_evidence_blocked_seed_is_counted_as_human_review(monkeypatch):
+    monkeypatch.setattr("src.apps.rule_governance.backend.access.authorize", lambda user_id: None)
     recorded = []
 
     class FakeSettings:
@@ -301,10 +302,10 @@ def test_evidence_blocked_seed_is_counted_as_human_review(monkeypatch):
     assert recorded[0]["review_required_count"] == 1
 
 
-def test_celery_beat_schedules_rule_asset_automation_on_ai_queue():
-    schedule = celery.conf.beat_schedule["reconcile-rule-asset-automation"]
+def test_celery_beat_schedules_rule_asset_automation_on_app_queue():
+    schedule = celery.conf.beat_schedule["app.rule-governance.reconcile-rule-asset-automation"]
 
     assert schedule["task"] == "reconcile_rule_asset_automation"
     assert schedule["schedule"] == 30.0
-    assert schedule["options"]["queue"] == "netops.ai"
-    assert celery.conf.task_routes["reconcile_rule_asset_automation"]["queue"] == "netops.ai"
+    assert schedule["options"]["queue"] == "app.rule-governance"
+    assert celery.conf.task_routes["reconcile_rule_asset_automation"]["queue"] == "app.rule-governance"

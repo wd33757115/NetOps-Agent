@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
@@ -92,6 +92,7 @@ class StartPatrolHandler:
     def handle(self, command: StartPatrolCommand) -> dict[str, Any]:
         if command.launch_mode not in {"workflow", "direct"}:
             raise ValueError("launch_mode must be workflow or direct")
+        command = replace(command, launch_mode="direct")
         patrol_mode = normalize_patrol_mode(command.mode)
         report_purpose = normalize_report_purpose(
             command.report_purpose,
@@ -454,13 +455,19 @@ class StartPatrolHandler:
 
     @staticmethod
     def _enqueue_batch_dispatch(patrol_batch_id: str) -> str:
-        from src.core.celery_tasks.tasks import dispatch_patrol_batch_task
-
-        task = dispatch_patrol_batch_task.apply_async(
-            args=[patrol_batch_id],
-            queue="netops.patrol",
-        )
+        from src.infrastructure.db.models import PatrolBatchRecord
+        from src.infrastructure.db.postgres import get_db_session
+        with get_db_session() as db:
+            batch = db.get(PatrolBatchRecord, patrol_batch_id)
+            rule_capture = bool(batch and (batch.selector_json or {}).get("rollout_stage_execution_id"))
+        if rule_capture:
+            from src.apps.rule_governance.backend.rollout_tasks import dispatch_capture
+            task = dispatch_capture.apply_async(args=[patrol_batch_id], queue="app.rule-governance")
+        else:
+            from src.apps.inspection.backend.tasks import dispatch_patrol_batch_task
+            task = dispatch_patrol_batch_task.apply_async(args=[patrol_batch_id], queue="netops.patrol")
         return str(task.id)
+
 
 
 class DispatchPatrolBatchHandler:
@@ -642,9 +649,7 @@ class DispatchPatrolBatchHandler:
 
     @staticmethod
     def _start_workflow(template_name: str, context: dict[str, Any], **kwargs: Any) -> str:
-        from src.core.workflows.engine import WorkflowEngine
-
-        return WorkflowEngine.start(template_name, context, **kwargs)
+        raise ValueError("巡检 Workflow 已退役，请通过巡检应用重新提交固定任务")
 
     def _cancel_uncommitted_launch(
         self,
@@ -683,6 +688,15 @@ class DispatchPatrolBatchHandler:
 
     @staticmethod
     def _launch_task(**kwargs: Any) -> str:
+        if kwargs.get("mode") == PRODUCTION_MODE:
+            from src.apps.inspection.backend.online_tasks import execute_online
+
+            task = execute_online.apply_async(
+                kwargs={"patrol_batch_id": kwargs["patrol_batch_id"],
+                        "execution_plan_id": kwargs["execution_plan_id"]},
+                queue="netops.patrol", task_id=str(kwargs["task_id"]),
+            )
+            return str(task.id)
         from src.core.celery_tasks.tasks import execute_device_patrol_task
 
         task_id = str(kwargs.pop("task_id"))
@@ -706,6 +720,7 @@ class ExecutePatrolCommand:
     attempt_number: int = 0
     worker_id: str | None = None
     owner_token: str | None = None
+    defer_completion: bool = False
 
 
 class ExecutePatrolHandler:
@@ -729,7 +744,7 @@ class ExecutePatrolHandler:
             )
         )
         snapshot_run_id = result.get("snapshot_run_id")
-        if snapshot_run_id:
+        if snapshot_run_id and not command.defer_completion:
             self._coordinator.complete(
                 str(snapshot_run_id),
                 owner_token=command.owner_token,

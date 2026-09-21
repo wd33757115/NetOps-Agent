@@ -791,9 +791,9 @@ def _build_parser_runtime_bundle(execution_plan: Any):
     if execution_plan.runtime_manifest_id:
         return _build_frozen_check_item_parser_bundle(execution_plan)
 
-    from src.core.device_ops.repository import DeviceRepository
+    from src.platform.inventory.repository import DeviceRepository
     from src.core.parser.identity import DeviceIdentity
-    from src.core.parser.runtime_bundle import ParserRuntimeBundle
+    from src.apps.rule_governance.runtime import ParserRuntimeBundle
 
     matches = DeviceRepository().get_devices_by_filter(
         device_id=str(execution_plan.device_id),
@@ -887,13 +887,13 @@ def build_frozen_check_item_parser_bundle(
     *,
     frozen_device: dict[str, Any] | None = None,
 ):
-    from src.core.check_items import CheckItemRuntimeBundleService
-    from src.core.device_ops.repository import DeviceRepository
+    from src.apps.rule_governance.runtime import CheckItemRuntimeReader
+    from src.platform.inventory.repository import DeviceRepository
     from src.core.parser.policy import (
         DEFAULT_COMMAND_ALIASES,
         ParserPolicy,
     )
-    from src.core.parser.runtime_bundle import ParserRuntimeBundle
+    from src.apps.rule_governance.runtime import ParserRuntimeBundle
 
     load_frozen_check_item_runtime_manifest(execution_plan)
     matches = (
@@ -925,7 +925,7 @@ def build_frozen_check_item_parser_bundle(
 
     templates: dict[str, dict[str, str] | None] = {}
     output_quality_profiles: dict[str, dict[str, Any]] = {}
-    bundle_service = CheckItemRuntimeBundleService()
+    bundle_service = CheckItemRuntimeReader()
     for item in execution_plan.commands:
         command = canonical(item.command)
         selected_ref: dict[str, str] | None = None

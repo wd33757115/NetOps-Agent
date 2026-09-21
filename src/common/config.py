@@ -101,8 +101,6 @@ class Settings(BaseSettings):
                 return int(eval(text, {"__builtins__": {}}, {}))
         return value
 
-    QDRANT_HOST: str = "localhost"
-    QDRANT_PORT: int = 6333
 
     FASTAPI_HOST: str = "0.0.0.0"
     FASTAPI_PORT: int = 8000
@@ -218,6 +216,8 @@ class Settings(BaseSettings):
     # 与 Django SIMPLE_JWT 共用（默认与 SECRET_KEY 一致，生产务必在 .env 中显式设置）
     JWT_SECRET_KEY: str = "django-insecure-default-key-change-in-production"
     JWT_ALGORITHM: str = "HS256"
+    NETOPS_APP_INTERNAL_SECRET: str = ""
+    NETOPS_AUTHORITY_URL: str = "http://127.0.0.1:8001"
 
     @property
     def postgres_url(self) -> str:

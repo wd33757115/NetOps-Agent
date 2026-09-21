@@ -474,9 +474,7 @@ def create_skill_md(
     if outputs is None:
         outputs = [{"name": "result", "type": "text", "description": "输出结果描述"}]
     if references is None:
-        references = [
-            {"type": "rag", "source": "knowledge-base", "description": "RAG 知识源引用"},
-        ]
+        references = []
 
     gov = resolve_category_governance(category)
     domain = domain or gov["domain"]

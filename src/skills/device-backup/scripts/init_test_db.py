@@ -12,7 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.core.device_ops.repository import DeviceRepository  # noqa: E402
+from src.platform.inventory.repository import DeviceRepository  # noqa: E402
 from src.infrastructure.db.migrations import require_database_schema_current  # noqa: E402
 from src.infrastructure.db.postgres import require_postgres_connection  # noqa: E402
 

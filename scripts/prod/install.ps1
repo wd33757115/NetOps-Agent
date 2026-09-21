@@ -47,7 +47,7 @@ DJANGO_SECRET_KEY=change-me-in-production
 }
 
 Write-Step "Docker pull base images"
-docker compose -f $composeFile pull postgres redis rabbitmq minio qdrant
+docker compose -f $composeFile pull postgres redis rabbitmq minio
 
 if (-not $SkipBuild) {
     Write-Step "Build django and react images"
@@ -55,6 +55,4 @@ if (-not $SkipBuild) {
     Write-Ok "Build done"
 }
 
-$qdrantDir = Join-Path $ProjectRoot "deployment\qdrant_storage"
-New-Item -ItemType Directory -Force -Path $qdrantDir | Out-Null
 Write-Host "`n[Done] Run scripts\prod\start.ps1" -ForegroundColor Green
